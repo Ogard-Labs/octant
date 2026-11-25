@@ -9,6 +9,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import * as composerStashStorage from "./composer/composerStashStore";
 import {
   chatShellBootstrap,
   chats,
@@ -77,6 +78,74 @@ async function newChatButton(): Promise<HTMLElement> {
 }
 
 describe("starting a thread from a to-do", () => {
+  it("replaces the unchanged local to-do starter with its saved draft", async () => {
+    const user = userEvent.setup();
+    const { todos } = todoClient();
+    const prompt = "Review the edited launch post.";
+    const saved: composerStashStorage.SavedComposerDraft = {
+      id: "saved-todo-draft",
+      source: { host: "local", mode: "chat", projectId: null, composerId: "draft", threadId: null },
+      savedAt: Date.now(),
+      draft: {
+        text: prompt,
+        caret: prompt.length,
+        files: [],
+        context: [
+          {
+            kind: "todo",
+            value: { todoId: TODO, title: "Draft the launch post", listHostId: HOST },
+          },
+        ],
+      },
+    };
+    vi.stubGlobal("indexedDB", {});
+    const store = composerStashStorage.createComposerStashStore(indexedDB);
+    const storage = vi.spyOn(composerStashStorage, "createComposerStashStore").mockReturnValue({
+      ...store,
+      list: async () => [saved],
+      readRecovery: async () => undefined,
+      restore: async (_id, move, draft) => ({
+        location: move.location,
+        revision: "restored-draft",
+        beforeText: move.beforeText,
+        draft,
+      }),
+      revise: async (record) => record,
+    });
+    const connect = vi.spyOn(composerStashStorage, "connectComposerStashWindow");
+    connect.mockImplementation(() => undefined);
+    try {
+      render(
+        <App
+          chatClient={chats()}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          providerClient={providers()}
+          shellClient={client(chatShellBootstrap())}
+          todoClient={todos}
+          todoListHostClient={thisHostKeepsList}
+        />,
+      );
+      await user.click(await screen.findByRole("button", { name: /^To-dos/ }));
+      await user.click(await screen.findByRole("button", { name: "Start Draft the launch post" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Chat" }));
+      const draft = await screen.findByRole("region", { name: "New Octant Chat thread" });
+      const input = within(draft).getByRole("textbox", { name: "First message" });
+      await waitFor(() => expect(input).toHaveValue("Draft the launch post\n\nKeep it short."));
+      await user.click(await within(draft).findByRole("button", { name: "Draft actions" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Saved drafts" }));
+      const list = await screen.findByRole("dialog", { name: "Saved drafts" });
+      await user.click(within(list).getByRole("button", { name: "Restore" }));
+      await waitFor(() => expect(input).toHaveValue(prompt));
+      expect(within(draft).getByText("From to-do")).toBeVisible();
+    } finally {
+      connect.mockRestore();
+      storage.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each(["saved", "refused"] as const)(
     "waits for a %s link answer before starting the first turn",
     async (linkOutcome) => {

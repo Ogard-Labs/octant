@@ -1461,6 +1461,47 @@ describe("useChatController", () => {
     expect(result.current.pendingDraft).toBe("");
   });
 
+  it.each(["accepted", "refused", "accepted with newer edits"] as const)(
+    "keeps a restored draft durable until a send is %s",
+    async (outcome) => {
+      const store = createComposerThreadDraftStore(memoryDraftStorage());
+      const pendingExecute = deferred<Awaited<ReturnType<ChatClient["execute"]>>>();
+      const client = createMockClient({
+        bootstrap: vi.fn(async () => bootstrap()),
+        thread: vi.fn(async () => threadView(1)),
+        subscribe: vi.fn(async function* () {}),
+        execute: vi.fn(() => pendingExecute.promise),
+      });
+      const { result } = renderHook(() =>
+        useChatController({ activeThreadId: threadId, client, draftStore: store }),
+      );
+      const draft = "Keep this draft until acceptance";
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(threadId));
+      act(() => result.current.setPendingDraft(draft));
+      let send: Promise<boolean> | undefined;
+      act(() => {
+        send = result.current.sendTurn(draft, [], [], [], [], [], undefined, {
+          composerDraft: "consume-on-acceptance",
+        });
+      });
+      expect(store.read("chat", threadId)?.text).toBe(draft);
+      if (outcome === "accepted with newer edits") {
+        act(() => result.current.setPendingDraft("Newer edits"));
+      }
+      if (outcome === "refused") pendingExecute.reject(new Error("No response from host"));
+      else {
+        pendingExecute.resolve({
+          kind: "turn-created",
+          turn: { id: "90000000-0000-4000-8000-000000000001" },
+        } as never);
+      }
+      await act(async () => expect(await send).toBe(outcome !== "refused"));
+      expect(store.read("chat", threadId)?.text).toBe(
+        outcome === "accepted" ? undefined : outcome === "refused" ? draft : "Newer edits",
+      );
+    },
+  );
+
   it("keeps the dropped-context warning when a failed send restores the draft", async () => {
     const store = createComposerThreadDraftStore(memoryDraftStorage());
     const pendingExecute = deferred<Awaited<ReturnType<ChatClient["execute"]>>>();

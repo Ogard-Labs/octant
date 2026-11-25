@@ -450,8 +450,8 @@ Settings loads the full registry of controls and search terms when it opens.
 The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
-entry is at most 1,613,095 B (1,575 KiB), the initial CSS at most 663,577 B
-(648 KiB), and the initial JavaScript and CSS at most 1,219,911 B after gzip
+entry is at most 1,581,020 B (1,544 KiB), the initial CSS at most 647,699 B
+(633 KiB), and the initial JavaScript and CSS at most 1,148,654 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
@@ -460,7 +460,7 @@ use. Before the workspace tree-shaking re-baseline, the maintainer also
 approved an increase for video offer schemas that the window decodes for
 Needs you (2026-11-22). Deferring that decoding is a follow-up. The question card docked above the composer, with its
 1-9 number keys, raised it again (maintainer decision, 2026-11-24), and the
-Settled thread state raised it by 1,577 B of main entry, 187 B of CSS and 397 B
+Settled thread state raised it by 1,592 B of main entry, 187 B of CSS and 358 B
 gzipped (maintainer decision, 2026-11-24). The budgets are exact bytes with no headroom, because the same
 source measures identically on macOS and Linux with Bun 1.4.4.
 
@@ -7163,6 +7163,26 @@ ls-remote` against the thread's remote and the GitHub reads they already
   explicit recovery option. The composer says so when a restored draft dropped
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
+
+  **Saved drafts** in the desktop and web composer are private to the client
+  profile. A saved entry carries the source host, Project, composer and binding
+  and the full editable draft, including attachment bytes and typed context.
+  IndexedDB commits the stash and its cleared source, or the restored
+  destination and removal from the stash, as one move. A restored draft keeps
+  its recovery data there while it is editable. New-task recovery belongs to
+  its window and follows the live composer across Project changes. When the
+  window closes, its recovered new-task draft becomes available in Saved
+  drafts. The live composer changes only after the write commits, and a
+  competing restore can consume the entry only once. A failed move preserves
+  a recoverable copy. Ordinary attachment
+  staging assigns destination-owned references. Ordinary turn admission
+  rechecks authority, context references and model capabilities. A host's
+  retention tombstones remove that thread's saved and recovered drafts,
+  including threads purged while the client was closed. The client reads
+  the owning host's tombstones through its existing retention permissions,
+  which a device paired at Full has. Archiving a thread or Project keeps
+  its saved drafts. Recovery waits for host acceptance before clearing a
+  submitted draft.
 
 - **Accepted message queue.** Chat, Work, and Code share a host-owned ordered
   queue for messages the user submits while a turn runs. A successful enqueue

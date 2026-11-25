@@ -3,23 +3,26 @@ import { describe, expect, it, vi } from "vitest";
 import { decodeHostId, LOCAL_HOST_ID, type HostIdentity } from "@octant/contracts/host";
 import { decodeImageGenerationScopeId, decodeVideoJobId } from "@octant/contracts";
 import { useContext, type ContextType } from "react";
+import { ComposerStashScopeContext } from "../composer/ComposerStashControls";
 import type { RemoteCodeSurfaceProps } from "../remote/RemoteWorkspace";
 import { VideoClientContext } from "../video/ThreadVideoClips";
-import { ORIGIN, readyPairedBridge } from "./pairedComputerTestBridge.test-support";
+import { HOST_ID, ORIGIN, readyPairedBridge } from "./pairedComputerTestBridge.test-support";
 
 const surfaces: RemoteCodeSurfaceProps[] = [];
 const videoClients: Array<ContextType<typeof VideoClientContext>> = [];
+const draftScopes: Array<ContextType<typeof ComposerStashScopeContext>> = [];
 vi.mock("../remote/RemoteWorkspace", () => ({
   RemoteCodeSurface: (props: RemoteCodeSurfaceProps) => {
     surfaces.push(props);
     videoClients.push(useContext(VideoClientContext));
+    draftScopes.push(useContext(ComposerStashScopeContext));
     return <p>Paired computer's Code</p>;
   },
 }));
 
 const { PairedComputerCodeSurface } = await import("./PairedComputerCodeSurface");
 
-const LAPTOP = decodeHostId("22222222-2222-4222-8222-222222222222");
+const LAPTOP = decodeHostId(HOST_ID);
 const hosts: ReadonlyArray<HostIdentity> = [
   { hostId: LOCAL_HOST_ID, displayName: "This Mac", health: "healthy", capabilities: ["code"] },
   { hostId: LAPTOP, displayName: "Laptop", health: "healthy", capabilities: ["code"] },
@@ -28,6 +31,7 @@ const hosts: ReadonlyArray<HostIdentity> = [
 async function surfaceFor(actsAsHostPerson: boolean, sent: URL[] = []) {
   surfaces.length = 0;
   videoClients.length = 0;
+  draftScopes.length = 0;
   const bridge = await readyPairedBridge(sent, { actsAsHostPerson });
   const thisComputer = { list: vi.fn(), clipUrl: vi.fn() };
   render(
@@ -62,6 +66,7 @@ describe("a paired computer's Code start screen", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(surfaces.every((props) => props.actsAsHostPerson === false)).toBe(true);
     expect(videoClients.every((client) => client === undefined)).toBe(true);
+    expect(draftScopes.at(-1)).toMatchObject({ host: HOST_ID, reconcilePurges: undefined });
   });
 
   it("lists and opens video clips through the paired computer's session", async () => {
@@ -106,5 +111,24 @@ describe("a paired computer's Code start screen", () => {
     expect(client?.toolGrantsAvailable).toBe(true);
     await client?.listToolApprovals().catch(() => undefined);
     expect(sent.some((url) => url.pathname === "/api/extensions/tool-approvals")).toBe(true);
+  });
+
+  it("reads confirmed purges from a computer that paired this device at Full", async () => {
+    vi.stubGlobal("indexedDB", {});
+    try {
+      const sent: URL[] = [];
+      await surfaceFor(true, sent);
+      await waitFor(() =>
+        expect(sent.some((url) => url.pathname === "/api/host-control/thread-retention")).toBe(
+          true,
+        ),
+      );
+      expect(draftScopes.at(-1)).toMatchObject({
+        host: HOST_ID,
+        reconcilePurges: expect.any(Function),
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

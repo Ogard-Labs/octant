@@ -222,6 +222,15 @@ describe("matchKeybinding", () => {
     expect(shadowedActions(bindings)).toEqual([]);
   });
 
+  it("keeps existing shortcuts that share the new composer default", () => {
+    expect(matchKeybinding(bindings, keyEvent("s", { meta: true }), true)).toBeUndefined();
+    for (const action of ["dictate", "zen-mode"] as const) {
+      const customized = resolveKeybindings({ [action]: "Mod+S" });
+      expect(matchKeybinding(customized, keyEvent("s", { meta: true }), true)).toBe(action);
+      expect(isShadowedKeybinding(customized, "composer-stash")).toBe(true);
+    }
+  });
+
   it("keeps overrides saved before reply detail had a chord", () => {
     const saved = parseKeybindingOverrides('{ "command-palette": "Mod+J" }\n');
     if (saved.status !== "ok") throw new Error("expected the saved document to read");

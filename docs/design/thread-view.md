@@ -634,6 +634,32 @@ while the file-type glyph loads. An available image thumbnail takes the glyph's
 place. Long filenames truncate within the chip so its remove control stays
 reachable.
 
+### Saved drafts
+
+The desktop and web composer in Chat, Work, and Code offers **Stash draft** and
+**Saved drafts** in its + menu, for both the first message and follow-ups. A
+focused composer uses ⌘S or Ctrl+S by default, remappable under Keyboard
+shortcuts in Settings › Keybindings. With content it stashes the draft. When empty it restores the only
+compatible entry or opens the list. Save and restore can include a draft with
+only attachments or selected context. The editor still handles Save in the
+editor's own focus.
+
+The stash keeps the text, caret, file bytes, and every typed selection with its
+original provenance. Choosing a saved draft appends it to the current draft
+when all of it fits. Files stage through the destination's usual attachment
+path. A selection belonging to a source conversation, checkout, or provider
+scope keeps that binding. A to-do link also keeps its original list, mode and
+Project, and the to-do must still be open. A refusal identifies what could not
+move and keeps the full stash available.
+
+Stash clears the composer after the save commits. Restore consumes the saved
+entry when the whole destination draft is recoverable. If you reopen the
+composer in a new window, look in **Saved drafts** for a restored first
+message you left in the closed window. The list orders entries by when the
+draft was last saved or revised, including entries recovered from a closed
+window. Both actions are separate from send and the host's message queue. The
+list offers removal of an individual saved draft.
+
 ## Image preview
 
 An image attached in a composer, and an image on a sent message, is a button

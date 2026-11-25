@@ -6,6 +6,7 @@ import {
 } from "../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerAttachmentIcon } from "../composer/ComposerAttachmentIcon";
+import type { ComposerStashBinding } from "../composer/useComposerStash";
 import {
   useId,
   useCallback,
@@ -115,6 +116,7 @@ export interface ChatComposerModelOption {
 const MODEL_OPTION_DEFAULT_ID = "(provider default)";
 
 export interface ChatComposerProps {
+  readonly stash?: ComposerStashBinding | undefined;
   readonly readOnly?: boolean;
   readonly benchmarkProjectId?: ProjectId | undefined;
   /** Caller-owned pending text. The component never persists or clears this value itself. */
@@ -961,6 +963,7 @@ export function ChatComposer(props: ChatComposerProps) {
   return (
     <ThreadComposer
       readOnly={props.readOnly === true}
+      stash={props.readOnly === true ? undefined : props.stash}
       queue={props.queue}
       {...(props.threadBusy === undefined ? {} : { threadBusy: props.threadBusy })}
       presentation="follow-up"

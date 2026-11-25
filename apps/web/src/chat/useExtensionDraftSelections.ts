@@ -210,7 +210,7 @@ export function useExtensionDraftSelections(options: {
     [invalidate, updateReceipts],
   );
 
-  return { clear, receipts, stagedReceipts, remove, resolveReference, restore };
+  return { clear, receipts, stagedReceipts, remove, resolveReference, restore, scopeKey };
 }
 
 function decodeScopeUuid(value: string | null): string | null {

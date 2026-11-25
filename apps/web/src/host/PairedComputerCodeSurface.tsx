@@ -21,6 +21,8 @@ import { createPairedComputerCodeClients } from "./pairedComputerCodeClients";
 import { PairedComputerThreadServers } from "./PairedComputerThreadServers";
 import type { RemoteServerGrantSource } from "@octant/contracts";
 import type { RemoteOpenMode, RemoteOpenOutcome } from "../home/runningServices";
+import { ComposerStashScopeContext } from "../composer/ComposerStashControls";
+import { usePairedComposerStashScope } from "../remote/usePairedComposerStashScope";
 
 export interface PairedComputerCodeSurfaceProps {
   /** The paired computer's session, already ready. */
@@ -94,6 +96,11 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
       current = false;
     };
   }, [bridge, ready]);
+  const stashScope = usePairedComposerStashScope(
+    bridge,
+    props.selectedHostId,
+    connected && standing.actsAsHostPerson,
+  );
 
   // A thread's MCP tool approvals, listed and answered on that computer, so one
   // Needs you opens here can be answered here.
@@ -140,49 +147,51 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
             : undefined
         }
       >
-        <RemoteCodeSurface
-          clients={clients}
-          actsAsHostPerson={standing.actsAsHostPerson}
-          extensionClient={extensionClient}
-          connected={connected}
-          providerGroups={providerGroups}
-          followsContinuationLink={false}
-          {...(props.initialThreadId === undefined
-            ? {}
-            : { initialThreadId: props.initialThreadId })}
-          {...(props.initialThreadRequest === undefined
-            ? {}
-            : { initialThreadRequest: props.initialThreadRequest })}
-          {...(standing.actsAsHostPerson && openBootstrap !== undefined
-            ? {
-                onCloneFromThisComputer: () =>
-                  openBootstrap({ destinationHostId: props.selectedHostId }),
-              }
-            : {})}
-          {...(props.selectProjectRequest === undefined
-            ? {}
-            : { selectProjectRequest: props.selectProjectRequest })}
-          {...(openServer === undefined
-            ? {}
-            : {
-                renderThreadExtras: (
-                  thread: CodeThread,
-                  checkout: CodeCheckoutIdentity | undefined,
-                ) => (
-                  <PairedComputerThreadServers
-                    key={String(thread.id)}
-                    client={localServers}
-                    inOwnWorktree={checkout?.kind === "managed-worktree"}
-                    hostName={hostName}
-                    open={openServer}
-                    projectId={thread.projectId}
-                    threadId={thread.id}
-                  />
-                ),
-              })}
-          onNavigate={() => undefined}
-          onOpenCanvas={() => undefined}
-        />
+        <ComposerStashScopeContext.Provider value={stashScope}>
+          <RemoteCodeSurface
+            clients={clients}
+            actsAsHostPerson={standing.actsAsHostPerson}
+            extensionClient={extensionClient}
+            connected={connected}
+            providerGroups={providerGroups}
+            followsContinuationLink={false}
+            {...(props.initialThreadId === undefined
+              ? {}
+              : { initialThreadId: props.initialThreadId })}
+            {...(props.initialThreadRequest === undefined
+              ? {}
+              : { initialThreadRequest: props.initialThreadRequest })}
+            {...(standing.actsAsHostPerson && openBootstrap !== undefined
+              ? {
+                  onCloneFromThisComputer: () =>
+                    openBootstrap({ destinationHostId: props.selectedHostId }),
+                }
+              : {})}
+            {...(props.selectProjectRequest === undefined
+              ? {}
+              : { selectProjectRequest: props.selectProjectRequest })}
+            {...(openServer === undefined
+              ? {}
+              : {
+                  renderThreadExtras: (
+                    thread: CodeThread,
+                    checkout: CodeCheckoutIdentity | undefined,
+                  ) => (
+                    <PairedComputerThreadServers
+                      key={String(thread.id)}
+                      client={localServers}
+                      inOwnWorktree={checkout?.kind === "managed-worktree"}
+                      hostName={hostName}
+                      open={openServer}
+                      projectId={thread.projectId}
+                      threadId={thread.id}
+                    />
+                  ),
+                })}
+            onNavigate={() => undefined}
+            onOpenCanvas={() => undefined}
+          />
+        </ComposerStashScopeContext.Provider>
       </VideoClientContext.Provider>
     </div>
   );

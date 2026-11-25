@@ -26,6 +26,7 @@ import {
   discardNewTaskDraftForPane,
   NewTaskDraftsContext,
 } from "./composer/useNewTaskPrompt";
+import type { ComposerStashTodo } from "./composer/composerStashDraft";
 import { StreamRepliesContext } from "./transcript/streamReplies";
 import { useThreadTaskList } from "./transcript/threadTaskLists";
 import { NextMessageSuggestionsContext } from "./followUps/FollowUpSuggestionChips";
@@ -401,10 +402,9 @@ import {
 } from "@octant/contracts/todos";
 
 /** A to-do whose Start opened the current new-thread draft. */
-interface TodoStartInProgress {
-  readonly todoId: string;
-  readonly title: string;
+interface TodoStartInProgress extends ComposerStashTodo {
   readonly mode: OctantMode;
+  readonly seed?: string;
   /** The Project the draft is for; absent for a Chat start in no Project. */
   readonly projectId?: string;
   /** The draft it opened, as `pane:surface`, once that draft is in front. */
@@ -1205,7 +1205,7 @@ function LaunchedShell(
     {},
   );
   const newTaskDrafts = useMemo(
-    () => createNewTaskDrafts(),
+    () => createNewTaskDrafts(String(props.launch.windowId)),
     [props.launch.serverUrl, props.launch.windowId],
   );
   function resetNewTaskDraft(mode: OctantMode, paneId?: PaneId): void {
@@ -1930,6 +1930,20 @@ function LaunchedShell(
       props.workTurnClient,
     ],
   );
+  useEffect(() => {
+    if (globalThis.indexedDB === undefined) return;
+    const lifetime = new AbortController();
+    void import("./composer/composerStashStore")
+      .then(({ connectComposerStashWindow }) =>
+        connectComposerStashWindow(
+          props.launch.windowId,
+          launchedClients.hostControlClient,
+          lifetime.signal,
+        ),
+      )
+      .catch(() => undefined);
+    return () => lifetime.abort();
+  }, [props.launch.windowId, launchedClients.hostControlClient]);
   const {
     agentProfileClient,
     agentRunClient,
@@ -3293,6 +3307,7 @@ function LaunchedShell(
     readonly hostId: string;
     readonly destination?: RemoteTodoProject;
     readonly todo?: Todo;
+    readonly todoListHostId?: string;
     readonly thread?: TodoThreadLink;
   }>();
   const remoteTodoSlot =
@@ -7653,13 +7668,15 @@ function LaunchedShell(
    * starts until the person sends; the host that owns the Project decides.
    */
   async function startTodo(todo: Todo, target: TodoStartTarget): Promise<void> {
+    const listHostId = todoList.read.status === "loading" ? undefined : todoList.read.view?.hostId;
+    if (listHostId === undefined) return;
     if (target.kind === "project" && target.hostId !== undefined) {
       const destination = remoteTodoProjects.find(
         (candidate) =>
           candidate.hostId === target.hostId && String(candidate.project.id) === target.projectId,
       );
       if (destination === undefined) return;
-      setRemoteTodo({ hostId: destination.hostId, destination, todo });
+      setRemoteTodo({ hostId: destination.hostId, destination, todo, todoListHostId: listHostId });
       return;
     }
     const project =
@@ -7674,17 +7691,30 @@ function LaunchedShell(
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
     resetNewTaskDraft(mode);
-    setPendingDraftPrompt(todo.notes === "" ? todo.title : `${todo.title}\n\n${todo.notes}`);
+    const seed = todo.notes === "" ? todo.title : `${todo.title}\n\n${todo.notes}`;
+    setPendingDraftPrompt(seed);
     setTodoStart({
       todoId: String(todo.id),
       title: todo.title,
+      listHostId,
       mode,
+      seed,
       ...(project === undefined ? {} : { projectId: String(project.id) }),
     });
     // A Chat start files the thread in no Project, so the draft must not keep
     // the Project the last Chat draft chose.
     if (project === undefined) setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
     await controller.openDraftThread(mode, project?.id);
+  }
+
+  function canRestoreTodoSource(source: ComposerStashTodo): boolean {
+    return (
+      todoList.read.status === "ready" &&
+      String(todoList.read.view.hostId) === source.listHostId &&
+      todoList.read.view.todos.some(
+        (todo) => String(todo.id) === source.todoId && todo.state === "open",
+      )
+    );
   }
 
   /**
@@ -9459,12 +9489,34 @@ function LaunchedShell(
                         : { pendingDraftCoordinator })}
                       pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
                       {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
-                      {...(todoStart?.draft === undefined || todoStart.draft !== frontDraft
+                      {...(frontDraft === undefined
                         ? {}
                         : {
                             draftTodoSource: {
-                              title: todoStart.title,
-                              onRemove: () => setTodoStart(undefined),
+                              draft: frontDraft,
+                              seed: todoStart?.draft === frontDraft ? todoStart.seed : undefined,
+                              current:
+                                todoStart?.draft === frontDraft
+                                  ? {
+                                      todoId: todoStart.todoId,
+                                      title: todoStart.title,
+                                      listHostId: todoStart.listHostId,
+                                    }
+                                  : undefined,
+                              canRestore: canRestoreTodoSource,
+                              change: (source) =>
+                                setTodoStart(
+                                  source === undefined
+                                    ? undefined
+                                    : {
+                                        ...source,
+                                        mode: activeMode,
+                                        draft: frontDraft,
+                                        ...(frontDraftProjectId === undefined
+                                          ? {}
+                                          : { projectId: frontDraftProjectId }),
+                                      },
+                                ),
                             },
                           })}
                       {...(pendingIssue === undefined ? {} : { pendingIssue })}
@@ -10055,6 +10107,7 @@ function LaunchedShell(
                                         key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
                                         bridge={remoteTodoSlot.bridge}
                                         hostId={remoteTodo.hostId}
+                                        ownerWindowId={props.launch.windowId}
                                         hostName={remoteTodoSlot.displayName}
                                         connected={remoteTodoSlot.state.kind === "ready"}
                                         {...(remoteTodo.destination === undefined
@@ -10063,6 +10116,10 @@ function LaunchedShell(
                                         {...(remoteTodo.todo === undefined
                                           ? {}
                                           : { todo: remoteTodo.todo })}
+                                        {...(remoteTodo.todoListHostId === undefined
+                                          ? {}
+                                          : { todoListHostId: remoteTodo.todoListHostId })}
+                                        canRestoreTodo={canRestoreTodoSource}
                                         {...(remoteTodo.thread === undefined
                                           ? {}
                                           : { thread: remoteTodo.thread })}
