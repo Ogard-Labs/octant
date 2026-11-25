@@ -3,19 +3,27 @@ import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { CodeSettings } from "@octant/contracts/code";
 import type { PermissionMode } from "@octant/contracts/providers";
+import type { ProjectId } from "@octant/contracts/projects";
 import {
   permissionModeOf,
   permissionModeOfWorkAccess,
   threadAccessOf,
   workAccessOfPermissionMode,
 } from "@octant/domain/guardrail-policy";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useFullAccessWarning } from "../code/FullAccessWarning";
 import { PERMISSION_MODE_OPTIONS } from "../code/PermissionModePicker";
+import {
+  AGENT_MEMORY_WRITES_COPY,
+  AGENT_MERGE_COPY,
+  AGENT_PULL_REQUEST_COMMENTS_COPY,
+  OWN_TOOLCHAIN_COPY,
+} from "../projects/projectAuthorityCopy";
 import { ProjectPermissionModeSection } from "../projects/ProjectPermissionModeSection";
 import { useProjectController } from "../projects/useProjectController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { useWorkSettings } from "../work/useWorkSettings";
 
 const CODE_MODE_OPTIONS = PERMISSION_MODE_OPTIONS.map((option) => ({
@@ -63,12 +71,107 @@ export function RemoteAccessDefaults(props: RemoteAccessDefaultsProps) {
             }
             project={project}
           />
+          <ProjectStandingPermissions
+            connected={props.connected}
+            controller={projects}
+            projectId={project.id}
+          />
         </div>
       ))}
       {projects.errorMessage === undefined ? null : (
         <OctantAlert tone="warning">{projects.errorMessage}</OctantAlert>
       )}
     </section>
+  );
+}
+
+/**
+ * A Project's standing permissions, set as a window sets them: whether agents
+ * write its memory, merge, or comment on pull requests without asking, and
+ * whether a Code Project runs its own toolchain. The host takes each only from
+ * its own person, so the shell mounts this for no other session. Agents'
+ * pushes to the default branch have no switch here or in a window, because no
+ * agent tool pushes there yet.
+ */
+function ProjectStandingPermissions(props: {
+  readonly controller: ReturnType<typeof useProjectController>;
+  readonly projectId: ProjectId;
+  readonly connected: boolean;
+}) {
+  const { controller, projectId } = props;
+  const project = controller.projects.find((candidate) => candidate.id === projectId);
+  if (project === undefined || project.lifecycle !== "active") return null;
+  const toState = (enabled: boolean) => (enabled ? "enabled" : "disabled");
+  return (
+    <>
+      <PermissionSwitch
+        checked={project.agentMemoryWrites === "enabled"}
+        description={AGENT_MEMORY_WRITES_COPY}
+        disabled={!props.connected}
+        label="Agents may write Project memory without asking"
+        onChange={(enabled) => controller.setAgentMemoryWrites(projectId, enabled)}
+      />
+      {project.type !== "code" ? null : (
+        <>
+          <PermissionSwitch
+            checked={project.agentMerge === "enabled"}
+            description={AGENT_MERGE_COPY}
+            disabled={!props.connected}
+            label="Agents may merge"
+            onChange={(enabled) => controller.setCodeAgentMerge(projectId, toState(enabled))}
+          />
+          <PermissionSwitch
+            checked={project.agentPullRequestComments === "enabled"}
+            description={AGENT_PULL_REQUEST_COMMENTS_COPY}
+            disabled={!props.connected}
+            label="Agents may comment on pull requests"
+            onChange={(enabled) =>
+              controller.setCodeAgentPullRequestComments(projectId, toState(enabled))
+            }
+          />
+          <PermissionSwitch
+            checked={project.ownToolchain === "enabled"}
+            description={OWN_TOOLCHAIN_COPY}
+            disabled={!props.connected}
+            label="Use the Project's own toolchain"
+            onChange={(enabled) => controller.setCodeOwnToolchain(projectId, toState(enabled))}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+function PermissionSwitch(props: {
+  readonly checked: boolean;
+  readonly label: string;
+  readonly description: string;
+  readonly disabled: boolean;
+  readonly onChange: (enabled: boolean) => Promise<boolean>;
+}) {
+  // Each command asserts the Project version it read, so a second flip waits
+  // for the first to come back.
+  const [pending, setPending] = useState(false);
+  const descriptionId = useId();
+  return (
+    <div className="flex items-start justify-between gap-2">
+      <div className="flex flex-col">
+        <span className="text-xs">{props.label}</span>
+        <span className="text-xs text-muted-foreground" id={descriptionId}>
+          {props.description}
+        </span>
+      </div>
+      <OctantSwitch
+        checked={props.checked}
+        describedBy={descriptionId}
+        disabled={props.disabled || pending}
+        label={props.label}
+        onCheckedChange={(enabled) => {
+          setPending(true);
+          void props.onChange(enabled).finally(() => setPending(false));
+        }}
+      />
+    </div>
   );
 }
 
