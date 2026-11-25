@@ -5,7 +5,7 @@ import {
   decodePreviewContextSelectionId,
   decodePreviewTargetId,
 } from "@octant/contracts/previews";
-import { decodeProviderInstanceId } from "@octant/contracts";
+import { decodeChatAttachmentId, decodeProviderInstanceId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import { useState, type ReactNode } from "react";
 import { CompactingThread } from "../context/compactionTestSupport";
@@ -58,6 +58,41 @@ function renderComposer(
 }
 
 describe("ChatComposer", () => {
+  it("shows distinct glyphs beside staged filenames and keeps them removable", async () => {
+    const user = userEvent.setup();
+    const files = [
+      { displayName: "notes.md", icon: "file-text" },
+      { displayName: "Script.TS", icon: "code-xml" },
+      { displayName: "theme.scss", icon: "code-xml" },
+      { displayName: "config.cjs", icon: "code-xml" },
+      { displayName: "manual.rst", icon: "file-text" },
+      { displayName: "favicon.ico", icon: "image" },
+      { displayName: "budget.xlsx", icon: "file-spreadsheet" },
+      { displayName: "bundle.zip", icon: "archive" },
+      { displayName: "diagram.png", icon: "image" },
+      { displayName: "unknown", icon: "file" },
+    ].map((file) => ({ ...file, id: decodeChatAttachmentId(crypto.randomUUID()) }));
+    const onRemoveAttachment = vi.fn();
+    renderComposer({ pendingAttachments: files, onRemoveAttachment });
+
+    const list = screen.getByRole("list", { name: "Attached files" });
+    const chips = within(list).getAllByRole("listitem");
+    files.forEach((file, index) => {
+      expect(chips[index]).toHaveTextContent(file.displayName);
+    });
+    const removeNotes = screen.getByRole("button", { name: "Remove notes.md attachment" });
+    await waitFor(() => {
+      files.forEach((file, index) => {
+        expect(chips[index]?.querySelector(`svg.octant-icon-${file.icon}`)).toHaveAttribute(
+          "aria-hidden",
+          "true",
+        );
+      });
+    });
+    await user.click(removeNotes);
+    expect(onRemoveAttachment).toHaveBeenCalledWith(files[0]?.id);
+  });
+
   it("holds a send while the host compacts the session, from Enter and from the button", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => true);

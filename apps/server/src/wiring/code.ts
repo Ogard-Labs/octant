@@ -95,6 +95,8 @@ import { createAgentProfileRouteHandler } from "../agentProfileRoutes";
 import { AgentProfileService } from "../agentProfileService";
 import { createFolderBrowseRouteHandler } from "../folderBrowseRoutes";
 import { FolderBrowseService } from "../folderBrowseService";
+import { createRepositoryBootstrapRouteHandler } from "../repositoryBootstrapRoutes";
+import { RepositoryBootstrapService } from "../repositoryBootstrapService";
 import { createProjectIconReader } from "../projectIcon";
 import { ProjectCustomIconStore } from "../projectIconStore";
 import { ProviderFolderScanService } from "../providerFolderScanService";
@@ -926,6 +928,18 @@ export function wireCode(deps: CodeDependencies) {
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const repositoryBootstrapService = new RepositoryBootstrapService({
+      readProject: (projectId) => persistence.readProject(projectId),
+      bindingReceiptStore,
+      projectRootPort,
+      homeDir: homedir(),
+      clock: () => new Date().toISOString(),
+    });
+    const repositoryBootstrapRoutes = createRepositoryBootstrapRouteHandler({
+      service: repositoryBootstrapService,
+      windowAuthorityStore,
+      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    });
     const codeProjectAccess = new CodeProjectAccess({
       readWorkspace: (scopeId) => persistence.readWindowWorkspace(scopeId)?.workspace,
       hasActiveCodeProject: isCodeProject,
@@ -1373,6 +1387,8 @@ export function wireCode(deps: CodeDependencies) {
       environmentService,
       folderBrowseRoutes,
       folderBrowseService,
+      repositoryBootstrapRoutes,
+      repositoryBootstrapService,
       isCodeProviderModelAllowed,
       // The host-owned repository scope a Code Home activity read may draw
       // from: connected repositories of Projects the window admits now.

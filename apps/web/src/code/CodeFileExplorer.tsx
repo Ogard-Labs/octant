@@ -16,6 +16,7 @@ import { useDockBarControls, useDockBarPlacement } from "../shell/dockBarControl
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { FileName, pathBasename, pathParent } from "../lib/fileName";
+import { fileKindForExtension } from "../lib/fileKindForExtension";
 
 export const MAX_CODE_FILE_EXPLORER_ENTRIES = 1_000;
 const EXPLORER_VIRTUALIZATION_THRESHOLD = 40;
@@ -50,48 +51,12 @@ export type CodeFileExplorerEntry =
 /** How a file differs from the checkout's last commit, for the mark at its row's end. */
 export type CodeFileChange = "modified" | "added";
 
-const CODE_EXTENSIONS = new Set([
-  "c",
-  "cc",
-  "cjs",
-  "cpp",
-  "cs",
-  "css",
-  "go",
-  "h",
-  "html",
-  "java",
-  "js",
-  "json",
-  "jsx",
-  "kt",
-  "mjs",
-  "py",
-  "rb",
-  "rs",
-  "scss",
-  "sh",
-  "sql",
-  "swift",
-  "toml",
-  "ts",
-  "tsx",
-  "xml",
-  "yaml",
-  "yml",
-]);
-const DOCUMENT_EXTENSIONS = new Set(["md", "mdx", "rst", "txt"]);
-const IMAGE_EXTENSIONS = new Set(["avif", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"]);
-
 /** The glyph kind a file name earns: code, document, image, or a plain file. */
 export function fileKindOf(name: string): "code" | "document" | "image" | "file" {
   const dot = name.lastIndexOf(".");
   if (dot <= 0) return "file";
   const extension = name.slice(dot + 1).toLowerCase();
-  if (CODE_EXTENSIONS.has(extension)) return "code";
-  if (DOCUMENT_EXTENSIONS.has(extension)) return "document";
-  if (IMAGE_EXTENSIONS.has(extension)) return "image";
-  return "file";
+  return fileKindForExtension(extension);
 }
 
 function FileGlyph(props: { readonly name: string }) {

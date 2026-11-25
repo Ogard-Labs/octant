@@ -157,6 +157,7 @@ import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { morePullRequestsThanTheFirst } from "./threadRowPullRequests";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
+import { AddRepositoryToComputerContext } from "./addRepositoryToComputerContext";
 import {
   useContext,
   useEffect,
@@ -1386,6 +1387,7 @@ function ProjectActionsMenu(props: {
   // Coordinators are Code only: Work turns carry no messages for one to follow
   // up with, and an archived Project starts nothing.
   const onNewCoordinator = archived || project.type !== "code" ? undefined : props.onNewCoordinator;
+  const onAddToAnotherComputer = useContext(AddRepositoryToComputerContext);
   return (
     <OctantMenuRoot>
       <OctantMenuTrigger
@@ -1404,6 +1406,11 @@ function ProjectActionsMenu(props: {
             {onNewCoordinator === undefined ? null : (
               <OctantMenuActionItem onClick={() => onNewCoordinator(project.id)}>
                 New coordinator
+              </OctantMenuActionItem>
+            )}
+            {onAddToAnotherComputer === undefined || archived || project.type !== "code" ? null : (
+              <OctantMenuActionItem onClick={() => onAddToAnotherComputer(project.id)}>
+                Add to another computer…
               </OctantMenuActionItem>
             )}
             <OctantMenuActionItem onClick={() => props.onMove(project.id, !project.pinned)}>

@@ -47,7 +47,7 @@ import {
   strictKeptSentence,
   type PickerGroup,
 } from "@octant/domain";
-import { ChevronDown, CirclePause, FileText, X } from "../ui/icons";
+import { ChevronDown, CirclePause, X } from "../ui/icons";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
@@ -67,6 +67,7 @@ import { ThreadInfo } from "../composer/ThreadInfo";
 import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
+import { ComposerAttachmentIcon } from "../composer/ComposerAttachmentIcon";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
@@ -2993,15 +2994,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 <div className="code-thread-workspace__attachments" aria-label="Attached files">
                   {attachments.staged.map(({ previewUrl, reference }) => (
                     <span
-                      className="chip code-thread-workspace__attachment"
+                      className="chip min-w-0 code-thread-workspace__attachment"
                       key={reference.attachmentId}
                     >
                       {previewUrl === "" ? (
-                        <FileText
-                          aria-hidden="true"
-                          className="code-thread-workspace__attachment-thumb"
-                          size={16}
-                        />
+                        <ComposerAttachmentIcon name={reference.displayName} />
                       ) : (
                         <img
                           alt={reference.displayName}
@@ -3014,7 +3011,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       </span>
                       <OctantButton
                         aria-label={`Remove ${reference.displayName}`}
-                        className="chip-x window-no-drag"
+                        className="chip-x shrink-0 window-no-drag"
                         disabled={queuePreparing || messageQueue.busy || messageQueue.uncertain}
                         onClick={() => attachments.remove(reference.attachmentId)}
                         type="button"
