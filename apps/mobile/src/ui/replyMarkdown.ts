@@ -49,25 +49,30 @@ export function replySegments(text: string): ReadonlyArray<ReplySegment> {
   return segments;
 }
 
+// Invisible, and enough to stop the two characters around it being read as one
+// piece of syntax.
+const APART = "\u200B";
+
 /**
  * A picture in a reply becomes a link to it. Drawing one would have the phone
  * ask an address the reply chose, which tells that address where the person is
  * and when they read it.
+ *
+ * The plain form is rewritten so that it reads well. Every other way to write a
+ * picture (nested brackets, references, unbalanced code) starts with the same
+ * two characters, so parting those wherever they are left is what holds. Markup
+ * that loads something is parted the same way.
  */
 function withoutRemoteMedia(markdown: string): string {
-  // Inline code is left as it is written.
   return markdown
-    .split(/(`+[^`]*`+)/)
-    .map((part) =>
-      part.startsWith("`")
-        ? part
-        : part
-            .replace(
-              /!\[([^\]]*)\]\(\s*<?([^\s)>]+)>?[^)]*\)/g,
-              (_whole, alt: string, url: string) => `[${alt.trim() === "" ? url : alt}](${url})`,
-            )
-            .replace(/!\[([^\]]*)\](?=\[)/g, "[$1]")
-            .replace(/<(?=\/?(?:img|video|audio|source|picture|iframe)\b)/gi, "&lt;"),
+    .replace(
+      /(^|[^`\\])!\[([^[\]\n\\]{0,300})\]\(([^\s()<>]{1,2000})(?:[ \t]+["'][^"'\n]{0,300}["'])?\)/g,
+      (_whole, before: string, alt: string, url: string) =>
+        `${before}[${alt.trim() === "" ? url : alt}](${url})`,
     )
-    .join("");
+    .replaceAll("![", `!${APART}[`)
+    .replace(
+      /<(?=\/?(?:img|image|video|audio|source|track|picture|iframe|object|embed|svg|link|style)\b)/gi,
+      `<${APART}`,
+    );
 }

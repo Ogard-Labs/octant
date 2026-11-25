@@ -18,6 +18,8 @@ const QUEUE_REFRESH_MS = 4_000;
 export interface TurnControl {
   /** The computer's own queue; undefined where this phone may not read or use one. */
   readonly queue: ThreadMessageQueueSnapshot | undefined;
+  /** A change to the queue is on its way. */
+  readonly pending: boolean;
   readonly queueMessage: () => Promise<void>;
   readonly removeQueued: (messageId: string) => Promise<void>;
   /** Stops the running turn; undefined while none runs that this phone may stop. */
@@ -45,8 +47,13 @@ export function useTurnControl(
 
   const read = useCallback(async () => {
     if (transport === undefined || mode === undefined || threadId === undefined) return;
-    const held = await loadMobileMessageQueue(transport, { mode, threadId }).catch(() => undefined);
-    if (shown.current === identity) setQueue(held);
+    try {
+      const held = await loadMobileMessageQueue(transport, { mode, threadId });
+      if (shown.current === identity) setQueue(held);
+    } catch {
+      // A read that was lost says nothing about the queue, so what was read
+      // before stands; taking it as none closed the composer in mid-turn.
+    }
   }, [identity, mode, threadId, transport]);
 
   useEffect(() => {
@@ -62,12 +69,18 @@ export function useTurnControl(
     return () => clearInterval(timer);
   }, [live, read, waiting]);
 
+  // A turn is running, so the screen is busy already and cannot say that a
+  // message is on its way: a second press would queue the same words again.
+  const changing = useRef(false);
+  const [pending, setPending] = useState(false);
   const change = async (
     run: (snapshot: ThreadMessageQueueSnapshot) => Promise<MobileQueueResult>,
     failure: string,
     onDone: () => void,
   ) => {
-    if (identity === undefined || queue === undefined) return;
+    if (identity === undefined || queue === undefined || changing.current) return;
+    changing.current = true;
+    setPending(true);
     await runMutation({
       guard,
       identity,
@@ -85,10 +98,13 @@ export function useTurnControl(
         onDone();
       },
     });
+    changing.current = false;
+    setPending(false);
   };
 
   return {
     queue,
+    pending,
     queueMessage: async () => {
       const prompt = input.prompt.trim();
       if (transport === undefined || prompt.length === 0) return;

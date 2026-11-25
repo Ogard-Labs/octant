@@ -30,6 +30,8 @@ export interface FloatingComposerProps {
   readonly busy?: boolean;
   /** While a turn runs, a message may still be written and waits behind it. */
   readonly queues?: boolean;
+  /** A message is on its way, so it cannot be sent again. */
+  readonly sending?: boolean;
   readonly editable?: boolean;
   readonly testID?: string;
   readonly footerHint?: string | undefined;
@@ -113,7 +115,11 @@ export function FloatingComposer(props: FloatingComposerProps) {
   const multiline = props.value !== undefined;
   const queues = props.busy === true && props.queues === true;
   const editable = props.editable !== false && (props.busy !== true || queues);
-  const canSend = editable && (props.value ?? "").trim().length > 0 && props.onSubmit !== undefined;
+  const canSend =
+    props.sending !== true &&
+    editable &&
+    (props.value ?? "").trim().length > 0 &&
+    props.onSubmit !== undefined;
 
   return (
     <View style={styles.wrap} testID={props.testID ?? "mobile-floating-composer"}>

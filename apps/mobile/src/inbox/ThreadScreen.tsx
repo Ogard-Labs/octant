@@ -872,6 +872,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             onPressModel={() => setModelOpen(true)}
             onSubmit={() => void (queues ? turnControl.queueMessage() : chat.send())}
             queues={queues}
+            sending={turnControl.pending}
             {...(chat.activeAttempt === undefined ? attachProps : {})}
             {...(chat.activeAttempt !== undefined && staleGate.allowProductMutations
               ? { onStop: () => void chat.stop() }
@@ -901,6 +902,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           onChangeText={setPrompt}
           onSubmit={queues ? () => void turnControl.queueMessage() : sendFollowUp}
           queues={queues}
+          sending={turnControl.pending}
           {...(turnControl.stop === undefined ? {} : { onStop: () => void turnControl.stop?.() })}
           {...(workTurnLive || codeTurnLive ? {} : attachProps)}
           placeholder={MOBILE_COPY.composerFollowUp}

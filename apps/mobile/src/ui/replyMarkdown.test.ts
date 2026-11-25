@@ -27,17 +27,34 @@ describe("a reply's Markdown", () => {
     expect(replySegments("![](https://example.com/a.png)")).toEqual([
       { kind: "prose", markdown: "[https://example.com/a.png](https://example.com/a.png)" },
     ]);
-    expect(replySegments("![chart][ref]\n\n[ref]: https://example.com/a.png")).toEqual([
-      { kind: "prose", markdown: "[chart][ref]\n\n[ref]: https://example.com/a.png" },
-    ]);
-    expect(replySegments('<img src="https://example.com/a.png"> <video src="x">')).toEqual([
-      { kind: "prose", markdown: '&lt;img src="https://example.com/a.png"> &lt;video src="x">' },
-    ]);
   });
 
-  it("leaves a picture's syntax alone inside inline code", () => {
-    expect(replySegments("Write `![alt](url)` there")).toEqual([
-      { kind: "prose", markdown: "Write `![alt](url)` there" },
-    ]);
+  it.each([
+    "![a [b]](http://e/p.png)",
+    "![a\\]b](http://e/p.png)",
+    "![ref]\n\n[ref]: http://e/p.png",
+    "![chart][ref]\n\n[ref]: http://e/p.png",
+    "``![i](http://e/p.png)` x",
+    "`a` ![i](<http://e/p q.png>) `b`",
+    "![i](http://e/p(1).png)",
+    '| a |\n|---|\n| ![i](http://e/p.png "t") |',
+    "[![i](http://e/p.png)](http://e)",
+    "!![i](http://e/p.png)",
+  ])("leaves no picture in %s", (written) => {
+    for (const segment of replySegments(written))
+      if (segment.kind === "prose") expect(segment.markdown).not.toContain("![");
+  });
+
+  it("leaves no markup that loads something", () => {
+    const [segment] = replySegments('<IMG src="http://e/a.png"> <video src="x"> </picture> <b>');
+    expect(segment?.kind === "prose" ? segment.markdown : "").toBe(
+      '<\u200BIMG src="http://e/a.png"> <\u200Bvideo src="x"> <\u200B/picture> <b>',
+    );
+  });
+
+  it("reads a long reply quickly, however it is written", () => {
+    const started = performance.now();
+    replySegments("![a](".repeat(20_000) + "x".repeat(200_000));
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 });
