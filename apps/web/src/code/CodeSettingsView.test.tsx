@@ -88,7 +88,7 @@ describe("CodeSettingsView", () => {
     await user.type(prefix, "bad prefix/");
     await user.tab();
     expect(update).not.toHaveBeenCalled();
-    expect(screen.getByText(/A branch prefix uses letters/)).toBeVisible();
+    expect(screen.getByText(/cannot use that prefix/)).toBeVisible();
   });
 
   it("offers the terminal shell on a Windows host, Windows PowerShell first, and saves the choice", async () => {

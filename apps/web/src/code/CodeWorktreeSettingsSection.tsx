@@ -53,9 +53,7 @@ export function CodeWorktreeSettingsSection(props: {
     const trimmed = prefix.trim();
     if (trimmed === (worktrees?.branchPrefix ?? DEFAULT_BRANCH_PREFIX)) return;
     if (!isValidBranchPrefix(trimmed)) {
-      setMessage(
-        "A branch prefix uses letters, numbers, dots, dashes and slashes, and cannot end in .lock.",
-      );
+      setMessage("Git or Windows cannot use that prefix in a branch name.");
       return;
     }
     const { branchPrefix: _previous, ...rest } = worktrees ?? {};
