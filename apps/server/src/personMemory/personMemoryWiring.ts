@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
+  type ChatThreadView,
+  type ChatTurn,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeProviderSessionId,
@@ -29,6 +31,29 @@ function namesProtectedPath(text: string, protectedSecretPath: (path: string) =>
   return [...text.matchAll(PATH_SHAPED)].some((match) =>
     protectedSecretPath(match[0].replace(/[.,;:!?'"]+$/u, "")),
   );
+}
+
+/**
+ * A Chat thread's newest messages from the person. A turn the host started to
+ * deliver a subagent's result carries that result where the person's message
+ * would be, so it is left out, as it is for a Work or Code thread.
+ */
+export function chatPersonMessages(
+  view: {
+    readonly turns: ReadonlyArray<
+      Pick<ChatTurn, "id" | "supersedes" | "rewound" | "delivery" | "userMessageRef">
+    >;
+    readonly contents: ReadonlyArray<
+      Pick<ChatThreadView["contents"][number], "contentId" | "body">
+    >;
+  },
+  limit: number,
+): ReadonlyArray<string> {
+  const bodies = new Map(view.contents.map((content) => [String(content.contentId), content.body]));
+  return activeChatTurns(view.turns)
+    .filter((turn) => turn.delivery === undefined)
+    .flatMap((turn) => bodies.get(String(turn.userMessageRef.contentId)) ?? [])
+    .slice(-limit);
 }
 
 /**
@@ -80,17 +105,12 @@ export function createPersonMemorySweep(input: {
         .find((candidate) => String(candidate.id) === threadId);
       const view = persistence.readChatThreadView(decodeChatThreadId(threadId));
       if (thread === undefined || view === undefined) return undefined;
-      const bodies = new Map(
-        view.contents.map((content) => [String(content.contentId), content.body]),
-      );
       return {
         title: thread.title,
         projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
-        personMessages: activeChatTurns(view.turns)
-          .flatMap((turn) => bodies.get(String(turn.userMessageRef.contentId)) ?? [])
-          .slice(-PERSON_MESSAGE_LIMIT),
+        personMessages: chatPersonMessages(view, PERSON_MESSAGE_LIMIT),
       };
     },
   };

@@ -924,6 +924,9 @@ function CodeProjectQuickStart(props: {
             defaultPermissionPersistence={
               props.controller.bootstrap.settings.defaultPermissionPersistence
             }
+            {...(props.controller.bootstrap.settings.worktrees === undefined
+              ? {}
+              : { worktreeSettings: props.controller.bootstrap.settings.worktrees })}
             providerGroups={props.providerGroups}
             {...(props.selectedProviderInstanceId === undefined
               ? {}

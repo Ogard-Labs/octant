@@ -73,12 +73,18 @@ import { Effect, Schema } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
-import type { CodeWorktreeRefsPort, CodeWorktreeSourcePreviewPort } from "../code/codeService";
+import type {
+  CodeWorktreeBranchNamesPort,
+  CodeWorktreeRefsPort,
+  CodeWorktreeSourcePreviewPort,
+} from "../code/codeService";
 import {
   createManagedWorktreeNodePorts,
+  listBranchNames,
   listWorktreeRefs,
   observeManagedWorktreeExecutionIdentity,
 } from "../code/managedWorktreeNodePorts";
+import { ManagedWorktreeReclaimService } from "../code/managedWorktreeReclaim";
 import { ManagedWorktreeService } from "../code/managedWorktreeService";
 import { ManagedRootGrantStore } from "../code/managedRootGrantStore";
 import { createManagedCodeThreadCreationPort } from "../code/managedCodeThreadCreation";
@@ -1672,6 +1678,43 @@ export function wireProviders(deps: ProvidersDependencies) {
       uuid: randomUUID,
     });
     const managedWorktreePorts = createManagedWorktreeNodePorts();
+    // Reclaiming asks the same question cleanup does, whether the thread and
+    // checkout the receipt names are still the host's own; it does not need
+    // the thread archived, so it does not read `active`.
+    const managedWorktreeAuthority = {
+      observeCleanupEligibility: async ({
+        repositoryId,
+        threadId,
+        checkoutId,
+      }: {
+        readonly repositoryId: string;
+        readonly threadId: string;
+        readonly checkoutId: string;
+      }) => {
+        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        const checkout = persistence.readCodeCheckout(decodeCodeCheckoutId(checkoutId));
+        if (
+          thread === undefined ||
+          checkout === undefined ||
+          thread.repositoryId !== repositoryId ||
+          thread.checkoutId !== checkoutId
+        ) {
+          return { status: "unavailable" as const };
+        }
+        return {
+          status: "eligible" as const,
+          active: thread.lifecycle === "active",
+          delivered: true,
+          checkoutId: decodeCodeCheckoutId(checkoutId),
+          repositoryId: decodeCodeRepositoryId(repositoryId),
+        };
+      },
+    };
+    const managedWorktreeReclaim = new ManagedWorktreeReclaimService({
+      receipts: managedWorktreeReceipts,
+      ...managedWorktreePorts,
+      authority: managedWorktreeAuthority,
+    });
     const managedWorktreeService = new ManagedWorktreeService({
       setupRecipe: (projectId) => {
         const project = persistence.readProject(projectId);
@@ -1683,27 +1726,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       grants: new ManagedRootGrantStore(randomUUID, processAuthorityNow),
       receipts: managedWorktreeReceipts,
       ...managedWorktreePorts,
-      authority: {
-        observeCleanupEligibility: async ({ repositoryId, threadId, checkoutId }) => {
-          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-          const checkout = persistence.readCodeCheckout(decodeCodeCheckoutId(checkoutId));
-          if (
-            thread === undefined ||
-            checkout === undefined ||
-            thread.repositoryId !== repositoryId ||
-            thread.checkoutId !== checkoutId
-          ) {
-            return { status: "unavailable" as const };
-          }
-          return {
-            status: "eligible" as const,
-            active: thread.lifecycle === "active",
-            delivered: true,
-            checkoutId: decodeCodeCheckoutId(checkoutId),
-            repositoryId: decodeCodeRepositoryId(repositoryId),
-          };
-        },
-      },
+      authority: managedWorktreeAuthority,
       now: Date.now,
     });
     agentRunChildWorktree.current = createAgentRunChildWorktreePort({
@@ -1763,6 +1786,17 @@ export function wireProviders(deps: ProvidersDependencies) {
       if (project?.type !== "code") return [];
       const entries = await listWorktreeRefs(project.binding.canonicalRoot, signal);
       return entries.map((entry) => decodeCodeWorktreeRef(entry));
+    };
+    const managedWorktreeBranchNames: CodeWorktreeBranchNamesPort["list"] = async (
+      input,
+      signal,
+    ) => {
+      const project = persistence.readProject(input.projectId);
+      if (project?.type !== "code") return { names: [], truncated: true };
+      const listed = await listBranchNames(project.binding.canonicalRoot, signal);
+      return listed.status === "observed"
+        ? { names: listed.names, truncated: listed.truncated }
+        : { names: [], truncated: true };
     };
     const managedWorktreeSourcePreview: CodeWorktreeSourcePreviewPort["preview"] = async (
       input,
@@ -2807,7 +2841,9 @@ export function wireProviders(deps: ProvidersDependencies) {
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
+      managedWorktreeBranchNames,
       managedWorktreeService,
+      managedWorktreeReclaim,
       worktreePreparation,
       childWorktreeSources,
       resolveChildWorktree: agentRunChildWorktree.current.preparationReceipt,

@@ -1191,6 +1191,9 @@ describe("ProjectSidebarSection activity view", () => {
         }),
       ).toBeVisible();
       expect(screen.getAllByRole("button", { name: /Draft the release notes/ })).toHaveLength(1);
+      // The list scrolls beside the foot, not under it.
+      expect(priority.closest(".project-nav__list")).not.toBeNull();
+      expect(foot.closest(".project-nav__list")).toBeNull();
       expect(screen.getByRole("button", { name: /Estimate app rebrand effort/ })).toHaveTextContent(
         "No Project",
       );

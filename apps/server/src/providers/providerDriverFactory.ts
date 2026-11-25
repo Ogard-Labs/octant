@@ -46,6 +46,7 @@ import type { AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { makeDevinPlanUsageFacts } from "./devinPlanUsage";
+import { makeMistralVibeUsageFacts } from "./mistralVibeUsage";
 import { makeOpenCodeDriver, type OpenCodeProtectedPaths } from "./openCodeDriver";
 import { makeOpenCodeGoUsageFacts } from "./openCodeGoUsage";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
@@ -161,15 +162,30 @@ export function makeProviderDriver(
         : { sessionOwnership: options.sessionOwnership }),
     });
     const credential = profile.process.hostAuthentication;
-    return instance.driverKind === "devin" && credential?.kind === "credential-file"
-      ? {
-          ...driver,
-          contextFacts: makeDevinPlanUsageFacts({
-            instanceId: instance.id,
-            credentialPath: credential.defaultPath,
-          }),
-        }
-      : driver;
+    if (instance.driverKind === "devin" && credential?.kind === "credential-file") {
+      return {
+        ...driver,
+        contextFacts: makeDevinPlanUsageFacts({
+          instanceId: instance.id,
+          credentialPath: credential.defaultPath,
+        }),
+      };
+    }
+    if (instance.driverKind === "mistral-vibe") {
+      return {
+        ...driver,
+        contextFacts: makeMistralVibeUsageFacts({
+          instanceId: instance.id,
+          ...(configuration.authentication === undefined
+            ? {}
+            : { authentication: configuration.authentication }),
+          ...(options.credentialResolver === undefined
+            ? {}
+            : { credentialResolver: options.credentialResolver }),
+        }),
+      };
+    }
+    return driver;
   }
   if (isAddedAcpAgentInstance(instance)) {
     const install = instance.configuration.install;

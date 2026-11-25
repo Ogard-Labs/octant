@@ -121,6 +121,11 @@ interface ProjectWindowAuthorityOptions {
   readonly rendererIdentity?: string;
   readonly serverUrl: string;
   readonly windowId: string;
+  /**
+   * Whether the app is quitting at the moment of the revoke. Read per request:
+   * a window the person closes on a running app is an ordinary close.
+   */
+  readonly appQuitting?: () => boolean;
 }
 
 export function generateProjectBridgeToken(
@@ -157,11 +162,18 @@ export async function createProjectWindowAuthority(
     capability,
     rendererIdentity,
     revoke: async () => {
-      const revokeResponse = await safeFetch(fetch, url, {
-        method: "DELETE",
-        headers,
-        body: JSON.stringify({ windowId: options.windowId }),
-      });
+      const revoke = (body: object) =>
+        safeFetch(fetch, url, { method: "DELETE", headers, body: JSON.stringify(body) });
+      const quitting = options.appQuitting?.() === true;
+      let revokeResponse = await revoke(
+        quitting
+          ? { windowId: options.windowId, desktopQuitAccepted: true }
+          : { windowId: options.windowId },
+      );
+      // A host that predates the statement refuses the unknown key; the window
+      // still has to lose its authority, so ask again without it.
+      if (quitting && revokeResponse.status === 400)
+        revokeResponse = await revoke({ windowId: options.windowId });
       if (revokeResponse.status !== 204) {
         throw new ProjectRootPickerError("Octant could not revoke this Project window.");
       }

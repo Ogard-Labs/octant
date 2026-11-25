@@ -66,8 +66,28 @@
   font-size: var(--oct-text-xs);
 }
 
-.thread-row-info-card__fact svg {
+.thread-row-info-card__fact svg:not(.provider-glyph) {
   flex: 0 0 auto;
+  color: var(--oct-meta);
+}
+
+/* Every mark takes one slot, so a Project's tile, a provider's glyph and a line
+   icon leave their labels on one edge. */
+.thread-row-info-card__mark {
+  display: grid;
+  flex: 0 0 16px;
+  place-items: center;
+}
+
+.thread-row-info-card__fact[data-live="working"] svg {
+  color: var(--octant-accent-text);
+}
+
+.thread-row-info-card__fact[data-live="attention"] svg {
+  color: var(--oct-warn-fg);
+}
+
+.thread-row-info-card__step {
   color: var(--oct-meta);
 }
 

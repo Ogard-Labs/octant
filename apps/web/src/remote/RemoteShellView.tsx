@@ -260,6 +260,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           connected={connected}
           extensionClient={extensionClient}
           mode={activeMode}
+          {...(personPort === undefined ? {} : { worktreePort: personPort })}
           readOnly={standing.accessLevel === "read-only"}
           stashScope={stashScope}
         />

@@ -150,6 +150,14 @@ export function mobileCoordinatorProposalPort(
         "The worker's first message could not be staged on the host.",
       ),
     executeOperation: (command) => executeMobileCodeOperation(transport, command),
+    readBranchPrefix: async () =>
+      (
+        await decodeJson(
+          await transport.authenticatedFetch({ method: "GET", path: "/api/code/bootstrap" }),
+          decodeHostAnswer(CodeBootstrap),
+          "The host's worktree settings could not be read.",
+        )
+      ).settings.worktrees?.branchPrefix,
   };
 }
 

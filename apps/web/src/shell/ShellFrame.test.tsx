@@ -589,7 +589,7 @@ describe("ShellFrame", () => {
       /@media \(max-width: 680px\)[\s\S]*\.sidebar-navigation__projects\s*\{[^}]*flex:\s*0 0 auto;/,
     );
     expect(shellStyles).toMatch(
-      /@media \(max-width: 680px\)[\s\S]*\.project-nav\s*\{[^}]*max-height:\s*none;[^}]*overflow-y:\s*visible;/,
+      /@media \(max-width: 680px\)[\s\S]*\.project-nav__list\s*\{[^}]*overflow-y:\s*visible;/,
     );
   });
 

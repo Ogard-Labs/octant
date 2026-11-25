@@ -5,6 +5,7 @@ import {
   type ProviderReadiness,
   type ProviderUsageLimitsSnapshot,
 } from "@octant/contracts";
+import { overageAllowsContinuedUse } from "@octant/domain";
 import { automaticModelUnavailableReason } from "@octant/domain/automatic-model-policy";
 
 /**
@@ -49,7 +50,14 @@ function atLimit(
   const windows = limits.rateLimitWindows ?? [];
   // A window's reset time decides when its exhaustion ends; the aggregate
   // quota flag has none, so it counts only when no window explains it.
-  if (windows.some((window) => window.status === "exhausted" && future(window.resetsAt))) {
+  if (
+    windows.some(
+      (window) =>
+        window.status === "exhausted" &&
+        future(window.resetsAt) &&
+        !overageAllowsContinuedUse(window.overage),
+    )
+  ) {
     return true;
   }
   if (windows.length === 0 && limits.quota === "exhausted") return true;

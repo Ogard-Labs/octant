@@ -6,7 +6,7 @@ import { browserDownloadHoldRoot } from "@octant/host-runtime";
 import * as downloadSave from "./browserDownloadSave";
 import { decodeBrowserPageScriptPreparation } from "@octant/contracts/browser-page-script";
 import { Schema } from "effect";
-import { UtcTimestamp } from "@octant/contracts";
+import { UtcTimestamp, decodeEventActor } from "@octant/contracts";
 import {
   decodePairedBrowserLeaseId,
   PairedBrowserNativeTarget,
@@ -54,6 +54,10 @@ const otherWindowId = "10000000-0000-4000-8000-000000000002" as WindowId;
 const threadOne = "20000000-0000-4000-8000-000000000001" as BrowserThreadId;
 const threadTwo = "20000000-0000-4000-8000-000000000002" as BrowserThreadId;
 const contextOne = "30000000-0000-4000-8000-000000000001" as BrowserContextId;
+const personActor = decodeEventActor({
+  kind: "local-user",
+  actorId: "00000000-0000-4000-8000-000000000002",
+});
 const authorityOne: ToolActionAuthority = {
   hostId: "40000000-0000-4000-8000-000000000001" as any,
   mode: "work",
@@ -123,6 +127,10 @@ function harness(
     readonly sharedRuntime?: boolean;
     readonly describePoint?: BrowserRuntimePort["describePoint"];
     readonly wrapRuntime?: (runtime: BrowserRuntimePort) => BrowserRuntimePort;
+    readonly pageSessions?: ConstructorParameters<
+      typeof BrowserAutomationService
+    >[0]["pageSessions"];
+    readonly hostRun?: boolean;
   } = {},
 ) {
   const contexts = new Set<BrowserContextId>();
@@ -178,7 +186,14 @@ function harness(
       };
     },
   };
-  const runtime = options.wrapRuntime?.(baseRuntime) ?? baseRuntime;
+  const hostRunRuntime: BrowserRuntimePort =
+    options.hostRun === true
+      ? {
+          ...baseRuntime,
+          persistentOwner: { createContext: vi.fn(async () => ({ status: "created" })) } as never,
+        }
+      : baseRuntime;
+  const runtime = options.wrapRuntime?.(hostRunRuntime) ?? hostRunRuntime;
   const ids = [contextOne, "30000000-0000-4000-8000-000000000002"];
   const service = new BrowserAutomationService({
     runtime,
@@ -209,6 +224,16 @@ function harness(
     ...(options.waitLimitMs === undefined ? {} : { waitLimitMs: () => options.waitLimitMs ?? 0 }),
     ...(options.strict === undefined ? {} : { strict: options.strict }),
     ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
+    ...(options.pageSessions === undefined ? {} : { pageSessions: options.pageSessions }),
+    ...(options.hostRun === true
+      ? {
+          executionOwner: {
+            kind: "execution" as const,
+            binding: {} as never,
+            isCurrent: () => true,
+          },
+        }
+      : {}),
     ...(options.unattended === true ? { isUnattendedScope: () => true } : {}),
     ...(options.delegatedProfileIsCurrent === undefined
       ? {}
@@ -2763,6 +2788,48 @@ describe("BrowserAutomationService", () => {
     await fixture.service.close();
   });
 
+  it("records the replacement of the person's page when a profile switch commits, and ends the old record as superseded", async () => {
+    const pageSessions = { opened: vi.fn(), ended: vi.fn(() => true), hold: vi.fn() };
+    const fixture = harness({ pageSessions });
+    await fixture.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy,
+      openedByPerson: true,
+    });
+    await fixture.service.act({ windowId, request: request() });
+    pageSessions.opened.mockClear();
+    const result = await fixture.service.switchTaskProfile({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      profile: { kind: "personal" },
+      expectedContextId: contextOne,
+      actor: personActor,
+      isCurrent: () => true,
+      save: async (commit) => {
+        commit(() => undefined);
+        return { status: "saved" };
+      },
+      bind: () => undefined,
+    });
+    expect(result.status).toBe("changed");
+    expect(pageSessions.opened).toHaveBeenCalledOnce();
+    expect(pageSessions.opened.mock.calls[0]?.[0]).toMatchObject({
+      threadId: threadOne,
+      profileKind: "personal",
+    });
+    expect(pageSessions.opened.mock.calls[0]?.[1]).toMatchObject({ actor: personActor });
+    expect(pageSessions.ended).toHaveBeenCalledWith(
+      contextOne,
+      threadOne,
+      "superseded",
+      personActor,
+    );
+    await fixture.service.close();
+  });
+
   it.each(["creation", "storage", "revision"] as const)(
     "keeps the original shared page and choice when %s fails",
     async (failure) => {
@@ -4343,4 +4410,304 @@ it("carries the held download's source receipt to its per-file review without su
     await rm(heldFolder, { recursive: true, force: true });
     await rm(workspace, { recursive: true, force: true });
   }
+});
+
+describe("Browser session recording", () => {
+  const recorder = () => ({ opened: vi.fn(), ended: vi.fn(() => true), hold: vi.fn() });
+  const open = async (
+    f: ReturnType<typeof harness>,
+    extra: Partial<Parameters<BrowserAutomationService["create"]>[0]> = {},
+  ) =>
+    f.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy,
+      // What the person's own open route says; every other caller leaves it out.
+      openedByPerson: true,
+      ...extra,
+    });
+
+  it("records the person's page by kind and Project, with nothing of the page", async () => {
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    await open(f);
+    expect(pageSessions.opened).toHaveBeenCalledTimes(1);
+    expect(pageSessions.opened).toHaveBeenCalledWith(
+      {
+        pageId: contextOne,
+        threadId: threadOne,
+        windowId,
+        mode: "work",
+        projectId: authorityOne.projectId,
+        profileKind: "private",
+      },
+      {},
+    );
+    await f.service.close();
+  });
+
+  it("records a reserved open only once its first navigation succeeds, and keeps the old offer until then", async () => {
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    const reopened = await open(f, { reopensPageId: "old-page" });
+    expect(reopened.context?.state).toBe("active");
+    // A page with no address yet has taken nothing from the offer.
+    expect(pageSessions.opened).not.toHaveBeenCalled();
+    vi.mocked(f.runtime.act).mockRejectedValueOnce(new Error("net::ERR_NAME_NOT_RESOLVED"));
+    const failed = await f.service.act({ windowId, request: request(), startedBy: "person" });
+    expect(failed.failure).toBeDefined();
+    expect(pageSessions.opened).not.toHaveBeenCalled();
+    const moved = await f.service.act({ windowId, request: request(), startedBy: "person" });
+    expect(moved.failure).toBeUndefined();
+    expect(pageSessions.opened).toHaveBeenCalledOnce();
+    expect(pageSessions.opened.mock.calls[0]?.[1]).toMatchObject({ reopens: "old-page" });
+    // A later navigation records nothing more.
+    await f.service.act({ windowId, request: request(), startedBy: "person" });
+    expect(pageSessions.opened).toHaveBeenCalledOnce();
+    await f.service.close();
+  });
+
+  it("writes nothing for a reserved page that ends before any navigation succeeded", async () => {
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    await open(f, { reopensPageId: "old-page" });
+    await f.service.stop(windowId, threadOne, contextOne, "person");
+    expect(pageSessions.opened).not.toHaveBeenCalled();
+    expect(pageSessions.ended).not.toHaveBeenCalled();
+    await f.service.close();
+  });
+
+  it("records a stored profile's kind and an account's id and nothing else", async () => {
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    await open(f, { policy: { ...policy, profile: { kind: "personal" } } });
+    expect(pageSessions.opened).toHaveBeenCalledWith(
+      expect.objectContaining({ profileKind: "personal" }),
+      expect.anything(),
+    );
+    await f.service.close();
+  });
+
+  it("records no page the host runs for its own owner", async () => {
+    const pageSessions = recorder();
+    const f = harness({ hostRun: true, pageSessions });
+    const opened = await open(f);
+    expect(opened.context?.state).toBe("active");
+    expect(pageSessions.opened).not.toHaveBeenCalled();
+    await f.service.close();
+  });
+
+  it("records no page the agent, a subagent, a routine, a saved flow or a terminal grant opened in the thread's context", async () => {
+    // None of these arrives through the person's open route, so none says the
+    // person opened it; the default is that the agent did.
+    const cases: ReadonlyArray<
+      readonly [string, Partial<Parameters<BrowserAutomationService["create"]>[0]>]
+    > = [
+      ["an agent open", {}],
+      ["a subagent's open", {}],
+      ["a saved flow's open", {}],
+      ["a terminal grant's open", { profileCaller: "terminal-grant" }],
+    ];
+    for (const [, extra] of cases) {
+      const pageSessions = recorder();
+      const f = harness({ pageSessions });
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy,
+        ...extra,
+      });
+      expect(pageSessions.opened).not.toHaveBeenCalled();
+      await f.service.close();
+    }
+    // A routine's page is the host acting, even when its route says person.
+    const routineSessions = recorder();
+    const routine = harness({ unattended: true, pageSessions: routineSessions });
+    await open(routine);
+    expect(routineSessions.opened).not.toHaveBeenCalled();
+    await routine.service.close();
+  });
+
+  it("records the account's stored profile id and never a site account or address", async () => {
+    const accountId = "a0000000-0000-4000-8000-0000000000c1";
+    const account = { kind: "account" as const, profileId: accountId as never };
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    Object.defineProperty(f.runtime, "profiles", {
+      value: {
+        list: async () => [{ profile: account, label: "me@example.com", sizeBytes: 0 }],
+        clear: async () => undefined,
+        syncExtensions: async () => undefined,
+      },
+      configurable: true,
+    });
+    await open(f, { policy: { ...policy, profile: account } });
+    const call = pageSessions.opened.mock.calls[0]?.[0];
+    expect(call).toMatchObject({ profileKind: "account", accountId });
+    // The profile's label is a site account; the record keeps only its id.
+    expect(JSON.stringify(call)).not.toMatch(/https?:|@|example/);
+    await f.service.close();
+  });
+
+  it("records no page for a routine, a dedicated Open, or a terminal grant", async () => {
+    const unattended = recorder();
+    const routine = harness({ unattended: true, pageSessions: unattended });
+    await open(routine);
+    const dedicatedSessions = recorder();
+    const dedicated = harness({ pageSessions: dedicatedSessions });
+    await open(dedicated, { dedicated: true });
+    const grantSessions = recorder();
+    const grant = harness({ pageSessions: grantSessions });
+    await open(grant, { profileCaller: "terminal-grant" });
+    for (const sessions of [unattended, dedicatedSessions, grantSessions]) {
+      expect(sessions.opened).not.toHaveBeenCalled();
+    }
+    await Promise.all([routine.service.close(), dedicated.service.close(), grant.service.close()]);
+  });
+
+  it("writes the end for the person closing, the agent closing, and a cleared profile", async () => {
+    const byPerson = recorder();
+    const person = harness({ pageSessions: byPerson });
+    await open(person);
+    const deviceActor = {
+      kind: "remote-device" as const,
+      actorId: "c0000000-0000-4000-8000-0000000000d1",
+      deviceId: "c0000000-0000-4000-8000-0000000000d1",
+    } as never;
+    await person.service.stop(windowId, threadOne, contextOne, "person", deviceActor);
+    // The end carries the request's actor.
+    expect(byPerson.ended).toHaveBeenCalledWith(
+      contextOne,
+      threadOne,
+      "closed-by-person",
+      deviceActor,
+    );
+
+    const byAgent = recorder();
+    const agent = harness({ pageSessions: byAgent });
+    await open(agent);
+    await agent.service.releaseThread(windowId, threadOne);
+    expect(byAgent.ended).toHaveBeenCalledWith(contextOne, threadOne, "closed-by-agent");
+
+    const cleared = recorder();
+    const profile = harness({ pageSessions: cleared });
+    await open(profile, { policy: { ...policy, profile: { kind: "personal" } } });
+    await profile.service.closeProfile({ kind: "personal" });
+    expect(cleared.ended).toHaveBeenCalledWith(contextOne, threadOne, "profile-removed");
+    await Promise.all([person.service.close(), agent.service.close(), profile.service.close()]);
+  });
+
+  it("writes the end when the thread's authority ends, the page expires, or the runtime is lost", async () => {
+    const revoked = recorder();
+    const authority = harness({ pageSessions: revoked });
+    await open(authority);
+    authority.revoke(threadOne);
+    authority.service.inspect(windowId, threadOne, contextOne);
+    expect(revoked.ended).toHaveBeenCalledWith(contextOne, threadOne, "authority-ended");
+
+    const expiredSessions = recorder();
+    const expired = harness({ pageSessions: expiredSessions });
+    await open(expired);
+    expired.advance(policy.sessionTimeoutMs);
+    expired.expire();
+    await vi.waitFor(() =>
+      expect(expiredSessions.ended).toHaveBeenCalledWith(contextOne, threadOne, "expired"),
+    );
+
+    const lostSessions = recorder();
+    const lost = harness({ pageSessions: lostSessions });
+    await open(lost);
+    lost.processExit();
+    expect(lostSessions.ended).toHaveBeenCalledWith(contextOne, threadOne, "runtime-lost");
+    await Promise.all([authority.service.close(), expired.service.close(), lost.service.close()]);
+  });
+
+  it("writes the end when the person closes a window or a device's session ends, and keeps it for a Quit or the host's shutdown", async () => {
+    const closedWindow = recorder();
+    const plain = harness({ pageSessions: closedWindow });
+    await open(plain);
+    await plain.service.revokeWindow(windowId);
+    expect(closedWindow.ended).toHaveBeenCalledWith(contextOne, threadOne, "authority-ended");
+
+    // The desktop says on the revoke request itself that its app is quitting.
+    const quitSessions = recorder();
+    const quit = harness({ pageSessions: quitSessions });
+    await open(quit);
+    await quit.service.revokeWindow(windowId, { appQuitting: true, actor: personActor });
+    expect(quitSessions.ended).not.toHaveBeenCalled();
+    expect(quitSessions.hold).toHaveBeenCalledWith(contextOne);
+
+    // A window closed afterwards on a running host is an ordinary close: the
+    // statement belongs to its own request and is never remembered.
+    const later = harness({ pageSessions: quitSessions });
+    await open(later);
+    await later.service.revokeWindow(windowId, { appQuitting: false, actor: personActor });
+    expect(quitSessions.ended).toHaveBeenCalledWith(
+      contextOne,
+      threadOne,
+      "authority-ended",
+      personActor,
+    );
+
+    const hostSessions = recorder();
+    const host = harness({ pageSessions: hostSessions });
+    await open(host);
+    await host.service.close();
+    expect(hostSessions.ended).not.toHaveBeenCalled();
+  });
+
+  it("writes one end for a page however many ways it ends", async () => {
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    await open(f);
+    await Promise.all([
+      f.service.revokeWindow(windowId),
+      f.service.releaseThread(windowId, threadOne, "person"),
+      f.service.stop(windowId, threadOne, contextOne),
+    ]);
+    expect(pageSessions.ended).toHaveBeenCalledTimes(1);
+  });
+
+  it("never reads a profile list that failed or is unavailable as a removed profile", async () => {
+    const account = {
+      kind: "account" as const,
+      profileId: "40000000-0000-4000-8000-000000000002" as never,
+    };
+    const f = harness({ pageSessions: recorder() });
+    expect(await f.service.profileState(account)).toBe("unknown");
+    Object.defineProperty(f.runtime, "profiles", {
+      value: {
+        list: async () => {
+          throw new Error("unavailable");
+        },
+        clear: async () => undefined,
+        syncExtensions: async () => undefined,
+      },
+      configurable: true,
+    });
+    expect(await f.service.profileState(account)).toBe("unknown");
+    Object.defineProperty(f.runtime, "profiles", {
+      value: {
+        list: async () => [],
+        clear: async () => undefined,
+        syncExtensions: async () => undefined,
+      },
+      configurable: true,
+    });
+    expect(await f.service.profileState(account)).toBe("gone");
+    expect(await f.service.profileState({ kind: "personal" })).toBe("exists");
+    await f.service.close();
+  });
+
+  it("reports whether the thread has a page open, in any window", async () => {
+    const f = harness({ pageSessions: recorder() });
+    expect(f.service.hasOpenPage(threadOne)).toBe(false);
+    await open(f);
+    expect(f.service.hasOpenPage(threadOne)).toBe(true);
+    await f.service.stop(windowId, threadOne, contextOne);
+    expect(f.service.hasOpenPage(threadOne)).toBe(false);
+    await f.service.close();
+  });
 });

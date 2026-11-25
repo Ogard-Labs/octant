@@ -1,6 +1,8 @@
 import type { FirstRunOnboardingStatus } from "@octant/contracts/shell";
 import { X } from "../ui/icons";
 import {
+  lazy,
+  Suspense,
   useEffect,
   useId,
   useLayoutEffect,
@@ -12,7 +14,6 @@ import {
 import { SIDEBAR_ACCOUNT_TRIGGER_SELECTOR } from "../shell/SidebarProfile";
 import { IconButton } from "../shell/IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
-import { GuidedTourPicture } from "./GuidedTourPicture";
 import {
   closeGuidedTour,
   isGuidedTourOpen,
@@ -30,6 +31,11 @@ import {
   type TourPlacementRect,
 } from "./guidedTourSteps";
 import "./guided-tour.css";
+
+// Decoration seen once per install, so it stays out of the first bundle.
+const GuidedTourPicture = lazy(() =>
+  import("./GuidedTourPicture").then((module) => ({ default: module.GuidedTourPicture })),
+);
 
 export interface GuidedTourProps {
   /** Host state. `undefined` until it arrives, which keeps the tour away. */
@@ -320,7 +326,9 @@ function GuidedTourSurface() {
         }
       >
         <div className="guided-tour__picture" key={step.id}>
-          <GuidedTourPicture id={step.id} />
+          <Suspense fallback={<svg className="guided-tour__picture-art" viewBox="0 0 300 112" />}>
+            <GuidedTourPicture id={step.id} />
+          </Suspense>
         </div>
         <IconButton
           className="guided-tour__close"

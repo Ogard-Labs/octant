@@ -334,6 +334,7 @@ export interface CodeRouteService {
   readonly read: (
     authenticatedWindowId: WindowId,
     threadId: CodeThreadId,
+    reads?: Readonly<{ worktreeCleanup?: boolean }>,
   ) => Promise<CodeThreadView> | CodeThreadView;
   readonly execute: (
     authenticatedWindowId: WindowId,
@@ -901,10 +902,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         case "thread": {
-          requireMethodAndEmptyQuery(request, url, "GET");
+          // A client built before the thread view named a cleaned-up worktree
+          // refuses a view with a key it does not know, so the field is sent
+          // only to one that says it reads it. A query, not a header: a paired
+          // device's forwarding refuses a header it does not list.
+          const readsCleanup = url.search === "?reads=worktree-cleanup";
+          if (!readsCleanup) requireMethodAndEmptyQuery(request, url, "GET");
+          else if (request.method !== "GET") {
+            throw new CodeRouteRejected("Code request is invalid.", 400);
+          }
           const threadId = decodePathThreadId(route.threadId);
           return jsonResponse(
-            await dependencies.service.read(authenticatedWindowId, threadId),
+            await dependencies.service.read(authenticatedWindowId, threadId, {
+              worktreeCleanup: readsCleanup,
+            }),
             200,
             origin,
           );
@@ -1022,6 +1033,40 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               {
                 category: "unauthorized",
                 message: "Continue after restart is set at a window on this computer.",
+              },
+              403,
+              origin,
+            );
+          }
+          // How new worktrees are named is the person's choice, at a window on
+          // this computer or on a device they paired; no agent-gated or
+          // hub-introduced caller may set it.
+          if (
+            command?.kind === "update-code-settings" &&
+            command.worktrees !== undefined &&
+            (callerAuthority !== "local-window" || agentGrantSession)
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message:
+                  "Only you, from a window or a device you paired, can change worktree naming and cleanup.",
+              },
+              403,
+              origin,
+            );
+          }
+          // A branch-name suggestion is a request to a model on the person's
+          // own account, made by the person asking for one.
+          if (
+            command?.kind === "suggest-code-worktree-branch" &&
+            (callerAuthority !== "local-window" || agentGrantSession)
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message:
+                  "Only you, from a window or a device you paired, can ask for a branch name.",
               },
               403,
               origin,

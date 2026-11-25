@@ -187,6 +187,46 @@ describe("project binding routes", () => {
     expect(oversized?.status).toBe(413);
   });
 
+  it("passes the desktop's statement that its app is quitting to a window's revocation, per request", async () => {
+    const revocations: Array<unknown> = [];
+    const store = new WindowAuthorityStore((_window, revocation) => revocations.push(revocation));
+    const handle = createProjectBindingRouteHandler({
+      ...routeDependencies(secret),
+      windowAuthorityStore: store,
+    });
+    const revoke = async (body: unknown, providedSecret = secret) =>
+      handle(
+        new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+          method: "DELETE",
+          headers: { "x-octant-desktop-secret": providedSecret },
+          body: JSON.stringify(body),
+        }),
+      );
+    const register = () =>
+      handle(desktopRequest("/api/desktop/window-authorities", { windowId, capability }));
+
+    await register();
+    expect((await revoke({ windowId, desktopQuitAccepted: true }))?.status).toBe(204);
+    await register();
+    expect((await revoke({ windowId }))?.status).toBe(204);
+    await register();
+    expect((await revoke({ windowId, desktopQuitAccepted: false }))?.status).toBe(204);
+    expect(revocations).toEqual([
+      { requestedBy: "desktop", appQuitting: true },
+      { requestedBy: "desktop", appQuitting: false },
+      { requestedBy: "desktop", appQuitting: false },
+    ]);
+
+    // Without the desktop's secret the statement reaches nothing, and the
+    // window keeps its authority.
+    await register();
+    expect((await revoke({ windowId, desktopQuitAccepted: true }, "wrong"))?.status).toBe(401);
+    expect((await revoke({ windowId, desktopQuitAccepted: "yes" }))?.status).toBe(400);
+    expect((await revoke({ windowId, extra: true }))?.status).toBe(400);
+    expect(revocations).toHaveLength(3);
+    expect(store.authenticate(capability, 1_001)).toBe(windowId);
+  });
+
   it("returns retryable unavailable when host-time recovery blocks window registration", async () => {
     const unavailableStore = new WindowAuthorityStore(undefined, {
       clockPosture: () => "recovery-required",

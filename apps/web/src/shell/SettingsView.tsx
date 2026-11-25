@@ -142,6 +142,7 @@ import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
 import { BlockedToolsSettings } from "../settings/BlockedToolsSettings";
 import { ProviderCredentialPassThroughSettings } from "../settings/ProviderCredentialPassThroughSettings";
 import { ArchivedWorktreesSettings } from "../settings/ArchivedWorktreesSettings";
+import { CleanedUpWorktreesSettings } from "../settings/CleanedUpWorktreesSettings";
 import { HostWorktreesSettings } from "../settings/HostWorktreesSettings";
 import { XcodeBuildDataSettings } from "../settings/XcodeBuildDataSettings";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
@@ -492,6 +493,8 @@ export function SettingsView(props: SettingsViewProps) {
   const capabilities: SettingsNativeCapabilities = {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
     sidebarVibrancySupported: props.sidebarVibrancySupported,
+    worktreeListsAvailable: props.archivedWorktreesClient !== undefined,
+    diskCleanupAvailable: props.diskCleanupClient !== undefined,
   };
   const hostEffectivePlugins = useFirstPartyPluginsEffective();
   const effectivePlugins = props.effectivePlugins ?? hostEffectivePlugins;
@@ -1145,6 +1148,11 @@ function ActiveSectionContent({
             />
           )}
           <ArchivedWorktreesSettings
+            client={props.archivedWorktreesClient}
+            focusedSetting={focusedSetting}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+          />
+          <CleanedUpWorktreesSettings
             client={props.archivedWorktreesClient}
             focusedSetting={focusedSetting}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}

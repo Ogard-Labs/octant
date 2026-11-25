@@ -2,7 +2,12 @@ import { createDefaultDeviceKeyStore, createRemoteSessionBridge } from "@octant/
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { describe, expect, it, vi } from "vitest";
 import { ORIGIN, readyPairedBridge } from "../host/pairedComputerTestBridge.test-support";
-import { canvasClientFor, createRemoteProductClients } from "./remoteProductClients";
+import { createArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
+import {
+  canvasClientFor,
+  createRemoteProductClients,
+  remoteProductPort,
+} from "./remoteProductClients";
 
 describe("remote product clients", () => {
   it("lets a paired browser read a person's saved decision answers and never write them", () => {
@@ -32,6 +37,18 @@ describe("remote product clients", () => {
     expect(read?.searchParams.get("wait")).toBe("0");
     expect(read?.searchParams.get("afterSequence")).toBe("4");
     expect(clients.code.threadEvents).toBe("poll");
+  });
+
+  it("builds the restore client from the session's port, and not with the shell's clients", async () => {
+    const sent: URL[] = [];
+    const bridge = await readyPairedBridge(sent);
+    const thread = decodeCodeThreadId("a1b2c3d4-0000-4000-8000-000000000001");
+    expect(createRemoteProductClients(bridge)).not.toHaveProperty("worktrees");
+    await createArchivedWorktreesClient(remoteProductPort(bridge))
+      .restore(thread)
+      .catch(() => undefined);
+    const restore = sent.find((url) => url.pathname === "/api/code/cleaned-up-worktrees/restore");
+    expect(restore?.origin).toBe(ORIGIN);
   });
 
   it("offers a paired browser a server Project's preview but no port forward onto the host's loopback", () => {

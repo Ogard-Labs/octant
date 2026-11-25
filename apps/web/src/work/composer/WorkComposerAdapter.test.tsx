@@ -420,6 +420,8 @@ describe("WorkComposerAdapter interactions", () => {
         <NewTaskDraftScopeContext.Provider value="work:pane">
           <WorkComposerAdapter
             {...baseProps}
+            serverUrl="http://127.0.0.1:9"
+            windowCapability="cap"
             projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
             onCreateThread={onCreateThread}
           />
@@ -427,13 +429,13 @@ describe("WorkComposerAdapter interactions", () => {
       </NewTaskDraftsContext.Provider>
     );
     const rendered = render(view);
-    expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Prior task");
+    expect(await screen.findByRole("button", { name: /^Thread: Prior task/ })).toBeVisible();
     expect(screen.getByLabelText("Selected extensions")).toHaveTextContent("Review");
 
     rendered.unmount();
     render(view);
 
-    expect(await screen.findByLabelText("Mentioned threads")).toHaveTextContent("Prior task");
+    expect(await screen.findByRole("button", { name: /^Thread: Prior task/ })).toBeVisible();
     expect(screen.getByLabelText("Selected extensions")).toHaveTextContent("Review");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     await waitFor(() => expect(onCreateThread).toHaveBeenCalled());

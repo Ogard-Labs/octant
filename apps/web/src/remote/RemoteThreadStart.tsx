@@ -1,3 +1,4 @@
+import { takenBranchNames } from "@octant/client-runtime/taken-branch-names";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
@@ -9,7 +10,7 @@ import type { ProjectSummary } from "@octant/contracts/projects";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import { decodeWorkThreadId, type WorkThread } from "@octant/contracts/work-threads";
 import {
-  defaultDeliveryBranchIntent,
+  deriveDeliveryBranch,
   defaultPermissionModeFor,
   resolveDraftProviderSelection,
   selectWorktreeRemote,
@@ -377,6 +378,15 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
       prepared.checkout.head.kind === "branch"
         ? String(prepared.checkout.head.name)
         : PLAIN_FOLDER_BASE_BRANCH;
+    const branchPrefix = currentSettings.worktrees?.branchPrefix;
+    // A worktree needs a repository, so a plain folder is worked in place.
+    const workspace = plainFolder
+      ? "current-checkout"
+      : (currentProject.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE);
+    const existingBranches =
+      workspace === "managed-worktree"
+        ? await takenBranchNames(controller.execute, currentProject.id, branchPrefix)
+        : [];
     // The same planner a local start screen uses, so a Project whose default is
     // a dedicated worktree gets one here too instead of the current checkout.
     const plan = planCodeThreadCreate({
@@ -385,16 +395,18 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
         executionPolicy: access.executionPolicy,
         permissionPersistence: currentSettings.defaultPermissionPersistence,
         ...(access.autoApprove ? { autoApprove: true } : {}),
-        // A worktree needs a repository, so a plain folder is worked in place.
-        workspace: plainFolder
-          ? "current-checkout"
-          : (currentProject.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE),
+        workspace,
         worktreeSource: {
           startFromOrigin: remote.status === "selected",
           remoteName: remote.status === "selected" ? remote.remoteName : "",
         },
         deliveryTarget: {
-          branchIntent: defaultDeliveryBranchIntent(baseBranch, threadId.slice(0, 8)),
+          branchIntent: deriveDeliveryBranch({
+            baseBranch,
+            shortId: threadId.slice(0, 8),
+            prefix: branchPrefix,
+            existingBranches,
+          }),
           // A repository with no remote still needs a name here; Git's own
           // default is the one the host's own thread starts use, and a draft
           // diff falls back to the local base branch when no such remote exists.

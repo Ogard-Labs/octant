@@ -1,5 +1,6 @@
 import { createCredentialTool } from "../credentials/credentialTool";
 import { workThreadSecrets, type ThreadSecretTurnFacts } from "./threadSecrets";
+import { cleanedUpWorktreeOf } from "../code/cleanedUpWorktrees";
 import type { HubActScopeSlot } from "../hub/hubActScope";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -811,8 +812,8 @@ export function wireWork(deps: WorkDependencies) {
                 create: (command) => browserAutomationService.create(command),
                 act: (command) => browserAutomationService.act(command),
                 saveDownload: (command) => browserAutomationService.saveDownload(command),
-                releaseThread: (ownerWindowId, threadId) =>
-                  browserAutomationService.releaseThread(ownerWindowId, threadId),
+                releaseThread: (ownerWindowId, threadId, endedBy, actor) =>
+                  browserAutomationService.releaseThread(ownerWindowId, threadId, endedBy, actor),
                 holdForPerson: (ownerWindowId, threadId) =>
                   browserAutomationService.holdForPerson(ownerWindowId, threadId),
                 holdForAsk: (ownerWindowId, threadId) =>
@@ -1990,6 +1991,7 @@ export function wireWork(deps: WorkDependencies) {
     });
     const threadMessageQueuePort = createThreadMessageQueuePort({
       persistence,
+      cleanedUpWorktree: cleanedUpWorktreeOf((id) => managedWorktreeReceipts.load(id)),
       journal: persistence.journal,
       chat: chatService,
       work: {

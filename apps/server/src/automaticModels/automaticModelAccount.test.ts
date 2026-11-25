@@ -72,6 +72,41 @@ describe("the account chosen for an automatic call", () => {
     expect(check({ limits: snapshot("exhausted", "2026-11-01T09:00:00.000Z") })).toBeUndefined();
   });
 
+  it("may still be asked when the included window is spent and extra usage is on", () => {
+    expect(
+      check({
+        limits: withLimits({
+          quota: "available",
+          rateLimitWindows: [
+            {
+              window: "monthly",
+              status: "exhausted",
+              utilization: 1,
+              resetsAt: "2026-12-01T00:00:00.000Z",
+              overage: { status: "allowed", disabledReason: "Pay as you go on" },
+            },
+          ],
+        }),
+      }),
+    ).toBeUndefined();
+    expect(
+      check({
+        limits: withLimits({
+          quota: "exhausted",
+          rateLimitWindows: [
+            {
+              window: "monthly",
+              status: "exhausted",
+              utilization: 1,
+              resetsAt: "2026-12-01T00:00:00.000Z",
+              overage: { status: "allowed", disabledReason: "Pay as you go off" },
+            },
+          ],
+        }),
+      }),
+    ).toBe("Work Claude is at its usage limit.");
+  });
+
   it("is not held by an aggregate exhausted flag once the window behind it has reset", () => {
     expect(
       check({

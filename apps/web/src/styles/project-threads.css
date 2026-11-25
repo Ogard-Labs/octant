@@ -65,9 +65,18 @@
 /* Project surfaces. */
 
 .project-nav {
+  display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   min-height: 0;
   margin: var(--oct-space-2) 0 0;
+}
+
+/* The list scrolls on its own above the foot, so no row passes under the foot
+   and it needs no ground to hide one. */
+.project-nav__list {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
 }
@@ -105,14 +114,6 @@
   cursor: default;
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-
-.project-nav__activity-toggle {
-  color: var(--octant-text-muted);
-}
-
-.project-nav__activity-toggle[aria-pressed="true"] {
-  color: var(--octant-text-primary);
 }
 
 .project-dialog .code-project-views__choice {
@@ -580,17 +581,26 @@
 
 /* Working and Settled stay at the foot of Status and the Activity feed while
    the list above scrolls. The cap keeps a long Working list from taking the
-   sidebar; past it the foot scrolls inside itself. */
-/* The nav lays its children out as a column while the foot shows, so with a
-   short list the foot still sits at the sidebar's bottom edge. */
+   sidebar; past it the foot scrolls inside itself. It paints no ground: an
+   opaque one drew a slab on the translucent sidebar. */
 .sidebar-live-dock {
-  margin-top: auto;
-  position: sticky;
-  bottom: 0;
+  flex: none;
   max-height: 40%;
+  margin-top: var(--oct-space-1);
+  padding-top: var(--oct-space-1);
   overflow-y: auto;
   border-top: 1px solid var(--oct-hairline);
-  background: var(--octant-sidebar-opaque);
+}
+
+/* Working and Settled are two headings of one foot, so Settled takes the group
+   heading's gaps and weight rather than a shelf's. */
+.sidebar-live-dock > .project-shelf {
+  margin-top: var(--oct-space-1);
+}
+
+.sidebar-live-dock > .project-shelf > summary {
+  gap: var(--oct-space-1);
+  font-weight: var(--oct-weight-regular);
 }
 
 .project-row--archived {
@@ -1542,10 +1552,6 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 @media (max-width: 680px) {
-  .project-nav {
-    max-height: 28vh;
-  }
-
   .project-dialog {
     max-width: calc(100vw - 32px);
   }

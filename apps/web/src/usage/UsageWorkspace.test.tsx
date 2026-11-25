@@ -396,6 +396,26 @@ describe("UsageWorkspace", () => {
     expect(onOpenSubject).toHaveBeenCalledWith("chat-thread", "thread-1");
   });
 
+  it("names the Project of spend no thread made, without a button that opens nothing", async () => {
+    const response = dashboard();
+    const { client } = clientReturning({
+      ...response,
+      detail: response.detail.map((row) => ({
+        ...row,
+        subjectType: "code-project",
+        subjectId: "project-1",
+      })),
+    });
+    render(
+      <UsageNamesProvider names={new Map([["project/project-1", "Octant app"]])}>
+        <UsageWorkspace client={client} onOpenSubject={vi.fn()} />
+      </UsageNamesProvider>,
+    );
+    const detail = await screen.findByRole("table", { name: "Usage request detail" });
+    expect(within(detail).getByText("Octant app")).toBeVisible();
+    expect(within(detail).queryByRole("button", { name: "Octant app" })).toBeNull();
+  });
+
   it("lists contributing and stale hosts and says other hosts are excluded", async () => {
     const { client } = clientReturning(dashboard());
     render(<UsageWorkspace client={client} />);

@@ -4,6 +4,8 @@ import {
   decodeHostAnswer,
   decodeCodeOperationId,
   decodeProjectWorkingFolderId,
+  decodeProviderInstanceId,
+  decodeProviderModelId,
 } from "@octant/contracts";
 import type { CodeTranscriptSearchRows } from "../persistence/codeTranscriptSearchProjection";
 import {
@@ -63,6 +65,8 @@ import {
   resolveConfinedDesktopFilePath,
 } from "../codeExternalEditorRoutes";
 import { withCodeBoard, withCodeOperationRuntime } from "../wiring/codeRuntime";
+import { createCodeRouteHandler } from "../codeRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { pathIsProjectConfined } from "../wiring/providers";
 import { CodeFileListingService } from "./codeFileListingService";
 import { withProjectExtraFolders } from "./codeProjectFolderRoot";
@@ -78,6 +82,8 @@ import {
   codeNavigationCheckoutChip,
   type CodeServiceOptions,
   type CodePersistencePort,
+  type CodeWorktreeBranchNamesPort,
+  type CodeWorktreeBranchSuggestionPort,
   type CodeWorktreeRefsPort,
   type CodeWorktreeSourcePreviewPort,
   type ManagedCodeThreadCreationPort,
@@ -273,6 +279,8 @@ describe("CodeService reads", () => {
         defaultPermissionPersistence: "current-session",
         requireGitRepository: true,
         defaultDiffLayout: "unified",
+        // Always answered, so a window can tell this host from one that predates it.
+        worktrees: { cleanup: {} },
         version: 0,
         updatedAt: now,
       },
@@ -961,6 +969,54 @@ describe("CodeService reads", () => {
     expect(result.checkouts).toContainEqual(managedCheckout);
   });
 
+  it("names a cleaned-up worktree in the thread view, and says nothing when the folder is in use", async () => {
+    const cleaned = serviceFixture({ worktreeCleanup: async () => "cleaned-up" });
+    await expect(
+      cleaned.service.read(ids.window, ids.thread, { worktreeCleanup: true }),
+    ).resolves.toMatchObject({ worktreeCleanup: "cleaned-up" });
+    // A client built before the field refuses a view with a key it does not know.
+    expect(await cleaned.service.read(ids.window, ids.thread)).not.toHaveProperty(
+      "worktreeCleanup",
+    );
+    const unreadable = serviceFixture({
+      worktreeCleanup: async () => {
+        throw new Error("receipt unreadable");
+      },
+    });
+    const view = await unreadable.service.read(ids.window, ids.thread, { worktreeCleanup: true });
+    expect(view).not.toHaveProperty("worktreeCleanup");
+    const plain = await serviceFixture().service.read(ids.window, ids.thread);
+    expect(plain).not.toHaveProperty("worktreeCleanup");
+  });
+
+  it("names a cleaned-up worktree in the thread view through the composed production route", async () => {
+    const cleaned = serviceFixture({ worktreeCleanup: async () => "cleaned-up" });
+    // The adapters the production Code route is built from.
+    const composed = withCodeBoard(
+      withCodeOperationRuntime(cleaned.service, {} as never),
+      vi.fn() as never,
+    );
+    const store = new WindowAuthorityStore();
+    const capability = "A".repeat(43);
+    store.register({ windowId: ids.window, capability, now: 0 });
+    const route = createCodeRouteHandler({
+      service: composed,
+      windowAuthorityStore: store,
+      now: () => 1,
+    });
+    const read = async (query: string) => {
+      const response = await route(
+        new Request(`http://127.0.0.1/api/code/threads/${ids.thread}${query}`, {
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+      expect(response?.status).toBe(200);
+      return (await response?.json()) as Record<string, unknown>;
+    };
+    expect(await read("?reads=worktree-cleanup")).toMatchObject({ worktreeCleanup: "cleaned-up" });
+    expect(await read("")).not.toHaveProperty("worktreeCleanup");
+  });
+
   it("fails closed when a thread is missing or outside the authenticated window", async () => {
     const hidden = thread({ projectId: ids.unauthorizedProject });
     const fixture = serviceFixture({ threads: [hidden] });
@@ -1317,6 +1373,69 @@ describe("CodeService commands", () => {
     });
     if (back.kind !== "settings-updated") throw new Error("settings were not updated");
     expect(back.settings.windowsTerminalShell).toBeUndefined();
+  });
+
+  it("stores worktree naming and cleanup choices, keeps them across later default changes, and stores nothing for the defaults", async () => {
+    const fixture = serviceFixture();
+    const defaults = {
+      kind: "update-code-settings",
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+    } as const;
+    const worktrees = {
+      branchPrefix: "henrik/",
+      branchNaming: "prompt",
+      cleanup: { whenMerged: true, inactivityDays: 30 },
+    } as const;
+    const chosen = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 0,
+      worktrees,
+    });
+    expect(chosen).toMatchObject({ settings: { worktrees } });
+    if (chosen.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: chosen.settings } as never);
+
+    const later = await fixture.service.execute(ids.window, { ...defaults, expectedVersion: 1 });
+    expect(later).toMatchObject({ settings: { worktrees } });
+    if (later.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: later.settings } as never);
+
+    const back = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 2,
+      worktrees: {},
+    });
+    if (back.kind !== "settings-updated") throw new Error("settings were not updated");
+    // The answer carries the empty choice; the journal keeps none.
+    expect(back.settings.worktrees).toEqual({ cleanup: {} });
+    const journaled = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as
+      | {
+          readonly events: ReadonlyArray<{
+            readonly payload: { readonly settings: { readonly worktrees?: unknown } };
+          }>;
+        }
+      | undefined;
+    expect(journaled?.events[0]?.payload.settings.worktrees).toBeUndefined();
+
+    // A naming choice alone still answers with a cleanup object, so it does not
+    // read as a host without cleanup, and stores no empty one.
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: back.settings } as never);
+    const named = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 3,
+      worktrees: { branchPrefix: "team/", cleanup: {} },
+    });
+    if (named.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(named.settings.worktrees).toEqual({ branchPrefix: "team/", cleanup: {} });
+    const stored = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as
+      | {
+          readonly events: ReadonlyArray<{
+            readonly payload: { readonly settings: { readonly worktrees?: unknown } };
+          }>;
+        }
+      | undefined;
+    expect(stored?.events[0]?.payload.settings.worktrees).toEqual({ branchPrefix: "team/" });
   });
 
   it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
@@ -4480,7 +4599,7 @@ describe("CodeService managed thread creation", () => {
       failure: {
         category: "conflict",
         message:
-          "The delivery branch already exists. Choose a different delivery branch and retry.",
+          "That branch name was taken since it was shown: a branch, a remote branch or a tag now uses it, or sits above or below it. The name has been refreshed. Check it and send again.",
       },
     });
     expect(port.commit).not.toHaveBeenCalled();
@@ -4664,6 +4783,142 @@ describe("CodeService managed thread creation", () => {
         projectId: ids.project,
       }),
     ).resolves.toMatchObject({ kind: "worktree-refs-listed", refs: [] });
+  });
+
+  it("asks the model the person selected for branch words only on request, and keeps the local name when it declines or throws", async () => {
+    const request = {
+      kind: "suggest-code-worktree-branch",
+      projectId: ids.project,
+      providerInstanceId: decodeProviderInstanceId(ids.provider),
+      modelId: decodeProviderModelId("model-a"),
+      draft: "Fix the login redirect",
+    } as const;
+    const suggest = vi.fn(async () => ({
+      status: "suggested" as const,
+      words: "fix-login-redirect",
+    }));
+    const fixture = serviceFixture({ threads: [], worktreeBranchSuggestion: { suggest } });
+    await expect(fixture.service.execute(ids.window, request)).resolves.toEqual({
+      kind: "worktree-branch-suggested",
+      projectId: ids.project,
+      words: "fix-login-redirect",
+    });
+    expect(suggest).toHaveBeenCalledWith({
+      projectId: ids.project,
+      providerInstanceId: request.providerInstanceId,
+      modelId: request.modelId,
+      draft: "Fix the login redirect",
+    });
+
+    const refusing = serviceFixture({
+      threads: [],
+      worktreeBranchSuggestion: {
+        suggest: vi.fn(async () => ({
+          status: "refused" as const,
+          reason: "spend-limited" as const,
+        })),
+      },
+    });
+    await expect(refusing.service.execute(ids.window, request)).resolves.toMatchObject({
+      kind: "worktree-branch-suggestion-declined",
+      reason: "spend-limited",
+    });
+    const throwing = serviceFixture({
+      threads: [],
+      worktreeBranchSuggestion: {
+        suggest: vi.fn(async () => {
+          throw new Error("provider down");
+        }),
+      },
+    });
+    await expect(throwing.service.execute(ids.window, request)).resolves.toMatchObject({
+      kind: "worktree-branch-suggestion-declined",
+      reason: "failed",
+    });
+    const absent = serviceFixture({ threads: [] });
+    await expect(absent.service.execute(ids.window, request)).resolves.toMatchObject({
+      reason: "provider-unavailable",
+    });
+  });
+
+  it("lets a window have one branch suggestion in flight, and hands the caller's stop signal on", async () => {
+    let release: (value: { status: "suggested"; words: string }) => void = () => undefined;
+    const suggest = vi.fn(
+      () =>
+        new Promise<{ status: "suggested"; words: string }>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const fixture = serviceFixture({ threads: [], worktreeBranchSuggestion: { suggest } });
+    const request = {
+      kind: "suggest-code-worktree-branch",
+      projectId: ids.project,
+      providerInstanceId: decodeProviderInstanceId(ids.provider),
+      modelId: decodeProviderModelId("model-a"),
+      draft: "Fix the login redirect",
+    } as const;
+    const stop = new AbortController();
+    const first = fixture.service.execute(ids.window, request, stop.signal);
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(1));
+    expect(suggest).toHaveBeenCalledWith(expect.objectContaining({ signal: stop.signal }));
+    await expect(fixture.service.execute(ids.window, request)).resolves.toMatchObject({
+      kind: "worktree-branch-suggestion-declined",
+      reason: "busy",
+    });
+    expect(suggest).toHaveBeenCalledTimes(1);
+    release({ status: "suggested", words: "fix-login-redirect" });
+    await expect(first).resolves.toMatchObject({ kind: "worktree-branch-suggested" });
+    // The window is free again once the first ended.
+    const second = fixture.service.execute(ids.window, request);
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
+    release({ status: "suggested", words: "fix-login-redirect" });
+    await second;
+  });
+
+  it("lists the names a new branch must not collide with, and answers that nothing is proven free when it cannot", async () => {
+    const list = vi.fn(async () => ({ names: ["octant/fix-login", "v1"], truncated: false }));
+    const fixture = serviceFixture({ threads: [], worktreeBranchNames: { list } });
+    const request = { kind: "list-code-worktree-branch-names", projectId: ids.project } as const;
+    await expect(fixture.service.execute(ids.window, request)).resolves.toEqual({
+      kind: "worktree-branch-names-listed",
+      projectId: ids.project,
+      names: ["octant/fix-login", "v1"],
+      truncated: false,
+    });
+    const failing = serviceFixture({
+      threads: [],
+      worktreeBranchNames: {
+        list: async () => {
+          throw new Error("git failed");
+        },
+      },
+    });
+    await expect(failing.service.execute(ids.window, request)).resolves.toMatchObject({
+      names: [],
+      truncated: true,
+    });
+    const absent = serviceFixture({ threads: [] });
+    await expect(absent.service.execute(ids.window, request)).resolves.toMatchObject({
+      truncated: true,
+    });
+    await expect(
+      fixture.service.execute(ids.window, { ...request, projectId: ids.unauthorizedProject }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+  });
+
+  it("refuses a branch suggestion for a Project the window may not act on, without calling the model", async () => {
+    const suggest = vi.fn();
+    const fixture = serviceFixture({ threads: [], worktreeBranchSuggestion: { suggest } });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "suggest-code-worktree-branch",
+        projectId: ids.unauthorizedProject,
+        providerInstanceId: decodeProviderInstanceId(ids.provider),
+        modelId: decodeProviderModelId("model-a"),
+        draft: "Fix it",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(suggest).not.toHaveBeenCalled();
   });
 
   it("F3: appends a compensating checkout-removed when thread journal fails after checkout journal succeeds", async () => {
@@ -6617,6 +6872,9 @@ function serviceFixture(
     readonly sessionAuthority?: CodeSessionAuthorityStore;
     readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
     readonly worktreeRefs?: CodeWorktreeRefsPort;
+    readonly worktreeBranchSuggestion?: CodeWorktreeBranchSuggestionPort;
+    readonly worktreeBranchNames?: CodeWorktreeBranchNamesPort;
+    readonly worktreeCleanup?: CodeServiceOptions["worktreeCleanup"];
     readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
     readonly worktreeRemoteFacts?: CodeWorktreeRemoteFacts;
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
@@ -6752,6 +7010,13 @@ function serviceFixture(
       ? {}
       : { worktreeSourcePreview: options.worktreeSourcePreview }),
     ...(options.worktreeRefs === undefined ? {} : { worktreeRefs: options.worktreeRefs }),
+    ...(options.worktreeBranchSuggestion === undefined
+      ? {}
+      : { worktreeBranchSuggestion: options.worktreeBranchSuggestion }),
+    ...(options.worktreeBranchNames === undefined
+      ? {}
+      : { worktreeBranchNames: options.worktreeBranchNames }),
+    ...(options.worktreeCleanup === undefined ? {} : { worktreeCleanup: options.worktreeCleanup }),
     ...(options.managedThreadCreation === undefined
       ? {}
       : { managedThreadCreation: options.managedThreadCreation }),
