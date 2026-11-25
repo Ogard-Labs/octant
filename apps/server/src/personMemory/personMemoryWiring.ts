@@ -14,21 +14,12 @@ import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { completeOnceOutcome } from "../harness/nativeHarnessSingleShot";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { recordOneShotUsage } from "../shield/shieldUsageLedger";
+import { namesProtectedPath } from "./namesProtectedPath";
 import type { PersonMemoryStore } from "./personMemoryStore";
 import { PersonMemorySweep, type PersonMemoryThreadSource } from "./personMemorySweep";
 
 /** The newest person messages a thread is distilled from; older ones are past the input cap anyway. */
 const PERSON_MESSAGE_LIMIT = 60;
-
-/** Path-shaped runs in text: home-relative (`~`, `$HOME`, `${HOME}`) or absolute. */
-const PATH_SHAPED = /(?:~|\$HOME|\$\{HOME\})?\/[^\s"'`<>()]+/g;
-
-/** Whether text names a path the secret guard protects, ignoring punctuation that ends a sentence. */
-function namesProtectedPath(text: string, protectedSecretPath: (path: string) => boolean): boolean {
-  return [...text.matchAll(PATH_SHAPED)].some((match) =>
-    protectedSecretPath(match[0].replace(/[.,;:!?'"]+$/u, "")),
-  );
-}
 
 /**
  * The sweep over Chat, Work, and Code with the host's own reads: each mode's

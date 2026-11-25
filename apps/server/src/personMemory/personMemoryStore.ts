@@ -12,6 +12,7 @@ import {
   DEFAULT_PERSON_MEMORY_SETTINGS,
   PERSON_MEMORY_ENTRY_AGGREGATE_TYPE,
   PERSON_MEMORY_ENTRY_RECORDED,
+  PERSON_MEMORY_ENTRY_SAVED,
   PERSON_MEMORY_SETTINGS_AGGREGATE_TYPE,
   PERSON_MEMORY_SETTINGS_CHANGED,
   PERSON_MEMORY_THREAD_AGGREGATE_TYPE,
@@ -19,6 +20,7 @@ import {
   PERSON_MEMORY_THREAD_UNTRACED,
   PERSON_MEMORY_UNTRACED_AGGREGATE_TYPE,
   PersonMemoryEntryRecorded,
+  PersonMemoryEntrySaved,
   PersonMemorySettingsChanged,
   PersonMemoryThreadRemembered,
   PersonMemoryThreadUntraced,
@@ -61,6 +63,7 @@ const SETTINGS_AGGREGATE_ID = "00000000-0000-4000-8000-0000000000e1";
 
 const decodeSettingsChanged = Schema.decodeUnknownSync(PersonMemorySettingsChanged);
 const decodeEntryRecorded = Schema.decodeUnknownSync(PersonMemoryEntryRecorded);
+const decodeEntrySaved = Schema.decodeUnknownSync(PersonMemoryEntrySaved);
 const decodeThreadRemembered = Schema.decodeUnknownSync(PersonMemoryThreadRemembered);
 const decodeThreadUntraced = Schema.decodeUnknownSync(PersonMemoryThreadUntraced);
 
@@ -68,6 +71,7 @@ export function registerPersonMemoryEvents(registry: EventRegistry): EventRegist
   return registry
     .register(PERSON_MEMORY_SETTINGS_CHANGED, 1, PersonMemorySettingsChanged)
     .register(PERSON_MEMORY_ENTRY_RECORDED, 1, PersonMemoryEntryRecorded)
+    .register(PERSON_MEMORY_ENTRY_SAVED, 1, PersonMemoryEntrySaved)
     .register(PERSON_MEMORY_THREAD_REMEMBERED, 1, PersonMemoryThreadRemembered)
     .register(PERSON_MEMORY_THREAD_UNTRACED, 1, PersonMemoryThreadUntraced);
 }
@@ -93,6 +97,14 @@ export interface PersonMemoryThreadScope {
   readonly projectId?: string | undefined;
   readonly createdAt: string;
 }
+
+/** What saving the person's own words at once did; a refusal says why, for the model to read. */
+export type PersonMemorySaveOutcome =
+  | { readonly status: "saved"; readonly created: boolean }
+  | {
+      readonly status: "refused";
+      readonly reason: "memory-off" | "project-kept-out" | "leaves-no-trace";
+    };
 
 export interface PersonMemoryStoreDependencies {
   readonly connection: SqliteConnection;
@@ -281,6 +293,43 @@ export class PersonMemoryStore {
   }
 
   /**
+   * Keeps one entry the person asked for in their own words, from a thread that
+   * has not ended. Unlike `remember` it writes no digest and does not mark the
+   * thread remembered, so the sweep still learns from the thread when it ends;
+   * an entry learned again from it then only keeps its one source. The caller
+   * has already shown the text is the person's own words.
+   */
+  saveFromOpenThread(input: {
+    /** The open thread; the entry records when the person said it as the source's `endedAt`. */
+    readonly source: Omit<PersonMemorySource, "endedAt">;
+    readonly kind: PersonMemoryKind;
+    readonly content: string;
+  }): PersonMemorySaveOutcome {
+    const thread = { mode: input.source.mode, threadId: input.source.threadId };
+    if (!this.#settings.enabled) return { status: "refused", reason: "memory-off" };
+    if (this.projectExcluded(input.source.projectId)) {
+      return { status: "refused", reason: "project-kept-out" };
+    }
+    if (this.leavesNoTrace(thread) || this.#gone.has(threadKey(thread))) {
+      return { status: "refused", reason: "leaves-no-trace" };
+    }
+    const now = this.#dependencies.clock();
+    const merged = mergePersonMemory({
+      existing: [...this.#entries.values()],
+      distilled: [{ kind: input.kind, content: input.content }],
+      source: { ...input.source, endedAt: now },
+      now,
+      newId: () => this.#dependencies.uuid() as PersonMemoryEntry["id"],
+    });
+    const created = merged.recorded.some((entry) => !this.#entries.has(String(entry.id)));
+    for (const entry of merged.recorded) {
+      this.#writeEntry(entry, undefined, PERSON_MEMORY_ENTRY_SAVED);
+    }
+    for (const entry of merged.evicted) this.#eraseEntry(String(entry.id));
+    return { status: "saved", created };
+  }
+
+  /**
    * `actor` is who asked, as the route resolved it from the authenticated
    * principal: a paired device's change is journaled as that device. Absent
    * means the person at this host.
@@ -455,17 +504,24 @@ export class PersonMemoryStore {
   }
 
   /** Replaces an entry's whole history with one event naming its current state. */
-  #writeEntry(entry: PersonMemoryEntry, actor?: EventActor): void {
+  #writeEntry(
+    entry: PersonMemoryEntry,
+    actor?: EventActor,
+    creation:
+      | typeof PERSON_MEMORY_ENTRY_RECORDED
+      | typeof PERSON_MEMORY_ENTRY_SAVED = PERSON_MEMORY_ENTRY_RECORDED,
+  ): void {
     const aggregate = {
       aggregateType: PERSON_MEMORY_ENTRY_AGGREGATE_TYPE,
       aggregateId: String(entry.id),
     };
-    if (this.#entries.has(String(entry.id))) this.#erase([aggregate]);
+    const known = this.#entries.has(String(entry.id));
+    if (known) this.#erase([aggregate]);
     this.#append(
       aggregate.aggregateType,
       aggregate.aggregateId,
       0,
-      PERSON_MEMORY_ENTRY_RECORDED,
+      known ? PERSON_MEMORY_ENTRY_RECORDED : creation,
       { entry },
       actor,
     );
@@ -576,6 +632,11 @@ export class PersonMemoryStore {
         }
         case PERSON_MEMORY_ENTRY_RECORDED: {
           const { entry } = decodeEntryRecorded(envelope.payload);
+          this.#entries.set(String(entry.id), entry);
+          break;
+        }
+        case PERSON_MEMORY_ENTRY_SAVED: {
+          const { entry } = decodeEntrySaved(envelope.payload);
           this.#entries.set(String(entry.id), entry);
           break;
         }

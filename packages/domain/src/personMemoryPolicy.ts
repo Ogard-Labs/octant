@@ -131,6 +131,41 @@ export function parsePersonMemoryDistillation(reply: string): DistilledThread {
   return { status: "parsed", summary, entries };
 }
 
+/**
+ * The person's own words that `text` quotes, or `undefined` when no message
+ * holds it. Whitespace and letter case do not matter, so a model may rewrap or
+ * recase a quotation, but it may not reword one. The result is the stretch of
+ * the message itself (whitespace collapsed), never the model's copy, so what is
+ * stored is always what the person typed.
+ */
+export function quotedFromPersonMessages(
+  text: string,
+  messages: ReadonlyArray<string>,
+): string | undefined {
+  const wanted = collapseWhitespace(text);
+  if (wanted.length === 0) return undefined;
+  for (const message of messages) {
+    const collapsed = collapseWhitespace(message);
+    const wantedLower = wanted.toLowerCase();
+    const at = collapsed.toLowerCase().indexOf(wantedLower);
+    if (at < 0) continue;
+    // Lowercasing can change a string's length (some letters become two), which
+    // would shift the match; the model's copy then equals the message modulo
+    // case and is the best text left.
+    return collapsed.toLowerCase().length === collapsed.length
+      ? collapsed.slice(at, at + wantedLower.length)
+      : wanted;
+  }
+  return undefined;
+}
+
+function collapseWhitespace(value: string): string {
+  return value
+    .split(/\s+/u)
+    .filter((word) => word.length > 0)
+    .join(" ");
+}
+
 function sameMemory(left: string, right: string): boolean {
   // Words compared without case or closing punctuation, trimmed by hand: a
   // trailing-run pattern backtracks on long runs of spaces or punctuation.

@@ -11,6 +11,7 @@ import {
   PERSON_MEMORY_BLOCK_PREAMBLE,
   personMemoryBlockText,
   personMemoryDistillPrompt,
+  quotedFromPersonMessages,
   searchPastThreads,
 } from "./personMemoryPolicy";
 
@@ -196,5 +197,22 @@ describe("searching past threads", () => {
       exclude: { mode: "chat", threadId: "t1" },
     });
     expect(hits).toEqual([]);
+  });
+});
+
+describe("quoting the person's own words", () => {
+  it("returns the person's own stretch when the text matches without regard to whitespace or case", () => {
+    expect(
+      quotedFromPersonMessages("i prefer\n  SHORT answers", [
+        "Hello. I prefer short   answers, thanks.",
+      ]),
+    ).toBe("I prefer short answers");
+  });
+
+  it("returns nothing for reworded, invented, or empty text", () => {
+    const messages = ["I prefer short answers."];
+    expect(quotedFromPersonMessages("I like short answers", messages)).toBeUndefined();
+    expect(quotedFromPersonMessages("   ", messages)).toBeUndefined();
+    expect(quotedFromPersonMessages("I prefer short answers", [])).toBeUndefined();
   });
 });

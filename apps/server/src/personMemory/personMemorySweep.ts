@@ -266,7 +266,7 @@ export class PersonMemorySweep {
 }
 
 /** The title as memory keeps it: redacted, and not kept at all when it names a protected path. */
-function keptTitle(title: string, namesProtectedPath: (text: string) => boolean): string {
+export function keptTitle(title: string, namesProtectedPath: (text: string) => boolean): string {
   return (
     keepable(title, PERSON_MEMORY_TITLE_MAX_CHARACTERS, namesProtectedPath) || "Untitled thread"
   );
