@@ -172,6 +172,7 @@ export interface CodeProjectPullRequestMergePort {
       readonly method: CodeProjectPullRequestMergeCommand["method"];
       /** The head commit the reviewer approved. */
       readonly headSha: string;
+      readonly expectedBaseBranch?: string;
       readonly expectedPullRequestNodeId?: string;
     },
     signal: AbortSignal,
@@ -895,6 +896,7 @@ export class CodeProjectPullRequestService {
             number: command.number,
             method: command.method,
             headSha: command.headSha,
+            ...(command.baseBranch === undefined ? {} : { expectedBaseBranch: command.baseBranch }),
             ...(link?.pullRequestNodeId === undefined
               ? {}
               : { expectedPullRequestNodeId: link.pullRequestNodeId }),
