@@ -380,3 +380,52 @@ describe("parseKeybindingOverrides", () => {
     expect(parseKeybindingOverrides('{"command-palette":3}')).toMatchObject({ status: "invalid" });
   });
 });
+
+describe("cycling between open terminals", () => {
+  const down = (modifiers: { meta?: boolean; ctrl?: boolean }) =>
+    keyEvent("ArrowDown", { ...modifiers, shift: true });
+  const up = (modifiers: { meta?: boolean; ctrl?: boolean }) =>
+    keyEvent("ArrowUp", { ...modifiers, shift: true });
+
+  it("moves to the next terminal on Mod+Shift+ArrowDown and back on ArrowUp", () => {
+    const bindings = resolveKeybindings();
+    expect(matchTerminalKeybinding(bindings, down({ meta: true }), true)).toBe(
+      "terminal-cycle-next",
+    );
+    expect(matchTerminalKeybinding(bindings, up({ meta: true }), true)).toBe(
+      "terminal-cycle-previous",
+    );
+    expect(matchTerminalKeybinding(bindings, down({ ctrl: true }), false)).toBe(
+      "terminal-cycle-next",
+    );
+    expect(matchKeybinding(bindings, down({ meta: true }), true)).toBeUndefined();
+    expect(shadowedActions(bindings)).toEqual([]);
+  });
+
+  it("leaves the shell its arrow keys, with or without Shift, Alt or Mod alone", () => {
+    const bindings = resolveKeybindings();
+    for (const event of [
+      keyEvent("ArrowDown"),
+      keyEvent("ArrowDown", { shift: true }),
+      keyEvent("ArrowDown", { alt: true }),
+      keyEvent("ArrowDown", { ctrl: true }),
+    ]) {
+      expect(matchTerminalKeybinding(bindings, event, false)).toBeUndefined();
+    }
+  });
+
+  it("shares a default chord with no other action", () => {
+    const chords = OCTANT_KEYBINDING_ACTIONS.map((action) => action.defaultChord);
+    expect(new Set(chords).size).toBe(chords.length);
+  });
+
+  it("writes the arrow keys the way a person reads them, and reads them back", () => {
+    const chord = resolveKeybindings().bindings.get("terminal-cycle-next");
+    if (chord === undefined) throw new Error("expected a default chord");
+    expect(formatChord(chord)).toBe("Mod+Shift+ArrowDown");
+    expect(parseChord("Mod+Shift+ArrowDown", { terminal: true })).toEqual({
+      status: "ok",
+      chord,
+    });
+  });
+});

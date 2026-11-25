@@ -1,4 +1,5 @@
 import { coordinatorWorkersOf } from "../agents/coordinatorWorkers";
+import { BOTTOM_TERMINAL_SLOT, dockTerminalSlot, TerminalSlot } from "../shell/terminalSlot";
 import { confirmFilesClose, filesCloseScope } from "../code/filesCloseGuard";
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
@@ -505,6 +506,9 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
         />
       );
     }
+    if (surface === "terminal") {
+      return <TerminalSlot slot={BOTTOM_TERMINAL_SLOT}>{threadUtility(surface)}</TerminalSlot>;
+    }
     return threadUtility(surface);
   }
 
@@ -917,6 +921,13 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
                 }
                 query={selectedProjectPullRequest}
               />
+            );
+          }
+          if (utilityTab.surface === "terminal") {
+            return (
+              <TerminalSlot slot={dockTerminalSlot(utilityTab.id)}>
+                {threadUtility("terminal", utilityTab)}
+              </TerminalSlot>
             );
           }
           return threadUtility(utilityTab.surface, utilityTab);

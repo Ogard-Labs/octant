@@ -106,6 +106,7 @@ import { DockModuleBoundary } from "./shell/DockModuleBoundary";
 import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { threadRestRowActions } from "./app/threadRestRowActions";
+import { TerminalShellContext, type TerminalShellFacts } from "./shell/terminalSlot";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
 import { PaneDockToolsContext, type PaneDockTools } from "./shell/PaneDockTools";
@@ -4148,6 +4149,9 @@ function LaunchedShell(
     renderedBottomPanelState,
     retainedBottomPanelState,
   } = dockPresentation;
+  // What the terminal cycle chords walk. A terminal reads it when a chord is
+  // pressed, so it holds whatever the newest render saw.
+  const terminalShell = useRef<TerminalShellFacts>(undefined);
   // The pull requests the active Code thread is already about, offered where a
   // reader adds a tab. Read from the same catalogue the Environment panel uses,
   // so the two never disagree.
@@ -8948,6 +8952,24 @@ function LaunchedShell(
               ? navigationModel.markedChatNavigation
               : []
         ).find((row) => row.threadId === replyDetailThread.threadId);
+  terminalShell.current = {
+    layout: controller.presentedLayout,
+    narrow: isNarrow,
+    dock: {
+      threadId: dockThread?.mode === "code" ? dockThread.threadId : undefined,
+      open: dockPresentedOpen,
+      tabs: displayedDockState.tabs,
+      minimised: dockShelfDrawn ? minimisedUtilityTabIds(displayedDockState) : [],
+    },
+    bottom: {
+      open: bottomPanelPresentedOpen,
+      tabs: renderedBottomPanelState.tabs,
+      shown: activeBottomSurface?.id,
+    },
+    activatePane: controller.activatePane,
+    selectDockTab,
+    openBottomTool,
+  };
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -10394,7 +10416,11 @@ function LaunchedShell(
                                                                             projectController.allProjects,
                                                                         }}
                                                                       >
-                                                                        {shell}
+                                                                        <TerminalShellContext.Provider
+                                                                          value={terminalShell}
+                                                                        >
+                                                                          {shell}
+                                                                        </TerminalShellContext.Provider>
                                                                       </BenchmarkAdviceContext.Provider>
                                                                     </PaneDockToolsContext.Provider>
                                                                   </QuestionnaireDraftsProvider>

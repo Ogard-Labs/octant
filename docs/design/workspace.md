@@ -1770,7 +1770,7 @@ the terminal's start in the journal records `program: "provider"`.
 Not built yet: the other ACP agents (offered once a CLI's interactive mode is
 confirmed), an added ACP agent, and the other providers with a command-line
 program.
-A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+E` stays with the page, as the renderer leaves it to a focused text field. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
+A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything (moving between a thread's terminals is a separate pair, under [Cycling between terminals](#cycling-between-terminals)), the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+E` stays with the page, as the renderer leaves it to a focused text field. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
 live cards on a shelf at the foot of the dock, so a page or a shell can be
 watched, and seen to answer, while another tool or only the dock's overview is
 in front. A floating preview of the Browser, drawn over the thread, covered the
@@ -4399,6 +4399,35 @@ output only while it holds the keyboard (the row keeps its height, so
 focusing never moves the output) and always lists it in the terminal's
 accessible description. Tab, Shift+Tab, a bare Escape and function keys still
 reach the shell.
+
+### Cycling between terminals
+
+With several terminals open for one thread, `Mod+Shift+ArrowDown`
+(`terminal-cycle-next`) and `Mod+Shift+ArrowUp` (`terminal-cycle-previous`),
+pressed in a terminal, put the caret in the next or previous one, wrapping at
+the ends. Both are remappable under Settings › Keyboard shortcuts, send nothing
+to the shell, and never move focus out of the terminals; with one terminal they
+do nothing. The order is the panes as laid out, then the bottom panel's
+Terminal, then the dock's Terminal sessions in tab order. Provider program
+terminals take part like shells. Choosing a session behind another brings it to
+the front of its own region and focuses it once it has attached; if the person
+clicks or moves focus elsewhere first, or it has not attached within 15 seconds,
+the caret stays where it is. Left out: other threads' terminals, anything a
+focused pane, narrow window or closed dock or panel hides, a dock Terminal
+minimised to its card, a pane with no running terminal, the card's read-only
+preview, Zen's cards and Project terminals, which belong to no thread view.
+Only Code threads have thread terminals. The commands are keyboard only: the
+command palette lists no terminal focus command.
+
+The defaults were chosen because shells read the arrows alone, with Alt or with
+Control, and bind none with both Mod and Shift, and no browser, desktop menu or
+system chord holds Mod+Shift with Up or Down. Rejected: Mod+Alt with arrows or
+brackets (desktop workspace switching, browser tab switching, AltGr, the focus
+space chords, and Option rewriting the printed key on Apple hardware),
+Mod+Shift with brackets, Page Up or Down (browser tab switching, and keys Apple
+laptops lack), Mod+Shift with Left or Right (word selection in a Windows
+shell), and Mod+Shift with a letter (the control code the shell would read, or a
+browser's own command).
 
 ### Quitting
 

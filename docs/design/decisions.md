@@ -3042,6 +3042,7 @@ Accessibility is a baseline for every changed surface, not a late pass.
 - Text contrast targets 4.5:1 (3:1 for large text and non-text marks). State always uses text, shape or label in addition to colour.
 - Keyboard focus draws one neutral inset edge on `:focus-visible` only. Feature CSS never suppresses, recolours or doubles it.
 - No surface is a keyboard trap. The terminal sends every key to its shell and has a documented chord to move focus out.
+- With several terminals open for a thread, remappable terminal chords (Mod+Shift+ArrowDown and Mod+Shift+ArrowUp by default, chosen clear of shell, browser, desktop and system chords) move the caret to the next or previous one, bringing a session behind a tab forward, and never out of the terminals or into another thread's, a hidden or a closed one (maintainer request, 2026-11-25). See [Workspace: Cycling between terminals](workspace.md#cycling-between-terminals).
 - Settings › Keybindings marks a shortcut as not running only when another action that answers in the same place keeps its chord: two global actions, two commands of one page, two terminal commands, or a terminal command behind a global action listed ahead of it. The action listed first keeps the chord.
 - Theme, typography, density, translucency, contrast and reduced-motion settings persist through the server-authoritative journal; renderer state is presentation only.
 - A refused server command is never a silent no-op, and loading, stale, denied, empty and error states keep stable geometry.
