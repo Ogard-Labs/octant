@@ -42,6 +42,8 @@ export const PERSON_MEMORY_OPEN_THREAD_IDLE_MS = 30 * 60 * 1_000;
 /** A thread still open is learned from at most once in this long. */
 export const PERSON_MEMORY_OPEN_THREAD_INTERVAL_MS = 6 * 60 * 60 * 1_000;
 const DISTILL_TIMEOUT_MS = 60_000;
+/** What a distillation may write back, which bounds its spend with what it sends. */
+const DISTILL_OUTPUT_TOKEN_BOUND = 1_024;
 
 /** One message the person wrote in a thread. */
 export interface PersonMessage {
@@ -111,6 +113,27 @@ export interface PersonMemoryModelPort {
       readonly modelId: ProviderModelId;
     };
   }) => { readonly model: PersonMemoryModelChoice; readonly driverKind: string } | undefined;
+  /**
+   * Whether the thread's Project lets this model see its conversation: the rule
+   * a turn passes before it sends. Absent, every model is allowed.
+   */
+  readonly projectAllows?: (input: {
+    readonly projectId: string | undefined;
+    readonly model: PersonMemoryModelChoice;
+  }) => boolean;
+  /**
+   * Asks the thread's and its Project's spend ceilings for the call before it
+   * is made, as a Shield review does. A refusal makes no call and the thread
+   * waits for a later pass. Absent, no ceiling is asked.
+   */
+  readonly admit?: (input: {
+    readonly mode: OctantMode;
+    readonly threadId: string;
+    readonly projectId: string | undefined;
+    readonly model: PersonMemoryModelChoice;
+    /** The most the call can use, from the size of what it sends. */
+    readonly upperBoundTokens: number;
+  }) => PersonMemorySpend;
   readonly complete: (input: {
     readonly model: PersonMemoryModelChoice;
     readonly instructions: string;
@@ -123,6 +146,10 @@ export interface PersonMemoryModelPort {
     readonly usage?: TurnUsage | undefined;
   }) => void;
 }
+
+export type PersonMemorySpend =
+  | { readonly status: "admitted"; readonly settle: (usage?: TurnUsage) => void }
+  | { readonly status: "refused" };
 
 export interface PersonMemorySweepOptions {
   readonly store: PersonMemoryStore;
@@ -372,19 +399,47 @@ export class PersonMemorySweep {
     });
     if (resolved === undefined) return "unavailable";
     if (!personMemoryDistillationAllowed(resolved.driverKind)) return "not-allowed";
-    this.#calls += 1;
-    const answer = await model.complete({
-      model: resolved.model,
-      instructions: PERSON_MEMORY_DISTILL_INSTRUCTIONS,
-      prompt: personMemoryDistillPrompt({
-        title: memorySource.title,
-        personMessages: messages.map((message) => message.text),
-        knownEntries: store.knownEntries(),
-      }),
-      timeoutMs: DISTILL_TIMEOUT_MS,
+    // The Project's provider rule and the spend ceilings, both settled before
+    // anything is sent, as a turn and a Shield review settle theirs.
+    if (
+      model.projectAllows?.({ projectId: facts.projectId, model: resolved.model }) === false
+    ) {
+      return "not-allowed";
+    }
+    const prompt = personMemoryDistillPrompt({
+      title: memorySource.title,
+      personMessages: messages.map((message) => message.text),
+      knownEntries: store.knownEntries(),
     });
-    if (answer.status !== "unavailable") {
-      model.recordUsage({ threadId, model: resolved.model, usage: answer.usage });
+    const spend = model.admit?.({
+      mode: source.mode,
+      threadId,
+      projectId: facts.projectId,
+      model: resolved.model,
+      upperBoundTokens:
+        Math.ceil((PERSON_MEMORY_DISTILL_INSTRUCTIONS.length + prompt.length) / 3) +
+        DISTILL_OUTPUT_TOKEN_BOUND,
+    }) ?? { status: "admitted" as const, settle: () => undefined };
+    if (spend.status === "refused") return "not-allowed";
+    this.#calls += 1;
+    let answer: PersonMemoryModelAnswer;
+    try {
+      answer = await model.complete({
+        model: resolved.model,
+        instructions: PERSON_MEMORY_DISTILL_INSTRUCTIONS,
+        prompt,
+        timeoutMs: DISTILL_TIMEOUT_MS,
+      });
+    } catch (error) {
+      spend.settle();
+      throw error;
+    }
+    try {
+      if (answer.status !== "unavailable") {
+        model.recordUsage({ threadId, model: resolved.model, usage: answer.usage });
+      }
+    } finally {
+      spend.settle(answer.status === "unavailable" ? undefined : answer.usage);
     }
     if (answer.status !== "answered") return "unavailable";
     const distilled = parsePersonMemoryDistillation(answer.text);

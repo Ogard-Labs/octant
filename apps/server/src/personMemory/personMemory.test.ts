@@ -195,10 +195,7 @@ function harness(threads: FakeThread[]) {
       .join("\n");
   /** A second sweep over the same threads with some of the model port replaced. */
   const sweepWith = (
-    port: Partial<{
-      readonly resolve: PersonMemoryModelPort["resolve"];
-      readonly complete: PersonMemoryModelPort["complete"];
-    }>,
+    port: Partial<PersonMemoryModelPort>,
   ) =>
     new PersonMemorySweep({
       store,
@@ -2124,6 +2121,64 @@ describe("learning from threads still open", () => {
     expect(await h.sweep.pass()).toEqual([
       { mode: "chat", threadId: THREAD_1, outcome: "remembered" },
     ]);
+  });
+
+  it("asks the Project's provider rule and the spend ceilings before the call, for threads open and put away", async () => {
+    const finished: FakeThread = {
+      id: THREAD_2,
+      title: "Done",
+      completedAt: QUIET,
+      projectId: PROJECT_A,
+      personMessages: ["Finished message"],
+    };
+    const opened = open({ projectId: PROJECT_A });
+    const h = begin([finished, opened]);
+    h.advance(QUIET);
+    const asked: Array<{ readonly threadId: string; readonly projectId: string | undefined }> = [];
+    const settled: Array<number | undefined> = [];
+    let rule = false;
+    let ceiling: "refused" | "admitted" = "admitted";
+    const sweep = h.sweepWith({
+      projectAllows: () => rule,
+      admit: ({ threadId, projectId, upperBoundTokens }) => {
+        asked.push({ threadId, projectId });
+        expect(upperBoundTokens).toBeGreaterThan(1_024);
+        return ceiling === "refused"
+          ? { status: "refused" }
+          : {
+              status: "admitted",
+              settle: (usage) => settled.push(usage?.inputTokens),
+            };
+      },
+    });
+
+    // The Project's rule refuses the provider: no call, nothing asked of the ceilings.
+    expect((await sweep.pass()).map((result) => result.outcome)).toEqual([
+      "not-allowed",
+      "not-allowed",
+    ]);
+    expect(h.prompts).toHaveLength(0);
+    expect(asked).toEqual([]);
+
+    // A ceiling at its limit refuses: no call either, and the threads wait.
+    rule = true;
+    ceiling = "refused";
+    h.advance("2026-11-01T12:10:00.000Z");
+    expect((await sweep.pass()).map((result) => result.outcome)).toEqual([
+      "not-allowed",
+      "not-allowed",
+    ]);
+    expect(h.prompts).toHaveLength(0);
+    expect(asked.map((ask) => ask.projectId)).toEqual([PROJECT_A, PROJECT_A]);
+
+    // Both clear: both threads are learned from and each reservation is settled with what was used.
+    ceiling = "admitted";
+    h.advance("2026-11-01T13:10:00.000Z");
+    expect((await sweep.pass()).map((result) => result.outcome)).toEqual([
+      "remembered",
+      "remembered",
+    ]);
+    expect(settled).toEqual([100, 100]);
   });
 
   it("sends a thread put away only what was said after what was learned, and makes no call when nothing is newer", async () => {

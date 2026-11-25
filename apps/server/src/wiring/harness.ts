@@ -1235,6 +1235,7 @@ export function wireHarness(deps: HarnessDependencies) {
     accountUnavailable: automaticModelAccountUnavailable,
     scratchRoot: harnessWorkDirectory,
     protectedSecretPath: (path) => isProtectedSecretPath(path),
+    spendCeiling,
   });
   const decisionReviewModelPort = createDecisionReviewModelPort({
     persistence,

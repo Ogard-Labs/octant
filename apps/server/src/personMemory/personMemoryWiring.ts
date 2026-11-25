@@ -5,18 +5,22 @@ import {
   type ChatTurn,
   decodeChatThreadId,
   decodeCodeThreadId,
+  decodeProjectId,
   decodeProviderSessionId,
+  decodeSpendCeilingReservationId,
   PERSON_MEMORY_REQUEST_SHAPE,
   PERSON_MEMORY_USAGE_AGGREGATE_TYPE,
   type ProviderInstanceId,
   type ProviderModelId,
 } from "@octant/contracts";
 import { activeChatTurns } from "@octant/domain";
+import { isProviderAllowedByProjectPolicy } from "@octant/domain/project-provider-policy";
 import { smallestShieldModel } from "@octant/domain/shield-judge-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { completeOnceOutcome } from "../harness/nativeHarnessSingleShot";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { recordOneShotUsage } from "../shield/shieldUsageLedger";
+import type { SpendCeilingService } from "../spendCeilingService";
 import { namesProtectedPath } from "./namesProtectedPath";
 import type { PersonMemoryStore } from "./personMemoryStore";
 import {
@@ -137,6 +141,7 @@ export function createPersonMemorySweep(input: {
     | "readCodeThreads"
     | "readProviderInstance"
     | "readProviderCatalog"
+    | "readProject"
   >;
   readonly store: PersonMemoryStore;
   readonly workThreads: {
@@ -157,6 +162,8 @@ export function createPersonMemorySweep(input: {
   readonly accountUnavailable: (providerInstanceId: ProviderInstanceId) => string | undefined;
   readonly scratchRoot: string;
   readonly protectedSecretPath: (path: string) => boolean;
+  /** The thread's and its Project's spend ceilings, asked before each call. */
+  readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle">;
 }): PersonMemorySweep {
   const { persistence } = input;
   // Each pass lists a mode's threads once; reading one thread uses that list
@@ -269,6 +276,45 @@ export function createPersonMemorySweep(input: {
     sources: [chat, work, code],
     namesProtectedPath: (text) => namesProtectedPath(text, input.protectedSecretPath),
     model: {
+      projectAllows: ({ projectId, model }) => {
+        if (projectId === undefined) return true;
+        const project = persistence.readProject(decodeProjectId(projectId));
+        // A Chat Project keeps no provider rule; any other Project's rule judges
+        // the provider and model that would read its threads.
+        if (project === undefined || project.type === "chat") return true;
+        const instance = persistence.readProviderInstance(model.providerInstanceId);
+        if (instance === undefined) return false;
+        const facts = persistence
+          .readProviderCatalog?.(model.providerInstanceId)
+          ?.models.find((candidate) => candidate.id === model.modelId);
+        return isProviderAllowedByProjectPolicy(project, instance, facts);
+      },
+      admit: ({ mode, threadId, projectId, upperBoundTokens }) => {
+        if (input.spendCeiling === undefined) {
+          return { status: "admitted", settle: () => undefined };
+        }
+        const reservationId = decodeSpendCeilingReservationId(randomUUID());
+        const admission = input.spendCeiling.admit({
+          reservationId,
+          threadId,
+          threadType: `${mode}-thread`,
+          ...(projectId === undefined ? {} : { projectId }),
+          turnUpperBoundTokens: upperBoundTokens,
+          // Learning is spend, not a turn of the thread's own.
+          countsAsTurn: false,
+        });
+        if (admission.status === "refused") return { status: "refused" };
+        return {
+          status: "admitted",
+          settle: (usage) =>
+            input.spendCeiling?.settle({
+              reservationId,
+              ...(usage === undefined
+                ? {}
+                : { observedTokens: usage.inputTokens + usage.outputTokens }),
+            }),
+        };
+      },
       resolve: ({ chosen, thread }) => {
         const model =
           chosen ??
