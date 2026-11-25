@@ -3,7 +3,11 @@ import {
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   type CodeTranscriptSearch,
   type ThreadFinishedReceipt,
+  type ThreadTouchedIssue,
+  type ThreadTouchedIssues,
+  MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS,
 } from "@octant/contracts";
+import { composeThreadTouchedIssues } from "@octant/domain/thread-board-pull-request-policy";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
@@ -158,6 +162,7 @@ import {
 import { THREAD_MOVE_REFUSALS, decideThreadMove } from "@octant/domain/thread-project-move-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import type { FinishedReportSettleOutcome } from "../finishedReceipts/finishedReportSettle";
 import {
   ConcurrencyConflict,
   JournalWriteFailed,
@@ -897,6 +902,17 @@ export interface CodeServiceOptions {
    * pretending the thread has none.
    */
   readonly pullRequests?: CodeNavigationPullRequestSource;
+  /**
+   * The issues each thread's tool calls wrote to, from its journal, and
+   * whether Linear is connected on this host (read locally, never from
+   * Linear). Absent, no row carries touched issues.
+   */
+  readonly touchedIssues?: CodeNavigationTouchedIssueSource;
+}
+
+export interface CodeNavigationTouchedIssueSource {
+  issuesFor(threadId: CodeThreadId): ReadonlyArray<ThreadTouchedIssue>;
+  linearConnected(): boolean;
 }
 
 export interface CodeNavigationPullRequestSource {
@@ -993,6 +1009,30 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
 }
 
 /** The thread without a person's Done mark, as if it had never been marked. */
+/**
+ * The thread's unlinked pull requests with this one added, or its time
+ * renewed: one entry per pull request, the newest kept within the bound.
+ */
+function withUnlinkedPullRequest(
+  current: CodeThread["unlinkedPullRequests"],
+  command: { readonly owner: string; readonly repository: string; readonly number: number },
+  unlinkedAt: CodeThread["updatedAt"],
+): NonNullable<CodeThread["unlinkedPullRequests"]> {
+  const same = (entry: NonNullable<CodeThread["unlinkedPullRequests"]>[number]) =>
+    entry.number === command.number &&
+    entry.owner.toLowerCase() === command.owner.toLowerCase() &&
+    entry.repository.toLowerCase() === command.repository.toLowerCase();
+  return [
+    ...(current ?? []).filter((entry) => !same(entry)),
+    {
+      owner: command.owner,
+      repository: command.repository,
+      number: command.number,
+      unlinkedAt,
+    },
+  ].slice(-MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS);
+}
+
 function withoutDoneMark<T extends Pick<CodeThread, "markedDoneAt" | "completionReceiptId">>(
   thread: T,
 ): Omit<T, "markedDoneAt" | "completionReceiptId"> {
@@ -1025,9 +1065,9 @@ export type MergedThreadPutAwayOutcome =
     };
 
 const COMPLETE_REFUSALS = {
-  archived: "An archived thread cannot be put away.",
-  executing: "Wait for the running turn to finish before putting this thread away.",
-  "awaiting-input": "This thread is waiting on you; answer it before putting it away.",
+  archived: "An archived thread cannot be settled.",
+  executing: "Wait for the running turn to finish before settling this thread.",
+  "awaiting-input": "This thread is waiting on you; answer it before settling it.",
 } as const;
 
 const SNOOZE_REFUSALS = {
@@ -1132,6 +1172,7 @@ export class CodeService {
   readonly #onThreadArchived: CodeServiceOptions["onThreadArchived"];
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
+  readonly #touchedIssues: CodeNavigationTouchedIssueSource | undefined;
   readonly #readLatestFinishedReceipt:
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
@@ -1202,6 +1243,7 @@ export class CodeService {
     this.#onThreadArchived = options.onThreadArchived;
     this.#waitForThreadChange = options.waitForThreadChange;
     this.#pullRequests = options.pullRequests;
+    this.#touchedIssues = options.touchedIssues;
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#turnAwaitsPerson = options.turnAwaitsPerson;
@@ -1548,12 +1590,49 @@ export class CodeService {
           : {}),
         ...(checkoutChip === undefined ? {} : { checkoutChip }),
         ...(hasPullRequests ? { pullRequestSummaries, threadPullRequests } : {}),
+        ...this.#touchedIssuesFor(thread, pullRequests),
         // Rides on the row the caller was already allowed to see: `threads`
         // is the authority-filtered list, so a window never learns what a
         // thread it cannot browse is running.
         ...(parked ? {} : this.#liveTurns?.read(String(thread.id))),
       };
     });
+  }
+
+  /**
+   * The issues a thread's tool calls wrote to, as far as this read may show
+   * them: GitHub issues in the thread's own repository or one the window's
+   * pull-request snapshot already reads, and Linear issues while Linear is
+   * connected. A failing source leaves the row without them.
+   */
+  #touchedIssuesFor(
+    thread: CodeThread,
+    pullRequests: ThreadBoardPullRequestSnapshot | undefined,
+  ): { readonly touchedIssues?: ThreadTouchedIssues } {
+    const source = this.#touchedIssues;
+    if (source === undefined) return {};
+    try {
+      const own = thread.deliveryTarget.proposedBaseRepository.split("/");
+      const ownRepository =
+        own.length === 2 && own[0] !== undefined && own[1] !== undefined
+          ? [{ owner: own[0], name: own[1] }]
+          : [];
+      const touchedIssues = composeThreadTouchedIssues({
+        issues: source.issuesFor(thread.id),
+        readableRepositories: [
+          ...ownRepository,
+          ...(pullRequests?.rows ?? []).map((row) => ({
+            owner: row.repositoryOwner,
+            name: row.repositoryName,
+          })),
+        ],
+        githubRevoked: pullRequests?.githubRevoked ?? false,
+        linearConnected: source.linearConnected(),
+      });
+      return touchedIssues === undefined ? {} : { touchedIssues };
+    } catch {
+      return {};
+    }
   }
 
   /**
@@ -2465,6 +2544,15 @@ export class CodeService {
         throw this.#failure("unauthorized", "Only a person can mark a Code thread Done.");
       }
       if (
+        command.kind === "unlink-code-thread-pull-request" &&
+        (isRoutineHostScope(authenticatedWindowId) || actor?.kind === "system")
+      ) {
+        throw this.#failure(
+          "unauthorized",
+          "Only a person can unlink a pull request from a thread.",
+        );
+      }
+      if (
         command.kind === "set-code-thread-coordinator-done-when" &&
         (isRoutineHostScope(authenticatedWindowId) || actor?.kind === "system")
       ) {
@@ -3153,40 +3241,51 @@ export class CodeService {
                                     version: command.expectedVersion + 1,
                                     updatedAt,
                                   }
-                                : command.kind === "mark-code-thread-done"
-                                  ? (() => {
-                                      const completionReceiptId = selectCompletionReceiptId(
-                                        this.#readLatestFinishedReceipt?.(String(current.id)),
-                                      );
-                                      // Marking Done also puts the thread away when Settings
-                                      // says so, unless a turn is still running or waits on
-                                      // the person: then the mark stands and the row stays.
-                                      const putAway =
-                                        this.#putAwayWhenDone() && this.#mayPutAwayDone(current);
-                                      return {
-                                        ...(putAway
-                                          ? {
-                                              ...withoutPinned(withoutRest(current)),
-                                              completedAt: updatedAt,
-                                            }
-                                          : current),
-                                        markedDoneAt: updatedAt,
-                                        ...(completionReceiptId === undefined
-                                          ? {}
-                                          : { completionReceiptId }),
-                                        version: command.expectedVersion + 1,
-                                        updatedAt,
-                                      };
-                                    })()
-                                  : {
+                                : command.kind === "unlink-code-thread-pull-request"
+                                  ? {
                                       ...current,
-                                      ...(command.workingFolderId === undefined
-                                        ? {}
-                                        : { workingFolderId: command.workingFolderId }),
-                                      workingDirectory: command.workingDirectory,
+                                      unlinkedPullRequests: withUnlinkedPullRequest(
+                                        current.unlinkedPullRequests,
+                                        command,
+                                        updatedAt,
+                                      ),
                                       version: command.expectedVersion + 1,
                                       updatedAt,
-                                    },
+                                    }
+                                  : command.kind === "mark-code-thread-done"
+                                    ? (() => {
+                                        const completionReceiptId = selectCompletionReceiptId(
+                                          this.#readLatestFinishedReceipt?.(String(current.id)),
+                                        );
+                                        // Marking Done also puts the thread away when Settings
+                                        // says so, unless a turn is still running or waits on
+                                        // the person: then the mark stands and the row stays.
+                                        const putAway =
+                                          this.#putAwayWhenDone() && this.#mayPutAwayDone(current);
+                                        return {
+                                          ...(putAway
+                                            ? {
+                                                ...withoutPinned(withoutRest(current)),
+                                                completedAt: updatedAt,
+                                              }
+                                            : current),
+                                          markedDoneAt: updatedAt,
+                                          ...(completionReceiptId === undefined
+                                            ? {}
+                                            : { completionReceiptId }),
+                                          version: command.expectedVersion + 1,
+                                          updatedAt,
+                                        };
+                                      })()
+                                    : {
+                                        ...current,
+                                        ...(command.workingFolderId === undefined
+                                          ? {}
+                                          : { workingFolderId: command.workingFolderId }),
+                                        workingDirectory: command.workingDirectory,
+                                        version: command.expectedVersion + 1,
+                                        updatedAt,
+                                      },
       );
       const next =
         command.kind === "change-code-thread-access"
@@ -3415,6 +3514,37 @@ export class CodeService {
       "system",
     );
     return alreadyPutAway ? { status: "recorded" } : { status: "put-away" };
+  }
+
+  /**
+   * Settle a thread on the host's behalf because the turn in which its agent
+   * filed a finished report completed. Re-reads the thread and decides from
+   * the authoritative record; a thread whose turn still runs or waits on the
+   * person answers busy, so the caller may try again shortly. Coordinators,
+   * child work and a pending decision are the caller's to rule out first.
+   */
+  settleFinishedThread(threadId: CodeThreadId): FinishedReportSettleOutcome {
+    const current = this.#persistence.readCodeThread(threadId);
+    if (current === undefined) return { status: "skipped", reason: "not-found" };
+    if (current.lifecycle !== "active") return { status: "skipped", reason: "not-active" };
+    if (current.completedAt !== undefined) return { status: "skipped", reason: "already-settled" };
+    if (!this.#mayPutAwayDone(current)) return { status: "skipped", reason: "busy" };
+    const updatedAt = decodeTimestamp(this.#clock());
+    const next = decodeCodeThread({
+      ...withoutPinned(withoutRest(current)),
+      completedAt: updatedAt,
+      version: current.version + 1,
+      updatedAt,
+    });
+    this.#append(
+      "code-thread",
+      current.id,
+      current.version,
+      "code.thread-updated@1",
+      { kind: "thread-updated", thread: next },
+      "system",
+    );
+    return { status: "settled" };
   }
 
   /**

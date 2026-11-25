@@ -273,6 +273,10 @@ function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFil
         { kind: "path", base: "data", path: "integrations" },
         { kind: "path", base: "data", path: "harness/cloud-cli" },
         names("", "[^/]*\\.secret", 1, { base: "runtime" }),
+        // Secrets a person gave a thread: the runtime directory, or the data
+        // directory on Windows, which has no runtime directory.
+        { kind: "path", base: "runtime", path: "thread-secrets" },
+        { kind: "path", base: "data", path: "thread-secrets" },
       ],
     },
     {
@@ -656,6 +660,22 @@ const SECRET_SHAPES: ReadonlyArray<RegExp> = [
 
 export const SECRET_REDACTION = "[redacted secret]";
 
+/** Below this a value occurs in too much ordinary text to replace. */
+const MINIMUM_HELD_LENGTH = 8;
+/** Shorter than that, only a value no ordinary word or number looks like. */
+const MINIMUM_MIXED_LENGTH = 6;
+
+/**
+ * Whether a value can be replaced wherever it occurs: long enough, or short
+ * and mixed, and not part of the replacement, which every later pass would
+ * grow again.
+ */
+export function isHoldableSecretValue(value: string): boolean {
+  if (SECRET_REDACTION.includes(value.trim())) return false;
+  if (value.length >= MINIMUM_HELD_LENGTH) return true;
+  return value.length >= MINIMUM_MIXED_LENGTH && !/^(?:\p{L}+|\p{N}+)$/u.test(value);
+}
+
 /** Shorter values are too likely to occur in ordinary text to be replaced. */
 const MINIMUM_ISSUED_VALUE_LENGTH = 8;
 
@@ -665,22 +685,65 @@ export interface SecretRedaction {
 }
 
 /**
- * Redacts known key formats, and every value the credential broker handed out
- * (`issuedValues`), from text bound for tool output, a transcript, the
- * journal, a log, an export, or diagnostics. Applied at every level.
+ * Redacts known key formats, every value the credential broker handed out
+ * (`issuedValues`), and every value a person gave a thread (`heldValues`) from
+ * text bound for tool output, a transcript, the journal, a log, an export, or
+ * diagnostics. Applied at every level.
+ *
+ * Every match is found in the original text and overlapping ones are replaced
+ * as one. Replacing them in turn let one secret hide part of another: a held
+ * key's header line removed the header the key-format rule looks for, and a
+ * held value that began a longer issued one left the rest of it readable.
  */
 export function redactSecrets(
   text: string,
   issuedValues: ReadonlyArray<string> = [],
+  heldValues: ReadonlyArray<string> = [],
 ): SecretRedaction {
-  let output = text;
-  for (const value of [...issuedValues].sort((a, b) => b.length - a.length)) {
-    if (value.length < MINIMUM_ISSUED_VALUE_LENGTH) continue;
-    output = output.split(value).join(SECRET_REDACTION);
+  const spans: Array<readonly [start: number, end: number]> = [];
+  for (const value of issuedValues)
+    if (value.length >= MINIMUM_ISSUED_VALUE_LENGTH) addOccurrences(spans, text, value);
+  for (const value of heldValues) addOccurrences(spans, text, value);
+  addPuttyKeys(spans, text);
+  for (const shape of SECRET_SHAPES)
+    for (const match of text.matchAll(shape))
+      if (match[0].length > 0) spans.push([match.index, match.index + match[0].length]);
+  if (spans.length === 0) return { text, redacted: false };
+  spans.sort((left, right) => left[0] - right[0] || right[1] - left[1]);
+  let output = "";
+  let cursor = 0;
+  let [start, end] = spans[0] ?? [0, 0];
+  for (const [nextStart, nextEnd] of spans) {
+    if (nextStart < end) {
+      end = Math.max(end, nextEnd);
+      continue;
+    }
+    output += text.slice(cursor, start) + SECRET_REDACTION;
+    cursor = end;
+    start = nextStart;
+    end = nextEnd;
   }
-  output = redactPuttyKeys(output);
-  for (const shape of SECRET_SHAPES) output = output.replace(shape, SECRET_REDACTION);
+  output += text.slice(cursor, start) + SECRET_REDACTION + text.slice(end);
   return { text: output, redacted: output !== text };
+}
+
+function addOccurrences(
+  spans: Array<readonly [start: number, end: number]>,
+  text: string,
+  value: string,
+): void {
+  if (value.length === 0) return;
+  // One step at a time: an occurrence can begin inside the one before it, and
+  // a long run of them is kept as one span.
+  let last: [start: number, end: number] | undefined;
+  for (let at = text.indexOf(value); at !== -1; at = text.indexOf(value, at + 1)) {
+    if (last !== undefined && at < last[1]) {
+      last[1] = at + value.length;
+      continue;
+    }
+    last = [at, at + value.length];
+    spans.push(last);
+  }
 }
 
 const PUTTY_HEADER = "PuTTY-User-Key-File-";
@@ -692,17 +755,19 @@ const PUTTY_MAC = "Private-MAC: ";
  * one forward pass: a lazy regular expression spanning the key restarted at
  * every repeated header and took quadratic time on text that never closed it.
  */
-function redactPuttyKeys(text: string): string {
-  let output = "";
+function addPuttyKeys(spans: Array<readonly [start: number, end: number]>, text: string): void {
   let cursor = 0;
   for (;;) {
     const start = text.indexOf(PUTTY_HEADER, cursor);
-    if (start === -1) return output + text.slice(cursor);
-    output += text.slice(cursor, start) + SECRET_REDACTION;
+    if (start === -1) return;
     const mac = text.indexOf(PUTTY_MAC, start + PUTTY_HEADER.length);
-    if (mac === -1) return output;
+    if (mac === -1) {
+      spans.push([start, text.length]);
+      return;
+    }
     const lineEnd = text.indexOf("\n", mac);
     cursor = lineEnd === -1 ? text.length : lineEnd;
+    spans.push([start, cursor]);
   }
 }
 
@@ -713,13 +778,21 @@ function withoutTrailingSlashes(path: string): string {
   return path.slice(0, end);
 }
 
-/** Redacts every string inside a JSON-shaped value, keys left as they are. */
-export function redactSecretsInValue<T>(value: T, issuedValues: ReadonlyArray<string> = []): T {
-  if (typeof value === "string") return redactSecrets(value, issuedValues).text as T;
+/**
+ * Redacts every string inside a JSON-shaped value. A key is redacted too when
+ * it holds a secret, unless it reads as a field name: renaming a field Octant
+ * itself reads would break the value rather than hide anything.
+ */
+export function redactSecretsInValue<T>(
+  value: T,
+  issuedValues: ReadonlyArray<string> = [],
+  heldValues: ReadonlyArray<string> = [],
+): T {
+  if (typeof value === "string") return redactSecrets(value, issuedValues, heldValues).text as T;
   if (Array.isArray(value)) {
     let changed = false;
     const next = value.map((item: unknown) => {
-      const redacted = redactSecretsInValue(item, issuedValues);
+      const redacted = redactSecretsInValue(item, issuedValues, heldValues);
       if (redacted !== item) changed = true;
       return redacted;
     });
@@ -729,12 +802,15 @@ export function redactSecretsInValue<T>(value: T, issuedValues: ReadonlyArray<st
   let changed = false;
   const next: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    const redacted = redactSecretsInValue(item, issuedValues);
-    if (redacted !== item) changed = true;
-    next[key] = redacted;
+    const redacted = redactSecretsInValue(item, issuedValues, heldValues);
+    const shown = FIELD_NAME.test(key) ? key : redactSecrets(key, issuedValues, heldValues).text;
+    if (redacted !== item || shown !== key) changed = true;
+    next[shown] = redacted;
   }
   return (changed ? next : value) as T;
 }
+
+const FIELD_NAME = /^[a-z][A-Za-z]*$/u;
 
 export function joinPosix(base: string, relative: string): string {
   if (relative === "") return base;

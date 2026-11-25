@@ -1,83 +1,21 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
-import type { LinearIssueContextRequest } from "@octant/contracts";
-import type { IntegrationAuthenticationSnapshot } from "@octant/contracts/integration";
-import {
-  linearIssueBrowseAvailable,
-  type LinearIssueListPage,
-  type LinearIssueRow,
-} from "@octant/contracts/linear-issues";
+import type { LinearIssueContextRequest, ProjectLinearTarget } from "@octant/contracts";
+import type { LinearIssueListPage, LinearIssueRow } from "@octant/contracts/linear-issues";
 import { Check, Circle, CircleCheck, CircleDashed, CircleDot, Search } from "../ui/icons";
-import { loadList, peekList } from "../composer/createFromCache";
+import { peekList } from "../composer/createFromCache";
+import {
+  linearFilterForTarget,
+  linearIssuesCacheKey,
+  loadLinearIssues,
+} from "./linearIssuesReadAhead";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { PopupSkeletonRows } from "../ui/base/PopupSkeletonRows";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
-export function useLinearIssuesCreateAvailable(
-  client: IntegrationClient | undefined,
-  pluginEnabled: boolean,
-): boolean {
-  const [available, setAvailable] = useState(false);
-  useEffect(() => {
-    if (client === undefined || !pluginEnabled) {
-      setAvailable(false);
-      return;
-    }
-    const readSnapshot = client.authenticationSnapshot;
-    if (typeof readSnapshot !== "function") {
-      setAvailable(false);
-      return;
-    }
-    const pending = thenableFrom(readSnapshot.call(client));
-    if (pending === undefined) {
-      setAvailable(false);
-      return;
-    }
-    let cancelled = false;
-    void pending
-      .then((snapshot) => {
-        if (!cancelled) {
-          setAvailable(
-            linearIssueBrowseAvailable(
-              (snapshot as IntegrationAuthenticationSnapshot).capabilities,
-            ),
-          );
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setAvailable(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, pluginEnabled]);
-  return available;
-}
-
-function thenableFrom(value: unknown): Promise<unknown> | undefined {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "then" in value &&
-    typeof value.then === "function"
-  ) {
-    return value as Promise<unknown>;
-  }
-  return undefined;
-}
-
-const LINEAR_ISSUES_KEY = "linear-issues";
-
-/** The first page of issues, shared with whoever reads ahead of the popup opening. */
-export function loadLinearIssues(client: IntegrationClient): Promise<LinearIssueListPage> {
-  const listIssues = client.listIssues;
-  if (typeof listIssues !== "function") {
-    return Promise.reject(new Error("Linear issues are unavailable."));
-  }
-  return loadList(client, LINEAR_ISSUES_KEY, () => listIssues.call(client, {}));
-}
+export { loadLinearIssues, useLinearIssuesCreateAvailable } from "./linearIssuesReadAhead";
 
 function linearStateFrom(page: LinearIssueListPage): IssueListState {
   return {
@@ -90,6 +28,7 @@ function linearStateFrom(page: LinearIssueListPage): IssueListState {
 
 export interface CreateFromLinearIssuePickerProps {
   readonly client: IntegrationClient;
+  readonly defaultLinearTarget?: ProjectLinearTarget;
   readonly selected?: LinearIssueContextRequest;
   readonly onSelect: (
     issue: LinearIssueContextRequest & { readonly identifier: string },
@@ -115,19 +54,21 @@ type IssueListState =
  * opaque node id; the server re-reads and frames issue text.
  */
 export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerProps) {
-  const { client, onSelect } = props;
+  const { client, defaultLinearTarget, onSelect } = props;
   const listboxId = useId();
   const [query, setQuery] = useState("");
+  const [scopeAll, setScopeAll] = useState(false);
   const debouncedQuery = useDebouncedValue(query, 250);
+  const activeTarget = scopeAll ? undefined : defaultLinearTarget;
   const [issues, setIssues] = useState<IssueListState>(() => {
-    const cached = peekList<LinearIssueListPage>(client, LINEAR_ISSUES_KEY);
+    const cached = peekList<LinearIssueListPage>(client, linearIssuesCacheKey(activeTarget));
     return cached === undefined ? { kind: "loading" } : linearStateFrom(cached.value);
   });
   const [loadingMore, setLoadingMore] = useState(false);
   const issuesGeneration = useRef(0);
 
   const loadIssues = useCallback(
-    async (search: string) => {
+    async (search: string, target: ProjectLinearTarget | undefined) => {
       const listIssues = client.listIssues;
       if (typeof listIssues !== "function") {
         setIssues({ kind: "unavailable", message: "Linear issues are unavailable." });
@@ -137,16 +78,22 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
       // The first page with no search is read ahead and kept: it shows at once
       // and is asked again behind the rows when it has grown old.
       const kept = search === "";
-      const cached = kept ? peekList<LinearIssueListPage>(client, LINEAR_ISSUES_KEY) : undefined;
+      const cacheKey = linearIssuesCacheKey(target);
+      const cached = kept ? peekList<LinearIssueListPage>(client, cacheKey) : undefined;
       if (cached === undefined) setIssues({ kind: "loading" });
       else {
         setIssues(linearStateFrom(cached.value));
         if (cached.fresh) return;
       }
       try {
+        const filter = linearFilterForTarget(target);
         const page: LinearIssueListPage = kept
-          ? await loadLinearIssues(client)
-          : await listIssues({ search, pageSize: 30 as never });
+          ? await loadLinearIssues(client, target)
+          : await listIssues({
+              search,
+              ...(filter === undefined ? {} : { filter }),
+              pageSize: 30 as never,
+            });
         if (operation !== issuesGeneration.current) return;
         setIssues(linearStateFrom(page));
       } catch (error) {
@@ -162,8 +109,8 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
   );
 
   useEffect(() => {
-    void loadIssues(debouncedQuery.trim());
-  }, [debouncedQuery, loadIssues]);
+    void loadIssues(debouncedQuery.trim(), activeTarget);
+  }, [debouncedQuery, activeTarget, loadIssues]);
 
   const loadMore = async () => {
     if (issues.kind !== "ready" || issues.endCursor === undefined) return;
@@ -172,10 +119,12 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
     const operation = issuesGeneration.current;
     const search = debouncedQuery.trim();
     const cursor = issues.endCursor;
+    const filter = linearFilterForTarget(activeTarget);
     setLoadingMore(true);
     try {
       const page = await listIssues({
         ...(search === "" ? {} : { search }),
+        ...(filter === undefined ? {} : { filter }),
         pageSize: 30 as never,
         cursor: cursor as never,
       });
@@ -209,12 +158,40 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
           aria-label="Search Linear issues"
           disabled={props.disabled}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search Linear issues…"
+          placeholder={
+            activeTarget === undefined
+              ? "Search Linear issues…"
+              : `Search ${activeTarget.teamName} issues…`
+          }
           type="search"
           unstyled
           value={query}
         />
       </label>
+      {defaultLinearTarget === undefined ? null : (
+        <div className="linear-settings__controls">
+          <OctantButton
+            aria-pressed={!scopeAll}
+            disabled={props.disabled}
+            onClick={() => setScopeAll(false)}
+            size="sm"
+            type="button"
+            variant={!scopeAll ? "secondary" : "ghost"}
+          >
+            {defaultLinearTarget.projectName ?? defaultLinearTarget.teamName}
+          </OctantButton>
+          <OctantButton
+            aria-pressed={scopeAll}
+            disabled={props.disabled}
+            onClick={() => setScopeAll(true)}
+            size="sm"
+            type="button"
+            variant={scopeAll ? "secondary" : "ghost"}
+          >
+            All workspace
+          </OctantButton>
+        </div>
+      )}
       {issues.kind === "loading" || issues.kind === "idle" ? (
         <PopupSkeletonRows label="Loading issues…" />
       ) : null}

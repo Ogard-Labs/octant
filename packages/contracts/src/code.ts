@@ -40,8 +40,20 @@ import {
   ThreadBoardPullRequestSummaries,
   ThreadNavigationPullRequestSummaries,
 } from "./threadBoardPullRequests";
+import { ThreadTouchedIssues } from "./threadTouchedIssues";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
+
+/** The most pull requests a thread remembers a person unlinked from it. */
+export const MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS = 50;
+
+export const CodeThreadUnlinkedPullRequest = Schema.Struct({
+  owner: GithubRepositoryOwner,
+  repository: GithubRepositoryName,
+  number: Schema.Int.pipe(Schema.between(1, 999_999_999)),
+  unlinkedAt: UtcTimestamp,
+}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+export type CodeThreadUnlinkedPullRequest = typeof CodeThreadUnlinkedPullRequest.Type;
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
 const brandedString = <B extends string>(brand: B) =>
   Schema.NonEmptyTrimmedString.pipe(Schema.brand(brand));
@@ -475,6 +487,18 @@ export const CodeThread = Schema.Struct({
   ),
   /** Fresh finished receipt recorded as completion evidence when a person marked the thread Done. */
   completionReceiptId: Schema.optional(FinishedReceiptId),
+  /**
+   * Pull requests a person unlinked from this thread, each with when. An
+   * unlink wins over every kind of linking evidence (the delivery branch,
+   * Octant's own pull-request operations, a tool call) until the thread
+   * touches that pull request again after it. Absent on every thread nobody
+   * unlinked from.
+   */
+  unlinkedPullRequests: Schema.optional(
+    Schema.Array(CodeThreadUnlinkedPullRequest).pipe(
+      Schema.maxItems(MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS),
+    ),
+  ),
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -1050,6 +1074,18 @@ export const CodeCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("mark-code-thread-done"),
     ...CodeThreadCommandFields,
+  }).annotations(strict),
+  /**
+   * A person unlinks one pull request from the thread: the thread stops
+   * listing it and stops being one of its linked threads until the thread
+   * touches it again. Only a person may send it, as with Mark Done.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("unlink-code-thread-pull-request"),
+    ...CodeThreadCommandFields,
+    owner: GithubRepositoryOwner,
+    repository: GithubRepositoryName,
+    number: Schema.Int.pipe(Schema.between(1, 999_999_999)),
   }).annotations(strict),
   /**
    * Hide the thread until `until`. The wake time is the first kind of wake
@@ -1692,6 +1728,8 @@ export const CodeNavigationRuntime = Schema.Struct({
    * Current clients read this one and fall back to `pullRequestSummaries`.
    */
   threadPullRequests: Schema.optional(ThreadNavigationPullRequestSummaries),
+  /** The issues the thread's tool calls wrote to, newest first; absent when none. */
+  touchedIssues: Schema.optional(ThreadTouchedIssues),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
 }).annotations(strict);

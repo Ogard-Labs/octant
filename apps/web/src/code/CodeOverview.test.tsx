@@ -1037,6 +1037,7 @@ function controller(): CodeController {
     archiveThread: vi.fn(async () => true),
     completeThread: vi.fn(async () => ({ status: "ok" }) as const),
     markThreadDone: vi.fn(async () => ({ status: "ok" }) as const),
+    unlinkPullRequest: vi.fn(),
     reopenThread: vi.fn(async () => ({ status: "ok" }) as const),
     snoozeThread: vi.fn(async () => ({ status: "ok" }) as const),
     wakeThread: vi.fn(async () => ({ status: "ok" }) as const),

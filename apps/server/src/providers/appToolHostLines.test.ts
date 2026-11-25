@@ -31,6 +31,7 @@ const BROADEST = [
   "octant_credential",
   "octant_debug",
   "octant_github",
+  "octant_linear",
   "octant_look",
   "octant_memory",
   "octant_narrate",
@@ -186,8 +187,8 @@ describe("appToolHostLines", () => {
     ]);
     for (const line of lines) expect(line.text.length).toBeLessThanOrEqual(240);
     const characters = lines.reduce((total, line) => total + line.text.length + 1, 0);
-    // Raised from 1,000 to 1,050 when adding octant_create_video's 75-char line
-    // on top of the expanded Canvas routing line (widest guide: 1,014 tokens).
+    // Raised from 1,000 to 1,050 when adding octant_create_video and
+    // octant_linear on top of the expanded Canvas routing line.
     expect(Math.ceil(characters / 4)).toBeLessThanOrEqual(1_050);
   });
 

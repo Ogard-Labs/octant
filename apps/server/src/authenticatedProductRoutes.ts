@@ -1,4 +1,5 @@
 import { DEVICE_ACCESS_LEVEL_REFUSED_REASON } from "@octant/contracts/remote-access";
+import { THREAD_SECRETS_PATH } from "./threadSecrets/threadSecretRoutes";
 import { authorizePrincipalAction } from "@octant/domain";
 import { removeImageMetadata } from "./attachments/imageMetadataRemoval";
 import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
@@ -102,7 +103,7 @@ export function classifyProductAction(request: Request): string | undefined {
   const path = url.pathname;
 
   // Private credential entry is host-local and is never a forwarded product action.
-  if (path === "/api/credential-requests") return undefined;
+  if (path === "/api/credential-requests" || path === THREAD_SECRETS_PATH) return undefined;
 
   const harnessSession =
     /^\/api\/native-harness\/sessions\/[^/]+(?:\/(approvals|questions))?$/.exec(path);
@@ -326,6 +327,21 @@ export function classifyProductAction(request: Request): string | undefined {
     // The service re-checks that Open and clamps to that one thread, so a
     // paired device never dumps the host.
     return method === "POST" ? "project.overview.read" : undefined;
+  }
+  if (path.startsWith("/api/video/")) {
+    // Listing a thread's video jobs, minting a single-clip playback ticket,
+    // and reading clip byte ranges are scoped reads of a thread the device
+    // can already open. Stopping a job stays uncatalogued and local-only.
+    if (
+      (method === "GET" || method === "HEAD") &&
+      (path === "/api/video/jobs" || path === "/api/video/clip")
+    ) {
+      return "project.overview.read";
+    }
+    if (method === "POST" && path === "/api/video/clip") {
+      return "project.overview.read";
+    }
+    return undefined;
   }
   if (path === "/api/agent-grants" || path === "/api/agent-grants/threads") {
     // What each outside agent may do and which threads it started.

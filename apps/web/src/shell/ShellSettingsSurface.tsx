@@ -38,7 +38,12 @@ import type { BenchmarksClient, ChatClient } from "@octant/client-runtime";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
-import type { ProjectId, SettingsDeepLink } from "@octant/contracts";
+import type {
+  ProjectId,
+  ProjectLinearTarget,
+  ProjectSummary,
+  SettingsDeepLink,
+} from "@octant/contracts";
 import type { ServerProject } from "@octant/contracts/server-projects";
 import type { ShellSettings } from "@octant/contracts/shell";
 import type { ThemeTypography } from "@octant/contracts/theme";
@@ -130,6 +135,11 @@ export interface ShellSettingsSurfaceProps {
   readonly hostBridge?: OctantHostBridge;
   readonly githubClient: GithubClient;
   readonly integrationClient?: IntegrationClient;
+  readonly linearProjects?: ReadonlyArray<ProjectSummary>;
+  readonly onProjectLinearTargetChange?: (
+    projectId: ProjectId,
+    target: ProjectLinearTarget | null,
+  ) => Promise<boolean>;
   readonly usageClient: UsageClient;
   readonly benchmarksClient?: BenchmarksClient;
   readonly chatClient?: Pick<ChatClient, "thread">;
@@ -295,6 +305,12 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.integrationClient === undefined
               ? {}
               : { integrationClient: props.integrationClient })}
+            {...(props.linearProjects === undefined
+              ? {}
+              : { linearProjects: props.linearProjects })}
+            {...(props.onProjectLinearTargetChange === undefined
+              ? {}
+              : { onProjectLinearTargetChange: props.onProjectLinearTargetChange })}
             usageClient={props.usageClient}
             {...(props.benchmarksClient === undefined
               ? {}

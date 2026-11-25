@@ -4,6 +4,7 @@ import {
   chordRulesFor,
   describeChord,
   formatChord,
+  isShadowedKeybinding,
   parseChord,
   type OctantKeybindingActionId,
 } from "@octant/domain";
@@ -41,9 +42,6 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
   const [draft, setDraft] = useState<string>();
   const [draftError, setDraftError] = useState<string>();
 
-  const shadowed = new Set(
-    controller.keybindings.conflicts.flatMap((conflict) => conflict.actionIds.slice(1)),
-  );
   const groups = OCTANT_KEYBINDING_ACTIONS.reduce<
     Array<{ readonly area: KeybindingArea; readonly actions: Array<KeybindingAction> }>
   >((result, action) => {
@@ -140,7 +138,7 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
                         Reset
                       </OctantButton>
                     ) : null}
-                    {shadowed.has(action.id) ? (
+                    {isShadowedKeybinding(controller.keybindings, action.id) ? (
                       <span className="keybinding-settings__warning" role="note">
                         Shares {bound} with another action and will not run.
                       </span>

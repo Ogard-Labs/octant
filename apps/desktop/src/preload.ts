@@ -411,6 +411,7 @@ export interface OctantHostBridge {
    * it to the chosen path. Answers only the saved file's name, never a path.
    */
   readonly saveSupportBundle: () => Promise<SupportBundleSaveResult>;
+  readonly downloadThreadVideoArchive: (ticket: string) => Promise<boolean>;
   /**
    * Opens the native folder picker and writes the kept Browser screenshots,
    * numbered, into the folder the person chose. Answers a count and the
@@ -1189,6 +1190,8 @@ export function createHostBridge(
       }
       return decodeSupportBundleSaveResult(answer);
     },
+    downloadThreadVideoArchive: async (ticket: string) =>
+      (await ipc.invoke(IPC_CHANNELS.downloadThreadVideoArchive, ticket)) === true,
     saveBrowserProofScreenshots: async (
       pictures: ReadonlyArray<{ readonly fileNumber: number; readonly dataUrl: string }>,
     ) => {

@@ -176,6 +176,7 @@ import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
 import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
+import { VideoGenerationSettingsView } from "../settings/VideoGenerationSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { WebSearchSettingsView } from "../settings/WebSearchSettingsView";
@@ -356,6 +357,11 @@ export interface SettingsViewProps {
   readonly hostFederationLifecycle?: HostFederationLifecycle;
   readonly githubClient?: GithubClient;
   readonly integrationClient?: IntegrationClient;
+  readonly linearProjects?: ReadonlyArray<import("@octant/contracts").ProjectSummary>;
+  readonly onProjectLinearTargetChange?: (
+    projectId: ProjectId,
+    target: import("@octant/contracts").ProjectLinearTarget | null,
+  ) => Promise<boolean>;
   readonly extensionClient?: ExtensionClient;
   /** Project names by Project id, to head the remembered tool approvals. */
   readonly projectNames?: ReadonlyMap<string, string>;
@@ -1042,8 +1048,11 @@ function ActiveSectionContent({
     return (
       <PluginSettingsSection
         entryPoint={pluginEntryPoint}
+        focusedSetting={focusedSetting}
         githubClient={props.githubClient}
         integrationClient={props.integrationClient}
+        linearProjects={props.linearProjects}
+        onProjectLinearTargetChange={props.onProjectLinearTargetChange}
       />
     );
   }
@@ -1172,7 +1181,7 @@ function ActiveSectionContent({
         </div>
       );
     case "voice":
-      // Voice and image generation both pick a model endpoint to send media
+      // Voice, image and video generation all pick a provider to send media
       // through, so they share one page under AI.
       return (
         <div className="settings-section-stack" id="settings-voice">
@@ -1195,6 +1204,16 @@ function ActiveSectionContent({
               ? {}
               : { providerController: props.providerController })}
             settings={props.settings.imageGeneration}
+          />
+          <VideoGenerationSettingsView
+            onSettingsChange={props.onSettingsChange}
+            {...(props.providerController?.snapshot === undefined
+              ? {}
+              : { providerSnapshot: props.providerController.snapshot })}
+            {...(props.providerController === undefined
+              ? {}
+              : { providerController: props.providerController })}
+            settings={props.settings.videoGeneration}
           />
         </div>
       );
@@ -2334,7 +2353,7 @@ function ProviderCatalogSection(props: {
           instances={controller.instances}
           {...(controller.message === undefined ? {} : { message: controller.message })}
           observedByInstance={controller.observedByInstance}
-          onAddOutsideProvider={controller.createOutsideHarnessEndpoint}
+          onAddOutsideProvider={controller.createOutsideProvider}
           {...(controller.snapshot?.outsideDrivers === undefined
             ? {}
             : { outsideDrivers: controller.snapshot.outsideDrivers })}
@@ -2380,7 +2399,7 @@ interface SectionProps {
 const COMPLETED_THREAD_ARCHIVE_CHOICES: ReadonlyArray<number> = [1, 3, 7, 14, 30, 90];
 
 /**
- * The window before a put-away thread is archived, as a short list of
+ * The window before a settled thread is archived, as a short list of
  * choices plus Never. A value chosen elsewhere that the list lacks is still
  * shown as itself rather than snapping to the nearest choice.
  */
@@ -2394,7 +2413,7 @@ function CompletedThreadArchiveSelect(props: {
       : [...COMPLETED_THREAD_ARCHIVE_CHOICES, props.afterDays].sort((left, right) => left - right);
   return (
     <OctantSelectField
-      aria-label="Archive put-away threads"
+      aria-label="Archive settled threads"
       id="completed-thread-archive"
       onValueChange={(value) => props.onChange(value === "never" ? null : Number(value))}
       options={[
@@ -2759,24 +2778,24 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Threads">
         <div className="setgroup">
           <SettingRow
-            description="Marking a Work or Code thread Done puts it away, and so does a Code thread's pull request merging. Reopen brings it back."
+            description="A thread settles when its agent files a finished report and that turn completes, when you mark a Work or Code thread Done, and when a Code thread's pull request merges. Un-settle brings it back."
             focused={focusedSetting === settingId("put-away-when-done")}
-            label="Put away threads when they're done"
+            label="Settle threads when they're done"
             scope="host"
             settingId="put-away-when-done"
           >
             <OctantSwitch
               checked={props.settings.putAwayThreadsWhenDone}
-              label="Put away threads when they're done"
+              label="Settle threads when they're done"
               onCheckedChange={(checked) =>
                 props.onSettingsChange({ putAwayThreadsWhenDone: checked })
               }
             />
           </SettingRow>
           <SettingRow
-            description="A put-away thread rests in its shelf, then moves to the archive. Archiving keeps everything."
+            description="A settled thread rests under Settled, then moves to the archive. Archiving keeps everything."
             focused={focusedSetting === settingId("completed-thread-archive")}
-            label="Archive put-away threads"
+            label="Archive settled threads"
             scope="host"
             settingId="completed-thread-archive"
           >

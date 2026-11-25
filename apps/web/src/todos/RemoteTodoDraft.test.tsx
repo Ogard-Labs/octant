@@ -70,8 +70,8 @@ vi.mock("../shell/DraftThreadWorkspace", async () => {
       useEffect(() => setSelectedProjectId(props.projectId), [props.projectId]);
       return (
         <div>
-          {props.todoSource === undefined ? null : (
-            <button onClick={props.todoSource.onRemove}>Remove source</button>
+          {props.todoSource?.current === undefined ? null : (
+            <button onClick={() => props.todoSource?.change(undefined)}>Remove source</button>
           )}
           <button onClick={() => setSelectedProjectId(undefined)}>No Project</button>
           <button

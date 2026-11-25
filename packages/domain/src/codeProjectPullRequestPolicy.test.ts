@@ -52,6 +52,68 @@ describe("Code Project pull-request policy", () => {
     expect(byIdentity).toEqual([{ threadId: "thread-identity", title: "Recorded identity" }]);
   });
 
+  it("links a thread to a pull request a tool call wrote to in another of the Project's repositories, and only there", () => {
+    const thread = {
+      threadId: "thread-tool",
+      projectId: "project-a",
+      title: "Complete open PRs",
+      repository: octantRepo,
+      pullRequestNumbers: [
+        {
+          number: 7,
+          observedAt: "2026-11-24T08:00:00Z",
+          repository: { owner: "Octant", name: "Site" },
+        },
+      ],
+    };
+    const pullRequest = (repository: { owner: string; name: string }) => ({
+      projectId: "project-a",
+      repository,
+      number: 7,
+      headBranch: "feature/docs",
+      title: "Docs",
+    });
+    expect(
+      matchLinkedThreadsToPullRequest({
+        pullRequest: pullRequest({ owner: "octant", name: "site" }),
+        threads: [thread],
+      }),
+    ).toEqual([{ threadId: "thread-tool", title: "Complete open PRs" }]);
+    // The same number in the thread's own repository is a different pull request.
+    expect(
+      matchLinkedThreadsToPullRequest({ pullRequest: pullRequest(octantRepo), threads: [thread] }),
+    ).toEqual([]);
+  });
+
+  it("keeps a pull request a person unlinked off the thread until the thread touches it again", () => {
+    const pullRequest = {
+      projectId: "project-a",
+      repository: octantRepo,
+      number: 12,
+      headBranch: "feature/manual-refresh",
+      title: "List active pull requests",
+    };
+    const thread = (observedAt: string) => ({
+      threadId: "thread-a",
+      projectId: "project-a",
+      title: "Manual refresh",
+      repository: octantRepo,
+      deliveryBranch: "feature/manual-refresh",
+      pullRequestNumbers: [{ number: 12, observedAt }],
+      unlinkedPullRequests: [
+        { owner: "octant", repository: "octant", number: 12, unlinkedAt: "2026-11-24T10:00:00Z" },
+      ],
+    });
+    // Unlinked after its last touch: neither the branch nor the identity links it.
+    expect(
+      matchLinkedThreadsToPullRequest({ pullRequest, threads: [thread("2026-11-24T09:00:00Z")] }),
+    ).toEqual([]);
+    // Touched again after the unlink: linked again.
+    expect(
+      matchLinkedThreadsToPullRequest({ pullRequest, threads: [thread("2026-11-24T11:00:00Z")] }),
+    ).toEqual([{ threadId: "thread-a", title: "Manual refresh" }]);
+  });
+
   it("never matches a linked thread by title or loose branch text", () => {
     expect(
       matchLinkedThreadsToPullRequest({

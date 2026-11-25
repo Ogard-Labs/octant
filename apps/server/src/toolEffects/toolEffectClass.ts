@@ -24,6 +24,8 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   // "It changes nothing on GitHub": every operation is a read of the
   // Project's delivery repository (github/githubReadToolService.ts).
   "octant_github",
+  // Read-only reads of the Project's bound Linear scope (plugins/linear/linearReadToolService.ts).
+  "octant_linear",
   PAST_THREADS_TOOL_NAME,
   SIDE_CHAT_LIST_FILES_TOOL_NAME,
   SIDE_CHAT_SEARCH_FILES_TOOL_NAME,

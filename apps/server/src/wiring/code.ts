@@ -5,7 +5,10 @@ import { removeHostWorktree } from "../code/hostWorktreeRemoval";
 import { createDiskCleanupRouteHandler } from "../diskCleanupRoutes";
 import { createArchivedWorktreeRouteHandler } from "../archivedWorktreeRoutes";
 import { createArchivedWorktrees } from "../code/archivedWorktrees";
-import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import {
+  decodeThreadWorkingDirectory,
+  type CodeThreadUnlinkedPullRequest,
+} from "@octant/contracts";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { GitHistoryPort } from "../code/gitHistoryPort";
@@ -56,7 +59,11 @@ import {
   CodeService,
 } from "../code/codeService";
 import type { CompletedThreadArchiveInput } from "../completedThreadArchiveSweep";
-import { pullRequestIdentitiesFromHistory } from "../code/codeThreadMetadataService";
+import {
+  pullRequestIdentitiesFromHistory,
+  touchedIssuesFromHistory,
+  type CodeThreadKnownPullRequest,
+} from "../code/codeThreadMetadataService";
 import {
   type CodeProjectPullRequestDetailPort,
   type CodeProjectPullRequestListPort,
@@ -91,6 +98,8 @@ import { createAgentProfileRouteHandler } from "../agentProfileRoutes";
 import { AgentProfileService } from "../agentProfileService";
 import { createFolderBrowseRouteHandler } from "../folderBrowseRoutes";
 import { FolderBrowseService } from "../folderBrowseService";
+import { createRepositoryBootstrapRouteHandler } from "../repositoryBootstrapRoutes";
+import { RepositoryBootstrapService } from "../repositoryBootstrapService";
 import { createProjectIconReader } from "../projectIcon";
 import { ProjectCustomIconStore } from "../projectIconStore";
 import { ProviderFolderScanService } from "../providerFolderScanService";
@@ -624,6 +633,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     IntegrationsWiring,
     | "cacheStats"
     | "githubIssueContextService"
+    | "linearConnected"
     | "linearIssueContextService"
     | "onGithubPullRequestsUnreadable"
     | "terminalSessionImports"
@@ -674,6 +684,7 @@ export function wireCode(deps: CodeDependencies) {
     githubIssueContextService,
     gitObservationPort,
     isProjectPolicyTargetAllowed,
+    linearConnected,
     linearIssueContextService,
     liveTurns,
     machineChangeFeed,
@@ -920,6 +931,18 @@ export function wireCode(deps: CodeDependencies) {
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const repositoryBootstrapService = new RepositoryBootstrapService({
+      readProject: (projectId) => persistence.readProject(projectId),
+      bindingReceiptStore,
+      projectRootPort,
+      homeDir: homedir(),
+      clock: () => new Date().toISOString(),
+    });
+    const repositoryBootstrapRoutes = createRepositoryBootstrapRouteHandler({
+      service: repositoryBootstrapService,
+      windowAuthorityStore,
+      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    });
     const codeProjectAccess = new CodeProjectAccess({
       readWorkspace: (scopeId) => persistence.readWindowWorkspace(scopeId)?.workspace,
       hasActiveCodeProject: isCodeProject,
@@ -1142,6 +1165,11 @@ export function wireCode(deps: CodeDependencies) {
           pullRequests: {
             snapshot: (windowId) => projectPullRequestService.navigationSnapshot(windowId),
           },
+          touchedIssues: {
+            issuesFor: (threadId) =>
+              touchedIssuesFromHistory(codeBoardEventStore.summaryForThread(threadId)),
+            linearConnected,
+          },
         });
       // Revocation is wired at construction, before any window can hold a watch.
       onWindowRevoked((windowId) => codeService.revokeWindow?.(windowId));
@@ -1171,10 +1199,8 @@ export function wireCode(deps: CodeDependencies) {
         readonly title: string;
         readonly repository: { readonly owner: string; readonly name: string };
         readonly deliveryBranch: string;
-        readonly pullRequestNumbers: ReadonlyArray<{
-          readonly number: number;
-          readonly observedAt: string;
-        }>;
+        readonly pullRequestNumbers: ReadonlyArray<CodeThreadKnownPullRequest>;
+        readonly unlinkedPullRequests?: ReadonlyArray<CodeThreadUnlinkedPullRequest>;
       }> = [];
       for (const thread of persistence.readCodeThreads()) {
         const repository = thread.deliveryTarget.proposedBaseRepository;
@@ -1192,6 +1218,9 @@ export function wireCode(deps: CodeDependencies) {
           pullRequestNumbers: pullRequestIdentitiesFromHistory(
             codeBoardEventStore.summaryForThread(thread.id),
           ),
+          ...(thread.unlinkedPullRequests === undefined
+            ? {}
+            : { unlinkedPullRequests: thread.unlinkedPullRequests }),
         });
       }
       return facts;
@@ -1367,6 +1396,8 @@ export function wireCode(deps: CodeDependencies) {
       environmentService,
       folderBrowseRoutes,
       folderBrowseService,
+      repositoryBootstrapRoutes,
+      repositoryBootstrapService,
       isCodeProviderModelAllowed,
       // The host-owned repository scope a Code Home activity read may draw
       // from: connected repositories of Projects the window admits now.

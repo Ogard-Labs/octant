@@ -7,6 +7,7 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { forgeReferencesFromToolCall } from "@octant/provider-sdk/forge-references";
 import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS, decodeProviderModelId } from "@octant/contracts";
 import { boundedChildFinalSummary } from "@octant/provider-sdk/child-observations";
 import { summarizeStepArgument, unwrapShellInvocation } from "@octant/domain/live-turn-policy";
@@ -529,6 +530,20 @@ function mapToolCompletion(
     if (item.type === "dynamicToolCall" && item.success === false) {
       return protocolFailure("Provider returned a contradictory tool completion status.");
     }
+    // The pull requests and issues a command wrote to, read from the command
+    // and what it printed. Codex's MCP items reach this mapper without their
+    // arguments or result, so only commands can report them.
+    // A command that exited non-zero wrote nothing it can be credited with.
+    const forgeReferences =
+      command === undefined || (typeof command.exitCode === "number" && command.exitCode !== 0)
+        ? undefined
+        : forgeReferencesFromToolCall({
+            toolName: "Command",
+            command: unwrapShellInvocation(command.command),
+            ...(typeof command.aggregatedOutput === "string"
+              ? { output: command.aggregatedOutput }
+              : {}),
+          });
     return [
       ...remoteOutput,
       event(context, {
@@ -536,6 +551,7 @@ function mapToolCompletion(
         toolCallId: id,
         summary: "Tool completed.",
         ...exitCode,
+        ...(forgeReferences === undefined ? {} : { forgeReferences }),
       }),
     ];
   }

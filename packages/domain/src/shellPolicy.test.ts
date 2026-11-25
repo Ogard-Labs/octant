@@ -254,6 +254,8 @@ describe("shell settings policy", () => {
       voice: {},
       // Image generation starts with no custom OpenAI-compatible sources.
       imageGeneration: { customSources: [] },
+      // Video names no profile for Full access, so the first ready one is used.
+      videoGeneration: {},
       // The Computer-use driver waits for a person before fetching an upstream release.
       computerUse: { enabled: true, automaticUpdates: false },
       // The host has not been told who is using it, so the profile carries no
@@ -626,6 +628,31 @@ describe("workspace surface identity", () => {
         overviewSurface(ids.tabB, "Another"),
       ),
     ).toBe(true);
+  });
+
+  it("opens one pull request tab per pull request a thread worked on, apart from its own", () => {
+    const tab = (id: typeof ids.tabA, number?: number) =>
+      decodeWorkspaceTab({
+        kind: "code-pr",
+        id,
+        threadId: ids.codeThread,
+        mode: "code",
+        title: "Pull request",
+        ...(number === undefined
+          ? {}
+          : {
+              pullRequest: {
+                projectId: "00000000-0000-4000-8000-000000000001",
+                repositoryOwner: "acme",
+                repositoryName: "app",
+                number,
+              },
+            }),
+      });
+    expect(sameWorkspaceSurface(tab(ids.tabA, 7), tab(ids.tabB, 7))).toBe(true);
+    expect(sameWorkspaceSurface(tab(ids.tabA, 7), tab(ids.tabB, 8))).toBe(false);
+    expect(sameWorkspaceSurface(tab(ids.tabA), tab(ids.tabB, 7))).toBe(false);
+    expect(sameWorkspaceSurface(tab(ids.tabA), tab(ids.tabB))).toBe(true);
   });
 
   it("keeps two files of one thread distinct by path and two terminals by identity", () => {

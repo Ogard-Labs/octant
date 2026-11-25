@@ -1,4 +1,10 @@
 import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
+import { MAX_WORK_ATTACHMENT_BYTES, MAX_WORK_TURN_ATTACHMENTS } from "@octant/contracts";
+import {
+  useNewTaskComposerStash,
+  type ComposerStashSource,
+  type ComposerStashTodoSource,
+} from "../../composer/useNewTaskComposerStash";
 import { attachAllowingFiles } from "../../composer/attachmentMediaType";
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import {
@@ -72,6 +78,8 @@ import { WorkKindSwitch } from "../../shell/WorkKindSwitch";
 import { ComposerInput, type ComposerInputElement } from "../../composer/ComposerInput";
 
 export interface WorkComposerAdapterProps {
+  readonly stashSource?: ComposerStashSource;
+  readonly stashTodo?: ComposerStashTodoSource;
   /** Text to start the composer with; a new revision replaces the draft once. */
   readonly promptRequest?: { readonly text: string; readonly revision: number };
   readonly projectId?: ProjectId;
@@ -239,6 +247,30 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   // A send refused before the host saw it explains itself beside the composer,
   // since no thread exists to carry a reason.
   const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !atMenu.resolving;
+  const stash = useNewTaskComposerStash({
+    mode: "work",
+    host: props.fixedHostId ?? props.selectedHostId,
+    projectId: props.projectId,
+    prompt: prompt,
+    textarea: textareaRef,
+    setPrompt,
+    busy: props.creating === true || submitting || atMenu.resolving,
+    files: {
+      current: images.staged.map((attachment) => attachment.file),
+      change: images.replaceDraftFiles,
+      attachmentLimit: MAX_WORK_TURN_ATTACHMENTS,
+      attachmentByteLimit: MAX_WORK_ATTACHMENT_BYTES,
+      readsImages: imageSupport !== false,
+    },
+    threads: { current: threadMentions.chips, change: threadMentions.restore },
+    extensions: {
+      current: extensionDraft.stagedReceipts,
+      change: extensionDraft.restore,
+      scopeKey: extensionDraft.scopeKey,
+    },
+    source: props.stashSource,
+    todo: props.stashTodo,
+  });
 
   useEffect(() => {
     if (props.projectId !== undefined) setProjectRequired(false);
@@ -395,6 +427,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         </div>
         <div className="composer-stack">
           <ThreadComposer
+            stash={stash}
             notices={[
               ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
               ...(images.message === undefined

@@ -1510,7 +1510,7 @@ export function useChatController(options: ChatControllerOptions) {
        * turn's own text on a refusal.
        */
       sendOptions: {
-        readonly composerDraft: "consume" | "keep";
+        readonly composerDraft: "consume" | "consume-on-acceptance" | "keep";
         readonly contextInputPolicy?: ConversationInputPolicy;
         readonly draftRevision?: number;
       } = { composerDraft: "consume" },
@@ -1544,11 +1544,14 @@ export function useChatController(options: ChatControllerOptions) {
         decodeChatSubmissionId(globalThis.crypto.randomUUID());
       pendingSubmissionIds.current.set(submissionKey, submissionId);
       const consumesDraft =
-        sendOptions.composerDraft === "consume" &&
+        sendOptions.composerDraft !== "keep" &&
         (sendOptions.draftRevision === undefined ||
           composerDraftRef.current.revisionFor(sendingThreadId) === sendOptions.draftRevision);
-      const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
-      if (consumesDraft) composerDraftRef.current.clearFor(sendingThreadId);
+      const clearsBeforeSend = consumesDraft && sendOptions.composerDraft === "consume";
+      const previousDraft = clearsBeforeSend
+        ? composerDraftRef.current.readFor(sendingThreadId)
+        : undefined;
+      if (clearsBeforeSend) composerDraftRef.current.clearFor(sendingThreadId);
       const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
       const result = await execute({
         kind: "send-chat-turn",
@@ -1571,15 +1574,18 @@ export function useChatController(options: ChatControllerOptions) {
       });
       if (
         consumesDraft &&
-        result === undefined &&
         composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
       ) {
-        composerDraftRef.current.restoreFor(sendingThreadId, {
-          ...previousDraft,
-          text: prompt,
-          caretIndex: previousDraft?.caretIndex ?? prompt.length,
-          stagedDropped: previousDraft?.stagedDropped === true,
-        });
+        if (clearsBeforeSend && result === undefined) {
+          composerDraftRef.current.restoreFor(sendingThreadId, {
+            ...previousDraft,
+            text: prompt,
+            caretIndex: previousDraft?.caretIndex ?? prompt.length,
+            stagedDropped: previousDraft?.stagedDropped === true,
+          });
+        } else if (!clearsBeforeSend && result !== undefined) {
+          composerDraftRef.current.clearFor(sendingThreadId);
+        }
       }
       if (result !== undefined) pendingSubmissionIds.current.delete(submissionKey);
       return result !== undefined;
@@ -1603,11 +1609,13 @@ export function useChatController(options: ChatControllerOptions) {
     readonly draftSideChatReturnsInvalid?: boolean;
     readonly draftRevision?: number;
     readonly readDraftRevision?: (threadId: string) => number;
+    readonly restoreComposerDraft?: typeof composerDraft.restoreFor;
   } = {
     draftSideChatReturns: composerDraft.sideChatReturns,
     draftSideChatReturnsInvalid: composerDraft.sideChatReturnsInvalid,
     draftRevision: composerDraft.revisionFor(String(options.activeThreadId ?? "")),
     readDraftRevision: composerDraft.revisionFor,
+    restoreComposerDraft: composerDraft.restoreFor,
   };
   return useRetainedRecord({
     activeView: visibleActiveView,

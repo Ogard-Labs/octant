@@ -31,9 +31,10 @@ describe("packaged renderer policy", () => {
     expect(directives.get("script-src")).toBe("'self'");
     expect(directives.get("object-src")).toBe("'none'");
     expect(directives.get("base-uri")).toBe("'none'");
-    // Synthesized speech plays from a blob URL; without this the default-src
-    // fallback refuses the audio element and read-aloud fails silently.
-    expect(directives.get("media-src")).toBe("'self' blob:");
+    // Synthesized speech plays from a blob URL and thread clips stream from
+    // the loopback server; without these the default-src fallback refuses
+    // the media element.
+    expect(directives.get("media-src")).toBe("'self' blob: http://127.0.0.1:* http://localhost:*");
     // Packaged `file://` and Vite `localhost` renderers talk to a loopback
     // server that is not `'self'`. Remote clients are same-origin. IPv6
     // bracket sources are not valid host-sources and only produce console

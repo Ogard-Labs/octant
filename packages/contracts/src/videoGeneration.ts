@@ -16,7 +16,7 @@ const OptionLabel = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32));
  * `@octant/provider-sdk/video-generation`, admitted by the same activation
  * ladder as image drivers (maintainer decision, 2026-11-22).
  */
-export const VIDEO_DRIVER_KINDS = ["gemini-video"] as const;
+export const VIDEO_DRIVER_KINDS = ["gemini-video", "runway-video", "fal-video"] as const;
 export const VideoDriverKind = Schema.Literal(...VIDEO_DRIVER_KINDS);
 export type VideoDriverKind = typeof VideoDriverKind.Type;
 
@@ -223,6 +223,13 @@ export const VideoJob = Schema.Struct({
   safetyRefusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
   failure: Schema.optional(ProviderFailure),
   providerCopy: VideoProviderCopy,
+  /**
+   * What the model declared about its stored copy when the remote id was
+   * recorded, kept on the job so cleanup reads the journal, never the
+   * catalog. Jobs journaled before it was kept have none and stay on the
+   * retry loop, the safe default.
+   */
+  providerRemoval: Schema.optional(VideoJobControl.fields.removal),
   settledCostUsdMicros: Schema.optional(NonNegativeInt),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
@@ -245,6 +252,7 @@ export const VideoJobStatusChanged = Schema.Struct({
   safetyRefusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
   failure: Schema.optional(ProviderFailure),
   providerCopy: Schema.optional(VideoProviderCopy),
+  providerRemoval: Schema.optional(VideoJobControl.fields.removal),
   settledCostUsdMicros: Schema.optional(NonNegativeInt),
 }).annotations(strict);
 export type VideoJobStatusChanged = typeof VideoJobStatusChanged.Type;
@@ -346,3 +354,35 @@ export const decodeVideoJobProviderCopyChanged = Schema.decodeUnknownSync(
   VideoJobProviderCopyChanged,
 );
 export const decodeVideoClipOptions = Schema.decodeUnknownSync(VideoClipOptions);
+
+/** A thread's video jobs, newest last, as the viewer lists them. */
+export const VideoJobsResponse = Schema.Struct({ jobs: Schema.Array(VideoJob) }).annotations(
+  strict,
+);
+export type VideoJobsResponse = typeof VideoJobsResponse.Type;
+
+/**
+ * A short-lived address for one clip, so a `<video>` element, which cannot
+ * send the window's credential, can seek with byte ranges. Every request on it
+ * checks the issuing window's authority over the thread again.
+ */
+export const VideoClipTicketResponse = Schema.Struct({
+  url: Schema.String.pipe(Schema.pattern(/^\/api\/video\/clip\?ticket=[A-Za-z0-9_-]{43}$/)),
+  expiresAt: UtcTimestamp,
+}).annotations(strict);
+export type VideoClipTicketResponse = typeof VideoClipTicketResponse.Type;
+
+/**
+ * Host settings for video. `defaultProfileInstanceId` is the video profile a
+ * thread at Full access makes clips on when several are ready and its Project
+ * keeps no choice; absent, or naming one that is not ready, means the first
+ * ready profile, as for images.
+ */
+export const VideoGenerationSettings = Schema.Struct({
+  defaultProfileInstanceId: Schema.optional(ProviderInstanceId),
+}).annotations(strict);
+export type VideoGenerationSettings = typeof VideoGenerationSettings.Type;
+export const decodeVideoGenerationSettings = Schema.decodeUnknownSync(VideoGenerationSettings);
+
+export const decodeVideoJobsResponse = Schema.decodeUnknownSync(VideoJobsResponse);
+export const decodeVideoClipTicketResponse = Schema.decodeUnknownSync(VideoClipTicketResponse);

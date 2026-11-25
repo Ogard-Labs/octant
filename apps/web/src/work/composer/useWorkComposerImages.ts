@@ -62,6 +62,7 @@ export interface WorkComposerImages {
   readonly takeForSend: () => ReadonlyArray<File>;
   readonly filesForSend: () => ReadonlyArray<File>;
   readonly clearAfterAccepted: () => void;
+  readonly replaceDraftFiles: (files: ReadonlyArray<File>) => void;
   readonly consume: (files: ReadonlyArray<File>) => void;
   readonly consumePaste: (clipboard: DataTransfer | null) => boolean;
 }
@@ -238,6 +239,16 @@ export function useWorkComposerImages(): WorkComposerImages {
     return taken;
   }, [clearAfterAccepted, filesForSend]);
 
+  const replaceDraftFiles = (files: ReadonlyArray<File>) => {
+    apply((list) => {
+      for (const attachment of list) forget(attachment.previewUrl);
+      const replaced = stagePersistedFiles(files);
+      for (const attachment of replaced) previews.current.add(attachment.previewUrl);
+      return replaced;
+    });
+    setMessage(undefined);
+  };
+
   const consumePaste = useCallback(
     (clipboard: DataTransfer | null): boolean => {
       if (!clipboardHasImage(clipboard)) return false;
@@ -265,6 +276,7 @@ export function useWorkComposerImages(): WorkComposerImages {
     takeForSend,
     filesForSend,
     clearAfterAccepted,
+    replaceDraftFiles,
     consume: (files) =>
       apply((list) =>
         list.filter((entry) => {

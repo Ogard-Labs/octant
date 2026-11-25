@@ -1,35 +1,32 @@
-import {
-  SkillFolderSelection,
-  decodeExtensionCommand,
-  decodeExtensionEffectiveStateQuery,
-  decodeExtensionToolApprovalDecision,
-  decodeExtensionToolGrantRequest,
-  type ExtensionCommand,
+import type {
+  DiscoveredAgentToolingListing,
+  DiscoveredAgentToolingRequest,
+  ExtensionCommand,
   ExtensionCommandResult,
-  type ExtensionEffectiveSnapshot,
-  type ExtensionEffectiveStateQuery,
+  ExtensionEffectiveSnapshot,
+  ExtensionEffectiveStateQuery,
+  ExtensionProjectPinListing,
+  ExtensionProjectPinRequest,
   ExtensionSnapshot,
-  type ExtensionToolApprovalDecision,
+  ExtensionToolApprovalDecision,
   ExtensionToolApprovalList,
   ExtensionToolGrantList,
-  type ExtensionToolGrantRequest,
-  type UserAddedMcpServerRequest,
-  DiscoveredAgentToolingListing,
-  RuntimeCompactionDefaults,
-  type DiscoveredAgentToolingRequest,
-  McpServerSignInView,
-  McpServerSignInRelayResult,
-  type McpServerSignInRelayRequest,
-  type McpServerSignInRequest,
+  ExtensionToolGrantRequest,
   McpServerConnectionListing,
   McpServerReconnectResult,
-  ExtensionProjectPinListing,
-  type ExtensionProjectPinRequest,
+  McpServerSignInRelayRequest,
+  McpServerSignInRelayResult,
+  McpServerSignInRequest,
+  McpServerSignInView,
+  RuntimeCompactionDefaults,
+  UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 import type { RemoteSessionStanding } from "./remoteSurfaceMatrix";
+
+const loadExtensionRpc = () => import("@octant/contracts/extension-rpc");
 
 export interface ExtensionClientOptions {
   readonly baseUrl: string;
@@ -111,15 +108,15 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
       : options.session.actsAsHostPerson;
   return {
     toolGrantsAvailable,
-    resolveSkillFolder(receiptId, signal) {
-      if (!toolGrantsAvailable || !/^[A-Za-z0-9_-]{43}$/.test(receiptId))
-        return Promise.reject(
-          new ExtensionClientFailure(
-            "invalid",
-            "Choose a skill folder in the local desktop window.",
-          ),
+    async resolveSkillFolder(receiptId, signal) {
+      if (!toolGrantsAvailable || !/^[A-Za-z0-9_-]{43}$/.test(receiptId)) {
+        throw new ExtensionClientFailure(
+          "invalid",
+          "Choose a skill folder in the local desktop window.",
         );
-      return request(
+      }
+      const { SkillFolderSelection } = await loadExtensionRpc();
+      const result = await request(
         fetch,
         new URL("/api/extensions/skill-folder-selection", options.baseUrl).toString(),
         {
@@ -129,9 +126,11 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           ...(signal === undefined ? {} : { signal }),
         },
         decodeHostAnswer(SkillFolderSelection),
-      ).then((result) => result.folderPath);
+      );
+      return result.folderPath;
     },
-    snapshot() {
+    async snapshot() {
+      const { ExtensionSnapshot } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/snapshot", options.baseUrl).toString(),
@@ -140,6 +139,8 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
       );
     },
     async effectiveState(query) {
+      const { decodeExtensionEffectiveStateQuery, ExtensionCommandResult } =
+        await loadExtensionRpc();
       let validated: ExtensionEffectiveStateQuery;
       try {
         validated = decodeExtensionEffectiveStateQuery(query);
@@ -168,7 +169,8 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
       }
       return result.snapshot;
     },
-    execute(command, signal) {
+    async execute(command, signal) {
+      const { decodeExtensionCommand, ExtensionCommandResult } = await loadExtensionRpc();
       let validated: ExtensionCommand;
       try {
         validated = decodeExtensionCommand(command);
@@ -187,7 +189,8 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         decodeHostAnswer(ExtensionCommandResult),
       );
     },
-    listToolApprovals(signal) {
+    async listToolApprovals(signal) {
+      const { ExtensionToolApprovalList } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/tool-approvals", options.baseUrl).toString(),
@@ -201,6 +204,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
       );
     },
     async decideToolApproval(decision) {
+      const { decodeExtensionToolApprovalDecision } = await loadExtensionRpc();
       let validated: ExtensionToolApprovalDecision;
       try {
         validated = decodeExtensionToolApprovalDecision(decision);
@@ -228,8 +232,9 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         },
       );
     },
-    listToolGrants(signal) {
-      if (!toolGrantsAvailable) return Promise.reject(notOnThisHost());
+    async listToolGrants(signal) {
+      if (!toolGrantsAvailable) throw notOnThisHost();
+      const { ExtensionToolGrantList } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/tool-grants", options.baseUrl).toString(),
@@ -244,6 +249,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
     },
     async revokeToolGrant(grantId) {
       if (!toolGrantsAvailable) throw notOnThisHost();
+      const { decodeExtensionToolGrantRequest } = await loadExtensionRpc();
       let validated: ExtensionToolGrantRequest;
       try {
         validated = decodeExtensionToolGrantRequest({ kind: "revoke", grantId });
@@ -272,7 +278,8 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         },
       );
     },
-    projectPins(pin) {
+    async projectPins(pin) {
+      const { ExtensionProjectPinListing } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/project-pins", options.baseUrl).toString(),
@@ -284,7 +291,8 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         decodeHostAnswer(ExtensionProjectPinListing),
       );
     },
-    mcpServerConnections() {
+    async mcpServerConnections() {
+      const { McpServerConnectionListing } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/connections", options.baseUrl).toString(),
@@ -296,7 +304,8 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         decodeHostAnswer(McpServerConnectionListing),
       );
     },
-    reconnectMcpServer(target) {
+    async reconnectMcpServer(target) {
+      const { McpServerReconnectResult } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/connections", options.baseUrl).toString(),
@@ -309,6 +318,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
       );
     },
     async mcpServerSignIn(signIn) {
+      const { McpServerSignInView } = await loadExtensionRpc();
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -341,6 +351,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
       }
     },
     async relayMcpServerSignIn(relay) {
+      const { McpServerSignInRelayResult } = await loadExtensionRpc();
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -372,7 +383,8 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         if (timer !== undefined) clearTimeout(timer);
       }
     },
-    listDiscoveredTooling() {
+    async listDiscoveredTooling() {
+      const { DiscoveredAgentToolingListing } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/discovered", options.baseUrl).toString(),
@@ -384,7 +396,8 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         decodeHostAnswer(DiscoveredAgentToolingListing),
       );
     },
-    runtimeCompactionDefaults() {
+    async runtimeCompactionDefaults() {
+      const { RuntimeCompactionDefaults } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/discovered", options.baseUrl).toString(),
@@ -396,7 +409,8 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         decodeHostAnswer(RuntimeCompactionDefaults),
       );
     },
-    applyDiscoveredTooling(discovered) {
+    async applyDiscoveredTooling(discovered) {
+      const { ExtensionCommandResult } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/discovered", options.baseUrl).toString(),
@@ -408,7 +422,8 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         decodeHostAnswer(ExtensionCommandResult),
       );
     },
-    addUserMcpServer(server) {
+    async addUserMcpServer(server) {
+      const { ExtensionCommandResult } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/user-servers", options.baseUrl).toString(),
@@ -420,12 +435,11 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         decodeHostAnswer(ExtensionCommandResult),
       );
     },
-    importLocalPluginReceipt(receiptId) {
+    async importLocalPluginReceipt(receiptId) {
       if (typeof receiptId !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(receiptId)) {
-        return Promise.reject(
-          new ExtensionClientFailure("invalid", "Local plugin receipt is required."),
-        );
+        throw new ExtensionClientFailure("invalid", "Local plugin receipt is required.");
       }
+      const { ExtensionCommandResult } = await loadExtensionRpc();
       return request(
         fetch,
         new URL("/api/extensions/import-local", options.baseUrl).toString(),

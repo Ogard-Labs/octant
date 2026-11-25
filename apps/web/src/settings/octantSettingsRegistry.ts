@@ -21,7 +21,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     {
       ...octantSettingsNavigation.general,
       keywords:
-        "general enabled modes startup default chat work updates version release threads completed put away archive snooze compact compaction context window profile name email avatar gravatar initials colour color picture identity notifications notify alerts push phone waiting approval failure completion automation routines",
+        "general enabled modes startup default chat work updates version release threads completed settle settled put away archive snooze compact compaction context window profile name email avatar gravatar initials colour color picture identity notifications notify alerts push phone waiting approval failure completion automation routines",
       settings: [
         {
           id: settingId("resource-limits"),
@@ -158,16 +158,16 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("put-away-when-done"),
-          label: "Put away threads when they're done",
+          label: "Settle threads when they're done",
           scope: "host",
           keywords: "finished merged pull request settle automatically mark shelf sidebar hide",
         },
         {
           id: settingId("completed-thread-archive"),
-          label: "Archive put-away threads",
+          label: "Archive settled threads",
           scope: "host",
           keywords:
-            "put away complete completed threads archive automatically days never snooze snoozed shelf sidebar",
+            "settle settled put away complete completed threads archive automatically days never snooze snoozed shelf sidebar",
         },
         {
           id: settingId("auto-compact-octant"),
@@ -1143,7 +1143,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     {
       ...octantSettingsNavigation.voice,
       keywords:
-        "voice speech microphone dictation transcription speech to text text to speech read aloud whisper tts stt image generation image provider profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint",
+        "voice speech microphone dictation transcription speech to text text to speech read aloud whisper tts stt image generation image provider profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint video generation video clip video provider profiles gemini video",
       settings: [
         {
           id: settingId("transcription"),
@@ -1194,6 +1194,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Image profile at Full access",
           scope: "host",
           keywords: "image generation profile default full access ask card without asking",
+        },
+        {
+          id: settingId("video-profile-full-access"),
+          label: "Video profile at Full access",
+          scope: "host",
+          keywords: "video clip generation profile default full access ask card without asking",
         },
         {
           id: settingId("default-model"),
@@ -1454,6 +1460,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Linear connection",
           scope: "host",
           keywords: "connect reconnect refresh connection sign in login",
+        },
+        {
+          id: settingId("linear-projects"),
+          label: "Linear project mapping",
+          scope: "host",
+          keywords: "linear team project binding mapping scope octant_linear issues",
         },
         {
           id: settingId("linear-disconnect"),

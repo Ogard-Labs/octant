@@ -14,6 +14,8 @@ import {
   type GeminiImageProviderConfiguration,
   type GeminiImageResolution,
   type GeminiVideoProviderConfiguration,
+  type RunwayVideoProviderConfiguration,
+  type FalVideoProviderConfiguration,
   type IdeogramImageProviderConfiguration,
   type OpenAiCompatibleProtocol,
   type OpenAiCompatibleProviderConfiguration,
@@ -219,19 +221,26 @@ export function geminiImageConfigurationFrom(data: FormData): GeminiImageProvide
   };
 }
 
+/** Any video profile's configuration; each kind holds the same two fields. */
+export type VideoProviderConfiguration =
+  | GeminiVideoProviderConfiguration
+  | RunwayVideoProviderConfiguration
+  | FalVideoProviderConfiguration;
+
 /**
- * A Gemini video profile holds only its models: aspect ratio, resolution, and
- * length are chosen per clip when one is generated, not stored on the profile.
+ * A video profile holds only its models: aspect ratio, resolution, and length
+ * are chosen per clip when one is generated, not stored on the profile.
  */
-export function geminiVideoConfigurationFrom(data: FormData): GeminiVideoProviderConfiguration {
+export function videoConfigurationFrom(
+  data: FormData,
+  kind: VideoProviderConfiguration["kind"],
+): VideoProviderConfiguration {
   const modelAllowlist = parseManualModelIds(String(data.get("modelAllowlist") ?? ""));
   const enteredDefault = String(data.get("defaultModel") ?? "").trim();
-  const defaultModel = enteredDefault.length > 0 ? enteredDefault : (modelAllowlist[0] ?? "");
-  return {
-    kind: "gemini-video-http",
-    modelAllowlist,
-    defaultModel: defaultModel as GeminiVideoProviderConfiguration["defaultModel"],
-  };
+  const defaultModel = (
+    enteredDefault.length > 0 ? enteredDefault : (modelAllowlist[0] ?? "")
+  ) as VideoProviderConfiguration["defaultModel"];
+  return { kind, modelAllowlist, defaultModel };
 }
 
 export function bflImageConfigurationFrom(data: FormData): BflImageProviderConfiguration {

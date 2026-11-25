@@ -172,6 +172,8 @@ export interface StartOctantServerOptions {
     >;
   };
   readonly credentialBrokerToken?: string;
+  /** Where a thread's secret files go; a host without one delivers none. */
+  readonly threadSecretsDirectory?: string;
   readonly credentialBrokerUrl?: string;
   readonly integrationSecretVault?: IntegrationSecretVault;
   readonly linearOAuthClientId?: string;

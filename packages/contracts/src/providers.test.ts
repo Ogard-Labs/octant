@@ -22,12 +22,14 @@ import {
   decodeProviderModelOptionValues,
   decodeProviderObservedState,
   decodeProviderProbeResult,
-  decodeProviderRegistryCommand,
-  decodeProviderRegistryCommandResult,
   decodeProviderRuntimeEvent,
   decodeProviderToolAnswer,
   decodeProviderTurnInput,
 } from "./providers";
+import {
+  decodeProviderRegistryCommand,
+  decodeProviderRegistryCommandResult,
+} from "./providerCommands";
 import * as providerContracts from "./providers";
 
 const ids = {

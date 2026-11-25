@@ -171,6 +171,68 @@ describe("EnvironmentThreadPullRequests", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(10);
   });
 
+  it("offers each pull request's one next step: Resolve before Fix, Merge only when ready, none once merged", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const onOpenExternal = vi.fn();
+    render(
+      <EnvironmentThreadPullRequests
+        onOpen={onOpen}
+        onOpenExternal={onOpenExternal}
+        summaries={summaries([
+          summary(1, { checks: "failing", mergeability: "conflicting" }),
+          summary(2, { checks: "failing" }),
+          summary(3, {
+            checks: "passing",
+            review: "approved",
+            mergeability: "mergeable",
+            readyToMerge: true,
+          }),
+        ])}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Resolve pull request #1 on GitHub" }));
+    expect(onOpenExternal).toHaveBeenCalledWith("https://github.com/acme/repo/pull/1/conflicts");
+    expect(screen.queryByRole("button", { name: "Fix pull request #1 on GitHub" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Fix pull request #2 on GitHub" }));
+    expect(onOpenExternal).toHaveBeenLastCalledWith("https://github.com/acme/repo/pull/2/checks");
+
+    await user.click(screen.getByRole("button", { name: "Merge pull request #3" }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ number: 3 }));
+
+    render(
+      <EnvironmentThreadPullRequests
+        onOpen={onOpen}
+        onOpenExternal={onOpenExternal}
+        summaries={summaries([summary(4, { state: "merged", checks: "failing" })])}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /pull request #4 on GitHub$|Merge pull request #4/ }),
+    ).toBeNull();
+  });
+
+  it("offers no Merge for a pull request already in the merge queue", () => {
+    render(
+      <EnvironmentThreadPullRequests
+        onOpen={vi.fn()}
+        onOpenExternal={vi.fn()}
+        summaries={summaries([
+          summary(5, {
+            checks: "passing",
+            review: "approved",
+            mergeability: "mergeable",
+            readyToMerge: true,
+            merging: "queued",
+          }),
+        ])}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Merge pull request #5" })).toBeNull();
+  });
+
   it("keeps the row and its menu as sibling controls, never a button inside a button", () => {
     const { container } = render(
       <EnvironmentThreadPullRequests

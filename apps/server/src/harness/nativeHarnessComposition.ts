@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { activeSandboxPolicy } from "../process/sandboxRuntimePolicy";
 import {
   decodeNativeHarnessContextRemaining,
@@ -336,6 +337,32 @@ export type ServerFileTools = (level: {
   readonly fullAccess: () => boolean;
 }) => NativeHarnessFileSystemPort;
 
+/**
+ * Whether two authorities say the same. Decoding a request puts its fields in
+ * the schema's order, so their text differed while nothing had changed.
+ */
+function sameAuthority(left: ToolActionAuthority, right: ToolActionAuthority): boolean {
+  const plain = (authority: ToolActionAuthority): unknown => JSON.parse(JSON.stringify(authority));
+  return isDeepStrictEqual(plain(left), plain(right));
+}
+
+/** What an approval shows of a call. */
+const MAX_INTENT_LENGTH = 2048;
+
+/** A command the thread's own rules let through, or why they did not. */
+export type PreparedThreadCommand =
+  | { readonly status: "refused"; readonly reason: string; readonly message?: string }
+  | {
+      readonly status: "admitted";
+      readonly callId: string;
+      readonly confirmedHosts?: ToolEgressCallConfirmation;
+      readonly admitStart: () => boolean;
+      readonly finish: (input: {
+        readonly started: boolean;
+        readonly exitCode?: number;
+      }) => "recorded" | "no-change" | "unavailable" | undefined;
+    };
+
 export interface NativeHarnessComposition {
   /** Ordinary admission for a fixed Code command; does not execute it or return credentials. */
   readonly prepareCodeCommand: (input: {
@@ -344,20 +371,19 @@ export interface NativeHarnessComposition {
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: string;
     readonly command: string;
+    /** What the host adds to the command, in its own words, for whoever approves it. */
+    readonly hostNote?: string;
     readonly signal?: AbortSignal;
-  }) => Promise<
-    | { readonly status: "refused"; readonly reason: string; readonly message?: string }
-    | {
-        readonly status: "admitted";
-        readonly callId: string;
-        readonly confirmedHosts?: ToolEgressCallConfirmation;
-        readonly admitStart: () => boolean;
-        readonly finish: (input: {
-          readonly started: boolean;
-          readonly exitCode?: number;
-        }) => "recorded" | "no-change" | "unavailable" | undefined;
-      }
-  >;
+  }) => Promise<PreparedThreadCommand>;
+  /** The same for a Work thread's running turn. */
+  readonly prepareWorkCommand: (input: {
+    readonly thread: WorkThread;
+    readonly projectRoot: string;
+    readonly extraFolders?: ReadonlyArray<string>;
+    readonly command: string;
+    readonly hostNote?: string;
+    readonly signal?: AbortSignal;
+  }) => Promise<PreparedThreadCommand>;
   readonly forChat: (input: {
     readonly thread: ChatThread;
     readonly windowId: string;
@@ -1086,104 +1112,144 @@ export function createNativeHarnessComposition(
             modelId: thread.modelId,
           }),
         };
+  /** One command through the running turn's own authority, approvals, Shield and forge rules. */
+  const prepareCommand = async (input: {
+    readonly threadId: string;
+    readonly mode: "work" | "code";
+    readonly ports: ReturnType<typeof askUserFor>;
+    readonly readPosture: () => ProviderExecutionPolicy | undefined;
+    readonly command: string;
+    readonly hostNote: string | undefined;
+    readonly signal: AbortSignal | undefined;
+  }): Promise<PreparedThreadCommand> => {
+    const { threadId, mode, ports, readPosture, command, signal } = input;
+    const posture = readPosture();
+    if (posture === undefined || signal?.aborted)
+      return { status: "refused", reason: "tool-authority-stale" };
+    const intent = `bash: ${input.hostNote === undefined ? "" : `(${input.hostNote}) `}${command}`;
+    // A command given something of the person's is approved whole or not at all.
+    if (input.hostNote !== undefined && intent.length > MAX_INTENT_LENGTH)
+      return {
+        status: "refused",
+        reason: "command-too-long",
+        message: "The command is too long to show whole for approval. Put it in a script.",
+      };
+    const admission = await admitNativeHarnessTool(
+      {
+        threadId,
+        authority: options.authority.service,
+        resolveAuthority: () => options.authority.resolve(threadId, mode),
+        resolveTurnExecutionPolicy: readPosture,
+        ports,
+        uuid: options.uuid,
+      },
+      {
+        name: "bash",
+        args: { command },
+        intent: intent.slice(0, MAX_INTENT_LENGTH),
+        ...(signal === undefined ? {} : { signal }),
+      },
+    );
+    if (admission.status === "refused")
+      return {
+        status: "refused",
+        reason: admission.outcome.result.error,
+        ...(admission.outcome.result.message === undefined
+          ? {}
+          : { message: admission.outcome.result.message }),
+      };
+    const callId = String(admission.request.actionId);
+    const admitForge = () =>
+      admitNativeHarnessForgeCommand({
+        threadId,
+        command,
+        fullAccess: readPosture() === "full-access",
+        forge: options.forgeChanges,
+      });
+    const forge = admitForge();
+    if (forge.status === "refused") {
+      ports.callEnded?.(callId);
+      return { status: "refused", ...forge.refusal };
+    }
+    const confirmedHosts = confirmedCommandHosts.get(callId);
+    confirmedCommandHosts.delete(callId);
+    let finished = false;
+    let recordRan = forge.recordRan;
+    let recorded: ReturnType<typeof recordRan>;
+    return {
+      status: "admitted",
+      callId,
+      ...(confirmedHosts === undefined ? {} : { confirmedHosts }),
+      admitStart: () => {
+        if (finished || signal?.aborted || readPosture() !== posture) return false;
+        const currentAuthority = options.authority.resolve(threadId, mode);
+        if (
+          currentAuthority === undefined ||
+          !sameAuthority(currentAuthority, admission.request.authority)
+        )
+          return false;
+        const currentForge = admitForge();
+        if (currentForge.status === "refused") return false;
+        recordRan = currentForge.recordRan;
+        return true;
+      },
+      finish: ({ started, exitCode }) => {
+        if (!finished) {
+          finished = true;
+          ports.callEnded?.(callId);
+          if (started) recorded = recordRan(exitCode);
+        }
+        return recorded;
+      },
+    };
+  };
   return {
-    prepareCodeCommand: async ({
+    prepareCodeCommand: ({
       thread,
       checkoutRoot,
       extraFolders,
       windowId,
       command,
+      hostNote,
       signal,
     }) => {
       const threadId = String(thread.id);
-      const posture = options.readCodeExecutionPolicy?.(threadId, windowId);
-      if (posture === undefined || signal?.aborted)
-        return { status: "refused", reason: "tool-authority-stale" };
-      const ports = askUserFor({
-        parentThreadId: threadId,
-        mode: "code",
-        projectId: thread.projectId,
-        lead: leadOf(thread),
-        windowId,
-        boundRoot: checkoutRoot,
-        ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
-      });
-      const admission = await admitNativeHarnessTool(
-        {
-          threadId,
-          authority: options.authority.service,
-          resolveAuthority: () => options.authority.resolve(threadId, "code"),
-          resolveTurnExecutionPolicy: () => options.readCodeExecutionPolicy?.(threadId, windowId),
-          ports,
-          uuid: options.uuid,
-        },
-        {
-          name: "bash",
-          args: { command },
-          intent: `bash: ${command}`.slice(0, 2048),
-          ...(signal === undefined ? {} : { signal }),
-        },
-      );
-      if (admission.status === "refused")
-        return {
-          status: "refused",
-          reason: admission.outcome.result.error,
-          ...(admission.outcome.result.message === undefined
-            ? {}
-            : { message: admission.outcome.result.message }),
-        };
-      const callId = String(admission.request.actionId);
-      const forge = admitNativeHarnessForgeCommand({
+      return prepareCommand({
         threadId,
+        mode: "code",
+        ports: askUserFor({
+          parentThreadId: threadId,
+          mode: "code",
+          projectId: thread.projectId,
+          lead: leadOf(thread),
+          windowId,
+          boundRoot: checkoutRoot,
+          ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+        }),
+        readPosture: () => options.readCodeExecutionPolicy?.(threadId, windowId),
         command,
-        fullAccess: options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
-        forge: options.forgeChanges,
+        hostNote,
+        signal,
       });
-      if (forge.status === "refused") {
-        ports.callEnded?.(callId);
-        return { status: "refused", ...forge.refusal };
-      }
-      const confirmedHosts = confirmedCommandHosts.get(callId);
-      confirmedCommandHosts.delete(callId);
-      let finished = false;
-      let recordRan = forge.recordRan;
-      let recorded: ReturnType<typeof recordRan>;
-      return {
-        status: "admitted",
-        callId,
-        ...(confirmedHosts === undefined ? {} : { confirmedHosts }),
-        admitStart: () => {
-          if (
-            finished ||
-            signal?.aborted ||
-            options.readCodeExecutionPolicy?.(threadId, windowId) !== posture
-          )
-            return false;
-          const currentAuthority = options.authority.resolve(threadId, "code");
-          if (
-            currentAuthority === undefined ||
-            JSON.stringify(currentAuthority) !== JSON.stringify(admission.request.authority)
-          )
-            return false;
-          const currentForge = admitNativeHarnessForgeCommand({
-            threadId,
-            command,
-            fullAccess: options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
-            forge: options.forgeChanges,
-          });
-          if (currentForge.status === "refused") return false;
-          recordRan = currentForge.recordRan;
-          return true;
-        },
-        finish: ({ started, exitCode }) => {
-          if (!finished) {
-            finished = true;
-            ports.callEnded?.(callId);
-            if (started) recorded = recordRan(exitCode);
-          }
-          return recorded;
-        },
-      };
+    },
+    prepareWorkCommand: ({ thread, projectRoot, extraFolders, command, hostNote, signal }) => {
+      const threadId = String(thread.id);
+      return prepareCommand({
+        threadId,
+        mode: "work",
+        ports: askUserFor({
+          parentThreadId: threadId,
+          mode: "work",
+          projectId: thread.projectId,
+          lead: leadOf(thread),
+          boundRoot: projectRoot,
+          ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+        }),
+        readPosture: () => options.readWorkExecutionPolicy?.(threadId),
+        command,
+        hostNote,
+        signal,
+      });
     },
     forChat: ({ thread, sideChat = false }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;

@@ -20,14 +20,14 @@ import { mobileThreadShelf } from "./threadArrangement";
 
 const REFUSAL: Readonly<Record<string, string>> = {
   archived: "This thread is archived.",
-  executing: "A turn is running. Put it away when it finishes.",
+  executing: "A turn is running. Settle it when it finishes.",
   "awaiting-input": "The agent is waiting on you. Answer it first.",
   "wake-time-not-in-future": "Pick a later time.",
 };
 
 /**
  * A thread row's actions on the phone: the desktop row menu's Snooze, Wake,
- * Put away, Reopen, and (Code only) Pin. Each option the host would refuse is
+ * Settle, Un-settle, and (Code only) Pin. Each option the host would refuse is
  * shown with the reason instead of being offered.
  */
 export function ThreadRowActionsSheet(props: {
@@ -131,7 +131,7 @@ export function ThreadRowActionsSheet(props: {
           {shelf === "completed" ? (
             <ListRow
               icon="arrow-undo-outline"
-              label="Reopen"
+              label="Un-settle"
               last={row?.mode !== "code"}
               onPress={busy ? undefined : () => void run({ kind: "reopen" })}
               testID="mobile-thread-action-reopen"
@@ -140,14 +140,14 @@ export function ThreadRowActionsSheet(props: {
             <ListRow
               detail={REFUSAL[complete.reason]}
               icon="checkmark-done-outline"
-              label="Put away"
+              label="Settle"
               last={row?.mode !== "code"}
               testID="mobile-thread-action-put-away"
             />
           ) : (
             <ListRow
               icon="checkmark-done-outline"
-              label="Put away"
+              label="Settle"
               last={row?.mode !== "code"}
               onPress={busy ? undefined : () => void run({ kind: "put-away" })}
               testID="mobile-thread-action-put-away"

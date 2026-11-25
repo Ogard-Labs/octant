@@ -45,25 +45,39 @@ export function RoutineEventFields(props: {
           </p>
         ) : null}
       </div>
-      {selected?.fields.map((field) => (
-        <div className="automation-editor__field" key={field.id}>
-          <label htmlFor={`${id}-${field.id}`}>{field.label}</label>
-          <OctantInput
-            id={`${id}-${field.id}`}
-            value={props.trigger.eventFilters[field.id] ?? ""}
-            required={field.required}
-            maxLength={256}
-            placeholder={field.placeholder}
-            onChange={(event) => {
-              const value = event.target.value;
-              props.onChange((previous) => ({
-                ...previous,
-                eventFilters: { ...previous.eventFilters, [field.id]: value },
-              }));
-            }}
-          />
-        </div>
-      ))}
+      {selected?.fields.map((field) => {
+        const listId =
+          field.options !== undefined && field.options.length > 0
+            ? `${id}-${field.id}-options`
+            : undefined;
+        return (
+          <div className="automation-editor__field" key={field.id}>
+            <label htmlFor={`${id}-${field.id}`}>{field.label}</label>
+            <OctantInput
+              id={`${id}-${field.id}`}
+              {...(listId === undefined ? {} : { list: listId })}
+              value={props.trigger.eventFilters[field.id] ?? ""}
+              required={field.required}
+              maxLength={256}
+              placeholder={field.placeholder}
+              onChange={(event) => {
+                const value = event.target.value;
+                props.onChange((previous) => ({
+                  ...previous,
+                  eventFilters: { ...previous.eventFilters, [field.id]: value },
+                }));
+              }}
+            />
+            {listId === undefined || field.options === undefined ? null : (
+              <datalist id={listId}>
+                {field.options.map((option) => (
+                  <option key={option.value} label={option.label} value={option.value} />
+                ))}
+              </datalist>
+            )}
+          </div>
+        );
+      })}
       <div className="automation-editor__field">
         <label htmlFor={`${id}-poll`}>Check every (minutes)</label>
         <OctantInput

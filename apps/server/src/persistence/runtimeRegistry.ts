@@ -111,6 +111,7 @@ import {
   ProjectImageGenerationChoiceChanged,
   ProjectBrandKitChanged,
   ProjectDesignSystemChanged,
+  ProjectLinearTargetChanged,
   WorkProjectDeveloperToolsChanged,
   WorkProjectActionsChanged,
   WorkProjectPermissionModeChanged,
@@ -427,6 +428,12 @@ import { HostOAuthJournalRecord } from "@octant/contracts/host-oauth";
 import { ProviderKeyJournalRecord } from "@octant/contracts/provider-key-journal";
 import { SecretStoreJournalRecord } from "@octant/contracts/secret-stores";
 import {
+  THREAD_SECRET_EVENT_NAME,
+  THREAD_SECRET_MEMORY_EVENT_NAME,
+  ThreadSecretJournalRecord,
+  ThreadSecretMemoryRecord,
+} from "@octant/contracts/thread-secrets";
+import {
   REMOTE_ACCESS_EVENT_NAMES,
   DeviceAccessLevelChangedV1,
   RemoteAccessPauseChangedV1,
@@ -676,6 +683,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.image-generation-choice-changed@1", 1, ProjectImageGenerationChoiceChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.design-system-changed@1", 1, ProjectDesignSystemChanged)
+    .register("project.linear-target-changed@1", 1, ProjectLinearTargetChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
     .register("project.extra-folder-added@1", 1, ProjectExtraFolderAdded)
     .register("project.extra-folder-removed@1", 1, ProjectExtraFolderRemoved)
@@ -703,6 +711,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("pending-question.deferred@1", 1, PendingQuestionDeferral)
     .register("decision-review.recorded@1", 1, DecisionReviewRecorded)
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
+    .register(THREAD_SECRET_EVENT_NAME, 1, ThreadSecretJournalRecord)
+    .register(THREAD_SECRET_MEMORY_EVENT_NAME, 1, ThreadSecretMemoryRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
     .register(NATIVE_SESSION_HISTORY_IMPORTED_EVENT, 1, NativeSessionHistoryImported)

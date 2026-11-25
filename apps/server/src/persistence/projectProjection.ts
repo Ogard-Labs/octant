@@ -30,6 +30,7 @@ import {
   decodeProjectImageGenerationChoiceChanged,
   decodeProjectBrandKitChanged,
   decodeProjectDesignSystemChanged,
+  decodeProjectLinearTargetChanged,
   decodeWorkProjectDeveloperToolsChanged,
   decodeWorkProjectActionsChanged,
   decodeWorkProjectPermissionModeChanged,
@@ -223,6 +224,8 @@ const projectDecoders = {
     decodeProjectBrandKitChanged(payload).project,
   "project.design-system-changed@1": (payload: unknown) =>
     decodeProjectDesignSystemChanged(payload).project,
+  "project.linear-target-changed@1": (payload: unknown) =>
+    decodeProjectLinearTargetChanged(payload).project,
   "project.extra-folder-added@1": (payload: unknown) =>
     decodeProjectExtraFolderAdded(payload).project,
   "project.extra-folder-removed@1": (payload: unknown) =>

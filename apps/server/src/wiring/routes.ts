@@ -36,6 +36,7 @@ export type RoutesDependencies = {
   /** The remote wiring's routes a paired device reaches; answers nothing until that wiring binds them. */
   readonly pairedDeviceRoutes: (request: Request) => Promise<Response | undefined>;
   readonly credentialRequestRoutes: (request: Request) => Promise<Response | undefined>;
+  readonly threadSecretRoutes: (request: Request) => Promise<Response | undefined>;
   readonly providerCloudSessionRoutes: (request: Request) => Promise<Response | undefined>;
 } & Pick<ServerStart, "latencyStats" | "persistence"> &
   Pick<AgentRunsWiring, "agentRunRouteDependencies" | "agentRunSettingsRoutes"> &
@@ -69,6 +70,7 @@ export type RoutesDependencies = {
     | "diskCleanupRoutes"
     | "codeProjectAccess"
     | "folderBrowseRoutes"
+    | "repositoryBootstrapRoutes"
     | "projectRoutes"
   > &
   Pick<
@@ -137,6 +139,7 @@ export type RoutesDependencies = {
   Pick<
     WorkFilesWiring,
     | "imageRoutes"
+    | "videoRoutes"
     | "serviceOfferRoutes"
     | "previewHandoffBridgeRoutes"
     | "previewRoutes"
@@ -186,6 +189,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     pairedDeviceRoutes,
     conversationInputRoutes,
     credentialRequestRoutes,
+    threadSecretRoutes,
     providerCloudSessionRoutes,
     agentMessageRoutes,
     agentProfileRoutes,
@@ -221,12 +225,14 @@ export function wireRoutes(deps: RoutesDependencies) {
     fileMentionRoutes,
     fleetActivityRoutes,
     folderBrowseRoutes,
+    repositoryBootstrapRoutes,
     followUpSuggestionRoutes,
     githubCloneRoutes,
     githubRoutes,
     goalLoopRoutes,
     goalRoutes,
     imageRoutes,
+    videoRoutes,
     serviceOfferRoutes,
     integrationRoutes,
     latencyStats,
@@ -341,9 +347,11 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await githubRoutes(request)) ??
     (await integrationRoutes(request)) ??
     (await credentialRequestRoutes(request)) ??
+    (await threadSecretRoutes(request)) ??
     (await githubCloneRoutes(request)) ??
     (await agentProfileRoutes(request)) ??
     (await folderBrowseRoutes(request)) ??
+    (await repositoryBootstrapRoutes(request)) ??
     (await linkedThreadRoutes(request)) ??
     (await codeOperationApprovalRoutes(request)) ??
     (await codeCheckoutOpenRoutes(request)) ??
@@ -377,6 +385,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await canvasRoutes(request)) ??
     (await serviceOfferRoutes(request)) ??
     (await imageRoutes(request)) ??
+    (await videoRoutes(request)) ??
     (await providerCloudSessionRoutes(request)) ??
     (await speechRoutes(request)) ??
     (await replyDetailRoutes(request)) ??

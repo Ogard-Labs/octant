@@ -347,8 +347,20 @@ Octant](provider-runtimes.md#sessions-started-outside-octant)).
 ## Linear issues
 
 Browse goes through the Integration port operations `list-issues`, `get-issue`,
-and `list-issue-filters` over Linear GraphQL. Create from a Linear issue frames
-redacted issue text through the same `externalContentFraming.ts` and appends
+`get-issue-by-identifier`, and `list-issue-filters` over Linear GraphQL.
+Inline tracker-key chips resolve public identifiers (`TEAM-123`) through
+`get-issue-by-identifier` rather than scanning a multi-row search page. Create
+from a Linear issue frames redacted issue text through the same
+`externalContentFraming.ts` and appends `thread.external-content-ingested@1`.
+
+Work and Code Projects may bind a Linear team (and optional Linear project) via
+the host-person `change-project-linear-target` command, journaled as
+`project.linear-target-changed@1`. For a Code Project with a binding and an
+effective Linear integration, Code agents are offered read-only `octant_linear`
+(`list`, `get`, `search`, `help`) pinned server-side to that team and optional
+Linear project. Every call rechecks thread authority, profile allowlists, and
+live Linear readiness, withholds issues outside the bound scope identically to
+missing issues, redacts secret shapes before returning text, and records
 `thread.external-content-ingested@1`.
 
 The behavior rules for both integrations are in

@@ -44,8 +44,12 @@ const CODE_OUTCOMES = {
   "bfl-image": "unavailable",
   "ideogram-image": "unavailable",
   "gemini-video": "unavailable",
+  "runway-video": "unavailable",
+  "fal-video": "unavailable",
   // Nothing admits an outside driver package yet, so no outside instance runs a turn.
   "outside-harness-endpoint": "unavailable",
+  // An outside image driver generates images; it runs no turn.
+  "outside-image": "unavailable",
   // An added agent claims nothing a conformance run would show: what it can do
   // is what its own `initialize` reports when the person runs it.
   "acp-agent": "unavailable",
@@ -53,7 +57,7 @@ const CODE_OUTCOMES = {
 
 describe("Code provider matrix", () => {
   it("classifies every declared provider kind with conformance or explicit unavailability", () => {
-    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(30);
+    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(33);
     for (const [providerKind, outcome] of Object.entries(CODE_OUTCOMES) as Array<
       [ProviderDriverKind, CodeOutcome]
     >) {
@@ -65,7 +69,10 @@ describe("Code provider matrix", () => {
           "bfl-image",
           "ideogram-image",
           "gemini-video",
+          "runway-video",
+          "fal-video",
           "outside-harness-endpoint",
+          "outside-image",
           "acp-agent",
         ]).toContain(providerKind);
         continue;

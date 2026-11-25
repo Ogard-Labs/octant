@@ -14,7 +14,7 @@ import {
   TICKET_ID,
 } from "../../../../packages/client-runtime/src/remoteConnectionFixtures";
 
-export { ORIGIN };
+export { HOST_ID, ORIGIN };
 
 async function pemFromPublicKey(publicKey: CryptoKey): Promise<string> {
   const spki = await crypto.subtle.exportKey("spki", publicKey);
@@ -31,11 +31,37 @@ async function pemFromPublicKey(publicKey: CryptoKey): Promise<string> {
  */
 export async function readyPairedBridge(
   sent: URL[],
-  options: { readonly actsAsHostPerson?: boolean } = {},
+  options: {
+    readonly actsAsHostPerson?: boolean;
+    readonly wrapFetch?: (fetch: typeof globalThis.fetch) => typeof globalThis.fetch;
+  } = {},
 ): Promise<RemoteSessionBridge> {
   const server = createFakeRemoteServer({
-    handleProductRequest: () =>
-      new Response("", { headers: { "content-type": "application/x-ndjson" } }),
+    handleProductRequest: ({ method, path, headers }) => {
+      if (path === "/api/video/jobs") return Response.json({ jobs: [] });
+      if (path === "/api/video/clip") {
+        if (method === "POST") {
+          return Response.json({
+            url: `/api/video/clip?ticket=${"a".repeat(43)}`,
+            expiresAt: "2026-11-26T12:00:00.000Z",
+          });
+        }
+        if (headers.get("range") === "bytes=0-") {
+          return new Response(new Uint8Array([1, 2]), {
+            status: 206,
+            headers: { "content-range": "bytes 0-1/3" },
+          });
+        }
+        if (headers.get("range") === "bytes=2-") {
+          return new Response(new Uint8Array([3]), {
+            status: 206,
+            headers: { "content-range": "bytes 2-2/3" },
+          });
+        }
+        return Response.json({ error: "Expected a byte range." }, { status: 400 });
+      }
+      return new Response("", { headers: { "content-type": "application/x-ndjson" } });
+    },
     ...(options.actsAsHostPerson === undefined
       ? {}
       : { actsAsHostPerson: options.actsAsHostPerson }),
@@ -50,10 +76,11 @@ export async function readyPairedBridge(
   server.registerDevice({ deviceId, publicKeyPem: pem, fingerprint: fingerprintFromPem(pem) });
   const hostId = decodeStableHostId(HOST_ID);
   const deviceKeyId = await store.set(keyPair, { origin: ORIGIN, hostId, deviceId });
+  const fetch = options.wrapFetch?.(server.fetch) ?? server.fetch;
   const bridge = createRemoteSessionBridge({
     fetch: (input, init) => {
       sent.push(new URL(input instanceof Request ? input.url : String(input)));
-      return server.fetch(input, init);
+      return fetch(input, init);
     },
     deviceKeyStore: store,
   });

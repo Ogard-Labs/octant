@@ -2,7 +2,7 @@ import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { ProjectMark } from "../projects/ProjectMark";
 import type { ReactNode } from "react";
 import { useContext, useMemo } from "react";
-import type { WorkspaceContentTabs } from "./workspaceContentTabs";
+import { isThreadPullRequestTab, type WorkspaceContentTabs } from "./workspaceContentTabs";
 import { WorkspaceContentViewContext } from "./WorkspaceContentView";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
 import type {
@@ -524,7 +524,8 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
   const showTabs =
     navigation.length > 1 ||
     localViews.length > 0 ||
-    ["code-file", "preview", "canvas"].includes(surface.kind);
+    ["code-file", "preview", "canvas"].includes(surface.kind) ||
+    isThreadPullRequestTab(surface);
   const active = String(props.activePaneId) === String(pane.paneId);
   const focused = String(props.focusedPaneId) === String(pane.paneId);
   const canSplit = canSplitPane(props.layout, pane.paneId, props.totalWorkspacePaneCount);

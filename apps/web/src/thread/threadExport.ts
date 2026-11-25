@@ -1,6 +1,7 @@
 import type { ThreadExportClient } from "@octant/client-runtime/thread-export-client";
 import { createThreadExportClient } from "@octant/client-runtime/thread-export-client";
 import type { OctantMode } from "@octant/contracts/modes";
+import type { ThreadVideoArchiveDownload } from "@octant/contracts/thread-export";
 import { serializeThreadExportBundle } from "@octant/domain";
 
 /**
@@ -33,11 +34,13 @@ export function resolveThreadExportClient(input: {
  * from a local cache.
  */
 export async function exportThreadBundle(
-  client: Pick<ThreadExportClient, "exportThread">,
+  client: Pick<ThreadExportClient, "exportThread" | "offerArchive">,
   input: { readonly mode: OctantMode; readonly threadId: string; readonly title: string },
-): Promise<string> {
+): Promise<string | ThreadVideoArchiveDownload> {
   try {
-    const outcome = await client.exportThread({ mode: input.mode, threadId: input.threadId });
+    const request = { mode: input.mode, threadId: input.threadId };
+    const outcome = (await client.offerArchive?.(request)) ?? (await client.exportThread(request));
+    if (outcome.kind === "archive-ready") return outcome;
     if (outcome.kind !== "exported") return "This thread could not be exported.";
     const fileName = `${exportFileSlug(input.title)}.octant-thread.json`;
     const saved = saveJson(serializeThreadExportBundle(outcome.bundle), fileName);

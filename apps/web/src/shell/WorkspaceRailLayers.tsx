@@ -197,6 +197,8 @@ export interface WorkspaceRailLayersProps {
   readonly onStartThread?: () => void;
   /** The current Project's one GitHub remote, which the Issues page opens on. */
   readonly projectRepository?: { readonly owner: string; readonly name: string };
+  /** The current Project's bound Linear team/project, which Linear browser opens on. */
+  readonly projectLinearTarget?: import("@octant/contracts").ProjectLinearTarget;
 }
 
 export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
@@ -278,6 +280,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               listIssueFilters={() => props.linearClient.listIssueFilters()}
               listIssues={(input) => props.linearClient.listIssues(input)}
               onClose={props.onCloseLinearIssues}
+              {...(props.projectLinearTarget === undefined
+                ? {}
+                : { defaultLinearTarget: props.projectLinearTarget })}
             />
           </LazyRailSurface>
         </div>

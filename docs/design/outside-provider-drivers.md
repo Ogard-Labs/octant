@@ -51,6 +51,11 @@ re-export, the serve helper, the out-of-process conformance kit, and an
 example loopback driver package that passes the kit and the host proxy's
 conformance in CI (see [Author kit rules](#author-kit-rules)); nothing is
 published to a registry ([decision 8](#maintainer-decisions)).
+Outside image generation drivers are built (maintainer approval, 2026-11-22):
+a package can declare an `outside-image` driver that speaks
+`image-generation/1`, and its profile runs through the host's own image job
+service (see [Outside media generation drivers](#outside-media-generation-drivers)).
+Outside video drivers are designed there and wait on the video seam.
 The maintainer authorized this scope on 2026-10-26, brought it into the first
 preview on 2026-11-06, and accepted the [maintainer decisions](#maintainer-decisions)
 below on 2026-10-26. Slices and their evidence are tracked in Linear; this
@@ -63,12 +68,13 @@ trust it, enable it, and add a provider from it, as separate actions, and use
 its models in Chat, Work, and Code without an Octant release. The driver runs in
 its own OS-confined process with no network, no filesystem beyond its package,
 and no credential: it translates between Octant's harness and one model
-service's wire protocol, and the host does everything else.
+service's wire protocol, and the host does everything else. The same holds
+for a driver that generates images: the person adds an image profile from it,
+and Octant's image tools use it exactly as they use a bundled image driver.
 
 ## First use case: an outside harness endpoint
 
-The first and, under this design, only admitted outside driver shape is a
-**harness endpoint**: a driver that supplies only a transport through the
+The first admitted outside driver shape is a **harness endpoint**: a driver that supplies only a transport through the
 provider-sdk harness endpoint port (`@octant/provider-sdk/harness-endpoint`,
 `packages/provider-sdk/src/harnessEndpoint.ts`). The concrete case is a model
 service whose native wire protocol is neither OpenAI- nor Anthropic-compatible,
@@ -96,6 +102,125 @@ Why this shape first:
 - **Its conformance kit exists.** `runHarnessEndpointConformance`
   (`packages/provider-sdk/src/harnessEndpointConformance.ts`) already states the
   properties the host relies on.
+
+## Outside media generation drivers
+
+A package can provide an image generator instead of a harness endpoint. It
+goes through the same steps (inspect, install, trust, enable, add a profile),
+the same confined process, the same brokered `http/request` to the configured
+origin with the key the host leases, and the same closed failures. Everything
+a person sees and pays for stays in the host's image job service, as for the
+bundled image drivers: the card, the price, the spend reservation and its
+settlement, storage of the image, and the restart rule that fails a job found
+running rather than calling the provider again.
+
+Rules, each taking the fail-closed option:
+
+- **Identity.** The family is the reserved driver kind `outside-image`, with
+  its own instance arm (`OutsideImageProviderConfiguration`: the driver
+  reference, the address, the key placement, the listed models and the
+  default model). It joins the closed kind set as the harness family did, so
+  the exhaustive checks stay closed.
+- **Declaration.** The driver document's `driverKind` is `outside-image`, every
+  protocol version is `image-generation/<major>`, and the one
+  `provider-driver` component carries `mediaGeneration`: `media: "image"` and
+  one to 64 models, each with an optional published price per image in whole
+  micro-dollars (at most 100 US dollars). Kind, protocols and declaration that
+  disagree are refused as `media-declaration-mismatch`; a price that is not a
+  positive whole number within the cap, or a model declared twice, is refused
+  as `entry-invalid`. The declaration is manifest data, so the digest the
+  person trusts covers it and a signature signs it.
+- **Price.** The host reads a model's price only from the declaration, at the
+  exact digest the profile binds, and freezes it with the job at enqueue; it
+  reserves price × variants before dispatch and settles from the images
+  returned, never more than the reservation. A model declared without a price
+  is unpriced, so an active spend limit refuses it before anything is sent.
+  Nothing a running driver says is a price.
+  When the provider answers a brokered request owned by a job and that job
+  fails without usable images, the host records an unreported usage row for
+  that job. Other jobs on the same driver process keep their own evidence.
+  _Rationale:_ a driver that named its own price at run time could reserve
+  nothing and bill anything; the declaration is reviewed, digest-bound and
+  signed, as bundled drivers' checked-in rates are.
+- **A queued job.** A job carries the driver digest and price it was
+  reserved at. Before it starts, a profile turned off, a driver no longer
+  admitted, a newly trusted digest, or a model the package no longer declares
+  ends it unstarted and releases its reservation; a crash-limit hold
+  journaled at the digest holds across a restart.
+- **Admission.** An image profile's driver is effective on the same ladder as
+  a harness endpoint, and its component must still declare image generation
+  at that digest, so neither family can run the other's package. A profile
+  whose driver is not effective is not offered by the image tools, the
+  composer or the offer card, and a job for it is refused before anything is
+  reserved or any process starts. Every listed model must be one the package
+  declares.
+- **The protocol.** `image-generation/1` shares the framing, `initialize`,
+  failures and the brokered `http/*` calls with `harness-endpoint/1`, and adds
+  `image/generate` (model, prompt, variant count, reference images as bytes,
+  and the frozen options), the `image/cancel` notification, and the driver's
+  `image/chunk` notification, which streams one image's base64 bytes in
+  pieces of at most a million characters when the whole answer would not fit
+  one line (the answer then names that image `chunked`). A driver's
+  `http/request` may name the `image/generate` it serves, and the host closes
+  those calls on cancel or deadline as it does for a send. The answer is
+  `completed` with one to 16 images, or `refused` with no text.
+- **What the host checks.** At most the requested number of images, or the
+  job fails as `protocol` and stores none; every image's bytes are sniffed by
+  the host and a media type the driver names that the bytes do not bear out
+  fails the job; an image given as an address is fetched by the host, once,
+  without the key, over HTTPS to a name that resolves only to public
+  addresses, or the configured origin, and only when that exact address (JSON
+  escapes undone) appeared whole in a response the host relayed for this job.
+  The download connects to the very answer it checked, through the shared
+  image downloader's pinned lookup, so a name that answers public for the
+  check and private a moment later is refused (maintainer decision,
+  2026-11-22; [Architecture](../architecture.md) image generation).
+  The streamed bytes of one image are capped at the host's image size bound. A safety refusal is Octant's sentence. A
+  crash, a deadline (ten minutes) or an unreadable message ends the job with
+  the closed reason, and a failed job charges nothing.
+- **Process.** An image profile's process starts at its first job, never at
+  host start or when the profile is turned on, and is stopped by the same
+  disable, uninstall, rollback and withdrawn-trust rules; the crash limit and
+  its journaled hold apply.
+- **Not yet.** A request body is UTF-8 text, as for harness endpoints, so a
+  provider that takes only a multipart upload needs a protocol addition, and
+  combined reference images for an outside image job are capped at 2.5 MiB so
+  they fit inside the 4 MiB brokered `http/request` line limit until a
+  streamed upload path exists.
+  Changing an outside image profile's address or models is a command the host
+  takes; its Settings form is not built yet (remove and add the profile).
+
+**Video.** An outside video driver follows the same shape on the
+provider-neutral video seam (`@octant/provider-sdk/video-generation`), once
+that seam and its job service exist on `main`. Designed, not built:
+
+- **Identity.** One reserved family, `outside-video`, added to the seam's
+  closed `VideoDriverKind` set as `outside-image` joins the provider kinds.
+- **Declaration.** The component's `mediaGeneration` takes `media: "video"`
+  with one to 64 `VideoModelCapabilities` entries, exactly the seam's schema
+  (durations, resolutions, aspect ratios, audio, inputs, `VideoPrice`, and
+  `VideoJobControl`). The host's adapter answers `models()` from this
+  declaration alone, so prices, cancel and removal facts are reviewed,
+  digest-bound data; a running driver cannot change them, and a model whose
+  price is `unpublished` is refused while a spend limit is set.
+- **Protocol `video-generation/1`.** After `initialize`, the host sends
+  `video/start` (model, prompt, the frozen clip options, first frame, last
+  frame and reference images as bytes), `video/poll`, `video/cancel` (only
+  for a model that declares it can cancel) and `video/forget` (only for one
+  that declares `removal: delete`), each naming the remote id the start
+  returned. Results mirror `VideoAdapterStart`, `VideoAdapterPoll` and
+  `VideoAdapterForget` with no free text; usage is read only as the counts
+  the seam names, never as a price.
+- **The clip.** A clip can reach the seam's 1 GB bound, far past a channel
+  line, so a completed poll names the clip by address only. The host fetches
+  it with the seam's approved-URL fetch, once, without the key, and only when
+  that exact address appeared in a response it relayed for this job, then
+  checks it with the seam's MP4 sniffing.
+- **What stays the host's.** The poll interval, the job time, the reservation
+  and settlement, storage, restart recovery (resuming a remote id within the
+  declared window) and the forget retries are the seam's job service, as for
+  the bundled video drivers; a driver process that stops mid-job ends the
+  poll with a closed reason, and the job service decides what follows.
 
 ## What exists today
 
@@ -1150,6 +1275,8 @@ put a package in front of the person. Controls marked new are this design's;
 | Exhausts the host (floods, hangs, crash loops)                   | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                                 |
 | An agent, mention, routine, or hub device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from the host's own person, at a window or a device they paired; references stay inert; held until trusted |
 | Impersonates a bundled provider                                  | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                                 |
+| An image driver names its own price, or bills past it            | New, built: prices only from the trusted, digest-bound declaration; reserved before dispatch, never settled above it; unpriced models refused under a spend limit                  |
+| An image driver points the host at an address to fetch           | New, built: fetched only when the provider's relayed answer named it, over HTTPS or the configured origin, without the key, then sniffed by the host                               |
 
 Residual risk: the configured endpoint receives what the person sends it, as
 for any endpoint; a trusted driver can mistranslate (send a different model id,
@@ -1183,6 +1310,12 @@ alternatives considered and the reason for the choice follow it.
    ACP profiles over the host's ACP stack, and managed processes. Both launch
    agent CLIs with filesystem and shell reach and need their own confinement
    design.
+   Revised (maintainer approval, 2026-11-22): media generation drivers are
+   admitted too, on the same terms; image generation is built and video
+   follows the video seam ([Outside media generation drivers](#outside-media-generation-drivers)).
+   Like a harness endpoint, a media driver launches nothing and holds no
+   authority: it translates one service's wire protocol, and the host makes
+   every call, holds the key, and owns the price and spend.
 2. **Egress.** Only the configured base URL origin, for the first release.
    Deferred: fixed hosts the manifest declares, shown in review; considered only
    with a concrete driver that needs them.

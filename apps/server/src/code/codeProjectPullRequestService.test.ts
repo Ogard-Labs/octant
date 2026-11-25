@@ -106,6 +106,7 @@ function serviceFixture(options: {
   readonly knownPullRequests?: ReadonlyArray<{
     readonly number: number;
     readonly observedAt: string;
+    readonly repository?: { readonly owner: string; readonly name: string };
   }>;
   readonly observeIssueClosure?: (
     request: {
@@ -880,7 +881,7 @@ describe("CodeProjectPullRequestService", () => {
         },
       }),
     });
-    expect(service.mergedPullRequestsForThread(String(threadId))).toEqual([]);
+    expect(service.mergedPullRequestsForThread(String(threadId), () => true)).toEqual([]);
 
     await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
 
@@ -888,12 +889,17 @@ describe("CodeProjectPullRequestService", () => {
       expect.objectContaining({ number: 11 }),
       expect.any(AbortSignal),
     );
-    expect(service.mergedPullRequestsForThread(String(threadId))).toEqual([
+    expect(service.mergedPullRequestsForThread(String(threadId), () => true)).toEqual([
       { baseRepository: "octant/octant", number: 11 },
     ]);
-    expect(service.mergedPullRequestsForThread("20000000-0000-4000-8000-0000000000ff")).toEqual([]);
+    expect(
+      service.mergedPullRequestsForThread("20000000-0000-4000-8000-0000000000ff", () => true),
+    ).toEqual([]);
+    // A merged pull request the thread is linked to but did not deliver (one
+    // its tool calls only commented on) is left out by the caller's test.
+    expect(service.mergedPullRequestsForThread(String(threadId), () => false)).toEqual([]);
     service.revokeGithub();
-    expect(service.mergedPullRequestsForThread(String(threadId))).toEqual([]);
+    expect(service.mergedPullRequestsForThread(String(threadId), () => true)).toEqual([]);
   });
 
   it("reuses one board join for sidebar navigation reads until it ages out or a refresh replaces it", async () => {
@@ -936,6 +942,84 @@ describe("CodeProjectPullRequestService", () => {
       rows: [],
       githubRevoked: true,
     });
+  });
+
+  it("leaves a thread off a pull request a person unlinked, even on rows cached before the unlink", async () => {
+    const unlinkedPullRequests: Array<{
+      owner: string;
+      repository: string;
+      number: number;
+      unlinkedAt: string;
+    }> = [];
+    const { service } = serviceFixture({
+      threads: [
+        {
+          threadId: String(threadId),
+          projectId: String(projectA),
+          title: "Manual refresh",
+          repository: { owner: "octant", name: "octant" },
+          deliveryBranch: "feature/manual-refresh",
+          pullRequestNumbers: [],
+          unlinkedPullRequests,
+        },
+      ],
+    });
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const before = await service.boardSnapshot(windowId);
+    expect(before.rows.find((row) => row.number === 12)?.linkedThreads).toEqual([
+      { threadId, title: "Manual refresh" },
+    ]);
+
+    unlinkedPullRequests.push({
+      owner: "octant",
+      repository: "octant",
+      number: 12,
+      unlinkedAt: "2999-01-01T00:00:00Z",
+    });
+    const after = await service.boardSnapshot(windowId);
+    expect(after.rows.find((row) => row.number === 12)?.linkedThreads ?? []).toEqual([]);
+  });
+
+  it("links a thread to the pull request a tool call wrote to, and never to one outside the Project", async () => {
+    const { service } = serviceFixture({
+      knownPullRequests: [
+        {
+          number: 7,
+          observedAt: "2026-08-21T08:00:00Z",
+          repository: { owner: "OCTANT", name: "Octant" },
+        },
+        {
+          number: 9,
+          observedAt: "2026-08-21T09:00:00Z",
+          repository: { owner: "someone-else", name: "private" },
+        },
+      ],
+      detail: async (request) =>
+        request.number === 7
+          ? {
+              ...observedDetail,
+              pullRequest: {
+                ...observedDetail.pullRequest,
+                number: 7,
+                url: "https://github.com/octant/octant/pull/7",
+                title: "Merged by a tool call",
+                state: "merged",
+                mergeability: "unknown",
+                headBranch: "feature/elsewhere",
+                updatedAt: "2026-08-22T06:30:00Z",
+              },
+            }
+          : { status: "unavailable" },
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const board = await service.boardSnapshot(windowId);
+
+    expect(board.rows.map((row) => row.number).sort((a, b) => a - b)).toEqual([7, 12]);
+    expect(board.rows.find((row) => row.number === 7)?.linkedThreads).toEqual([
+      { threadId, title: "Manual refresh" },
+    ]);
+    expect(JSON.stringify(board.rows)).not.toContain("someone-else");
   });
 
   it("keeps another window's linked pull-request pairs when a window with disjoint thread visibility refreshes", async () => {

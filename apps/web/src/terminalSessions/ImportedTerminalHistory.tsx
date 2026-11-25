@@ -6,7 +6,7 @@ import {
 } from "@octant/client-runtime/terminal-session-client";
 import type { ImportedTerminalSession } from "@octant/contracts";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
-import { TERMINAL_SESSION_TOOL_NAMES } from "./CreateFromTerminalSessionPicker";
+import { TERMINAL_SESSION_TOOL_NAMES } from "./terminalSessionsReadAhead";
 
 /**
  * The terminal session a Work or Code thread started from, above its own

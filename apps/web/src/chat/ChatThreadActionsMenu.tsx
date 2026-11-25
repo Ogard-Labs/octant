@@ -14,6 +14,8 @@ import {
 } from "../ui/icons";
 import { useMemo, useState } from "react";
 import { exportThreadBundle, resolveThreadExportClient } from "../thread/threadExport";
+import { ThreadVideoArchiveConfirmation } from "../thread/ThreadVideoArchiveConfirmation";
+import type { ThreadVideoArchiveDownload } from "@octant/contracts/thread-export";
 import {
   handOffThread,
   resolveThreadHandOffClient,
@@ -77,6 +79,7 @@ export interface ChatThreadActionsMenuProps {
 export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [exporting, setExporting] = useState(false);
+  const [archive, setArchive] = useState<ThreadVideoArchiveDownload>();
   const [handingOff, setHandingOff] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [accountMoveOpen, setAccountMoveOpen] = useState(false);
@@ -171,13 +174,13 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
     setStatus(undefined);
     void (async () => {
       try {
-        setStatus(
-          await exportThreadBundle(exportClient, {
-            mode: "chat",
-            threadId: String(props.view.thread.id),
-            title: props.view.thread.title,
-          }),
-        );
+        const result = await exportThreadBundle(exportClient, {
+          mode: "chat",
+          threadId: String(props.view.thread.id),
+          title: props.view.thread.title,
+        });
+        if (typeof result === "string") setStatus(result);
+        else setArchive(result);
       } finally {
         setExporting(false);
       }
@@ -304,6 +307,14 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
           />
         ) : null}
       </OctantDialogPresence>
+      <ThreadVideoArchiveConfirmation
+        archive={archive}
+        onClose={() => setArchive(undefined)}
+        onDownload={() => {
+          setArchive(undefined);
+          setStatus("Started the thread archive download.");
+        }}
+      />
       {status === undefined ? null : (
         <p aria-live="polite" className="chat-workspace__export-status" role="status">
           {status}

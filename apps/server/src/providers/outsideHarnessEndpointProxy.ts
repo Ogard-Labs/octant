@@ -213,11 +213,26 @@ interface PendingCall {
   /** The brokered calls made for this call, closed when the host settles it early. */
   readonly brokered: Set<AbortController>;
   readonly cloudPorts: CloudSessionPorts | undefined;
+  /** The notification that tells the driver the host settled this call early, if any. */
+  readonly cancelMethod: string | undefined;
+  /**
+   * When set, receives each decoded text piece of a relayed broker response
+   * immediately before the host writes `http/chunk`, and a completion signal
+   * when that response's body finishes.
+   */
+  readonly onRelayedResponseChunk: ((httpId: number, text: string) => void) | undefined;
+  readonly onRelayedResponseEnd: ((httpId: number, completedNormally: boolean) => void) | undefined;
+  /** Receives each `image/chunk` the driver streams for this call; absent refuses them. */
+  readonly onImageChunk: ((image: number, data: string) => void) | undefined;
+  readonly onProviderResponse: (() => void) | undefined;
+  /** Whether to abort any still-open brokered HTTP streams when the call settles normally. */
+  readonly closeBrokeredOnSettle: boolean;
 }
 
 type BrokeredRequest = (
   params: OutsideDriverHttpRequestParams,
   signal: AbortSignal,
+  onProviderResponse?: () => void,
 ) => Promise<Response>;
 
 /**
@@ -269,12 +284,29 @@ class OutsideDriverLink {
       readonly timeoutMs: number;
       readonly onEvent?: (event: OutsideDriverStreamEvent) => void;
       readonly cloudPorts?: CloudSessionPorts;
+      readonly onRelayedResponseChunk?: (httpId: number, text: string) => void;
+      readonly onRelayedResponseEnd?: (httpId: number, completedNormally: boolean) => void;
+      readonly onImageChunk?: (image: number, data: string) => void;
+      readonly onProviderResponse?: () => void;
+      readonly closeBrokeredOnSettle?: boolean;
     },
-  ): { readonly id: number; readonly settled: Promise<unknown> } {
+  ): {
+    readonly id: number;
+    readonly settled: Promise<unknown>;
+  } {
     const id = this.#nextId;
     this.#nextId += 1;
-    if (method === OUTSIDE_DRIVER_METHODS.sessionSend || method.startsWith("cloud/"))
-      this.#sends.add(id);
+    const owns =
+      method === OUTSIDE_DRIVER_METHODS.sessionSend ||
+      method === OUTSIDE_DRIVER_METHODS.imageGenerate ||
+      method.startsWith("cloud/");
+    if (owns) this.#sends.add(id);
+    const cancelMethod =
+      method === OUTSIDE_DRIVER_METHODS.sessionSend
+        ? OUTSIDE_DRIVER_METHODS.sessionCancel
+        : method === OUTSIDE_DRIVER_METHODS.imageGenerate
+          ? OUTSIDE_DRIVER_METHODS.imageCancel
+          : undefined;
     const settled = new Promise<unknown>((resolve, reject) => {
       if (this.#stopped !== undefined) {
         reject(this.#stopped);
@@ -284,9 +316,7 @@ class OutsideDriverLink {
         const pending = this.#pending.get(id);
         if (pending === undefined) return;
         this.#pending.delete(id);
-        if (method === OUTSIDE_DRIVER_METHODS.sessionSend) {
-          this.notify(OUTSIDE_DRIVER_METHODS.sessionCancel, { requestId: id });
-        }
+        if (cancelMethod !== undefined) this.notify(cancelMethod, { requestId: id });
         closeBrokered(pending);
         reject(notAnswered());
       }, options.timeoutMs);
@@ -298,6 +328,12 @@ class OutsideDriverLink {
         timer,
         brokered: new Set(),
         cloudPorts: options.cloudPorts,
+        cancelMethod,
+        onRelayedResponseChunk: options.onRelayedResponseChunk,
+        onRelayedResponseEnd: options.onRelayedResponseEnd,
+        onImageChunk: options.onImageChunk,
+        onProviderResponse: options.onProviderResponse,
+        closeBrokeredOnSettle: options.closeBrokeredOnSettle === true,
       });
       this.#write({ jsonrpc: "2.0", id, method, params });
     });
@@ -318,7 +354,7 @@ class OutsideDriverLink {
     this.#pending.delete(id);
     clearTimeout(pending.timer);
     pending.reject(interrupted());
-    this.notify(OUTSIDE_DRIVER_METHODS.sessionCancel, { requestId: id });
+    if (pending.cancelMethod !== undefined) this.notify(pending.cancelMethod, { requestId: id });
     closeBrokered(pending);
   }
 
@@ -366,8 +402,19 @@ class OutsideDriverLink {
       if (pending === undefined) return;
       this.#pending.delete(message.id);
       clearTimeout(pending.timer);
+      if (pending.closeBrokeredOnSettle) closeBrokered(pending);
       if ("result" in message) pending.resolve(message.result);
       else pending.reject(failureFromDriver(message.error.data));
+      return;
+    }
+    if (message.method === OUTSIDE_DRIVER_METHODS.imageChunk) {
+      const { requestId, image, data } = message.params;
+      if (requestId >= this.#nextId) return this.#violate();
+      const pending = this.#pending.get(requestId);
+      // A chunk for a job the host already settled reaches nothing.
+      if (pending === undefined) return;
+      if (pending.onImageChunk === undefined) return this.#violate();
+      pending.onImageChunk(image, data);
       return;
     }
     if (message.method === OUTSIDE_DRIVER_METHODS.sessionEvent) {
@@ -409,7 +456,7 @@ class OutsideDriverLink {
     const controller = new AbortController();
     this.#http.set(httpId, controller);
     owner?.brokered.add(controller);
-    void this.#relayHttp(httpId, params, controller, owner?.cloudPorts).finally(() => {
+    void this.#relayHttp(httpId, params, controller, owner).finally(() => {
       if (this.#http.get(httpId) === controller) this.#http.delete(httpId);
       owner?.brokered.delete(controller);
     });
@@ -419,8 +466,9 @@ class OutsideDriverLink {
     httpId: OutsideDriverMessageId,
     params: OutsideDriverHttpRequestParams,
     controller: AbortController,
-    cloudPorts?: CloudSessionPorts,
+    owner?: PendingCall,
   ): Promise<void> {
+    const cloudPorts = owner?.cloudPorts;
     let response: Response;
     try {
       if (cloudPorts !== undefined) {
@@ -442,7 +490,7 @@ class OutsideDriverLink {
           ...(params.headers === undefined ? {} : { headers: Object.fromEntries(params.headers) }),
           signal: controller.signal,
         });
-      } else response = await this.#broker(params, controller.signal);
+      } else response = await this.#broker(params, controller.signal, owner?.onProviderResponse);
     } catch (error) {
       this.#refuseHttp(httpId, closed(error));
       return;
@@ -452,7 +500,7 @@ class OutsideDriverLink {
       id: httpId,
       result: { status: response.status, headers: relayedHeaders(response.headers, params) },
     });
-    const outcome = await this.#relayBody(httpId, response, controller.signal);
+    const outcome = await this.#relayBody(httpId, response, controller.signal, owner);
     this.notify(
       OUTSIDE_DRIVER_METHODS.httpEnd,
       outcome === undefined
@@ -466,11 +514,13 @@ class OutsideDriverLink {
     httpId: OutsideDriverMessageId,
     response: Response,
     signal: AbortSignal,
+    owner?: PendingCall,
   ): Promise<ProviderFailure | undefined> {
     if (response.body === null) return undefined;
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let bytes = 0;
+    let completedNormally = false;
     const chunkCharacters = Math.max(1, Math.floor(this.#limits.messageBytes / 8));
     try {
       for (;;) {
@@ -484,6 +534,7 @@ class OutsideDriverLink {
           return failure("protocol", "The provider response exceeded the size limit.");
         }
         const text = decoder.decode(read.value, { stream: true });
+        if (text.length > 0) owner?.onRelayedResponseChunk?.(httpId, text);
         for (let offset = 0; offset < text.length; offset += chunkCharacters) {
           // The end that follows an abort is the last line for this call.
           if (signal.aborted) return interrupted();
@@ -494,14 +545,17 @@ class OutsideDriverLink {
         }
       }
       const rest = decoder.decode();
+      if (rest.length > 0) owner?.onRelayedResponseChunk?.(httpId, rest);
       if (signal.aborted) return interrupted();
       if (rest.length > 0) this.notify(OUTSIDE_DRIVER_METHODS.httpChunk, { httpId, data: rest });
+      completedNormally = true;
       return undefined;
     } catch {
       // An aborted fetch errors its body before the abort listener answers.
       if (signal.aborted) return interrupted();
       return failure("unavailable", "The provider response could not be read.");
     } finally {
+      owner?.onRelayedResponseEnd?.(httpId, completedNormally);
       reader.cancel().catch(() => undefined);
     }
   }
@@ -615,7 +669,7 @@ function makeBroker(input: {
   readonly fetch: OutsideDriverFetch;
   readonly limits: OutsideDriverLimits;
 }): BrokeredRequest {
-  return async (params, signal) => {
+  return async (params, signal, onProviderResponse) => {
     if (input.origin === undefined) {
       throw failure("invalid-configuration", "The provider address is not a valid endpoint.");
     }
@@ -705,6 +759,7 @@ function makeBroker(input: {
     } finally {
       clearTimeout(connecting);
     }
+    onProviderResponse?.();
     if (response.status >= 300 && response.status < 400) {
       response.body?.cancel().catch(() => undefined);
       throw failure("invalid-configuration", "The configured endpoint returned a redirect.");
@@ -1178,3 +1233,20 @@ function allUnavailable() {
     harnessAutoReview: "unavailable",
   } as const;
 }
+
+/**
+ * The pieces an outside driver of another family shares with this one: the
+ * channel conversation, the brokered call, the closed failures, and the
+ * bounds. An image driver's proxy builds on them so both families stop,
+ * broker, and fail in exactly the same way.
+ */
+export {
+  OutsideDriverLink,
+  makeBroker as makeOutsideDriverBroker,
+  configuredOrigin as outsideDriverConfiguredOrigin,
+  DEFAULT_LIMITS as OUTSIDE_DRIVER_DEFAULT_LIMITS,
+  failure as outsideDriverFailure,
+  closed as outsideDriverClosedFailure,
+  driverStopped as outsideDriverStopped,
+  noAgreedProtocol as outsideDriverNoAgreedProtocol,
+};

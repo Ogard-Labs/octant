@@ -10,12 +10,17 @@ import {
 } from "@octant/client-runtime/folder-browse-client";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
+import {
+  createThreadVideoResults,
+  type ThreadVideoResults,
+} from "@octant/client-runtime/video-generation-client";
 
 export interface PairedComputerCodeClients {
   readonly desktop: DesktopPaneClient;
   readonly code: CodeClient;
   readonly project: ProjectClient;
   readonly provider: ProviderClient;
+  readonly videoResults: ThreadVideoResults;
   /** That computer's folders, for a new Code Project there; it admits only its own person. */
   readonly folderBrowse: FolderBrowseClient;
 }
@@ -45,6 +50,7 @@ export function createPairedComputerCodeClients(
     desktop: createDesktopPaneClient(port),
     project: createProjectClient(port),
     provider: createProviderClient(port),
+    videoResults: createThreadVideoResults(port),
     folderBrowse: createFolderBrowseClient(port),
   };
 }

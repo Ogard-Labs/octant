@@ -105,6 +105,11 @@ import { wireBrowser } from "./wiring/browser";
 import { wireCodeRuntime } from "./wiring/codeRuntime";
 import { wireDevices } from "./wiring/devices";
 import { wireCodeTooling } from "./wiring/codeTooling";
+import {
+  codeThreadSecrets,
+  wireThreadSecrets,
+  type ThreadSecretTurnFacts,
+} from "./wiring/threadSecrets";
 import { wireHarness } from "./wiring/harness";
 import { wireChat } from "./wiring/chat";
 import { wireWork } from "./wiring/work";
@@ -289,6 +294,7 @@ export function startOctantServer(
       isRestrictedDeviceScope,
       isPersonPairedDeviceCurrent,
       isPairedDeviceSessionCurrent,
+      isAuthenticatedPairedDeviceSessionCurrent,
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
@@ -419,10 +425,12 @@ export function startOctantServer(
       githubIntegrationIsEffective,
       githubIssueContextService,
       githubReadToolService,
+      linearReadToolService,
       linearRoutineEventSources,
       githubRoutes,
       integrationRoutes,
       credentialOperations,
+      linearConnected,
       linearIssueContextService,
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
@@ -692,7 +700,28 @@ export function startOctantServer(
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
           }),
       });
+    const commandBroker =
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeSecretStoreBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          });
+    const { threadSecrets, threadSecretRoutes } = wireThreadSecrets({
+      options,
+      persistence,
+      machineChangeFeed,
+      onThreadArchived,
+      onWaitingAsk,
+      onWindowRevoked,
+      processAuthorityTime,
+      windowAuthorityStore,
+      readReference: commandBroker?.requestCardRead,
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(() => threadSecrets.close()));
     const {
+      threadKeepsSandbox,
+      isHarnessProvider,
       readHarnessProcessReceipts,
       beginGoogleCliChange,
       recoverGoogleCliCommands,
@@ -728,6 +757,7 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      threadSecrets,
       hubActScopeSlot,
       threadMoveHolds,
       resolveThreadStrict,
@@ -802,6 +832,8 @@ export function startOctantServer(
       environmentService,
       folderBrowseRoutes,
       folderBrowseService,
+      repositoryBootstrapRoutes,
+      repositoryBootstrapService,
       isCodeProviderModelAllowed,
       listActivityRepositories,
       onPullRequestSnapshotRefreshed,
@@ -843,6 +875,7 @@ export function startOctantServer(
       gitEnvironmentPort,
       githubIssueContextService,
       gitObservationPort,
+      linearConnected,
       linearIssueContextService,
       terminalSessionImports,
       liveTurns,
@@ -1100,6 +1133,7 @@ export function startOctantServer(
       fileMentionService: (): FileMentionService => fileMentionService,
       githubExtensionSnapshot,
       githubReadToolService,
+      linearReadToolService,
       isCodeProviderModelAllowed,
       liveTurns,
       machineChangeFeed,
@@ -1297,6 +1331,15 @@ export function startOctantServer(
       workThreadService: (): WorkThreadService => workThreadService,
       workTurnService: (): WorkTurnService => workTurnService,
     });
+    const threadSecretFacts: ThreadSecretTurnFacts = {
+      service: threadSecrets,
+      composition: nativeHarnessComposition,
+      resolveStrict: resolveThreadStrict,
+      keepsSandbox: threadKeepsSandbox,
+      isHarnessProvider,
+      windowCurrent: (windowId) =>
+        windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
+    };
     const {
       fileMentionRoutes,
       fileMentionService,
@@ -1318,6 +1361,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      threadSecretFacts,
       narrationForTurn,
       hubActScopeSlot,
       transcriptionForTurn,
@@ -1529,6 +1573,7 @@ export function startOctantServer(
     });
     const {
       imageRoutes,
+      videoRoutes,
       serviceOfferRoutes,
       previewHandoffBridgeRoutes,
       previewRoutes,
@@ -1539,12 +1584,16 @@ export function startOctantServer(
       workResearchProjection,
       workResearchRoutes,
     } = wireWorkFiles({
+      isAuthenticatedPairedDeviceSessionCurrent,
       speechGates,
       credentialResolver,
+      imageGenerationOffers,
       serviceOffers,
       keptImageChoices,
       keptVideoChoices,
       imageJobService,
+      videoJobService,
+      onWindowRevoked,
       options,
       persistence,
       projectService,
@@ -1722,13 +1771,6 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
-    const commandBroker =
-      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
-        ? undefined
-        : makeSecretStoreBrokerClient({
-            url: options.credentialBrokerUrl,
-            token: options.credentialBrokerToken,
-          });
     const commandJournal = secretStoresJournal({
       journal: persistence.journal,
       connection: persistence.connection,
@@ -1838,11 +1880,19 @@ export function startOctantServer(
     });
     // One credential tool, composed from two sides that each keep their own
     // authority check: registered integration operations and saved commands.
-    contributeCodeTools(({ windowId, thread, readThread }) => {
+    contributeCodeTools(({ windowId, thread, readThread, folders, operationId, routineRun }) => {
       const providerVersion = persistence.readProviderInstance(thread.providerInstanceId)?.version;
       const windowCurrent = () =>
         windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId));
       return createCredentialTool({
+        secrets: codeThreadSecrets(threadSecretFacts, {
+          windowId,
+          thread,
+          readThread,
+          folders,
+          operationId,
+          routineRun: routineRun !== undefined,
+        }),
         registered: registeredCredentialOperations({
           service: credentialRequests,
           windowId: String(windowId),
@@ -2010,6 +2060,7 @@ export function startOctantServer(
       conversationInputRoutes,
       providerCloudSessionRoutes: cloudSessions.routes,
       credentialRequestRoutes,
+      threadSecretRoutes,
       agentMessageRoutes,
       agentProfileRoutes,
       archivedWorktreeRoutes,
@@ -2044,12 +2095,14 @@ export function startOctantServer(
       fileMentionRoutes,
       fleetActivityRoutes,
       folderBrowseRoutes,
+      repositoryBootstrapRoutes,
       followUpSuggestionRoutes,
       githubCloneRoutes,
       githubRoutes,
       goalLoopRoutes,
       goalRoutes,
       imageRoutes,
+      videoRoutes,
       serviceOfferRoutes,
       integrationRoutes,
       latencyStats,
@@ -2206,6 +2259,7 @@ export function startOctantServer(
       externalContentIngestionStore,
       extensionApiService,
       generatedImageStore,
+      videoJobService,
       debugConfigurationApprovals,
       debugService,
       hostMemoryGuard,
@@ -2530,6 +2584,11 @@ export function startOctantServer(
           }
           try {
             managedCloneProcessPort.close();
+          } catch (error) {
+            shutdownFailure = error;
+          }
+          try {
+            repositoryBootstrapService.close();
           } catch (error) {
             shutdownFailure = error;
           }

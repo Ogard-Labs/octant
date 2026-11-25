@@ -1,4 +1,5 @@
 import "../styles/code-thread.css";
+import { settledThreadNotice } from "../composer/settledThreadNotice";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
@@ -17,6 +18,7 @@ import { useContinuationInputPolicy } from "../continuity/useContinuationInputPo
 import { ConversationInputs } from "../continuity/ConversationInputs";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
+import { ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { CommandCredentialRequests } from "../credentials/CommandCredentialRequests";
 import { CredentialRequests } from "../credentials/CredentialRequests";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -46,7 +48,7 @@ import {
   strictKeptSentence,
   type PickerGroup,
 } from "@octant/domain";
-import { ChevronDown, CirclePause, FileText, X } from "../ui/icons";
+import { ChevronDown, CirclePause, X } from "../ui/icons";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
@@ -66,6 +68,13 @@ import { ThreadInfo } from "../composer/ThreadInfo";
 import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
+import { ComposerAttachmentIcon } from "../composer/ComposerAttachmentIcon";
+import {
+  composerStashContextValues,
+  recoveredComposerThreadDraft,
+} from "../composer/composerStashDraft";
+import type { ComposerStashBinding, ComposerStashSubmission } from "../composer/useComposerStash";
+import { MAX_CODE_ATTACHMENT_BYTES, MAX_CODE_TURN_ATTACHMENTS } from "@octant/contracts";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
@@ -84,6 +93,7 @@ import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
+import { ThreadVideoClips } from "../video/ThreadVideoClips";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import { ThreadWakeups } from "../wakeups/ThreadWakeups";
@@ -577,6 +587,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const threadVersionRef = useRef<CodeThread["version"] | undefined>(undefined);
   const [accessChanging, setAccessChanging] = useState(false);
   const textareaRef = useRef<ComposerInputElement>(null);
+  const stashSubmission = useRef<ComposerStashSubmission>(undefined);
   useEffect(() => {
     const update = props.updateApprovalAnchor;
     const activeView = view;
@@ -1272,6 +1283,84 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.operationClient !== undefined &&
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
+  const stash: ComposerStashBinding = {
+    submission: stashSubmission,
+    target: {
+      location: {
+        host: props.hostId ?? "local",
+        extensionScope: extensionDraft.scopeKey,
+        mode: "code",
+        projectId: thread.projectId ?? null,
+        composerId: props.threadId,
+        threadId: props.threadId,
+        binding: view.checkout.id,
+      },
+      attachmentLimit: props.attachmentClient === undefined ? 0 : MAX_CODE_TURN_ATTACHMENTS,
+      attachmentByteLimit: MAX_CODE_ATTACHMENT_BYTES,
+      readsImages: seesImages.takesImages !== false,
+      context: ["file", "thread", "extension", "side-chat", "review", "continuation"],
+    },
+    draft: {
+      text: draft,
+      caret:
+        textareaRef.current?.selectionStart ?? props.controller.pendingDraftCaret ?? draft.length,
+      files: attachments.staged.map((item) => item.file),
+      context: [
+        ...pathMentions.selectedPaths.map((value) => ({ kind: "file" as const, value })),
+        ...threadMentions.chips.map((value) => ({ kind: "thread" as const, value })),
+        ...extensionDraft.stagedReceipts.map((value) => ({ kind: "extension" as const, value })),
+        ...(props.controller.draftSideChatReturns ?? []).map((value) => ({
+          kind: "side-chat" as const,
+          value,
+        })),
+        ...(props.controller.draftReviewFindingReferences ?? []).map((value) => ({
+          kind: "review" as const,
+          value,
+        })),
+        ...(props.controller.draftSideChatReturnsInvalid
+          ? [{ kind: "side-chat" as const, value: null }]
+          : []),
+        ...(props.controller.draftReviewFindingReferencesInvalid
+          ? [{ kind: "review" as const, value: null }]
+          : []),
+        ...(continuation.policy === "text-only"
+          ? [{ kind: "continuation" as const, value: continuation.policy }]
+          : []),
+      ],
+    },
+    unavailable:
+      attachments.busy ||
+      queuePreparing ||
+      messageQueue.busy ||
+      messageQueue.uncertain ||
+      props.controller.turnStatus === "sending"
+        ? "Wait for the current attachment or send to finish."
+        : undefined,
+    prepare: async (next) => {
+      const files = await attachments.prepareDraftFiles(next.files);
+      if (files.kind === "refused") return files;
+      return {
+        ...files,
+        apply: () => {
+          files.apply();
+          pathMentions.clear();
+          pathMentions.restore(composerStashContextValues(next, "file"));
+          threadMentions.restore(composerStashContextValues(next, "thread"));
+          extensionDraft.restore(composerStashContextValues(next, "extension"));
+          continuation.change(composerStashContextValues(next, "continuation")[0] ?? "preserve");
+          setDraft(next.text);
+          if (props.controller.restoreComposerDraft === undefined) {
+            props.controller.setPendingDraft(next.text, next.caret);
+          } else {
+            props.controller.restoreComposerDraft(
+              props.threadId,
+              recoveredComposerThreadDraft(next),
+            );
+          }
+        },
+      };
+    },
+  };
   async function submitFollowUp(toolCatalogHandoff = false) {
     if (props.controller.draftReviewFindingReferencesInvalid) {
       setSendNotice(
@@ -1288,6 +1377,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
     const sideChatReturns = props.controller.draftSideChatReturns ?? [];
     if (!canSend || queuePreparingRef.current) return;
+    const retireStashRecovery = stashSubmission.current?.();
     const draftRevision = props.controller.draftRevision ?? draftRevisionRef.current;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
@@ -1321,6 +1411,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             extensionSelections,
           },
           () => {
+            retireStashRecovery?.();
             attachments.acceptQueueClaim(captured);
             continuation.reset();
             if (!mountedRef.current || activeThreadKeyRef.current !== originThreadKey) return;
@@ -1367,6 +1458,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (continuation.policy === "text-only") sendArguments[12] = continuation.policy;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
+      retireStashRecovery?.();
       continuation.reset();
       attachments.takeForSend();
       // Only the draft that was sent is cleared: typing during the awaited send
@@ -1989,6 +2081,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   {firstUserMessage === undefined ? launchProgress : null}
                   <CredentialRequests
                     key={String(props.threadId)}
+                    threadId={String(props.threadId)}
+                    serverUrl={props.serverUrl}
+                    windowCapability={props.windowCapability}
+                  />
+                  <ThreadSecrets
+                    key={`secrets-${String(props.threadId)}`}
                     threadId={String(props.threadId)}
                     serverUrl={props.serverUrl}
                     windowCapability={props.windowCapability}
@@ -2784,8 +2882,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadKind="code-thread"
           turnActive={busy}
         />
+        <ThreadVideoClips
+          className="thread-column"
+          scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+          threadKind="code-thread"
+        />
         <ThreadComposer
           readOnly={readOnly}
+          stash={readOnly ? undefined : stash}
           queue={
             <>
               <ThreadWakeups
@@ -2986,15 +3090,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 <div className="code-thread-workspace__attachments" aria-label="Attached files">
                   {attachments.staged.map(({ previewUrl, reference }) => (
                     <span
-                      className="chip code-thread-workspace__attachment"
+                      className="chip min-w-0 code-thread-workspace__attachment"
                       key={reference.attachmentId}
                     >
                       {previewUrl === "" ? (
-                        <FileText
-                          aria-hidden="true"
-                          className="code-thread-workspace__attachment-thumb"
-                          size={16}
-                        />
+                        <ComposerAttachmentIcon name={reference.displayName} />
                       ) : (
                         <img
                           alt={reference.displayName}
@@ -3007,7 +3107,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       </span>
                       <OctantButton
                         aria-label={`Remove ${reference.displayName}`}
-                        className="chip-x window-no-drag"
+                        className="chip-x shrink-0 window-no-drag"
                         disabled={queuePreparing || messageQueue.busy || messageQueue.uncertain}
                         onClick={() => attachments.remove(reference.attachmentId)}
                         type="button"
@@ -3274,6 +3374,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             providerChanging ? { text: "Checking the selected provider…" } : undefined
           }
           notices={[
+            ...[
+              settledThreadNotice({
+                settledAt: view?.thread.completedAt,
+                onUnsettle: readOnly
+                  ? undefined
+                  : () => void props.controller.reopenThread(props.threadId),
+              }),
+            ].filter((notice) => notice !== undefined),
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
             ...(projectTrustNotice === undefined ? [] : [projectTrustNotice]),
             ...(attachments.message === undefined

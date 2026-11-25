@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { Schema } from "effect";
 import { AutomationIntegrationEvent } from "@octant/contracts";
+import {
+  decodeLinearIssueFilterOptions,
+  LINEAR_ISSUE_FILTERS_OPERATION,
+} from "@octant/contracts/linear-issues";
 import type { IntegrationEventSourceProvider } from "@octant/plugin-api/integration";
 import type { IntegrationService } from "../../integration/integrationService";
 import { LINEAR_ASSIGNMENT_SOURCE_OPERATION } from "./linearAssignmentSource";
@@ -20,14 +24,46 @@ export function linearRoutineEventSources(
       if (!effective()) return [];
       const snapshot = await service.snapshot("linear", AbortSignal.timeout(10_000));
       if (snapshot.state !== "ready") return [];
+      let teamOptions: ReadonlyArray<{ readonly value: string; readonly label: string }> = [];
+      let projectOptions: ReadonlyArray<{ readonly value: string; readonly label: string }> = [];
+      try {
+        const filtersResult = await service.executeOperation(
+          "linear",
+          { kind: "operation", operationId: LINEAR_ISSUE_FILTERS_OPERATION, input: {} },
+          AbortSignal.timeout(10_000),
+        );
+        if (filtersResult.kind === "ok") {
+          const decoded = decodeLinearIssueFilterOptions(filtersResult.value);
+          teamOptions = decoded.teams.flatMap((team) =>
+            team.key === undefined ? [] : [{ value: team.key, label: team.label }],
+          );
+          projectOptions = decoded.projects.map((project) => ({
+            value: project.id,
+            label: project.label,
+          }));
+        }
+      } catch {
+        // Filter options are an affordance; keep free-text entry available when unavailable.
+      }
       return [
         {
           integrationId: "linear",
           sourceId: "assigned-to-me",
           label: `Linear assignments (${snapshot.account?.login ?? "connected account"})`,
           fields: [
-            { id: "team", label: "Team key (optional)", required: false, placeholder: "ENG" },
-            { id: "project", label: "Project identifier (optional)", required: false },
+            {
+              id: "team",
+              label: "Team key (optional)",
+              required: false,
+              placeholder: "ENG",
+              ...(teamOptions.length === 0 ? {} : { options: teamOptions }),
+            },
+            {
+              id: "project",
+              label: "Project identifier (optional)",
+              required: false,
+              ...(projectOptions.length === 0 ? {} : { options: projectOptions }),
+            },
           ],
         },
       ];

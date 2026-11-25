@@ -1,6 +1,9 @@
 import { Schema } from "effect";
 import { ExtensionPackageManifest } from "@octant/contracts/extensions";
-import { OutsideProviderDriverProtocolVersion } from "@octant/contracts/outside-driver-protocol";
+import {
+  OutsideProviderDriverProtocolVersion,
+  outsideDriverProtocolFamily,
+} from "@octant/contracts/outside-driver-protocol";
 import { ProviderDriverKind } from "@octant/contracts/providers";
 
 /**
@@ -9,7 +12,11 @@ import { ProviderDriverKind } from "@octant/contracts/providers";
  * It is deliberately separate from the bundled `ProviderDriverCatalogEntry`,
  * which stays closed to bundled drivers. An outside entry names exactly one
  * provider-driver component whose entry is an ES module inside the package,
- * the harness endpoint protocol versions it speaks, and nothing else: it
+ * the protocol versions it speaks, and nothing else. A driver is one of two
+ * families: a harness endpoint (`outside-harness-endpoint`, speaking
+ * `harness-endpoint/N`) or an image generator (`outside-image`, speaking
+ * `image-generation/N`), whose component also declares its image models and
+ * their published prices as data (`mediaGeneration`). Either way it
  * declares no capabilities and contributes nothing, because a driver
  * translates a wire protocol and the host performs every effect on its
  * behalf. Install, trust, enablement, and credentials are facts the host
@@ -19,8 +26,11 @@ import { ProviderDriverKind } from "@octant/contracts/providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
-/** The one driver-kind family every outside driver belongs to. */
+/** The driver-kind family every outside harness endpoint belongs to. */
 export const OUTSIDE_PROVIDER_DRIVER_KIND = "outside-harness-endpoint" as const;
+
+/** The driver-kind family every outside image generator belongs to. */
+export const OUTSIDE_IMAGE_DRIVER_KIND = "outside-image" as const;
 
 /**
  * The file at a driver package's root that holds its entry. A folder that has
@@ -57,6 +67,7 @@ export const OutsideProviderDriverRefusalReason = Schema.Literal(
   "package-metadata-invalid",
   "signature-missing",
   "signature-invalid",
+  "media-declaration-mismatch",
 );
 export type OutsideProviderDriverRefusalReason = typeof OutsideProviderDriverRefusalReason.Type;
 
@@ -95,7 +106,12 @@ function entryRefusal(
 ): OutsideProviderDriverRefusalReason | undefined {
   const { manifest } = entry;
   if (manifest.source.kind === "bundled") return "bundled-source";
-  if (entry.driverKind !== OUTSIDE_PROVIDER_DRIVER_KIND) return "bundled-kind-claim";
+  if (
+    entry.driverKind !== OUTSIDE_PROVIDER_DRIVER_KIND &&
+    entry.driverKind !== OUTSIDE_IMAGE_DRIVER_KIND
+  ) {
+    return "bundled-kind-claim";
+  }
   // A slug is the package's name in Settings and in `@` addressing; a bundled
   // driver kind's name there would read as that driver.
   if (bundledDriverKinds.has(manifest.slug)) return "bundled-kind-claim";
@@ -121,6 +137,18 @@ function entryRefusal(
   const entryPoint = component.entryPoint ?? "";
   if (entryPoint.startsWith("builtin:")) return "bundled-kind-claim";
   if (!isPackageRelativeModule(entryPoint)) return "entry-point-not-package-relative";
+  // The family, every protocol version, and the media declaration must agree,
+  // so the host never starts an image job on a chat driver or the reverse.
+  const generatesImages = entry.driverKind === OUTSIDE_IMAGE_DRIVER_KIND;
+  const expectedFamily = generatesImages ? "image-generation" : "harness-endpoint";
+  if (
+    entry.protocolVersions.some(
+      (version) => outsideDriverProtocolFamily(version) !== expectedFamily,
+    ) ||
+    (component.mediaGeneration?.media === "image") !== generatesImages
+  ) {
+    return "media-declaration-mismatch";
+  }
   return undefined;
 }
 

@@ -1614,6 +1614,17 @@ describe("native harness composition", () => {
       }
     });
 
+    it("lets an admitted Code command start while the thread's authority is unchanged", async () => {
+      const harness = setup({ fullAccessTag: "not-tagged" });
+      const prepared = await harness.composition.prepareCodeCommand({
+        thread: autoThread,
+        checkoutRoot: "/Users/dev/app",
+        windowId: "window-1",
+        command: "ls -la",
+      });
+      expect(prepared.status === "admitted" && prepared.admitStart()).toBe(true);
+    });
+
     it("asks the person as before when Shield is not the thread's reviewer", async () => {
       const harness = setup({});
       await harness.bash("ls -la");
@@ -1683,6 +1694,103 @@ describe("native harness composition", () => {
       );
       expect(asked).not.toHaveBeenCalled();
       expect(ran).toEqual(["ls -la"]);
+    });
+
+    describe("a Work command given something of the person's", () => {
+      const workThread = {
+        id: "00000000-0000-4000-8000-000000000052",
+        lifecycle: "active",
+        projectId,
+        providerInstanceId,
+        modelId: "another-provider-model",
+        bindingRevisionId: revisionId,
+        access: "auto",
+      } as unknown as WorkThread;
+      const prepare = async (over: {
+        readonly verdict?: "allow" | "deny" | "ask";
+        readonly posture?: ProviderExecutionPolicy | undefined;
+        readonly command?: string;
+        readonly hostNote?: string;
+      }) => {
+        const asked = vi.fn(async (_ask: unknown) => "approved" as const);
+        const review = vi.fn(async () => decision(over.verdict ?? "allow"));
+        const posture = "posture" in over ? over.posture : "auto-accept-edits";
+        const composition = createNativeHarnessComposition({
+          isChildAuthorityCurrent: () => true,
+          authority: createNativeHarnessAuthority({
+            hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+            persistence: {
+              readChatThread: () => undefined,
+              readProject: () =>
+                ({ type: "work", lifecycle: "active", bindingHistory: [{ revisionId }] }) as never,
+              readCodeThread: () => undefined,
+              readProviderInstance: () => ({ enabled: true }) as never,
+            },
+            workThreads: { read: () => workThread as never },
+            runningWorkTurnAccess: () => "auto",
+            readThreadTaint: () => ({ externalContentIngested: false }) as never,
+          }),
+          // The provider runs its own tools; the host still rules this command.
+          isHarnessProvider: () => false,
+          readWorkExecutionPolicy: () => posture,
+          approvals: { ask: asked, recordReviewed: vi.fn(), remembers: () => false },
+          shield: { review },
+          hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+          readThreadTaint: () => false,
+          recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+          uuid: () => "00000000-0000-4000-8000-000000000099",
+          clock: () => "2026-10-31T00:00:00.000Z",
+        });
+        const prepared = await composition.prepareWorkCommand({
+          thread: workThread,
+          projectRoot: "/Users/dev/offer",
+          command: over.command ?? "deploy",
+          hostNote: over.hostNote ?? "Octant gives it OCTANT_SECRET_DEPLOY_TOKEN",
+        });
+        return { prepared, asked, review };
+      };
+
+      it("is judged by Shield as the command it is, against the Project folder", async () => {
+        const { prepared, review, asked } = await prepare({ verdict: "allow" });
+        expect(prepared).toMatchObject({ status: "admitted" });
+        expect(review).toHaveBeenCalledWith(
+          expect.objectContaining({
+            boundRoot: "/Users/dev/offer",
+            call: expect.objectContaining({ kind: "command", command: "deploy" }),
+          }),
+        );
+        expect(asked).not.toHaveBeenCalled();
+        if (prepared.status === "admitted") {
+          expect(prepared.admitStart()).toBe(true);
+          prepared.finish({ started: false });
+          expect(prepared.admitStart()).toBe(false);
+        }
+      });
+
+      it("tells the person what it is given, in the host's words", async () => {
+        const { asked } = await prepare({ verdict: "ask" });
+        expect(asked).toHaveBeenCalledWith(
+          expect.objectContaining({
+            summary: "bash: (Octant gives it OCTANT_SECRET_DEPLOY_TOKEN) deploy",
+          }),
+        );
+      });
+
+      it("is refused when Shield denies it, when no turn runs, and in Plan", async () => {
+        expect((await prepare({ verdict: "deny" })).prepared).toMatchObject({ status: "refused" });
+        for (const posture of [undefined, "plan"] as const) {
+          const { prepared, asked } = await prepare({ posture });
+          expect(prepared).toMatchObject({ status: "refused" });
+          expect(asked).not.toHaveBeenCalled();
+        }
+      });
+
+      it("is never approved in part", async () => {
+        const { prepared, review, asked } = await prepare({ command: "x".repeat(2_040) });
+        expect(prepared).toMatchObject({ status: "refused", reason: "command-too-long" });
+        expect(review).not.toHaveBeenCalled();
+        expect(asked).not.toHaveBeenCalled();
+      });
     });
 
     it("never overrules a class the person already allowed for the session", async () => {

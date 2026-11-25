@@ -5,24 +5,37 @@ import type {
   GithubIssueContextRequest,
   LinearIssueContextRequest,
   ProjectId,
+  ProjectLinearTarget,
   TerminalSessionImportRequest,
   TerminalSessionSummary,
 } from "@octant/contracts";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { moveWithinTabList } from "../ui/base/radioGroupKeys";
 import {
   loadGithubRecentRepositories,
   loadGithubRepositories,
 } from "../code/GitHubRepositoryPicker";
-import { CreateFromIssuePicker } from "../github/CreateFromIssuePicker";
-import {
-  CreateFromLinearIssuePicker,
-  loadLinearIssues,
-} from "../linear/CreateFromLinearIssuePicker";
-import {
-  CreateFromTerminalSessionPicker,
-  loadTerminalSessions,
-} from "../terminalSessions/CreateFromTerminalSessionPicker";
+import { loadLinearIssues } from "../linear/linearIssuesReadAhead";
+import { PopupSkeletonRows } from "../ui/base/PopupSkeletonRows";
+
+const LazyCreateFromIssuePicker = lazy(() =>
+  import("../github/CreateFromIssuePicker").then((module) => ({
+    default: module.CreateFromIssuePicker,
+  })),
+);
+
+const LazyCreateFromLinearIssuePicker = lazy(() =>
+  import("../linear/CreateFromLinearIssuePicker").then((module) => ({
+    default: module.CreateFromLinearIssuePicker,
+  })),
+);
+import { loadTerminalSessions } from "../terminalSessions/terminalSessionsReadAhead";
+
+const LazyCreateFromTerminalSessionPicker = lazy(() =>
+  import("../terminalSessions/CreateFromTerminalSessionPicker").then((module) => ({
+    default: module.CreateFromTerminalSessionPicker,
+  })),
+);
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 
@@ -31,6 +44,7 @@ export type CreateFromTab = "github" | "linear" | "terminal";
 export interface CreateFromSources {
   readonly githubClient?: GithubClient | undefined;
   readonly linearClient?: IntegrationClient | undefined;
+  readonly defaultLinearTarget?: ProjectLinearTarget | undefined;
   readonly terminalSessions?:
     | { readonly client: TerminalSessionClient; readonly projectId: ProjectId }
     | undefined;
@@ -47,7 +61,9 @@ function readAhead(sources: CreateFromSources): void {
     void loadGithubRepositories(sources.githubClient).catch(ignore);
     void loadGithubRecentRepositories(sources.githubClient).catch(ignore);
   }
-  if (sources.linearClient !== undefined) void loadLinearIssues(sources.linearClient).catch(ignore);
+  if (sources.linearClient !== undefined) {
+    void loadLinearIssues(sources.linearClient, sources.defaultLinearTarget).catch(ignore);
+  }
   if (sources.terminalSessions !== undefined) {
     void loadTerminalSessions(
       sources.terminalSessions.client,
@@ -82,7 +98,7 @@ export function CreateFromControl(
     readonly onToggle: () => void;
   },
 ) {
-  const { githubClient, linearClient, terminalSessions } = props;
+  const { githubClient, linearClient, defaultLinearTarget, terminalSessions } = props;
   const terminalProject = terminalSessions?.projectId;
   const showGithub = githubClient !== undefined;
   const showLinear = linearClient !== undefined;
@@ -90,8 +106,8 @@ export function CreateFromControl(
 
   // When the control mounts and whenever the Project changes, so a reopen is instant.
   useEffect(() => {
-    readAhead({ githubClient, linearClient, terminalSessions });
-  }, [githubClient, linearClient, terminalSessions?.client, terminalProject]);
+    readAhead({ githubClient, linearClient, defaultLinearTarget, terminalSessions });
+  }, [githubClient, linearClient, defaultLinearTarget, terminalSessions?.client, terminalProject]);
 
   const activeTab: CreateFromTab =
     props.tab === "linear" && showLinear
@@ -135,34 +151,44 @@ export function CreateFromControl(
       </div>
       <div className="create-from-popup__body" role="tabpanel">
         {activeTab === "github" && githubClient !== undefined ? (
-          <CreateFromIssuePicker
-            client={githubClient}
-            disabled={props.creating}
-            onSelect={props.onSelectGithub}
-            {...(props.selectedGithub === undefined ? {} : { selected: props.selectedGithub })}
-          />
+          <Suspense fallback={<PopupSkeletonRows label="Loading issues…" />}>
+            <LazyCreateFromIssuePicker
+              client={githubClient}
+              disabled={props.creating}
+              onSelect={props.onSelectGithub}
+              {...(props.selectedGithub === undefined ? {} : { selected: props.selectedGithub })}
+            />
+          </Suspense>
         ) : null}
         {activeTab === "linear" && linearClient !== undefined ? (
-          <CreateFromLinearIssuePicker
-            client={linearClient}
-            disabled={props.creating}
-            onSelect={props.onSelectLinear}
-            {...(props.selectedLinear === undefined ? {} : { selected: props.selectedLinear })}
-          />
+          <Suspense fallback={<PopupSkeletonRows label="Loading issues…" />}>
+            <LazyCreateFromLinearIssuePicker
+              client={linearClient}
+              disabled={props.creating}
+              onSelect={props.onSelectLinear}
+              {...(defaultLinearTarget === undefined ? {} : { defaultLinearTarget })}
+              {...(props.selectedLinear === undefined ? {} : { selected: props.selectedLinear })}
+            />
+          </Suspense>
         ) : null}
         {activeTab === "terminal" && terminalSessions !== undefined ? (
-          <CreateFromTerminalSessionPicker
-            client={terminalSessions.client}
-            disabled={props.creating}
-            onSelect={props.onSelectTerminal}
-            projectId={terminalSessions.projectId}
-            {...(props.selectedTerminal === undefined ? {} : { selected: props.selectedTerminal })}
-          />
+          <Suspense fallback={<PopupSkeletonRows label="Loading sessions…" />}>
+            <LazyCreateFromTerminalSessionPicker
+              client={terminalSessions.client}
+              disabled={props.creating}
+              onSelect={props.onSelectTerminal}
+              projectId={terminalSessions.projectId}
+              {...(props.selectedTerminal === undefined
+                ? {}
+                : { selected: props.selectedTerminal })}
+            />
+          </Suspense>
         ) : null}
       </div>
     </div>
   );
-  const read = () => readAhead({ githubClient, linearClient, terminalSessions });
+  const read = () =>
+    readAhead({ githubClient, linearClient, defaultLinearTarget, terminalSessions });
   return (
     <div className="create-from-issue-control">
       <div className="create-from-issue-control__bar" onFocusCapture={read} onPointerEnter={read}>

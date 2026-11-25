@@ -28,7 +28,7 @@ export interface PersonMemorySettingsProps {
 
 /** What the section says memory is, in the person's words. */
 export const PERSON_MEMORY_FACT =
-  "Octant remembers your preferences, how you work, and what you worked on, so a new thread in any Project starts knowing them. It learns only from what you wrote in threads you put away, and it stays on this computer.";
+  "Octant remembers your preferences, how you work, and what you worked on, so a new thread in any Project starts knowing them. It learns only from what you wrote in threads you settle, and it stays on this computer.";
 
 export const PERSON_MEMORY_PROVIDER_NOTE =
   "New threads get these notes whatever provider they use, so something learned in a thread on one provider can reach a thread on another.";
