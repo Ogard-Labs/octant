@@ -51,6 +51,8 @@ export class RememberedThreadSecrets {
   readonly #store: Pick<ProviderCredentialStore, "resolve" | "set" | "delete">;
   readonly #uuid: () => string;
   readonly #remembered = new Map<string, Remembered>();
+  /** Writes to the store that have not landed yet. */
+  readonly #storing = new Map<string, Promise<void>>();
 
   constructor(options: {
     readonly journal: ThreadSecretMemoryJournal;
@@ -95,13 +97,15 @@ export class RememberedThreadSecrets {
     }
     this.#remembered.set(id, record);
     if (value.kind === "value") {
+      const storing = this.#store.set(id, value.value);
+      this.#storing.set(id, storing);
       try {
-        await this.#store.set(id, value.value);
-        // Replaced by a newer one while it was stored: nothing lists it any more.
-        if (!this.#remembered.has(id)) await this.#store.delete(id);
+        await storing;
       } catch {
         await this.forget(id);
         return undefined;
+      } finally {
+        this.#storing.delete(id);
       }
     }
     return id;
@@ -120,6 +124,9 @@ export class RememberedThreadSecrets {
   async forget(id: string): Promise<boolean> {
     const record = this.#remembered.get(id);
     if (record === undefined) return true;
+    // A value removed before its write lands would be stored with no name.
+    await this.#storing.get(id)?.catch(() => undefined);
+    if (!this.#remembered.has(id)) return true;
     try {
       if (record.source === "pasted") await this.#store.delete(id);
       this.#journal.record({ name: "thread-secret.forgotten", id });

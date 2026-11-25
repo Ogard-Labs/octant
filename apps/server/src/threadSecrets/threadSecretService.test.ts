@@ -1224,17 +1224,28 @@ describe("a secret the person asked Octant to remember", () => {
     expect([...stored.values()]).toEqual(["second-Value-1"]);
   });
 
-  it("leaves no stored value behind when a newer one replaced it before it was stored", async () => {
+  it("removes a replaced value only once it has been stored, and leaves none behind", async () => {
     const storing = Promise.withResolvers<void>();
-    const { open, stored } = memory({ setWaits: () => storing.promise });
+    const removed: number[] = [];
+    const { open, stored } = memory({
+      setWaits: () => storing.promise,
+      deleteFails: () => {
+        removed.push(stored.size);
+        return false;
+      },
+    });
     const remembered = open();
     const first = remembered.remember("TOKEN", { kind: "value", value: VALUE });
     const second = remembered.remember("TOKEN", { kind: "value", value: "second-Value-1" });
     const kept = remembered.list()[1]?.id ?? "";
-    await remembered.forgetEarlier("TOKEN", kept);
+    const dropped = remembered.forgetEarlier("TOKEN", kept);
+    await Promise.resolve();
+    expect(removed).toEqual([]);
     storing.resolve();
-    await Promise.all([first, second]);
+    await Promise.all([first, second, dropped]);
+    expect(removed).toHaveLength(1);
     expect([...stored.entries()]).toEqual([[kept, "second-Value-1"]]);
+    expect(remembered.list().map(({ id }) => id)).toEqual([kept]);
   });
 
   it.each(["journal", "store", "grant"] as const)(
