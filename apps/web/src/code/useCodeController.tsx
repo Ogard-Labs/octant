@@ -2594,6 +2594,23 @@ export function useCodeController(options: CodeControllerOptions) {
    * the move is admissible and answers with a refusal reason this renderer
    * shows rather than a failure it swallows.
    */
+  /**
+   * Reads the open thread's view from the host again, for a fact that changes
+   * with no journal event of its own, such as its worktree being restored.
+   */
+  const reloadThreadView = useCallback(
+    async (threadId: CodeThreadId): Promise<void> => {
+      try {
+        const view = await client.thread(threadId);
+        if (!mounted.current || String(activeThreadId.current) !== String(view.thread.id)) return;
+        installView(view);
+      } catch {
+        // The next navigation refresh reads it again.
+      }
+    },
+    [client, installView],
+  );
+
   const rebindThreadCheckout = useCallback(
     async (threadId: CodeThreadId): Promise<CodeThreadCheckoutRebindOutcome | undefined> => {
       const thread = bootstrapRef.current?.threads.find(
@@ -3738,6 +3755,7 @@ export function useCodeController(options: CodeControllerOptions) {
     setThreadMessageWake,
     setThreadRestartContinuation,
     rebindThreadCheckout,
+    reloadThreadView,
     renameThread,
     providerRequests,
     providerAnswerRefusal,

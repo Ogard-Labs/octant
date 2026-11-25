@@ -1058,6 +1058,7 @@ function controller(): CodeController {
     setThreadMessageWake: vi.fn(async () => ({ status: "ok" as const })),
     setThreadRestartContinuation: vi.fn(async () => ({ status: "ok" as const })),
     rebindThreadCheckout: vi.fn(async () => undefined),
+    reloadThreadView: vi.fn(async () => undefined),
 
     turnActivity: new Map(),
     turnErrorInTranscript: false,

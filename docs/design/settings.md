@@ -488,7 +488,8 @@ interrupted, restore interrupted), and **Restore worktree**, which restores at
 once, since it only recreates the folder and the host checks the branch first. A
 refusal, such as a branch that moved, is said in the feedback line and the row
 stays. A person-paired device may change these choices and restore; a
-hub-introduced device may not.
+hub-introduced device may not. The same restore is offered in the thread itself
+(see [Thread view](thread-view.md#cleaned-up-worktree)).
 **Worktrees on this computer** follows it: a first row says when the host last
 scanned ("Not scanned since Octant started" until then) and how many it found,
 with **Scan** and, when any qualify, **Remove N merged or gone**, which asks
