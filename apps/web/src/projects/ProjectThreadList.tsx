@@ -1,5 +1,4 @@
 import {
-  Fragment,
   lazy,
   memo,
   Suspense,
@@ -615,6 +614,11 @@ export interface ProjectThreadRowsProps {
    * already says it once, and repeating it on each row only adds a line.
    */
   readonly hideCheckoutFact?: boolean;
+  /**
+   * Threads whose rows take one more step in. A worker's row already sits one
+   * step in, so a thread it started takes another.
+   */
+  readonly indentedThreadIds?: ReadonlySet<string>;
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
   /**
    * Rows shown before the list folds behind Show more. Absent shows every
@@ -939,7 +943,20 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
     };
   }, [threads.length, virtualized]);
 
-  const row = (thread: ChatThreadNavigationItem) => (
+  const row = (thread: ChatThreadNavigationItem) => {
+    if (props.indentedThreadIds?.has(thread.threadId) !== true) return threadRow(thread);
+    // Set here, not in the sidebar's stylesheet: that loads before first paint
+    // and has no room under its budget.
+    return (
+      <div
+        key={thread.navigationId ?? thread.threadId}
+        style={{ marginInlineStart: "var(--oct-space-3)" }}
+      >
+        {threadRow(thread)}
+      </div>
+    );
+  };
+  const threadRow = (thread: ChatThreadNavigationItem) => (
     <ProjectThreadRow
       actions={actions}
       {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
@@ -1212,10 +1229,14 @@ function CoordinatorThreadSection(props: {
     setFolded(next);
     writeFoldedCoordinators(next);
   }
-  const rows = (threads: ReadonlyArray<ChatThreadNavigationItem>) => (
+  const rows = (
+    threads: ReadonlyArray<ChatThreadNavigationItem>,
+    indentedThreadIds?: ReadonlySet<string>,
+  ) => (
     <ProjectThreadRows
       {...(props.actions === undefined ? {} : { actions: props.actions })}
       {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+      {...(indentedThreadIds === undefined ? {} : { indentedThreadIds })}
       {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
       {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
       {...(props.projectNameForThread === undefined
@@ -1283,27 +1304,16 @@ function CoordinatorThreadSection(props: {
             {open && hasRows ? (
               <div className="project-coordinator__workers" id={listId}>
                 {childRows.length === 0 ? null : rows(childRows)}
-                {!hasWorkers
+                {workerRows.length === 0
                   ? null
-                  : workerRows.length === group.workers.length
-                    ? rows(group.workers)
-                    : group.workers.map((worker) => {
-                        // A worker already sits one step in, so the threads it
-                        // started take a step of their own. Set here, not in the
-                        // sidebar's stylesheet: that loads before first paint
-                        // and has no room under its budget.
-                        const own = props.expandThreads([worker]).slice(1);
-                        return (
-                          <Fragment key={worker.navigationId ?? worker.threadId}>
-                            {rows([worker])}
-                            {own.length === 0 ? null : (
-                              <div style={{ marginInlineStart: "var(--oct-space-3)" }}>
-                                {rows(own)}
-                              </div>
-                            )}
-                          </Fragment>
-                        );
-                      })}
+                  : rows(
+                      workerRows,
+                      new Set(
+                        workerRows
+                          .filter((thread) => !group.workers.includes(thread))
+                          .map((thread) => thread.threadId),
+                      ),
+                    )}
               </div>
             ) : null}
           </div>

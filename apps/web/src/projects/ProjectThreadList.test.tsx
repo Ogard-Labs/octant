@@ -2073,6 +2073,30 @@ describe("coordinators in a Project's thread list", () => {
     ]);
     sessionStorage.clear();
   });
+
+  it("keeps a large coordinator's workers one measured list when one of them started a side task", () => {
+    sessionStorage.clear();
+    const workers = Array.from({ length: 45 }, (_, index) => ({
+      ...working,
+      threadId: `worker-${String(index)}`,
+    }));
+    const { container } = render(
+      <FollowUpLineageContext value={new Map([["worker-child", "worker-0"]])}>
+        <ProjectThreadList
+          groupCoordinators
+          onSelectThread={vi.fn()}
+          threads={[
+            coordinator,
+            ...workers,
+            { threadId: "worker-child", title: "Check the fixtures" },
+          ]}
+        />
+      </FollowUpLineageContext>,
+    );
+    expect(container.querySelectorAll(".project-threads__virtual-list")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-thread-id^='worker-']").length).toBeLessThan(45);
+    sessionStorage.clear();
+  });
 });
 
 describe("A thread row's short age", () => {
