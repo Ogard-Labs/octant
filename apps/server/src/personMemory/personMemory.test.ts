@@ -1684,6 +1684,34 @@ describe("saving what the person asks to be remembered, at once", () => {
     ]);
   });
 
+  it("removes a labelled credential's whole value, whatever shape it has, and keeps a product name", () => {
+    for (const message of [
+      'password: "first\nleft over" ok',
+      "password: 'first\nleft over'",
+      "password:\n```\nfirst\nleft over\n```",
+      'secret = """\nfirst\nleft over"""',
+      "password: |\n  first\n  left over\nI prefer tabs.",
+      "password: first \\\nleft over",
+      'password: _first"second" left over',
+      'password: *first"second" left over',
+      '**password:** "first" left over',
+      'password="first"left',
+      'password = "fir\\"st left over"',
+      'password: "unclosed\nleft over',
+      "oauth2Token = first left over",
+    ]) {
+      const redacted = redactForPersonMemory(message);
+      expect({ message, redacted, left: /first|second|left/.test(redacted) }).toMatchObject({
+        left: false,
+      });
+    }
+    expect(redactForPersonMemory("password: |\n  first\nI prefer tabs.")).toContain(
+      "I prefer tabs.",
+    );
+    const product = "I prefer 1Password: use its browser extension";
+    expect(redactForPersonMemory(product)).toBe(product);
+  });
+
   it("removes a whole private key given after a credential label", () => {
     const body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC";
     const key = `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----`;

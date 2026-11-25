@@ -2374,8 +2374,9 @@ except where a bullet says otherwise.
   It also reads the same way in every mode, through reads the host already
   makes for Octant Shield. Secrets are redacted (the same secret shapes as
   approvals, private-key blocks, and the whole value after a credential label such
-  as `password:`, `token =` or `the passphrase is`, to its closing quote or the
-  end of the line) before the text reaches the model and
+  as `password:`, `token =` or `the passphrase is`: to its closing quote or
+  fence, over an indented block, else to the end of the line; a value given with
+  no label and no known shape cannot be told from other words) before the text reaches the model and
   again before anything is stored, and an entry or summary that still names a
   protected path is dropped.
 - **The model call.** One tool-less, single-use session per ended thread, in a
