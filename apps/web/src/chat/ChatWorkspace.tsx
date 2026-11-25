@@ -132,6 +132,7 @@ import { canvasRecipeFillTurn } from "../canvas/canvasRecipeFill";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
+import { McpSignInNotice } from "../transcript/McpSignInNotice";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
   useThreadActivityRevision,
@@ -1714,6 +1715,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               onEdit={readOnly ? undefined : (command) => void props.controller.execute(command)}
             />
           )}
+          <McpSignInNotice
+            className="chat-workspace__tool-approval thread-column"
+            client={readOnly ? undefined : props.extensionClient}
+            mode="chat"
+            receipts={pendingExtensionSelections}
+            // Retry and Regenerate send the latest turn's selections again.
+            retrySelections={view.turns.at(-1)?.extensionSelections}
+            threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
+            turnActive={turnActive}
+          />
           <ExtensionToolApprovalPrompt
             className="chat-workspace__tool-approval thread-column"
             client={readOnly ? undefined : props.extensionClient}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { McpClientSetupControl } from "./McpClientSetupControl";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import "./mcp-sign-in.css";
 
 export interface McpServerSignInControlProps {
   readonly client: Pick<ExtensionClient, "mcpServerSignIn" | "relayMcpServerSignIn">;

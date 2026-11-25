@@ -606,6 +606,51 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
+  it("offers sign-in to a server this Work thread's next turn needs", async () => {
+    const awaiting = vi.fn(async () => ({
+      servers: [
+        {
+          extensionId: "44000000-0000-4000-8000-000000000011",
+          packageId: "44000000-0000-4000-8000-000000000012",
+          componentId: "mcp",
+          packageName: "Linear",
+          serverName: "Linear",
+          transport: "streamable-http",
+          state: "needs-sign-in",
+        },
+      ],
+    }));
+    const extensionClient = {
+      toolGrantsAvailable: true,
+      snapshot: vi.fn(async () => ({ packages: [] })),
+      listToolApprovals: vi.fn(async () => []),
+      mcpServersAwaitingSignIn: awaiting,
+      mcpServerSignIn: vi.fn(async () => ({ kind: "signed-out" })),
+    };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        extensionClient={extensionClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    const notice = await screen.findByRole(
+      "status",
+      { name: "Linear needs sign-in" },
+      { timeout: 10_000 },
+    );
+    expect(await within(notice).findByRole("button", { name: "Sign in" })).toBeEnabled();
+    expect(awaiting).toHaveBeenCalledWith(
+      { mode: "work", threadId: String(threadId), selections: [] },
+      expect.any(AbortSignal),
+    );
+  });
+
   it("keeps an MCP tool approval open and explains a failed decision", async () => {
     const user = userEvent.setup();
     const approval = {

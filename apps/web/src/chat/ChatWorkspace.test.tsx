@@ -1157,6 +1157,63 @@ describe("ChatWorkspace", () => {
     });
   });
 
+  it("offers sign-in to a server the latest turn's Retry would use, and none for the read-only thread", async () => {
+    const selection = {
+      kind: "plugin",
+      extensionId: "44000000-0000-4000-8000-000000000011",
+      packageId: "44000000-0000-4000-8000-000000000012",
+      componentId: "mcp",
+      packageVersion: "1.0.0",
+      packageDigest: `sha256:${"a".repeat(64)}`,
+      catalogEpoch: `sha256:${"b".repeat(64)}`,
+      origin: { kind: "draft", reference: "@linear" },
+    };
+    const view = viewWithFailedAttempt();
+    const activeView = {
+      ...view,
+      turns: view.turns.map((turn) => ({ ...turn, extensionSelections: [selection] })),
+    } as never;
+    const awaiting = vi.fn(async () => ({
+      servers: [
+        {
+          extensionId: "44000000-0000-4000-8000-000000000011",
+          packageId: "44000000-0000-4000-8000-000000000012",
+          componentId: "mcp",
+          packageName: "Linear",
+          serverName: "Linear",
+          transport: "streamable-http",
+          state: "needs-sign-in",
+        },
+      ],
+    }));
+    const client: ExtensionClient = {
+      ...extensionClient(),
+      mcpServersAwaitingSignIn: awaiting as never,
+      mcpServerSignIn: vi.fn(async () => ({ kind: "signed-out" })) as never,
+    };
+    const workspace = (readOnly: boolean) => (
+      <ChatWorkspace
+        controller={controllerFixture({ activeView })}
+        extensionClient={client}
+        providerSnapshot={providerSnapshot()}
+        readOnly={readOnly}
+      />
+    );
+    const { rerender } = render(workspace(false));
+    const notice = await screen.findByRole(
+      "status",
+      { name: "Linear needs sign-in" },
+      { timeout: 10_000 },
+    );
+    expect(await within(notice).findByRole("button", { name: "Sign in" })).toBeEnabled();
+    expect(awaiting).toHaveBeenCalledWith(
+      { mode: "chat", threadId, selections: [selection] },
+      expect.any(AbortSignal),
+    );
+    rerender(workspace(true));
+    expect(screen.queryByRole("status", { name: "Linear needs sign-in" })).toBeNull();
+  });
+
   it("shows a follow-up this Chat thread's agent proposed and schedules it only on the person's click", async () => {
     const user = userEvent.setup();
     const proposalId = "44000000-0000-4000-8000-000000000020";

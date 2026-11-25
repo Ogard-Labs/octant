@@ -14840,6 +14840,22 @@ replays a failed call; it is the person's act, at a local window or a device the
 Settings would discover tools outside a task's authority, so the person's
 action only clears what blocks the next authorized connect.
 
+A thread says so itself when its next turn would get a server that reads Needs
+sign-in, and carries the same sign-in control
+([Thread view](design/thread-view.md#server-sign-in)). The host decides which
+servers those are (`/api/extensions/connections`, `thread-sign-in`) from the
+thread's mode and id and the selections the next turn would carry: the Project's
+pins (Work and Code) and those selections, each put through the checks the turn
+itself makes against the thread's own activation. It does not ask the sessions,
+because a turn drops a server whose connection failed and a missing sign-in is
+what makes it fail. A thread whose turns carry no extension tools (a Project on
+a server, Strict on Windows, a model known not to carry Octant's tools) names
+none. The answer is told only to a principal the sign-in routes admit, a local
+window or a device the host's own person paired; every other device session is
+refused, so it is never shown a sign-in it cannot do. The read writes nothing,
+and no address, code or token passes through it: the sign-in and its one-time
+relay are the routes below, unchanged.
+
 For an existing host-owned HTTP OAuth session, an approved explicit invocation
 checks the exact retained grant owner again before dispatch. Credential access
 and refresh each have a ten-second stage bound. A known expired token or a

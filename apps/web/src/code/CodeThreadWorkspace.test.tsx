@@ -128,6 +128,48 @@ describe("Babysitting a pull request", () => {
   });
 });
 
+describe("Signing in to a server from a Code thread", () => {
+  it("offers sign-in to a server this thread's next turn needs", async () => {
+    const awaiting = vi.fn(async () => ({
+      servers: [
+        {
+          extensionId: "44000000-0000-4000-8000-000000000011",
+          packageId: "44000000-0000-4000-8000-000000000012",
+          componentId: "mcp",
+          packageName: "Linear",
+          serverName: "Linear",
+          transport: "streamable-http",
+          state: "needs-sign-in",
+        },
+      ],
+    }));
+    const extensionClient = {
+      toolGrantsAvailable: true,
+      snapshot: vi.fn(async () => ({ packages: [] })),
+      listToolApprovals: vi.fn(async () => []),
+      mcpServersAwaitingSignIn: awaiting,
+      mcpServerSignIn: vi.fn(async () => ({ kind: "signed-out" })),
+    };
+    render(
+      <CodeThreadWorkspace
+        controller={controller({})}
+        extensionClient={extensionClient as never}
+        threadId={threadId}
+      />,
+    );
+    const notice = await screen.findByRole(
+      "status",
+      { name: "Linear needs sign-in" },
+      { timeout: 10_000 },
+    );
+    expect(await within(notice).findByRole("button", { name: "Sign in" })).toBeEnabled();
+    expect(awaiting).toHaveBeenCalledWith(
+      { mode: "code", threadId, selections: [] },
+      expect.any(AbortSignal),
+    );
+  });
+});
+
 describe("Code plan proposals", () => {
   it.each([0, 503])(
     "keeps plan retry reachable after an initial read fails with %s",

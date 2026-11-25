@@ -105,6 +105,32 @@ stays as the record. Under Strict, a 6-call loop stops the turn, journals
 thread ready to accept the next message straight away. `turnLoopNoticeSentence`
 and `turnStallNoticeSentence` in `@octant/domain` are the shared wordings.
 
+## Server sign-in
+
+When an MCP server the thread's next turn would get needs a sign-in, the thread
+shows a notice beside its waiting requests, in Chat, Work and Code alike:
+"{server} needs sign-in", one sentence, the sign-in control Settings uses, and
+Dismiss. The person finishes there, with no visit to Settings; on a device the
+host's own person paired, the control shows the address field once the host says
+the attempt can be finished that way.
+
+- Which servers count is the host's answer, never the window's
+  ([Architecture: extensions and skills](../architecture.md#extensions-and-skills)):
+  one pinned to the thread's Project, or one selected with `@` in the composer.
+  In Chat the latest turn's selections count too, since Retry and Regenerate send
+  them again. A server the person has switched off, not trusted, or not chosen for
+  this thread is never named, whatever state it is in.
+- A read-only thread, and a device that may not sign in, show nothing and ask
+  nothing.
+- The notice goes when the server is signed in (here, in Settings or on another
+  device), when it is switched off, unpinned or taken out of the composer. A
+  sign-in finished here says "Signed in to {server}" for a moment first. A read
+  that could not reach the host keeps it, so a half-pasted address is not lost.
+- Dismiss hides it in this thread until the window closes, or until the server
+  has been usable and needs a sign-in again. Dismissing changes nothing on the
+  host; Settings › Skills & Extensions still lists the server.
+- It is announced politely, not as an alert, because it waits on no running work.
+
 ## Reply actions
 
 A finished reply (completed, failed, interrupted or cancelled) ends with one

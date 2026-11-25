@@ -224,6 +224,7 @@ import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
+import { McpSignInNotice } from "../transcript/McpSignInNotice";
 import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { SideTaskInline, sideTasksAfterTurn, useThreadSideTasks } from "../followUps/SideTaskCards";
 import {
@@ -3345,6 +3346,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           </div>
         )}
 
+        <McpSignInNotice
+          className="thread-column"
+          client={readOnly ? undefined : props.extensionClient}
+          mode="work"
+          receipts={extensionDraft.receipts}
+          threadId={String(props.threadId)}
+          turnActive={turnRunning}
+        />
         <ExtensionToolApprovalPrompt
           className="thread-column"
           client={readOnly ? undefined : props.extensionClient}
