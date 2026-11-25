@@ -1337,9 +1337,11 @@ describe("carried images in the store", () => {
         "canvas-public-share-DOCUMENT",
       ),
     );
-    serve();
-    expect((await fetch(`${service?.publicUrl}/s/${created.shareId}`)).status).toBe(404);
-    expect((await fetch(viewerImage(created.shareId, image.sha256))).status).toBe(404);
+    for (const restarted of [false, true]) {
+      if (restarted) serve();
+      expect((await fetch(`${service?.publicUrl}/s/${created.shareId}`)).status).toBe(404);
+      expect((await fetch(viewerImage(created.shareId, image.sha256))).status).toBe(404);
+    }
   });
 
   test("serves a frame only the images its own design names", async () => {
@@ -1364,7 +1366,11 @@ describe("carried images in the store", () => {
         expect(await runTakedown([created.shareId], operatorEnv())).toMatchObject({ code: 0 });
       }
       if (ending === "expiry" || ending === "expiry sweep") now += 31 * DAY_MS;
-      if (ending === "expiry sweep") serve();
+      if (ending === "expiry sweep") {
+        // The sweep at start removes it before any request asks.
+        serve();
+        expect(filesNaming(image.entry.data.slice(-64))).toEqual([]);
+      }
       expect((await fetch(viewerImage(created.shareId, image.sha256))).status).toBe(404);
       const framePath = new URL(inFrame);
       expect(
@@ -1509,6 +1515,22 @@ describe("carried images in the store", () => {
     }
   });
 
+  test("keeps the published images and none of the new ones when an update cannot be written", async () => {
+    start();
+    const [kept, refused] = [picture("image-1", 1), picture("image-1", 2)];
+    const created = await createPictures([kept]);
+    const renaming = spyOn(fs, "renameSync").mockImplementation(() => {
+      throw new Error("No space left on the device.");
+    });
+    try {
+      expect((await update(created, pictureDocument([refused]))).status).toBe(503);
+    } finally {
+      renaming.mockRestore();
+    }
+    expect(filesNaming(refused.entry.data.slice(-64))).toEqual([]);
+    expect((await fetch(viewerImage(created.shareId, kept.sha256))).status).toBe(200);
+  });
+
   test("removes an unfinished write's image bytes at the next start and keeps the finished share", async () => {
     start();
     const kept = picture("image-1", 1);
@@ -1527,7 +1549,7 @@ describe("carried images in the store", () => {
     expect((await fetch(viewerImage(created.shareId, kept.sha256))).status).toBe(200);
   });
 
-  test("never serves other bytes as an image when its share file was changed by hand", async () => {
+  test("never misreads an image when its share file was reformatted, resized or truncated by hand", async () => {
     start();
     const image = picture("image-1", 1);
     const created = await createPictures([image]);

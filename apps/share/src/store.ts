@@ -501,7 +501,13 @@ export class ShareStore {
 
   #writeAtomic(path: string, content: string): void {
     const temporary = `${path}.${Buffer.from(this.#randomBytes(6)).toString("hex")}.tmp`;
-    writeFileSync(temporary, content, { mode: 0o600 });
-    renameSync(temporary, path);
+    try {
+      writeFileSync(temporary, content, { mode: 0o600 });
+      renameSync(temporary, path);
+    } catch (error) {
+      // A full disk must not leave a document behind that no revoke removes.
+      rmSync(temporary, { force: true });
+      throw error;
+    }
   }
 }

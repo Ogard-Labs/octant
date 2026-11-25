@@ -355,8 +355,8 @@ frame-ancestors 'none'`. The page loads one first-party stylesheet and
 A share is one JSON file, `shares/<id>.json` in the data directory. Its terms
 (times, byte length, password hash, owner secret hash, revision) come first,
 with an image index: each carried image's SHA-256, type, and byte range counted
-from the end of the head, and which images each design names. The document comes last, with the
-images' base64 text at its end. The file opens with its head's length as a
+from the end of the head, and which images each design names. The document comes
+last, with the images' base64 text at its end. The file opens with its head's length as a
 fixed eight-digit `headBytes`, so an image request, on the page or in a frame,
 reads the head, runs the link's checks on it, and reads that one image's range.
 It neither reads nor decodes the document's text or its other images. Both
@@ -366,7 +366,8 @@ revisions. The page and the frame page still read the whole share.
 - A file with no such head, or whose index does not fit the file, is read
   whole. That covers every share an earlier version stored. Reading never
   rewrites one; its owner's next update does. A share whose document the
-  service cannot read serves no image, as it serves no page.
+  service could not read when it last read the file whole (at start, at a page
+  view, and at each owner call) serves no image, as it serves no page.
 - An earlier version of the service reads the same file whole and ignores the
   head, so an operator can go back to it and keep every link, including links
   published or updated since. A share it updates there is read whole again
@@ -374,8 +375,9 @@ revisions. The page and the frame page still read the whole share.
 - A publish or update is one atomic rename. A revoke, expiry, takedown, or
   owner delete writes the tombstone, which stops the images with the page, then
   unlinks the one file that holds the document and its images; a stop between
-  the two is finished at the next start or request. A temporary file left by a
-  stop before its rename is removed at the next start.
+  the two is finished at the next start or request. A write that fails
+  removes its temporary file, and one left by a stop before its rename is
+  removed at the next start.
 - The index is metadata and is not counted toward the storage cap. Each image
   counts once, as its base64 text in the document.
 
