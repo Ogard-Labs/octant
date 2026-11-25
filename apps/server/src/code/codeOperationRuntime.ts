@@ -1231,6 +1231,11 @@ export interface CodeOperationRuntime {
    */
   turnInProgress?(threadId: string): boolean;
   /**
+   * Whether a terminal of the thread is starting or running: a shell can hold
+   * the thread's folder with no turn going.
+   */
+  terminalRunning?(threadId: string): boolean;
+  /**
    * The provider session a compaction of the thread resumes: the one its next
    * turn would resume, in the checkout that turn would run in.
    */
@@ -2458,6 +2463,7 @@ export function createCodeOperationRuntime(
     threadWithActiveTurnPosture: (thread) => turns.threadWithActiveTurnPosture(thread),
     turnInProgress: (threadId) =>
       startingTurns.has(threadId) || turns.holdsTurn(threadId) || fileReviewLeases.has(threadId),
+    terminalRunning: (threadId) => service.threadTerminalRunning(threadId),
     compactionSessions: {
       exists: (threadId) => compactableSession(decodeCodeThreadId(threadId)) !== undefined,
       occupancy: (threadId) => {

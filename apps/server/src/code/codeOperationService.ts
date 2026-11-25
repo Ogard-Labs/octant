@@ -1746,6 +1746,13 @@ async function untilAborted<T>(
 export class CodeOperationService {
   readonly #options: CodeOperationServiceOptions;
   readonly #terminalOwners = new Map<string, TerminalOwner>();
+  /**
+   * Terminal starts that have begun and not yet answered, by thread. A start
+   * resolves the thread's access and checkout root before its owner exists, so
+   * a worktree cleanup that looked in that gap would find nothing running in a
+   * folder a shell is about to open in.
+   */
+  readonly #startingTerminals = new Map<string, number>();
   /** Live output streams each window holds open, so revoking the window ends them. */
   readonly #liveTerminalStreams = new Map<string, Set<LiveTerminalStream>>();
   /**
@@ -1815,11 +1822,40 @@ export class CodeOperationService {
   ): Promise<CodeOperationResult> {
     const command = decodeCodeOperationCommand(rawCommand);
     const release = this.#options.events.actingFor?.(command.operationId, options.actor);
+    const starting = command.kind === "start-terminal" ? String(command.threadId) : undefined;
+    if (starting !== undefined) {
+      this.#startingTerminals.set(starting, (this.#startingTerminals.get(starting) ?? 0) + 1);
+    }
     try {
       return await this.#executeAs(windowId, command, options);
     } finally {
       release?.();
+      if (starting !== undefined) {
+        const left = (this.#startingTerminals.get(starting) ?? 1) - 1;
+        if (left > 0) this.#startingTerminals.set(starting, left);
+        else this.#startingTerminals.delete(starting);
+      }
     }
+  }
+
+  /**
+   * Whether a terminal of this thread is starting or running. A shell can hold
+   * the thread's folder as its working directory with no turn going, so the
+   * worktree cleanup counts it as work: a start is counted from the moment it
+   * is asked for, and an owner only while its process still runs.
+   */
+  threadTerminalRunning(threadId: string): boolean {
+    if ((this.#startingTerminals.get(threadId) ?? 0) > 0) return true;
+    for (const [terminalId, owner] of this.#terminalOwners) {
+      if (owner.threadId !== threadId) continue;
+      if (owner.starting !== undefined) return true;
+      try {
+        if (this.#options.terminals.attach(terminalId).status === "running") return true;
+      } catch {
+        // A terminal the port no longer knows is not running.
+      }
+    }
+    return false;
   }
 
   async #executeAs(

@@ -2332,6 +2332,8 @@ export function startOctantServer(
           liveTurn: (id) => liveTurns.read(String(id)) !== undefined,
           childWorkGoing: (id) => childWorkGoing(String(id)),
           debugSession: (id) => debugService.hasSession(id),
+          // Unknown (no operation runtime) counts as running, as an unreadable turn does.
+          threadTerminalRunning: (id) => codeOperationRuntime?.terminalRunning?.(String(id)) !== false,
           projectTerminalRunning: (projectId) => projectTerminals?.hasRunning(projectId) === true,
           queuedMessage: (id) =>
             threadMessageQueue.hasQueued(

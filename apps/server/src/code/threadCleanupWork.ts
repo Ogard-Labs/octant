@@ -21,6 +21,8 @@ export interface ThreadCleanupWorkPorts {
    * folders, so the host cannot say which worktree it is in.
    */
   readonly projectTerminalRunning: (projectId: ProjectId) => boolean;
+  /** A terminal of the thread, in the Code workspace or an agent's, is starting or running. */
+  readonly threadTerminalRunning: (threadId: CodeThreadId) => boolean;
   /** A message waits in the thread's queue. */
   readonly queuedMessage: (threadId: CodeThreadId) => boolean;
   /** Wake-ups waiting for the thread; undefined when the service is not running. */
@@ -56,6 +58,7 @@ export function threadHasWork(
       ports.liveTurn(threadId) ||
       ports.childWorkGoing(threadId) ||
       ports.debugSession(threadId) ||
+      ports.threadTerminalRunning(threadId) ||
       (options.ignoreProjectTerminals !== true && ports.projectTerminalRunning(projectId)) ||
       ports.queuedMessage(threadId) ||
       wakeups === undefined ||

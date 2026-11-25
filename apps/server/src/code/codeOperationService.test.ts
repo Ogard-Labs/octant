@@ -4297,6 +4297,7 @@ describe("CodeOperationService terminal readers", () => {
 
   function readerFixture(
     evidenceOverrides: { readonly put?: (content: string) => undefined } = {},
+    gates: { readonly access?: Promise<void> } = {},
   ) {
     let observer: ((emission: unknown) => void) | undefined;
     const removeObserver = vi.fn();
@@ -4336,7 +4337,10 @@ describe("CodeOperationService terminal readers", () => {
             observedAt: "2026-07-21T10:00:00.000Z",
           }),
         ),
-        canAccessProject: vi.fn(async () => true),
+        canAccessProject: vi.fn(async () => {
+          await gates.access;
+          return true;
+        }),
         approvalContextDigest: vi.fn(async () => "a".repeat(64)),
         resolveCheckoutRoot: vi.fn(async () => ({
           checkoutRoot: "/private/exact-checkout",
@@ -4388,6 +4392,36 @@ describe("CodeOperationService terminal readers", () => {
       )
       .map((entry) => entry.expectedCursor);
   }
+
+  it("counts a thread's terminal as work from before its checkout resolves until it has exited", async () => {
+    let letThrough: () => void = () => undefined;
+    const access = new Promise<void>((resolve) => {
+      letThrough = resolve;
+    });
+    const { service, terminals } = readerFixture({}, { access });
+    expect(service.threadTerminalRunning(String(ids.thread))).toBe(false);
+    const starting = service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    // Still resolving the thread's access: no owner exists yet.
+    expect(service.threadTerminalRunning(String(ids.thread))).toBe(true);
+    expect(service.threadTerminalRunning("12121212-1212-4212-8212-121212121212")).toBe(false);
+    letThrough();
+    await starting;
+    expect(service.threadTerminalRunning(String(ids.thread))).toBe(true);
+    terminals.attach.mockReturnValue({
+      terminalId: ids.terminal,
+      status: "exited",
+      canRerun: false,
+      transcript: { chunks: [], byteLength: 0, truncated: false, characters: 0 },
+    } as never);
+    expect(service.threadTerminalRunning(String(ids.thread))).toBe(false);
+  });
 
   it("keeps sending a terminal's output to the reader that was already following it", async () => {
     const { emit, events, service } = readerFixture();
