@@ -2177,6 +2177,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       attachmentsFolder,
       sandboxPolicy,
       serverPlacement,
+      permissionPersistence: threadPersistence,
     }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
@@ -2244,7 +2245,12 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           threadMode,
           `${executionPolicy}${ownSubagents ? "+own-subagents" : ""}${
             keepsOwnMemory(executionPolicy, strict) ? "+own-memory" : ""
-          }${strict ? "" : "+not-strict"}`,
+          }${strict ? "" : "+not-strict"}${
+            // A command accepted for the session stays accepted in the process
+            // that holds its thread, so a thread whose approvals now hold for
+            // one call each never resumes there.
+            threadPersistence === "project-default" ? "+one-call-approvals" : ""
+          }`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
           // A process launched with other host credentials let through is
           // not reused for this list.
@@ -4454,7 +4460,7 @@ function makeConnection(
                   // approved escalation runs that one command only.
                   input.scope === "once" || state.sandbox.kind === "native"
                     ? "project-default"
-                    : permissionPersistence(options),
+                    : (input.persistence ?? permissionPersistence(options)),
                 ),
               }),
             ).pipe(
