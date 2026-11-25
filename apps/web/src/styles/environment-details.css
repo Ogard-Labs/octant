@@ -390,6 +390,30 @@
   position: relative;
 }
 
+/* A layer and the one it is based on are joined glyph to glyph. Each row draws
+   its own half, so a title on two lines never breaks the line. */
+.environment-thread-pr:is([data-stack-join="previous"], [data-stack-join="both"])::before,
+.environment-thread-pr:is([data-stack-join="next"], [data-stack-join="both"])::after {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: calc(
+    var(--environment-row-inset) + (var(--environment-icon-size, 16px) - 1px) / 2
+  );
+  width: 1px;
+  height: calc(50% - 11px);
+  background: var(--oct-hairline-strong);
+  content: "";
+  pointer-events: none;
+}
+
+.environment-thread-pr::before {
+  top: 0;
+}
+
+.environment-thread-pr::after {
+  bottom: 0;
+}
+
 .environment-thread-pr[data-step] .environment-thread-pr__meta {
   padding-inline-end: 76px;
 }
@@ -419,6 +443,31 @@
   align-items: center;
   justify-content: flex-end;
   gap: var(--oct-space-1);
+}
+
+.environment-thread-pr__checks-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* A layer's place stands beside the title's first line with the checks under
+   it, so the row's next step, at the foot of the row, has its room. */
+.environment-thread-pr[data-stacked] .environment-thread-pr__checks-end {
+  display: grid;
+  align-self: flex-start;
+  justify-items: end;
+}
+
+.environment-thread-pr[data-stacked] .environment-thread-pr__checks-line {
+  line-height: 1.2;
+}
+
+.environment-thread-pr__stack {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* Room for "123/456" and the dot: 56px. */
