@@ -119,12 +119,12 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
               )}
             </label>
             <label className="work-promotion__field">
-              <span className="oct-row-detail">Target Code Project</span>
+              <span className="oct-row-detail">Code Project</span>
               {noTargets ? (
-                <OctantEmpty layout="line" title="No active Code Project to target" tone="lane" />
+                <OctantEmpty layout="line" title="No active Code Project" tone="lane" />
               ) : (
                 <OctantSelectField
-                  aria-label="Target Code Project"
+                  aria-label="Code Project"
                   onValueChange={setTargetIndex}
                   options={props.targetCodeProjectLabels.map((project, index) => ({
                     id: String(index),
@@ -157,7 +157,7 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
                 <div className="surface-row__copy">
                   <span className="oct-row-label">{proposal.selectedContext.summary}</span>
                   <span className="oct-row-detail">
-                    Target Code Project:{" "}
+                    Code Project:{" "}
                     {props.targetCodeProjectLabels.find(
                       (project) => String(project.id) === String(proposal.targetCodeProjectId),
                     )?.name ?? "Unknown"}

@@ -89,7 +89,7 @@ export function DelegatedCodeSetting(props: {
       </div>
       {confirming && marked === undefined ? (
         <form
-          aria-label="Confirm the delivery target for delegated Code work"
+          aria-label="Confirm the delivery for delegated Code work"
           noValidate
           className="settings-panel__stack"
           onSubmit={(event) => {

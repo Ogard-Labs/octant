@@ -500,10 +500,10 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         />
         <p className="automation-editor__note">
           {mode === "chat"
-            ? "Each run starts a new Chat thread with this delivery target."
+            ? "Each run starts a new Chat thread to deliver this."
             : mode === "work"
-              ? "Each run starts a new thread with this target. It is Done when you mark it Done."
-              : "Each run starts a new thread with this target. It is Done when the target is met."}
+              ? "Each run starts a new thread to deliver this. It is Done when you mark it Done."
+              : "Each run starts a new thread to deliver this. It is Done when this is delivered."}
         </p>
       </div>
 
@@ -556,8 +556,8 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         />
         <label htmlFor={ids.confirm}>
           {trigger.kind === "file-arrival"
-            ? "I confirm this delivery target for every file-triggered run"
-            : "I confirm this delivery target for every scheduled run"}
+            ? "I confirm this delivery for every file-triggered run"
+            : "I confirm this delivery for every scheduled run"}
         </label>
       </div>
 

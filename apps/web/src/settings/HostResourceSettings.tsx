@@ -201,9 +201,9 @@ export function HostResourceSettings({
     },
     {
       key: "cpuTargetPercent",
-      label: "CPU target (%)",
+      label: "CPU limit for new work (%)",
       description:
-        "Automatic mode leaves the remaining CPU capacity for other local work. This is an admission target, not a CPU cap.",
+        "With Automatic limits on, Octant starts new work only while CPU use is under this share; work already running is not capped.",
       min: 20,
       max: 90,
     },

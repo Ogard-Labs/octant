@@ -1493,7 +1493,7 @@ describe("WorkspaceView concurrent Code threads", () => {
       { name: "Workspace pane: Thread B" },
       { timeout: 5_000 },
     );
-    const waitingNotice = "This thread is waiting for authoritative recovery or user input.";
+    const waitingNotice = "This thread is waiting for you, or for Octant to recover it.";
     await waitFor(() => expect(within(paneB).getByText(waitingNotice)).toBeVisible(), {
       timeout: 5_000,
     });

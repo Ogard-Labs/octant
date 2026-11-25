@@ -4061,6 +4061,21 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     expect(screen.getByRole("heading", { name: "Loading Code thread" })).toBeVisible();
+    // A loading state is its title alone: no sentence repeats it underneath.
+    expect(document.querySelector('[data-slot="empty-description"]')).toBeNull();
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={{
+          ...controller(),
+          activeView: undefined,
+          status: "conflict-reload",
+        }}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Reloading Code thread" })).toBeVisible();
+    expect(document.querySelector('[data-slot="empty-description"]')).toBeNull();
 
     rerender(
       <CodeThreadWorkspace

@@ -93,7 +93,7 @@ const blockReasonLabels: Record<AutomationBlockReason, string> = {
     "The provider or model capability no longer matches. Edit and resume to revalidate.",
   "authority-mismatch": "The authority profile no longer matches. Edit and resume to revalidate.",
   "delivery-target-invalid":
-    "The confirmed delivery target is no longer valid. Edit and confirm a new target.",
+    "The confirmed delivery is no longer valid. Edit and confirm it again.",
   "full-access-ineligible": "Automations cannot use Full access. Pick a profile that asks first.",
   "unsupported-mode": "This mode is not supported for automations.",
   "automation-recursion": "Automation-created work cannot manage automations.",
@@ -457,11 +457,11 @@ export function buildAutomationDraft(input: AutomationDraftFormInput): Automatio
   issues.push(...automationTriggerIssues(input.trigger));
   if (input.trigger.kind === "file-arrival" && input.mode === "chat")
     issues.push("File arrivals start Work or Code routines, not Chat routines.");
-  if (targetSummary.length === 0) issues.push("Describe the delivery target.");
+  if (targetSummary.length === 0) issues.push("Describe what each run delivers.");
   if (targetSummary.length > MAX_AUTOMATION_TARGET_LENGTH) {
-    issues.push(`Keep the delivery target under ${MAX_AUTOMATION_TARGET_LENGTH} characters.`);
+    issues.push(`Keep the delivery under ${MAX_AUTOMATION_TARGET_LENGTH} characters.`);
   }
-  if (!input.deliveryTargetConfirmed) issues.push("Confirm the delivery target before saving.");
+  if (!input.deliveryTargetConfirmed) issues.push("Confirm the delivery before saving.");
 
   if (issues.length > 0) return { kind: "invalid", issues: dedupe(issues) };
 

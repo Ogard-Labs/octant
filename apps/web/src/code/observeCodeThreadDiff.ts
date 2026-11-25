@@ -46,7 +46,7 @@ export async function observeCodeThreadDiff(
     if (checkout.kind !== "git-observed") {
       return {
         state: "unavailable",
-        message: "Git observation returned no authoritative checkout state.",
+        message: "Git status could not be read.",
       };
     }
     if (checkout.changedPaths.length > 0) {
@@ -60,7 +60,7 @@ export async function observeCodeThreadDiff(
   } catch {
     return {
       state: "unavailable",
-      message: "Git observation is unavailable. Reconnect and retry.",
+      message: "Git status is unavailable. Reconnect and retry.",
     };
   }
 }

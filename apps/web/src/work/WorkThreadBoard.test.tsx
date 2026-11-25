@@ -174,7 +174,7 @@ describe("WorkThreadBoard", () => {
 
     const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
     expect(within(waiting).getByText("Recovering thread")).toBeVisible();
-    expect(within(waiting).getByText(/Project projection missing/)).toBeVisible();
+    expect(within(waiting).getByText(/Project data missing/)).toBeVisible();
   });
 
   it("keeps a specific Waiting reason visible in the narrow grouped list", async () => {
@@ -315,7 +315,7 @@ describe("WorkThreadBoard", () => {
     expect(article).toHaveTextContent("Drafting the export outline");
     const facts = article.querySelector(".board-card-facts");
     if (facts === null) throw new Error("Expected card facts");
-    expect(facts).toHaveTextContent(/Project projection missing/);
+    expect(facts).toHaveTextContent(/Project data missing/);
     expect(facts).toHaveTextContent("Approval: Write the export");
     expect(facts).toHaveTextContent("Follow-up");
     expect(facts).toHaveTextContent("Recovering");

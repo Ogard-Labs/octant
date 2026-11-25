@@ -635,14 +635,7 @@ function AutomationListBody(props: {
     }
   };
   if (controller.list.status === "loading") {
-    return (
-      <OctantEmpty
-        eyebrow="Automations"
-        message="Loading automations."
-        state="loading"
-        title="Loading"
-      />
-    );
+    return <OctantEmpty eyebrow="Automations" state="loading" title="Loading automations" />;
   }
   if (controller.list.status === "unavailable") {
     return (
@@ -992,14 +985,7 @@ function AutomationDetail(props: {
   }, [props.narrow, detailReady]);
 
   if (controller.detail.status === "loading" || controller.detail.status === "idle") {
-    return (
-      <OctantEmpty
-        eyebrow="Automations"
-        message="Loading the automation."
-        state="loading"
-        title="Loading"
-      />
-    );
+    return <OctantEmpty eyebrow="Automations" state="loading" title="Loading automation" />;
   }
   if (controller.detail.status === "unavailable") {
     return (
@@ -1223,7 +1209,7 @@ function AutomationDetail(props: {
           <dd>{`${String(automation.executionProfile.modelId)} · ${automation.executionProfile.executionPolicy}`}</dd>
         </div>
         <div>
-          <dt>Delivery target</dt>
+          <dt>Delivery</dt>
           <dd>
             {automation.deliveryTarget.summary}
             <span className="automation-detail__confirmed">

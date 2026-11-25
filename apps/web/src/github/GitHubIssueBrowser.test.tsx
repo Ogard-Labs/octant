@@ -442,7 +442,7 @@ describe("GitHubIssueBrowser", () => {
 
     expect(await screen.findByRole("button", { name: /Other repo/ })).toBeInTheDocument();
     expect(screen.queryByRole("article", { name: "Issue #1" })).not.toBeInTheDocument();
-    expect(screen.getByText("Select an issue to read it.")).toBeInTheDocument();
+    expect(screen.getByText("Select an issue to read it")).toBeInTheDocument();
     expect(
       readCatalogue.mock.calls.some(
         ([request]) =>
@@ -527,7 +527,7 @@ describe("GitHubIssueBrowser", () => {
     await waitFor(() =>
       expect(screen.queryByRole("article", { name: "Issue #1" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByText("Select an issue to read it.")).toBeInTheDocument();
+    expect(screen.getByText("Select an issue to read it")).toBeInTheDocument();
   });
 
   it("renders unavailable reason, remediation, and retry delay", async () => {

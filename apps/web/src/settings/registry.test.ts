@@ -269,7 +269,7 @@ describe("searchSettings", () => {
           settings: [
             {
               id: settingId("color-scheme"),
-              label: "Color scheme",
+              label: "Colour scheme",
               scope: "app",
               keywords: "light system",
             },
@@ -283,7 +283,7 @@ describe("searchSettings", () => {
         kind: "setting",
         sectionId: "appearance",
         settingId: "color-scheme",
-        label: "Color scheme",
+        label: "Colour scheme",
         scope: "app",
       },
     ]);

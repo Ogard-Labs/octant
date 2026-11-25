@@ -820,7 +820,7 @@ function IssueDetailPane(props: {
 }) {
   const { detail, selected } = props;
   if (detail.kind === "idle") {
-    return <OctantEmpty layout="line" title="Select an issue to read it." />;
+    return <OctantEmpty layout="line" title="Select an issue to read it" />;
   }
   if (detail.kind === "loading") {
     return <OctantEmpty layout="line" title="Loading issue…" />;

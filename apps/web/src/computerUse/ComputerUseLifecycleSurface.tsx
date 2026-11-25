@@ -30,7 +30,7 @@ export function ComputerUseLifecycleSurface(props: {
                 ? "Computer use failed"
                 : "Computer use unavailable"}
           </strong>
-          <p>{controller.errorMessage ?? "The authoritative host lifecycle is unavailable."}</p>
+          <p>{controller.errorMessage ?? "Computer use could not report its state."}</p>
         </OctantAlert>
         <OctantButton onClick={controller.retry} type="button" variant="secondary">
           Retry

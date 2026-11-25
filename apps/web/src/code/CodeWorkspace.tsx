@@ -461,7 +461,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         <UnavailableProjection
           message={
             props.projections?.fileOpenError ??
-            "Reload this tab when the authoritative file projection is available. Your workspace layout remains preserved."
+            "This file cannot be read yet. Reload the tab to try again; your layout is kept."
           }
           title={`${props.tab.relativePath} is unavailable`}
         />
@@ -503,7 +503,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
       if (tests === undefined) {
         return (
           <UnavailableProjection
-            message="No authoritative repository-test definitions are attached to this restored tab."
+            message="This restored tab has no tests to show."
             title="Repository tests unavailable"
           />
         );
@@ -553,7 +553,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
       if (props.appleToolchainClient === undefined) {
         return (
           <UnavailableProjection
-            message="Reconnect to the authoritative Apple toolchain service to restore this workbench."
+            message="Reconnect to restore this workbench."
             title="Apple workbench unavailable"
           />
         );
@@ -1156,9 +1156,9 @@ function GitWorkspaceSurface(
       });
       if (result.kind === "git-observed") setObservation(result);
       else if (result.kind === "operation-failed") setFailure(result.failure.message);
-      else setFailure("Git observation returned no authoritative checkout state.");
+      else setFailure("Git status could not be read.");
     } catch {
-      setFailure("Git observation is unavailable. Reconnect and retry.");
+      setFailure("Git status is unavailable. Reconnect and retry.");
     }
   }, [props.client, props.nextUuid, props.scope]);
 
@@ -1179,11 +1179,11 @@ function GitWorkspaceSurface(
   if (failure !== undefined) {
     return (
       <OctantEmpty
-        action={{ label: "Retry Git observation", onClick: () => void observe() }}
+        action={{ label: "Retry", onClick: () => void observe() }}
         message={failure}
         role="alert"
         state="warning"
-        title="Git state unavailable"
+        title="Git status unavailable"
       />
     );
   }
@@ -1243,9 +1243,9 @@ function PullRequestWorkspaceSurface(
       });
       if (result.kind === "pull-request-review") setReview(result);
       else if (result.kind === "operation-failed") setFailure(result.failure.message);
-      else setFailure("Pull request observation returned no authoritative state.");
+      else setFailure("The pull request could not be read.");
     } catch {
-      setFailure("Pull request observation is unavailable. Reconnect and retry.");
+      setFailure("The pull request is unavailable. Reconnect and retry.");
     }
   }, [props.client, props.nextUuid, props.scope]);
 
@@ -1254,11 +1254,11 @@ function PullRequestWorkspaceSurface(
   if (failure !== undefined) {
     return (
       <OctantEmpty
-        action={{ label: "Retry pull request observation", onClick: () => void observe() }}
+        action={{ label: "Retry", onClick: () => void observe() }}
         message={failure}
         role="alert"
         state="warning"
-        title="Pull request state unavailable"
+        title="Pull request unavailable"
       />
     );
   }

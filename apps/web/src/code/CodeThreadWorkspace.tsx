@@ -1056,15 +1056,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ? {}
             : { action: { label: "Retry Code", onClick: props.controller.retry } })}
           eyebrow="Code workspace"
-          message={
-            props.controller.errorMessage ??
-            (props.controller.status === "conflict-reload"
-              ? "Loading current authoritative Code state."
-              : "Loading the selected Code thread.")
-          }
+          {...(props.controller.errorMessage === undefined
+            ? {}
+            : { message: props.controller.errorMessage })}
           {...(unavailable === undefined ? {} : { role: "alert" as const })}
           state={unavailable === undefined ? "loading" : "warning"}
-          title={unavailable === undefined ? "Loading Code thread" : "Code thread unavailable"}
+          title={
+            unavailable !== undefined
+              ? "Code thread unavailable"
+              : props.controller.status === "conflict-reload"
+                ? "Reloading Code thread"
+                : "Loading Code thread"
+          }
         />
       </section>
     );
@@ -2097,7 +2100,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           <OctantAlert className="thread-column code-thread-workspace__callout" tone="warning">
             <p>
               {thread.lifecycle === "waiting"
-                ? "This thread is waiting for authoritative recovery or user input."
+                ? "This thread is waiting for you, or for Octant to recover it."
                 : "This thread was interrupted and requires an explicit retry."}
             </p>
           </OctantAlert>
@@ -2111,11 +2114,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           >
             <div className="code-thread-workspace__transcript code-thread-workspace__transcript--empty thread-column">
               {props.controller.conversationHistory === "loading" ? (
-                <OctantEmpty
-                  message="Loading the existing thread transcript from this host."
-                  state="loading"
-                  title="Loading conversation"
-                />
+                <OctantEmpty state="loading" title="Loading conversation" />
               ) : readOnly ? (
                 <OctantEmpty state="neutral" title="No messages yet" />
               ) : showEmptyConversation ? (
@@ -2680,7 +2679,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                           message.sourceThreadId !== props.threadId
                                         ? "This receipt belongs to the original source thread. Open that thread to review its files."
                                         : message.checkoutId !== view.checkout.id
-                                          ? "This receipt belongs to an earlier checkout binding. Its files cannot be retargeted to this checkout."
+                                          ? "This receipt belongs to an earlier checkout, so its files cannot be reviewed here."
                                           : "Review these files after this turn finishes.",
                                 })}
                           />

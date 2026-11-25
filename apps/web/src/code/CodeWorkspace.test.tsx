@@ -758,7 +758,7 @@ describe("CodeWorkspace", () => {
 
     // The panes' one state: a mark and two lines, found by its words.
     expect(screen.getByText("README.md is unavailable")).toBeVisible();
-    expect(screen.getByText(/authoritative file projection/i)).toBeVisible();
+    expect(screen.getByText(/This file cannot be read yet/i)).toBeVisible();
   });
 
   it("opens the conversation workspace for code-overview tabs instead of the summary card", () => {

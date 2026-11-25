@@ -235,7 +235,7 @@ describe("AgentsCenter", () => {
         })}
       />,
     );
-    expect(screen.getByText("Loading agent runs.")).toBeInTheDocument();
+    expect(screen.getByText("Loading agents")).toBeInTheDocument();
   });
 
   it("shows an empty state when no runs match the filters", async () => {
@@ -248,7 +248,7 @@ describe("AgentsCenter", () => {
   it("offers search and filters only once there are runs to filter", async () => {
     render(<AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [] })) })} />);
     await screen.findByText("No agent runs yet");
-    expect(screen.queryByRole("group", { name: "Agents Center controls" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Agents controls" })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Search tasks, roles, threads")).not.toBeInTheDocument();
   });
 
@@ -348,7 +348,7 @@ describe("AgentsCenter", () => {
     // The previous answer stays until the new one arrives; marking the list
     // busy is the feedback, not a full-pane loading screen.
     expect(screen.getByText(summary.task)).toBeInTheDocument();
-    expect(screen.queryByText("Loading agent runs.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading agents")).not.toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Agent runs" })).toHaveAttribute("aria-busy", "true");
 
     settleSecond?.({ items: [] });

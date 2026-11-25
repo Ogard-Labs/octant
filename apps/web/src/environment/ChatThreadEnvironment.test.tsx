@@ -154,7 +154,7 @@ describe("the Chat thread environment summary", () => {
     const environment = await screen.findByRole("region", { name: "Environment details" });
     expect(environment).toHaveAttribute("data-environment-status", "unavailable");
     expect(screen.getByText("Chat · Project unavailable")).toBeVisible();
-    expect(screen.getByText("Authoritative Chat context is unavailable.")).toBeVisible();
+    expect(screen.getByText("This thread's Project could not be found.")).toBeVisible();
     expect(screen.queryByText("Unavailable for unfiled Chat")).not.toBeInTheDocument();
     expect(screen.queryByText("1 attachment")).not.toBeInTheDocument();
     expect(screen.queryByText("Git")).not.toBeInTheDocument();
