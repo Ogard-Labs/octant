@@ -65,7 +65,7 @@ function isResearchRole(role: string): boolean {
  * user = control-fill bubble; assistant = reasoning and tool rows, then bare prose.
  */
 export function MessageBubble(props: MessageBubbleProps) {
-  const { colors, surfaceStyle } = useTheme();
+  const { colors } = useTheme();
   const user = isUserRole(props.role);
   const research = isResearchRole(props.role);
   const showActions = props.showActions !== false && !user && !research;
@@ -107,16 +107,14 @@ export function MessageBubble(props: MessageBubbleProps) {
         // A person's message: the control fill, no accent and no outline; the
         // reply beside it is bare prose.
         bubbleUser: {
-          // On glass the bubble takes the thin glass fill so the ground shows
-          // through it like every other panel; flat keeps the control fill.
-          backgroundColor: surfaceStyle === "glass" ? colors.glassFillRegular : colors.userBubble,
+          backgroundColor: colors.userBubble,
         },
         assistantStack: {
           width: "100%",
           gap: space.xs,
         },
       }),
-    [colors, surfaceStyle],
+    [colors],
   );
 
   if (user) {

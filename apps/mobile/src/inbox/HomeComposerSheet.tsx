@@ -24,6 +24,11 @@ const MOBILE_CREATE_MODES: ReadonlyArray<{
   { id: "code", label: "Code", icon: "code-slash" },
 ];
 
+// The question is large already, and shares what the keyboard leaves with the
+// message, which follows the system size as far as it goes.
+const BAR_TEXT_SCALE = 1.2;
+const QUESTION_TEXT_SCALE = 1.3;
+
 function placeholderFor(mode: MobileCreateMode): string {
   if (mode === "work") return MOBILE_COPY.composerWork;
   if (mode === "code") return MOBILE_COPY.composerCode;
@@ -85,7 +90,13 @@ export function HomeComposerSheet(props: {
           fontWeight: "700",
           letterSpacing: -0.3,
         },
-        question: { flex: 1, alignItems: "center", justifyContent: "center", gap: 6 },
+        question: {
+          flex: 1,
+          overflow: "hidden",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+        },
         headline: {
           color: colors.textPrimary,
           fontSize: 24,
@@ -180,7 +191,11 @@ export function HomeComposerSheet(props: {
           size={40}
           testID="mobile-home-composer-cancel"
         />
-        <Text accessibilityRole="header" style={styles.headerTitle}>
+        <Text
+          accessibilityRole="header"
+          maxFontSizeMultiplier={BAR_TEXT_SCALE}
+          style={styles.headerTitle}
+        >
           {MOBILE_COPY.newThread}
         </Text>
       </View>
@@ -189,6 +204,7 @@ export function HomeComposerSheet(props: {
         {props.mode === "chat" ? (
           <Text
             accessibilityLabel={projectLabel}
+            maxFontSizeMultiplier={QUESTION_TEXT_SCALE}
             style={styles.headline}
             testID="mobile-home-composer-project-label"
           >
@@ -196,11 +212,15 @@ export function HomeComposerSheet(props: {
           </Text>
         ) : (
           <>
-            <Text style={styles.headline}>
+            <Text maxFontSizeMultiplier={QUESTION_TEXT_SCALE} style={styles.headline}>
               {props.mode === "code" ? MOBILE_COPY.newCodeQuestion : MOBILE_COPY.newWorkQuestion}
             </Text>
             {choices.length === 0 || props.selectedProjectId === undefined ? (
-              <Text style={styles.headline} testID="mobile-home-composer-project-label">
+              <Text
+                maxFontSizeMultiplier={QUESTION_TEXT_SCALE}
+                style={styles.headline}
+                testID="mobile-home-composer-project-label"
+              >
                 {projectLabel}
               </Text>
             ) : (
