@@ -1181,6 +1181,51 @@ describe("side tasks", () => {
         expect(switches.get(first)).toBe(false);
       });
 
+      it("keeps the receipt of the latest start, however old its offer is", async () => {
+        const store = storeOn(openConnection());
+        const tools = toolsFor(store, "chat", uuidFactory());
+        const offerOne = async () => {
+          await tools.execute({
+            name: "octant_offer_side_task",
+            inputJson: JSON.stringify(offer),
+          });
+          return String(store.read(threadId).tasks.at(-1)?.offer.id);
+        };
+        const start = (sideTaskId: string, child: string) =>
+          startSideTask(
+            startDependencies(store, {
+              create: async () => ({
+                kind: "created",
+                created: {
+                  kind: "new-thread",
+                  mode: "chat",
+                  title: offer.title,
+                  threadId: child,
+                } as never,
+                onSuggestingModel: true,
+              }),
+            }),
+            { threadId, windowId, sideTaskId },
+          );
+        const oldest = await offerOne();
+        for (let index = 0; index < MAX_STARTED_SIDE_TASK_RECEIPTS; index += 1) {
+          await start(
+            await offerOne(),
+            `00000000-0000-4000-8000-${String(900 + index).padStart(12, "0")}`,
+          );
+        }
+        const late = "00000000-0000-4000-8000-000000000800";
+        await start(oldest, late);
+
+        const started = store
+          .read(threadId)
+          .tasks.filter((task) => task.status === "started")
+          .map((task) => String(task.startedThreadId));
+        expect(started).toHaveLength(MAX_STARTED_SIDE_TASK_RECEIPTS);
+        expect(started).toContain(late);
+        expect(started).not.toContain("00000000-0000-4000-8000-000000000900");
+      });
+
       it("reads a started receipt's child state and its reporting switch together", async () => {
         const { store, child } = await startedTask();
         const { reports } = reportingFake();

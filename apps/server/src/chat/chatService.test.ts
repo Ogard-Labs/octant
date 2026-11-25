@@ -12696,6 +12696,7 @@ describe("agent result delivery", () => {
       reports,
       journal: fixture.persistence.journal,
       ports: { chat, work: chat, code: chat },
+      childDeleted: () => false,
       clock: () => new Date(now),
     });
     const unsubscribe = fixture.persistence.journal.subscribeCommitted((append) =>

@@ -64,6 +64,11 @@ interface SideTaskReportDeliveryServiceOptions {
   >;
   readonly ports: SideTaskReportDeliveryPorts;
   readonly clock: () => Date;
+  /**
+   * Whether a child's thread is deleted or being deleted. Startup finishes a
+   * pending deletion before this service hears of commits, so `start` asks.
+   */
+  readonly childDeleted: (childThreadId: string) => boolean;
   /** Injectable so tests drive the retry cadence by hand. */
   readonly schedule?: (atEpochMs: number, fire: () => void) => SideTaskReportDeliveryTimerHandle;
   readonly unschedule?: (handle: SideTaskReportDeliveryTimerHandle) => void;
@@ -103,6 +108,10 @@ export class SideTaskReportDeliveryService {
   start(): void {
     const parents = new Set<string>();
     for (const entry of this.#options.reports.undelivered()) {
+      if (this.#options.childDeleted(entry.childThreadId)) {
+        this.#refuseDeletedChild(entry.childThreadId);
+        continue;
+      }
       parents.add(String(entry.report.parentThreadId));
     }
     for (const parentThreadId of parents) this.#arm(parentThreadId);
@@ -142,14 +151,7 @@ export class SideTaskReportDeliveryService {
       return;
     }
     if (event.eventName === "chat.deleted@1") {
-      try {
-        this.#options.reports.refuseOwedFrom(
-          event.aggregateId,
-          "The side task's thread was deleted.",
-        );
-      } catch (error) {
-        this.#options.onError?.("A deleted side task's reports could not be settled.", error);
-      }
+      this.#refuseDeletedChild(event.aggregateId);
     }
     this.#watchParent(event);
   }
@@ -239,6 +241,14 @@ export class SideTaskReportDeliveryService {
       this.#pending.set(parentThreadId, { parentThreadId, timer: undefined, evaluating: false });
     }
     queueMicrotask(() => void this.#evaluate(parentThreadId));
+  }
+
+  #refuseDeletedChild(childThreadId: string): void {
+    try {
+      this.#options.reports.refuseOwedFrom(childThreadId, "The side task's thread was deleted.");
+    } catch (error) {
+      this.#options.onError?.("A deleted side task's reports could not be settled.", error);
+    }
   }
 
   #retryAfterMs(): number {

@@ -95,6 +95,7 @@ function fixture(
     readonly chat?: Partial<SideTaskReportDeliveryModePort>;
     readonly work?: Partial<SideTaskReportDeliveryModePort>;
     readonly code?: Partial<SideTaskReportDeliveryModePort>;
+    readonly childDeleted?: (childThreadId: string) => boolean;
   } = {},
 ) {
   const connection = openConnection();
@@ -114,6 +115,7 @@ function fixture(
       return timers[timers.length - 1];
     },
     unschedule: () => undefined,
+    childDeleted: options.childDeleted ?? (() => false),
   });
   const unsubscribe = journal.subscribeCommitted((append) => service.onCommittedAppend(append));
   const flush = async () => {
@@ -143,6 +145,7 @@ function fixture(
           return timers[timers.length - 1];
         },
         unschedule: () => undefined,
+        childDeleted: options.childDeleted ?? (() => false),
       });
       return { reports: restartedReports, service: restarted };
     },
@@ -326,6 +329,19 @@ describe("SideTaskReportDeliveryService", () => {
     await f.flush();
     expect(f.work.dispatched).toHaveLength(2);
     expect(f.reports.undelivered()).toHaveLength(0);
+    f.unsubscribe();
+    f.service.stop();
+  });
+
+  it("settles what a child owed when its deletion finished before delivery started", async () => {
+    const f = fixture({ childDeleted: (threadId) => threadId === child });
+    f.reports.owe(child, completion("Deleted while the host was starting."));
+    f.reports.owe(sibling, completion("Still owed."));
+    f.service.start();
+    await f.flush();
+
+    expect(f.chat.dispatched.flat().map((report) => report.text)).toEqual(["Still owed."]);
+    expect(f.restart().reports.undelivered()).toHaveLength(0);
     f.unsubscribe();
     f.service.stop();
   });

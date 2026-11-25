@@ -192,9 +192,21 @@ export class SideTaskStore {
     this.#boundView(record);
   }
 
-  /** Drops the oldest receipts past the view's bounds, started ones against their own. */
+  /**
+   * Drops the oldest receipts past the view's bounds, started ones against
+   * their own. Those age from their start, not their offer, so starting an old
+   * offer never drops the receipt it just made.
+   */
   #boundView(record: ThreadRecord): void {
-    const started = record.tasks.filter((task) => task.status === "started");
+    if (record.tasks.length <= MAX_SIDE_TASK_VIEW_ENTRIES) return;
+    const startOrder = [...this.#startedOffers.keys()];
+    const started = record.tasks
+      .filter((task) => task.status === "started")
+      .toSorted(
+        (left, right) =>
+          startOrder.indexOf(String(left.startedThreadId)) -
+          startOrder.indexOf(String(right.startedThreadId)),
+      );
     const others = record.tasks.filter((task) => task.status !== "started");
     const kept = new Set([
       ...started.slice(-MAX_STARTED_SIDE_TASK_RECEIPTS),

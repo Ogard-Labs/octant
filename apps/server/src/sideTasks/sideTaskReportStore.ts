@@ -10,13 +10,16 @@ import {
   SideTaskReportRefused,
   SideTaskReportingResumed,
   SideTaskReportingStopped,
+  THREAD_RETENTION_EVENT_NAMES,
   THREAD_SIDE_TASK_REPORTS_AGGREGATE_TYPE,
   THREAD_SIDE_TASK_REPORT_EVENT_NAMES,
+  type ThreadRetentionThreadPurged,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
 import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
+import { THREAD_RETENTION_AGGREGATE } from "../persistence/threadRetentionProjection";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
@@ -68,7 +71,7 @@ export class SideTaskReportStore {
   readonly #actor: typeof EventActor.Type;
   readonly #clock: () => string;
   readonly #records = new Map<string, ChildRecord>();
-  /** Threads a purge erased while this host ran; no report may name one again. */
+  /** Threads a purge erased, as the retained purge records say; no report may name one again. */
   readonly #purged = new Set<string>();
 
   constructor(options: {
@@ -298,7 +301,15 @@ export class SideTaskReportStore {
   #hydrate(): void {
     for (const envelope of replayAggregateTypesInOrder(this.#journal, [
       THREAD_SIDE_TASK_REPORTS_AGGREGATE_TYPE,
+      THREAD_RETENTION_AGGREGATE,
     ])) {
+      if (envelope.aggregateType === THREAD_RETENTION_AGGREGATE) {
+        if (envelope.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged)
+          this.forgetPurgedThread(
+            String((envelope.payload as ThreadRetentionThreadPurged).threadId),
+          );
+        continue;
+      }
       const childThreadId = String(envelope.aggregateId);
       const record = this.#record(childThreadId);
       record.version += 1;

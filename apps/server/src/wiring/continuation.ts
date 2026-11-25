@@ -364,6 +364,10 @@ export function wireContinuation(deps: ContinuationDependencies) {
       journal: persistence.journal,
       reports: deps.sideTaskReports,
       clock: () => new Date(),
+      childDeleted: (childThreadId) => {
+        const lifecycle = persistence.readChatThread(decodeChatThreadId(childThreadId))?.lifecycle;
+        return lifecycle === "deleting" || lifecycle === "deleted";
+      },
       ports: {
         chat: createChatSideTaskReportDeliveryPort({
           readThread: (threadId) => persistence.readChatThread(threadId),
