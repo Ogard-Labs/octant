@@ -23,6 +23,7 @@ import {
   type AutomationCommandResult,
   type AutomationDefinition,
   type AutomationId,
+  type AutomationRun,
   type HostId,
   type ProjectId,
   type RoutineChangeRequest,
@@ -118,6 +119,16 @@ export interface AutomationRouteDependencies {
     readonly current: () => boolean;
     readonly signal: AbortSignal;
   }) => Promise<AutomationFileSourcePreparation>;
+  /**
+   * Notified when a person explicitly confirms a held run or starts one via
+   * Run now, carrying their authenticated window or paired-device scope so the
+   * dispatcher can launch the first turn interactively instead of unattended.
+   */
+  readonly onHumanConfirmedRun?: (input: {
+    readonly definition: AutomationDefinition;
+    readonly run: AutomationRun;
+    readonly windowId: WindowId;
+  }) => void;
 }
 
 /**
@@ -758,6 +769,19 @@ async function handleCommand(
     eventPreparation === undefined
       ? dependencies.commands.execute(command, undefined, preparation)
       : dependencies.commands.execute(command, undefined, preparation, eventPreparation);
+  if (
+    result.kind === "automation-run-confirmed" ||
+    (command.kind === "run-now-automation" && result.kind === "automation-run-accepted")
+  ) {
+    const definition = dependencies.projection.getDefinition(result.run.automationId);
+    if (definition !== undefined) {
+      dependencies.onHumanConfirmedRun?.({
+        definition,
+        run: result.run,
+        windowId: context.scopeId,
+      });
+    }
+  }
   return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
 }
 

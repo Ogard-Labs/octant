@@ -62,6 +62,13 @@ import {
   type BrowserStepsCommand,
 } from "@octant/contracts/browser-capture";
 import {
+  BrowserPageClaimResult,
+  BrowserPageDismissResult,
+  BrowserPageReleaseResult,
+  decodeBrowserPageOfferCommand,
+  type BrowserPageOfferCommand,
+} from "@octant/contracts/browser-page-sessions";
+import {
   BrowserExtensionsResult,
   decodeBrowserExtensionsCommand,
   type BrowserExtensionsCommand,
@@ -113,6 +120,24 @@ export interface BrowserAutomationClient {
     command: BrowserCredentialCommand,
     signal?: AbortSignal,
   ): Promise<typeof BrowserCredentialResult.Type>;
+  /**
+   * Reserve the page a restart took for this window, and learn the profile to
+   * open a blank page in. The open that follows names the page; nothing ends
+   * until it succeeds. Absent on a client that cannot.
+   */
+  claimPageOffer?(
+    input: BrowserPageOfferCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserPageClaimResult.Type>;
+  /** Gives a claim back when the open it was for failed or was abandoned. */
+  releasePageOffer?(
+    input: BrowserPageOfferCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserPageReleaseResult.Type>;
+  dismissPageOffer?(
+    input: BrowserPageOfferCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserPageDismissResult.Type>;
   resolve(input: BrowserThreadScopeRequest, signal?: AbortSignal): Promise<BrowserThreadScope>;
   create(
     input: BrowserContextCreateCommand,
@@ -263,6 +288,30 @@ export function createBrowserAutomationClient(
         "/api/browser/contexts/inspect",
         decodeBrowserContextInspectCommand(input),
         decodeHostAnswer(BrowserAutomationSnapshot),
+        signal,
+      ),
+    claimPageOffer: (input, signal) =>
+      post(
+        options,
+        "/api/browser/page-offer/claim",
+        decodeBrowserPageOfferCommand(input),
+        decodeHostAnswer(BrowserPageClaimResult),
+        signal,
+      ),
+    releasePageOffer: (input, signal) =>
+      post(
+        options,
+        "/api/browser/page-offer/release",
+        decodeBrowserPageOfferCommand(input),
+        decodeHostAnswer(BrowserPageReleaseResult),
+        signal,
+      ),
+    dismissPageOffer: (input, signal) =>
+      post(
+        options,
+        "/api/browser/page-offer/dismiss",
+        decodeBrowserPageOfferCommand(input),
+        decodeHostAnswer(BrowserPageDismissResult),
         signal,
       ),
     inspectThread: (input, signal) =>

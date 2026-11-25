@@ -1,4 +1,5 @@
 import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
+import { paneTerminalSlot, TerminalSlot } from "./terminalSlot";
 import { ProjectMark } from "../projects/ProjectMark";
 import type { ReactNode } from "react";
 import { useContext, useMemo } from "react";
@@ -953,7 +954,16 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
           </OctantContextMenuRoot>
         ) : null}
         <div className="workspace-pane__panel" hidden={activeLocalView !== undefined}>
-          {props.renderSurface(surface, pane.paneId)}
+          <TerminalSlot
+            slot={
+              // A terminal a local view covers has nowhere to show a caret.
+              surface.kind === "code-terminal" && activeLocalView === undefined
+                ? paneTerminalSlot(pane.paneId, String(surface.id))
+                : undefined
+            }
+          >
+            {props.renderSurface(surface, pane.paneId)}
+          </TerminalSlot>
         </div>
         {localViews.map((view) => (
           <div

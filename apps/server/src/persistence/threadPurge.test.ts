@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { PROJECT_INSTRUCTIONS_AGGREGATE_TYPE } from "@octant/contracts/octant-instructions";
 import { OctantInstructionsStore } from "../octantInstructions/octantInstructionsStore";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -1136,6 +1137,95 @@ describe("thread purge sweep", () => {
     expect(approvals.approvals(decodeProjectId(projectId))).toEqual([]);
   });
 
+  it("takes a receipt's turn before deleting its file and folder, so a restore in flight cannot outlive the purge", async () => {
+    const turns: Array<{ receiptId: string; fileWhenTaken: boolean; folderWhenTaken: boolean }> =
+      [];
+    const harness = openHarness(async (receiptId, run) => {
+      turns.push({
+        receiptId,
+        fileWhenTaken: existsSync(
+          join(harness.directory, "managed-worktree-receipts", `${receiptId}.json`),
+        ),
+        folderWhenTaken: existsSync(worktreeLayout(harness.directory).worktreeFor(threads.code.id)),
+      });
+      await run();
+    });
+    seedControlThread(harness);
+    const thread = threads.code;
+    seedThreadTraces(harness, thread);
+
+    await harness.service.purge(
+      {
+        scope: {
+          kind: "thread",
+          mode: thread.mode,
+          threadId: decodeThreadRetentionThreadId(thread.id),
+        },
+        confirm: true,
+      },
+      "local-window",
+    );
+
+    // Only this thread's receipt took a turn, and it still had its file and
+    // folder when it did: the deletion happens inside the turn.
+    expect(turns).toEqual([
+      { receiptId: uuidFor("code", "worktree"), fileWhenTaken: true, folderWhenTaken: true },
+    ]);
+    expect(
+      existsSync(
+        join(harness.directory, "managed-worktree-receipts", `${uuidFor("code", "worktree")}.json`),
+      ),
+    ).toBe(false);
+    expect(existsSync(worktreeLayout(harness.directory).worktreeFor(thread.id))).toBe(false);
+  });
+
+  it("takes the receipt before it deletes anything, so a wait that gives up leaves the thread whole", async () => {
+    const harness = openHarness(async () => {
+      throw new Error("A worktree cleanup or restore is still running; try the purge again.");
+    });
+    seedControlThread(harness);
+    const thread = threads.code;
+    seedThreadTraces(harness, thread);
+    const attachment = join(
+      harness.directory,
+      "code-threads",
+      thread.id,
+      uuidFor("code", "attachment"),
+      "finalized.bin",
+    );
+    const image = join(
+      harness.directory,
+      "generated-images",
+      thread.id,
+      uuidFor("code", "image"),
+      "finalized.bin",
+    );
+    expect(existsSync(attachment)).toBe(true);
+
+    await expect(
+      harness.service.purge(
+        {
+          scope: {
+            kind: "thread",
+            mode: thread.mode,
+            threadId: decodeThreadRetentionThreadId(thread.id),
+          },
+          confirm: true,
+        },
+        "local-window",
+      ),
+    ).rejects.toThrow("still running");
+
+    expect(existsSync(attachment)).toBe(true);
+    expect(existsSync(image)).toBe(true);
+    expect(existsSync(worktreeLayout(harness.directory).worktreeFor(thread.id))).toBe(true);
+    expect(
+      existsSync(
+        join(harness.directory, "managed-worktree-receipts", `${uuidFor("code", "worktree")}.json`),
+      ),
+    ).toBe(true);
+  });
+
   it("leaves a managed worktree in place whose receipt names a path outside the managed worktree directory", async () => {
     const harness = openHarness();
     seedControlThread(harness);
@@ -1186,7 +1276,9 @@ interface Harness {
   readonly directory: string;
 }
 
-function openHarness(): Harness {
+function openHarness(
+  whileReceiptIdle?: (receiptId: string, run: () => Promise<void>) => Promise<void>,
+): Harness {
   const directory = mkdtempSync(join(tmpdir(), "octant-thread-purge-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -1223,6 +1315,7 @@ function openHarness(): Harness {
         mode,
         threadId: String(threadId),
         managedWorktreeRootPath: managedWorktreeRoot,
+        ...(whileReceiptIdle === undefined ? {} : { whileReceiptIdle }),
         purgeChatAttachments: (id) => chatAttachments.purgeThread(decodeChatThreadId(id)),
         purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
         purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),

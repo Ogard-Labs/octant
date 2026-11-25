@@ -57,7 +57,11 @@ import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
 import { makeClaudeLibraryPublishes } from "./claudeLibraryPublishes";
 import { assertReadableChatThread } from "./chat/chatService";
 import { createThreadReadAuthority } from "./threadReadAuthority";
-import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
+import {
+  decodeThreadMessageQueueScope,
+  type PublishedSnapshotRunRequest,
+  type WindowId,
+} from "@octant/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
 import { existsSync, statSync } from "node:fs";
@@ -101,6 +105,7 @@ import { wireFoundations } from "./wiring/foundations";
 import { wireHarnessState } from "./wiring/harnessState";
 import { wireWorkRequestState } from "./wiring/workRequestState";
 import { wireCode } from "./wiring/code";
+import { threadHasWork } from "./code/threadCleanupWork";
 import { wireBrowser } from "./wiring/browser";
 import { wireCodeRuntime } from "./wiring/codeRuntime";
 import { wireDevices } from "./wiring/devices";
@@ -606,6 +611,7 @@ export function startOctantServer(
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
+      managedWorktreeBranchNames,
       worktreePreparation,
       childWorktreeSources,
       resolveChildWorktree,
@@ -629,6 +635,7 @@ export function startOctantServer(
       pinnedExtensionIds,
       reviewedModelManifest,
       managedWorktreeService,
+      managedWorktreeReclaim,
       skillDiscoveryService,
       providerAvailabilityMarks,
     } = yield* wireProviders({
@@ -743,6 +750,7 @@ export function startOctantServer(
       decisionReviewModelPort,
       runtimeForgeChanges,
       followUpCreation,
+      worktreeBranchSuggestion,
       restartContinuation,
       liftRestartRecovery,
       followUpSuggestionRoutes,
@@ -832,6 +840,8 @@ export function startOctantServer(
     const {
       agentProfileRoutes,
       archivedWorktreeRoutes,
+      worktreeReclaimSweep,
+      setThreadWorkCheck,
       buildCodeService,
       diskCleanupRoutes,
       canAccessCodeProject,
@@ -868,9 +878,12 @@ export function startOctantServer(
       isProjectPolicyTargetAllowed,
       resolveHostStrict,
       selectCodeConversation,
+      worktreeBranchSuggestion,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
+      managedWorktreeBranchNames,
       managedWorktreeService,
+      managedWorktreeReclaim,
       managedWorktreeSourcePreview,
       probeProviderForThreads,
       providerFolderDiscoveryPorts,
@@ -988,6 +1001,7 @@ export function startOctantServer(
       terminalBrowserTools,
       routineBrowserTools,
       browserAutomationService,
+      browserPageOffers,
       browserExtensionService,
       browserFlowService,
       browserFlows,
@@ -1548,6 +1562,7 @@ export function startOctantServer(
       browserModelBindings,
       browserAuthority,
       browserAutomationService,
+      browserPageOffers,
       browserCaptures,
       browserExtensionService,
       browserFlowService,
@@ -1688,6 +1703,7 @@ export function startOctantServer(
       codeEvidence,
       benchmarkCheckCommands,
       managedWorktreeReceipts,
+      managedWorktreeReclaim,
       managedWorktreeService,
       roots,
       routeCodeService,
@@ -2189,6 +2205,7 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
+      childWorkGoing,
       defaultTodoListHost,
       composeHostDiagnostics,
       externalContentRoutes,
@@ -2229,6 +2246,7 @@ export function startOctantServer(
       evictGeneratedImageScope: (scopeId) => imageRoutes.evictScope(scopeId),
       liveTurns,
       managedWorktreeReceipts,
+      managedWorktreeReclaim,
       movedThreadHistory,
       threadMoveHolds,
       threadMoveState,
@@ -2306,6 +2324,30 @@ export function startOctantServer(
       parentRunsAtFullAccess,
     });
     todos.setDefaultListHost(defaultTodoListHost);
+    // The idle check of a restorable worktree cleanup: every kind of work the
+    // host tracks for a thread, the same turns and child runs a move waits for.
+    setThreadWorkCheck((threadId, options) =>
+      threadHasWork(
+        {
+          projectOf: (id) => persistence.readCodeThread(id)?.projectId,
+          turnInProgress: (id) => codeOperationRuntime?.turnInProgress?.(String(id)) !== false,
+          liveTurn: (id) => liveTurns.read(String(id)) !== undefined,
+          childWorkGoing: (id) => childWorkGoing(String(id)),
+          debugSession: (id) => debugService.hasSession(id),
+          // Unknown (no operation runtime) counts as running, as an unreadable turn does.
+          threadTerminalRunning: (id) =>
+            codeOperationRuntime?.terminalRunning?.(String(id)) !== false,
+          projectTerminalRunning: (projectId) => projectTerminals?.hasRunning(projectId) === true,
+          queuedMessage: (id) =>
+            threadMessageQueue.hasQueued(
+              decodeThreadMessageQueueScope({ mode: "code", threadId: String(id) }),
+            ),
+          pendingWakeups: (id) => threadWakeups.service?.list("code", String(id)).length,
+        },
+        threadId,
+        options,
+      ),
+    );
     benchmarkThreadPurge.purge = async (threadId, mode) => {
       const outcome = await threadRetention.purge(
         {
@@ -2470,6 +2512,7 @@ export function startOctantServer(
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
           mergedThreadPutAway?.start();
+          worktreeReclaimSweep.start();
           idleCompactions.start();
           stopBenchmarkRunner = benchmarkRunner.start();
           personMemorySweep.start();
@@ -2577,6 +2620,7 @@ export function startOctantServer(
           }
           completedThreadArchiveSweep.stop();
           mergedThreadPutAway?.stop();
+          worktreeReclaimSweep.stop();
           idleCompactions.stop();
           personMemorySweep.stop();
           personMemory.close();

@@ -88,6 +88,7 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     | "browserDownloadPermissions"
     | "browserSessionGrants"
     | "browserAutomationService"
+    | "browserPageOffers"
     | "browserExtensionService"
     | "browserFlowService"
     | "browserProfileService"
@@ -118,6 +119,7 @@ export function wireContext(deps: ContextDependencies) {
     onWindowRevoked,
     browserAuthority,
     browserAutomationService,
+    browserPageOffers,
     browserCredentialUseService,
     browserSessionGrants,
     browserUploadPermissions,
@@ -884,8 +886,8 @@ export function wireContext(deps: ContextDependencies) {
               ...command,
               ...(custody === undefined ? {} : { flowRun: custody }),
             }),
-          releaseThread: (owner, threadId) =>
-            browserAutomationService.releaseThread(owner, threadId),
+          releaseThread: (owner, threadId, endedBy, actor) =>
+            browserAutomationService.releaseThread(owner, threadId, endedBy, actor),
           snapshotRefs: (owner, threadId) => browserAutomationService.snapshotRefs(owner, threadId),
         },
       });
@@ -937,6 +939,7 @@ export function wireContext(deps: ContextDependencies) {
   const browserAutomationRoutes = createBrowserAutomationRouteHandler({
     agentAvailability: (windowId, threadId) => readBrowserAvailability(windowId, String(threadId)),
     service: browserAutomationService,
+    pageOffers: browserPageOffers,
     taskProfiles: {
       read: (threadId, mode) => {
         const thread = taskProfileThread(String(threadId), mode);

@@ -98,6 +98,12 @@ disabled until you enable them):
 - Goose ACP
 - GLM Agent ACP
 - Gemini CLI ACP
+- Google Antigravity ACP (interactive use on a personal Google sign-in; use a
+  Gemini API key or Google Cloud Agent Platform for unattended routines or
+  background features — see the
+  [Terms](https://antigravity.google/terms),
+  [FAQ](https://antigravity.google/docs/faq), and
+  [ACP docs](https://antigravity.google/docs/ide/extensions/acp))
 - GitHub Copilot ACP
 - Cline ACP
 - Qwen Code ACP

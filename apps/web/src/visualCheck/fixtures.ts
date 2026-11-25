@@ -432,55 +432,105 @@ export function threadRoutinesClient(): AutomationClient {
 
 // --- Rail ------------------------------------------------------------------
 
-const CLAUDE_ACCOUNT_ID = "10000000-0000-4000-8000-000000000001";
+function claudeAccount(id: string, displayName: string) {
+  return decodeProviderInstance({
+    id,
+    displayName,
+    driverKind: "claude",
+    configuration: {
+      kind: "claude-agent-sdk",
+      binaryPath: "/opt/homebrew/bin/claude",
+      authentication: "subscription",
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: VISUAL_NOW,
+    updatedAt: VISUAL_NOW,
+  });
+}
 
-export const CLAUDE_ACCOUNT = decodeProviderInstance({
-  id: CLAUDE_ACCOUNT_ID,
-  displayName: "Claude Max",
-  driverKind: "claude",
-  configuration: {
-    kind: "claude-agent-sdk",
-    binaryPath: "/opt/homebrew/bin/claude",
-    authentication: "subscription",
+/** One account in each standing a ring draws: 60% left, 12% left and spent. */
+const RAIL_STANDINGS = [
+  {
+    account: claudeAccount("10000000-0000-4000-8000-000000000001", "Claude Max"),
+    status: "allowed",
+    utilization: 0.4,
   },
-  enabled: true,
-  environmentPolicy: "inherit-host",
-  version: 1,
-  createdAt: VISUAL_NOW,
-  updatedAt: VISUAL_NOW,
-});
+  {
+    account: claudeAccount("10000000-0000-4000-8000-000000000002", "Claude Team"),
+    status: "warning",
+    utilization: 0.88,
+  },
+  {
+    account: claudeAccount("10000000-0000-4000-8000-000000000003", "Claude Lab"),
+    status: "exhausted",
+    utilization: 1,
+  },
+] as const;
 
-/** A plan reading with 60% of the tightest window left, so the face draws its ring. */
+export const RAIL_ACCOUNTS = RAIL_STANDINGS.map((standing) => standing.account);
+
 export function planUsageClient(): ProviderUsageLimitsClient {
   const snapshot = decodeProviderUsageLimitsSnapshot({
     version: 1,
     refreshedAt: VISUAL_NOW,
-    entries: [
-      {
-        providerInstanceId: CLAUDE_ACCOUNT_ID,
-        status: "available",
-        source: "provider-runtime",
-        observedAt: VISUAL_NOW,
-        limits: {
-          providerInstanceId: CLAUDE_ACCOUNT_ID,
-          scope: "account",
-          requests: { status: "unavailable" },
-          tokens: { status: "unavailable" },
-          concurrency: { status: "unavailable" },
-          retry: { status: "inactive" },
-          quota: "available",
-          source: "observed-evidence",
-          confidence: "high",
-          updatedAt: VISUAL_NOW,
-          rateLimitWindows: [
-            { window: "five_hour", status: "allowed", utilization: 0.4, observedAt: VISUAL_NOW },
-          ],
-        },
+    entries: RAIL_STANDINGS.map(({ account, status, utilization }) => ({
+      providerInstanceId: account.id,
+      status: "available",
+      source: "provider-runtime",
+      observedAt: VISUAL_NOW,
+      limits: {
+        providerInstanceId: account.id,
+        scope: "account",
+        requests: { status: "unavailable" },
+        tokens: { status: "unavailable" },
+        concurrency: { status: "unavailable" },
+        retry: { status: "inactive" },
+        quota: "available",
+        source: "observed-evidence",
+        confidence: "high",
+        updatedAt: VISUAL_NOW,
+        rateLimitWindows: [
+          { window: "five_hour", status, utilization, observedAt: VISUAL_NOW },
+          { window: "seven_day", status: "allowed", utilization: 0.2, observedAt: VISUAL_NOW },
+        ],
       },
-    ],
+    })),
   });
   return { list: async () => snapshot } as unknown as ProviderUsageLimitsClient;
 }
+
+/** A list longer than the sidebar is tall, over running and settled threads. */
+export const SIDEBAR_THREADS = [
+  ...Array.from({ length: 16 }, (_, index) => ({
+    projectId: String(CODE_PROJECT.id),
+    threadId: `sidebar-idle-${String(index)}`,
+    title: `Tidy the release notes, part ${String(index + 1)}`,
+    updatedAt: new Date(Date.parse(VISUAL_NOW) - (index + 2) * 3_600_000).toISOString(),
+  })),
+  {
+    projectId: String(CODE_PROJECT.id),
+    threadId: "sidebar-working",
+    title: "Fix the export of wide tables",
+    activity: "working" as const,
+    updatedAt: "2026-08-18T08:55:00.000Z",
+  },
+  {
+    projectId: String(CODE_PROJECT.id),
+    threadId: "sidebar-settled-1",
+    title: "Add a shortcut for the board",
+    shelf: "completed" as const,
+    updatedAt: "2026-08-18T07:00:00.000Z",
+  },
+  {
+    projectId: String(CODE_PROJECT.id),
+    threadId: "sidebar-settled-2",
+    title: "Check the retry limits",
+    shelf: "completed" as const,
+    updatedAt: "2026-08-17T07:00:00.000Z",
+  },
+];
 
 // --- Settings usage --------------------------------------------------------
 

@@ -247,6 +247,7 @@ export interface DraftThreadWorkspaceProps {
   ) => Promise<CodeCommandResult | undefined>;
   readonly defaultPermissionMode?: PermissionMode;
   readonly defaultPermissionPersistence?: PermissionPersistence;
+  readonly worktreeSettings?: import("@octant/contracts/code").CodeWorktreeSettings | undefined;
   readonly onPermissionModeChange?: (mode: PermissionMode) => void;
   /** Whether the selected provider has a reviewer of its own, so Auto applies. */
   readonly autoSupported?: boolean;
@@ -1040,6 +1041,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}
         defaultPermissionMode={props.defaultPermissionMode ?? "ask-first"}
         defaultPermissionPersistence={props.defaultPermissionPersistence ?? "current-session"}
+        {...(props.worktreeSettings === undefined
+          ? {}
+          : { worktreeSettings: props.worktreeSettings })}
         {...(props.onPermissionModeChange === undefined
           ? {}
           : { onPermissionModeChange: props.onPermissionModeChange })}

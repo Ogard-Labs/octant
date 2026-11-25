@@ -49,6 +49,7 @@ import type {
   BrowserAutomationSnapshot,
   BrowserContextPolicy,
   BrowserThreadId,
+  EventActor,
   StoredBrowserProfile,
   ProviderExecutionPolicy,
   ToolActionAuthority,
@@ -172,9 +173,12 @@ export interface BrowserAppManagedToolsOptions {
         }
       | { readonly status: "refused"; readonly error: string }
     >;
+    /** `actor` is the agent whose Stop this is, for the record of a page it ends. */
     readonly releaseThread: (
       windowId: WindowId,
       threadId: BrowserThreadId,
+      endedBy?: "person" | "agent",
+      actor?: EventActor,
     ) => Promise<BrowserAutomationSnapshot>;
     /** What the latest snapshot's refs name; flows read it to describe and find elements. */
     readonly snapshotRefs?: (windowId: WindowId, threadId: BrowserThreadId) => BrowserFlowRefs;
@@ -413,7 +417,12 @@ export function createBrowserAppManagedTools(
         options.modelBindings.delete(String(snapshot.context.contextId));
       }
       return browserToolResult(
-        await options.browser.releaseThread(options.windowId, options.threadId),
+        await options.browser.releaseThread(
+          options.windowId,
+          options.threadId,
+          "agent",
+          browserFlowAgentActor(authority, String(options.threadId)),
+        ),
       );
     }
     if (!modelIsCurrent(options)) return failure("browser-model-stale");

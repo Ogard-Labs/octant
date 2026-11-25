@@ -302,7 +302,13 @@ in-process host, so it loses no capability by comparison: the 3.0.3 source
 sends ACP usage updates with context size and cost, a `/compact` command,
 `review/*` extension methods, and questions as elicitation. Usage and context
 updates are consumed from the verified 3.0.3 release on (a later release
-unverified), as specified below.
+unverified), as specified below. Remaining Vibe Code allowance is not in
+that ACP usage update: when the instance uses API-key authentication,
+Octant reads the monthly window from Mistral's billing endpoint with the
+key Settings already holds, under the
+[account usage endpoint](../architecture.md#security-and-authority) rule.
+Pay-as-you-go on at a spent included window is extra usage, not an account
+stop.
 Native review remains unimplemented. Supplementary file-review
 reads have a candidate integration behind an empty verified-version allowlist:
 no production profile declares the read capability until signed-in 3.0.3
@@ -1551,8 +1557,9 @@ telemetry). Octant adds no terminal mode to carry it. A person-operated
 [provider terminal](workspace.md) (maintainer decision, 2026-11-21) opens Claude
 Code's own interface in a Code thread with the environment that thread's turns
 launch with: under Strict Code Mode still does not start there, and outside
-Strict the terminal does not read that switch yet and keeps Octant's telemetry
-guard, so it does not start there either. Once the Agent SDK supports Code Mode, Octant offers it under the
+Strict the terminal follows that switch as the thread's turns do, so with the
+switch on it carries no `DISABLE_TELEMETRY` of Octant's, except for a thread
+that keeps or chose a sandbox. Once the Agent SDK supports Code Mode, Octant offers it under the
 same gate and level as Claude's other tools. The `REPL` tool, which runs code
 in Claude's own process, is already offered outside Plan under the shell's
 rules (see [Native plan capture](#native-plan-capture)).
@@ -3070,95 +3077,59 @@ where the CLI keeps its sign-in, and no call to Google's internal endpoints
 with the person's token. The CLI talks to Google itself.
 
 **Interactive use on a personal sign-in only** (maintainer decision,
-2026-11-21, reversing the same day's decision that Antigravity runs in
-Automations as in a thread). Answers on Google's Antigravity developer forum
-(`discuss.ai.google.dev`, read 2026-11-21) draw the consumer-plan line at one
-person, on their own computer, signed in through the CLI's own flow, driving
-an unmodified `agy acp` themselves. Unattended or background automation, task
-queues and multi-agent "teammates", `agy` as a sub-agent inside another agent
-loop or a multi-provider orchestration, serving several users, and sharing or
-rotating credentials are not supported there; automated or multi-agent runs
-belong on a Gemini API key (AI Studio) or Vertex AI. The profile declares the
-runs its sign-in does not cover (`personalSignIn` in the contracts profile
-table), each with the sentence a refused run shows, and the server refuses by
-that declaration, never by the profile id:
+2026-11-21, refined 2026-11-25 for granular reversible controls and manual
+routine confirmation). Google's consumer `oauth-personal` boundary permits
+launching unmodified `agy acp` interactively in a thin client where the person
+drives the session directly and Antigravity owns its sign-in, system prompt,
+tools, and session history; unattended loops, hidden background model calls,
+and automatic cross-model routing are not supported on personal sign-in and
+belong on a Gemini API key (AI Studio) or Google Cloud Agent Platform. Only
+the `antigravity` profile declares `personalSignIn` in
+`packages/contracts/src/acpAgentProfiles.ts`, and every restriction is an
+independent optional field on `AcpPersonalSignInRefusals` so any single limit
+can be loosened or tightened in one line without rewriting enforcement sites:
 
-- **Routines and every other turn no person sent** (`refusesUnattendedRuns`).
-  Every Automation dispatch on an `antigravity` instance on the personal
-  sign-in (scheduled,
-  triggered, Run now, a follow-up, and a Chat follow-up proposal, which runs
-  through the same dispatch) is refused by the dispatcher as
-  `provider-capability-mismatch`, after its authority revalidation and before
-  a thread is created or the CLI starts: the run is journaled as refused with
-  the sentence below and the routine is paused with that reason. The
-  provider is read live at dispatch, so a routine saved earlier is refused at
-  its next run. The refusal is not part of the revalidation itself, which
-  source polling and file arming share, so an integration or file routine on
-  Antigravity keeps observing until its first run is refused, which pauses
-  it with the reason, rather than going quiet with no reason; later
-  occurrences make no runs while it is paused. Every other turn the host starts
-  as itself runs under the host's own scope (`ROUTINE_HOST_SCOPE_ID`), which
-  no window or device can claim, and is refused at that mode's turn
-  admission: a Work turn (`startFirstTurn`) and a Code turn
-  (`start-provider-turn`) under that scope, and a Chat send, retry, resume or
-  child-result delivery that carries no window, the host's scope, a
-  usage-limit recovery or another thread's coordination depth. That covers a
-  message or wake-up waking an idle thread, a coordinator's worker, a pull
-  request's Auto-fix rounds, goal-loop rounds, a
-  usage-limit resume, a restart continuation, a child's result delivered into
-  the thread, a peer's delegated task, a
-  benchmark cell, and one Chat thread messaging another. A person's own send
-  carries their window (a queued message keeps the window that queued it), so
-  it, and steering their own turn, still run. Fan-out a person starts (the
-  linked threads one prompt creates, a side task's send) carries the person's
-  window and counts as their own send. Each refusal shows: "Google doesn't
-  support unattended runs of Google Antigravity on a personal Google sign-in,
-  so Octant did not start this run. Switch this provider to a Gemini API key
-  or Agent Platform in Settings, or choose another provider."
-- **The provider a turn resolves to.** The check reads the provider a turn
-  would actually run on, not only the thread's own. In Chat a model pool or
-  the Chat provider fallback can route a turn onto Antigravity from a thread
-  on another provider, and a retry or resume runs on its attempt's provider,
-  so a Chat send, retry, resume or child-result delivery is checked before
-  anything is probed: the thread's own provider and each of this host's pool
-  candidates before a route is computed (routing probes every candidate),
-  the routed provider or retry's attempt provider before it is probed, and
-  the Chat provider fallback before it is probed, so no Antigravity session
-  opens for a turn that is refused. A pooled thread with an Antigravity
-  candidate therefore takes no unattended turn, even one the route might
-  have sent elsewhere. A turn the person sends themselves that their own
-  pool or fallback routes onto Antigravity still runs (maintainer decision,
-  2026-11-21); an outside agent's send that could be routed there is refused
-  with the outside-agent sentence (below). Work and Code have no pool or provider
-  fallback: a turn runs on the thread's own provider, and a coordinator's
-  continue-on-fallback move changes that provider before it starts its host
-  turn, which admission then refuses. A helper's resolved provider (its role
-  slot, its fallback or its pool route, as `effectiveAgentRunExecutionTarget`
-  reads the routing receipt) is the one checked when the child starts or
-  resumes.
-- **Helper runs** (`refusesHelperRuns`). Antigravity on the personal sign-in
-  is never a helper target (for the other sign-ins see "Which sign-ins they
-  bind", below): the target list names it unavailable as `helper-runs-refused`, so an
-  explicit target, a role slot and a follow-up on it are refused, and a child
-  that would start or resume on it is refused at launch. A thread running on
-  Antigravity starts no helper on any provider, here or on another hub member,
-  including a Chat thread whose running turn a pool or fallback moved onto
-  Antigravity (the running turn's provider, from the live-turn registry, is
-  read; with no turn running, the thread's own provider is, so a retry or
-  resume of an earlier helper after the person moved off Antigravity runs),
-  and the person's retry or resume of an earlier child is refused too (its
-  capabilities report delegation blocked as `helper-runs-refused`). A hub
-  member whose Work default is Antigravity refuses a peer's delegated task as
-  `provider-unavailable`, and so does a member taking delegated Code work
-  whose first provider for the Project is Antigravity, before any thread or
-  worktree exists (both are a turn another agent started, which no person on
-  that member sent). The message: "Google doesn't support Google
-  Antigravity as a helper agent, or starting helpers from it, on a personal
-  Google sign-in. Switch this provider to a Gemini API key or Agent Platform
-  in Settings, or use another provider for helper work." The CLI's own
-  built-in subagents
-  inside `agy` are unaffected, and the driver keeps its helper-run handling
-  (`answersOncePerCall`, below) as a fallback that still fails closed.
+- **Unattended turns and routines** (`refusesUnattendedRuns` and
+  `routineConfirmation`). When a routine targeting an `antigravity` instance
+  on the personal sign-in becomes due (scheduled, file-arrival, integration
+  event, or follow-up), the dispatcher checks `personalSignInRefusals` after
+  authority revalidation and before any thread or CLI process starts. With
+  `routineConfirmation: "prompt-human"` (Antigravity's default), the run moves
+  to `awaiting-confirmation` without pausing the routine or starting `agy`;
+  the person can explicitly confirm it with **Send now** (`confirm-automation-run`)
+  or start a routine with **Run now**, which dispatches the first turn under
+  their authenticated window so it runs as an interactive turn. Restart
+  recovery without a confirming window fails closed instead of launching
+  unattended. Setting `routineConfirmation: "refuse"` (or omitting it) falls
+  back to refusing and pausing the routine with `provider-capability-mismatch`.
+  Every other turn the host starts as itself runs under `ROUTINE_HOST_SCOPE_ID`
+  (or, in Chat, without a person's window, with a coordination depth, or as
+  usage-limit recovery) and is refused at turn admission (wakes, coordinator
+  workers, Auto-fix rounds, goal rounds, usage-limit/restart continuations,
+  child-result deliveries, peer tasks, benchmark cells, cross-thread Chat
+  messages). A person's own send carries their window and still runs.
+- **Hidden background and single-shot model calls** (`refusesBackgroundModelCalls`).
+  Octant never silently routes background or single-shot host calls onto an
+  `antigravity` personal sign-in: Shield Judge, Person Memory, Decision Review,
+  Thread Titles (`createAutomaticModelAccountCheck`, `personMemoryWiring`,
+  `hostShield`), Pull Request Reviewers (`pullRequestReviewHostRuntime`),
+  Image Description (`imageDescriber`), Thread Hand-Off synthesis (`wiring/work`),
+  and Git commit/PR drafting (`codeOperationRuntime`) all skip or refuse it,
+  and `acpDriver` refuses `singleUse` sessions as defense in depth before any
+  process launches.
+- **Automatic cross-model routing** (`refusesAutomaticCrossModelRouting`).
+  In Chat, multi-model pool routing and the Chat provider fallback skip an
+  `antigravity` personal sign-in candidate without probing it, so turns are
+  never automatically routed or failed over onto `agy acp` from another
+  provider.
+- **Manual cross-model handoff and helpers** (`refusesManualCrossModelHandoff`,
+  `refusesHelperRuns`). Both hooks exist in the policy table and enforcement
+  paths (`chatService`, `workTurnService`, `codeOperationRuntime`,
+  `agentRunDelegation`), and are left unset on `antigravity` by default so
+  explicit person-driven coding workflows (manual provider switches and
+  helper runs) keep working while remaining one-line reversible if Google's
+  policy tightens. (`antigravity` on Agent Platform still refuses helper runs
+  under sandboxed ADC constraints, independent of `personalSignIn`.)
 - **Outside agents** (`refusesOutsideAgents`). An agent grant's session (an
   outside agent, which is never the person) may not send a prompt or an answer
   to a thread on Antigravity: "Google doesn't support another agent driving
@@ -3772,7 +3743,10 @@ switches say, as do an explicit sandbox and a Full access thread that keeps the
 sandbox. A version read always keeps every guard. A process kept warm across
 turns keeps the guards it started with; ACP and Pi runtimes do not reuse a warm
 process across a change, and an OpenCode 1.x server takes the change at its
-next start.
+next start. A [provider terminal](workspace.md) reads both switches by the same
+rule when its program starts, for Claude Code and for an ACP agent's
+environment guards; Google Antigravity's program runs bare there, so the
+`--disable-telemetry` argument is its turns' alone.
 
 | Runtime             | Telemetry guards (set while telemetry is off)                                                                                            | Self-update guards (set while self-update is off) |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |

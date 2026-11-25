@@ -518,6 +518,79 @@ describe("ShellFrame", () => {
     expect(screen.queryByRole("separator", { name: "Resize navigation sidebar" })).toBeNull();
   });
 
+  it("keeps one separator through a drag that hides the sidebar and offers it while hidden", () => {
+    const commit = vi.fn();
+    function Frame() {
+      const [collapsed, setCollapsed] = useState(false);
+      return (
+        <ShellFrame
+          chrome={<header>Chrome</header>}
+          contextSidebarWidth={360}
+          material="opaque"
+          onCommitSidebarWidth={commit}
+          onPreviewSidebarWidth={vi.fn()}
+          onSidebarCollapsedChange={setCollapsed}
+          sidebar={<aside aria-label="Octant sidebar">Sidebar</aside>}
+          sidebarCollapsed={collapsed}
+          sidebarResizable
+          sidebarWidth={300}
+          wideContextOpen={false}
+          workspace={<main>Workspace</main>}
+        />
+      );
+    }
+    render(<Frame />);
+    const separator = screen.getByRole("separator", { name: "Resize navigation sidebar" });
+    Object.assign(separator, {
+      hasPointerCapture: vi.fn(() => true),
+      releasePointerCapture: vi.fn(),
+      setPointerCapture: vi.fn(),
+    });
+
+    fireEvent.pointerDown(separator, { clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(separator, { clientX: 10, pointerId: 1 });
+    expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).toBeNull();
+    expect(screen.getByRole("separator", { name: "Resize navigation sidebar" })).toBe(separator);
+    fireEvent.pointerUp(separator, { clientX: 10, pointerId: 1 });
+    expect(commit).not.toHaveBeenCalled();
+    expect(separator).toHaveAttribute("aria-valuetext", "Hidden");
+
+    fireEvent.pointerDown(separator, { clientX: 0, pointerId: 2 });
+    fireEvent.pointerMove(separator, { clientX: 340, pointerId: 2 });
+    fireEvent.pointerUp(separator, { clientX: 340, pointerId: 2 });
+    expect(screen.getByRole("complementary", { name: "Octant sidebar" })).toBeInTheDocument();
+    expect(commit).toHaveBeenCalledExactlyOnceWith(340);
+  });
+
+  it("offers no grab edge for a hidden sidebar in a narrow window", () => {
+    render(
+      <ShellFrame
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={360}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        onSidebarCollapsedChange={vi.fn()}
+        sidebar={<aside>Sidebar</aside>}
+        sidebarCollapsed
+        sidebarResizable={false}
+        sidebarWidth={300}
+        wideContextOpen={false}
+        workspace={<main>Workspace</main>}
+      />,
+    );
+
+    expect(screen.queryByRole("separator", { name: "Resize navigation sidebar" })).toBeNull();
+  });
+
+  it("keeps the grab edge of a hidden sidebar inside the window", () => {
+    expect(
+      cssRule(
+        ".shell--sidebar-collapsed.shell-frame:not(.shell--sidebar-rail) > .shell-frame__sidebar-resize",
+      ),
+    ).toContain("left: 0;");
+  });
+
   it("keeps the primary workspace full-height while the narrow sidebar becomes an overlay", () => {
     const shell = cssRule(".shell.shell-frame");
     const sidebarContent = cssRule(
@@ -589,7 +662,7 @@ describe("ShellFrame", () => {
       /@media \(max-width: 680px\)[\s\S]*\.sidebar-navigation__projects\s*\{[^}]*flex:\s*0 0 auto;/,
     );
     expect(shellStyles).toMatch(
-      /@media \(max-width: 680px\)[\s\S]*\.project-nav\s*\{[^}]*max-height:\s*none;[^}]*overflow-y:\s*visible;/,
+      /@media \(max-width: 680px\)[\s\S]*\.project-nav__list\s*\{[^}]*overflow-y:\s*visible;/,
     );
   });
 

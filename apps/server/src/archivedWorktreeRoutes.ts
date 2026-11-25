@@ -1,6 +1,8 @@
 import { decodeRemoveArchivedWorktreeRequest } from "@octant/contracts/archived-worktrees";
+import { decodeRestoreCleanedUpWorktreeRequest } from "@octant/contracts/cleaned-up-worktrees";
 import { principalActsAsHostPerson } from "./clientPrincipal";
 import { refused, type ArchivedWorktrees } from "./code/archivedWorktrees";
+import { cleanedUpRefusal, type CleanedUpWorktrees } from "./code/cleanedUpWorktrees";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -10,6 +12,8 @@ const HEADERS = "content-type, x-octant-window-capability";
 const BODY_LIMIT = 1_024;
 export const ARCHIVED_WORKTREES_PATH = "/api/code/archived-worktrees";
 export const ARCHIVED_WORKTREE_REMOVE_PATH = "/api/code/archived-worktrees/remove";
+export const CLEANED_UP_WORKTREES_PATH = "/api/code/cleaned-up-worktrees";
+export const CLEANED_UP_WORKTREE_RESTORE_PATH = "/api/code/cleaned-up-worktrees/restore";
 
 function corsHeaders(origin: string | null): Record<string, string> {
   return {
@@ -28,15 +32,16 @@ function json(body: unknown, status: number, origin: string | null): Response {
 
 export interface ArchivedWorktreeRouteDependencies {
   readonly worktrees: Pick<ArchivedWorktrees, "list" | "remove">;
+  readonly cleanedUp: Pick<CleanedUpWorktrees, "list" | "restore">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
 
 /**
- * Settings › Code › Worktrees. Both reading and removing are the host's own
- * person's, at a window or on a device they paired: the list names folders on
- * this computer, and removing one deletes files from its disk, so a
- * hub-introduced or restricted device gets neither.
+ * Settings › Code › Worktrees. Reading, removing and restoring are a window on
+ * this host's, or a device the host's own person paired: the lists name folders
+ * on this computer, removing one deletes files from its disk and restoring one
+ * writes them, so a device the hub introduced or a restricted one gets none.
  */
 export function createArchivedWorktreeRouteHandler(
   dependencies: ArchivedWorktreeRouteDependencies,
@@ -44,9 +49,13 @@ export function createArchivedWorktreeRouteHandler(
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
+    const cleanedUpPath =
+      url.pathname === CLEANED_UP_WORKTREES_PATH ||
+      url.pathname === CLEANED_UP_WORKTREE_RESTORE_PATH;
     if (
       url.pathname !== ARCHIVED_WORKTREES_PATH &&
-      url.pathname !== ARCHIVED_WORKTREE_REMOVE_PATH
+      url.pathname !== ARCHIVED_WORKTREE_REMOVE_PATH &&
+      !cleanedUpPath
     ) {
       return undefined;
     }
@@ -71,7 +80,30 @@ export function createArchivedWorktreeRouteHandler(
       throw error;
     }
     if (!principalActsAsHostPerson(principal)) {
-      return json(refused("unauthorized"), 403, origin);
+      return json(
+        cleanedUpPath ? cleanedUpRefusal("unauthorized") : refused("unauthorized"),
+        403,
+        origin,
+      );
+    }
+    if (url.pathname === CLEANED_UP_WORKTREES_PATH && request.method === "GET") {
+      return json(
+        { kind: "cleaned-up-worktrees", worktrees: await dependencies.cleanedUp.list() },
+        200,
+        origin,
+      );
+    }
+    if (url.pathname === CLEANED_UP_WORKTREE_RESTORE_PATH && request.method === "POST") {
+      let threadId;
+      try {
+        const text = await request.text();
+        if (text.length > BODY_LIMIT) return json({ error: "Request is too large." }, 413, origin);
+        threadId = decodeRestoreCleanedUpWorktreeRequest(JSON.parse(text) as unknown).threadId;
+      } catch {
+        return json(cleanedUpRefusal("malformed"), 400, origin);
+      }
+      const result = await dependencies.cleanedUp.restore(threadId);
+      return json(result, result.kind === "cleaned-up-worktree-refused" ? 409 : 200, origin);
     }
     if (url.pathname === ARCHIVED_WORKTREES_PATH && request.method === "GET") {
       return json(

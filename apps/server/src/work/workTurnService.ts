@@ -54,7 +54,9 @@ import {
   decodeWorkTurnCancelResult,
   decodeWorkTurnFailure,
   decodeWorkTurnLookupResult,
+  decodeWorkThreadId,
   decodeWorkTurnRequestId,
+  type ThreadMessageSteered,
   decodeWorkTurnState,
   decodeStartWorkThreadTurnCommand,
   decodeRewindWorkThreadCommand,
@@ -941,20 +943,26 @@ export class WorkTurnService {
       projectId: String(thread.projectId),
     });
     if (owned !== "ok") return refuse(owned);
-    if (reason !== "provider-switch")
+    if (reason !== "provider-switch") {
+      if (
+        reason === "branch" &&
+        String(previous.authority.providerInstanceId) !== String(thread.providerInstanceId)
+      ) {
+        const target = this.#persistence.readProviderInstance(thread.providerInstanceId);
+        const handoffRefusal = personalSignInRefusals(target)?.refusesManualCrossModelHandoff;
+        if (handoffRefusal !== undefined) throw this.#failure("unauthorized", handoffRefusal);
+      }
       return {
         blocks: selection.blocks,
         selection,
         record: restartHandoffRecord(selection, reason === "branch" ? "fork" : "rewind"),
       };
+    }
     const switched = withHandoverSummary(
       selection,
       this.#handoverSummary("work-thread", thread.id),
     );
-    const record = providerSwitchHandoffRecord(
-      switched,
-      // A handoff that never completed is made again from the provider the
-      // conversation came from, not the one that may not have received it.
+    const sourceProvider =
       previous.handoff?.reason === "provider-switch" && previous.status !== "completed"
         ? {
             providerInstanceId: previous.handoff.previousProviderInstanceId,
@@ -963,7 +971,17 @@ export class WorkTurnService {
         : {
             providerInstanceId: previous.authority.providerInstanceId,
             modelId: previous.authority.modelId,
-          },
+          };
+    if (String(sourceProvider.providerInstanceId) !== String(thread.providerInstanceId)) {
+      const target = this.#persistence.readProviderInstance(thread.providerInstanceId);
+      const handoffRefusal = personalSignInRefusals(target)?.refusesManualCrossModelHandoff;
+      if (handoffRefusal !== undefined) throw this.#failure("unauthorized", handoffRefusal);
+    }
+    const record = providerSwitchHandoffRecord(
+      switched,
+      // A handoff that never completed is made again from the provider the
+      // conversation came from, not the one that may not have received it.
+      sourceProvider,
     );
     return {
       blocks: switched.blocks,
@@ -2958,6 +2976,16 @@ export class WorkTurnService {
     this.#liveUpdates.settleCompaction(threadId, compaction);
   }
 
+  /**
+   * A message the person sent into a running turn. The live feed carries no
+   * steered message, so every open view is told to read the transcript again;
+   * that read holds the reply, tool steps and tasks streamed so far.
+   */
+  showSteeredMessage(record: ThreadMessageSteered): void {
+    this.#projection.applySteeredMessage(record);
+    this.#liveUpdates.invalidate(decodeWorkThreadId(String(record.threadId)));
+  }
+
   /** The live feed cursor for a thread; subscribe from here to read from now. */
   liveCursor(threadId: WorkThreadId): number {
     return this.#liveUpdates.head(threadId);
@@ -2972,8 +3000,11 @@ export class WorkTurnService {
     const liveSteps =
       liveStepsHeld === undefined ? undefined : withoutPublishedSnapshots(liveStepsHeld);
     const liveReasoningMs = this.#liveReasoningMs.get(String(turn.requestId));
+    const liveTasks = this.#liveTasks.get(String(turn.requestId));
     const withSteps =
-      (liveSteps === undefined || liveSteps.steps.length === 0) && liveReasoningMs === undefined
+      (liveSteps === undefined || liveSteps.steps.length === 0) &&
+      liveReasoningMs === undefined &&
+      liveTasks === undefined
         ? turn
         : decodeWorkTurnState({
             ...turn,
@@ -2984,6 +3015,7 @@ export class WorkTurnService {
                   ...(liveSteps.truncated ? { toolStepsTruncated: true } : {}),
                 }),
             ...(liveReasoningMs === undefined ? {} : { reasoningMs: liveReasoningMs }),
+            ...(liveTasks === undefined ? {} : { tasks: liveTasks }),
           });
     const live = this.#liveResponses.get(String(turn.requestId));
     if (live === undefined) return withSteps;

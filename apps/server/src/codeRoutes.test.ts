@@ -650,7 +650,7 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledTimes(4);
   });
 
-  it("lets a device the host's own person paired change Strict, restart continuation and account choices, as that device, and refuses any other device", async () => {
+  it("lets a device the host's own person paired change Strict, restart continuation, worktree naming and cleanup, branch suggestions and account choices, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
@@ -682,6 +682,20 @@ describe("Code routes", () => {
         defaultExecutionPolicy: "approval-gated",
         defaultPermissionPersistence: "current-session",
         restartContinuation: true,
+      },
+      {
+        kind: "update-code-settings",
+        expectedVersion: 1,
+        defaultExecutionPolicy: "approval-gated",
+        defaultPermissionPersistence: "current-session",
+        worktrees: { branchPrefix: "henrik/", cleanup: { inactivityDays: 30 } },
+      },
+      {
+        kind: "suggest-code-worktree-branch",
+        projectId: "00000000-0000-4000-8000-0000000000a1",
+        providerInstanceId: "00000000-0000-4000-8000-0000000000a2",
+        modelId: "model-a",
+        draft: "Fix the login redirect",
       },
       {
         kind: "move-code-thread-account",
@@ -2036,7 +2050,10 @@ describe("Code routes", () => {
     const route = routeFixture({ read });
 
     expect((await route(request(`/api/code/threads/${threadId}`)))?.status).toBe(200);
-    expect(read).toHaveBeenCalledWith(windowId, threadId);
+    expect(read).toHaveBeenCalledWith(windowId, threadId, { worktreeCleanup: false });
+    // Only a client that says it reads the cleaned-up worktree field is sent it.
+    await route(request(`/api/code/threads/${threadId}?reads=worktree-cleanup`));
+    expect(read).toHaveBeenLastCalledWith(windowId, threadId, { worktreeCleanup: true });
     expect(
       (
         await route(

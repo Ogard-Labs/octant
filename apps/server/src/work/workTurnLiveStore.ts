@@ -246,9 +246,12 @@ export class WorkTurnLiveStore {
   }
 
   /**
-   * The thread's journaled transcript changed under every open view (a
-   * rewind removed turns), so each subscriber reads it again. The frame takes
-   * a sequence of its own, so a view that reconnects from before it replays it.
+   * The thread's journaled transcript changed under every open view (a rewind
+   * removed turns, or a running turn took a message the person steered into
+   * it), so each subscriber reads it again. The frame takes a sequence of its
+   * own, so a view that reconnects from before it replays it. Unlike a feed
+   * that lost its place, the subscription stays open: no frame is missing, and
+   * a host reader waiting for the running turn to settle still has to see it.
    */
   invalidate(threadId: WorkThreadId): void {
     if (this.#closed) return;
@@ -304,7 +307,6 @@ export class WorkTurnLiveStore {
         const next = subscriber.queue.shift();
         if (next !== undefined) {
           yield next;
-          if (next.kind === "snapshot-required") return;
           continue;
         }
         await new Promise<void>((resolve) => {

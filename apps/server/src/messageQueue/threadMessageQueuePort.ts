@@ -39,7 +39,12 @@ export type ThreadMessageQueueInspection =
       readonly tail?: ThreadMessageQueueTail;
       readonly privateContextJson?: string;
     }
-  | { readonly status: "held"; readonly reason: ThreadMessageQueueRefusalReason };
+  | {
+      readonly status: "held";
+      readonly reason: ThreadMessageQueueRefusalReason;
+      /** What the host says beside the reason, when the reason alone would not. */
+      readonly message?: string;
+    };
 
 export const MAX_THREAD_MESSAGE_QUEUE_PRIVATE_CONTEXT_BYTES = 64 * 1024;
 export interface ThreadMessageQueueResource {

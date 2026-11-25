@@ -1,13 +1,5 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import {
-  Folders,
-  House,
-  ScrollText,
-  Search,
-  Settings,
-  SquarePen,
-  type IconComponent,
-} from "../ui/icons";
+import { Folders, House, Search, Settings, SquarePen, type IconComponent } from "../ui/icons";
 import { Fragment, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
@@ -67,11 +59,12 @@ export interface SidebarRailProps {
   readonly onOpenProjects?: () => void;
   /** Whether the Projects page is the one showing. */
   readonly projectsActive?: boolean;
-  readonly onOpenActivity?: () => void;
   readonly onOpenSettings: () => void;
+  /** What is left of each account's plan, above the person's face. */
+  readonly usage?: ReactNode;
   /**
-   * The person's face, which opens the account menu (Settings among it) and
-   * rings their plan usage. Without it the foot is a plain Settings button.
+   * The person's face, which opens the account menu (Settings among it).
+   * Without it the foot is a plain Settings button.
    */
   readonly account?: ReactNode;
   /** The More menu: destinations the rail does not list, and Customize sidebar. */
@@ -89,7 +82,7 @@ const TILE_RAIL: Readonly<
 
 /**
  * Project tiles past this many wait behind the folder button rather than push
- * Settings and the usage rings out of the window. Pins count against it first
+ * the places above them out of a short window. Pins count against it first
  * in the collapsed rail, and the beside rail draws no more than this many of
  * them: the sidebar next to it lists every Project anyway.
  */
@@ -192,28 +185,21 @@ export function SidebarRail(props: SidebarRailProps) {
             <RailButton icon={Search} label="Search" onSelect={props.onOpenSearch} />
           )}
           {beside || modes.length < 2 ? null : (
-            <>
-              <RailDivider />
-              <div aria-label="Workspace mode" className="sidebar-rail__group" role="group">
-                {modes.map((mode) => (
-                  <RailButton
-                    active={mode === activeMode}
-                    icon={iconForVisibleMode(mode, false)}
-                    key={mode}
-                    label={modeLabels[mode]}
-                    onSelect={() => {
-                      if (mode !== activeMode) props.onSelectMode(mode);
-                    }}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-          {beside ||
-          (props.home === undefined &&
-            props.tiles.length === 0 &&
-            props.destinations.length === 0) ? null : (
-            <RailDivider />
+            // A tray, as the sidebar's own switch is: which mode is on stands
+            // apart from which place is showing, and needs no dividers.
+            <div aria-label="Workspace mode" className="sidebar-rail__modes" role="group">
+              {modes.map((mode) => (
+                <RailButton
+                  active={mode === activeMode}
+                  icon={iconForVisibleMode(mode, false)}
+                  key={mode}
+                  label={modeLabels[mode]}
+                  onSelect={() => {
+                    if (mode !== activeMode) props.onSelectMode(mode);
+                  }}
+                />
+              ))}
+            </div>
           )}
           {props.home === undefined ? null : (
             <RailButton
@@ -285,9 +271,6 @@ export function SidebarRail(props: SidebarRailProps) {
               <Fragment key={project.id}>{tile}</Fragment>
             );
           })}
-          {props.onOpenActivity === undefined ? null : (
-            <RailButton icon={ScrollText} label="Activity feed" onSelect={props.onOpenActivity} />
-          )}
           {props.onOpenProjects === undefined ? null : (
             <RailButton
               active={props.projectsActive === true}
@@ -299,6 +282,7 @@ export function SidebarRail(props: SidebarRailProps) {
           {props.more}
         </div>
         <div className="sidebar-rail__foot">
+          {props.usage}
           {props.account ?? (
             <RailButton icon={Settings} label="Settings" onSelect={props.onOpenSettings} />
           )}

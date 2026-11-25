@@ -11,10 +11,16 @@ import {
   type ProviderCapabilitySupport,
 } from "@octant/contracts";
 import { recordAgentRunTurnUsage } from "./agentRun/agentRunUsageLedger";
-import { recordOneShotUsage, recordShieldReviewUsage } from "./shield/shieldUsageLedger";
+import {
+  recordOneShotUsage,
+  recordShieldReviewUsage,
+  recordUnplannedUsage,
+} from "./shield/shieldUsageLedger";
 import {
   IMAGE_DESCRIPTION_REQUEST_SHAPE,
   IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE,
+  WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE,
+  WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE,
 } from "@octant/contracts";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
@@ -473,6 +479,40 @@ describe("SpendCeilingService", () => {
         countsAsTurn: false,
       }).status,
     ).toBe("refused");
+  });
+
+  it("counts a suggested branch name against its own Project's ceiling and no other's", () => {
+    const { connection, journal, service } = openService();
+    const ledger = { connection, journal, clock: () => now, uuid: () => crypto.randomUUID() };
+    const otherProject = "73000000-0000-4000-8000-000000000009";
+    for (const projectId of [ids.project, otherProject]) {
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "project", projectId: decodeProjectId(projectId) },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 1_000 },
+        window: { kind: "calendar", period: "day", timeZone: "UTC" },
+      });
+    }
+    recordUnplannedUsage(ledger, {
+      aggregateType: WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE,
+      aggregateId: ids.project,
+      requestShape: WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE,
+      providerInstanceId: ids.provider as never,
+      modelId: "model-a" as never,
+      usage: { inputTokens: 880, outputTokens: 20 },
+    });
+    const suggestion = (projectId: string) =>
+      service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.reservationA,
+        threadType: "code-thread",
+        projectId,
+        turnUpperBoundTokens: 200,
+        countsAsTurn: false,
+      }).status;
+    expect(suggestion(ids.project)).toBe("refused");
+    expect(suggestion(otherProject)).toBe("admitted");
   });
 
   it("counts Octant Shield's reviews against the reviewed Work thread's ceiling", () => {

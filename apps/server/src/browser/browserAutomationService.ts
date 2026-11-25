@@ -13,7 +13,7 @@ import {
   type PairedBrowserProfileKind,
   type PairedBrowserTarget,
 } from "@octant/contracts/paired-browser-control";
-import type { EventActor, UtcTimestamp } from "@octant/contracts";
+import type { BrowserPageCloseReason, EventActor, UtcTimestamp } from "@octant/contracts";
 import { isBrowserFaviconDataUrl } from "@octant/contracts/browser-automation";
 import type { PersistentBrowserLeaseBinding } from "@octant/contracts/persistent-browser-owner";
 import type { PairedBrowserHost } from "./pairedBrowserControl";
@@ -70,6 +70,8 @@ import {
 import {
   authorizeToolAction,
   browserCaptureTaker,
+  browserPageProfileFacts,
+  isRecordedBrowserSession,
   browserPageAuditResult,
   boundBrowserPageTools,
   canRequestToolCancellation,
@@ -94,6 +96,7 @@ import { browserExpiryFailure, browserOriginRefusal } from "./browserRecoveryMes
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
 import type { BrowserDownloadRecorder } from "./browserDownloadJournal";
+import type { BrowserPageSessions } from "./browserPageSessions";
 import { saveBrowserDownload, type BrowserDownloadFacts } from "./browserDownloadSave";
 import {
   BrowserNavigationBlockedError,
@@ -130,6 +133,8 @@ export interface BrowserTaskProfileSwitchInput {
   readonly profile: BrowserProfile;
   readonly expectedContextId?: BrowserContextId;
   readonly url?: string;
+  /** The actor of the request, for the Browser session record the switch writes. */
+  readonly actor?: EventActor;
   readonly isCurrent: () => boolean;
   readonly save: (commit: (persist: () => void) => boolean) => Promise<BrowserTaskProfileCommit>;
   /** Registers an identity-only pending binding before the shared page is exposed. */
@@ -221,6 +226,11 @@ export interface BrowserAutomationServiceOptions {
   readonly strict?: (threadId: string) => boolean;
   /** Where a saved, refused, or denied download is journaled. */
   readonly downloads?: BrowserDownloadRecorder;
+  /**
+   * Where the person's open pages are recorded, so a restart can offer one
+   * back. Absent on a host that records none.
+   */
+  readonly pageSessions?: Pick<BrowserPageSessions, "opened" | "ended" | "hold">;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly now: () => number;
@@ -244,6 +254,13 @@ const AGENT_ACTIVE_LINGER_MS = 15_000;
 interface OwnedContext {
   readonly windowId: WindowId;
   readonly threadId: BrowserThreadId;
+  /** The page's start is in the journal and its end is not yet. */
+  pageRecorded: boolean;
+  /**
+   * A reserved reopen records its page only once its first navigation succeeds,
+   * so an open that fails before any address loads leaves the offer it was for.
+   */
+  recordPage?: (() => void) | undefined;
   /**
    * A context created for one Open of its own rather than as the thread's
    * shared Browser context. It is deliberately invisible to
@@ -458,6 +475,7 @@ export class BrowserAutomationService {
   readonly #waitLimitMs: () => number;
   readonly #strict: (threadId: string) => boolean;
   readonly #downloads: BrowserDownloadRecorder | undefined;
+  readonly #pageSessions: BrowserAutomationServiceOptions["pageSessions"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #now: () => number;
@@ -517,6 +535,7 @@ export class BrowserAutomationService {
     this.#waitLimitMs = options.waitLimitMs ?? (() => MAX_BROWSER_WAIT_MS);
     this.#strict = options.strict ?? (() => true);
     this.#downloads = options.downloads;
+    this.#pageSessions = options.pageSessions;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#now = options.now;
@@ -533,6 +552,7 @@ export class BrowserAutomationService {
       for (const [contextId, owned] of this.#contexts) {
         if (affected !== undefined && !affected.has(contextId)) continue;
         if (owned.record.state !== "active" && owned.record.state !== "creating") continue;
+        this.#notePageEnded(owned, "runtime-lost");
         owned.abort.abort();
         owned.cancelExpiry?.();
         owned.cancelExpiry = undefined;
@@ -619,6 +639,17 @@ export class BrowserAutomationService {
       BrowserProfileCaller,
       "person-paired-device" | "remote-device" | "terminal-grant"
     >;
+    /**
+     * True only from the person's own open route. An agent, a subagent, a
+     * routine, a saved flow, a terminal grant and the host's own run open
+     * pages in the same context and never say so, so their pages are never
+     * recorded as the person's.
+     */
+    readonly openedByPerson?: boolean | undefined;
+    /** Who asked, for the journal; the host's own actor when the request names none. */
+    readonly actor?: EventActor | undefined;
+    /** The page a restart took that this Open reopens; the route checked the reservation. */
+    readonly reopensPageId?: string | undefined;
   }): Promise<BrowserAutomationSnapshot> {
     if (!this.#flowRunAllows(input.threadId, input.flowRun))
       return failedSnapshot(
@@ -701,6 +732,7 @@ export class BrowserAutomationService {
     const owned: OwnedContext = {
       windowId: input.windowId,
       threadId: input.threadId,
+      pageRecorded: false,
       dedicated,
       action: input.action,
       abort: new AbortController(),
@@ -807,6 +839,7 @@ export class BrowserAutomationService {
         owned.status = "running";
         owned.lastActivityAt = this.#now();
         this.#scheduleExpiry(owned);
+        this.#notePageOpened(owned, input);
       } catch (error) {
         if (owned.record.state === "creating") {
           owned.status = owned.abort.signal.aborted ? "interrupted" : "failed";
@@ -1029,8 +1062,16 @@ export class BrowserAutomationService {
           // teardown starts synchronously, then finishes after this commit.
           persist();
           input.bind(replacement.record.contextId, replacement.record.authority);
-          retired = this.#destroy(previous, "user-requested", "ready");
           replacement.dedicated = false;
+          // A page the person opened is still the person's open page in the new
+          // profile: record the replacement and end the old record, which the
+          // switch superseded rather than the person closing.
+          if (previous.pageRecorded)
+            this.#notePageOpened(replacement, {
+              openedByPerson: true,
+              ...(input.actor === undefined ? {} : { actor: input.actor }),
+            });
+          retired = this.#destroy(previous, "user-requested", "ready", "superseded", input.actor);
           committed = true;
           return true;
         });
@@ -1939,6 +1980,7 @@ export class BrowserAutomationService {
         owned.evidence.splice(0, owned.evidence.length - MAX_RETAINED_BROWSER_EVIDENCE);
       }
       if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
+      if (input.request.kind === "navigate") owned.recordPage?.();
       owned.failure = undefined;
       owned.status = "running";
       return snapshot(owned);
@@ -2450,6 +2492,8 @@ export class BrowserAutomationService {
     windowId: WindowId,
     threadId: BrowserThreadId,
     contextId: BrowserContextId,
+    endedBy: "person" | "agent" = "person",
+    actor?: EventActor,
   ): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(contextId);
     if (owned === undefined) throw new Error("Browser context is stale or unknown.");
@@ -2463,7 +2507,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    await this.#destroy(owned, "user-requested", "ready");
+    await this.#destroy(owned, "user-requested", "ready", closedBy(endedBy), actor);
     owned.failure = undefined;
     return snapshot(owned);
   }
@@ -3099,6 +3143,8 @@ export class BrowserAutomationService {
   async releaseThread(
     windowId: WindowId,
     threadId: BrowserThreadId,
+    endedBy: "person" | "agent" = "agent",
+    actor?: EventActor,
   ): Promise<BrowserAutomationSnapshot> {
     this.#forgetExpiry(windowId, threadId);
     const ownedContexts = [...this.#contexts.values()].filter(
@@ -3106,14 +3152,23 @@ export class BrowserAutomationService {
     );
     await Promise.all(
       ownedContexts.map(async (owned) => {
-        await this.#destroy(owned, "user-requested", "ready");
+        await this.#destroy(owned, "user-requested", "ready", closedBy(endedBy), actor);
         this.#contexts.delete(owned.record.contextId);
       }),
     );
     return { status: "ready", threadId, evidence: [] };
   }
 
-  async revokeWindow(windowId: WindowId): Promise<void> {
+  /**
+   * `appQuitting` is the desktop's statement, on this one revoke request, that
+   * its app is quitting: the window is leaving with it rather than being closed
+   * by the person, so its page keeps its record open and is offered back.
+   * `actor` is the request's own.
+   */
+  async revokeWindow(
+    windowId: WindowId,
+    revocation?: { readonly appQuitting: boolean; readonly actor: EventActor },
+  ): Promise<void> {
     if (this.#executionOwner !== undefined) return;
     this.#forgetExpiry(windowId);
     await Promise.all(
@@ -3121,7 +3176,15 @@ export class BrowserAutomationService {
         .filter((owned) => owned.windowId === windowId)
         .map(async (owned) => {
           owned.abort.abort();
-          await this.#destroy(owned, "authority-revoked", "interrupted");
+          // A window closed by the person, and a remote device's session that
+          // ended, are ordinary endings and write the end.
+          await this.#destroy(
+            owned,
+            "authority-revoked",
+            "interrupted",
+            revocation?.appQuitting === true ? "keep" : "authority-ended",
+            revocation?.actor,
+          );
         }),
     );
   }
@@ -3795,7 +3858,7 @@ export class BrowserAutomationService {
           browserProfileKey(owned.record.policy.profile) === key &&
           (owned.record.state === "active" || owned.record.state === "creating"),
       )
-      .map((owned) => this.#destroy(owned, "user-requested", "stale"));
+      .map((owned) => this.#destroy(owned, "user-requested", "stale", "profile-removed"));
     await Promise.allSettled(closing);
   }
 
@@ -3828,7 +3891,16 @@ export class BrowserAutomationService {
     owned: OwnedContext,
     reason: BrowserContextRecord["stopReason"],
     status: BrowserWorkspaceStatus,
+    pageEnd?: BrowserPageCloseReason | "keep",
+    actor?: EventActor,
   ): Promise<void> {
+    if (pageEnd !== "keep") this.#notePageEnded(owned, pageEnd ?? pageEndOf(reason), actor);
+    else if (owned.pageRecorded) {
+      // The app is leaving with the page open: its record stays, and this
+      // running host offers it again without waiting for a restart.
+      owned.pageRecorded = false;
+      this.#pageSessions?.hold(String(owned.record.contextId));
+    }
     const creating = owned.record.state === "creating";
     owned.abort.abort();
     owned.cancelExpiry?.();
@@ -3895,6 +3967,7 @@ export class BrowserAutomationService {
   }
 
   #revokeAuthority(owned: OwnedContext): void {
+    this.#notePageEnded(owned, "authority-ended");
     owned.abort.abort();
     owned.cancelExpiry?.();
     owned.cancelExpiry = undefined;
@@ -3919,6 +3992,7 @@ export class BrowserAutomationService {
   }
 
   #markExpired(owned: OwnedContext): void {
+    this.#notePageEnded(owned, "expired");
     owned.abort.abort();
     owned.cancelExpiry?.();
     owned.cancelExpiry = undefined;
@@ -3936,6 +4010,102 @@ export class BrowserAutomationService {
         context: owned.record,
       });
     }
+  }
+
+  /**
+   * Records the person's own page in a thread's Browser pane as a Browser
+   * session, so that a restart or crash can offer it back. Only what opens a
+   * blank page again is kept: never an address, a title, or page content.
+   */
+  #notePageOpened(
+    owned: OwnedContext,
+    input: {
+      readonly profileCaller?: "person-paired-device" | "remote-device" | "terminal-grant";
+      readonly openedByPerson?: boolean | undefined;
+      readonly actor?: EventActor | undefined;
+      readonly reopensPageId?: string | undefined;
+    },
+  ): void {
+    const authority = owned.record.authority;
+    if (
+      this.#pageSessions === undefined ||
+      authority.mode === "chat" ||
+      !isRecordedBrowserSession({
+        openedByPerson: input.openedByPerson === true,
+        mode: authority.mode,
+        dedicated: owned.dedicated,
+        hostRun: this.#executionOwner !== undefined,
+        unattended: this.#isUnattendedScope(owned.windowId),
+        terminalGrant: input.profileCaller === "terminal-grant",
+      })
+    )
+      return;
+    const sessions = this.#pageSessions;
+    const record = (): void => {
+      owned.recordPage = undefined;
+      sessions.opened(
+        {
+          pageId: owned.record.contextId,
+          threadId: owned.threadId,
+          windowId: owned.windowId,
+          mode: authority.mode,
+          projectId: authority.projectId,
+          ...browserPageProfileFacts(owned.record.policy.profile),
+        },
+        {
+          ...(input.actor === undefined ? {} : { actor: input.actor }),
+          ...(input.reopensPageId === undefined ? {} : { reopens: input.reopensPageId }),
+        },
+      );
+      owned.pageRecorded = true;
+    };
+    if (input.reopensPageId === undefined) record();
+    else owned.recordPage = record;
+  }
+
+  #notePageEnded(
+    owned: OwnedContext,
+    reason: BrowserPageCloseReason | undefined,
+    actor?: EventActor,
+  ): void {
+    if (!owned.pageRecorded || reason === undefined) return;
+    owned.pageRecorded = false;
+    this.#pageSessions?.ended(
+      String(owned.record.contextId),
+      String(owned.threadId),
+      reason,
+      ...(actor === undefined ? [] : [actor]),
+    );
+  }
+
+  /** Whether the thread has a page of its own Browser pane open in any window. */
+  hasOpenPage(threadId: BrowserThreadId): boolean {
+    return [...this.#contexts.values()].some(
+      (owned) =>
+        String(owned.threadId) === String(threadId) &&
+        !owned.dedicated &&
+        (owned.record.state === "active" || owned.record.state === "creating"),
+    );
+  }
+
+  /**
+   * Whether the profile a record names still exists on this host. Private,
+   * Project and Personal always do; a named account is gone once it is removed.
+   * A profile list that cannot be read now answers `unknown`, never `gone`.
+   */
+  async profileState(profile: BrowserProfile): Promise<"exists" | "gone" | "unknown"> {
+    if (profile.kind !== "account") return "exists";
+    const profiles = this.#runtime.profiles;
+    if (profiles === undefined) return "unknown";
+    const rows = await profiles.list(false).catch(() => undefined);
+    if (rows === undefined) return "unknown";
+    return rows.some(
+      (entry) =>
+        entry.profile.kind === "account" &&
+        String(entry.profile.profileId) === String(profile.profileId),
+    )
+      ? "exists"
+      : "gone";
   }
 
   #forgetExpiry(windowId: WindowId, threadId?: BrowserThreadId): void {
@@ -4246,6 +4416,19 @@ function failedSnapshot(
   status: BrowserWorkspaceStatus,
 ): BrowserAutomationSnapshot {
   return { status, threadId, evidence: [], failure };
+}
+
+function closedBy(endedBy: "person" | "agent"): BrowserPageCloseReason {
+  return endedBy === "agent" ? "closed-by-agent" : "closed-by-person";
+}
+
+/** What ending a context for this reason means for its Browser session record; a shutdown writes none. */
+function pageEndOf(reason: BrowserContextRecord["stopReason"]): BrowserPageCloseReason | undefined {
+  if (reason === "authority-revoked") return "authority-ended";
+  if (reason === "timeout") return "expired";
+  if (reason === "error") return "runtime-lost";
+  if (reason === "shutdown") return undefined;
+  return "closed-by-person";
 }
 
 function stoppedRecord(

@@ -16,7 +16,8 @@ const MAX_CODE_SESSION_CONVERSATION_PAGES = 40;
 
 /**
  * A Code thread's public conversation, oldest first, as the host summarizes
- * it: each turn's prompt and, once the turn completed, its final reply.
+ * it: each turn's prompt, the messages the person sent into it while it ran,
+ * in the order they were sent, and, once the turn completed, its final reply.
  * Rewound turns are not in it (the event store leaves them out), reasoning
  * and tool steps never are, and a message whose text cannot be read is left
  * out rather than guessed at. Each message's source names its turn and its
@@ -58,6 +59,17 @@ export function readCodeSessionConversation(
           role: "user",
           exchangeKey,
           content: prompt,
+        });
+      }
+      for (const steered of turn.steeredMessages ?? []) {
+        messages.push({
+          source: {
+            kind: "message",
+            referenceId: `${exchangeKey}:steered:${steered.messageId}`,
+          },
+          role: "user",
+          exchangeKey,
+          content: steered.body,
         });
       }
       if (turn.status !== "completed") continue;

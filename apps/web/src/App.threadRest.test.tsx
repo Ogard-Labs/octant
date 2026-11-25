@@ -82,6 +82,48 @@ describe("thread rest from the sidebar", () => {
     expect(await screen.findByText("This thread is waiting on you.")).toBeVisible();
   });
 
+  it("snoozes the Code thread in front from the command palette", async () => {
+    const codeApi: CodeClient = {
+      ...codes(),
+      execute: vi.fn(async () => {
+        throw { category: "invalid", message: "This thread is waiting on you." };
+      }),
+    };
+    render(shell(codeApi));
+
+    const projectsNav = await screen.findByRole("navigation", { name: "Projects" });
+    await userEvent.click(
+      within(projectsNav).getByRole("button", { name: /Controller foundation/ }),
+    );
+    await waitFor(() =>
+      expect(
+        within(projectsNav).getByRole("button", { name: /Controller foundation/ }),
+      ).toHaveAttribute("aria-current", "page"),
+    );
+    await userEvent.keyboard("{Control>}k{/Control}");
+    await userEvent.click(await screen.findByRole("option", { name: /^Snooze · In 1 hour/ }));
+
+    await waitFor(() =>
+      expect(codeApi.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "snooze-code-thread" }),
+      ),
+    );
+    expect(await screen.findByText("This thread is waiting on you.")).toBeVisible();
+  });
+
+  it("offers no thread commands while a new thread is being drafted", async () => {
+    render(shell(codes()));
+
+    await screen.findByRole("navigation", { name: "Projects" });
+    await userEvent.keyboard("{Control>}n{/Control}");
+    await userEvent.keyboard("{Control>}k{/Control}");
+    await screen.findByRole("combobox", { name: "Search commands" });
+
+    expect(screen.getByRole("option", { name: /^New Code thread/ })).toBeVisible();
+    expect(screen.queryByRole("option", { name: /^Snooze · / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^Settle/ })).not.toBeInTheDocument();
+  });
+
   it("shelves a snoozed Code thread whose lifecycle still rests on waiting", async () => {
     const base = codes();
     const snoozedThreads = async () => {

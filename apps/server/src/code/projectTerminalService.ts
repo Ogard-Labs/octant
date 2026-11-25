@@ -184,6 +184,8 @@ export interface ProjectTerminalServiceOptions {
     readonly workThreadId: WorkThreadId;
     readonly shell: string;
     readonly strict: boolean;
+    /** The program starts under, or a turn of the task holds, a chosen sandbox policy. */
+    readonly sandboxPolicySelected: boolean;
   }) => ProviderTerminalLaunch;
   /**
    * A Work or Code Project on a registered server, which the local catalog never
@@ -300,6 +302,8 @@ export class ProjectTerminalService {
    * survives to be offered back.
    */
   readonly #endedByRestart = new Map<string, ProjectId>();
+  /** Starts that have begun and not yet ended, by Project: counted before any folder is resolved. */
+  readonly #launching = new Map<string, number>();
   readonly #startingServerWork = new Map<
     string,
     {
@@ -604,6 +608,23 @@ export class ProjectTerminalService {
   }
 
   /**
+   * Whether any shell of the Project is running or still starting. A terminal
+   * records its Project and not a folder, so the host cannot say which of the
+   * Project's worktrees it is in; a cleanup of any of them waits for it.
+   */
+  hasRunning(projectId: ProjectId): boolean {
+    return (
+      this.#launching.has(String(projectId)) ||
+      [...this.#owners.values()].some(
+        (owner) => !owner.ended && String(owner.projectId) === String(projectId),
+      ) ||
+      [...this.#startingServerWork.values()].some(
+        (starting) => !starting.cancelled && String(starting.projectId) === String(projectId),
+      )
+    );
+  }
+
+  /**
    * What a running Project terminal runs, as its start recorded it: its Work
    * task's provider program, or undefined for a shell or a terminal this host
    * does not hold. A Zen card records it, so its restart asks for the same.
@@ -810,7 +831,54 @@ export class ProjectTerminalService {
     };
   }
 
+  /**
+   * A start is counted from its first line, before it resolves any folder: the
+   * folder is resolved across awaits and the shell is registered later, and a
+   * cleanup that reads "nothing running" in between must still see it.
+   */
   async #startAction(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { kind: "start-action" }>,
+    device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
+  ): Promise<ProjectTerminalResult> {
+    const done = this.#beginLaunch(command.projectId);
+    try {
+      return await this.#startActionNow(windowId, command, device);
+    } finally {
+      done();
+    }
+  }
+
+  async #start(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
+    action?: ProjectAction,
+    placed?: {
+      readonly checkout: ActionCheckout | undefined;
+      readonly folder: string;
+      readonly receipt: ActionReceipt;
+    },
+    device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
+  ): Promise<ProjectTerminalResult> {
+    const done = this.#beginLaunch(command.projectId);
+    try {
+      return await this.#startNow(windowId, command, action, placed, device);
+    } finally {
+      done();
+    }
+  }
+
+  #beginLaunch(projectId: ProjectId): () => void {
+    const key = String(projectId);
+    this.#launching.set(key, (this.#launching.get(key) ?? 0) + 1);
+    return () => {
+      const left = (this.#launching.get(key) ?? 1) - 1;
+      if (left <= 0) this.#launching.delete(key);
+      else this.#launching.set(key, left);
+    };
+  }
+
+  async #startActionNow(
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { kind: "start-action" }>,
     device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
@@ -836,7 +904,7 @@ export class ProjectTerminalService {
     return this.#start(windowId, { ...command, kind: "start" }, placed.action, placed, device);
   }
 
-  async #start(
+  async #startNow(
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
     action?: ProjectAction,
@@ -947,6 +1015,7 @@ export class ProjectTerminalService {
         workThreadId: providerTask,
         shell,
         strict,
+        sandboxPolicySelected: turnHoldsSandboxPolicy(String(providerTask)),
       }) ?? { status: "refused", message: "This host does not open provider terminals." };
       if (launch.status === "refused") return refused("unavailable", launch.message);
       providerProgram = launch;
@@ -1028,6 +1097,26 @@ export class ProjectTerminalService {
       protections = prepared;
       const deviceStillCurrent = () =>
         device === undefined || this.#deviceOwnerCurrent(windowId, device.binding);
+      // The policy the terminal starts under is known only now, and under one
+      // the program's environment keeps the provider's channels closed.
+      if (providerTask !== undefined && prepared.launch.sandboxPolicy !== undefined) {
+        const confined = this.#options.providerTerminal?.({
+          workThreadId: providerTask,
+          shell,
+          strict,
+          sandboxPolicySelected: true,
+        });
+        // Refused now (the provider was just switched off): never start with
+        // the environment resolved before the policy was known.
+        if (confined?.status !== "resolved") {
+          await prepared.end();
+          return refused(
+            "unavailable",
+            confined?.message ?? "This host does not open provider terminals.",
+          );
+        }
+        providerProgram = confined;
+      }
       // The program runs the way the task's turns do (maintainer decision,
       // 2026-11-21), by the rule a Code thread's provider terminal follows:
       // where a turn runs without Octant's sandbox, so does the program, on

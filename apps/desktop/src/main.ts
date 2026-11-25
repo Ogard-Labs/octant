@@ -1664,6 +1664,7 @@ async function refreshDesktopProjectWindowAuthorityAfterHostRestart(options: {
       desktopBridgeSecret,
       serverUrl: options.host.url,
       windowId: options.windowId,
+      appQuitting: appIsQuitting,
     }),
   );
   if (authority === undefined) return;
@@ -2141,7 +2142,11 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       createView: ({ partition, webPreferences }) =>
         popupViewOf(new WebContentsView({ webPreferences: { partition, ...webPreferences } })),
     });
-    const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(surfaceHost, profileStore);
+    const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(
+      surfaceHost,
+      profileStore,
+      appIsQuitting,
+    );
     launch.acquired({ browserBroker: nextBrowserRuntimeBroker });
     const deviceHelperPath = resolveDesktopNativeHelperPath(
       {
@@ -2602,6 +2607,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         desktopBridgeSecret,
         serverUrl,
         windowId: state.windowId,
+        appQuitting: appIsQuitting,
       });
       rendererIdentity = authority.rendererIdentity;
       return authority;
@@ -2973,6 +2979,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           desktopBridgeSecret,
           serverUrl,
           windowId,
+          appQuitting: appIsQuitting,
         });
         rendererIdentity = authority.rendererIdentity;
         return authority;
@@ -5130,6 +5137,16 @@ async function flushWindowState(): Promise<void> {
     return;
   }
   await flushNativeWindowState(mainWindow, stableWindowId, nativeStateStore);
+}
+
+/**
+ * Whether the app is leaving, for the windows it revokes: a quit it accepted
+ * (the person's, the system's, a signal's or an update's) or a person's Quit
+ * that closes its windows and leaves a host running for other clients. A window
+ * the person closes on a running app is neither.
+ */
+function appIsQuitting(): boolean {
+  return desktopQuitAccepted || retainedHostWindows !== undefined;
 }
 
 async function closeLocalWindowsForRetainedHost(): Promise<"closed" | "failed"> {

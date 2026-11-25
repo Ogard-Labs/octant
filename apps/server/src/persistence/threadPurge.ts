@@ -1,5 +1,6 @@
 import {
   BENCHMARK_RUN_AGGREGATE_TYPE,
+  BROWSER_PAGE_AGGREGATE_TYPE,
   BROWSER_FLOW_AGGREGATE_TYPE,
   NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE,
   TOOL_EGRESS_PROJECT_AGGREGATE,
@@ -432,6 +433,16 @@ export function erasePurgedProjectData(input: {
   )) {
     aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
   }
+  // A Browser page's record names the Project of its thread, so a Project erase
+  // takes the pages a restart left open along with their ends.
+  for (const aggregate of projectOwnedAggregates(
+    connection,
+    BROWSER_PAGE_AGGREGATE_TYPE,
+    "$.projectId",
+    projectId,
+  )) {
+    aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
+  }
   for (const canvasId of input.canvasIds) {
     for (const aggregate of collectCanvasFamilyAggregates(connection, canvasId)) {
       aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
@@ -440,6 +451,7 @@ export function erasePurgedProjectData(input: {
   connection.pragma("foreign_keys = OFF");
   try {
     connection.prepare("DELETE FROM project_memory_projection WHERE project_id = ?").run(projectId);
+    connection.prepare("DELETE FROM browser_page_projection WHERE project_id = ?").run(projectId);
     eraseReplicaArtifactCopies(connection, input.canvasIds);
     deleteJournalEvents(connection, [...aggregates.values()]);
     reconcileAggregateHeads(connection);

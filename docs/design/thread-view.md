@@ -41,6 +41,35 @@ rather than on every turn; a launch outside Strict shows nothing. It is the
 same meta-ink note as a provider handoff's (`role="note"`), not a page banner
 or a card. `strictKeptSentence` in `@octant/domain` is the one wording.
 
+## Cleaned-up worktree
+
+When the host has removed a Code thread's managed worktree folder to save space
+(or an interrupted cleanup or restore left it that way), the thread view says so
+in one neutral card above the composer, in the settled thread's place and wording
+family: "This thread's worktree was cleaned up to save space. The branch and the
+thread are kept, and the thread takes no new turn until the worktree is
+restored." (`cleanedUpWorktreeSentence` in `@octant/domain`, with its two
+variants for a cleanup or a restore still under way). The card carries
+**Restore worktree**, which asks the host's existing restore route and then
+reads the thread again; the card goes with the host's answer, even when that
+read fails and waits for the next refresh, and a worktree another window already
+restored counts as back. That answer belongs to the thread and to the cleanup it
+answered: moving to another thread while a restore runs never hides that
+thread's card, and a later cleanup of the same thread shows its card again. A refusal, such as a branch that moved, shows as a
+second quiet line (naming what to do where waiting would not help) and the card
+stays; a warning that the host handed the folder back with some files missing
+stays on its line after the card is gone, with **Dismiss**. An open thread reads
+its cleanup standing again on the navigation refresh, so the card appears when
+a cleanup happens under it and goes when another window restores it. Sending is held while the card shows: the
+send button is disabled, Enter sends nothing, and the draft stays. The files and
+terminal surfaces of that thread say the same in place of "This checkout can't
+be read" and do not offer to move the thread to the Project's checkout. The host
+answers a send, a queued message or a wake-up that fires for such a thread with
+the same sentence. A window on this computer or a device the host's own person
+paired gets the button, a paired browser's over its session; a hub-introduced or restricted device reads the sentence
+without it. `cleanedUpWorktreeNotice` in `apps/web/src/composer/` is the one
+recipe, and `CodeThreadView.worktreeCleanup` is what the host reports.
+
 ## Context handoffs
 
 When a thread changes provider, moves to another account, switches models, or
@@ -625,8 +654,8 @@ cost with Previous and Next turn controls. There is no hide control and no
 setting: the panel is closed until asked for, so the figures cost the page
 nothing.
 
-**Plan meters.** Remaining plan usage shows in the account menu and the rail's
-ring, on a start screen as the [plan usage line](start-screen.md#plan-usage-line)
+**Plan meters.** Remaining plan usage shows in the rail's usage rings (the
+account menu where no rail shows), on a start screen as the [plan usage line](start-screen.md#plan-usage-line)
 at the end of the context-chip row above the card, and in Settings › Usage. It
 does not stand beside a thread's composer, and the Environment panel's Usage row
 shows the thread's own tokens and cost, not the plan. Its form is the start
@@ -634,7 +663,7 @@ screen's line: each window's share left and its reset, no bar (the bar meters
 went with the Inbox card and the Usage bars setting, maintainer request,
 2026-11-18). The line describes the provider the composer will send to (a start
 screen follows the model menu's choice) and reads the same host observation as
-the rail's ring, picked by window length (`windowSpan`). A provider that reports
+the rail's rings. A provider that reports
 no window shows none. The row under the box
 ([The row under the box](../../DESIGN.md#composer-row)) keeps its controls: the
 approval mode is its shield icon alone, the model button names the model with a
@@ -934,8 +963,9 @@ steered state, since its read lists only messages still waiting. While the
 runtime has not yet taken it, that one message shows "Sending into the
 running turn" and cannot be edited, removed or
 moved; the rest of the queue stays usable. A transcript read afresh shows it
-at once; a desktop transcript already open shows it when the turn settles or
-is read again. A message the runtime does not take stays in the queue for
+at once, and so does an open desktop Work transcript, which reads the running
+turn again without losing the reply streamed so far; an open desktop Code
+transcript shows it when the turn settles or is read again. A message the runtime does not take stays in the queue for
 the next turn.
 
 ## Scheduled wake-ups

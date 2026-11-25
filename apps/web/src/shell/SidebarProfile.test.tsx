@@ -28,6 +28,27 @@ describe("SidebarProfile", () => {
     expect(onOpenSettings.mock.calls[0]?.[0]).toBeUndefined();
   });
 
+  it("leads the menu with Settings and names its key only where the host has one", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    const first = (await screen.findAllByRole("menuitem"))[0];
+    expect(first).toHaveTextContent(/^Settings$/);
+
+    rerender(
+      <SidebarProfile
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        profile={profile}
+        settingsShortcut="⌘,"
+      />,
+    );
+    // The key cap is a hint; the row keeps its plain name.
+    expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveTextContent("Settings⌘,");
+  });
+
   it("names the identity button after the account menu and the person, with the label visible", () => {
     render(
       <SidebarProfile

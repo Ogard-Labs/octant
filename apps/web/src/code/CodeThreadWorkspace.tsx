@@ -1,5 +1,8 @@
 import "../styles/code-thread.css";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
+import { cleanedUpWorktreeNotice } from "../composer/cleanedUpWorktreeNotice";
+import { createArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
+import type { RemoteProductPort } from "../remote/remoteProductClients";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
@@ -394,6 +397,8 @@ export interface CodeThreadWorkspaceProps {
   readonly coordinatorWorkers?: CoordinatorWorkersSource;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  /** Restores the thread's cleaned-up worktree where there is no window capability, over a device's session. */
+  readonly worktreePort?: RemoteProductPort;
   readonly messageQueueClient?: ThreadMessageQueueClient;
   /** The thread's wake-ups; absent builds one from the server address. */
   readonly wakeupClient?: ThreadWakeupClient;
@@ -435,6 +440,78 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ? serverCodeProjectFor(serverCodeProjects, view?.thread.projectId)
     : undefined;
   const displayReady = props.controller.conversationHistory === "loaded";
+  // The host removed this thread's worktree folder: the thread keeps its
+  // branch, takes no turn, and offers Restore to a window or a device the
+  // host's own person paired. A device the hub introduced, or a restricted
+  // one, reads the sentence and nothing more.
+  const hostWorktreeCleanup = view?.worktreeCleanup;
+  const mayRestoreWorktree = props.pairedDevice !== true || props.actsAsHostPerson === true;
+  const { worktreePort: sessionWorktreePort } = props;
+  const worktreeClient = useMemo(
+    () =>
+      sessionWorktreePort !== undefined
+        ? createArchivedWorktreesClient(sessionWorktreePort)
+        : props.serverUrl === undefined || props.windowCapability === undefined
+          ? undefined
+          : createArchivedWorktreesClient({
+              baseUrl: props.serverUrl,
+              fetch: globalThis.fetch,
+              windowCapability: props.windowCapability,
+            }),
+    [sessionWorktreePort, props.serverUrl, props.windowCapability],
+  );
+  const [restoringWorktree, setRestoringWorktree] = useState(false);
+  const [restoreProblem, setRestoreProblem] = useState<string>();
+  // The host said the worktree is back. The notice goes with that answer, not
+  // with the view read that follows, which may fail and is read again by the
+  // next refresh. The answer belongs to the thread and to the cleanup it
+  // answered: another thread never inherits it, a later cleanup of this one
+  // shows its notice again, and it clears once the view no longer names one.
+  const [restoredAnswer, setRestoredAnswer] = useState<{
+    readonly threadId: string;
+    readonly standing: typeof hostWorktreeCleanup;
+  }>();
+  const currentThreadId = useRef(String(props.threadId));
+  currentThreadId.current = String(props.threadId);
+  useEffect(() => {
+    setRestoredAnswer((answer) =>
+      answer?.threadId === String(props.threadId) ? answer : undefined,
+    );
+    setRestoreProblem(undefined);
+  }, [props.threadId]);
+  useEffect(() => {
+    if (hostWorktreeCleanup === undefined) setRestoredAnswer(undefined);
+  }, [hostWorktreeCleanup]);
+  const worktreeRestored =
+    restoredAnswer?.threadId === String(props.threadId) &&
+    restoredAnswer.standing === hostWorktreeCleanup;
+  const worktreeCleanup = worktreeRestored ? undefined : hostWorktreeCleanup;
+  async function restoreWorktree(): Promise<void> {
+    if (worktreeClient === undefined || restoringWorktree) return;
+    const askedThread = String(props.threadId);
+    const askedStanding = hostWorktreeCleanup;
+    setRestoringWorktree(true);
+    setRestoreProblem(undefined);
+    try {
+      const result = await worktreeClient.restore(props.threadId);
+      // Another window may have restored it first: it is back all the same.
+      if (result.kind === "cleaned-up-worktree-restored" || result.reason === "not-cleaned-up") {
+        // Not if the person has moved to another thread meanwhile.
+        if (currentThreadId.current === askedThread) {
+          setRestoredAnswer({ threadId: askedThread, standing: askedStanding });
+        }
+      } else {
+        setRestoreProblem(result.message);
+      }
+    } catch {
+      setRestoreProblem("The worktree could not be restored.");
+    } finally {
+      setRestoringWorktree(false);
+    }
+    // A view that does not load now is read again by the next refresh; the
+    // notice is already gone with the host's answer.
+    await props.controller.reloadThreadView(props.threadId).catch(() => undefined);
+  }
   const revealOperationId = props.revealOperationId;
   // The turn's first own row (its prompt) is where the reader lands; a fork's
   // inherited rows belong to its source thread, which a hit never names.
@@ -1070,6 +1147,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // turn while the session compacts. Draft editing remains available while
   // the queue's acknowledgment is pending.
   const canSend =
+    worktreeCleanup === undefined &&
     trimmed.length > 0 &&
     !compacting &&
     !attachments.busy &&
@@ -3379,6 +3457,37 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   : () => void props.controller.reopenThread(props.threadId),
               }),
             ].filter((notice) => notice !== undefined),
+            ...[
+              cleanedUpWorktreeNotice({
+                standing: worktreeCleanup,
+                busy: restoringWorktree,
+                onRestore:
+                  readOnly || !mayRestoreWorktree || worktreeClient === undefined
+                    ? undefined
+                    : () => void restoreWorktree(),
+              }),
+            ].filter((notice) => notice !== undefined),
+            // Kept after the host hands the folder back to the thread (files
+            // it could not put back), until it is dismissed or the next restore.
+            ...(restoreProblem === undefined
+              ? []
+              : [
+                  {
+                    key: "worktree-restore-problem",
+                    tone: "danger" as const,
+                    text: restoreProblem,
+                    action: (
+                      <OctantButton
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setRestoreProblem(undefined)}
+                      >
+                        Dismiss
+                      </OctantButton>
+                    ),
+                  },
+                ]),
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
             ...(projectTrustNotice === undefined ? [] : [projectTrustNotice]),
             ...(attachments.message === undefined

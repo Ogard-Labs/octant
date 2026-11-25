@@ -954,15 +954,10 @@ describe("AutomationDispatchService", () => {
     await dispatcher.dispatchNow(definition.id, run.id);
 
     expect(code.create).not.toHaveBeenCalled();
-    expect(session.projection.getRun(run.id)?.failure).toMatchObject({
-      reason: "provider-capability-mismatch",
-      message: expect.stringContaining(
-        "Google doesn't support unattended runs of Google Antigravity",
-      ),
-    });
-    expect(session.projection.getDefinition(definition.id)?.blockedReason).toBe(
-      "provider-capability-mismatch",
-    );
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("awaiting-confirmation");
+    expect(session.projection.getRun(run.id)?.failure).toBeUndefined();
+    expect(session.projection.getDefinition(definition.id)?.blockedReason).toBeUndefined();
+    expect(session.projection.getDefinition(definition.id)?.lifecycle).toBe("enabled");
     session.connection.close();
   });
 
@@ -1006,11 +1001,12 @@ describe("AutomationDispatchService", () => {
     }
   });
 
-  it("an Antigravity instance on personal sign-in still refuses a routine", async () => {
+  it("holds an Antigravity personal sign-in routine for confirmation and launches it once confirmed by a person's window", async () => {
     const session = openSession();
     const definition = codeDefinition();
     const run = claimQueuedRun(session, definition);
     const code = createCodePort();
+    const confirmedWindowId = "00000000-0000-4000-8000-000000000099" as never;
     const dispatcher = new AutomationDispatchService({
       store: session.store,
       projection: session.projection,
@@ -1036,8 +1032,256 @@ describe("AutomationDispatchService", () => {
     await dispatcher.dispatchNow(definition.id, run.id);
 
     expect(code.create).not.toHaveBeenCalled();
-    expect(session.projection.getRun(run.id)?.failure?.reason).toBe("provider-capability-mismatch");
+    const held = session.projection.getRun(run.id);
+    expect(held?.lifecycle).toBe("awaiting-confirmation");
+    expect(held?.threadId).toBeUndefined();
+
+    // Unattended offers while awaiting-confirmation do not launch the run.
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.create).not.toHaveBeenCalled();
+
+    // Confirming moves the run to dispatching and dispatches under the confirming window.
+    session.store.appendRunStatusChanged({
+      automationId: definition.id,
+      runId: run.id,
+      previousLifecycle: "awaiting-confirmation",
+      lifecycle: "dispatching",
+      version: (held?.version ?? 1) + 1,
+      expectedVersion: held?.version ?? 1,
+      updatedAt: "2026-08-10T13:01:00.000Z" as UtcTimestamp,
+    });
+
+    await dispatcher.dispatchNow(definition.id, run.id, confirmedWindowId);
+
+    expect(code.create).toHaveBeenCalledOnce();
+    expect(code.launch).toHaveBeenCalledWith(
+      expect.objectContaining({ scopeId: confirmedWindowId }),
+    );
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
     session.connection.close();
+  });
+
+  it("retains confirmation across same-process capacity waits and fails closed after a restart", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+    code.launch.mockResolvedValueOnce({ kind: "waiting-capacity", message: "wait" });
+    const confirmedWindowId = "00000000-0000-4000-8000-000000000099" as never;
+    const makeDispatcher = (isConfirmedScopeCurrent?: (windowId: unknown) => boolean) =>
+      new AutomationDispatchService({
+        store: session.store,
+        projection: session.projection,
+        code: code.port,
+        work: unavailableAutomationWorkDispatchPort(),
+        capacity: alwaysAdmit(),
+        ...(isConfirmedScopeCurrent === undefined ? {} : { isConfirmedScopeCurrent }),
+        resolveFacts: () => ({
+          ...matchingFacts(definition),
+          providerInstance: {
+            id: AUTOMATION_TEST_IDS.providerInstance,
+            enabled: true,
+            driverKind: "antigravity",
+            configuration: {
+              kind: "antigravity-acp",
+              binaryPath: "/opt/homebrew/bin/agy",
+              authentication: "provider-owned",
+            },
+          } as never,
+        }),
+        now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+      });
+
+    // Same-process re-offer after a capacity wait retains the confirming window and succeeds.
+    const sameProcess = makeDispatcher(() => true);
+    await sameProcess.dispatchNow(definition.id, run.id, confirmedWindowId);
+    expect(session.projection.getRun(run.id)?.dispatchIntent).toBeDefined();
+    expect(session.projection.getRun(run.id)?.firstTurnAcceptance).toBeUndefined();
+
+    await sameProcess.dispatchNow(definition.id, run.id);
+    expect(code.launch).toHaveBeenCalledTimes(2);
+    expect(code.launch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ scopeId: confirmedWindowId }),
+    );
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+    session.connection.close();
+
+    // A fresh dispatcher (simulating a host restart) has no in-memory confirmation and fails closed.
+    const restartedSession = openSession();
+    const restartedDef = codeDefinition();
+    const restartedRun = claimQueuedRun(restartedSession, restartedDef);
+    const restartedCode = createCodePort();
+    restartedCode.launch.mockResolvedValueOnce({ kind: "waiting-capacity", message: "wait" });
+    const beforeRestart = new AutomationDispatchService({
+      store: restartedSession.store,
+      projection: restartedSession.projection,
+      code: restartedCode.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      resolveFacts: () => ({
+        ...matchingFacts(restartedDef),
+        providerInstance: {
+          id: AUTOMATION_TEST_IDS.providerInstance,
+          enabled: true,
+          driverKind: "antigravity",
+          configuration: {
+            kind: "antigravity-acp",
+            binaryPath: "/opt/homebrew/bin/agy",
+            authentication: "provider-owned",
+          },
+        } as never,
+      }),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+    await beforeRestart.dispatchNow(restartedDef.id, restartedRun.id, confirmedWindowId);
+    expect(restartedSession.projection.getRun(restartedRun.id)?.dispatchIntent).toBeDefined();
+
+    const afterRestart = new AutomationDispatchService({
+      store: restartedSession.store,
+      projection: restartedSession.projection,
+      code: restartedCode.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      resolveFacts: () => ({
+        ...matchingFacts(restartedDef),
+        providerInstance: {
+          id: AUTOMATION_TEST_IDS.providerInstance,
+          enabled: true,
+          driverKind: "antigravity",
+          configuration: {
+            kind: "antigravity-acp",
+            binaryPath: "/opt/homebrew/bin/agy",
+            authentication: "provider-owned",
+          },
+        } as never,
+      }),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+    await afterRestart.dispatchNow(restartedDef.id, restartedRun.id);
+    expect(restartedCode.launch).toHaveBeenCalledTimes(1);
+    expect(restartedSession.projection.getRun(restartedRun.id)?.lifecycle).toBe("failed");
+    expect(restartedSession.projection.getRun(restartedRun.id)?.failure?.reason).toBe(
+      "provider-capability-mismatch",
+    );
+    restartedSession.connection.close();
+  });
+
+  it("retains confirmation across a busy follow-up wait until the thread is free, and re-prompts if the window is revoked", async () => {
+    const originThreadId = "00000000-0000-4000-8000-000000000077" as never;
+    const confirmedWindowId = "00000000-0000-4000-8000-000000000099" as never;
+    const makeFollowUp = () =>
+      codeDefinition({
+        trigger: { kind: "once", scheduledAt: "2026-08-10T13:00:00.000Z" } as never,
+        nextDueAt: "2026-08-10T13:00:00.000Z" as never,
+        missedRunPolicy: "run-once",
+        targetPolicy: "same-thread",
+        originThreadId,
+      });
+
+    const session = openSession();
+    const definition = makeFollowUp();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+    let busy = true;
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: code.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      isConfirmedScopeCurrent: () => true,
+      readFollowUpThread: () => ({
+        kind: "present",
+        projectId: String(definition.projectId),
+        archived: false,
+        done: false,
+        busy,
+        providerInstanceId: String(definition.executionProfile.providerInstanceId),
+        modelId: String(definition.executionProfile.modelId),
+        executionPolicy: "approval-gated",
+      }),
+      resolveFacts: () => ({
+        ...matchingFacts(definition),
+        providerInstance: {
+          id: AUTOMATION_TEST_IDS.providerInstance,
+          enabled: true,
+          driverKind: "antigravity",
+          configuration: {
+            kind: "antigravity-acp",
+            binaryPath: "/opt/homebrew/bin/agy",
+            authentication: "provider-owned",
+          },
+        } as never,
+      }),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+
+    // Confirmed while the thread is busy: stays dispatching without falling back to awaiting-confirmation.
+    await dispatcher.dispatchNow(definition.id, run.id, confirmedWindowId);
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("dispatching");
+    expect(session.projection.getRun(run.id)?.dispatchIntent).toBeUndefined();
+
+    // Scheduler re-offer while still busy keeps waiting in dispatching (no re-prompt).
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("dispatching");
+
+    // Once the thread finishes its turn, the next scheduler offer launches under the confirmed window.
+    busy = false;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.launch).toHaveBeenCalledWith(
+      expect.objectContaining({ scopeId: confirmedWindowId }),
+    );
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+    session.connection.close();
+
+    // Confirming scope revocation returns a waiting run to awaiting-confirmation instead of launching.
+    const revokedSession = openSession();
+    const revokedDef = makeFollowUp();
+    const revokedRun = claimQueuedRun(revokedSession, revokedDef);
+    const revokedCode = createCodePort();
+    let revokedBusy = true;
+    let scopeCurrent = true;
+    const revokedDispatcher = new AutomationDispatchService({
+      store: revokedSession.store,
+      projection: revokedSession.projection,
+      code: revokedCode.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      isConfirmedScopeCurrent: () => scopeCurrent,
+      readFollowUpThread: () => ({
+        kind: "present",
+        projectId: String(revokedDef.projectId),
+        archived: false,
+        done: false,
+        busy: revokedBusy,
+        providerInstanceId: String(revokedDef.executionProfile.providerInstanceId),
+        modelId: String(revokedDef.executionProfile.modelId),
+        executionPolicy: "approval-gated",
+      }),
+      resolveFacts: () => ({
+        ...matchingFacts(revokedDef),
+        providerInstance: {
+          id: AUTOMATION_TEST_IDS.providerInstance,
+          enabled: true,
+          driverKind: "antigravity",
+          configuration: {
+            kind: "antigravity-acp",
+            binaryPath: "/opt/homebrew/bin/agy",
+            authentication: "provider-owned",
+          },
+        } as never,
+      }),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+    await revokedDispatcher.dispatchNow(revokedDef.id, revokedRun.id, confirmedWindowId);
+    scopeCurrent = false;
+    revokedBusy = false;
+    await revokedDispatcher.dispatchNow(revokedDef.id, revokedRun.id);
+    expect(revokedSession.projection.getRun(revokedRun.id)?.lifecycle).toBe(
+      "awaiting-confirmation",
+    );
+    expect(revokedCode.launch).not.toHaveBeenCalled();
+    revokedSession.connection.close();
   });
 
   it("capability-gates Work when the first-turn runtime port is unavailable", async () => {

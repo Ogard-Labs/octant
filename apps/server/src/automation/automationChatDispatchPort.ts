@@ -6,6 +6,7 @@ import {
   type ProviderInstanceId,
   type ProviderModelId,
   type UtcTimestamp,
+  type WindowId,
 } from "@octant/contracts";
 import { ChatServiceError } from "../chat/chatService";
 import { automationChatSubmissionId } from "./automationRunIdentity";
@@ -33,7 +34,7 @@ export interface AutomationChatService {
    */
   readonly execute: (
     command: unknown,
-    context?: { readonly hostRun: true },
+    context?: { readonly hostRun: true; readonly windowId?: WindowId },
   ) => Promise<{ readonly kind: string }>;
 }
 
@@ -109,7 +110,11 @@ async function createChatThread(
 
 async function startOrRecover(
   options: CreateAutomationChatDispatchPortOptions,
-  input: { readonly run: AutomationRun; readonly threadId: ChatThreadId },
+  input: {
+    readonly run: AutomationRun;
+    readonly threadId: ChatThreadId;
+    readonly windowId?: WindowId;
+  },
 ): Promise<AutomationFirstTurnLaunchOutcome> {
   const snapshot = input.run.definitionSnapshot;
   try {
@@ -156,10 +161,12 @@ async function startOrRecover(
         prompt: followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
         submissionId: automationChatSubmissionId(input.run),
       },
-      // The run is the host's own, with no window: a routine's turn and a
-      // follow-up take the host-run tools, as a person's turn would take a
-      // window's.
-      { hostRun: true },
+      // A run a person explicitly confirmed carries their window alongside
+      // `hostRun` so turn admission sees the person while Chat still restricts
+      // the routine to its host-run tool set (no window/proposal tools).
+      input.windowId === undefined
+        ? { hostRun: true }
+        : { hostRun: true, windowId: input.windowId },
     );
     return {
       kind: "accepted",

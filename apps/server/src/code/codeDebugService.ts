@@ -332,6 +332,8 @@ export class CodeDebugService {
   readonly #requestDeadlineMs: number;
   readonly #disconnectGraceMs: number;
   readonly #sessions = new Map<string, SessionRecord>();
+  /** Starts that have begun and not yet ended, by thread; see `start`. */
+  readonly #launching = new Map<string, number>();
   /** The last session each thread ended, so its window can read why. */
   readonly #endings = new Map<string, Ending>();
   #sweepTimer: ReturnType<typeof setInterval> | undefined;
@@ -453,6 +455,14 @@ export class CodeDebugService {
     }
   }
 
+  /** Whether any session of the thread is starting, running or ending; the host's own bookkeeping, for no caller. */
+  hasSession(threadId: CodeThreadId): boolean {
+    return (
+      (this.#launching.get(String(threadId)) ?? 0) > 0 ||
+      [...this.#sessions.values()].some((record) => sameThread(record, threadId))
+    );
+  }
+
   /** The thread's one running session, for a caller that may reach the thread. */
   threadSession(
     caller: CodeDebugCaller,
@@ -538,6 +548,25 @@ export class CodeDebugService {
     caller: CodeDebugCaller,
     request: CodeDebugStartRequest,
     answer: CodeDebugStartAnswer = { answeredInThread: false },
+  ): Promise<CodeDebugStartResult> {
+    // Counted from the first line, before the checkout's folder is resolved: the
+    // session is registered only after awaits, and a cleanup that reads "no
+    // session" in between must still see this start.
+    const key = String(request.threadId);
+    this.#launching.set(key, (this.#launching.get(key) ?? 0) + 1);
+    try {
+      return await this.#startNow(caller, request, answer);
+    } finally {
+      const left = (this.#launching.get(key) ?? 1) - 1;
+      if (left <= 0) this.#launching.delete(key);
+      else this.#launching.set(key, left);
+    }
+  }
+
+  async #startNow(
+    caller: CodeDebugCaller,
+    request: CodeDebugStartRequest,
+    answer: CodeDebugStartAnswer,
   ): Promise<CodeDebugStartResult> {
     if (this.#closed) return { status: "failed", reason: "launch-failed" };
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);

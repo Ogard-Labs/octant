@@ -22,6 +22,7 @@ function runTone(lifecycle: AutomationRunLifecycle): RunStripTone {
     case "interrupted":
       return "failure";
     case "queued":
+    case "awaiting-confirmation":
     case "dispatching":
     case "recovering-dispatch":
     case "running":

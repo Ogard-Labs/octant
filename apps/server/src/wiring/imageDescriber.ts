@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   decodeProviderInstanceId,
   decodeSpendCeilingReservationId,
+  personalSignInRefusals,
   IMAGE_DESCRIPTION_REQUEST_SHAPE,
   IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE,
   type ProjectId,
@@ -59,8 +60,8 @@ export function createHostImageDescriber(deps: {
           : deps.nativeHarnessRoutingStore.projectOverride(projectId)?.configuration,
     }),
     readProject: (projectId) => persistence.readProject(projectId),
-    candidateFacts: (project, candidate) =>
-      coordinatorCandidateFacts(
+    candidateFacts: (project, candidate) => {
+      const facts = coordinatorCandidateFacts(
         {
           readProviderInstance: (id) => persistence.readProviderInstance(id),
           observedState: (id) => providerRuntimeRegistry.observedState(id),
@@ -81,7 +82,13 @@ export function createHostImageDescriber(deps: {
         },
         project,
         candidate,
-      ),
+      );
+      const instance = persistence.readProviderInstance(candidate.providerInstanceId);
+      const refusal = personalSignInRefusals(instance)?.refusesBackgroundModelCalls;
+      return refusal === undefined || facts.notReady !== undefined
+        ? facts
+        : { ...facts, notReady: refusal };
+    },
     takesImage: (candidate, mediaType) =>
       supportsConversationInput(
         providerRuntimeRegistry.observedState(
@@ -92,7 +99,13 @@ export function createHostImageDescriber(deps: {
       ),
     resolveDriver: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);
-      if (instance === undefined || !instance.enabled) return undefined;
+      if (
+        instance === undefined ||
+        !instance.enabled ||
+        personalSignInRefusals(instance)?.refusesBackgroundModelCalls !== undefined
+      ) {
+        return undefined;
+      }
       try {
         return makeConfiguredProviderDriver(instance, deps.configuredDriverOptions());
       } catch {

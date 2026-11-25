@@ -5,7 +5,8 @@ import { acpAgentProfile } from "@octant/contracts/acp-agent-profiles";
 import { isAcpAgentInstance, providerTerminalName } from "@octant/domain";
 import { sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpSessionMode } from "./acpProfiles";
-import { DEFAULT_PROVIDER_OWN_CHANNELS } from "./providerOwnChannels";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
+import { credentialPassThroughApplies, DEFAULT_PROVIDER_OWN_CHANNELS } from "./providerOwnChannels";
 import { resolveProviderToolingAccount } from "./providerToolingAccount";
 
 /**
@@ -44,15 +45,16 @@ export function resolveProviderTerminal(input: {
   readonly mode?: AcpSessionMode;
   readonly executionPolicy?: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean | undefined;
+  /** A turn of the thread holds a chosen sandbox policy. */
+  readonly sandboxPolicySelected?: boolean;
   /** Where an ACP agent instance keeps its managed home, as its driver is given. */
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
   /**
-   * The host credentials the person lets through to each provider, by driver
-   * kind, as a turn outside Strict would get them.
+   * The person's provider telemetry and self-update switches, and the host
+   * credentials they let through, by driver kind; read only outside Strict.
+   * Absent keeps both channels closed and lets nothing through.
    */
-  readonly credentialPassThrough?: (
-    driverKind: ProviderInstance["driverKind"],
-  ) => ReadonlyArray<string>;
+  readonly ownChannels?: (driverKind: ProviderInstance["driverKind"]) => ProviderOwnChannels;
 }): ProviderTerminalLaunch {
   const instance = input.instance;
   if (instance === undefined || !instance.enabled)
@@ -84,6 +86,26 @@ interface Program {
   readonly environment: NodeJS.ProcessEnv;
 }
 
+/**
+ * The channels this thread's terminal opens outside Strict. Where the
+ * thread's turns close the telemetry and self-update switches for a kept or
+ * chosen sandbox, the terminal closes them too; the pass-through list is
+ * carried either way.
+ */
+function terminalOwnChannels(
+  driverKind: ProviderInstance["driverKind"],
+  input: Parameters<typeof resolveProviderTerminal>[0],
+): ProviderOwnChannels {
+  const chosen = input.ownChannels?.(driverKind) ?? DEFAULT_PROVIDER_OWN_CHANNELS;
+  const turnsReadSwitches = credentialPassThroughApplies(driverKind, {
+    strict: false,
+    executionPolicy: input.executionPolicy ?? "approval-gated",
+    fullAccessSandbox: input.fullAccessSandbox === true,
+    sandboxPolicy: input.sandboxPolicySelected === true,
+  });
+  return turnsReadSwitches ? chosen : { ...chosen, telemetry: false, selfUpdate: false };
+}
+
 function toolingProgram(
   instance: ProviderInstance,
   input: Parameters<typeof resolveProviderTerminal>[0],
@@ -93,7 +115,7 @@ function toolingProgram(
     input.hostEnvironment,
     input.homeDirectory,
     input.strict,
-    input.credentialPassThrough?.(instance.driverKind) ?? [],
+    terminalOwnChannels(instance.driverKind, input),
   );
   return account === undefined
     ? undefined
@@ -125,13 +147,9 @@ function acpProgram(
   } catch {
     return undefined;
   }
-  const credentialPassThrough = input.credentialPassThrough?.(instance.driverKind) ?? [];
   const environment = sanitizeAcpEnvironment(profile, input.hostEnvironment, {
     managedHome,
-    // The provider's channels stay closed here, as before this list existed.
-    ...(credentialPassThrough.length === 0
-      ? {}
-      : { ownChannels: { ...DEFAULT_PROVIDER_OWN_CHANNELS, credentialPassThrough } }),
+    ownChannels: terminalOwnChannels(instance.driverKind, input),
     executionPolicy: input.executionPolicy ?? "approval-gated",
     mode: input.mode ?? "code",
     // A TTY, not the ACP stream: the CLI keeps its colour.

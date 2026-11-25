@@ -17,8 +17,10 @@ export type AcpAgentAuthentication = typeof AcpAgentAuthentication.Type;
 
 /**
  * What an agent's own personal sign-in does not cover, as its vendor draws
- * that line. Each field is the sentence a refused run shows, so the server
- * refuses by what the profile declares, never by the profile's id.
+ * that line. Each field is optional and independent, so loosening any single
+ * boundary later is removing that one field from the profile row. The server
+ * checks the declared fields via `personalSignInRefusals`, never the profile
+ * id.
  */
 export interface AcpPersonalSignInRefusals {
   /**
@@ -26,11 +28,37 @@ export interface AcpPersonalSignInRefusals {
    * itself (a wake, Auto-fix, a goal round, a usage-limit or restart
    * continuation, a child's result, a benchmark) or another thread sends.
    */
-  readonly refusesUnattendedRuns: string;
+  readonly refusesUnattendedRuns?: string;
+  /**
+   * How a due routine run handles an unattended trigger when
+   * `refusesUnattendedRuns` is set: `"prompt-human"` holds the run in
+   * `"awaiting-confirmation"` until the person confirms it from their own
+   * window without pausing the routine; absent or `"refuse"` fails the run
+   * and pauses the routine.
+   */
+  readonly routineConfirmation?: "prompt-human" | "refuse";
+  /**
+   * Hidden background or meta single-shot model calls Octant starts on its own
+   * (Shield Judge, person memory distilling, decision review, PR reviewer,
+   * image description, harness observers, commit/PR drafts, hand-off drafts,
+   * context summaries).
+   */
+  readonly refusesBackgroundModelCalls?: string;
   /** A helper run on the agent, and a helper run a thread on it starts. */
-  readonly refusesHelperRuns: string;
+  readonly refusesHelperRuns?: string;
   /** A turn an outside agent sends under an agent grant. */
-  readonly refusesOutsideAgents: string;
+  readonly refusesOutsideAgents?: string;
+  /**
+   * Automatic cross-model routing (Chat multi-model pool selection or
+   * automatic Chat provider fallback) that would route a turn onto this
+   * account without the person explicitly switching the thread.
+   */
+  readonly refusesAutomaticCrossModelRouting?: string;
+  /**
+   * Explicit human-triggered cross-model text handoff (switching a thread
+   * from another provider onto this account, or cross-provider fork).
+   */
+  readonly refusesManualCrossModelHandoff?: string;
 }
 
 /**
@@ -246,23 +274,25 @@ export const ACP_AGENT_PROFILES = {
       "agent-platform": "Agent Platform (Google Cloud project)",
     },
     authenticationNote:
-      "A personal Google sign-in covers only turns you send yourself. Routines, helper runs and other agents need a Gemini API key or Agent Platform.",
+      "A personal Google sign-in covers turns you send yourself. Scheduled routines wait for your confirmation, and background model jobs or automatic routing need a Gemini API key or Agent Platform.",
     signInGuidance:
       "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then check the connection again.",
     // `agy` with no arguments is Google's own interactive CLI, where the
     // person signs in.
     interactiveArgs: [],
-    // Google supports the CLI on a personal plan for one person at their own
-    // computer driving it themselves; unattended runs, use as a sub-agent of
-    // another agent loop, and other callers belong on a Gemini API key or
-    // Agent Platform, which an instance may choose instead.
+    // Each limit below is optional and independent so any single boundary can
+    // be loosened later by removing its entry. Only this profile declares
+    // `personalSignIn`; `api-key` and `agent-platform` lift every entry.
     personalSignIn: {
       refusesUnattendedRuns:
         "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Switch this provider to a Gemini API key or Agent Platform in Settings, or choose another provider.",
-      refusesHelperRuns:
-        "Google doesn't support Google Antigravity as a helper agent, or starting helpers from it, on a personal Google sign-in. Switch this provider to a Gemini API key or Agent Platform in Settings, or use another provider for helper work.",
+      routineConfirmation: "prompt-human",
+      refusesBackgroundModelCalls:
+        "Google doesn't support background or automated model calls to Google Antigravity on a personal Google sign-in. Switch this provider to a Gemini API key or Agent Platform in Settings, or choose another provider.",
       refusesOutsideAgents:
         "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or switch this provider to a Gemini API key or Agent Platform in Settings.",
+      refusesAutomaticCrossModelRouting:
+        "Google doesn't support automatic multi-model pool or fallback routing into Google Antigravity on a personal Google sign-in. Switch this provider to a Gemini API key or Agent Platform in Settings, or remove it from the pool or fallback.",
     },
     // 0x1b is taken: copilot's 0x11 seed normalizes to the `1b` digest.
     bundledPluginSerial: 0x1c,
