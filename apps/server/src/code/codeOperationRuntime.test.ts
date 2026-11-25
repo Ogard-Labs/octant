@@ -6459,7 +6459,8 @@ describe("CodeOperationRuntime", () => {
         summary: "done",
         occurredAt: at(20),
       });
-      clockNow = at(30);
+      // The runtime stamps the request with the clock when it takes it up, so
+      // the clock moves on only after it has: under load it can lag the offer.
       let approvalId: string | undefined;
       await vi.waitFor(async () => {
         const events = await operationEvents(fixture.runtime, startOperation);
@@ -6468,6 +6469,7 @@ describe("CodeOperationRuntime", () => {
           ?.approvalId.toString();
         expect(approvalId).toBeDefined();
       });
+      clockNow = at(30);
       await fixture.runtime.execute(windowId, {
         kind: "answer-provider-approval",
         operationId: operationId(91),
