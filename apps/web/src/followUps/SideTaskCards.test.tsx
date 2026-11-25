@@ -299,4 +299,58 @@ describe("SideTaskInline", () => {
       undefined,
     );
   });
+
+  it("re-reads the offers when the pane's navigation moves while a started receipt is shown", async () => {
+    const sideTasks = vi.fn(async () => ({
+      threadId,
+      tasks: [
+        task({
+          status: "started",
+          startedWith: "fresh",
+          startedThreadId: started.threadId,
+        }),
+      ],
+    }));
+    const client = { sideTasks, start: vi.fn(), continueHere: vi.fn(), dismiss: vi.fn() };
+    const tree = (navigationRevision: number) => (
+      <SideTaskProvider
+        client={client as never}
+        navigationRevision={navigationRevision}
+        threadId={threadId}
+      >
+        <SideTaskInline last loadedTurnIds={new Set([turnId])} running={false} turnId={turnId} />
+      </SideTaskProvider>
+    );
+    const view = render(tree(1));
+    await waitFor(() => expect(sideTasks).toHaveBeenCalled());
+    // The started task itself moves the provider onto the recovery cadence,
+    // which reads once; the baseline is whatever that settles to.
+    await act(async () => {});
+    const before = sideTasks.mock.calls.length;
+
+    view.rerender(tree(2));
+
+    await waitFor(() => expect(sideTasks.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it("ignores navigation moves while no started receipt needs them", async () => {
+    const sideTasks = vi.fn(async () => ({ threadId, tasks: [task()] }));
+    const client = { sideTasks, start: vi.fn(), continueHere: vi.fn(), dismiss: vi.fn() };
+    const tree = (navigationRevision: number) => (
+      <SideTaskProvider
+        client={client as never}
+        navigationRevision={navigationRevision}
+        threadId={threadId}
+      >
+        <SideTaskInline last loadedTurnIds={new Set([turnId])} running={false} turnId={turnId} />
+      </SideTaskProvider>
+    );
+    const view = render(tree(1));
+    await waitFor(() => expect(sideTasks).toHaveBeenCalledTimes(1));
+
+    view.rerender(tree(2));
+    await act(async () => {});
+
+    expect(sideTasks).toHaveBeenCalledTimes(1);
+  });
 });

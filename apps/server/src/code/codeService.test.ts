@@ -767,6 +767,37 @@ describe("CodeService reads", () => {
     expect(runtime[0]).toMatchObject({ executing: false, awaitingInput: true });
   });
 
+  it("reports a running thread whose provider turn waits on the person as awaiting input, not executing", async () => {
+    const waiting = thread();
+    const other = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({
+      threads: [waiting, other],
+      turnAwaitsPerson: (threadId) => threadId === String(waiting.id),
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockImplementation((threadId) => [
+      {
+        work: decodeCodeRuntimeWork({
+          id: testUuid(31),
+          threadId,
+          kind: "provider-turn",
+          state: "running",
+          updatedAt: now,
+        }),
+        firstSequence: 1,
+      },
+    ]);
+
+    const { runtime } = await fixture.service.navigation(ids.window);
+
+    expect(runtime[0]).toMatchObject({
+      threadId: waiting.id,
+      executing: false,
+      awaitingInput: true,
+    });
+    expect(runtime[1]).toMatchObject({ threadId: other.id, executing: true });
+    expect(runtime[1]).not.toHaveProperty("awaitingInput");
+  });
+
   it("does not report a live step for a thread whose Project the window cannot browse", async () => {
     const hidden = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
     const liveTurns = new LiveTurnRegistry();
@@ -6587,6 +6618,7 @@ function serviceFixture(
     readonly serverGitHistory?: CodeServiceOptions["serverGitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
     readonly awaitsHarnessApproval?: CodeServiceOptions["awaitsHarnessApproval"];
+    readonly turnAwaitsPerson?: CodeServiceOptions["turnAwaitsPerson"];
     readonly forkMergeBack?: CodeServiceOptions["forkMergeBack"];
     readonly forkConversation?: CodeServiceOptions["forkConversation"];
     readonly recordExternalContentIngestion?: CodeServiceOptions["recordExternalContentIngestion"];
@@ -6723,6 +6755,9 @@ function serviceFixture(
     ...(options.awaitsHarnessApproval === undefined
       ? {}
       : { awaitsHarnessApproval: options.awaitsHarnessApproval }),
+    ...(options.turnAwaitsPerson === undefined
+      ? {}
+      : { turnAwaitsPerson: options.turnAwaitsPerson }),
     ...(options.forkMergeBack === undefined ? {} : { forkMergeBack: options.forkMergeBack }),
     ...(options.isProviderModelAllowed === undefined
       ? {}

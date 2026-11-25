@@ -1959,6 +1959,59 @@ describe("coordinators in a Project's thread list", () => {
     expect(document.querySelector("[data-thread-id='worker-working']")).toBeNull();
     sessionStorage.clear();
   });
+
+  it("nests a coordinator's and a worker's follow-up children under them, never as top-level rows", () => {
+    sessionStorage.clear();
+    const coordChild = {
+      threadId: "coord-child",
+      title: "Research the parser",
+      checkoutChip: { checkoutKind: "managed-worktree" as const, label: "research-parser" },
+    };
+    const workerChild = { threadId: "worker-child", title: "Check the fixtures" };
+    render(
+      <FollowUpLineageContext
+        value={
+          new Map([
+            ["coord-child", "coordinator"],
+            ["worker-child", "worker-working"],
+            ["coordinator", "ordinary"],
+            ["worker-working", "ordinary"],
+          ])
+        }
+      >
+        <ProjectThreadList
+          groupCoordinators
+          onSelectThread={vi.fn()}
+          threads={[ordinary, working, coordinator, asking, orphan, coordChild, workerChild]}
+        />
+      </FollowUpLineageContext>,
+    );
+    const section = screen.getByRole("group", { name: "Coordinators" });
+    const ids = (root: ParentNode) =>
+      [...root.querySelectorAll<HTMLElement>("[data-thread-id]")].map(
+        (row) => row.dataset.threadId,
+      );
+    // The coordinator's own child sits between its row and its counted
+    // workers; the worker's child rides inside the worker rows. Neither is a
+    // managed worker and neither is repeated at the top level.
+    expect(ids(section)).toEqual([
+      "coordinator",
+      "coord-child",
+      "worker-working",
+      "worker-child",
+      "worker-asking",
+    ]);
+    expect(ids(document)).toEqual([
+      "coordinator",
+      "coord-child",
+      "worker-working",
+      "worker-child",
+      "worker-asking",
+      "ordinary",
+      "orphan",
+    ]);
+    sessionStorage.clear();
+  });
 });
 
 describe("A thread row's short age", () => {

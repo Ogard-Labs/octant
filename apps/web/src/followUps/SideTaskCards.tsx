@@ -41,6 +41,12 @@ export interface SideTaskProviderProps {
     | ((started: StartedResult, unsentPrompt: string | undefined) => void)
     | undefined;
   readonly refreshIntervalMs?: number;
+  /**
+   * The pane mode's navigation revision. A started receipt's child state is
+   * read from that mode's navigation, so the list re-reads when it moves —
+   * but only while a started task makes the read meaningful.
+   */
+  readonly navigationRevision?: number | undefined;
   readonly children: ReactNode;
 }
 
@@ -98,7 +104,17 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
     [client, threadId],
   );
 
-  const revision = useThreadActivityRevision("threadFollowUps");
+  const followUpsRevision = useThreadActivityRevision("threadFollowUps");
+  const navigationRevision = props.navigationRevision;
+  // A started child's state lives on its own thread's navigation row, which
+  // the follow-ups feed does not see. The navigation revision joins the
+  // refresh only while a started task makes that read meaningful, so streamed
+  // tokens on unrelated threads do not re-read the offers.
+  const hasStarted = tasks.some((task) => task.status === "started");
+  const tracksNavigation = hasStarted && navigationRevision !== undefined;
+  const revision = tracksNavigation
+    ? (followUpsRevision ?? 0) + navigationRevision
+    : followUpsRevision;
   // A different thread or client starts clean; a notice never clears the list.
   useEffect(() => {
     requestGeneration.current += 1;
@@ -112,7 +128,9 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
   useVisibleRefresh(
     refresh,
     revision,
-    revision === undefined ? (props.refreshIntervalMs ?? 4_000) : THREAD_ACTIVITY_RECOVERY_MS,
+    followUpsRevision === undefined && !tracksNavigation
+      ? (props.refreshIntervalMs ?? 4_000)
+      : THREAD_ACTIVITY_RECOVERY_MS,
   );
 
   const setMessage = useCallback((id: string, message: string | undefined) => {

@@ -744,6 +744,12 @@ export interface CodeServiceOptions {
    * the thread needs the person.
    */
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
+  /**
+   * Whether the thread's running provider turn is parked on a question the
+   * person has not answered. Its work record stays `running` while it waits,
+   * so without this the navigation row would call a parked turn executing.
+   */
+  readonly turnAwaitsPerson?: (threadId: string) => boolean;
   /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
   /** The person's Settings choice to put a thread away once it is done; absent is off. */
@@ -1132,6 +1138,7 @@ export class CodeService {
   readonly #putAwayWhenDone: () => boolean;
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
+  readonly #turnAwaitsPerson: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
   readonly #moveHold?: (threadId: string) => boolean;
   readonly #terminalSessions: TerminalSessionImportPort | undefined;
@@ -1197,6 +1204,7 @@ export class CodeService {
     this.#pullRequests = options.pullRequests;
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
+    this.#turnAwaitsPerson = options.turnAwaitsPerson;
     this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
     this.#putAwayWhenDone = options.putAwayWhenDone ?? (() => false);
     if (options.issueContext !== undefined) {
@@ -1506,8 +1514,12 @@ export class CodeService {
     pullRequests: ThreadBoardPullRequestSnapshot | undefined,
   ): ReadonlyArray<CodeNavigationRuntime> {
     return threads.map((thread) => {
+      // A provider turn parked on a question keeps its `running` work record,
+      // so the live read is what tells a waiting turn from an executing one.
+      const personParked = this.#turnAwaitsPerson?.(String(thread.id)) === true;
       const activity = boardRuntimeActivityFromWorks(
         this.#persistence.readCodeRuntimeWorks(thread.id),
+        { turnParkedOnPerson: personParked },
       );
       const checkout = this.#persistence.readCodeCheckout(thread.checkoutId);
       const checkoutChip = codeNavigationCheckoutChip(checkout);
@@ -1530,8 +1542,10 @@ export class CodeService {
       const parked = this.#awaitsHarnessApproval?.(String(thread.id)) === true;
       return {
         threadId: thread.id,
-        executing: activity.executing && !parked,
-        ...(parked ? { awaitingInput: true as const } : {}),
+        executing: activity.executing && !parked && !personParked,
+        ...(parked || personParked || activity.awaitingInput
+          ? { awaitingInput: true as const }
+          : {}),
         ...(checkoutChip === undefined ? {} : { checkoutChip }),
         ...(hasPullRequests ? { pullRequestSummaries, threadPullRequests } : {}),
         // Rides on the row the caller was already allowed to see: `threads`

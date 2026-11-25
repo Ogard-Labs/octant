@@ -2094,21 +2094,52 @@ export function wireWork(deps: WorkDependencies) {
       // The receipt's live state reads the same navigation projections the
       // sidebar rows do, so the two never disagree. A child the window's
       // navigation does not list answers nothing rather than guessing.
-      childState: async ({ mode, threadId, windowId }) => {
+      childState: async ({ mode, threadId, windowId, share }) => {
         try {
+          // One navigation read answers every started child of this mode in
+          // the request; `share` is absent only for callers outside the route.
+          const readNavigation = <T>(read: () => Promise<T> | T): Promise<T> =>
+            share === undefined
+              ? Promise.resolve(read())
+              : share(mode, () => Promise.resolve(read()));
           if (mode === "chat") {
-            const row = chatService.navigation().threads.find((t) => String(t.id) === threadId);
-            return sideTaskChildState(row);
+            const navigation = await readNavigation(() => chatService.navigation());
+            const thread = navigation.threads.find((t) => String(t.id) === threadId);
+            if (thread === undefined) return undefined;
+            return sideTaskChildState({
+              executing: thread.executing,
+              awaitingInput: thread.awaitingInput === true,
+              followUp: thread.followUpOpen,
+            });
           }
           const window = decodeWindowId(windowId);
           if (mode === "work") {
-            const navigation = await workThreadServiceWithWorkflows.navigation(window);
-            const row = navigation.runtime.find((entry) => String(entry.threadId) === threadId);
-            return sideTaskChildState(row);
+            const navigation = await readNavigation(() =>
+              workThreadServiceWithWorkflows.navigation(window),
+            );
+            const thread = navigation.threads.find((t) => String(t.id) === threadId);
+            const runtime = navigation.runtime.find((entry) => String(entry.threadId) === threadId);
+            if (thread === undefined || runtime === undefined) return undefined;
+            return sideTaskChildState({
+              executing: runtime.executing,
+              awaitingInput: runtime.awaitingInput === true,
+              followUp: runtime.followUpDue !== undefined,
+            });
           }
-          const navigation = await routeCodeService.navigation(window);
-          const row = navigation.runtime.find((entry) => String(entry.threadId) === threadId);
-          return sideTaskChildState(row);
+          const navigation = await readNavigation(() => routeCodeService.navigation(window));
+          const thread = navigation.threads.find((t) => String(t.id) === threadId);
+          const runtime = navigation.runtime.find((entry) => String(entry.threadId) === threadId);
+          if (thread === undefined || runtime === undefined) return undefined;
+          const followUp = await routeCodeService.readFollowUp?.(
+            window,
+            decodeCodeThreadId(threadId),
+          );
+          return sideTaskChildState({
+            executing: runtime.executing,
+            awaitingInput: runtime.awaitingInput === true,
+            followUp: followUp?.followUp?.state === "open",
+            lifecycle: thread.lifecycle,
+          });
         } catch {
           return undefined;
         }
