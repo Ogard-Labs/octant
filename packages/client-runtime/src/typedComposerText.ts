@@ -15,9 +15,13 @@
  */
 const SCOPE_LIMIT = 256;
 const typed = new Map<string, string>();
-/** The last few texts each scope's person typed, for a field that shows its value late. */
+/**
+ * The last few texts typed in the scopes typed in last, for a field that shows
+ * its value late. Only the fields in use need them, so few scopes are kept.
+ */
 const echoes = new Map<string, string[]>();
 const ECHO_LIMIT = 8;
+const ECHO_SCOPE_LIMIT = 4;
 
 /** The draft scope of an open thread's composer. */
 export function threadDraftScope(mode: "chat" | "work" | "code", threadId: string): string {
@@ -30,16 +34,19 @@ export function noteTypedComposerText(scope: string, text: string): void {
   typed.delete(scope);
   if (trimmed.length === 0) return;
   typed.set(scope, trimmed);
-  echoes.set(
-    scope,
-    [...(echoes.get(scope) ?? []).filter((text) => text !== trimmed), trimmed].slice(-ECHO_LIMIT),
-  );
+  const earlier = (echoes.get(scope) ?? []).filter((text) => text !== trimmed);
+  echoes.delete(scope);
+  echoes.set(scope, [...earlier, trimmed].slice(-ECHO_LIMIT));
+  while (echoes.size > ECHO_SCOPE_LIMIT) {
+    const oldest = echoes.keys().next();
+    if (oldest.done === true) break;
+    echoes.delete(oldest.value);
+  }
   // A scope forgotten only costs a claim, never grants one.
   while (typed.size > SCOPE_LIMIT) {
     const oldest = typed.keys().next();
     if (oldest.done === true) break;
     typed.delete(oldest.value);
-    echoes.delete(oldest.value);
   }
 }
 

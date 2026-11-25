@@ -54,6 +54,7 @@ import {
   type PersonMemoryModelAnswer,
   type PersonMemoryModelPort,
   type PersonMemoryThreadSource,
+  redactForPersonMemory,
 } from "./personMemorySweep";
 
 const START = "2026-11-01T10:00:00.000Z";
@@ -1670,6 +1671,32 @@ describe("saving what the person asks to be remembered, at once", () => {
     expect(h.store.view().entries.map((entry) => entry.content)).toEqual(
       expect.arrayContaining(["I use [redacted]", "I prefer tabs."]),
     );
+  });
+
+  it("keeps the lines beside a credential when one quotation holds both", async () => {
+    const { h, latestMessages, remember } = saving();
+    latestMessages.push("password = placeholder\nI prefer tabs.");
+
+    await remember({ text: "password = placeholder\nI prefer tabs." });
+
+    expect(h.store.view().entries.map((entry) => entry.content)).toEqual([
+      "[redacted] I prefer tabs.",
+    ]);
+  });
+
+  it("removes a whole private key given after a credential label", () => {
+    const body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC";
+    const key = `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----`;
+    for (const message of [
+      `secret: ${key}\nI prefer tabs.`,
+      `my token is\n${key}\nI prefer tabs.`,
+      `password: "${key}"\nI prefer tabs.`,
+    ]) {
+      const redacted = redactForPersonMemory(message);
+      expect(redacted).not.toContain(body);
+      expect(redacted).not.toContain("PRIVATE KEY");
+      expect(redacted).toContain("I prefer tabs.");
+    }
   });
 
   it("keeps the 200-entry cap, dropping the oldest entry the person never edited", async () => {

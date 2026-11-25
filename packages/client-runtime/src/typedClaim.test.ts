@@ -127,6 +127,17 @@ describe("what the person typed", () => {
     expect(composerTextWasTyped("mobile-home", "I prefer tabs")).toBe(false);
   });
 
+  it("keeps the earlier texts of only the fields typed in last", () => {
+    forgetTypedComposerText();
+    noteTypedComposerText("field-0", "I prefer");
+    noteTypedComposerText("field-0", "I prefer tabs");
+    for (let index = 1; index <= 4; index += 1) {
+      noteTypedComposerText(`field-${String(index)}`, "Something else");
+    }
+    composerValueShown("field-0", "I prefer");
+    expect(composerTextWasTyped("field-0", "I prefer tabs")).toBe(false);
+  });
+
   it("hands a claim to the handler only for the length of the call that hands the text over", async () => {
     forgetTypedComposerText();
     noteTypedComposerText("new-task:a", "I prefer tabs");

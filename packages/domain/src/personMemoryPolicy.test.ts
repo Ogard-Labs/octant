@@ -242,7 +242,6 @@ describe("quoting the person's own words", () => {
     ).toEqual([
       {
         before: "Hello. ",
-        quoted: "I prefer short answers",
         raw: "I prefer short   answers",
         after: ", thanks.",
       },
@@ -254,11 +253,16 @@ describe("quoting the person's own words", () => {
     expect(found).toEqual([
       {
         before: "İstanbul is nice.\n",
-        quoted: "I prefer tabs",
         raw: "I prefer tabs",
         after: ", İyi.",
       },
     ]);
+  });
+
+  it("matches a word whose last letter lowers to another form than the same letter within it", () => {
+    expect(
+      personQuotationsIn("λογος", ["Ο ΛΟΓΟΣ μου"]).map((quotation) => quotation.raw),
+    ).toEqual(["ΛΟΓΟΣ"]);
   });
 
   it("returns every place a text appears, and nothing for reworded, invented, or empty text", () => {

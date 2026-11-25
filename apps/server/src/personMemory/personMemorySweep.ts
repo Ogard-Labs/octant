@@ -20,7 +20,7 @@ import {
   personMemoryDistillationAllowed,
   personMemoryDistillPrompt,
 } from "@octant/domain/person-memory-policy";
-import { redactSecretsAndPrivateKeys } from "@octant/domain/secret-shaped-text-policy";
+import { redactPrivateKeys, redactSecretShaped } from "@octant/domain/secret-shaped-text-policy";
 import type { PersonMemoryStore } from "./personMemoryStore";
 
 /** Once an hour is often enough to learn from threads a person put away. */
@@ -200,7 +200,9 @@ type Settle = "no" | "idle" | "refused";
 
 /** Secret-shaped text and private-key blocks, replaced before a model sees them and before storage. */
 export function redactForPersonMemory(text: string): string {
-  return redactSecretsAndPrivateKeys(text.replaceAll(LABELLED_CREDENTIAL, "[redacted]"));
+  // A key block goes first and whole: a label's value ends with its line, which
+  // would take the block's opening marker and leave its body.
+  return redactSecretShaped(redactPrivateKeys(text).replaceAll(LABELLED_CREDENTIAL, "[redacted]"));
 }
 
 /**

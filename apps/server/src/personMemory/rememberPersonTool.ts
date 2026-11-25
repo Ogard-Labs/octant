@@ -75,7 +75,7 @@ export function createRememberPersonTools(input: {
       // of a credential cannot be stored by quoting it without its label.
       const text = personQuotationsIn(request.text, typed)
         .filter((quotation) => !cutsThrough(quotation, input.namesProtectedPath))
-        .map((quotation) => redactForPersonMemory(quotation.quoted).trim())
+        .map((quotation) => redactForPersonMemory(quotation.raw).replace(/\s+/gu, " ").trim())
         .find((candidate) => candidate.length > 0);
       if (text === undefined) return refuse(NOT_THE_PERSONS_WORDS);
       if (text.length > PERSON_MEMORY_ENTRY_MAX_CHARACTERS) {

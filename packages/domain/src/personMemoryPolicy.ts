@@ -135,8 +135,6 @@ export function parsePersonMemoryDistillation(reply: string): DistilledThread {
 export interface PersonQuotation {
   /** The message before the stretch, as written. */
   readonly before: string;
-  /** The stretch with its whitespace collapsed: what is stored. */
-  readonly quoted: string;
   /** The stretch as written, line breaks included. */
   readonly raw: string;
   /** The message after the stretch, as written. */
@@ -167,7 +165,6 @@ export function personQuotationsIn(
       const raw = message.slice(start, end);
       found.push({
         before: message.slice(0, start),
-        quoted: collapseWhitespace(raw),
         raw,
         after: message.slice(end),
       });
@@ -196,7 +193,8 @@ function fold(value: string): {
         ends.push(next);
       }
     } else {
-      const lowered = character.toLowerCase();
+      // A sigma at the end of a word lowers to another letter than one within it.
+      const lowered = character.toLowerCase().replaceAll("\u03c2", "\u03c3");
       for (let at = 0; at < lowered.length; at += 1) {
         units.push(lowered.charAt(at));
         starts.push(index);
@@ -212,13 +210,6 @@ function fold(value: string): {
     ends.pop();
   }
   return { units, starts, ends };
-}
-
-function collapseWhitespace(value: string): string {
-  return value
-    .split(/\s+/u)
-    .filter((word) => word.length > 0)
-    .join(" ");
 }
 
 function sameMemory(left: string, right: string): boolean {
