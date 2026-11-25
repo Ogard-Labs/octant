@@ -4,7 +4,15 @@ import {
 } from "@octant/client-runtime/typed-composer-text";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeBootstrap, CodeThreadId } from "@octant/contracts/code";
-import { memo, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   useCodeController,
   type CodeController,
@@ -44,6 +52,13 @@ function sameCodeProviderRequestsByThreadId(
  */
 export interface CodeThreadControllers {
   readonly get: (threadId: CodeThreadId) => CodeController | undefined;
+  /**
+   * What a surface bound to this thread may draw now: the thread's running
+   * controller, or the state a recently left thread was parked with. A parked
+   * controller is only drawn from, for the moment before its slot runs again;
+   * nothing is delivered to it, which is why `get` does not answer one.
+   */
+  readonly shown: (threadId: CodeThreadId) => CodeController | undefined;
   readonly holdAccessNotice: (threadId: CodeThreadId, text: string) => void;
   /** Wakes the listener when any open thread's controller moves. */
   readonly subscribe: (listener: () => void) => () => void;
@@ -74,12 +89,15 @@ export interface CodeThreadControllerRegistry extends CodeThreadControllers {
     typedByPerson?: boolean,
   ) => void;
   readonly publish: (threadId: CodeThreadId, controller: CodeController) => void;
+  /** The thread left every pane; keep what it showed until it is opened again or let go. */
+  readonly park: (threadId: CodeThreadId, controller: CodeController) => void;
   readonly refreshConversation: (threadId: CodeThreadId) => void;
   readonly release: (threadId: CodeThreadId) => void;
 }
 
 export function createCodeThreadControllers(): CodeThreadControllerRegistry {
   const byThread = new Map<string, CodeController>();
+  const parkedByThread = new Map<string, CodeController>();
   const refreshWhenPublished = new Set<string>();
   const firstPromptWhenPublished = new Map<string, string>();
   const accessNoticeWhenPublished = new Map<string, string>();
@@ -92,6 +110,13 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
   const announce = (key: string) => {
     for (const listener of threadListeners.get(key) ?? []) listener();
     for (const listener of listeners) listener();
+  };
+  const letGoOfRunning = (key: string): boolean => {
+    refreshWhenPublished.delete(key);
+    firstPromptWhenPublished.delete(key);
+    draftWhenPublished.delete(key);
+    // The origin tab is let go on switch; keep its notice for when it returns.
+    return byThread.delete(key);
   };
   return {
     announceFirstPrompt: (threadId, prompt) => {
@@ -116,6 +141,7 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       }
     },
     get: (threadId) => byThread.get(String(threadId)),
+    shown: (threadId) => byThread.get(String(threadId)) ?? parkedByThread.get(String(threadId)),
     holdAccessNotice: (threadId, text) => {
       const key = String(threadId);
       const controller = byThread.get(key);
@@ -127,6 +153,7 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
     },
     publish: (threadId, controller) => {
       const key = String(threadId);
+      parkedByThread.delete(key);
       if (byThread.get(key) !== controller) {
         byThread.set(key, controller);
         announce(key);
@@ -159,13 +186,18 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       }
       refreshWhenPublished.add(key);
     },
+    park: (threadId, controller) => {
+      const key = String(threadId);
+      if (parkedByThread.get(key) === controller) return;
+      // What was queued while the thread was parked waits for it to run again.
+      if (byThread.has(key)) letGoOfRunning(key);
+      parkedByThread.set(key, controller);
+      announce(key);
+    },
     release: (threadId) => {
       const key = String(threadId);
-      refreshWhenPublished.delete(key);
-      firstPromptWhenPublished.delete(key);
-      draftWhenPublished.delete(key);
-      // The origin tab is released on switch; keep its notice for when it returns.
-      if (!byThread.delete(key)) return;
+      const wasRunning = letGoOfRunning(key);
+      if (!parkedByThread.delete(key) && !wasRunning) return;
       announce(key);
     },
     subscribe: (listener) => {
@@ -209,7 +241,7 @@ export function useCodeThreadController(
   );
   const read = useCallback(
     () =>
-      controllers === undefined || threadId === undefined ? undefined : controllers.get(threadId),
+      controllers === undefined || threadId === undefined ? undefined : controllers.shown(threadId),
     [controllers, threadId],
   );
   return useSyncExternalStore(subscribe, read, read);
@@ -267,25 +299,64 @@ export interface CodeThreadControllerSlotsProps {
 }
 
 /**
- * Holds a controller open for every Code thread the window has open.
+ * How many recently left threads keep what they showed. Each is one controller's
+ * state in memory with no stream, poll or read behind it.
+ */
+const MAX_PARKED_CODE_THREADS = 8;
+
+/**
+ * The threads that left every pane, most recent first, while the window still
+ * lists them. Parking holds one host's threads, so another client lets go of all.
+ */
+function useParkedThreadIds(props: CodeThreadControllerSlotsProps): ReadonlyArray<CodeThreadId> {
+  const { client, threadIds } = props;
+  const [left, setLeft] = useState<{
+    readonly client: CodeClient;
+    readonly open: ReadonlyArray<CodeThreadId>;
+    readonly parked: ReadonlyArray<CodeThreadId>;
+  }>({ client, open: threadIds, parked: [] });
+  let { parked } = left;
+  if (left.client !== client || left.open !== threadIds) {
+    const open = new Set(threadIds.map(String));
+    parked =
+      left.client === client
+        ? [...left.open.filter((id) => !left.parked.includes(id)), ...left.parked]
+            .filter((id) => !open.has(String(id)))
+            .slice(0, MAX_PARKED_CODE_THREADS)
+        : [];
+    setLeft({ client, open: threadIds, parked });
+  }
+  const listed = props.navigationBootstrap?.threads;
+  return listed === undefined
+    ? parked
+    : parked.filter((id) => listed.some((thread) => String(thread.id) === String(id)));
+}
+
+/**
+ * Holds a controller open for every Code thread the window has open, and keeps
+ * the state of the few it left last.
  *
  * Rendered once, near the top of the shell, and draws nothing. Its position in
  * the tree is deliberate: a controller has to outlive the panes that read it,
  * because closing a diff tab must not tear down the turn that thread is
- * running.
+ * running. A pane shows one thread, so choosing another thread takes the
+ * outgoing one out of the layout; letting its controller go there made coming
+ * back draw a loading notice before the conversation it had already loaded.
  */
 export function CodeThreadControllerSlots(props: CodeThreadControllerSlotsProps) {
   const navigation = useMemo(
     () => ({ bootstrap: props.navigationBootstrap }),
     [props.navigationBootstrap],
   );
+  const parkedThreadIds = useParkedThreadIds(props);
   return (
     <>
-      {props.threadIds.map((threadId) => (
+      {[...props.threadIds, ...parkedThreadIds].map((threadId, index) => (
         <CodeThreadControllerSlot
           client={props.client}
           navigation={navigation}
           key={String(threadId)}
+          parked={index >= props.threadIds.length}
           readCursorStore={props.readCursorStore}
           registry={props.registry}
           threadId={threadId}
@@ -305,12 +376,14 @@ export function CodeThreadControllerSlots(props: CodeThreadControllerSlotsProps)
 const CodeThreadControllerSlot = memo(function CodeThreadControllerSlot(props: {
   readonly navigation: { readonly bootstrap: CodeBootstrap | undefined };
   readonly client: CodeClient;
+  readonly parked: boolean;
   readonly readCursorStore: CodeReadCursorStore;
   readonly registry: CodeThreadControllerRegistry;
   readonly threadId: CodeThreadId;
 }) {
   const controller = useCodeController({
     activeThreadId: props.threadId,
+    parked: props.parked,
     navigation: props.navigation,
     client: props.client,
     // The thread list is the shell's to re-read. A poll per open thread would
@@ -319,9 +392,10 @@ const CodeThreadControllerSlot = memo(function CodeThreadControllerSlot(props: {
     navigationRefreshMs: 0,
     readCursorStore: props.readCursorStore,
   });
-  const { registry, threadId } = props;
+  const { parked, registry, threadId } = props;
   useEffect(() => {
-    registry.publish(threadId, controller);
+    if (parked) registry.park(threadId, controller);
+    else registry.publish(threadId, controller);
   });
   useEffect(() => () => registry.release(threadId), [registry, threadId]);
   return null;

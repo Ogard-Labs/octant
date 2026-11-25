@@ -411,6 +411,12 @@ function readsConversationWindow(
  */
 export interface CodeControllerOptions {
   readonly activeThreadId?: CodeThreadId;
+  /**
+   * The thread left every pane but may come straight back. Its transcript stays
+   * in memory with no stream, poll or read behind it, and is read again from
+   * the journal the moment the thread is opened; nothing is marked as seen.
+   */
+  readonly parked?: boolean;
   /** Window-owned metadata; a thread slot waits for it instead of bootstrapping. */
   readonly navigation?: { readonly bootstrap: CodeBootstrap | undefined };
   readonly client?: CodeClient;
@@ -2081,6 +2087,12 @@ export function useCodeController(options: CodeControllerOptions) {
     };
   }, [loadBootstrap, ownsNavigation]);
 
+  const parked = options.parked === true;
+  const parkedThread = useRef<
+    { readonly threadKey: string; readonly client: CodeClient } | undefined
+  >(undefined);
+  const conversationHistoryRef = useRef(conversationHistory);
+  conversationHistoryRef.current = conversationHistory;
   useEffect(() => {
     activeThreadId.current = options.activeThreadId;
     threadGeneration.current += 1;
@@ -2089,20 +2101,34 @@ export function useCodeController(options: CodeControllerOptions) {
     turnAbort.current?.abort();
     turnAbort.current = undefined;
     earlierAbort.current?.abort();
-    conversationThreadKey.current = undefined;
-    conversationRef.current = [];
-    setConversation([]);
+    const threadKey =
+      options.activeThreadId === undefined ? undefined : String(options.activeThreadId);
+    const keepsTranscript =
+      threadKey !== undefined &&
+      conversationThreadKey.current === threadKey &&
+      (parked
+        ? conversationHistoryRef.current === "loaded"
+        : parkedThread.current?.threadKey === threadKey && parkedThread.current.client === client);
+    parkedThread.current =
+      parked && threadKey !== undefined && keepsTranscript ? { threadKey, client } : undefined;
+    if (!keepsTranscript) {
+      conversationThreadKey.current = undefined;
+      conversationRef.current = [];
+      setConversation([]);
+      setTurnActivity(new Map());
+    }
+    // Loading again either way: a kept transcript is drawn at once, but nothing
+    // treats it as the thread's current state until the journal has answered.
     setConversationHistory("loading");
     setProviderRequests([]);
     setRefusedAnswer(undefined);
-    setTurnActivity(new Map());
     setTurnStatus(
       options.activeThreadId === undefined
         ? "idle"
         : (activeTurnOperations.current.get(String(options.activeThreadId))?.status ?? "idle"),
     );
     const firstTurnFailure =
-      options.activeThreadId === undefined
+      options.activeThreadId === undefined || parked
         ? undefined
         : firstTurnFailures.current.get(String(options.activeThreadId));
     setTurnError(firstTurnFailure?.message);
@@ -2118,8 +2144,9 @@ export function useCodeController(options: CodeControllerOptions) {
       setActiveView(undefined);
       return;
     }
+    if (parked) return;
     void activateThread(options.activeThreadId);
-  }, [activateThread, options.activeThreadId]);
+  }, [activateThread, client, options.activeThreadId, parked]);
 
   // The current thread list, read inside callbacks that must not re-create
   // themselves every time a thread's version changes.

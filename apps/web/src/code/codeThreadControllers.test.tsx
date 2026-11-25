@@ -5,13 +5,16 @@ import {
 } from "@octant/client-runtime/typed-composer-text";
 import { CodeClientFailure, type CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeBootstrap, CodeThreadId, CodeThreadView } from "@octant/contracts/code";
-import { act, render, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { useLayoutEffect, useMemo, useRef } from "react";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
+  useCodeThreadController,
   useOpenCodeThreadProviderRequests,
 } from "./codeThreadControllers";
+import CodeWorkspaceTab from "./CodeWorkspaceTab";
 import { createCodeReadCursorStore } from "./useCodeController";
 
 function ProviderRequestReader(props: {
@@ -429,5 +432,273 @@ describe("CodeThreadControllerSlots", () => {
 
     expect(snapshots.length).toBeGreaterThan(0);
     expect(snapshots.at(-1)).toBe(snapshots[0]);
+  });
+});
+
+/** A host that holds each thread's answers back until the test lets them through. */
+function conversingHost(replies: Map<string, string>) {
+  const codeClient = client();
+  const gate = { held: false, release: () => undefined as void };
+  let open = Promise.resolve();
+  const hold = () => {
+    gate.held = true;
+    open = new Promise<void>((resolve) => {
+      gate.release = () => {
+        gate.held = false;
+        resolve();
+      };
+    });
+  };
+  const read = codeClient.thread;
+  Object.assign(codeClient, {
+    thread: vi.fn(async (threadId: CodeThreadId) => {
+      await open;
+      return read(threadId);
+    }),
+    conversation: vi.fn(async (threadId: CodeThreadId) => {
+      await open;
+      const operationId = String(threadId).replace(/^1/, "7");
+      const evidence = (part: string) => ({
+        contentId: String(threadId).replace(/^1/, part),
+        digest: "a".repeat(64),
+        byteLength: 10,
+      });
+      return {
+        version: 3 as const,
+        threadId,
+        turns: [
+          {
+            operationId,
+            providerInstanceId: "50000000-0000-4000-8000-000000000001",
+            modelId: "model-a",
+            sessionId: String(threadId).replace(/^1/, "8"),
+            prompt: evidence("5"),
+            assistant: [evidence("6")],
+            status: "completed" as const,
+            startedAt: now,
+            updatedAt: now,
+          },
+        ],
+        nextCursor: 1,
+        hasMore: false,
+      };
+    }),
+    operationContent: vi.fn(async (threadId: CodeThreadId, _operation: unknown, id: unknown) =>
+      new TextEncoder().encode(
+        String(id).startsWith("5") ? "What is here?" : (replies.get(String(threadId)) ?? ""),
+      ),
+    ),
+    listTests: vi.fn(async () => ({ definitions: [] })),
+    inspectTerminal: vi.fn(async () => ({ sessions: [] })),
+  });
+  return { client: codeClient, hold, release: () => gate.release() };
+}
+
+interface DrawnFrame {
+  readonly threadId: CodeThreadId;
+  readonly text: string;
+  readonly turnStatus: string | undefined;
+  readonly requests: number | undefined;
+}
+
+/** One pane, as a workspace draws it: the thread in front, under its own controller. */
+function ThreadPane(props: {
+  readonly controllers: ReturnType<typeof createCodeThreadControllers>;
+  readonly threadId: CodeThreadId;
+  readonly onFrame?: (frame: DrawnFrame) => void;
+}) {
+  const controller = useCodeThreadController(props.controllers, props.threadId);
+  // What each commit draws, before any effect or answer.
+  const pane = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    props.onFrame?.({
+      threadId: props.threadId,
+      text: pane.current?.textContent ?? "",
+      turnStatus: controller?.turnStatus,
+      requests: controller?.providerRequests.length,
+    });
+  });
+  return (
+    <main ref={pane} data-thread={String(props.threadId)} key={String(props.threadId)}>
+      {controller === undefined ? (
+        "Preparing this Code thread"
+      ) : (
+        <CodeWorkspaceTab
+          controller={controller}
+          tab={
+            {
+              id: `tab-${String(props.threadId)}`,
+              kind: "code-overview",
+              mode: "code",
+              threadId: props.threadId,
+              title: "Thread",
+            } as never
+          }
+        />
+      )}
+    </main>
+  );
+}
+
+function ThreadWindow(props: {
+  readonly client: CodeClient;
+  readonly registry: ReturnType<typeof createCodeThreadControllers>;
+  readonly readCursorStore: ReturnType<typeof createCodeReadCursorStore>;
+  readonly navigationBootstrap: CodeBootstrap;
+  readonly threadId: CodeThreadId;
+  readonly onFrame?: (frame: DrawnFrame) => void;
+}) {
+  const { threadId } = props;
+  return (
+    <>
+      <ThreadPane
+        controllers={props.registry}
+        threadId={threadId}
+        {...(props.onFrame === undefined ? {} : { onFrame: props.onFrame })}
+      />
+      <CodeThreadControllerSlots
+        client={props.client}
+        navigationBootstrap={props.navigationBootstrap}
+        readCursorStore={props.readCursorStore}
+        registry={props.registry}
+        threadIds={useMemo(() => [threadId], [threadId])}
+      />
+    </>
+  );
+}
+
+describe("switching between Code threads the window has loaded", () => {
+  // The workspace's own lazy chunk belongs to a thread's first open, not to a switch.
+  beforeAll(async () => {
+    await import("./CodeWorkspace");
+  }, 60_000);
+
+  async function openBoth() {
+    const replies = new Map([
+      [String(threadA), "Reply from the first thread"],
+      [String(threadB), "Reply from the second thread"],
+    ]);
+    const host = conversingHost(replies);
+    const registry = createCodeThreadControllers();
+    const readCursorStore = createCodeReadCursorStore();
+    const frames: DrawnFrame[] = [];
+    const props = {
+      client: host.client,
+      navigationBootstrap: bootstrap(),
+      onFrame: (frame: DrawnFrame) => void frames.push(frame),
+      readCursorStore,
+      registry,
+    };
+    const view = render(<ThreadWindow {...props} threadId={threadA} />);
+    const show = (threadId: CodeThreadId, change: Partial<typeof props> = {}) =>
+      view.rerender(<ThreadWindow {...props} {...change} threadId={threadId} />);
+    await screen.findByText("Reply from the first thread");
+    show(threadB);
+    await screen.findByText("Reply from the second thread");
+    frames.length = 0;
+    return { frames, host, readCursorStore, registry, replies, show };
+  }
+
+  it("draws the incoming conversation in the first frame while the host is still answering", async () => {
+    const opened = await openBoth();
+    opened.host.hold();
+    opened.show(threadA);
+
+    expect(opened.frames.length).toBeGreaterThan(0);
+    for (const frame of opened.frames) {
+      expect(frame.text).not.toContain("Reply from the second thread");
+      expect(frame.text).not.toMatch(/Loading conversation|Preparing this Code thread/);
+    }
+
+    // The transcript measures itself within the same commit, before anything is painted.
+    expect(screen.getByText("Reply from the first thread")).toBeInTheDocument();
+
+    // The journal still has the last word on what the thread holds.
+    opened.replies.set(String(threadA), "Reply the thread got meanwhile");
+    opened.host.release();
+    expect(await screen.findByText("Reply the thread got meanwhile")).toBeInTheDocument();
+    expect(screen.queryByText("Reply from the first thread")).toBeNull();
+    expect(opened.registry.get(threadA)?.conversationHistory).toBe("loaded");
+  });
+
+  it("does not call a kept transcript loaded before the host has answered again", async () => {
+    const opened = await openBoth();
+    opened.host.hold();
+    opened.show(threadA);
+    expect(opened.registry.get(threadA)?.conversationHistory).toBe("loading");
+    opened.host.release();
+    await waitFor(() => expect(opened.registry.get(threadA)?.conversationHistory).toBe("loaded"));
+  });
+
+  it("keeps no stream open and delivers nothing to a thread that left every pane", async () => {
+    const opened = await openBoth();
+    const subscribed = vi.mocked(opened.host.client.subscribe).mock.calls;
+    const signals = subscribed
+      .filter(([threadId]) => String(threadId) === String(threadA))
+      .map(([, , signal]) => signal);
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    expect(opened.registry.get(threadA)).toBeUndefined();
+    expect(opened.registry.shown(threadA)?.conversation).toHaveLength(2);
+
+    const reads = vi.mocked(opened.host.client.thread).mock.calls.length;
+    await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+    expect(vi.mocked(opened.host.client.thread).mock.calls).toHaveLength(reads);
+  });
+
+  it("delivers a prompt queued for a parked thread once it is opened", async () => {
+    const opened = await openBoth();
+    opened.registry.restoreDraft(threadA, "Bounced prompt");
+    expect(opened.registry.shown(threadA)?.pendingDraft).toBe("");
+    opened.show(threadA);
+    await waitFor(() => expect(opened.registry.get(threadA)?.pendingDraft).toBe("Bounced prompt"));
+    act(() => opened.registry.get(threadA)?.setPendingDraft(""));
+  });
+
+  it("keeps the draft typed in each thread across a switch", async () => {
+    const opened = await openBoth();
+    act(() => opened.registry.get(threadB)?.setPendingDraft("Half a thought"));
+    opened.show(threadA);
+    expect(screen.queryByText("Half a thought")).toBeNull();
+    opened.show(threadB);
+    expect(opened.registry.get(threadB)?.pendingDraft).toBe("Half a thought");
+    act(() => opened.registry.get(threadB)?.setPendingDraft(""));
+  });
+
+  it("keeps only the threads left most recently", () => {
+    const registry = createCodeThreadControllers();
+    const ids = Array.from(
+      { length: 12 },
+      (_, index) => `10000000-0000-4000-8000-0000000001${String(index + 10)}` as CodeThreadId,
+    );
+    const props = {
+      client: client(),
+      navigationBootstrap: undefined,
+      readCursorStore: createCodeReadCursorStore(),
+      registry,
+    };
+    const view = render(<CodeThreadControllerSlots {...props} threadIds={ids.slice(0, 1)} />);
+    for (const id of ids.slice(1)) {
+      view.rerender(<CodeThreadControllerSlots {...props} threadIds={[id]} />);
+    }
+    expect(ids.map((id) => registry.shown(id) !== undefined)).toEqual([
+      ...Array.from({ length: 3 }, () => false),
+      ...Array.from({ length: 9 }, () => true),
+    ]);
+  });
+
+  it.each([
+    [
+      "the host no longer lists it",
+      (): { navigationBootstrap: CodeBootstrap } => ({
+        navigationBootstrap: { ...bootstrap(), threads: bootstrap().threads.slice(1) },
+      }),
+    ],
+    ["the window moves to another host", () => ({ client: conversingHost(new Map()).client })],
+  ])("lets go of a parked thread when %s", async (_, change) => {
+    const opened = await openBoth();
+    expect(opened.registry.shown(threadA)).toBeDefined();
+    opened.show(threadB, change());
+    await waitFor(() => expect(opened.registry.shown(threadA)).toBeUndefined());
   });
 });
