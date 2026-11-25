@@ -72,7 +72,7 @@ export function WaitingMessages(props: {
             ? null
             : action(MOBILE_COPY.outboxTryAgain, () => props.onTryAgain(message))}
           {/* Words its computer may already have are not changed into others. */}
-          {message.attempted === true && message.refused === undefined
+          {message.attempted === true
             ? null
             : action(MOBILE_COPY.outboxEdit, () => props.onEdit(message))}
           {action(MOBILE_COPY.outboxDelete, () => props.onDelete(message))}

@@ -35,7 +35,7 @@ export function useTurnControl(
     readonly attachmentIds: ReadonlyArray<string>;
     readonly onQueued: () => void;
     /** Sent, and no answer came: kept under its id until the computer says. */
-    readonly onUnanswered: (message: { readonly id: string; readonly text: string }) => void;
+    readonly onUnanswered: (message: { readonly id: string; readonly text: string }) => boolean;
     readonly onStopped: () => void;
   },
 ): TurnControl {
@@ -74,6 +74,7 @@ export function useTurnControl(
   // A turn is running, so the screen is busy already and cannot say that a
   // message is on its way: a second press would queue the same words again.
   const changing = useRef(false);
+  const unanswered = useRef<{ readonly words: string; readonly id: string } | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const change = async (
     run: (snapshot: ThreadMessageQueueSnapshot) => Promise<MobileSendResult>,
@@ -110,7 +111,14 @@ export function useTurnControl(
     queueMessage: async () => {
       const prompt = input.prompt.trim();
       if (transport === undefined || prompt.length === 0) return;
-      const messageId = globalThis.crypto.randomUUID();
+      // The same words and files again are the same message until the computer
+      // has answered for it.
+      const words = JSON.stringify([prompt, input.attachmentIds]);
+      const messageId =
+        unanswered.current?.words === words
+          ? unanswered.current.id
+          : globalThis.crypto.randomUUID();
+      unanswered.current = undefined;
       await change(
         ({ scope }) =>
           queueMobileMessage({
@@ -122,8 +130,17 @@ export function useTurnControl(
           }),
         "The message could not be queued.",
         (status) => {
-          if (status === "unreachable") input.onUnanswered({ id: messageId, text: prompt });
-          else hapticSuccess();
+          if (status === "unreachable") {
+            // Files do not wait on the phone, so a message with them stays here.
+            const held =
+              input.attachmentIds.length === 0 &&
+              input.onUnanswered({ id: messageId, text: prompt });
+            if (!held) {
+              unanswered.current = { words, id: messageId };
+              ui.setError("No answer came. Your draft stays here; send it again.");
+              return;
+            }
+          } else hapticSuccess();
           input.setPrompt("");
           input.onQueued();
         },

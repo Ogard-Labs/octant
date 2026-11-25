@@ -64,10 +64,14 @@ export function createSealedText(ports: {
   };
   return {
     load: async () => {
+      // After whatever is still being written.
+      await last.catch(() => undefined);
       const sealed = file.read();
       if (sealed === null) return null;
+      // A key that could not be read this time is not a key that is gone, so
+      // this may throw and leave the text where it lies.
+      const raw = await storage.getItem(KEY_NAME);
       try {
-        const raw = await storage.getItem(KEY_NAME);
         if (raw === null) throw new Error("The key is gone.");
         const whole = fromBase64(sealed);
         const text = await crypto.subtle.decrypt(

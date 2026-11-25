@@ -1,12 +1,12 @@
 import { useCallback } from "react";
 import {
-  readRemoteSessionStanding,
+  askRemoteSessionStanding,
   RESTRICTED_REMOTE_SESSION,
   type RemoteSessionStanding,
 } from "@octant/client-runtime";
 import { usePolledResource } from "../runtime/usePolledResource";
 
-type SessionStandingTransport = Parameters<typeof readRemoteSessionStanding>[0];
+type SessionStandingTransport = Parameters<typeof askRemoteSessionStanding>[0];
 const DEMO_STANDING: RemoteSessionStanding = { actsAsHostPerson: true };
 const STANDING_REFRESH_INTERVAL_MS = 10_000;
 
@@ -20,14 +20,17 @@ export function useRemoteSessionStanding(
   transport: SessionStandingTransport | undefined,
   offlineDemo: boolean,
   refresh = 0,
+  /** Told what the host said, and nothing when it could not be reached. */
+  onAnswered?: (standing: RemoteSessionStanding) => void,
 ): RemoteSessionStanding {
   const load = useCallback(async () => {
-    const standing =
+    const asked =
       transport === undefined
-        ? RESTRICTED_REMOTE_SESSION
-        : await readRemoteSessionStanding(transport);
-    return { transport, refresh, standing };
-  }, [transport, refresh]);
+        ? { answered: false, standing: RESTRICTED_REMOTE_SESSION }
+        : await askRemoteSessionStanding(transport);
+    if (asked.answered) onAnswered?.(asked.standing);
+    return { transport, refresh, standing: asked.standing };
+  }, [onAnswered, transport, refresh]);
   const { value: read } = usePolledResource(load, {
     intervalMs: STANDING_REFRESH_INTERVAL_MS,
     enabled: !offlineDemo && transport !== undefined,

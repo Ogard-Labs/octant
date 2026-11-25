@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { AppState } from "react-native";
-import { queueMobileMessage } from "@octant/client-runtime";
+import { queueMobileMessage, type RemoteSessionStanding } from "@octant/client-runtime";
 import { MOBILE_COPY } from "../copy";
 import { createExpoSecureStringStorage } from "../hosts/expoSecureStorage";
 import { useMobileThreads } from "../inbox/MobileThreadsContext";
@@ -33,6 +33,7 @@ import { createSealedText } from "./sealedText";
 
 // A computer that is there but does not answer is asked again after this.
 const ASK_AGAIN_MS = 15_000;
+const READ_AGAIN_MS = 5_000;
 
 export interface OutboxApi {
   readonly waitingFor: (
@@ -42,6 +43,9 @@ export interface OutboxApi {
   readonly keep: (message: WaitingMessage) => string | undefined;
   readonly remove: (id: string) => void;
   readonly tryAgain: (id: string) => void;
+  /** What a computer last said of this phone's session, while the app runs. */
+  readonly lastStanding: (hostId: string) => RemoteSessionStanding | undefined;
+  readonly noteStanding: (hostId: string, standing: RemoteSessionStanding) => void;
 }
 
 const Context = createContext<OutboxApi | undefined>(undefined);
@@ -50,6 +54,18 @@ export function useOutbox(): OutboxApi {
   const value = useContext(Context);
   if (value === undefined) throw new Error("Messages wait inside OutboxProvider.");
   return value;
+}
+
+// One for the app: an earlier provider's last write lands before a later one
+// reads, however quickly the app is locked and opened.
+let kept: ReturnType<typeof createSealedText> | undefined;
+function keptText(): ReturnType<typeof createSealedText> {
+  kept ??= createSealedText({
+    crypto: globalThis.crypto,
+    file: outboxFile(),
+    storage: createExpoSecureStringStorage(),
+  });
+  return kept;
 }
 
 /**
@@ -64,32 +80,30 @@ export function OutboxProvider(props: { readonly children: ReactNode }) {
   const [outbox, setOutbox] = useState<Outbox>(EMPTY_OUTBOX);
   // Nothing is sent or written before what was kept is read.
   const [loaded, setLoaded] = useState(false);
-  const sealed = useMemo(
-    () =>
-      createSealedText({
-        crypto: globalThis.crypto,
-        file: outboxFile(),
-        storage: createExpoSecureStringStorage(),
-      }),
-    [],
-  );
+  const sealed = keptText();
+  const [reads, setReads] = useState(0);
   useEffect(() => {
-    if (!live) return;
+    if (!live || loaded) return;
     let gone = false;
-    void sealed
-      .load()
-      .catch(() => null)
-      .then((kept) => {
+    let again: ReturnType<typeof setTimeout> | undefined;
+    sealed.load().then(
+      (kept) => {
         if (gone) return;
         setOutbox((current) => ({
           messages: [...parseOutbox(kept).messages, ...current.messages],
         }));
         setLoaded(true);
-      });
+      },
+      () => {
+        // Not read is not empty: nothing is written over it, and it is read again.
+        if (!gone) again = setTimeout(() => setReads((count) => count + 1), READ_AGAIN_MS);
+      },
+    );
     return () => {
       gone = true;
+      clearTimeout(again);
     };
-  }, [live, sealed]);
+  }, [live, loaded, reads, sealed]);
   useEffect(() => {
     if (!live || !loaded) return;
     void sealed
@@ -104,6 +118,8 @@ export function OutboxProvider(props: { readonly children: ReactNode }) {
 
   const [turn, setTurn] = useState(0);
   const sending = useRef(false);
+  const current = useRef(outbox);
+  current.current = outbox;
   useEffect(() => {
     if (!live || !loaded || sending.current || AppState.currentState !== "active") return;
     const ready = transports.filter(
@@ -125,6 +141,20 @@ export function OutboxProvider(props: { readonly children: ReactNode }) {
       let unreached = false;
       let sent = false;
       for (const { transport, message } of due) {
+        if (!current.current.messages.some((entry) => entry.id === message.id)) continue;
+        // Said before it leaves, and kept: a message on its way, or one a crash
+        // cut off, is not offered for editing into a second one.
+        const leaving = markAttempted(current.current, message.id);
+        current.current = leaving;
+        setOutbox((held) => markAttempted(held, message.id));
+        const written = await sealed.keep(JSON.stringify(leaving)).then(
+          () => true,
+          () => false,
+        );
+        if (!written) {
+          unreached = true;
+          continue;
+        }
         const result = await queueMobileMessage({
           transport,
           scope: { mode: message.mode, threadId: message.threadId },
@@ -138,7 +168,6 @@ export function OutboxProvider(props: { readonly children: ReactNode }) {
           setOutbox((current) => markRefused(current, message.id, result.message));
         } else {
           unreached = true;
-          setOutbox((current) => markAttempted(current, message.id));
         }
       }
       sending.current = false;
@@ -148,7 +177,7 @@ export function OutboxProvider(props: { readonly children: ReactNode }) {
       else setTurn((count) => count + 1);
     })();
     return () => clearTimeout(again);
-  }, [health, hosts, live, loaded, outbox, refresh, transports, turn]);
+  }, [health, hosts, live, loaded, outbox, refresh, sealed, transports, turn]);
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") setTurn((count) => count + 1);
@@ -165,14 +194,20 @@ export function OutboxProvider(props: { readonly children: ReactNode }) {
     },
     [outbox],
   );
+  const standings = useRef(new Map<string, RemoteSessionStanding>());
+  const noteStanding = useCallback((hostId: string, standing: RemoteSessionStanding) => {
+    standings.current.set(hostId, standing);
+  }, []);
   const value = useMemo<OutboxApi>(
     () => ({
       waitingFor: (thread) => waitingFor(outbox, thread),
       keep,
       remove: (id) => setOutbox((current) => removeWaiting(current, id)),
       tryAgain: (id) => setOutbox((current) => tryAgain(current, id, new Date())),
+      lastStanding: (hostId) => standings.current.get(hostId),
+      noteStanding,
     }),
-    [keep, outbox],
+    [keep, noteStanding, outbox],
   );
   return <Context.Provider value={value}>{props.children}</Context.Provider>;
 }

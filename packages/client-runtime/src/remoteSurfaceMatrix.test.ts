@@ -4,6 +4,7 @@ import {
   listRemoteShellSurfacesByAvailability,
   listRemoteThreadSurfaces,
   listRemoteThreadSurfacesByReach,
+  askRemoteSessionStanding,
   readRemoteSessionStanding,
   remoteShellSurfaceAvailability,
   remoteThreadSurfaceReach,
@@ -287,5 +288,20 @@ describe("what a session that acts as the host's own person reaches", () => {
         hostPerson,
       ),
     ).toBe("unavailable");
+  });
+});
+
+describe("asking a host what this session is", () => {
+  const asked = async (answer: () => Promise<Response>) =>
+    (await askRemoteSessionStanding({ authenticatedFetch: answer })).answered;
+
+  it("tells a host that refused from one that did not answer", async () => {
+    expect(await asked(async () => new Response("", { status: 403 }))).toBe(true);
+    expect(await asked(async () => new Response("", { status: 503 }))).toBe(false);
+    expect(
+      await asked(async () => {
+        throw new TypeError("Network request failed");
+      }),
+    ).toBe(false);
   });
 });

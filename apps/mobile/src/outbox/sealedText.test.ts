@@ -54,6 +54,27 @@ describe("text kept on the phone", () => {
     expect(keyless.sealed()).toBeNull();
   });
 
+  it("stays where it lies when the key cannot be read this time", async () => {
+    const held = phone();
+    await held.text().keep("plan");
+    let fails = true;
+    const text = createSealedText({
+      crypto: globalThis.crypto,
+      storage: {
+        getItem: async (key) => {
+          if (fails) throw new Error("The keychain did not answer.");
+          return held.secure.get(key) ?? null;
+        },
+        setItem: async () => undefined,
+        deleteItem: async () => undefined,
+      },
+      file: { read: held.sealed, write: () => undefined, remove: () => held.tamper(null) },
+    });
+    await expect(text.load()).rejects.toThrow();
+    fails = false;
+    expect(await text.load()).toBe("plan");
+  });
+
   it("leaves neither text nor key behind once there is nothing to keep", async () => {
     const held = phone();
     const text = held.text();

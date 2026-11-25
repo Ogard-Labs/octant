@@ -23,6 +23,7 @@ import {
   stopMobileWorkTurn,
   type MobileAttachmentSource,
   type MobileInboxRow,
+  type RemoteSessionStanding,
 } from "@octant/client-runtime";
 import { ScreenHeader } from "../navigation/ScreenHeader";
 import { BottomSheet } from "../ui/BottomSheet";
@@ -147,7 +148,15 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
-  const standing = useRemoteSessionStanding(transport, offlineDemo);
+  const outbox = useOutbox();
+  const { noteStanding } = outbox;
+  const noteAnswered = useCallback(
+    (answered: RemoteSessionStanding) => {
+      if (hostId !== undefined) noteStanding(hostId, answered);
+    },
+    [hostId, noteStanding],
+  );
+  const standing = useRemoteSessionStanding(transport, offlineDemo, 0, noteAnswered);
   const watchingOnly = standing.accessLevel === "read-only";
   const surfaces = useMemo(
     () => listMobileThreadSurfaces({ mode: selected?.mode ?? "chat", session: standing }),
@@ -309,11 +318,15 @@ export function ThreadScreen(props: ThreadScreenProps) {
       : {};
   // Only a computer that cannot be reached right now is written to for later;
   // one that rejected this phone, or that the phone may only watch, is not.
+  // Which of the two it is, is what that computer last said of this session.
+  const lastStanding = hostId === undefined ? undefined : outbox.lastStanding(hostId);
   const unreached =
     !offlineDemo &&
-    composerAccess.editable &&
+    lastStanding !== undefined &&
+    conversationComposerAccess(
+      listMobileThreadSurfaces({ mode: mode ?? "chat", session: lastStanding }),
+    ).editable &&
     ["idle", "connecting", "stale", "unavailable"].includes(hostHealth);
-  const outbox = useOutbox();
   const waiting =
     selected === undefined
       ? []
@@ -383,7 +396,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
     attachmentIds: pendingAttachments.map((attachment) => attachment.id),
     onQueued: () => threadAttachments.attachmentsSent(),
     onStopped: () => void refresh({ quiet: true }),
-    onUnanswered: ({ id, text }) => void keepForLater(text, id),
+    onUnanswered: ({ id, text }) => keepForLater(text, id),
   });
   // Where the queue cannot be read, a running turn still closes the composer.
   const queues = mayAct && turnLive && turnControl.queue !== undefined;
@@ -488,8 +501,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
     };
   })();
   const composerEditable =
-    composerAccess.editable &&
-    (unreached ||
+    unreached ||
+    (composerAccess.editable &&
       (mode === "chat"
         ? staleGate.allowProductMutations && (chat.activeAttempt === undefined || queues)
         : staleGate.allowProductMutations &&
@@ -760,7 +773,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               <WaitingMessages
                 messages={waiting}
                 onDelete={(message) =>
-                  message.attempted === true && message.refused === undefined
+                  message.attempted === true
                     ? Alert.alert(MOBILE_COPY.outboxDeleteTitle, MOBILE_COPY.outboxDeleteSent, [
                         { text: "Cancel", style: "cancel" },
                         {
@@ -930,7 +943,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             }
             busySince={chat.activeAttempt === undefined ? undefined : runningChatTurn?.createdAt}
             editable={composerEditable}
-            footerHint={composerAccess.reason}
+            footerHint={unreached ? undefined : composerAccess.reason}
             modelDriverKind={selectedModel?.driverKind}
             modelLabel={modelLabel}
             onChangeText={setPrompt}
@@ -962,7 +975,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           }
           busySince={runningWorkTurn?.acceptedAt ?? runningCodeTurn?.startedAt}
           editable={composerEditable}
-          footerHint={composerAccess.reason}
+          footerHint={unreached ? undefined : composerAccess.reason}
           {...(levelLabel === undefined
             ? {}
             : { modelLabel: levelLabel, onPressModel: () => setDetailsOpen(true) })}

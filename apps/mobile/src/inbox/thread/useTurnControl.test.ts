@@ -17,6 +17,7 @@ let root: Root;
 let control: TurnControl;
 let prompts: string[];
 let errors: Array<string | undefined>;
+let keeps: boolean;
 let unanswered: Array<{ readonly id: string; readonly text: string }>;
 
 function Harness(props: { readonly transport: MobileRemoteTransport }) {
@@ -32,7 +33,10 @@ function Harness(props: { readonly transport: MobileRemoteTransport }) {
     stopTurn: undefined,
     attachmentIds: [],
     onQueued: () => {},
-    onUnanswered: (message) => unanswered.push(message),
+    onUnanswered: (message) => {
+      unanswered.push(message);
+      return keeps;
+    },
     onStopped: () => {},
   });
   return null;
@@ -50,6 +54,7 @@ beforeEach(() => {
   prompts = [];
   errors = [];
   unanswered = [];
+  keeps = true;
   root = createRoot(document.createElement("div"));
 });
 afterEach(() => {
@@ -113,6 +118,24 @@ describe("queueing behind a running turn", () => {
     expect(new Set(sent)).toEqual(new Set([unanswered[0]?.id]));
     expect(unanswered).toEqual([{ id: sent[0], text: "And the docs" }]);
     expect(prompts).toEqual([""]);
+  });
+
+  it("keeps the draft when the phone cannot hold the message, and sends it again as the same one", async () => {
+    keeps = false;
+    const sent: string[] = [];
+    await render({
+      hostId: "host",
+      authenticatedFetch: async ({ path, body }) => {
+        if (path !== "/api/thread-message-queue/commands")
+          return Response.json({ status: "ready", snapshot });
+        sent.push((JSON.parse(String(body)) as { messageId: string }).messageId);
+        throw new TypeError("Network request failed");
+      },
+    });
+    await act(async () => control.queueMessage());
+    expect(prompts).toEqual([]);
+    await act(async () => control.queueMessage());
+    expect(new Set(sent).size).toBe(1);
   });
 
   it("offers no queue where the computer refuses one", async () => {

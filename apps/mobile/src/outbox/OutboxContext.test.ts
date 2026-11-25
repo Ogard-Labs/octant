@@ -108,6 +108,25 @@ describe("a message written while its computer is out of reach", () => {
     expect(sent.map((command) => command.messageId)).toEqual([id]);
   });
 
+  it("is marked as on its way, and kept so, before it leaves", async () => {
+    let keptThen: string | null = null;
+    answer = (command) => {
+      keptThen = held.kept;
+      return applied(command);
+    };
+    held.kept = JSON.stringify({ messages: [message()] });
+    await render("ready");
+    expect(JSON.parse(String(keptThen))).toMatchObject({ messages: [{ id, attempted: true }] });
+  });
+
+  it("is not sent once the person deleted it", async () => {
+    await render("unavailable");
+    act(() => void outbox.keep(message()));
+    act(() => outbox.remove(id));
+    await render("ready");
+    expect(sent).toEqual([]);
+  });
+
   it("comes back with the reason when the computer refuses it", async () => {
     answer = (command) => ({
       status: "refused",
