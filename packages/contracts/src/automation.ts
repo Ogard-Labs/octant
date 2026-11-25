@@ -152,6 +152,7 @@ export type AutomationLifecycle = typeof AutomationLifecycle.Type;
 
 export const AutomationRunLifecycle = Schema.Literal(
   "queued",
+  "awaiting-confirmation",
   "dispatching",
   "recovering-dispatch",
   "running",
@@ -171,6 +172,7 @@ const AUTOMATION_POST_LAUNCH_LIFECYCLES: ReadonlySet<AutomationRunLifecycle> = n
 ]);
 const AUTOMATION_PRE_LAUNCH_LIFECYCLES: ReadonlySet<AutomationRunLifecycle> = new Set([
   "queued",
+  "awaiting-confirmation",
   "dispatching",
   "recovering-dispatch",
 ]);
@@ -1212,7 +1214,7 @@ export const AutomationRun = Schema.Struct({
         !AUTOMATION_PRE_LAUNCH_LIFECYCLES.has(run.lifecycle) ||
         run.firstTurnAcceptance === undefined;
       const queuedLaunchEvidenceAbsent =
-        run.lifecycle !== "queued" ||
+        (run.lifecycle !== "queued" && run.lifecycle !== "awaiting-confirmation") ||
         (run.threadId === undefined &&
           run.dispatchIntent === undefined &&
           run.runtimeLaunchClaim === undefined &&
@@ -1303,6 +1305,12 @@ export const AutomationCommand = Schema.Union(
     retryRunId: Schema.optional(AutomationRunId),
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("confirm-automation-run"),
+    ...AutomationCommandFields,
+    runId: AutomationRunId,
+    expectedRunVersion: AggregateVersion,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("cancel-current-automation-run"),
     ...AutomationCommandFields,
     runId: AutomationRunId,
@@ -1355,6 +1363,10 @@ export const AutomationCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("automation-run-accepted"),
+    run: AutomationRun,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("automation-run-confirmed"),
     run: AutomationRun,
   }).annotations(strict),
   Schema.Struct({

@@ -8,6 +8,7 @@ import {
   type AutomationCommand,
   type AutomationDefinition,
   type AutomationId,
+  type UtcTimestamp,
 } from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
@@ -23,7 +24,8 @@ import {
   AutomationEventStore,
   registerAutomationEvents,
 } from "./automationEventStore";
-import { AutomationProjection } from "./automationProjection";
+import { AutomationProjection, hydrateAutomationProjection } from "./automationProjection";
+import { buildAutomationRunForOccurrence } from "./automationRunIdentity";
 import {
   AUTOMATION_TEST_IDS,
   AUTOMATION_TEST_NOW,
@@ -64,6 +66,7 @@ afterEach(() => {
 interface Harness {
   readonly projection: AutomationProjection;
   readonly service: AutomationCommandService;
+  readonly store: AutomationEventStore;
   readonly journal: Journal;
 }
 
@@ -86,7 +89,7 @@ function createHarness(): Harness {
     hostId: "local",
     clock: () => now,
   });
-  return { projection, service, journal };
+  return { projection, service, store, journal };
 }
 
 const principal = automationLocalWindowPrincipal();
@@ -627,5 +630,131 @@ describe("automation command service", () => {
       runNowRequestId: AUTOMATION_TEST_IDS.runNowRequest,
     } as unknown as AutomationCommand);
     expect(result).toMatchObject({ kind: "automation-command-failed", reason: "terminal" });
+  });
+
+  it("confirms an awaiting-confirmation run into dispatching and rejects stale or non-waiting runs", () => {
+    const harness = createHarness();
+    const { service, store } = harness;
+    const definition = created(harness, automationId("3092"));
+    const accepted = service.execute({
+      kind: "run-now-automation",
+      automationId: definition.id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+      runNowRequestId: AUTOMATION_TEST_IDS.runNowRequest,
+    } as unknown as AutomationCommand);
+    expect(accepted.kind).toBe("automation-run-accepted");
+    if (accepted.kind !== "automation-run-accepted") return;
+
+    // A queued run cannot be confirmed.
+    const notWaiting = service.execute({
+      kind: "confirm-automation-run",
+      automationId: definition.id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+      runId: accepted.run.id,
+      expectedRunVersion: 1,
+    } as unknown as AutomationCommand);
+    expect(notWaiting).toMatchObject({ kind: "automation-command-failed", reason: "invalid" });
+
+    store.appendRunStatusChanged({
+      automationId: definition.id,
+      runId: accepted.run.id,
+      previousLifecycle: "queued",
+      lifecycle: "awaiting-confirmation",
+      version: 2,
+      expectedVersion: 1,
+      updatedAt: "2026-08-10T13:01:00.000Z" as UtcTimestamp,
+    });
+
+    const stale = service.execute({
+      kind: "confirm-automation-run",
+      automationId: definition.id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+      runId: accepted.run.id,
+      expectedRunVersion: 1,
+    } as unknown as AutomationCommand);
+    expect(stale).toMatchObject({ kind: "automation-command-failed", reason: "stale-version" });
+
+    const confirmed = service.execute({
+      kind: "confirm-automation-run",
+      automationId: definition.id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+      runId: accepted.run.id,
+      expectedRunVersion: 2,
+    } as unknown as AutomationCommand);
+    expect(confirmed.kind).toBe("automation-run-confirmed");
+    if (confirmed.kind !== "automation-run-confirmed") return;
+    expect(confirmed.run.lifecycle).toBe("dispatching");
+    expect(confirmed.run.version).toBe(3);
+  });
+
+  it("cancels an awaiting-confirmation follow-up run when its definition is archived and preserves the cancellation on replay", () => {
+    const harness = createHarness();
+    const { service, store, projection } = harness;
+    const id = automationId("3093");
+    const originThreadId = "00000000-0000-4000-8000-000000000078" as never;
+    const createdFollowUp = service.execute(
+      createCommand(id, {
+        definition: {
+          ...automationDefinitionDraftFixture(),
+          missedRunPolicy: "run-once",
+          targetPolicy: "same-thread",
+        },
+      }),
+      { originThreadId },
+    );
+    expect(createdFollowUp.kind).toBe("automation-created");
+    if (createdFollowUp.kind !== "automation-created") return;
+
+    const scheduledAt = (
+      createdFollowUp.automation.trigger.kind === "once"
+        ? createdFollowUp.automation.trigger.scheduledAt
+        : now
+    ) as UtcTimestamp;
+    const run = buildAutomationRunForOccurrence({
+      definition: createdFollowUp.automation,
+      occurrence: {
+        kind: "scheduled",
+        automationId: id,
+        definitionRevision: createdFollowUp.automation.definitionRevision,
+        triggerKind: "once",
+        scheduledAt,
+      },
+      now: scheduledAt,
+    });
+    store.appendRunCreated({ run });
+    store.appendRunStatusChanged({
+      automationId: id,
+      runId: run.id,
+      previousLifecycle: "queued",
+      lifecycle: "awaiting-confirmation",
+      version: 2,
+      expectedVersion: 1,
+      updatedAt: "2026-09-01T09:01:00.000Z" as UtcTimestamp,
+    });
+
+    const archived = service.execute({
+      kind: "archive-automation",
+      automationId: id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+    } as unknown as AutomationCommand);
+    expect(archived.kind).toBe("automation-archived");
+    expect(projection.getRun(run.id)?.lifecycle).toBe("cancelled");
+    expect(projection.getRun(run.id)?.cancellationTombstone).toBeDefined();
+
+    // Replay into a fresh projection yields the same cancelled state.
+    const replayed = new AutomationProjection();
+    expect(hydrateAutomationProjection({ store, projection: replayed })).toBe("ok");
+    expect(replayed.getRun(run.id)?.lifecycle).toBe("cancelled");
+    expect(replayed.getRun(run.id)?.cancellationTombstone).toBeDefined();
   });
 });

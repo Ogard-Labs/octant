@@ -10437,6 +10437,10 @@ function LaunchedShell(
                                                               launchedClients.providerUsageLimitsClient
                                                             }
                                                             instances={providerController.instances}
+                                                            order={
+                                                              providerController.defaults
+                                                                .providerOrder
+                                                            }
                                                           >
                                                             <HostPlatformContext.Provider
                                                               value={hostPlatform}

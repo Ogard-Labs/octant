@@ -647,8 +647,8 @@ cost with Previous and Next turn controls. There is no hide control and no
 setting: the panel is closed until asked for, so the figures cost the page
 nothing.
 
-**Plan meters.** Remaining plan usage shows in the account menu and the rail's
-ring, on a start screen as the [plan usage line](start-screen.md#plan-usage-line)
+**Plan meters.** Remaining plan usage shows in the rail's usage rings (the
+account menu where no rail shows), on a start screen as the [plan usage line](start-screen.md#plan-usage-line)
 at the end of the context-chip row above the card, and in Settings › Usage. It
 does not stand beside a thread's composer, and the Environment panel's Usage row
 shows the thread's own tokens and cost, not the plan. Its form is the start
@@ -656,7 +656,7 @@ screen's line: each window's share left and its reset, no bar (the bar meters
 went with the Inbox card and the Usage bars setting, maintainer request,
 2026-11-18). The line describes the provider the composer will send to (a start
 screen follows the model menu's choice) and reads the same host observation as
-the rail's ring, picked by window length (`windowSpan`). A provider that reports
+the rail's rings. A provider that reports
 no window shows none. The row under the box
 ([The row under the box](../../DESIGN.md#composer-row)) keeps its controls: the
 approval mode is its shield icon alone, the model button names the model with a

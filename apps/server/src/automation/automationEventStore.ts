@@ -195,6 +195,7 @@ export interface AppendAutomationRunCreatedInput {
 }
 
 export interface AppendAutomationRunStatusChangedInput {
+  readonly actor?: typeof EventActor.Type;
   readonly automationId: AutomationId;
   readonly runId: AutomationRunId;
   readonly previousLifecycle: AutomationRunLifecycle;
@@ -737,6 +738,7 @@ export class AutomationEventStore {
       payload,
       aggregateVersion: expectedVersion + 1,
       label: "Automation run status change",
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
   }
 

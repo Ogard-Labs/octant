@@ -1,5 +1,10 @@
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
-import type { ProviderInstance, ProviderUsageLimitsSnapshot } from "@octant/contracts";
+import type {
+  ProviderInstance,
+  ProviderInstanceId,
+  ProviderUsageLimitsSnapshot,
+} from "@octant/contracts";
+import { orderProviderInstances } from "@octant/domain";
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { useProviderUsageSnapshot } from "./useProviderUsageSnapshot";
 
@@ -12,7 +17,7 @@ export interface PlanUsageReading {
 interface PlanUsageValue {
   /** Absent where the window cannot ask the host for plan limits. */
   readonly client?: ProviderUsageLimitsClient;
-  /** The provider accounts the window knows, so a reading can be named. */
+  /** The provider accounts the window knows, in the person's order, so a reading can be named. */
   readonly instances: ReadonlyArray<ProviderInstance>;
   /** The host's last plan-limit observation, read once for every consumer. */
   readonly reading: PlanUsageReading;
@@ -36,18 +41,20 @@ export function PlanUsageProvider(props: {
   readonly children: ReactNode;
   readonly client?: ProviderUsageLimitsClient | undefined;
   readonly instances?: ReadonlyArray<ProviderInstance> | undefined;
+  /** The person's provider order: a reorder changes it without reading the accounts again. */
+  readonly order?: ReadonlyArray<ProviderInstanceId> | undefined;
 }) {
-  const { client, instances = NO_INSTANCES } = props;
+  const { client, instances = NO_INSTANCES, order } = props;
   const { snapshot, now } = useProviderUsageSnapshot(client);
   // The value stays the same object between readings, so a render of the app
   // above this provider commits nothing below it.
   const value = useMemo<PlanUsageValue>(
     () => ({
-      instances,
+      instances: order === undefined ? instances : orderProviderInstances(instances, order),
       reading: { snapshot, now },
       ...(client === undefined ? {} : { client }),
     }),
-    [client, instances, now, snapshot],
+    [client, instances, now, order, snapshot],
   );
   return <PlanUsageContext.Provider value={value}>{props.children}</PlanUsageContext.Provider>;
 }

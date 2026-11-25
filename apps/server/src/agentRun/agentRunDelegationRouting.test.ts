@@ -283,6 +283,7 @@ function delegationPair(
             displayName: "Google Antigravity",
             driverKind: "antigravity",
             reason: "helper-runs-refused" as const,
+            message: ANTIGRAVITY_HELPER_REFUSAL,
           },
         ]
       : [];
