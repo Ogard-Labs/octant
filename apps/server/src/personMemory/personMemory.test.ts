@@ -1600,6 +1600,22 @@ describe("which turns the person typed", () => {
     expect(restart(h).typedSince()).toEqual(began);
   });
 
+  it("does not count a turn copied into a branched thread as typed, though the source's turn was marked", () => {
+    const h = harness([]);
+    mark(h, "turn-a");
+    const began = h.store.typedSince();
+    const after = "2026-11-01T11:00:00.000Z";
+    expect(
+      h.store.countsAsPersonWords({ mode: "chat", threadId: THREAD_1, turnId: "turn-a", began: after }),
+    ).toBe(true);
+
+    // The branch copies the turn under its own thread; marks belong to a thread.
+    expect(
+      h.store.countsAsPersonWords({ mode: "chat", threadId: THREAD_2, turnId: "turn-a", began: after }),
+    ).toBe(false);
+    expect(began < after).toBe(true);
+  });
+
   it("keeps only a thread's newest marks", () => {
     const h = harness([]);
     for (let index = 0; index < 205; index += 1) mark(h, `turn-${String(index)}`);

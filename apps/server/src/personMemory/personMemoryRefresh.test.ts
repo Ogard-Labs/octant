@@ -17,6 +17,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { createPersonMemoryAccess } from "./personMemoryAccess";
+import { latestEventAt } from "./personMemoryWiring";
 import { createPersonMemoryCutOff, type ConversationOwnership } from "./personMemoryRefresh";
 import { PersonMemoryStore, registerPersonMemoryEvents } from "./personMemoryStore";
 
@@ -503,5 +504,41 @@ describe("when a long-lived thread sees newer entries", () => {
     // Measured on this fixture: 0 changes before, 2 after, against the turn-by-turn cut's count below.
     expect(changes(cutAtEveryTurn)).toBe(10);
     expect((blocks.at(-1)?.split("\n").length ?? 1) - 1).toBe(8);
+  });
+});
+
+describe("when a thread was last active", () => {
+  it("reads the end of the newest turn, not only when the last message began, through one indexed row", () => {
+    const f = fixture();
+    f.chatTurn("2026-11-01T10:30:00.000Z", "session-a", false);
+    f.insert("chat-thread", THREAD, "chat.attempt-updated@1", "2026-11-01T11:00:00.000Z", {
+      kind: "attempt-updated",
+      attempt: { providerSessionId: "session-a" },
+    });
+    f.insert("code-operation", crypto.randomUUID(), "code.operation-event-recorded@1", "2026-11-01T10:40:00.000Z", {
+      threadId: THREAD,
+      event: { kind: "turn-finished" },
+    });
+    f.insert("code-operation", crypto.randomUUID(), "code.operation-event-recorded@1", "2026-11-01T10:50:00.000Z", {
+      threadId: "bbbbbbbb-0000-4000-8000-000000000002",
+      event: { kind: "turn-finished" },
+    });
+
+    expect(
+      latestEventAt(f.connection, {
+        aggregateType: "chat-thread",
+        aggregateId: THREAD,
+        eventName: "chat.turn-created@1",
+      }),
+    ).toBe("2026-11-01T10:30:00.000Z");
+    expect(
+      latestEventAt(f.connection, { aggregateType: "chat-thread", aggregateId: THREAD }),
+    ).toBe("2026-11-01T11:00:00.000Z");
+    expect(latestEventAt(f.connection, { aggregateType: "code-operation", threadId: THREAD })).toBe(
+      "2026-11-01T10:40:00.000Z",
+    );
+    expect(
+      latestEventAt(f.connection, { aggregateType: "chat-thread", aggregateId: "nobody" }),
+    ).toBeUndefined();
   });
 });
