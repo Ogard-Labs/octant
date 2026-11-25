@@ -807,7 +807,21 @@ function createMockTransport(input: {
   // text in the preview as it finds Chat and Code text.
   if (workThreads.some((thread) => String(thread.id) === WORK_THREAD_ID)) {
     const prompt = "List what the travel launch still needs.";
-    const response = "Visa letters, the venue deposit, and the press kit are still open.";
+    const response = [
+      "Visa letters, the venue deposit, and the press kit are still open.",
+      "",
+      "| Item | Owner | Due |",
+      "| --- | --- | --- |",
+      "| Visa letters | Ada | **Friday** |",
+      "| Venue deposit | Grace | 14 August |",
+      "| Press kit | Lin | *not set* |",
+      "",
+      "1. Send the visa letters first.",
+      "2. The deposit needs `finance@` to approve it.",
+      "   - The quote is in [the venue's offer](https://example.com/offer).",
+      "",
+      "> The press kit can wait for the venue.",
+    ].join("\n");
     workTurns.set(WORK_THREAD_ID, [
       {
         requestId: "84000000-0000-4000-8000-000000000001",
@@ -830,6 +844,17 @@ function createMockTransport(input: {
           { role: "user", text: prompt },
           { role: "assistant", text: response },
         ],
+        toolSteps: [
+          {
+            toolCallId: "read",
+            toolName: "Read",
+            state: "completed",
+            summary: "launch/checklist.md",
+          },
+          { toolCallId: "search", toolName: "Search", state: "completed", summary: "3 open items" },
+        ],
+        reasoningMs: 12_400,
+        wroteFiles: { paths: ["launch/checklist.md", "launch/owners.md"], truncated: false },
         capabilities: {
           workspace: "project-backed",
           confinement: "project-root-confined",
@@ -842,6 +867,76 @@ function createMockTransport(input: {
         version: 2,
         acceptedAt: EARLIER,
         updatedAt: NOW,
+      },
+      // The turn the list says is running: its plan, its calls and its helpers.
+      {
+        requestId: "84000000-0000-4000-8000-000000000003",
+        threadId: WORK_THREAD_ID,
+        turnId: "84000000-0000-4000-8000-000000000004",
+        projectId: PROJECT_ID,
+        authority: {
+          hostId: input.hostId,
+          projectId: PROJECT_ID,
+          bindingRevisionId: BINDING_ID,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: PROVIDER_ID,
+          modelId: MODEL_ID,
+        },
+        status: "running",
+        prompt: "Draft the visa letters and chase the deposit.",
+        transcript: [{ role: "user", text: "Draft the visa letters and chase the deposit." }],
+        toolSteps: [
+          {
+            toolCallId: "draft",
+            toolName: "Write",
+            state: "completed",
+            summary: "launch/visa-letters.md",
+          },
+          {
+            toolCallId: "mail",
+            toolName: "Search",
+            state: "running",
+            summary: "The venue's last message",
+          },
+        ],
+        tasks: [
+          { taskId: "1", state: "completed", summary: "Draft the visa letters" },
+          {
+            taskId: "2",
+            state: "running",
+            summary: "Chase the venue deposit",
+            runningSummary: "Reading the venue's last message",
+          },
+          { taskId: "3", state: "pending", summary: "Update the checklist" },
+        ],
+        childObservations: {
+          children: ["Compare visa rules", "Find the deposit terms"].map((task, index) => ({
+            providerInstanceId: PROVIDER_ID,
+            sessionId: "82000000-0000-4000-8000-000000000002",
+            childAgentId: `helper-${String(index + 1)}`,
+            task,
+            lifecycleStatus: "running" as const,
+            latestSummary: "Reading",
+            firstObservedAt: EARLIER,
+            updatedAt: NOW,
+            historyStatus: "partial" as const,
+            history: [],
+          })),
+          truncated: false,
+        },
+        capabilities: {
+          workspace: "project-backed",
+          confinement: "project-root-confined",
+          shell: "denied",
+          git: "denied",
+          worktree: "denied",
+          pullRequest: "denied",
+          code: "denied",
+        },
+        version: 1,
+        acceptedAt: new Date(Date.now() - 44_000).toISOString(),
+        updatedAt: new Date(Date.now() - 4_000).toISOString(),
       },
     ]);
   }
