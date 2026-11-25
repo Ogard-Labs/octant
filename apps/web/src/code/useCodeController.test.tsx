@@ -23,6 +23,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   forgetTypedComposerText,
   noteTypedComposerText,
+  threadDraftScope,
 } from "@octant/client-runtime/typed-composer-text";
 import { createCodeReadCursorStore, useCodeController } from "./useCodeController";
 import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
@@ -1529,7 +1530,7 @@ describe("useCodeController", () => {
       return command;
     };
 
-    noteTypedComposerText("I prefer short answers.");
+    noteTypedComposerText(threadDraftScope("code", ids.thread), "I prefer short answers.");
     expect(await startedClaims("I prefer short answers.")).toMatchObject({ typedByPerson: true });
     expect(await startedClaims("A button wrote this.")).not.toHaveProperty("typedByPerson");
   });

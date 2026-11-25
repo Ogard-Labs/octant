@@ -1,4 +1,8 @@
-import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
+import {
+  armedTypedClaimFor,
+  threadDraftScope,
+  typedClaimFor,
+} from "@octant/client-runtime/typed-composer-text";
 import { createEditorDraftStore } from "../editor/editorDraftStore";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type {
@@ -2483,7 +2487,7 @@ export function useCodeController(options: CodeControllerOptions) {
         const { operationId, started } = await beginProviderTurn({
           ...input,
           prompt,
-          ...typedClaimFor(prompt),
+          ...armedTypedClaimFor(prompt),
         });
         if (started.kind === "operation-failed") {
           failFirstTurn(started.failure.message);
@@ -3113,7 +3117,9 @@ export function useCodeController(options: CodeControllerOptions) {
           ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
           // Only the composer's own send can claim it: text a button composed
           // (a turn's line notes) arrives through `fromOutsideComposer`.
-          ...(outsideComposer ? {} : typedClaimFor(trimmed)),
+          ...(outsideComposer
+            ? {}
+            : typedClaimFor(threadDraftScope("code", String(view.thread.id)), trimmed)),
           threadMentionIds,
           sideChatReturns,
           reviewFindingReferences: reviewReferences,

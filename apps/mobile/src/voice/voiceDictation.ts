@@ -163,12 +163,12 @@ export class VoiceDictation {
 }
 
 /** The draft with the transcript's words after it, one space between. */
-export function appendTranscript(draft: string, transcript: string): string {
+export function appendTranscript(scope: string, draft: string, transcript: string): string {
   const words = transcript.trim();
   if (words.length === 0) return draft;
   const joined = draft.length === 0 || /\s$/.test(draft) ? `${draft}${words}` : `${draft} ${words}`;
   // What the person dictated is theirs, as what they type is.
-  noteTypedComposerText(joined);
+  noteTypedComposerText(scope, joined);
   return joined;
 }
 

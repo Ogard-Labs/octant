@@ -35,7 +35,7 @@ function Prompt(props: {
   );
 }
 
-function Controlled(props: { readonly value: string }) {
+function Controlled(props: { readonly value: string; readonly typedScope?: string }) {
   const [value, setValue] = useState(props.value);
   const [seen, setSeen] = useState(props.value);
   if (seen !== props.value) {
@@ -47,6 +47,7 @@ function Controlled(props: { readonly value: string }) {
       <label htmlFor="controlled">Message</label>
       <ComposerInput
         id="controlled"
+        typedScope={props.typedScope}
         onChange={(event) => setValue(event.currentTarget.value)}
         value={value}
       />
@@ -64,43 +65,78 @@ describe("ComposerInput", () => {
     expect(onValue).toHaveBeenLastCalledWith("hello", 5);
   });
 
-  it("notes what the person typed or pasted, and not a value a button wrote", async () => {
+  it("notes what the person typed or pasted in its draft, and not a value a button wrote", async () => {
     forgetTypedComposerText();
-    const { rerender } = render(<Controlled value="Prefilled by a button" />);
+    const { rerender } = render(<Controlled typedScope="chat:a" value="Prefilled by a button" />);
     const input = screen.getByRole("textbox", { name: "Message" });
-    expect(composerTextWasTyped("Prefilled by a button")).toBe(false);
+    expect(composerTextWasTyped("chat:a", "Prefilled by a button")).toBe(false);
 
     await userEvent.type(input, "!");
     // The person changed the draft: what the box holds now is their text.
     const changed = (input as ComposerInputElement).value;
     expect(changed).not.toBe("Prefilled by a button");
-    expect(composerTextWasTyped(changed)).toBe(true);
-    expect(composerTextWasTyped("Prefilled by a button")).toBe(false);
+    expect(composerTextWasTyped("chat:a", changed)).toBe(true);
+    expect(composerTextWasTyped("chat:a", "Prefilled by a button")).toBe(false);
 
-    rerender(<Controlled value="Written by another button" />);
-    expect(composerTextWasTyped("Written by another button")).toBe(false);
+    // A button writes other words, and later the same words the person typed.
+    rerender(<Controlled typedScope="chat:a" value="Written by another button" />);
+    expect(composerTextWasTyped("chat:a", "Written by another button")).toBe(false);
+    expect(composerTextWasTyped("chat:a", changed)).toBe(false);
+    rerender(<Controlled typedScope="chat:a" value={changed} />);
+    expect(composerTextWasTyped("chat:a", changed)).toBe(false);
+  });
+
+  it("never lets typing in one composer count for the same words in another", async () => {
+    forgetTypedComposerText();
+    render(
+      <>
+        <Controlled typedScope="chat:a" value="" />
+        <label htmlFor="other">Other</label>
+        <ComposerInput id="other" value="I prefer tabs" onChange={() => undefined} />
+      </>,
+    );
+
+    await userEvent.type(
+      screen.getAllByRole("textbox", { name: "Message" })[0] as Element,
+      "I prefer tabs",
+    );
+
+    expect(composerTextWasTyped("chat:a", "I prefer tabs")).toBe(true);
+    expect(composerTextWasTyped("chat:b", "I prefer tabs")).toBe(false);
+  });
+
+  it("brings a draft's note back when its thread is shown again", async () => {
+    forgetTypedComposerText();
+    const { rerender } = render(<Controlled typedScope="chat:a" value="" />);
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "I prefer tabs");
+
+    // Another thread's draft takes the composer, then the first one returns.
+    rerender(<Controlled typedScope="chat:b" value="Something else" />);
+    expect(composerTextWasTyped("chat:b", "Something else")).toBe(false);
+    rerender(<Controlled typedScope="chat:a" value="I prefer tabs" />);
+
+    expect(composerTextWasTyped("chat:a", "I prefer tabs")).toBe(true);
   });
 
   it("counts undone or redone text as typed only if it was typed when it was current", async () => {
     forgetTypedComposerText();
-    render(<Controlled value="Prefilled by a button" />);
+    render(<Controlled typedScope="chat:a" value="Prefilled by a button" />);
     const input = screen.getByRole("textbox", { name: "Message" });
     input.focus();
 
     await userEvent.keyboard("!");
     const typed = (input as ComposerInputElement).value;
-    expect(composerTextWasTyped(typed)).toBe(true);
+    expect(composerTextWasTyped("chat:a", typed)).toBe(true);
 
     // Undoing the person's edit lands on the text the button wrote.
-    forgetTypedComposerText();
     await userEvent.keyboard("{Control>}z{/Control}");
     expect((input as ComposerInputElement).value).toBe("Prefilled by a button");
-    expect(composerTextWasTyped("Prefilled by a button")).toBe(false);
+    expect(composerTextWasTyped("chat:a", "Prefilled by a button")).toBe(false);
 
     // Redoing it lands on what the person typed.
     await userEvent.keyboard("{Control>}{Shift>}z{/Shift}{/Control}");
     expect((input as ComposerInputElement).value).toBe(typed);
-    expect(composerTextWasTyped(typed)).toBe(true);
+    expect(composerTextWasTyped("chat:a", typed)).toBe(true);
   });
 
   it("accepts a value assigned with a change event", () => {

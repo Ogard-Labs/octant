@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { postWithTypedClaim, sendWithTypedClaim, withoutTypedClaim } from "./typedClaim";
 import {
+  armedTypedClaimFor,
+  armTypedClaim,
+  composerTextReplaced,
   composerTextWasTyped,
   forgetTypedComposerText,
   noteTypedComposerText,
@@ -63,21 +66,63 @@ describe("a send that claims the person typed it", () => {
 });
 
 describe("what the person typed", () => {
-  it("claims only text a composer's own input left, and nothing a button wrote", () => {
+  it("claims only text the scope's own input left, and nothing a button wrote", () => {
     forgetTypedComposerText();
-    expect(typedClaimFor("A template's text")).toEqual({});
+    expect(typedClaimFor("chat:a", "A template's text")).toEqual({});
 
-    noteTypedComposerText("I prefer short answers.");
+    noteTypedComposerText("chat:a", "I prefer short answers.");
 
-    expect(typedClaimFor("  I prefer short answers.\n")).toEqual({ typedByPerson: true });
-    expect(composerTextWasTyped("A template's text")).toBe(false);
+    expect(typedClaimFor("chat:a", "  I prefer short answers.\n")).toEqual({ typedByPerson: true });
+    expect(composerTextWasTyped("chat:a", "A template's text")).toBe(false);
   });
 
-  it("keeps only the newest texts", () => {
+  it("never lets typing in one composer count for the same words in another", () => {
     forgetTypedComposerText();
-    for (let index = 0; index < 20; index += 1) noteTypedComposerText(`message ${String(index)}`);
+    noteTypedComposerText("chat:a", "I prefer tabs");
 
-    expect(composerTextWasTyped("message 0")).toBe(false);
-    expect(composerTextWasTyped("message 19")).toBe(true);
+    expect(composerTextWasTyped("chat:b", "I prefer tabs")).toBe(false);
+    expect(composerTextWasTyped("composer:instance", "I prefer tabs")).toBe(false);
+  });
+
+  it("keeps a draft's note however much is typed in other composers", () => {
+    forgetTypedComposerText();
+    noteTypedComposerText("chat:a", "I prefer tabs");
+    for (let index = 0; index < 100; index += 1) {
+      noteTypedComposerText(`chat:other-${String(index)}`, `message ${String(index)}`);
+    }
+
+    expect(composerTextWasTyped("chat:a", "I prefer tabs")).toBe(true);
+  });
+
+  it("holds only the last text, forgets it when a button replaces the draft, and keeps it for the person's own restored draft", () => {
+    forgetTypedComposerText();
+    noteTypedComposerText("chat:a", "First draft");
+    noteTypedComposerText("chat:a", "Second draft");
+    expect(composerTextWasTyped("chat:a", "First draft")).toBe(false);
+
+    // A thread switch brings the same draft back: the note stays.
+    composerTextReplaced("chat:a", "Second draft");
+    expect(composerTextWasTyped("chat:a", "Second draft")).toBe(true);
+
+    // A button writes other text, and later the same words as the person's: not typed.
+    composerTextReplaced("chat:a", "Prefilled by a button");
+    composerTextReplaced("chat:a", "Second draft");
+    expect(composerTextWasTyped("chat:a", "Second draft")).toBe(false);
+  });
+
+  it("answers a new-task send with the claim its own composer armed, once, for exactly that text", () => {
+    forgetTypedComposerText();
+    noteTypedComposerText("new-task:a", "I prefer tabs");
+
+    armTypedClaim("new-task:a", "I prefer tabs");
+    expect(armedTypedClaimFor("something else")).toEqual({});
+    armTypedClaim("new-task:a", "I prefer tabs");
+    expect(armedTypedClaimFor("I prefer tabs")).toEqual({ typedByPerson: true });
+    expect(armedTypedClaimFor("I prefer tabs")).toEqual({});
+
+    // Another composer's submit of the same words, which nobody typed, leaves nothing to find.
+    armTypedClaim("new-task:a", "I prefer tabs");
+    armTypedClaim("new-task:b", "I prefer tabs");
+    expect(armedTypedClaimFor("I prefer tabs")).toEqual({});
   });
 });

@@ -1,5 +1,5 @@
 import { postWithTypedClaim } from "./typedClaim";
-import { typedClaimFor } from "./typedComposerText";
+import { armedTypedClaimFor } from "./typedComposerText";
 import {
   type ChatEventFrame,
   type ChatThread,
@@ -806,7 +806,7 @@ export async function sendMobileChatTurn(input: {
       ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
         ? {}
         : { attachmentIds: [...input.attachmentIds] }),
-      ...typedClaimFor(trimmed),
+      ...armedTypedClaimFor(trimmed),
     },
     (body) =>
       input.transport.authenticatedFetch({

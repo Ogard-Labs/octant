@@ -1,5 +1,5 @@
 import { postWithTypedClaim } from "./typedClaim";
-import { typedClaimFor } from "./typedComposerText";
+import { armedTypedClaimFor } from "./typedComposerText";
 import {
   decodeBindingRevisionId,
   decodeStartWorkThreadTurnCommand,
@@ -177,7 +177,7 @@ export async function sendMobileWorkTurn(input: {
       threadId: input.thread.id,
       turnId: globalThis.crypto.randomUUID(),
       prompt,
-      ...typedClaimFor(prompt),
+      ...armedTypedClaimFor(prompt),
       authority: {
         hostId: LOCAL_HOST_ID,
         projectId: input.thread.projectId,

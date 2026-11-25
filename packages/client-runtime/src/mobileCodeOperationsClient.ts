@@ -1,5 +1,5 @@
 import { postWithTypedClaim } from "./typedClaim";
-import { typedClaimFor } from "./typedComposerText";
+import { armedTypedClaimFor } from "./typedComposerText";
 import {
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
@@ -628,7 +628,7 @@ export async function sendMobileCodeTurn(input: {
       { readonly kind: "start-provider-turn" }
     >["sessionId"],
     prompt: evidence,
-    ...typedClaimFor(prompt),
+    ...armedTypedClaimFor(prompt),
     ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
       ? {}
       : {

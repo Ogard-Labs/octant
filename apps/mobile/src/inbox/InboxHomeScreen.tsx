@@ -94,6 +94,9 @@ function modeIcon(
   return "chatbubble-outline";
 }
 
+/** The one draft the home composer and its sheet share, which says whose typing a send may claim. */
+const HOME_TYPED_SCOPE = "mobile-home";
+
 export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const { colors } = useTheme();
   const {
@@ -192,7 +195,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     placementTransport !== undefined &&
     placementAccessReason === undefined;
   const appendToDraft = useCallback((text: string) => {
-    setPrompt((draft) => appendTranscript(draft, text));
+    setPrompt((draft) => appendTranscript(HOME_TYPED_SCOPE, draft, text));
     setCodeRetry(undefined);
   }, []);
   const voice = useVoiceDictation({
@@ -988,6 +991,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
             onSubmit={() => void createThread(currentCreateMode)}
             placeholder={modePresentation?.placeholder ?? MOBILE_COPY.composerHome}
             testID="mobile-home-composer"
+            typedScope={HOME_TYPED_SCOPE}
             value={prompt}
             voice={voice}
           />
@@ -1004,6 +1008,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         }
       />
       <HomeComposerSheet
+        typedScope={HOME_TYPED_SCOPE}
         busy={creating}
         editable={composerEditable}
         error={composerError}

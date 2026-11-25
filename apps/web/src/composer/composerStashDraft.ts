@@ -48,6 +48,12 @@ export type ComposerStashContext = {
 
 export interface ComposerStashDraft {
   readonly text: string;
+  /**
+   * The person's own input left this text in the composer it was taken from.
+   * It travels with the draft, so a draft put aside and taken up again (or
+   * moved to another composer) is still the person's own words.
+   */
+  readonly typed?: true;
   readonly caret: number;
   readonly files: ReadonlyArray<File>;
   readonly context: ReadonlyArray<ComposerStashContext>;

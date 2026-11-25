@@ -1,3 +1,4 @@
+import { armTypedClaim } from "@octant/client-runtime/typed-composer-text";
 import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
 import { MAX_WORK_ATTACHMENT_BYTES, MAX_WORK_TURN_ATTACHMENTS } from "@octant/contracts";
 import {
@@ -13,6 +14,7 @@ import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
   useNewTaskPrompt,
+  useNewTaskTypedScope,
 } from "../../composer/useNewTaskPrompt";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
@@ -123,6 +125,7 @@ export interface WorkComposerAdapterProps {
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [prompt, setPrompt] = useNewTaskPrompt();
+  const typedScope = useNewTaskTypedScope();
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
   const storedMentionChips = mentionChipsFromDraft(
@@ -274,6 +277,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    armTypedClaim(typedScope, trimmed);
     // A Work thread belongs to a Project, so the first turn
     // cannot start until one is chosen. Refusing here, with a visible reason,
     // is what makes the Project control a requirement rather than a suggestion.
@@ -523,6 +527,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             }
             input={
               <ComposerInput
+                typedScope={typedScope}
                 inlineChips={mention.inlineChips}
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
@@ -630,7 +635,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 <ComposerVoiceButton
                   disabled={props.creating === true}
                   onTranscript={(transcript) =>
-                    setPrompt((current) => appendTranscript(current, transcript))
+                    setPrompt((current) => appendTranscript(typedScope, current, transcript))
                   }
                 />
               ),

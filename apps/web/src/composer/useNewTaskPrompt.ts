@@ -6,7 +6,14 @@ import {
 } from "@octant/contracts";
 import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
 import type { PermissionMode, PermissionPersistence } from "@octant/contracts/providers";
-import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useId,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { ComposerExtensionSelection } from "./composerExtensionSelection";
 
 export type NewTaskCreateFromSelection =
@@ -334,4 +341,15 @@ export function useNewTaskPrompt() {
     [drafts, scope],
   );
   return [prompt, setPrompt] as const;
+}
+
+/**
+ * The draft a new-task prompt holds, as the typed-text notes know it: the draft
+ * scope the prompt is stored under, so a prompt shown again after navigating
+ * away keeps the person's typing, and no other composer shares it.
+ */
+export function useNewTaskTypedScope(): string {
+  const scope = useContext(NewTaskDraftScopeContext);
+  const own = useId();
+  return scope === undefined ? `composer:${own}` : `new-task:${scope}`;
 }

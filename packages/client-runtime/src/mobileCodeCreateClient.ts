@@ -1,5 +1,5 @@
 import { postWithTypedClaim } from "./typedClaim";
-import { typedClaimFor } from "./typedComposerText";
+import { armedTypedClaimFor } from "./typedComposerText";
 import {
   decodeCodeDeliveryTarget,
   decodeCodeThread,
@@ -543,7 +543,7 @@ export async function createMobileCodeFromPrompt(input: {
           checkoutId: checkout.id,
           sessionId,
           prompt: evidence,
-          ...typedClaimFor(prompt),
+          ...armedTypedClaimFor(prompt),
         },
         (body) =>
           input.transport.authenticatedFetch({

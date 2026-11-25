@@ -392,9 +392,10 @@ export function ThreadScreen(props: ThreadScreenProps) {
         !workTurnLive &&
         !codeTurnLive &&
         (mode === "code" || work.thread !== undefined));
+  const typedScope = `thread:${identity ?? "none"}`;
   const appendToDraft = useCallback(
-    (text: string) => setPrompt((draft) => appendTranscript(draft, text)),
-    [],
+    (text: string) => setPrompt((draft) => appendTranscript(typedScope, draft, text)),
+    [typedScope],
   );
   const voice = useVoiceDictation({
     transport: offlineDemo ? undefined : transport,
@@ -839,6 +840,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               : {})}
             placeholder={MOBILE_COPY.composerFollowUp}
             testID="mobile-thread-composer"
+            typedScope={typedScope}
             value={prompt}
             voice={voice}
           />
@@ -863,6 +865,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           {...(workTurnLive || codeTurnLive ? {} : attachProps)}
           placeholder={followUpComposerCopy?.placeholder ?? MOBILE_COPY.composerFollowUp}
           testID="mobile-thread-composer"
+          typedScope={typedScope}
           value={prompt}
           voice={voice}
         />

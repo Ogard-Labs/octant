@@ -1,4 +1,7 @@
-import { noteTypedComposerText } from "@octant/client-runtime/typed-composer-text";
+import {
+  composerTextReplaced,
+  noteTypedComposerText,
+} from "@octant/client-runtime/typed-composer-text";
 import { findSubagentModelTags, type SubagentModelTagMatch } from "@octant/domain";
 import {
   createElement,
@@ -105,6 +108,11 @@ export interface ComposerInputProps extends ForwardedAttributes {
     | ((match: SubagentModelTagMatch, locate: LocateComposerChip) => ReactNode)
     | undefined;
   readonly inlineChips?: ComposerInlineChips | undefined;
+  /**
+   * The draft this prompt holds (a thread's or a new task's key), which says
+   * whose typing a send may claim. Without one, the prompt is its own draft.
+   */
+  readonly typedScope?: string | undefined;
 }
 
 const TAG_NAME = "octant-composer-input";
@@ -396,8 +404,12 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       autoFocus,
       renderModelChip,
       inlineChips,
+      typedScope,
       ...attributes
     } = props;
+    const ownScope = `composer:${useId()}`;
+    const scopeRef = useRef(typedScope ?? ownScope);
+    scopeRef.current = typedScope ?? ownScope;
     const rootRef = useRef<ComposerInputElement | null>(null);
     const modelRef = useRef(value);
     // The value the caller last gave or was told; assigning `value` and then
@@ -443,7 +455,8 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       // Only the person's own edits come through here: typing, paste, cut, undo,
       // and dictation. A value a caller writes does not, and undoing back to one
       // is not typing it.
-      if (typed) noteTypedComposerText(modelRef.current);
+      if (typed) noteTypedComposerText(scopeRef.current, modelRef.current);
+      else composerTextReplaced(scopeRef.current, modelRef.current);
       flushSync(() => onChangeRef.current?.({ target: root, currentTarget: root }));
     };
 
@@ -619,6 +632,9 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const external = pendingRef.current === undefined;
         modelRef.current = value;
         if (external) {
+          // A value the caller wrote is not the person's typing: the draft's
+          // note stays only when it is the very text the person left there.
+          composerTextReplaced(scopeRef.current, value);
           pendingRef.current = { start: value.length, end: value.length };
           // A value the caller writes starts a new undo history, as a text
           // field's does: a send's text is gone, and a picked file or model
@@ -694,6 +710,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       // `change` on an editable element themselves.
       const onNativeChange = () => {
         reportedRef.current = modelRef.current;
+        composerTextReplaced(scopeRef.current, modelRef.current);
         remember({ value: modelRef.current, caret: modelRef.current.length, typed: false }, false);
         onChangeRef.current?.({ target: root, currentTarget: root });
         tick();

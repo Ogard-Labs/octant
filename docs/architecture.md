@@ -2307,18 +2307,27 @@ except where a bullet says otherwise.
   thread, in any Project, mode, or provider, does. The tool step in the thread
   is the record of what was stored.
 - **What counts as the person's words.** A composer send claims
-  `typedByPerson` when the exact text it sends is one the person's own input
-  recently left in a composer in that window (typing, paste, cut, undo,
-  dictation; the last 16 are kept). Text a button writes that is the same as one
-  of those counts too, because the person did type those words. A button, a
-  template, a recipe, a suggestion, or a prefilled draft (a handoff's, for
-  example) writes text without that input, so it counts only once the person
-  changes it, and then the whole text counts, including the stretch the button
-  supplied: the claim is about the exact text sent, not about who wrote each
-  part. Undo or redo that lands on text counts only if that text was left by the
-  person's input when it was current, so undoing back to what a button wrote
-  does not count; deleting back to it by hand does, because that is the
-  person's own input. A message that carries a quote of transcript text does not
+  `typedByPerson` when the exact text it sends is the last text the person's own
+  input (typing, paste, cut, undo, redo, dictation) left in the draft it sends
+  from. Provenance belongs to the draft: each composer holds one note per draft
+  scope (a thread's, a new task's, a queued message's editor, else the composer
+  itself), so typing in one composer never makes the same words in another
+  count, and a send asks the scope it sends from. A button, a template, a
+  recipe, a suggestion, or a prefilled draft (a handoff's, for example) writes
+  text without that input and forgets the draft's note, so it counts only once
+  the person changes it, and then the whole text counts, including the stretch
+  the button supplied: the claim is about the exact text sent, not about who
+  wrote each part. A thread switch brings the note back with the draft it
+  belongs to (the note outlives the composer, and a draft shown again is the
+  text the note holds), and a stash carries it with the draft it saves and
+  restores; a restore joined to text already in the composer counts only when
+  both parts were typed. A send that fails and leaves the draft in place keeps
+  its claim. Undo or redo that lands on text counts only if that text was left
+  by the person's input when it was current, so undoing back to what a button
+  wrote does not count; deleting back to it by hand does, because that is the
+  person's own input. A person's own edit in a queued message's editor claims
+  typing the same way; a save that changes nothing keeps the claim the message
+  had and gives none. A message that carries a quote of transcript text does not
   count. Side tasks (start and "Do it here"),
   thread dialogue, answers to pending requests that build a prompt, pull
   request and review buttons, Canvas and planner sends, routines, goal rounds,
@@ -2331,8 +2340,9 @@ except where a bullet says otherwise.
   `person-memory.turn-typed@1` (mode, thread id, and the turn, Code operation,
   or steered message id; no text, hash, or excerpt) appended with the turn, so
   a turn with no mark is not the person's words. A queued message keeps its
-  claim on the queue entry and a person's edit keeps it; any other edit clears
-  it. A message steered into a running turn is marked on its own. The marks are
+  claim on the queue entry; an edit that changes it keeps the claim only when
+  the person's own route made it with the edit, and any other changing edit
+  clears it. A message steered into a running turn is marked on its own. The marks are
   erased with their thread, with Leave no trace, and by Forget everything, and
   a thread counts only its newest 200. A mark beyond the 200 stays in the
   journal until the next start removes it, so a turn whose mark was compacted

@@ -139,9 +139,15 @@ export function planComposerStashRestore(
 
   const starter = sameTodo && current.text === target.todoSeed ? "" : current.text;
   const separator = starter !== "" && saved.text !== "" ? "\n\n" : "";
+  // Joined text is the person's own only when each part was.
+  const typed =
+    (starter !== "" || saved.text !== "") &&
+    (starter === "" || current.typed === true) &&
+    (saved.text === "" || saved.typed === true);
   return {
     kind: "ready",
     draft: {
+      ...(typed ? { typed: true as const } : {}),
       text: starter + separator + saved.text,
       caret:
         saved.text === "" && starter !== ""
@@ -184,10 +190,12 @@ export function planComposerStashRecovery(
     current.text === "" ||
     current.text === record.draft.text ||
     (todo !== undefined && current.text === target.todoSeed);
+  const { typed: _savedTyped, ...saved } = record.draft;
   return {
     kind: "ready",
     draft: {
-      ...record.draft,
+      ...saved,
+      ...(useSavedPrompt && record.draft.typed === true ? { typed: true as const } : {}),
       text: useSavedPrompt ? record.draft.text : current.text,
       caret: useSavedPrompt ? record.draft.caret : current.caret,
       context: record.draft.context.map((part) =>

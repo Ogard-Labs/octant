@@ -1,4 +1,4 @@
-import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
+import { threadDraftScope, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import "../styles/code-thread.css";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
@@ -586,6 +586,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [accessChanging, setAccessChanging] = useState(false);
   const textareaRef = useRef<ComposerInputElement>(null);
   const stashSubmission = useRef<ComposerStashSubmission>(undefined);
+  const typedScope = threadDraftScope("code", String(props.threadId));
   useEffect(() => {
     const update = props.updateApprovalAnchor;
     const activeView = view;
@@ -1282,6 +1283,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
   const stash: ComposerStashBinding = {
+    typedScope,
     submission: stashSubmission,
     target: {
       location: {
@@ -1407,7 +1409,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ...(reviewFindingReferences.length === 0 ? {} : { reviewFindingReferences }),
             fileMentionPaths,
             extensionSelections,
-            ...typedClaimFor(draft),
+            ...typedClaimFor(typedScope, draft),
           },
           () => {
             retireStashRecovery?.();
@@ -3127,6 +3129,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           }}
           input={
             <ComposerInput
+              typedScope={typedScope}
               inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-activedescendant={
@@ -3337,7 +3340,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <ComposerVoiceButton
                 disabled={busy}
                 onTranscript={(transcript) => {
-                  const next = appendTranscript(draft, transcript);
+                  const next = appendTranscript(typedScope, draft, transcript);
                   draftRevisionRef.current += 1;
                   setDraft(next);
                   props.controller.setPendingDraft?.(next, next.length);

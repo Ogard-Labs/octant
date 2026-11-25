@@ -1,4 +1,4 @@
-import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
+import { threadDraftScope, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
@@ -773,7 +773,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const canvasCanMove =
     props.pendingCanvasSelections === undefined ||
     (props.onClearCanvasSelections !== undefined && props.onAttachCanvasContext !== undefined);
+  const typedScope = threadDraftScope("chat", String(thread.id));
   const stash: ComposerStashBinding = {
+    typedScope,
     submission: stashSubmission,
     target: {
       location: {
@@ -1227,7 +1229,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           args[6] = previous.version;
         // A quote the person selected from the transcript is another party's
         // text inside the message, so a message that carries one is not counted.
-        const typed = quotesForSend.length === 0 ? typedClaimFor(draft) : {};
+        const typed = quotesForSend.length === 0 ? typedClaimFor(typedScope, draft) : {};
         if (
           sendingDraftRevision !== undefined ||
           continuation.policy === "text-only" ||
@@ -1836,6 +1838,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             />
           )}
           <ChatComposer
+            typedScope={typedScope}
             stash={stash}
             readOnly={readOnly}
             benchmarkProjectId={view.thread.projectId}
@@ -2166,7 +2169,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     ),
                     threadMentionIds,
                     ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
-                    ...(context.quotes.length === 0 ? typedClaimFor(draft) : {}),
+                    ...(context.quotes.length === 0 ? typedClaimFor(typedScope, draft) : {}),
                   },
                   () => {
                     retireStashRecovery?.();

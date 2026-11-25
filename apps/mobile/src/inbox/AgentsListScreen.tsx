@@ -513,6 +513,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         </Text>
       )}
       <HomeComposerSheet
+        typedScope="mobile-agents-new-chat"
         availableModes={["chat"]}
         busy={creating}
         editable={
