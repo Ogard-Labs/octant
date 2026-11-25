@@ -45,3 +45,16 @@ body,
 .visual-check__dock--tiled {
   width: 280px;
 }
+
+/* The rail's own column, at the width the window gives it. */
+.visual-check__rail {
+  display: flex;
+  width: var(--oct-rail-w);
+  height: 100%;
+}
+
+.visual-check__rail > .sidebar-rail {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}

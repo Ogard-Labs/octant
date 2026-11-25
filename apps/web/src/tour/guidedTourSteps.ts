@@ -42,7 +42,7 @@ export const GUIDED_TOUR_STEPS: ReadonlyArray<GuidedTourStep> = [
     // The row of controls at the top of the Projects list, not the whole
     // panel, which is as tall as the window and leaves nothing to point at.
     targets: [
-      'nav[aria-label="Projects"] > .project-nav__toolbar',
+      'nav[aria-label="Projects"] .project-nav__toolbar',
       'nav[aria-label="Projects"] h2',
       'button[aria-label="Projects"]',
     ],

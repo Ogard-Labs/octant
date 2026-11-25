@@ -398,7 +398,7 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   overflow: hidden;
 }
 
-/* The destinations scroll above a foot (usage, Settings) that stays put. One
+/* The destinations scroll above a foot (plan usage, the account face) that stays put. One
    column scrolled as a whole, so in a short window the foot was out of reach
    and the last destination was cut through its icon by the window's bottom
    edge. Now the list ends in a short fade rather than a half icon, and the
@@ -434,6 +434,7 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   display: none;
 }
 
+.sidebar-rail__modes,
 .sidebar-rail__foot {
   display: flex;
   flex: none;
@@ -442,11 +443,22 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   gap: 2px;
 }
 
-.sidebar-rail__group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
+/* The sidebar's mode tray, stood on end. Its two faces are one switch, so they
+   share the tray's ground; drawn bare between dividers, the chosen mode read as
+   a second current place beside the one that was showing. The rail's own
+   selected wash is fainter than that ground, so the chosen face takes the
+   tray's step. */
+.sidebar-rail__modes {
+  --oct-wash-selected: color-mix(in srgb, var(--oct-fg) 12%, transparent);
+  margin: var(--oct-space-1) 0;
+  padding: 2px;
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+}
+
+/* Two pixels inside the tray's corner, as a segment of the sidebar's tray is. */
+.sidebar-rail__modes .sidebar-rail__face {
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
 }
 
 .sidebar-rail__button {
@@ -488,6 +500,9 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   --sidebar-rail-fill: var(--oct-wash-pressed);
 }
 
+/* A face whose menu is open stays held: focus has moved into the menu, so
+   neither hover nor focus draws it any more. */
+.sidebar-rail__button[aria-expanded="true"] .sidebar-rail__face,
 .sidebar-rail__button[aria-current="page"] .sidebar-rail__face {
   --sidebar-rail-fill: var(--oct-wash-selected);
   color: var(--oct-fg);
@@ -511,46 +526,25 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   text-align: center;
 }
 
-/* The person's face at the foot of the icon rail, ringed with what is left of
-   their tightest plan window in the meta ink. A window near or at its limit
-   takes the danger ink so a spent week reads at a glance. */
+/* A round face for the round picture it holds: the hover and held fills draw
+   as a ring around it, and the focus ring follows the same circle. */
+.rail-account,
 .rail-account__face {
   border-radius: var(--oct-radius-pill);
 }
 
-.rail-account__face > .rail-account__ring {
-  position: absolute;
-  inset: 1px;
-  width: 34px;
-  height: 34px;
-  transform: rotate(-90deg);
-  pointer-events: none;
-}
-
-.rail-account__track,
-.rail-account__arc {
-  fill: none;
-  stroke-width: 1.5;
-}
-
-.rail-account__track {
-  stroke: color-mix(in oklab, var(--oct-fg) 12%, transparent);
-}
-
-.rail-account__arc {
-  stroke: color-mix(in oklab, var(--oct-fg) 50%, transparent);
-  stroke-linecap: round;
-}
-
-.rail-account__arc:is([data-level="near"], [data-level="spent"]),
-.rail-account__left:is([data-level="near"], [data-level="spent"]) {
-  stroke: var(--oct-danger);
-  color: var(--oct-danger);
-}
-
+/* The account menu's Plan usage rows, in the same two steps as the rings. */
 .rail-account__left {
   color: var(--oct-meta);
   font-variant-numeric: tabular-nums;
+}
+
+.rail-account__left[data-level="near"] {
+  color: var(--oct-warn-fg);
+}
+
+.rail-account__left[data-level="spent"] {
+  color: var(--oct-danger-fg);
 }
 
 /* A Project letter is drawn at icon size, as an outline in the icons' muted
@@ -1062,7 +1056,7 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   flex-wrap: wrap;
   align-items: center;
   gap: 0 var(--oct-space-1);
-  /* The 32px tray row sits centred in the 38px band, and keeps that
+  /* The 32px tray row sits centred in the band, and keeps that
      centreline when the actions wrap to a second row beneath it. */
   padding-block: calc((var(--oct-title-rail-h) - 32px) / 2);
   min-width: 0;
@@ -1107,9 +1101,7 @@ html[data-octant-native-host="true"] .sidebar__chrome {
   margin-left: auto;
 }
 
-/* Search and Activity use the same compact shell icon recipe. */
-.sidebar__chrome-actions .shell-icon-button,
-.sidebar__chrome-activity .shell-icon-button {
+.sidebar__chrome-actions .shell-icon-button {
   width: var(--oct-rail-button-h);
   min-width: var(--oct-rail-button-h);
   height: var(--oct-rail-button-h);
@@ -1117,7 +1109,6 @@ html[data-octant-native-host="true"] .sidebar__chrome {
 }
 
 .sidebar__chrome-actions,
-.sidebar__chrome-activity,
 .sidebar__primary-actions {
   display: inline-flex;
   flex: 0 0 auto;
@@ -1127,10 +1118,6 @@ html[data-octant-native-host="true"] .sidebar__chrome {
 
 .sidebar__primary-actions {
   order: 2;
-}
-
-.sidebar__chrome-activity {
-  order: 1;
 }
 
 /* Space separates the navigation actions from the Project tree. A rule here
@@ -1408,12 +1395,6 @@ html[data-octant-native-host="true"] .sidebar__chrome {
 
 .project-nav__toolbar button:not([data-pressed], [aria-pressed="true"]):hover {
   color: var(--oct-fg);
-}
-
-.sidebar-navigation__threads {
-  display: grid;
-  gap: 2px;
-  margin-top: var(--oct-space-1);
 }
 
 .sidebar-navigation__thread {
@@ -1799,28 +1780,13 @@ html[data-octant-density="compact"]
   white-space: nowrap;
 }
 
-.sidebar-navigation__thread-meta,
-.sidebar-navigation__thread-unread,
-.sidebar-navigation__thread-follow-up {
+.sidebar-navigation__thread-unread {
   padding: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: 1.4;
   border: 0;
   border-radius: 0;
-}
-
-/*
- * Durable follow-up marker. It is deliberately distinguished by more than
- * color: an amber palette, a leading diamond glyph, and the visible
- * "Follow-up" label so the obligation is legible without relying on hue.
- */
-.sidebar-navigation__thread-follow-up[data-indicator="follow-up"] {
-  color: var(--oct-warn-fg);
-}
-
-.sidebar-navigation__thread-follow-up[data-indicator="follow-up"]::before {
-  content: "◆ ";
 }
 
 /*
@@ -1990,29 +1956,13 @@ html[data-octant-density="compact"]
 /* The age and the status give their place to the actions, so neither is ever
    drawn over the other. */
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):hover
-  :is(
-    .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-when,
-    .sidebar-navigation__thread-state
-  ),
+  :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):focus-within
-  :is(
-    .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-when,
-    .sidebar-navigation__thread-state
-  ),
+  :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([aria-expanded="true"])
-  :is(
-    .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-when,
-    .sidebar-navigation__thread-state
-  ),
+  :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([data-popup-open])
-  :is(
-    .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-when,
-    .sidebar-navigation__thread-state
-  ) {
+  :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state) {
   opacity: 0;
 }
 
@@ -2180,16 +2130,6 @@ html[data-octant-density="compact"]
 
 .sidebar-navigation__thread-rename {
   width: 100%;
-}
-
-.sidebar-navigation__thread-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  padding: 2px 8px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  cursor: default;
 }
 
 .shell-frame > .workspace-layer {
@@ -2769,6 +2709,8 @@ html[data-octant-density="compact"]
 
   .sidebar-navigation {
     flex: 0 0 auto;
+    /* As a scroller of its own it held the sticky foot at the list's end. */
+    overflow: visible;
   }
 
   .sidebar-navigation__projects {
@@ -2779,9 +2721,22 @@ html[data-octant-density="compact"]
     flex: 0 0 auto;
   }
 
-  .project-nav {
-    max-height: none;
+  /* The drawer scrolls as one column, so its foot sticks to the drawer's edge
+     and paints the drawer's own opaque ground over the rows passing under it. */
+  .project-nav__list {
     overflow-y: visible;
+  }
+
+  /* A row reached with the keyboard scrolls clear of the foot over it. */
+  .project-nav__list:not(:last-child) * {
+    scroll-margin-bottom: 40vh;
+  }
+
+  .sidebar-live-dock {
+    position: sticky;
+    bottom: 0;
+    max-height: 40vh;
+    background: var(--octant-sidebar-opaque);
   }
 
   .shell-frame > .workspace-layer {
@@ -2861,95 +2816,6 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
 .new-thread-welcome__mark {
   margin-bottom: 4px;
   color: var(--oct-accent-fg);
-}
-
-.draft-thread__eyebrow {
-  display: block;
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.draft-thread__description {
-  max-width: 58ch;
-  margin: 2px 0 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
-  line-height: 1.5;
-}
-
-/* Recent work under the composer. These rows are the way back into open work
-   from a start screen, so they stay quiet until pointed at and never compete
-   with the prompt above them. The button recipe fixes its own height, which a
-   two-line row has to opt out of. */
-/* The Continue list keeps the same clear step below the cards that the
-   cards keep below the composer, so the three read as separate bands. */
-.draft-thread__recent {
-  order: 4;
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-2);
-  margin-top: 56px;
-}
-
-/* "Continue" is a section label over a hairline, the head every list
-   surface gives a group (DESIGN.md "Page shell"). */
-.draft-thread__recent-title {
-  margin: 0;
-  padding: 0 0 var(--oct-space-2);
-  border-bottom: 1px solid var(--oct-hairline);
-  color: var(--oct-muted);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.3;
-}
-
-.draft-thread__recent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* The bare variant draws nothing, so this takes the ghost hover fill itself. */
-.draft-thread__recent-item:hover {
-  background: var(--muted);
-}
-
-.draft-thread__recent-item:active {
-  background: var(--oct-wash-pressed);
-}
-
-.draft-thread__recent-item {
-  display: flex;
-  width: 100%;
-  height: auto;
-  min-height: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  border-radius: var(--oct-radius-md);
-  font-weight: 400;
-  text-align: left;
-  white-space: normal;
-}
-
-.draft-thread__recent-name {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-}
-
-.draft-thread__recent-detail {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-detail);
 }
 
 /* A New coordinator draft's settings, one quiet line under the composer:
@@ -3937,13 +3803,6 @@ form > .work-composer-adapter__attachments {
    ink, so a thread that worked through many is not read as having one. */
 .sidebar-navigation__thread-pr-more {
   color: var(--oct-meta);
-}
-
-/* Passing checks ride on the PR number as one more mark in the success ink,
-   so a thread ready to merge reads as ready without opening it. */
-.sidebar-navigation__thread-pr-checks {
-  margin-inline-start: 2px;
-  color: var(--octant-success-text);
 }
 
 /* PR state carries the same meaning in navigation, boards, and pane headers. */
