@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { runBoundedGit } from "./boundedGit";
 import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
 import {
   ManagedWorktreeReceiptStore,
@@ -1044,5 +1045,33 @@ describe("a cleanup or restore killed at any instant", () => {
       status: "ran",
       value: 7,
     });
+  });
+});
+
+describe("the receipt lock and a Git helper that outlived its kill", () => {
+  it("does not start or release an operation while such a group is still there", async () => {
+    let present = true;
+    await runBoundedGit({
+      executable: "sh",
+      args: ["-c", "sleep 60"],
+      env: { PATH: process.env.PATH ?? "" },
+      signal: new AbortController().signal,
+      timeoutMs: 50,
+      graceMs: 20,
+      confirmMs: 50,
+      probeGroup: () => present,
+    });
+    const w = await world({ restoreWaitMs: 100 });
+    let ran = false;
+    const held = w.service.exclusive(w.receiptId, async () => {
+      ran = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(ran).toBe(false);
+    // A person's restore that has to wait says a cleanup still holds the receipt.
+    await expect(w.restore()).resolves.toEqual({ status: "refused", reason: "cleanup-running" });
+    present = false;
+    await held;
+    expect(ran).toBe(true);
   });
 });

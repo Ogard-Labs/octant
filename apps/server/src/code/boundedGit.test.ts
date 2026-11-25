@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runBoundedGit } from "./boundedGit";
+import { runBoundedGit, waitForSurvivingGit } from "./boundedGit";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -89,6 +89,54 @@ describe("runBoundedGit", () => {
     const { child, grandchild } = await pids();
     expect(alive(child)).toBe(false);
     expect(alive(grandchild)).toBe(false);
+  });
+
+  it("keeps waiting for a helper that ignores SIGTERM and closed its pipes after Git itself left on SIGTERM", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-bounded-git-"));
+    directories.push(directory);
+    // The helper shares Git's process group but holds none of its pipes.
+    const script = `(trap "" TERM; exec sleep 60) >/dev/null 2>&1 </dev/null & echo $! > "${directory}/helper"; echo ready > "${directory}/ready"; sleep 60`;
+    const stop = new AbortController();
+    const running = runBoundedGit({
+      executable: "sh",
+      args: ["-c", script],
+      env,
+      signal: stop.signal,
+      timeoutMs: 60_000,
+      graceMs: 300,
+    });
+    await expect
+      .poll(() => readFile(join(directory, "ready"), "utf8").then(() => true, () => false))
+      .toBe(true);
+    const helper = Number(await readFile(join(directory, "helper"), "utf8"));
+    expect(alive(helper)).toBe(true);
+    stop.abort(new Error("stopped"));
+    await expect(running).rejects.toThrow("stopped");
+    expect(alive(helper)).toBe(false);
+  });
+
+  it("settles when a group cannot be confirmed gone, and keeps reporting it until it is", async () => {
+    let present = true;
+    const result = await runBoundedGit({
+      executable: "sh",
+      args: ["-c", "sleep 60"],
+      env,
+      signal: new AbortController().signal,
+      timeoutMs: 100,
+      graceMs: 50,
+      confirmMs: 100,
+      probeGroup: () => present,
+    });
+    expect(result.timedOut).toBe(true);
+    let drained = false;
+    const waiting = waitForSurvivingGit().then(() => {
+      drained = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(drained).toBe(false);
+    present = false;
+    await waiting;
+    expect(drained).toBe(true);
   });
 
   it("refuses to start under a signal that has already stopped", async () => {

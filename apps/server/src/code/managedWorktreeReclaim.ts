@@ -1,3 +1,4 @@
+import { waitForSurvivingGit } from "./boundedGit";
 import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
 import type { ManagedWorktreeReceipt, ManagedWorktreeReclaim } from "./managedWorktreeReceiptStore";
 import {
@@ -136,10 +137,16 @@ export class ManagedWorktreeReclaimService {
     const previous = this.#locks.get(receiptId) ?? Promise.resolve();
     const operation = previous.then(async () => {
       this.#holders.set(receiptId, kind);
-      started?.();
       try {
+        // A Git that was stopped may have left a helper that outlived its kill
+        // (see `runBoundedGit`). It could still be writing in a folder, so the
+        // receipt is not handed on, nor started on, until every such group is
+        // gone; a person's restore that waits on it is told a cleanup holds it.
+        await waitForSurvivingGit();
+        started?.();
         return await run();
       } finally {
+        await waitForSurvivingGit();
         this.#holders.delete(receiptId);
       }
     });
