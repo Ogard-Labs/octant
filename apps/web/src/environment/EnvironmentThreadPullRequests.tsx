@@ -5,6 +5,7 @@ import type {
   ThreadBoardPullRequestSummaries,
 } from "@octant/contracts";
 import { pullRequestStateMark } from "../code/pullRequestState";
+import { stackJoin, stackPlaceSentence, stackPlaceWords, type StackJoin } from "../code/stackPlace";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { ArrowUpRight, GitMerge, MoreHorizontal } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -32,7 +33,9 @@ export interface EnvironmentThreadPullRequestsProps {
 /**
  * The one next step a row offers, by what blocks the pull request first:
  * conflicts must be resolved before checks can be fixed, and only a pull
- * request with neither, approved and freshly observed, is ready to merge.
+ * request with neither, approved and freshly observed, is ready to merge. Merge
+ * is the bottom layer's alone in a stack: a higher one merges into the branch of
+ * the layer below it, not the branch the stack lands on.
  * Fix and Resolve open the place on GitHub where that work is seen; Merge
  * opens the pull request, whose Merge asks for the method before it acts.
  */
@@ -50,7 +53,8 @@ export function threadPullRequestNextStep(summary: Summary): ThreadPullRequestNe
   if (summary.checks === "failing" && url !== undefined)
     return { kind: "fix", url: `${url}/checks` };
   // One already in the merge queue or set to merge itself needs no Merge.
-  if (summary.readyToMerge && summary.merging === undefined) return { kind: "merge" };
+  if (summary.readyToMerge && summary.merging === undefined && summary.stack?.parent === undefined)
+    return { kind: "merge" };
   return undefined;
 }
 
@@ -147,6 +151,7 @@ function rowName(summary: Summary): string {
     ...(counts === undefined ? [] : [`checks ${counts.long}`]),
     ...(lines === undefined ? [] : [lines.spoken]),
     ...(summary.readyToMerge ? ["ready to merge"] : []),
+    ...(summary.stack === undefined ? [] : [stackPlaceSentence(summary.stack).toLowerCase()]),
     ...(staleWord(summary) === undefined ? [] : [staleWord(summary)?.toLowerCase() ?? ""]),
   ].join(", ");
 }
@@ -218,12 +223,13 @@ export function EnvironmentThreadPullRequests(props: EnvironmentThreadPullReques
         Pull requests
       </p>
       <ul className="environment-thread-prs__list">
-        {shown.map((summary) => (
+        {shown.map((summary, index) => (
           <ThreadPullRequestRow
             key={`${String(summary.identity.projectId)}:${summary.identity.repositoryOwner}/${summary.identity.repositoryName}#${String(summary.identity.number)}`}
             onOpen={props.onOpen}
             onOpenExternal={props.onOpenExternal}
             onOpenOnGithub={props.onOpenOnGithub}
+            stackJoin={stackJoin(shown, index)}
             summary={summary}
           />
         ))}
@@ -254,6 +260,7 @@ export function EnvironmentThreadPullRequests(props: EnvironmentThreadPullReques
 
 function ThreadPullRequestRow(props: {
   readonly summary: Summary;
+  readonly stackJoin: StackJoin | undefined;
   readonly onOpen: EnvironmentThreadPullRequestsProps["onOpen"];
   readonly onOpenOnGithub: EnvironmentThreadPullRequestsProps["onOpenOnGithub"];
   readonly onOpenExternal: EnvironmentThreadPullRequestsProps["onOpenExternal"];
@@ -295,22 +302,31 @@ function ThreadPullRequestRow(props: {
         className="environment-thread-pr__checks-end"
         data-reserved={summary.state === "open" || summary.state === "draft" ? "true" : undefined}
       >
-        {counts === undefined ? null : (
-          <span className="environment-thread-pr__check-count">{counts.short}</span>
+        {/* Above the checks, not on line two: that line gives way to the next
+            step, and the place was the first thing it cut. */}
+        {summary.stack === undefined ? null : (
+          <span className="environment-thread-pr__stack">{stackPlaceWords(summary.stack)}</span>
         )}
-        {checks === undefined ? null : (
-          <span
-            className="environment-thread-pr__checks"
-            data-checks={checks}
-            title={counts === undefined ? `Checks ${checks}` : `Checks ${checks}, ${counts.long}`}
-          />
-        )}
+        <span className="environment-thread-pr__checks-line">
+          {counts === undefined ? null : (
+            <span className="environment-thread-pr__check-count">{counts.short}</span>
+          )}
+          {checks === undefined ? null : (
+            <span
+              className="environment-thread-pr__checks"
+              data-checks={checks}
+              title={counts === undefined ? `Checks ${checks}` : `Checks ${checks}, ${counts.long}`}
+            />
+          )}
+        </span>
       </span>
     </>
   );
   return (
     <li
       className="environment-thread-pr"
+      data-stacked={summary.stack === undefined ? undefined : "true"}
+      data-stack-join={props.stackJoin}
       data-step={
         step === undefined ||
         (step.kind !== "merge" && props.onOpenExternal === undefined) ||

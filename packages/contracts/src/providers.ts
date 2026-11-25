@@ -96,6 +96,8 @@ export const ProviderDriverKind = Schema.Literal(
   // Like the harness family above, which driver an instance runs is package
   // data in its configuration.
   "outside-image",
+  // The one family for every outside driver package that generates video.
+  "outside-video",
 );
 export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 
@@ -918,14 +920,7 @@ export const OutsideHarnessEndpointProviderConfiguration = Schema.Struct({
 export type OutsideHarnessEndpointProviderConfiguration =
   typeof OutsideHarnessEndpointProviderConfiguration.Type;
 
-/**
- * An outside image generator as the person added it: the exact driver
- * package, the address its brokered requests may reach, how the key is sent
- * (absent: no key), and the image models the person listed, each of which
- * the package must also declare. The default model is one of them.
- */
-export const OutsideImageProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("outside-image"),
+const outsideMediaConfigurationFields = {
   driver: OutsideProviderDriverReference,
   baseUrl: Schema.NonEmptyTrimmedString,
   key: Schema.optional(OutsideDriverKeyPlacement),
@@ -935,6 +930,17 @@ export const OutsideImageProviderConfiguration = Schema.Struct({
     Schema.filter((modelIds) => new Set(modelIds).size === modelIds.length),
   ),
   defaultModel: ProviderModelId,
+};
+
+/**
+ * An outside image generator as the person added it: the exact driver
+ * package, the address its brokered requests may reach, how the key is sent
+ * (absent: no key), and the image models the person listed, each of which
+ * the package must also declare. The default model is one of them.
+ */
+export const OutsideImageProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("outside-image"),
+  ...outsideMediaConfigurationFields,
 })
   .pipe(
     Schema.filter((configuration) =>
@@ -943,6 +949,24 @@ export const OutsideImageProviderConfiguration = Schema.Struct({
   )
   .annotations(strict);
 export type OutsideImageProviderConfiguration = typeof OutsideImageProviderConfiguration.Type;
+
+/**
+ * An outside video generator as the person added it: the exact driver
+ * package, the address its brokered requests may reach, how the key is sent
+ * (absent: no key), and the video models the person listed, each of which the
+ * package must also declare.
+ */
+export const OutsideVideoProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("outside-video"),
+  ...outsideMediaConfigurationFields,
+})
+  .pipe(
+    Schema.filter((configuration) =>
+      configuration.modelAllowlist.some((id) => String(id) === String(configuration.defaultModel)),
+    ),
+  )
+  .annotations(strict);
+export type OutsideVideoProviderConfiguration = typeof OutsideVideoProviderConfiguration.Type;
 
 /**
  * Suggested GPT Image model IDs for Settings. Image allowlists are
@@ -1441,10 +1465,19 @@ export const OutsideImageProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type OutsideImageProviderInstance = typeof OutsideImageProviderInstance.Type;
 
-/** An instance whose driver is an outside package, of either family. */
+export const OutsideVideoProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("outside-video"),
+  configuration: OutsideVideoProviderConfiguration,
+  driverQuarantine: Schema.optional(OutsideDriverQuarantine),
+}).annotations(strict);
+export type OutsideVideoProviderInstance = typeof OutsideVideoProviderInstance.Type;
+
+/** An instance whose driver is an outside package, of any family. */
 export const OutsideDriverProviderInstance = Schema.Union(
   OutsideHarnessEndpointProviderInstance,
   OutsideImageProviderInstance,
+  OutsideVideoProviderInstance,
 );
 export type OutsideDriverProviderInstance = typeof OutsideDriverProviderInstance.Type;
 
@@ -1452,7 +1485,9 @@ export function isOutsideDriverProviderInstance(
   instance: ProviderInstance,
 ): instance is OutsideDriverProviderInstance {
   return (
-    instance.driverKind === "outside-harness-endpoint" || instance.driverKind === "outside-image"
+    instance.driverKind === "outside-harness-endpoint" ||
+    instance.driverKind === "outside-image" ||
+    instance.driverKind === "outside-video"
   );
 }
 
@@ -1478,6 +1513,7 @@ export const ProviderInstance = Schema.Union(
   FalVideoProviderInstance,
   OutsideHarnessEndpointProviderInstance,
   OutsideImageProviderInstance,
+  OutsideVideoProviderInstance,
 );
 export type ProviderInstance = typeof ProviderInstance.Type;
 
@@ -1578,6 +1614,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     OllamaProviderInstance,
     OutsideHarnessEndpointProviderInstance,
     OutsideImageProviderInstance,
+    OutsideVideoProviderInstance,
   ),
 }).annotations(strict);
 export type ProviderInstanceConfigurationChanged = typeof ProviderInstanceConfigurationChanged.Type;
@@ -2527,6 +2564,19 @@ export const OutsideProviderDriverListing = Schema.Struct({
         Schema.Struct({
           modelId: ProviderModelId,
           usdMicrosPerImage: Schema.optional(Schema.Int.pipe(Schema.positive())),
+        }).annotations(strict),
+      ).pipe(Schema.minItems(1), Schema.maxItems(64)),
+    }).annotations(strict),
+  ),
+  /** Present for a driver that generates video: the models its package declares. */
+  videoGeneration: Schema.optional(
+    Schema.Struct({
+      models: Schema.Array(
+        Schema.Struct({
+          modelId: ProviderModelId,
+          displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
+          /** False for a model an active spend limit refuses. The card shows each clip's price. */
+          publishesPrice: Schema.Boolean,
         }).annotations(strict),
       ).pipe(Schema.minItems(1), Schema.maxItems(64)),
     }).annotations(strict),

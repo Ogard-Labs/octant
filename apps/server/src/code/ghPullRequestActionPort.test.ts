@@ -433,6 +433,8 @@ describe("pull-request action port", () => {
       headBranch: "feature/a",
       baseBranch: "main",
       headSha: "a".repeat(40),
+      // What GitHub has not worked out, and what it did not say, are unknown.
+      mergeability: "unknown",
     });
     await expect(port.summary(identity, signal)).resolves.toEqual({ status: "unavailable" });
   });

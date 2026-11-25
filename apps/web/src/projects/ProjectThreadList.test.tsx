@@ -1235,6 +1235,41 @@ describe("ProjectThreadRows", () => {
     expect(merged).toHaveTextContent("#2Sidebar pull request 2");
   });
 
+  it("shows a stack's layers as one joined run with each one's place, and names the layer below", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        actions={{ onOpenPullRequest: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            pullRequests: {
+              items: [
+                pullRequest(12, { stack: { position: 1, size: 2 } }),
+                pullRequest(13, { stack: { position: 2, size: 2, parent: 12 } }),
+                pullRequest(9),
+              ],
+              hiddenCount: 0,
+            },
+          },
+        ]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const card = await findThreadDetails();
+    const upper = within(card).getByRole("button", { name: /^Open pull request #13:/ });
+
+    expect(upper).toHaveTextContent("#13Sidebar pull request 132 of 2");
+    expect(upper).toHaveAccessibleName(/Layer 2 of 2 of a stack, on #12$/);
+    expect(
+      within(card)
+        .getAllByRole("button", { name: /^Open pull request #/ })
+        .map((line) => line.parentElement?.getAttribute("data-stack-join")),
+    ).toEqual(["next", "previous", null]);
+  });
+
   it("names the repository on each line only when the pull requests span repositories", async () => {
     const user = userEvent.setup();
     render(

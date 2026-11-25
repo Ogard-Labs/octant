@@ -114,6 +114,27 @@ export const ThreadBoardPullRequestRelationship = Schema.Literal("linked", "prom
 export type ThreadBoardPullRequestRelationship = typeof ThreadBoardPullRequestRelationship.Type;
 
 /**
+ * Where an open pull request stands in its stack: `position` 1 is the bottom,
+ * which lands first, and `parent` is the number of the pull request it is based
+ * on, absent on the bottom. The host derives it from the branches of every open
+ * pull request the window may read in that repository, so a thread that worked
+ * on two layers of four still reads "2 of 4".
+ */
+export const PullRequestStackPlace = Schema.Struct({
+  position: Schema.Int.pipe(Schema.positive()),
+  size: Schema.Int.pipe(Schema.greaterThanOrEqualTo(2)),
+  parent: Schema.optional(Schema.Int.pipe(Schema.positive())),
+})
+  .pipe(
+    Schema.filter(
+      (place) =>
+        place.position <= place.size && (place.parent === undefined) === (place.position === 1),
+    ),
+  )
+  .annotations(strict);
+export type PullRequestStackPlace = typeof PullRequestStackPlace.Type;
+
+/**
  * One read-only pull-request summary joined from the in-memory Project pull-
  * request snapshot. `readyToMerge` is conservative: it is true only when every
  * required signal is present, fresh, and non-ambiguous; it never implies the
@@ -139,6 +160,8 @@ export const ThreadBoardPullRequestSummary = Schema.Struct({
   deletions: Schema.optional(PullRequestLineCount),
   checkCounts: Schema.optional(PullRequestCheckCounts),
   merging: Schema.optional(PullRequestMerging),
+  /** Absent on a pull request of no stack, and on a board card, which has no room for it. */
+  stack: Schema.optional(PullRequestStackPlace),
 }).annotations(strict);
 export type ThreadBoardPullRequestSummary = typeof ThreadBoardPullRequestSummary.Type;
 
