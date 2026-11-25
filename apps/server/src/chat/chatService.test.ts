@@ -1,3 +1,4 @@
+import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
 import { videoOfferDecisionRules } from "../video/videoOfferDecisionRules";
 import { decodeChatThreadId, decodeEventActor } from "@octant/contracts";
 import {
@@ -2562,6 +2563,40 @@ describe("ChatService", () => {
       threadId: String(created.thread.id),
       turnId: String(second.turn.id),
     });
+  });
+
+  it("starts the run of an accepted turn when the journal cannot record that the person typed it", async () => {
+    const access = createPersonMemoryAccess({
+      store: {
+        markTurnTyped: () => {
+          throw new Error("SQLITE_FULL: database or disk is full");
+        },
+      } as unknown as Parameters<typeof createPersonMemoryAccess>[0]["store"],
+      projectLabel: () => undefined,
+    });
+    const { service, fakeDriver } = openFixture({
+      markTurnTyped: ({ threadId, projectId, turnId }) =>
+        access.markTurnTyped({ mode: "chat", threadId, projectId, turnId }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Typed",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    const sent = await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "I typed this.",
+      },
+      { typedByPerson: true },
+    );
+
+    expect(sent.kind).toBe("turn-created");
+    expect(fakeDriver.sentTurns).toHaveLength(1);
   });
 
   it("sends an unchanged Side Chat source once to a provider that keeps its own history", async () => {

@@ -150,7 +150,16 @@ export function createPersonMemoryAccess(input: {
       cutOff: input.cutOff?.(scope) ?? scope.createdAt,
     });
   return {
-    markTurnTyped: (turn) => input.store.markTurnTyped(turn),
+    markTurnTyped: (turn) => {
+      // The turn is already accepted when this runs. A journal that cannot
+      // take the mark leaves the turn unmarked, which is never the person's
+      // words, instead of failing a turn the person has already been given.
+      try {
+        input.store.markTurnTyped(turn);
+      } catch {
+        // Unmarked is the safe side.
+      }
+    },
     blockFor: (scope) =>
       scopeReadsPersonMemory(scope.windowId, scope.threadId) ? blockOf(scope) : undefined,
     toolsFor: (scope) => {
