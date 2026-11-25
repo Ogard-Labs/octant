@@ -11,6 +11,27 @@ function read(relative: string): string {
 }
 
 /**
+ * A selector list's selectors, or a selector's compounds: split only outside
+ * brackets, since `:is(.a, .b)` and `[data-x="a b"]` hold commas and spaces
+ * of their own.
+ */
+function splitOutsideBrackets(text: string, separator: RegExp): ReadonlyArray<string> {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const char of text) {
+    if (char === "(" || char === "[") depth += 1;
+    else if (char === ")" || char === "]") depth -= 1;
+    if (depth === 0 && separator.test(char)) {
+      parts.push(current);
+      current = "";
+    } else current += char;
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
+/**
  * DESIGN.md "Voice" and "Face" are the part of the system that leaves the renderer.
  * These checks keep the renderer honest about it: one face, one set of type
  * roles, and no uppercase kickers creeping back into headings.
@@ -117,13 +138,13 @@ describe("surface language", () => {
       expect(rules).toContain("--surface-table-columns:");
       const redrawn: string[] = [];
       for (const block of rules.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        const selectors = (block[1] ?? "").split(",").map((each) => each.trim());
+        const selectors = splitOutsideBrackets(block[1] ?? "", /,/);
         // What a selector styles is its last compound, whatever it stands
         // under and whatever state it is in: a hover on the row is the
         // table's, and so is the row inside the dock's list. A rule about a
         // cell inside the row is the page's own.
         const named = selectors.filter((selector) => {
-          const subject = selector.split(/\s*[>+~]\s*|\s+/).pop() ?? "";
+          const subject = splitOutsideBrackets(selector, /[\s>+~]/).at(-1) ?? "";
           const classes: ReadonlyArray<string> = subject.match(/\.[A-Za-z0-9_-]+/g) ?? [];
           return page.own.some((own) => classes.includes(own));
         });
