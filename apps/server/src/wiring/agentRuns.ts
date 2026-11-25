@@ -23,6 +23,7 @@ import {
   decodeMultiModelRoutingVendorId,
   decodeProjectId,
   decodeProviderInstanceId,
+  type ProviderInstanceId,
   decodeWindowId,
   decodeWorkThreadId,
   decodeUtcTimestamp,
@@ -48,6 +49,13 @@ import {
   layoutContainsAgentRunThread,
   parentRunsAtFullAccess,
 } from "../agentRun/authorizeAgentRunCreation";
+import { AgentRunChildCodeThreads } from "../agentRun/agentRunChildCodeThreads";
+import {
+  AgentRunChildResources,
+  createAgentRunChildToolHosts,
+} from "../agentRun/agentRunChildTools";
+import { isRoutineHostScope } from "../routineHostScope";
+import { stableCodeFileId } from "./code";
 import { readChatThreadView } from "../chat/chatService";
 import { WorkThreadProjection } from "../work/workThreadProjection";
 import { awaitsLeadApproval } from "../harness/leadApprovalAttention";
@@ -131,10 +139,13 @@ import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-polic
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
   activeChatTurns,
+  appToolThreadLevel,
   browserToolTransport,
   chatTurnAnsweredAttempt,
   modelCanTakeDelegatedWork,
   isNativeHarnessDriverKind,
+  isToolAllowedByAllowlist,
+  type AppToolThreadLevel,
 } from "@octant/domain";
 import { type AppManagedToolSet, combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import type { PersonMemoryTurnScope } from "../personMemory/personMemoryAccess";
@@ -656,6 +667,8 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     | "agentRunParentAuthority"
     | "agentRunPersistence"
     | "agentRunRequestOwner"
+    | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "liveTurns"
@@ -936,6 +949,102 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
             return undefined;
           }
         });
+  });
+  // A child is offered a thread's tool only as itself: the host below reads
+  // the child's own run and the parent's grant, window and tools on each call,
+  // and every area that contributes an inherited tool builds it from that.
+  const parentToolFacts = (
+    run: AgentRun,
+  ): ReturnType<Parameters<typeof createAgentRunChildToolHosts>[0]["parent"]> => {
+    try {
+      const id = String(run.parentThreadId);
+      const carries = (
+        thread: { readonly providerInstanceId: ProviderInstanceId; readonly modelId: unknown },
+        level?: AppToolThreadLevel,
+      ) =>
+        browserToolTransport(
+          providerRuntimeRegistry.observedState(thread.providerInstanceId),
+          String(thread.modelId),
+          level,
+        ) === true;
+      switch (run.routingReceipt.mode) {
+        case "chat": {
+          const thread = persistence.readChatThread(decodeChatThreadId(id));
+          return thread?.lifecycle === "active"
+            ? { toolConstraints: [], inPlan: false, carriesTools: carries(thread) }
+            : undefined;
+        }
+        case "work": {
+          const thread = workThreadProjection.read(decodeWorkThreadId(id));
+          return thread?.lifecycle === "active"
+            ? {
+                toolConstraints: [],
+                inPlan: (runningWorkTurnAccess(id) ?? thread.access) === "plan",
+                carriesTools: carries(thread, appToolThreadLevel(thread)),
+              }
+            : undefined;
+        }
+        case "code": {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(id));
+          return thread?.lifecycle === "active"
+            ? {
+                toolConstraints: thread.toolConstraints ?? [],
+                inPlan: codeParentActiveTurn(thread).executionPolicy === "plan",
+                carriesTools: carries(thread, appToolThreadLevel(thread)),
+              }
+            : undefined;
+        }
+      }
+    } catch {
+      return undefined;
+    }
+  };
+  const childToolHost = createAgentRunChildToolHosts({
+    isCurrent: (run) => agentRunInteractions.isCurrent(run),
+    carriesTools: ({ providerInstanceId, modelId, executionPolicy }) =>
+      browserToolTransport(
+        providerRuntimeRegistry.observedState(providerInstanceId),
+        String(modelId),
+        { executionPolicy },
+      ) === true,
+    parent: parentToolFacts,
+    window: (run) => {
+      const owner = agentRunRequestOwner(run);
+      return owner === undefined ? undefined : decodeWindowId(owner);
+    },
+    windowCanAnswer: (windowId) =>
+      !isRoutineHostScope(windowId) &&
+      (deps.isPairedDeviceScope(windowId)
+        ? !deps.isRestrictedDeviceScope(windowId)
+        : windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId))),
+    approvals: (run) => agentRunInteractions.toolsFor(run),
+    toolAllowed: isToolAllowedByAllowlist,
+  });
+  const childResources = new AgentRunChildResources();
+  const childCodeThreads = new AgentRunChildCodeThreads({
+    readThread: (id) => persistence.readCodeThread(id),
+    readCheckout: (id) => persistence.readCodeCheckout(id),
+    fileId: stableCodeFileId,
+    verifiedHead: async (host, parent) => {
+      const workspace = host.run.workspaceReceipt;
+      const project = persistence.readProject(parent.projectId);
+      if (
+        workspace.kind !== "code-worktree" ||
+        project?.type !== "code" ||
+        project.lifecycle !== "active" ||
+        project.binding.canonicalRoot !== workspace.checkoutRoot ||
+        String(project.bindingHistory.at(-1)?.revisionId) !== String(parent.bindingRevisionId)
+      )
+        return undefined;
+      return await agentRunChildWorktree.current?.ownedHead({
+        requestId: String(host.run.requestId),
+        parentThreadId: host.parentThreadId,
+        repositoryId: String(parent.repositoryId),
+        repositoryRoot: workspace.checkoutRoot,
+        worktreeRoot: workspace.worktreeRoot,
+        signal: new AbortController().signal,
+      });
+    },
   });
   // Managed subagent execution. A managed child runs as an in-process
   // provider session, not a spawned process, so authority is re-derived from
@@ -1839,6 +1948,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     keepAwakePolicy: () => effectiveKeepAwakePolicy(agentRunSettingsStore.current().resourcePolicy),
     agentsManagedToolsFor,
     capacityScheduler,
+    childCodeThreads,
+    childResources,
+    childToolHost,
     contributeChildTools,
     coordinatorWorkersHolder,
     externalContentIngestionStore,

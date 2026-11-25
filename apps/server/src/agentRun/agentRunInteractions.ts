@@ -130,6 +130,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     readonly summary: string;
     readonly approvalClass: string;
     readonly shieldCall?: (boundRoot: string) => ShieldCall;
+    readonly singleUse?: true;
     readonly signal?: AbortSignal;
   }) => (await approveListing(input)).outcome;
   const childRoot = (run: AgentRun): string | undefined =>
@@ -146,6 +147,8 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     readonly approvalClass: string;
     readonly commandHosts?: ReadonlyArray<NativeHarnessCommandHost>;
     readonly shieldCall?: (boundRoot: string) => ShieldCall;
+    /** Asked for this one act: no remembered answer settles it and none is kept. */
+    readonly singleUse?: true;
     readonly signal?: AbortSignal;
   }): Promise<
     | (NativeHarnessCommandApprovalOutcome & { readonly byReviewer?: true })
@@ -167,6 +170,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       toolName: input.toolName,
       summary: input.summary,
       approvalClass: input.approvalClass,
+      ...(input.singleUse === undefined ? {} : { singleUse: true }),
       signal: input.signal,
     };
     const shield = options.shield?.();
@@ -312,6 +316,19 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       askUser: async (input) => {
         const outcome = await ask({ ...input, run });
         return outcome;
+      },
+      // An Octant tool the child inherited asks the person for each act, on
+      // the same card and under the same checks as the child's other asks.
+      askTool: async ({ summary, approvalClass, signal }) => {
+        const outcome = await approve({
+          run,
+          toolName: "provider-action",
+          summary,
+          approvalClass,
+          singleUse: true,
+          signal: signal ?? new AbortController().signal,
+        });
+        return outcome === "approved" || outcome === "cancelled" ? outcome : "denied";
       },
     }),
   };

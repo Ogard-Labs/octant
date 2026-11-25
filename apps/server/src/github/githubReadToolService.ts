@@ -131,6 +131,8 @@ export interface GithubReadToolContext {
   readonly readThread: (windowId: WindowId, threadId: CodeThread["id"]) => CodeThread | undefined;
   /** Present on a turn whose agent may update its thread's linked issues. */
   readonly issueUpdates?: GithubIssueUpdatePort;
+  /** Who reads the answer and takes its mark, when that is not the thread: a child run. */
+  readonly readerId?: string;
 }
 
 /**
@@ -259,7 +261,7 @@ export class GithubReadToolService {
         const ingested = recordGithubReadIngestion({
           ingestion: this.#ingestion,
           uuid: this.#uuid,
-          threadId: context.thread.id,
+          threadId: context.readerId ?? context.thread.id,
           sourceLabel: result.sourceLabel,
           contentReference: `${result.sourceLabel}-${decision.repository.owner}-${
             decision.repository.name
@@ -517,7 +519,7 @@ const GITHUB_READ_SOURCE_LABEL = {
 function recordGithubReadIngestion(input: {
   readonly ingestion: Pick<ExternalContentIngestionStore, "record">;
   readonly uuid: () => string;
-  readonly threadId: CodeThread["id"];
+  readonly threadId: string;
   readonly sourceLabel: string;
   readonly contentReference: string;
 }): ExternalContentIngestionResult {

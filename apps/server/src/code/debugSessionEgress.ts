@@ -70,6 +70,8 @@ export interface DebugSessionEgressOptions {
   readonly journal: Pick<Journal, "append">;
   readonly rules: Pick<ToolEgressRules, "startProgramLaunch">;
   readonly endpoint: ToolEgressProxyEndpointRequest;
+  /** The parent whose rules hold for a child run's session; undefined for a thread's own. */
+  readonly parentThreadOf?: (threadId: string) => string | undefined;
   readonly resolveAll?: ToolEgressProxyOptions["resolveAll"];
   readonly connect?: ToolEgressProxyOptions["connect"];
   readonly hostActor: EventActorValue;
@@ -83,10 +85,14 @@ export function createDebugSessionEgress(options: DebugSessionEgressOptions): De
     start: async (scope) => {
       let launch: ToolEgressLaunch;
       try {
+        const parentThreadId = options.parentThreadOf?.(scope.threadId);
         launch = {
           launchId: decodeLaunchId(scope.sessionId),
           threadId: decodeAggregateId(scope.threadId),
           projectId: decodeAggregateId(scope.projectId),
+          ...(parentThreadId === undefined
+            ? {}
+            : { parentThreadId: decodeAggregateId(parentThreadId) }),
         };
       } catch {
         return { status: "refused" };

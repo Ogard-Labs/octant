@@ -176,7 +176,10 @@ export async function readImageInsideFolder(
  */
 export function lookToolForThread(input: {
   readonly describer: Pick<ImageDescriber, "available" | "describe">;
+  /** The thread whose spend a describe counts against. */
   readonly threadId: string;
+  /** Whose model reads the answer, when that is not the thread's own: a child run. */
+  readonly readerId?: string;
   readonly threadType: ImageDescriptionScope["threadType"];
   readonly projectId?: ProjectId | undefined;
   readonly threadModel: string;
@@ -217,7 +220,7 @@ export function lookToolForThread(input: {
   if (tools === undefined) return undefined;
   return adaptMediaToolSet({
     tools,
-    threadId: input.threadId,
+    threadId: input.readerId ?? input.threadId,
     ...(input.recordExternalContentIngestion === undefined
       ? {}
       : { recordExternalContentIngestion: input.recordExternalContentIngestion }),
