@@ -1280,6 +1280,37 @@ describe("a secret the person asked Octant to remember", () => {
     expect(remembered.list().map(({ id }) => id)).toEqual([kept]);
   });
 
+  it("grants nothing to a device that lost its standing while a remembered value was read", async () => {
+    const { open } = memory();
+    const context = host({ remembered: open() });
+    await grant(context, request(), { lifetime: "remember" });
+    context.service.withdrawThread(THREAD);
+    const asked = context.service.request(context.caller, request());
+    const { id, remembered } = card(context.service);
+    const answer: ThreadSecretAnswer = {
+      id,
+      action: "save",
+      lifetime: "1-hour",
+      fields: [
+        {
+          name: "DEPLOY_TOKEN",
+          source: "remembered",
+          rememberedId: remembered[0]?.id ?? "",
+        },
+      ],
+    };
+    let standing = true;
+    const answered = context.service.answer(WINDOW, THREAD, answer, {
+      paired: true,
+      current: () => standing,
+    });
+    standing = false;
+    expect(await answered).toEqual({ status: "gone" });
+    expect(context.service.active()).toEqual([]);
+    expect(await save(context.service)).toEqual({ status: "accepted" });
+    expect(await asked).toMatchObject({ status: "saved" });
+  });
+
   it.each(["journal", "store", "grant"] as const)(
     "leaves nothing kept when the %s refuses",
     async (what) => {

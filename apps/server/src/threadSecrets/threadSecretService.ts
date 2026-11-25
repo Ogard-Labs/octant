@@ -173,6 +173,8 @@ export interface ThreadSecretReader {
   readonly paired: boolean;
   /** Whom a grant is journaled as; absent means the person at this host. */
   readonly actor?: EventActor | undefined;
+  /** Whether a device's session still stands. Asked again after each wait. */
+  readonly current?: (() => boolean) | undefined;
 }
 
 /** A card waiting on the person, as a list of asks names it. Nothing typed is in it. */
@@ -395,7 +397,9 @@ export class ThreadSecretService {
     pending.state = "saving";
     pending.failure = undefined;
     this.#changed();
-    const result = await this.#save(pending, answer, from).catch(
+    const permitted = () =>
+      from.current?.() !== false && this.#answerableBy(pending.caller, scopeId, from);
+    const result = await this.#save(pending, answer, from, permitted).catch(
       (): ThreadSecretFailure => "unavailable",
     );
     // The turn, thread or window may have ended while an item was read.
@@ -403,9 +407,10 @@ export class ThreadSecretService {
     if (typeof result === "string") {
       // The card stays open: a locked store can be unlocked, a value retyped.
       pending.state = "pending";
-      pending.failure = result;
+      const stands = permitted();
+      if (stands) pending.failure = result;
       this.#changed();
-      return { status: "refused", failure: result };
+      return stands ? { status: "refused", failure: result } : { status: "gone" };
     }
     pending.settle(result);
     return { status: "accepted" };
@@ -423,13 +428,14 @@ export class ThreadSecretService {
     this.sweep();
     const own = (caller: ThreadSecretCaller) =>
       caller.threadId === threadId && this.#answerableBy(caller, scopeId, from);
+    const shown = (card: ThreadSecretRequestCard) => (from.paired ? withoutStore(card) : card);
     return {
       requests: [
-        ...this.#answered.filter(({ caller }) => own(caller)).map(({ card }) => card),
+        ...this.#answered.filter(({ caller }) => own(caller)).map(({ card }) => shown(card)),
         ...[...this.#pending.values()]
           .filter(({ caller }) => own(caller))
           .map((pending) => ({
-            ...(from.paired ? withoutStore(pending.card) : pending.card),
+            ...shown(pending.card),
             state: pending.state,
             ...(pending.failure === undefined ? {} : { failure: pending.failure }),
           })),
@@ -947,6 +953,7 @@ export class ThreadSecretService {
     pending: PendingRequest,
     answer: Extract<ThreadSecretAnswer, { readonly action: "save" }>,
     from: ThreadSecretReader,
+    permitted: () => boolean,
   ): Promise<ThreadSecretFailure | ThreadSecretRequestResult> {
     const { card, caller, input } = pending;
     if (
@@ -961,6 +968,7 @@ export class ThreadSecretService {
       answered.set(entry.name, read);
     }
     if (this.#pending.get(card.id) !== pending) return "revoked";
+    if (!permitted()) return "unavailable";
     // Read after every await: a card drawn before Strict came on grants nothing
     // Strict refuses.
     const authority = this.#authority(caller);
@@ -985,6 +993,7 @@ export class ThreadSecretService {
         : decideThreadSecretLifetime({ ...still, kind: input.kind }, answer.lifetime);
     if (
       this.#pending.get(card.id) !== pending ||
+      !permitted() ||
       still === undefined ||
       still.mode === "chat" ||
       decision?.status !== "allowed"

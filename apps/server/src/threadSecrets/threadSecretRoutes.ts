@@ -175,11 +175,12 @@ export function createPairedThreadSecretRoutes(
     }
     if (Either.isLeft(command)) return reply({ status: "invalid" }, 400);
     // The body may have arrived slowly; the device may have been signed out.
-    if (context.abortSignal?.aborted || !deps.sessionCurrent(principal, context.sessionNow))
-      return reply({ status: "refused" }, 401);
+    const current = () =>
+      context.abortSignal?.aborted !== true && deps.sessionCurrent(principal, context.sessionNow);
+    if (!current()) return reply({ status: "refused" }, 401);
     const { right } = command;
     const scopeId = String(context.scopeId);
-    const reader = { paired: true, actor: eventActorForPrincipal(principal) };
+    const reader = { paired: true, actor: eventActorForPrincipal(principal), current };
     return reply(
       right.kind === "list"
         ? { requests: service.view(scopeId, right.threadId, reader).requests, active: [] }

@@ -26,6 +26,7 @@ function setup(
     readonly sessionCurrent?: () => boolean;
     readonly records?: unknown[];
     readonly storeFails?: boolean;
+    readonly whileStoring?: () => Promise<void>;
     readonly browse?: ThreadSecretServiceOptions["browse"];
   } = {},
 ) {
@@ -58,7 +59,7 @@ function setup(
       },
       store: {
         resolve: async () => "old-value",
-        set: async () => undefined,
+        set: async () => over.whileStoring?.(),
         delete: async () => {
           if (over.storeFails === true) throw new Error("locked");
         },
@@ -314,6 +315,39 @@ describe("a thread secret's card on a phone", () => {
       requests: [{ state: "pending", sources: expect.arrayContaining(["onepassword"]) }],
     });
   });
+
+  it("keeps a linked store out of a card that has been answered", async () => {
+    const h = setup(anywhere);
+    await h.route(h.call(h.answer()));
+    const listed = await h.fromDevice({ kind: "list", threadId: THREAD });
+    expect(await listed?.json()).toMatchObject({
+      requests: [{ state: "saved", sources: ["pasted"], remembered: [] }],
+    });
+  });
+
+  it.each(["signed out", "held below Full"] as const)(
+    "grants nothing to a device %s while its answer was kept, and leaves the card here",
+    async (how) => {
+      let lost = false;
+      const h = setup({
+        ...anywhere,
+        mayAnswer: () => !(lost && how === "held below Full"),
+        sessionCurrent: () => !(lost && how === "signed out"),
+        whileStoring: async () => {
+          lost = true;
+        },
+      });
+      const answered = await h.fromDevice(h.answer({ lifetime: "remember" }));
+      expect(await answered?.json()).toEqual({ status: "gone" });
+      expect(h.service.active(THREAD)).toEqual([]);
+      expect(h.service.hostView().remembered.map(({ name }) => name)).toEqual(["OLD"]);
+      const here = (await (await h.route(h.call()))?.json()) as {
+        readonly requests: ReadonlyArray<Record<string, unknown>>;
+      };
+      expect(here.requests).toMatchObject([{ state: "pending" }]);
+      expect(here.requests[0]).not.toHaveProperty("failure");
+    },
+  );
 
   it("takes neither a listing of the store nor a revoke or forget", async () => {
     const h = setup(anywhere);
