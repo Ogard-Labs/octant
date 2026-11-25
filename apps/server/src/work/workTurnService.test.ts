@@ -97,6 +97,7 @@ import {
   type WorkThreadAdoptedSession,
   type ImportedSessionHistory,
   type WorkTurnStreamFrame,
+  type ThreadMessageSteered,
 } from "@octant/contracts";
 import { Effect, Queue, Schema, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -4930,6 +4931,71 @@ describe("WorkTurnService", () => {
       { taskId: "task-1", state: "completed", summary: "Watch CI" },
       { taskId: "task-2", state: "pending", summary: "Commit the evidence" },
     ]);
+    controller.abort();
+  });
+
+  it("shows a message steered into a running turn at once, keeping the reply streamed so far", async () => {
+    const steered = deferred<void>();
+    const gate = deferred<void>();
+    const tasks = [{ taskId: "task-1", state: "pending" as const, summary: "Watch CI" }];
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onDelta?.("Partial reply");
+          input.onTasks?.(tasks);
+          await steered.promise;
+          input.onDelta?.("Partial reply, then more");
+          await gate.promise;
+          return { kind: "completed", response: "Partial reply, then more" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const controller = new AbortController();
+    const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
+    await expect(stream.next()).resolves.toMatchObject({ value: { kind: "response-delta" } });
+    await expect(stream.next()).resolves.toMatchObject({ value: { kind: "turn-tasks" } });
+
+    fixture.service.showSteeredMessage({
+      kind: "thread-message-steered",
+      mode: "work",
+      threadId: String(ids.thread),
+      turnKey: String(ids.request),
+      messageId: "12121212-1212-4212-8212-121212121212",
+      body: "Check the totals too.",
+      steeredAt: "2026-08-11T12:00:05.000Z" as UtcTimestamp,
+    } as ThreadMessageSteered);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "snapshot-required", sequence: 3, threadId: ids.thread },
+    });
+    // What the open view reads in answer to that frame, while the turn runs.
+    const reread = await fixture.service.transcript(ids.window, ids.thread);
+    expect(reread.liveCursor).toBe(3);
+    expect(reread.turns[0]).toMatchObject({
+      status: "running",
+      response: "Partial reply",
+      transcript: [{ role: "user" }, { role: "assistant", text: "Partial reply" }],
+      tasks,
+      steeredMessages: [{ body: "Check the totals too." }],
+    });
+
+    // The same subscription goes on, so a host reader waiting for the turn to
+    // settle is not cut off.
+    steered.resolve();
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "response-delta", sequence: 4, text: ", then more" },
+    });
+    gate.resolve();
+    await expect(stream.next()).resolves.toMatchObject({
+      value: {
+        kind: "turn-settled",
+        turn: {
+          response: "Partial reply, then more",
+          steeredMessages: [{ body: "Check the totals too." }],
+        },
+      },
+    });
     controller.abort();
   });
 

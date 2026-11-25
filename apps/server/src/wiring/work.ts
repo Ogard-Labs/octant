@@ -2081,7 +2081,7 @@ export function wireWork(deps: WorkDependencies) {
             actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
           });
           // Work keeps its turns in memory; the journal rebuilds them at start.
-          if (scope.mode === "work") workTurnProjection.applySteeredMessage(record);
+          if (scope.mode === "work") workTurnService.showSteeredMessage(record);
         },
       },
     });

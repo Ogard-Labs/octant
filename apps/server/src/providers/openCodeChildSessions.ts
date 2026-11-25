@@ -71,6 +71,37 @@ const FORWARDED_EVENTS: ReadonlySet<string> = new Set([
   "session.next.tool.called",
 ]);
 
+/**
+ * One assistant message's counts as the session's own usage reads them
+ * (`openCodeEventMapper`): input is all input, cached or not, and output
+ * includes reasoning, which OpenCode reports apart. A message missing any of
+ * the parts stays unknown rather than counted short.
+ */
+function messageUsage(tokens: unknown): ProviderChildUsage | undefined {
+  const reported = tokens as
+    | {
+        readonly input?: unknown;
+        readonly output?: unknown;
+        readonly reasoning?: unknown;
+        readonly cache?: { readonly read?: unknown; readonly write?: unknown };
+      }
+    | undefined;
+  return reportedChildUsage({
+    inputTokens: sumOfCounts([reported?.input, reported?.cache?.read, reported?.cache?.write]),
+    outputTokens: sumOfCounts([reported?.output, reported?.reasoning]),
+  });
+}
+
+/** The sum of counts that are all safe non-negative integers; otherwise unknown. */
+function sumOfCounts(counts: ReadonlyArray<unknown>): number | undefined {
+  let sum = 0;
+  for (const count of counts) {
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return undefined;
+    sum += count;
+  }
+  return sum;
+}
+
 function parentOf(event: OpenCodeEvent): string | undefined {
   const properties = event.properties as {
     readonly parentID?: unknown;
@@ -214,13 +245,7 @@ export class OpenCodeChildSessions {
     }
     const info = (event.properties as { readonly info?: Readonly<Record<string, unknown>> }).info;
     if (info?.role !== "assistant" || typeof info.id !== "string") return undefined;
-    const tokens = info.tokens as
-      | { readonly input?: unknown; readonly output?: unknown }
-      | undefined;
-    const counted = reportedChildUsage({
-      inputTokens: tokens?.input,
-      outputTokens: tokens?.output,
-    });
+    const counted = messageUsage(info.tokens);
     if (
       counted?.inputTokens !== undefined &&
       counted.outputTokens !== undefined &&

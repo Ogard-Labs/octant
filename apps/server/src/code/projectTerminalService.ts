@@ -184,6 +184,8 @@ export interface ProjectTerminalServiceOptions {
     readonly workThreadId: WorkThreadId;
     readonly shell: string;
     readonly strict: boolean;
+    /** The program starts under, or a turn of the task holds, a chosen sandbox policy. */
+    readonly sandboxPolicySelected: boolean;
   }) => ProviderTerminalLaunch;
   /**
    * A Work or Code Project on a registered server, which the local catalog never
@@ -1013,6 +1015,7 @@ export class ProjectTerminalService {
         workThreadId: providerTask,
         shell,
         strict,
+        sandboxPolicySelected: turnHoldsSandboxPolicy(String(providerTask)),
       }) ?? { status: "refused", message: "This host does not open provider terminals." };
       if (launch.status === "refused") return refused("unavailable", launch.message);
       providerProgram = launch;
@@ -1094,6 +1097,26 @@ export class ProjectTerminalService {
       protections = prepared;
       const deviceStillCurrent = () =>
         device === undefined || this.#deviceOwnerCurrent(windowId, device.binding);
+      // The policy the terminal starts under is known only now, and under one
+      // the program's environment keeps the provider's channels closed.
+      if (providerTask !== undefined && prepared.launch.sandboxPolicy !== undefined) {
+        const confined = this.#options.providerTerminal?.({
+          workThreadId: providerTask,
+          shell,
+          strict,
+          sandboxPolicySelected: true,
+        });
+        // Refused now (the provider was just switched off): never start with
+        // the environment resolved before the policy was known.
+        if (confined?.status !== "resolved") {
+          await prepared.end();
+          return refused(
+            "unavailable",
+            confined?.message ?? "This host does not open provider terminals.",
+          );
+        }
+        providerProgram = confined;
+      }
       // The program runs the way the task's turns do (maintainer decision,
       // 2026-11-21), by the rule a Code thread's provider terminal follows:
       // where a turn runs without Octant's sandbox, so does the program, on

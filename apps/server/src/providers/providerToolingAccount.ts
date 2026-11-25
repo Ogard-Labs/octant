@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import type { ProviderInstance, ProviderToolingProvider } from "@octant/contracts";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
 import { accountRunsAsItself, effectiveClaudeAccountConfigDirectory } from "@octant/domain";
 import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
 import { codexAccountProcessEnvironment } from "./codexProcess";
@@ -30,8 +31,12 @@ export function resolveProviderToolingAccount(
   homeDirectory: string,
   /** Whether the launch it mirrors is Strict; tooling commands always are. */
   strict = true,
-  /** Host credentials the person lets through to this provider; read only outside Strict. */
-  credentialPassThrough: ReadonlyArray<string> = [],
+  /**
+   * The person's provider switches and the host credentials they let through
+   * to this provider; read only outside Strict. Codex takes only the
+   * credentials: its launches carry no telemetry or self-update guard.
+   */
+  ownChannels: ProviderOwnChannels = DEFAULT_PROVIDER_OWN_CHANNELS,
 ): ProviderToolingAccount | undefined {
   if (instance.driverKind === "claude") {
     const directory =
@@ -42,10 +47,7 @@ export function resolveProviderToolingAccount(
       configDirectory: directory ?? "/",
       authentication: instance.configuration.authentication,
       strict,
-      // The provider's channels stay closed here, as before this list existed.
-      ...(credentialPassThrough.length === 0
-        ? {}
-        : { ownChannels: { ...DEFAULT_PROVIDER_OWN_CHANNELS, credentialPassThrough } }),
+      ownChannels,
     });
     if (directory === undefined) {
       // The account uses Claude's own default folder; leave both variables unset
@@ -78,7 +80,7 @@ export function resolveProviderToolingAccount(
             binaryPath: instance.configuration.binaryPath,
             hostEnvironment,
             codexHome: directory,
-            credentialPassThrough,
+            credentialPassThrough: ownChannels.credentialPassThrough ?? [],
           }),
       shownEnvironment: [{ name: "CODEX_HOME", value: directory }],
       directory,
