@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -121,6 +121,27 @@ describe("the secret card", () => {
       );
     },
   );
+
+  it("keeps pasted lines when what is pasted next has no text", async () => {
+    const { user } = setup();
+    await user.click(input());
+    await user.paste("one\ntwo");
+    fireEvent.paste(input(), { clipboardData: { getData: () => "" } });
+    expect(input()).toHaveValue("2 lines pasted");
+    expect(save()).toBeEnabled();
+  });
+
+  it("hides a value pasted over lines that replaced a shown one", async () => {
+    const { user } = setup();
+    await user.type(input(), "first-value");
+    await user.click(screen.getByRole("button", { name: "Show Deploy token" }));
+    expect(input()).toHaveAttribute("type", "text");
+    await user.click(input());
+    await user.paste("one\ntwo");
+    await user.paste("second-value");
+    expect(input()).toHaveValue("second-value");
+    expect(input()).toHaveAttribute("type", "password");
+  });
 
   it("takes one line pasted with its line break as that line", async () => {
     const { user } = setup();

@@ -329,6 +329,8 @@ function SecretField(props: {
     if (!typed) return;
     const { selectionStart, selectionEnd, value } = event.currentTarget;
     const pasted = event.clipboardData.getData("text/plain");
+    // An image or a file has no text to answer with.
+    if (pasted === "") return;
     // Over a count of lines there is no text to paste into: it is replaced.
     const text =
       lines > 1
@@ -341,6 +343,8 @@ function SecretField(props: {
       props.onProblem(TOO_LONG);
     } else if (lines > 1 || linesOf(text) > 1) {
       event.preventDefault();
+      // What was shown has gone; what replaces it starts hidden.
+      setRevealed(false);
       props.onChange({ text: linesOf(text) > 1 ? text : text.replace(/[\r\n]+$/u, "") });
     }
   };
