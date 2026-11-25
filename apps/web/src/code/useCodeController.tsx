@@ -2016,6 +2016,9 @@ export function useCodeController(options: CodeControllerOptions) {
         // A first read that failed covered nothing, so its activity is still
         // to be looked at.
         let triedActivity = openingReadFailed ? -1 : activityAtOpen;
+        // Until a read succeeds there is nothing shown to compare the newest
+        // turn with, so a look reads the thread.
+        let unread = openingReadFailed;
         let following = false;
         let retryPending = false;
         const followTurn = async () => {
@@ -2025,6 +2028,7 @@ export function useCodeController(options: CodeControllerOptions) {
             return true;
           conversationCursor = hydrated.nextCursor ?? conversationCursor;
           // It may be the first read of the thread to succeed.
+          unread = false;
           setConversationHistory("loaded");
           setTurnError((current) =>
             current === HISTORY_UNAVAILABLE_MESSAGE ? undefined : current,
@@ -2083,7 +2087,7 @@ export function useCodeController(options: CodeControllerOptions) {
               follow(activity, working);
             });
           };
-          void (working ? followTurn() : lookAtNewestTurn())
+          void (working || unread ? followTurn() : lookAtNewestTurn())
             .then((read) => {
               if (!read) lookAgainLater();
             })
@@ -3507,7 +3511,13 @@ export function useCodeController(options: CodeControllerOptions) {
           internalClearRan = true;
         }
         setConversation((current) => [
-          ...current,
+          // A read that landed before the host answered may already show the
+          // host's copy of this turn; the rows this send streams replace it.
+          ...current.filter(
+            (message) =>
+              message.operationId === undefined ||
+              String(message.operationId) !== String(operationId),
+          ),
           { ...userMessage, operationId },
           {
             id: assistantId,

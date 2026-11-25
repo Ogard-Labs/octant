@@ -643,6 +643,16 @@ describe("CodeThreadControllerSlots", () => {
       );
     }, 12_000);
 
+    it("reads a thread with no turns again when the read that opened it failed", async () => {
+      const { api, conversationWindow } = host([]);
+      conversationWindow.mockRejectedValueOnce(new Error("offline"));
+      const { registry } = open(api, {
+        ...bootstrap(),
+        activity: [{ threadId: threadA, lastSequence: 4 }] as never,
+      });
+      await waitFor(() => expect(registry.get(threadA)?.conversationHistory).toBe("loaded"));
+    });
+
     it("streams the queued turn that follows the one this view followed", async () => {
       let finishFirst = () => {};
       const firstEnds = new Promise<void>((resolve) => {
