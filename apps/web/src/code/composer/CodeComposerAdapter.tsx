@@ -1506,7 +1506,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                           Object.entries(modelOptionValues).filter(([key]) => key !== id),
                         );
                         setModelChoice({
-                          key: suggestModelKey,
+                          key: modelKey,
                           values: value === undefined ? remaining : { ...remaining, [id]: value },
                         });
                       }}

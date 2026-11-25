@@ -247,7 +247,7 @@ export interface DraftThreadWorkspaceProps {
   ) => Promise<CodeCommandResult | undefined>;
   readonly defaultPermissionMode?: PermissionMode;
   readonly defaultPermissionPersistence?: PermissionPersistence;
-  readonly worktreeSettings?: import("@octant/contracts/code").CodeWorktreeSettings;
+  readonly worktreeSettings?: import("@octant/contracts/code").CodeWorktreeSettings | undefined;
   readonly onPermissionModeChange?: (mode: PermissionMode) => void;
   /** Whether the selected provider has a reviewer of its own, so Auto applies. */
   readonly autoSupported?: boolean;

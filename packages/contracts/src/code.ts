@@ -646,30 +646,17 @@ export const CodeDefaultModel = Schema.Struct({
   modelId: ProviderModelId,
 }).annotations(strict);
 
-const BRANCH_PREFIX_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
 /**
  * The start of a branch name Octant generates for a new managed worktree
  * (`octant/`, `henrik/`, `wip-`). It uses the characters Octant generates and
- * none Git treats specially; the domain naming policy repeats the check.
+ * none Git treats specially: no segment ends with `.` or `.lock`, and none holds
+ * `..`. The domain naming policy repeats the check.
  */
 export const CodeBranchPrefix = Schema.String.pipe(
   Schema.maxLength(40),
-  Schema.filter((value) => {
-    const trimmed = value.endsWith("/") ? value.slice(0, -1) : value;
-    return (
-      trimmed.length > 0 &&
-      trimmed
-        .split("/")
-        .every(
-          (segment) =>
-            BRANCH_PREFIX_SEGMENT.test(segment) &&
-            !segment.endsWith(".") &&
-            !segment.endsWith(".lock") &&
-            !segment.includes(".."),
-        )
-    );
-  }),
+  Schema.pattern(
+    /^(?!.*\.(?:\.|(?:lock)?(?:\/|$)))[A-Za-z0-9][\w.-]*(?:\/[A-Za-z0-9][\w.-]*)*\/?$/,
+  ),
 );
 
 export const CodeWorktreeNaming = Schema.Literal("short-id", "prompt");
@@ -982,11 +969,6 @@ export const CodeCommand = Schema.Union(
     projectId: ProjectId,
   }).annotations(strict),
   /**
-   * The person asked a model for words to name a new worktree's branch. It
-   * carries the draft text and the model the composer has selected, and nothing
-   * else about the Project or the checkout.
-   */
-  /**
    * The names a new worktree's branch must not collide with: local branches,
    * remote branches without the remote's name, and tags. A bounded read of
    * names only, apart from the display list the Where picker shows.
@@ -995,6 +977,11 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("list-code-worktree-branch-names"),
     projectId: ProjectId,
   }).annotations(strict),
+  /**
+   * The person asked a model for words to name a new worktree's branch. It
+   * carries the draft text and the model the composer has selected, and nothing
+   * else about the Project or the checkout.
+   */
   Schema.Struct({
     kind: Schema.Literal("suggest-code-worktree-branch"),
     projectId: ProjectId,
