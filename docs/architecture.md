@@ -2228,12 +2228,16 @@ except where a bullet says otherwise.
   block (memory on, Project not kept out, thread not Leave no trace), to a turn
   a local window or a paired device the host's own person approved started. It
   takes the text and a kind, and the host keeps the text only if it is a
-  quotation from the person's own latest message in this thread, compared
-  without regard to whitespace or letter case; the entry stores the person's
-  stretch of that message, never the model's copy. This holds on every thread,
-  including one that has read outside content: a tool result, a web page, or
-  the agent's own words are not the person's and are refused with a reason the
-  model can read, so outside content cannot create an entry by this route. The
+  quotation from a message of the turn the tool was built for that the person
+  typed (see [What counts as the person's words](#what-counts-as-the-persons-words)),
+  compared without regard to whitespace or letter case; the entry stores the
+  person's stretch of that message, never the model's copy. The tool is pinned
+  to its own turn when it is built, so a message that arrives later, or any
+  message the person did not type, is not a source. This holds on every thread,
+  including one that has read outside content: a tool result, a web page, a
+  side task's text, a delivered result, or the agent's own words are not the
+  person's and are refused with a reason the model can read, so outside
+  content cannot create an entry by this route. The
   text is redacted as above before storage, and refused when it is over 400
   characters or names a protected path; the caps run through the same merge as
   the sweep. A routine's run, another turn the host starts as itself, and a
@@ -2249,6 +2253,34 @@ except where a bullet says otherwise.
   show the entry (it holds only entries older than the thread); every later
   thread, in any Project, mode, or provider, does. The tool step in the thread
   is the record of what was stored.
+- **What counts as the person's words.** A composer send claims
+  `typedByPerson` when the exact text it sends is what the person's own input
+  last left in a composer (typing, paste, cut, undo, dictation). A button, a
+  template, a recipe, or a prefilled draft writes text without that input, so
+  it counts only once the person changes it, and a message that carries a quote
+  of transcript text does not count. Side tasks (start and "Do it here"),
+  thread dialogue, answers to pending requests that build a prompt, pull
+  request and review buttons, Canvas and planner sends, routines, goal rounds,
+  restart and usage continuations, deliveries, coordinator and hub-delegated
+  turns, and outside agents through agent access never claim it. The host
+  believes the claim only on the person's own routes, where the authenticated
+  principal is a local window or a device the host's own person paired at
+  Full; from a hub-introduced, restricted, or agent-grant session, and from any
+  caller inside the host, it is ignored. The host records a believed claim as
+  `person-memory.turn-typed@1` (mode, thread id, and the turn, Code operation,
+  or steered message id; no text, hash, or excerpt) appended with the turn, so
+  a turn with no mark is not the person's words. A queued message keeps its
+  claim on the queue entry and a person's edit keeps it; any other edit clears
+  it. A message steered into a running turn is marked on its own. The marks are
+  erased with their thread, with Leave no trace, and by Forget everything, and
+  a thread keeps only its newest 200. A client that sends nothing (an older
+  one) leaves its turns unmarked, so nothing from them is quotable and nothing
+  new is learned from them; a client whose host predates the field sends the
+  message again without it when the host refuses the unknown field. The sweep
+  and the save tool read only marked turns among those that began after this
+  host began recording marks (`typedSince`, journaled in the settings and kept
+  through Forget everything); turns that began earlier are read as they always
+  were.
 - **What the distiller reads.** Only what the person wrote in the thread and
   its title: never the agent's answers, tool output, attachments, or files.
   Rationale: an agent's answer can carry outside content (a web page, a tool
@@ -2316,7 +2348,7 @@ except where a bullet says otherwise.
   events from the journal, not only from the view. Purging or deleting a
   thread erases its digest, removes it from every entry's sources, and erases
   each entry that came only from it.
-- **Storage.** Entries, digests, settings, and Leave-no-trace marks are
+- **Storage.** Entries, digests, settings, typed-turn marks, and Leave-no-trace marks are
   journal events (`person-memory-*` aggregates) held in host memory and
   rebuilt from the journal at start, so they are local, owner-only, and in no
   diagnostics or telemetry. A thread's digest names the thread as `threadId`,
@@ -2346,11 +2378,12 @@ except where a bullet says otherwise.
     its lead sees and never more. A child whose originating scope is absent or
     restricted, or whose lead is peer-delegated, in a kept-out Project, or in a
     Leave no trace thread, gets neither.
-  - Only turns with the person's own message can write person memory: the
-    distillation of ended threads, and `octant_remember_person` in a turn a
-    local window or a paired device started, with the person's own words from
-    that thread's latest message. Routines, host-started turns, and subagents
-    read it without writing to it, and all caps stay unchanged.
+  - Only turns with the person's own typed message can write person memory: the
+    distillation of ended threads (marked turns, plus turns older than the
+    marks), and `octant_remember_person` in a turn a local window or a paired
+    device started, with the person's typed words from that turn's own message.
+    Routines, host-started turns, and subagents read it without writing to it,
+    and all caps stay unchanged.
   - A hub, spoke, or peer host: person memory stays on the host that wrote
     it and is never synced or relayed.
   - A provider: sees memory only in a thread (or its subagent) on that provider

@@ -1611,6 +1611,52 @@ describe("which turns the person typed", () => {
     expect(messages).toEqual(["I typed this", "Said before marks"]);
   });
 
+  it("reads an old journal's turns as before, and starts counting marks from the first start that follows", () => {
+    const h = harness([]);
+    // A journal written before marks existed: the settings event has no start.
+    h.journal.append({
+      aggregate: {
+        aggregateType: "person-memory-settings",
+        aggregateId: "00000000-0000-4000-8000-0000000000e1",
+      },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: "person-memory.settings-changed@1",
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor,
+          occurredAt: START,
+          payload: {
+            settings: { enabled: true, pastThreadSearch: true, excludedProjectIds: [] },
+            since: START,
+          },
+        },
+      ],
+    });
+    const old = new PersonMemoryStore({
+      connection: h.connection,
+      journal: h.journal,
+      uuid: () => crypto.randomUUID(),
+      clock: () => decodeUtcTimestamp("2026-11-02T00:00:00.000Z"),
+      actor,
+    });
+    const turn = (began: string) => ({
+      mode: "chat" as const,
+      threadId: THREAD_1,
+      turnId: "turn-a",
+      began,
+    });
+
+    // The first start journals when marking began; older turns read as before.
+    const began = old.typedSince();
+    expect(String(began)).toBe("2026-11-02T00:00:00.000Z");
+    expect(old.countsAsPersonWords(turn("2026-11-01T10:30:00.000Z"))).toBe(true);
+    expect(old.countsAsPersonWords(turn("2026-11-02T00:00:01.000Z"))).toBe(false);
+    old.close();
+  });
+
   it("keeps an entry's saved event when the sweep later rewrites it", async () => {
     const thread: FakeThread = {
       id: THREAD_1,
