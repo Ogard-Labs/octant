@@ -34,6 +34,11 @@ export interface ShellResizeHandleProps {
   readonly collapse?: {
     readonly collapsed: boolean;
     readonly onCollapsedChange: (collapsed: boolean) => void;
+    /**
+     * The width the panel is drawn at, when the window squeezes it below its
+     * value. A drag starts there, so it hides where the edge is seen to be.
+     */
+    readonly drawnValue?: () => number | undefined;
   };
   readonly edge: "leading" | "trailing" | "top" | "bottom";
   readonly maximum: number;
@@ -96,7 +101,7 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
     if (delta === 0 && !pointer.moved) return;
     // Where the dragged edge asks to be, before the bounds apply. A hidden
     // panel's edge starts from nothing.
-    const requested = (pointer.startCollapsed ? 0 : pointer.startValue) + delta;
+    const requested = (pointer.startCollapsed ? 0 : pointer.startEdge) + delta;
     const hidden =
       props.collapse !== undefined &&
       requested <
@@ -194,6 +199,7 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
           activePointer.current = {
             pointerId: event.pointerId,
             startValue: props.value,
+            startEdge: Math.min(props.value, props.collapse?.drawnValue?.() ?? props.value),
             startPoint: verticalResize(props.edge) ? event.clientY : event.clientX,
             startCollapsed: collapsed,
             collapsed,
@@ -216,6 +222,7 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
 interface ActivePointer {
   readonly pointerId: number;
   readonly startValue: number;
+  readonly startEdge: number;
   readonly startPoint: number;
   readonly startCollapsed: boolean;
   collapsed: boolean;

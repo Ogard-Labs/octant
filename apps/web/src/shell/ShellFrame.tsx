@@ -231,6 +231,15 @@ function useWorkspaceWidthVariable(
   }, [layer, present]);
 }
 
+/** The sidebar column as the stylesheet resolved it: a dock can squeeze it below its setting. */
+function renderedSidebarWidth(frame: HTMLElement | null): number | undefined {
+  if (frame === null) return undefined;
+  const width = Number.parseFloat(
+    getComputedStyle(frame).getPropertyValue("--octant-rendered-sidebar-width"),
+  );
+  return Number.isFinite(width) && width > 0 ? width : undefined;
+}
+
 export function ShellFrame(props: ShellFrameProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const workspaceLayerRef = useRef<HTMLDivElement | null>(null);
@@ -353,6 +362,7 @@ export function ShellFrame(props: ShellFrameProps) {
                       collapse: {
                         collapsed: props.sidebarCollapsed === true,
                         onCollapsedChange: props.onSidebarCollapsedChange,
+                        drawnValue: () => renderedSidebarWidth(shellRef.current),
                       },
                     })}
                 edge="trailing"

@@ -166,17 +166,17 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
     latestKeybindings.current = keybindings;
   }, [keybindings]);
 
-  // Only a running terminal with a place among the thread's own takes part.
+  // Only a mounted terminal with a place among the thread's own takes part.
   useEffect(() => {
     if (sessionNumber === 0 || shell === undefined || slot === undefined) return;
     const cycle = terminalCycleFor(shell);
     latestCycle.current = { cycle, slot };
-    const forget = cycle.register(slot, () => session.current?.focus());
+    const forget = cycle.register(slot, () => session.current?.focus(), props.interactive);
     return () => {
       latestCycle.current = undefined;
       forget();
     };
-  }, [shell, slot, sessionNumber]);
+  }, [shell, slot, sessionNumber, props.interactive]);
 
   useEffect(() => {
     let disposed = false;

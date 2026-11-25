@@ -86,8 +86,11 @@ export function listThreadTerminals(input: TerminalPlaceInput): ReadonlyArray<Te
 export interface TerminalCycle {
   /** Moves the caret from the terminal in `fromSlot` to the one beside it. */
   readonly cycle: (fromSlot: string, direction: "next" | "previous") => void;
-  /** A running terminal says how to take the caret; the return value forgets it. */
-  readonly register: (slot: string, focus: () => void) => () => void;
+  /**
+   * A mounted terminal says how to take the caret, and whether it takes typing
+   * (a shell that exited is a readable replay); the return value forgets it.
+   */
+  readonly register: (slot: string, focus: () => void, takesInput: boolean) => () => void;
 }
 
 /** How long a terminal brought to the front may take to attach and take the caret. */
@@ -107,11 +110,9 @@ export function createTerminalCycle(
     readonly show: (place: TerminalPlace) => void;
   },
 ): TerminalCycle {
-  const mounted = new Map<string, () => void>();
+  const mounted = new Map<string, { readonly focus: () => void; readonly takesInput: boolean }>();
   let abandonPending: (() => void) | undefined;
-  let pending:
-    | { readonly slot: string; readonly threadId: string; readonly deadline: number }
-    | undefined;
+  let pending: { readonly slot: string; readonly threadId: string } | undefined;
 
   const forgetPending = (): void => {
     pending = undefined;
@@ -134,12 +135,13 @@ export function createTerminalCycle(
       const from = places.find((place) => terminalSlotKey(place) === fromSlot);
       if (from === undefined) return;
       // A pane draws only what it holds, so one with no running terminal has
-      // nowhere to put the caret. A session behind a tab mounts when shown.
-      const open = places.filter(
-        (place) =>
-          place.threadId === from.threadId &&
-          (place.kind !== "pane" || mounted.has(terminalSlotKey(place))),
-      );
+      // nowhere to type. A session behind a tab mounts when shown, and one that
+      // turns out to have exited still takes the caret, so the chord goes on.
+      const open = places.filter((place) => {
+        if (place.threadId !== from.threadId) return false;
+        const key = terminalSlotKey(place);
+        return place.kind !== "pane" || key === fromSlot || mounted.get(key)?.takesInput === true;
+      });
       const index = open.findIndex((place) => terminalSlotKey(place) === fromSlot);
       if (index < 0 || open.length < 2) return;
       const target = open[(index + (direction === "next" ? 1 : -1) + open.length) % open.length];
@@ -147,29 +149,34 @@ export function createTerminalCycle(
       const slot = terminalSlotKey(target);
       forgetPending();
       show(target);
-      const focus = mounted.get(slot);
-      if (focus !== undefined) {
-        focus();
+      const standing = mounted.get(slot);
+      if (standing !== undefined) {
+        standing.focus();
         return;
       }
-      pending = { slot, threadId: from.threadId, deadline: Date.now() + MOUNT_DEADLINE_MS };
+      pending = { slot, threadId: from.threadId };
       const abandon = (): void => forgetPending();
+      const deadline = setTimeout(abandon, MOUNT_DEADLINE_MS);
       globalThis.document?.addEventListener("pointerdown", abandon, true);
-      abandonPending = () => globalThis.document?.removeEventListener("pointerdown", abandon, true);
+      abandonPending = () => {
+        clearTimeout(deadline);
+        globalThis.document?.removeEventListener("pointerdown", abandon, true);
+      };
     },
-    register: (slot, focus) => {
-      mounted.set(slot, focus);
+    register: (slot, focus, takesInput) => {
+      const standing = { focus, takesInput };
+      mounted.set(slot, standing);
       if (pending?.slot === slot) {
-        const { threadId, deadline } = pending;
+        const { threadId } = pending;
         forgetPending();
         // A dock tab's name repeats from thread to thread.
         const sameThread = read().places.some(
           (place) => terminalSlotKey(place) === slot && place.threadId === threadId,
         );
-        if (sameThread && Date.now() <= deadline && caretIsFree()) focus();
+        if (sameThread && caretIsFree()) focus();
       }
       return () => {
-        if (mounted.get(slot) === focus) mounted.delete(slot);
+        if (mounted.get(slot) === standing) mounted.delete(slot);
       };
     },
   };

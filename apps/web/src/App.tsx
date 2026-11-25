@@ -8945,7 +8945,7 @@ function LaunchedShell(
     replyDetailThread === undefined
       ? undefined
       : (replyDetailThread.mode === "code"
-          ? navigationModel.codeProjectThreads
+          ? navigationModel.codeSidebarThreads
           : replyDetailThread.mode === "work"
             ? navigationModel.workProjectThreads
             : chatController.status === "ready"

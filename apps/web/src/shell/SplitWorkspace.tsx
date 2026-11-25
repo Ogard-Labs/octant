@@ -956,7 +956,8 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
         <div className="workspace-pane__panel" hidden={activeLocalView !== undefined}>
           <TerminalSlot
             slot={
-              surface.kind === "code-terminal"
+              // A terminal a local view covers has nowhere to show a caret.
+              surface.kind === "code-terminal" && activeLocalView === undefined
                 ? paneTerminalSlot(pane.paneId, String(surface.id))
                 : undefined
             }

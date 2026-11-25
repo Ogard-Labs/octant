@@ -143,7 +143,7 @@ describe("ShellResizeHandle", () => {
   });
 });
 
-function renderCollapsible(startCollapsed: boolean) {
+function renderCollapsible(startCollapsed: boolean, drawnValue?: () => number) {
   const onCommit = vi.fn();
   const onPreview = vi.fn();
   const onCollapsedChange = vi.fn();
@@ -161,6 +161,7 @@ function renderCollapsible(startCollapsed: boolean) {
             onCollapsedChange(next);
             setCollapsed(next);
           },
+          ...(drawnValue === undefined ? {} : { drawnValue }),
         }}
         edge="trailing"
         maximum={420}
@@ -198,6 +199,21 @@ describe("a resize handle whose panel can be dragged shut", () => {
     fireEvent.pointerUp(separator, { clientX: 100, pointerId: 1 });
     expect(onCommit).not.toHaveBeenCalled();
     expect(onCollapsedChange).toHaveBeenCalledOnce();
+  });
+
+  it("hides a squeezed panel where its edge is drawn, and restores its own width", () => {
+    const { onCommit, onPreview, onCollapsedChange, separator } = renderCollapsible(
+      false,
+      () => 240,
+    );
+
+    fireEvent.pointerDown(separator, { clientX: 240, pointerId: 5 });
+    fireEvent.pointerMove(separator, { clientX: 150, pointerId: 5 });
+    expect(onCollapsedChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.pointerUp(separator, { clientX: 150, pointerId: 5 });
+    expect(onPreview).toHaveBeenLastCalledWith(300);
+    expect(onCommit).not.toHaveBeenCalled();
   });
 
   it("stays shown at the minimum after a small overshoot", () => {

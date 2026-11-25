@@ -2862,7 +2862,7 @@ drag strip and the traffic-light reserve do not move. The slide is for opening a
 the system's reduced-motion setting or the app's own.
 Dragging the sidebar's edge also hides and shows it, with the same one hidden
 state as **Hide sidebar** and **Show sidebar**, in whichever collapsed form the
-Icon rail setting names. A drag past the minimum width stops at the minimum;
+Icon rail setting names, and with the same slide. A drag past the minimum width stops at the minimum;
 64px further it hides the sidebar while the pointer is still down. Hiding this
 way keeps the width from before the drag. While the sidebar is hidden, its edge
 (the window's left edge, or the icon rail's right edge) stays grabbable: pulling
@@ -4413,9 +4413,9 @@ Terminal, then the dock's Terminal sessions in tab order. Provider program
 terminals take part like shells. Choosing a session behind another brings it to
 the front of its own region and focuses it once it has attached; if the person
 clicks or moves focus elsewhere first, or it has not attached within 15 seconds,
-the caret stays where it is. Left out: other threads' terminals, anything a
-focused pane, narrow window or closed dock or panel hides, a dock Terminal
-minimised to its card, a pane with no running terminal, the card's read-only
+the caret stays where it is. Left out: other threads' terminals, anything a focused pane, narrow window, covering content
+view, or closed dock or panel hides, a dock Terminal
+minimised to its card, a pane whose shell is not running, the card's read-only
 preview, Zen's cards and Project terminals, which belong to no thread view.
 Only Code threads have thread terminals. The commands are keyboard only: the
 command palette lists no terminal focus command.

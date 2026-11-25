@@ -89,6 +89,7 @@ function Workbench(props: {
   readonly layout: WorkspaceLayoutNode;
   readonly dockSessions: ReadonlyArray<string>;
   readonly onShow?: () => void;
+  readonly exited?: string;
 }) {
   const [shown, setShown] = useState(props.dockSessions[0]);
   const tabs = props.dockSessions.map((id) => ({ id, surface: "terminal" }));
@@ -117,7 +118,7 @@ function Workbench(props: {
           <TerminalSlot key={terminalSlotKey(place)} slot={terminalSlotKey(place)}>
             <XtermTerminalAdapter
               ariaLabel={place.label}
-              interactive
+              interactive={place.label !== props.exited}
               loadRuntime={runtimes}
               onData={() => undefined}
               onResize={() => undefined}
@@ -200,6 +201,54 @@ describe("cycling between open terminals", () => {
     expect(caret("dock a")).toHaveFocus();
   });
 
+  it("skips a pane whose shell exited, and can leave one the caret was in", async () => {
+    const layout = split(
+      split(pane("a", THREAD, "code-terminal"), pane("b", THREAD, "code-terminal")),
+      pane("c", THREAD, "code-terminal"),
+    );
+    const { rerender } = render(<Workbench dockSessions={[]} layout={layout} />);
+    await settle();
+    act(() => caret("pane a").focus());
+    await press("ArrowDown");
+    expect(caret("pane b")).toHaveFocus();
+
+    rerender(<Workbench dockSessions={[]} exited="pane b" layout={layout} />);
+    await press("ArrowDown");
+    expect(caret("pane c")).toHaveFocus();
+    await press("ArrowUp");
+    expect(caret("pane a")).toHaveFocus();
+  });
+
+  it("stops waiting for a session that never attaches", () => {
+    vi.useFakeTimers();
+    try {
+      const cycle = createTerminalCycle(() => ({
+        places: listThreadTerminals({
+          dock: {
+            threadId: THREAD,
+            tabs: [
+              { id: "a", surface: "terminal" },
+              { id: "b", surface: "terminal" },
+            ],
+            minimised: [],
+          },
+        }),
+        show: () => undefined,
+      }));
+      const removed = vi.spyOn(document, "removeEventListener");
+      cycle.cycle("dock:a", "next");
+      vi.advanceTimersByTime(15_000);
+      expect(removed).toHaveBeenCalledWith("pointerdown", expect.any(Function), true);
+
+      const focus = vi.fn();
+      cycle.register("dock:b", focus, true);
+      expect(focus).not.toHaveBeenCalled();
+      removed.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does nothing with one terminal", async () => {
     const onShow = vi.fn();
     const layout = split(
@@ -237,15 +286,15 @@ describe("cycling between open terminals", () => {
       cycle.cycle("dock:a", "next");
       composer.focus();
       const focus = vi.fn();
-      cycle.register("dock:b", focus);
+      cycle.register("dock:b", focus, true);
       expect(focus).not.toHaveBeenCalled();
 
       composer.blur();
       cycle.cycle("dock:a", "next");
       fireEvent.pointerDown(composer);
       const later = vi.fn();
-      cycle.register("dock:b", later)();
-      cycle.register("dock:b", later);
+      cycle.register("dock:b", later, true)();
+      cycle.register("dock:b", later, true);
       // The first registration above delivered nothing after the pointer press.
       expect(later).not.toHaveBeenCalled();
     } finally {
@@ -272,7 +321,7 @@ describe("cycling between open terminals", () => {
     threadId = OTHER;
     const focus = vi.fn();
 
-    cycle.register("dock:terminal:2", focus);
+    cycle.register("dock:terminal:2", focus, true);
 
     expect(focus).not.toHaveBeenCalled();
   });
@@ -288,8 +337,8 @@ describe("cycling between open terminals", () => {
     const cycle = createTerminalCycle(() => ({ places, show }));
     const [first, , third] = places.map(terminalSlotKey);
     const focus = vi.fn();
-    cycle.register(first ?? "", () => undefined);
-    cycle.register(third ?? "", focus);
+    cycle.register(first ?? "", () => undefined, true);
+    cycle.register(third ?? "", focus, true);
 
     cycle.cycle(first ?? "", "next");
 
