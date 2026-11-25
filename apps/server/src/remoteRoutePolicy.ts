@@ -30,6 +30,7 @@ import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
 import { PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS } from "./providers/providerCredentialRoutes";
 import { PAIRED_DEVICE_ADMINISTRATION_ROUTES } from "./remote/localDeviceAdministrationRoutes";
 import { PAIRED_DEVICE_ACCESS_ACTIVITY_ROUTES } from "./remote/accessActivityRoutes";
+import { PAIRED_THREAD_SECRETS_PATH } from "./threadSecrets/threadSecretRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
@@ -1146,6 +1147,14 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: REPOSITORY_BOOTSTRAP_LAND_FILES_MAX_BODY_BYTES,
   },
+  // A thread secret's card on a phone: eight fields of the largest value.
+  {
+    kind: "exact" as const,
+    path: PAIRED_THREAD_SECRETS_PATH,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 262_144,
+  },
   // One-time connector OAuth callback relay for a person-paired device:
   // JSON-only, tightly bounded, never in the restricted device catalogue.
   {
@@ -1462,6 +1471,34 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path: "/api/usage/export",
     methods: ["POST"] as const,
   },
+  // The diagnostics export, its journal-growth read and the support bundle,
+  // for a device the host's own person paired as a local window takes them
+  // (maintainer decision, 2026-11-12); the routes refuse every other device,
+  // and the desktop save stays on the loopback chain, never forwarded.
+  {
+    kind: "exact" as const,
+    path: "/api/diagnostics/export",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8 * 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/diagnostics/journal-growth",
+    methods: ["GET"] as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/diagnostics/bundle",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/diagnostics/bundle/preview",
+    methods: ["GET"] as const,
+  },
   {
     kind: "exact" as const,
     path: "/api/host/resources",
@@ -1603,6 +1640,16 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 64 * 1_024,
   })),
+  // Which MCP servers Plan may reach, shown beside that tooling. A hub-introduced
+  // or restricted device is refused before dispatch, as for the tooling itself.
+  { kind: "exact" as const, path: "/api/mcp-plan-read-only", methods: ["GET"] as const },
+  {
+    kind: "exact" as const,
+    path: "/api/mcp-plan-read-only/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  },
   // Kept provider sessions and background live tasks in Code and Work, for a
   // device the host's own person paired; each route refuses restricted devices.
   ...[

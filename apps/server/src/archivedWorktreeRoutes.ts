@@ -33,9 +33,10 @@ export interface ArchivedWorktreeRouteDependencies {
 }
 
 /**
- * Settings › Code › Worktrees. Both reading and removing are a window on this
- * host's: the list names folders on this computer, and removing one deletes
- * files from its disk, so a paired device gets neither.
+ * Settings › Code › Worktrees. Both reading and removing are the host's own
+ * person's, at a window or on a device they paired: the list names folders on
+ * this computer, and removing one deletes files from its disk, so a
+ * hub-introduced or restricted device gets neither.
  */
 export function createArchivedWorktreeRouteHandler(
   dependencies: ArchivedWorktreeRouteDependencies,

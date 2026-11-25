@@ -174,6 +174,43 @@ time.work-list__meta-text {
   color: var(--oct-meta);
 }
 
+.work-list__stack {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A pull request and the one it is based on are joined glyph to glyph: the
+   glyph sits on the row's first line, so the upper part is short. */
+.work-list__list > li[data-stack-join] {
+  position: relative;
+}
+
+.work-list__list > li:is([data-stack-join="previous"], [data-stack-join="both"])::before,
+.work-list__list > li:is([data-stack-join="next"], [data-stack-join="both"])::after {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: calc(var(--oct-space-2) + 7.5px);
+  width: 1px;
+  background: var(--oct-hairline-strong);
+  content: "";
+  pointer-events: none;
+}
+
+.work-list__list > li::before {
+  top: 0;
+  height: var(--oct-space-2);
+}
+
+.work-list__list > li::after {
+  top: calc(var(--oct-space-2) + var(--oct-text-sm) * 1.3 + 2px);
+  /* Across the gap between rows, which the page's list has and the dock's not. */
+  bottom: calc(var(--work-list-gap, 0px) * -1);
+}
+
 .work-list__linked {
   display: inline-flex;
   flex: 0 0 auto;

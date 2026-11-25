@@ -109,6 +109,7 @@ import {
   ProviderNativeSessionId,
   personalSignInRefusals,
   type ImportedSessionHistory,
+  type EventActor,
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
@@ -445,6 +446,7 @@ export interface WorkTurnServiceDependencies {
     thread: WorkThread,
     adopted: WorkThreadAdoptedSession,
     history: ImportedSessionHistory,
+    actor?: EventActor,
   ) => { readonly status: "recorded" } | { readonly status: "refused"; readonly message: string };
   /**
    * The earlier conversation the thread's adoption imported, as journaled;
@@ -1331,6 +1333,7 @@ export class WorkTurnService {
     authenticatedWindowId: WindowId,
     threadId: WorkThreadId,
     nativeSessionId: ProviderNativeSessionId,
+    actor?: EventActor,
   ): Promise<AdoptWorkNativeSessionResult> {
     const key = String(threadId);
     if (this.#adoptingThreads.has(key))
@@ -1422,6 +1425,7 @@ export class WorkTurnService {
               : { workingFolderId: target.thread.workingFolderId }),
           },
           history,
+          actor,
         );
         if (recorded.status === "refused")
           return { kind: "work-native-session-refused", message: recorded.message };

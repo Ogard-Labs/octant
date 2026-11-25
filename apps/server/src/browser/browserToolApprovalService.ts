@@ -306,8 +306,9 @@ export class BrowserToolApprovalService {
     // An upload's or a download's "Always allow" covers later transfers in that
     // direction between this site and this workspace on a page in the same
     // profile; it never becomes a
-    // remembered grant to open the origin. A paired device is not at this
-    // computer's files, so its answer covers this one transfer only.
+    // remembered grant to open the origin. A device the host's own person
+    // paired acts as the person, so its answer is remembered as a window's
+    // is; a restricted or hub-introduced device's covers this one transfer.
     const direction =
       pending.view.upload !== undefined
         ? "upload"
@@ -319,7 +320,7 @@ export class BrowserToolApprovalService {
       decision.remember === true &&
       direction !== undefined &&
       pending.workspaceRoot !== undefined &&
-      !this.#isPairedDevice(windowId)
+      !this.#isRestrictedDevice(windowId)
     ) {
       this.#options.rememberTransfer?.(
         {

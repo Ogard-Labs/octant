@@ -24,6 +24,7 @@ import {
   requireLinuxConfinement,
 } from "./linuxConfinement";
 import { LINUX_EGRESS_FORWARDER_PORT, LINUX_EGRESS_FORWARDER_SOURCE } from "./proxiedNetworkEgress";
+import { applyProtectedFilesChoice, configureSecretGuardLocations } from "./secretGuard";
 import { ProcessConfinementError } from "./seatbeltProfile";
 
 const SETPRIV_PATH = "/usr/bin/setpriv";
@@ -1112,6 +1113,55 @@ describe("Linux Bubblewrap confinement", () => {
       expect(result.stderr).toBe("");
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "keeps every thread's secrets from a command that holds the folder around them, whatever the list keeps",
+    () => {
+      const { boundRoot, temporaryDirectory } = fixture();
+      const runtime = join(boundRoot, "runtime");
+      const files = ["own", "other"].map((thread) =>
+        join(runtime, "thread-secrets", "host", thread, "TOKEN"),
+      );
+      for (const file of files) {
+        mkdirSync(dirname(file), { recursive: true });
+        writeFileSync(file, "private-value");
+      }
+      configureSecretGuardLocations({
+        dataDirectory: join(boundRoot, "data"),
+        runtimeDirectory: runtime,
+      });
+      try {
+        for (const removed of [[], ["octant-credentials"]] as const) {
+          applyProtectedFilesChoice({ added: [], removed });
+          const result = spawnSync(
+            DEFAULT_BWRAP_PATH,
+            [
+              ...buildBubblewrapLaunch({
+                executable: "/bin/sh",
+                args: [
+                  "-c",
+                  'echo x > "$1"; shift; for path in "$@"; do cat "$path" 2>/dev/null; done; echo end',
+                  "sh",
+                  join(runtime, "beside"),
+                  ...files,
+                ],
+                boundRoot,
+                temporaryDirectory,
+                networkEgress: "none",
+              }).args,
+            ],
+            { encoding: "utf8" },
+          );
+          expect(result.stderr).toBe("");
+          expect(result.stdout).toBe("end\n");
+          // The launch can write beside it: what stops it is the guard alone.
+          expect(readFileSync(join(runtime, "beside"), "utf8")).toBe("x\n");
+        }
+      } finally {
+        applyProtectedFilesChoice({ added: [], removed: [] });
+      }
     },
   );
 

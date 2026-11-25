@@ -28,6 +28,7 @@ import {
   OpenAiImageProviderConfiguration,
   OutsideHarnessEndpointProviderConfiguration,
   OutsideImageProviderConfiguration,
+  OutsideVideoProviderConfiguration,
   PermissionPersistence,
   PiProviderConfiguration,
   ProviderCatalogSnapshot,
@@ -261,6 +262,19 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-outside-image-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: OutsideImageProviderConfiguration,
+  }).annotations(strict),
+  /** Adds a video provider from an admitted outside video driver; created off, as above. */
+  Schema.Struct({
+    kind: Schema.Literal("create-outside-video-provider"),
+    ...ProviderInstanceCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: OutsideVideoProviderConfiguration,
+  }).annotations(strict),
+  /** Changes an outside video provider's address, key placement, or models; never its driver. */
+  Schema.Struct({
+    kind: Schema.Literal("change-outside-video-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: OutsideVideoProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("rename-provider"),

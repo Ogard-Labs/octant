@@ -213,13 +213,11 @@ Pika's own models. Runway also resells MiniMax H3, which fal does not host.
   since no compatible video API exists to be compatible with.
 
 A third-party video driver builds against the same seam as the in-tree
-drivers. Loading one from an outside package needs the outside driver format
-to carry media drivers. Today it carries only harness-endpoint chat drivers,
-and the same is true for image drivers. Loading outside media drivers (image
-and video) was approved on 2026-11-22 as its own change and is built
-separately. This seam stays compatible with it: a driver is a plain value of
-the seam's types, with no host import, so the same value can come from an
-outside package.
+drivers. A package from outside Octant can carry one, approved on 2026-11-22:
+it declares its models as the seam's own capabilities, runs in a confined
+process, and the host puts this seam's adapter in front of it, so the rules
+below hold for it unchanged
+([Outside media generation drivers](outside-provider-drivers.md#outside-media-generation-drivers)).
 
 ## Native first
 

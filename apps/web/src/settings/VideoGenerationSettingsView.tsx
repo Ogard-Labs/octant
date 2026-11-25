@@ -1,7 +1,7 @@
 import type { ProviderInstanceId, VideoGenerationSettings } from "@octant/contracts";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ShellSettings } from "@octant/contracts/shell";
-import { isVideoProfileDriverKind } from "@octant/domain";
+import { admitsListedOutsideVideoDriver, isVideoProfileDriverKind } from "@octant/domain";
 import type { ReactNode } from "react";
 import { ProviderCreateForm } from "../providers/ProviderSettingsConfiguration";
 import type { ProviderController } from "../providers/useProviderController";
@@ -22,8 +22,12 @@ export interface VideoGenerationSettingsViewProps {
  * provider; the price shows on each card before anything is made.
  */
 export function VideoGenerationSettingsView(props: VideoGenerationSettingsViewProps) {
+  const admitsOutside = admitsListedOutsideVideoDriver(props.providerSnapshot?.outsideDrivers);
   const ready = (props.providerSnapshot?.instances ?? []).filter(
-    (instance) => instance.enabled && isVideoProfileDriverKind(instance.driverKind),
+    (instance) =>
+      instance.enabled &&
+      isVideoProfileDriverKind(instance.driverKind) &&
+      (instance.driverKind !== "outside-video" || admitsOutside(instance)),
   );
   const firstReady = ready[0]?.displayName;
   return (

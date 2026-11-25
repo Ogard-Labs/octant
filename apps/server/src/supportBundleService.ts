@@ -6,6 +6,7 @@ import {
   type CodeSettings,
   type CorrelationId,
   type DiagnosticHostHealth,
+  type EventActor,
   type ProviderInstance,
   type ProviderObservedState,
   type SupportBundleExportRequest,
@@ -293,10 +294,19 @@ export async function exportSupportBundle(
   request: SupportBundleExportRequest,
   sources: SupportBundleSources,
   stage?: StageSupportBundleDelivery,
+  /** Who asked: the local person or the paired device; absent, the local person. */
+  actor?: EventActor,
+  /** Ends when the caller is gone or no longer admitted; nothing is recorded after. */
+  signal?: AbortSignal,
 ): Promise<SupportBundleOutcome> {
   const bundleId = (sources.idGenerator ?? randomUUID)();
   const facts = await gatherSupportBundleFacts(sources, bundleId);
   const files = buildSupportBundleFiles(facts, homeDirectoriesFor(sources));
+  // Gathering takes a while: a device lowered or revoked meanwhile is handed
+  // nothing, so no hand-over is journaled for it.
+  if (signal?.aborted === true) {
+    return { kind: "failed", message: "The request ended before the bundle was handed over." };
+  }
   const byteCount = files.reduce((sum, file) => sum + Buffer.byteLength(file.contents), 0);
   let staged: ReturnType<StageSupportBundleDelivery> | undefined;
   if (stage !== undefined) {
@@ -331,7 +341,7 @@ export async function exportSupportBundle(
           eventName: SUPPORT_BUNDLE_EXPORTED_EVENT,
           eventVersion: 1,
           correlationId: randomUUID() as CorrelationId,
-          actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          actor: actor ?? { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
           occurredAt: facts.generatedAt,
           payload,
         },
