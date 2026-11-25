@@ -727,6 +727,8 @@ export function wireCode(deps: CodeDependencies) {
       turnInProgress: (threadId) =>
         archivedWorktreeTurns?.turnInProgress?.(String(threadId)) === true,
       cleanup: (input, signal) => managedWorktreeService.cleanup(input, signal),
+      cleanupOnArchive: () =>
+        persistence.readCodeSettings()?.settings.worktrees?.cleanup?.onArchive !== false,
     });
     const archivedWorktreeRoutes = createArchivedWorktreeRouteHandler({
       worktrees: archivedWorktrees,

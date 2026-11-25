@@ -119,6 +119,28 @@ export interface ManagedWorktreeGitPort {
     signal: AbortSignal,
   ): Promise<Readonly<{ status: "deleted" | "rejected" }>>;
   /**
+   * Whether the worktree holds anything a person could not get back from the
+   * branch: untracked or ignored files. A port without it cannot tell, so a
+   * restorable cleanup that needs it is refused.
+   */
+  hasUnrecoverableFiles?(
+    targetPath: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; found: boolean }>
+    | Readonly<{ status: "unavailable" | "failed" }>
+  >;
+  /** The commit one local branch points at, or none when it does not exist. */
+  resolveBranchHead?(
+    input: Readonly<{ repositoryRoot: string; branch: string }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ status: "observed"; head?: string }> | Readonly<{ status: "failed" }>>;
+  /** Checks out an existing local branch in a new worktree folder (`git worktree add <path> <branch>`). */
+  restoreWorktree?(
+    input: Readonly<{ repositoryRoot: string; targetPath: string; branch: string }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ status: "created" | "rejected" }>>;
+  /**
    * Drop the checkpoint anchors of a checkout that is gone. The anchors live in
    * the repository's shared ref store, not in the worktree, so removing the
    * worktree does not take them with it.
@@ -181,7 +203,12 @@ export type ManagedWorktreeRefusalReason =
   | "repository-mismatch"
   | "remote-unavailable"
   | "undelivered"
-  | "unowned";
+  | "not-reclaimed"
+  | "restore-mismatch"
+  | "unowned"
+  | "unrecoverable-files"
+  | "unverified"
+  | "working";
 
 type ManagedWorktreeRefusal = Readonly<{
   status: "refused";
@@ -723,6 +750,15 @@ export class ManagedWorktreeService {
       return { status: "interrupted" };
     }
     if (receipt === undefined) return { status: "refused", reason: "unowned" };
+    // A restorable cleanup keeps what a restore needs; finishing it as a
+    // removal here would throw that away, so only the reclaim path touches it.
+    if (
+      receipt.reclaim !== undefined ||
+      receipt.state === "reclaimed" ||
+      receipt.state === "restoring"
+    ) {
+      return { status: "refused", reason: "mismatched" };
+    }
     if (
       discard !== undefined &&
       (receipt.branchIntent !== discard ||
@@ -1171,7 +1207,7 @@ export function managedWorktreeRoot(repositoryRoot: string, repositoryId: string
   return join(dirname(repositoryRoot), ".octant-worktrees", repositoryId);
 }
 
-function branchRef(branchIntent: string): string {
+export function branchRef(branchIntent: string): string {
   return `refs/heads/${branchIntent}`;
 }
 
@@ -1180,7 +1216,7 @@ function branchFromRefIntent(refIntent: string): string | undefined {
   return match?.[1];
 }
 
-function hasAmbiguousInventory(
+export function hasAmbiguousInventory(
   observation: Extract<RepositoryIdentityObservation, { status: "available" }>,
 ): boolean {
   return observation.worktrees.some(

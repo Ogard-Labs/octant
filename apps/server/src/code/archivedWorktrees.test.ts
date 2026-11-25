@@ -41,6 +41,7 @@ function setup(options: {
   readonly receiptState?: "ready" | "cleanup-pending" | "removed";
   readonly cleanup?: CleanupResult;
   readonly turnRunning?: boolean;
+  readonly cleanupOnArchive?: () => boolean;
 }) {
   const thread = {
     id: threadId,
@@ -60,6 +61,9 @@ function setup(options: {
     loadReceipt: async () => receipt(options.receiptState ?? "ready"),
     cleanup,
     turnInProgress: () => options.turnRunning === true,
+    ...(options.cleanupOnArchive === undefined
+      ? {}
+      : { cleanupOnArchive: options.cleanupOnArchive }),
     measure: async () => ({ bytes: 2_048, complete: true }),
   });
   return { worktrees, cleanup };
@@ -116,6 +120,18 @@ describe("archived worktrees", () => {
       { receiptId, confirmedByLocalUser: false, onArchive: true },
       expect.any(AbortSignal),
     );
+  });
+
+  it("leaves an archived thread's worktree alone when a person turned archive cleanup off, and removes it again when they turn it on", async () => {
+    let on = false;
+    const { worktrees, cleanup } = setup({ cleanupOnArchive: () => on });
+    await worktrees.reclaimOnArchive(threadId);
+    expect(cleanup).not.toHaveBeenCalled();
+    // It stays listed, so a person can still remove it by hand.
+    await expect(worktrees.list()).resolves.toHaveLength(1);
+    on = true;
+    await worktrees.reclaimOnArchive(threadId);
+    expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the worktree of a thread archived while its turn still runs", async () => {
