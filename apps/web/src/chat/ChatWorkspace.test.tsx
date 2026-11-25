@@ -1207,7 +1207,7 @@ describe("ChatWorkspace", () => {
     );
     expect(await within(notice).findByRole("button", { name: "Sign in" })).toBeEnabled();
     expect(awaiting).toHaveBeenCalledWith(
-      { mode: "chat", threadId, selections: [selection] },
+      { mode: "chat", threadId, selections: [selection], references: [] },
       expect.any(AbortSignal),
     );
     rerender(workspace(true));

@@ -91,7 +91,9 @@ function notice(
       className="thread-column"
       client={client}
       mode="code"
+      onResolveReference={async () => true}
       receipts={[]}
+      selections={[]}
       threadId={threadId}
       turnActive={false}
       {...overrides}
@@ -109,9 +111,41 @@ describe("signing in to a server from the thread", () => {
     expect(shown).toHaveTextContent("Linear needs sign-in");
     expect(await within(shown).findByRole("button", { name: "Sign in again" })).toBeEnabled();
     expect(calls.mcpServersAwaitingSignIn).toHaveBeenCalledWith(
-      { mode: "code", threadId, selections: [receipt.selection] },
+      { mode: "code", threadId, selections: [receipt.selection], references: [] },
       expect.any(AbortSignal),
     );
+  });
+
+  it("asks about a name the composer refused, and selects it again once signed in", async () => {
+    const user = userEvent.setup();
+    const { client, calls } = host({
+      begin: {
+        kind: "awaiting-consent",
+        attemptId: "46000000-0000-4000-8000-000000000009",
+        authorizationUrl: "https://linear.app/authorize",
+        relayable: true,
+        expiresAt: "2026-11-25T23:00:00.000Z",
+      } as never,
+    });
+    const onResolveReference = vi.fn(async () => true);
+    const refused = {
+      label: "@linear",
+      reference: "@linear",
+      status: { kind: "blocked", reason: "unavailable" },
+    } as const;
+    render(notice(client, { receipts: [refused], onResolveReference }));
+    await user.click(await screen.findByRole("button", { name: "Sign in again" }));
+    expect(calls.mcpServersAwaitingSignIn).toHaveBeenCalledWith(
+      { mode: "code", threadId, selections: [], references: ["@linear"] },
+      expect.any(AbortSignal),
+    );
+    expect(onResolveReference).not.toHaveBeenCalled();
+    await user.type(
+      await screen.findByRole("textbox", { name: "Callback address" }),
+      "http://127.0.0.1:4000/oauth/callback",
+    );
+    await user.click(screen.getByRole("button", { name: "Finish sign-in" }));
+    await waitFor(() => expect(onResolveReference).toHaveBeenCalledExactlyOnceWith("@linear"));
   });
 
   it("shows nothing in a thread that uses no server needing sign-in", async () => {
@@ -178,7 +212,7 @@ describe("signing in to a server from the thread", () => {
     await waitFor(() => expect(screen.queryByText("Linear needs sign-in")).toBeNull());
   });
 
-  it("stays dismissed in this thread until the server has been fine and needs sign-in again", async () => {
+  it("stays dismissed in this thread until the thread stops waiting on it and then does again", async () => {
     const user = userEvent.setup();
     const { client, calls, state } = host();
     const first = render(notice(client));

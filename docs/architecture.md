@@ -14820,7 +14820,8 @@ successful connect (kept after an idle close), and the installed `mcp.json`
 read from disk for the transport. Reading it never connects, signs in,
 discovers endpoints or lists tools, so a server no task has used yet reads
 Ready rather than Connected. States, most decisive first: Off (package or
-server switched off), Needs sign-in (sign-in-again, consent pending, client
+server switched off), Needs sign-in (sign-in-again, consent pending, an attempt
+whose status or cancellation is not confirmed, client
 setup required for a registered-client connector, or a
 catalog connector that signs in and has no sign-in while not connected;
 signed out alone is only an offer, since a hosted server that takes a key or
@@ -14844,10 +14845,11 @@ A thread says so itself when its next turn would get a server that reads Needs
 sign-in, and carries the same sign-in control
 ([Thread view](design/thread-view.md#server-sign-in)). The host decides which
 servers those are (`/api/extensions/connections`, `thread-sign-in`) from the
-thread's mode and id and the selections the next turn would carry: the Project's
-pins (Work and Code) and those selections, each put through the checks the turn
-itself makes against the thread's own activation. It does not ask the sessions,
-because a turn drops a server whose connection failed and a missing sign-in is
+thread's mode and id, the selections the next turn would carry, and the `@` names
+its draft could not select: the Project's pins (Work and Code), those selections
+and those names, each put through the checks the turn itself makes against the
+thread's own activation. It does not ask the sessions, because a turn drops a
+server whose connection failed, the composer refuses it, and a missing sign-in is
 what makes it fail. A thread whose turns carry no extension tools (a Project on
 a server, Strict on Windows, a model known not to carry Octant's tools) names
 none. The answer is told only to a principal the sign-in routes admit, a local

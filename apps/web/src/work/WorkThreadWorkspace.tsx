@@ -3350,7 +3350,17 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           className="thread-column"
           client={readOnly ? undefined : props.extensionClient}
           mode="work"
+          onResolveReference={extensionDraft.resolveReference}
           receipts={extensionDraft.receipts}
+          selections={[
+            ...(messageQueue.snapshot?.items.flatMap(
+              (item) => item.payload?.extensionSelections ?? [],
+            ) ?? []),
+            // A resume scheduled at a usage limit sends its turn's selections again.
+            ...(thread?.usageResume?.status === "scheduled"
+              ? (turns.at(-1)?.extensionSelections ?? [])
+              : []),
+          ]}
           threadId={String(props.threadId)}
           turnActive={turnRunning}
         />

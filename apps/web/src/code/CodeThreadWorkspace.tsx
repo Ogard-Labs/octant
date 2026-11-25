@@ -2938,7 +2938,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           className="thread-column"
           client={readOnly || serverCheckout ? undefined : props.extensionClient}
           mode="code"
+          onResolveReference={extensionDraft.resolveReference}
           receipts={extensionDraft.receipts}
+          selections={
+            messageQueue.snapshot?.items.flatMap(
+              (item) => item.payload?.extensionSelections ?? [],
+            ) ?? []
+          }
           threadId={String(props.threadId)}
           turnActive={busy}
         />

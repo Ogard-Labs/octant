@@ -15,8 +15,10 @@ export interface McpSignInNoticeProps {
   readonly threadId: string | undefined;
   /** The composer's selections, which the next message carries. */
   readonly receipts: ReadonlyArray<ComposerExtensionSelection>;
-  /** The selections a Retry of the latest turn would send again. */
-  readonly retrySelections?: ReadonlyArray<ExtensionSelection> | undefined;
+  /** What a queued message, a Retry or a scheduled resume would send besides. */
+  readonly selections: ReadonlyArray<ExtensionSelection>;
+  /** Resolves a composer reference again, for one refused before the sign-in. */
+  readonly onResolveReference: (reference: string) => Promise<unknown>;
   readonly turnActive: boolean;
   readonly className: string;
 }

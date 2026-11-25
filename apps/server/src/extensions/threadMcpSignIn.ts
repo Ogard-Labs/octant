@@ -17,7 +17,7 @@ import { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
-import { revalidateExtensionSelection } from "@octant/plugin-host";
+import { resolveDraftExtensionReference, revalidateExtensionSelection } from "@octant/plugin-host";
 import { Schema } from "effect";
 import { buildCatalogs, type ExtensionSelectionSubject } from "./extensionChatResolver";
 import { pinnedSelections } from "./selectedExtensions";
@@ -55,6 +55,8 @@ export function createThreadMcpSignInThreads(records: {
   readonly platform: string;
 }): (mode: OctantMode, threadId: string) => ThreadMcpSignInThread | undefined {
   return (mode, threadId) => {
+    // Windows Strict runs no Octant-operated tool, in any mode.
+    if (records.platform === "win32" && records.strict(threadId)) return undefined;
     const runsAs = (
       thread: ChatThread | WorkThread | CodeThread,
       pinnedExtensionIds: ReadonlyArray<string>,
@@ -84,7 +86,6 @@ export function createThreadMcpSignInThreads(records: {
     if (
       thread === undefined ||
       records.onServer(String(thread.projectId)) ||
-      (records.platform === "win32" && records.strict(threadId)) ||
       records.carriesAppManagedTools(thread) === false
     )
       return undefined;
@@ -110,7 +111,7 @@ export function createThreadMcpSignInReader(options: {
   readonly thread: (mode: OctantMode, threadId: string) => ThreadMcpSignInThread | undefined;
   readonly connections: () => Promise<McpServerConnectionListing>;
 }): (request: ThreadMcpSignInRequest) => Promise<McpServerConnectionListing> {
-  return async ({ mode, threadId, selections }) => {
+  return async ({ mode, threadId, selections, references }) => {
     const none: McpServerConnectionListing = { servers: [] };
     const thread = options.thread(mode, threadId);
     if (thread === undefined) return none;
@@ -136,9 +137,16 @@ export function createThreadMcpSignInReader(options: {
       (selection) =>
         revalidateExtensionSelection(selection, addressing, "provider-handoff").kind === "selected",
     );
+    // The composer refuses a server whose connection failed, so its draft holds
+    // the name alone; the name is resolved here as the composer resolves one.
+    const named = references.flatMap((reference) => {
+      const resolved = resolveDraftExtensionReference(reference, addressing, "draft");
+      return resolved.kind === "selected" ? [resolved.selection] : [];
+    });
     const used = new Set(
       [
         ...carried,
+        ...named,
         ...pinnedSelections(
           thread.pinnedExtensionIds,
           selections,

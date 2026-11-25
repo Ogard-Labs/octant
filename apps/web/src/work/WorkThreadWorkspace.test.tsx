@@ -646,7 +646,7 @@ describe("WorkThreadWorkspace", () => {
     );
     expect(await within(notice).findByRole("button", { name: "Sign in" })).toBeEnabled();
     expect(awaiting).toHaveBeenCalledWith(
-      { mode: "work", threadId: String(threadId), selections: [] },
+      { mode: "work", threadId: String(threadId), selections: [], references: [] },
       expect.any(AbortSignal),
     );
   });

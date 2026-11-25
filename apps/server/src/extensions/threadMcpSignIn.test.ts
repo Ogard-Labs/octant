@@ -142,8 +142,11 @@ function fixture(
         }).catalogEpoch,
       origin: { kind: "draft", reference: slug },
     });
-  const read = async (selections: ReadonlyArray<ExtensionSelection> = []) =>
-    (await reader({ kind: "thread-sign-in", mode, threadId, selections })).servers.map(
+  const read = async (
+    selections: ReadonlyArray<ExtensionSelection> = [],
+    references: ReadonlyArray<string> = [],
+  ) =>
+    (await reader({ kind: "thread-sign-in", mode, threadId, selections, references })).servers.map(
       (server) => server.serverName,
     );
   return { read, selection, connections };
@@ -188,6 +191,16 @@ describe("servers a thread's next turn needs signed in", () => {
     const test = fixture();
     const stale = test.selection(linear, "linear", `sha256:${"0".repeat(64)}`);
     await expect(test.read([stale])).resolves.toEqual([]);
+  });
+
+  it("names the server of a reference the composer could not select, and only one the thread may use", async () => {
+    // Once a connection failed, the composer refuses the server as
+    // unavailable, and a missing sign-in is what fails it.
+    await expect(fixture().read([], ["@linear"])).resolves.toEqual(["linear"]);
+    await expect(fixture().read([], ["@nothing", "plain words"])).resolves.toEqual([]);
+    await expect(
+      fixture({ linear: { ...on, pluginDesired: false } }).read([], ["@linear"]),
+    ).resolves.toEqual([]);
   });
 
   it("names a server once when the draft selects it and the Project pins it", async () => {
@@ -236,10 +249,15 @@ describe("what a thread's next turn runs as", () => {
   it.each([
     ["the Project is on a server", { onServer: true }],
     ["the model is known not to carry Octant's tools", { carriesTools: false }],
-    ["it runs under Strict on Windows", { strict: true, platform: "win32" }],
     ["the provider is gone", { driverKind: undefined }],
   ])("has no extension tools when %s", (_why, options) => {
     expect(records(options)("work", threadId)).toBeUndefined();
     expect(records(options)("code", threadId)).toBeUndefined();
+  });
+
+  it("has no extension tools in any mode under Strict on Windows", () => {
+    const read = records({ strict: true, platform: "win32" });
+    for (const mode of ["chat", "work", "code"] as const)
+      expect(read(mode, threadId)).toBeUndefined();
   });
 });

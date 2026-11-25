@@ -19,7 +19,7 @@ import "./mcp-sign-in-notice.css";
 const SIGNED_IN_NOTICE_MS = 6_000;
 
 // A dismissal outlives a thread switch, which remounts the notice, and ends
-// with the window or when the server no longer needs the sign-in.
+// with the window or when the thread no longer waits on that sign-in.
 const dismissed = new Set<string>();
 
 const serverKey = (server: McpServerConnection) =>
@@ -39,21 +39,25 @@ export function McpSignInNotices(
   const [changes, setChanges] = useState(0);
 
   // Held as one string so a new array each render does not read again.
-  const carried = JSON.stringify([
-    ...props.receipts.flatMap((receipt) =>
-      receipt.selection === undefined ? [] : [receipt.selection],
-    ),
-    ...(props.retrySelections ?? []),
-  ]);
+  const refused = props.receipts.filter((receipt) => receipt.selection === undefined);
+  const carried = JSON.stringify({
+    selections: [
+      ...props.receipts.flatMap((receipt) =>
+        receipt.selection === undefined ? [] : [receipt.selection],
+      ),
+      ...props.selections,
+    ].slice(0, 32),
+    references: refused.map((receipt) => receipt.reference.slice(0, 256)).slice(0, 32),
+  });
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       if (client.mcpServersAwaitingSignIn === undefined) return;
-      const selections = (JSON.parse(carried) as ReadonlyArray<ExtensionSelection>).slice(0, 32);
+      const draft = JSON.parse(carried) as {
+        readonly selections: ReadonlyArray<ExtensionSelection>;
+        readonly references: ReadonlyArray<string>;
+      };
       try {
-        const listed = await client.mcpServersAwaitingSignIn(
-          { mode, threadId, selections },
-          signal,
-        );
+        const listed = await client.mcpServersAwaitingSignIn({ mode, threadId, ...draft }, signal);
         if (signal.aborted) return;
         const waiting = new Set(listed.servers.map((server) => `${threadId}/${serverKey(server)}`));
         for (const key of dismissed)
@@ -112,7 +116,7 @@ export function McpSignInNotices(
             title={`${label} needs sign-in`}
             tone="warning"
           >
-            <p>Sign in here and you can use it from the next message.</p>
+            <p>Once it is signed in, you can use it from the next message.</p>
             <McpServerSignInControl
               client={client}
               componentId={String(server.componentId)}
@@ -124,6 +128,9 @@ export function McpSignInNotices(
                   setServers((current) =>
                     current.filter((other) => serverKey(other) !== serverKey(server)),
                   );
+                  // A name the composer refused while the server could not
+                  // connect would otherwise stay refused in the draft.
+                  for (const receipt of refused) void props.onResolveReference(receipt.reference);
                 }
                 setChanges((count) => count + 1);
               }}

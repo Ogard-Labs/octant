@@ -2047,6 +2047,7 @@ describe("server connection status in Settings", () => {
       mode: "code",
       threadId: "72000000-0000-4000-8000-00000000000b",
       selections: [],
+      references: [],
     };
     for (const refused of [
       pairedDeviceRequest(path, ask, "hub-roster"),

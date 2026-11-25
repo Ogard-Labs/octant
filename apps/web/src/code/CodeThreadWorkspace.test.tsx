@@ -9,6 +9,7 @@ import {
   decodeCodeCheckoutId,
   decodeCodeRelativePath,
 } from "@octant/contracts/code";
+import { decodeExtensionSelection } from "@octant/contracts/extensions";
 import { PlanClientFailure, type PlanClient } from "@octant/client-runtime/plan-client";
 import type { CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -164,8 +165,55 @@ describe("Signing in to a server from a Code thread", () => {
     );
     expect(await within(notice).findByRole("button", { name: "Sign in" })).toBeEnabled();
     expect(awaiting).toHaveBeenCalledWith(
-      { mode: "code", threadId, selections: [] },
+      { mode: "code", threadId, selections: [], references: [] },
       expect.any(AbortSignal),
+    );
+  });
+
+  it("asks about the servers a queued message carries", async () => {
+    const scope = { mode: "code", threadId } as const;
+    const selection = decodeExtensionSelection({
+      kind: "plugin",
+      extensionId: "44000000-0000-4000-8000-000000000011",
+      packageId: "44000000-0000-4000-8000-000000000012",
+      componentId: "mcp",
+      packageVersion: "1.0.0",
+      packageDigest: `sha256:${"a".repeat(64)}`,
+      catalogEpoch: `sha256:${"b".repeat(64)}`,
+      origin: { kind: "draft", reference: "linear" },
+    });
+    const host = queueTestHost();
+    await host.execute({
+      kind: "enqueue",
+      scope,
+      requestId: crypto.randomUUID(),
+      messageId: crypto.randomUUID(),
+      expectedVersion: 0,
+      payload: { mode: "code", prompt: "Look it up", extensionSelections: [selection] },
+    } as never);
+    const awaiting = vi.fn(async () => ({ servers: [] }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ turnStatus: "running" })}
+        extensionClient={
+          {
+            toolGrantsAvailable: true,
+            snapshot: vi.fn(async () => ({ packages: [] })),
+            listToolApprovals: vi.fn(async () => []),
+            mcpServersAwaitingSignIn: awaiting,
+          } as never
+        }
+        messageQueueClient={host}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(
+      () =>
+        expect(awaiting).toHaveBeenCalledWith(
+          { ...scope, selections: [selection], references: [] },
+          expect.any(AbortSignal),
+        ),
+      { timeout: 10_000 },
     );
   });
 });

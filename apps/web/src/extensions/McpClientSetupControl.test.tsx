@@ -229,6 +229,20 @@ describe("MCP application identity setup", () => {
     expect(screen.getByText(/Link a secret store in Settings to choose/)).toBeInTheDocument();
   });
 
+  it("says where a client secret is chosen when no store can be read here, rather than that none is linked", async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(await screen.findByRole("button", { name: "Client setup" }));
+    await screen.findByRole("dialog");
+    await user.click(screen.getByRole("button", { name: "Client secret (POST)" }));
+    expect(
+      screen.getByText(
+        "A client secret is chosen in Settings › Skills & Extensions on the host's own window.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Link a secret store/)).not.toBeInTheDocument();
+  });
+
   it("uses a linked item address without exposing a broker id or a raw-secret input", async () => {
     const user = userEvent.setup();
     const { mcpServerSignIn } = setup({ linked: true });

@@ -512,7 +512,8 @@ export const decodeMcpServerConnectionListing = Schema.decodeUnknownSync(
  * its failure so the next task connects fresh. Reconnect is a person's act
  * in a local window; it never replays a call that failed. `thread-sign-in`
  * answers with only the servers one thread's next turn would get and cannot
- * use until someone signs in; `selections` are the ones that turn would carry.
+ * use until someone signs in. `selections` are the ones that turn would carry,
+ * and `references` the `@` names in its draft the composer could not select.
  */
 export const McpServerConnectionRequest = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
@@ -522,6 +523,7 @@ export const McpServerConnectionRequest = Schema.Union(
     mode: OctantMode,
     threadId: Schema.UUID,
     selections: Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32)),
+    references: Schema.Array(boundedText(256)).pipe(Schema.maxItems(32)),
   }).annotations(strict),
 );
 export type McpServerConnectionRequest = typeof McpServerConnectionRequest.Type;

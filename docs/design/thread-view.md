@@ -116,9 +116,12 @@ the attempt can be finished that way.
 
 - Which servers count is the host's answer, never the window's
   ([Architecture: extensions and skills](../architecture.md#extensions-and-skills)):
-  one pinned to the thread's Project, or one selected with `@` in the composer.
-  In Chat the latest turn's selections count too, since Retry and Regenerate send
-  them again. A server the person has switched off, not trusted, or not chosen for
+  one pinned to the thread's Project, one selected with `@` in the composer, or one
+  a queued message carries. In Chat the latest turn's selections count too, since
+  Retry and Regenerate send them again, and in Work those of a turn waiting on a
+  scheduled resume. An `@` name the composer refuses counts when the thread could
+  use that server: one failed connection makes the composer refuse it, and signing
+  in selects it again. A server the person has switched off, not trusted, or not chosen for
   this thread is never named, whatever state it is in.
 - A read-only thread, and a device that may not sign in, show nothing and ask
   nothing.
@@ -126,9 +129,13 @@ the attempt can be finished that way.
   device), when it is switched off, unpinned or taken out of the composer. A
   sign-in finished here says "Signed in to {server}" for a moment first. A read
   that could not reach the host keeps it, so a half-pasted address is not lost.
-- Dismiss hides it in this thread until the window closes, or until the server
-  has been usable and needs a sign-in again. Dismissing changes nothing on the
-  host; Settings › Skills & Extensions still lists the server.
+- Dismiss hides it in this thread until the window closes, or until the thread
+  stops waiting on that sign-in (the server is signed in, or no longer chosen) and
+  then waits on it again. Dismissing changes nothing on the host; Settings › Skills
+  & Extensions still lists the server.
+- A server whose app registration is missing is named too, and Client setup opens
+  from the notice. Registering an app is not a sign-in: a client secret is chosen
+  from a linked secret store in Settings on the host, and the form says so.
 - It is announced politely, not as an alert, because it waits on no running work.
 
 ## Reply actions
