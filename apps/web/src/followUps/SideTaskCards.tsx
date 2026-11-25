@@ -25,6 +25,7 @@ import {
 } from "../polling/ThreadActivityRevisions";
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
+import { LazyThreadReferenceChip } from "../threadReferences/LazyThreadReferenceChip";
 import "./follow-up-suggestions.css";
 
 type StartedResult = Extract<SideTaskResult, { readonly kind: "side-task-started" }>;
@@ -304,7 +305,17 @@ function SideTaskCard(props: { readonly task: SideTask; readonly running: boolea
     return (
       <div aria-label={`Side task: ${task.offer.title}`} className="side-task-receipt" role="group">
         <p className="side-task-receipt__line">
-          <span className="side-task-receipt__title">{task.offer.title}</span>
+          <span className="side-task-receipt__title">
+            {task.startedThreadId === undefined ? (
+              task.offer.title
+            ) : (
+              <LazyThreadReferenceChip
+                look="link"
+                threadId={String(task.startedThreadId)}
+                title={task.offer.title}
+              />
+            )}
+          </span>
           <span aria-hidden="true"> · </span>
           {task.status === "started" ? (
             <>

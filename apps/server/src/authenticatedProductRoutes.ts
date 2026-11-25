@@ -1,5 +1,8 @@
 import { DEVICE_ACCESS_LEVEL_REFUSED_REASON } from "@octant/contracts/remote-access";
-import { THREAD_SECRETS_PATH } from "./threadSecrets/threadSecretRoutes";
+import {
+  PAIRED_THREAD_SECRETS_PATH,
+  THREAD_SECRETS_PATH,
+} from "./threadSecrets/threadSecretRoutes";
 import { authorizePrincipalAction } from "@octant/domain";
 import { removeImageMetadata } from "./attachments/imageMetadataRemoval";
 import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
@@ -103,7 +106,14 @@ export function classifyProductAction(request: Request): string | undefined {
   const path = url.pathname;
 
   // Private credential entry is host-local and is never a forwarded product action.
-  if (path === "/api/credential-requests" || path === THREAD_SECRETS_PATH) return undefined;
+  // A thread secret's own forwarded path answers only a device that acts as the
+  // host's person, which never reaches this catalogue.
+  if (
+    path === "/api/credential-requests" ||
+    path === THREAD_SECRETS_PATH ||
+    path === PAIRED_THREAD_SECRETS_PATH
+  )
+    return undefined;
 
   const harnessSession =
     /^\/api\/native-harness\/sessions\/[^/]+(?:\/(approvals|questions))?$/.exec(path);
@@ -319,9 +329,10 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "POST" && path === "/api/speech/synthesis") return "speech.synthesize";
     return undefined;
   }
-  if (path === "/api/diagnostics/export") {
-    return method === "POST" ? "diagnostics.export" : undefined;
-  }
+  // The diagnostics export, its journal-growth read and the support bundle have
+  // no action here: a device the host's own person paired takes them as a
+  // local window does, and every other device session stays denied.
+  if (path.startsWith("/api/diagnostics/")) return undefined;
   if (path === "/api/threads/export") {
     // A thread export is a read of a thread the caller can already Open.
     // The service re-checks that Open and clamps to that one thread, so a

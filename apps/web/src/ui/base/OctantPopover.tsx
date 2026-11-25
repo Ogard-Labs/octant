@@ -28,6 +28,13 @@ export interface OctantPopoverProps {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   /**
+   * Also opens while the pointer rests on the trigger, without moving focus,
+   * and closes when it leaves. A press keeps it open and moves focus in, so a
+   * card that describes its trigger keeps its actions within reach of touch
+   * and the keyboard. The trigger then shows no native tooltip under the card.
+   */
+  readonly openOnHover?: boolean;
+  /**
    * "inline-end" opens beside the trigger, for a row inside another popup
    * that opens a list of its own, like a submenu.
    */
@@ -120,7 +127,12 @@ export function OctantPopover(props: OctantPopoverProps) {
           })}
       // The native tooltip names a chip whose words may be cut; while the
       // popup is open it would sit on top of the popup's first rows.
-      title={props.triggerTooltip === undefined && !props.open ? props.triggerLabel : undefined}
+      title={
+        props.triggerTooltip === undefined && !props.open && props.openOnHover !== true
+          ? props.triggerLabel
+          : undefined
+      }
+      {...(props.openOnHover === true ? { closeDelay: 150, delay: 350, openOnHover: true } : {})}
       {...props.triggerDataAttributes}
       {...(props.triggerAriaPressed === undefined
         ? {}

@@ -7469,6 +7469,7 @@ describe("CodeOperationRuntime", () => {
         expect.objectContaining({
           threadId: String(threadId),
           provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+          actor: expect.objectContaining({ actorId: expect.any(String) }),
         }),
       );
       // The thread names the session it continues and offers no other.
@@ -7499,6 +7500,53 @@ describe("CodeOperationRuntime", () => {
       });
     } finally {
       fixture.close();
+    }
+  });
+
+  it("journals an adopted session's records as whoever adopted it: the local person, a paired device, or the host", async () => {
+    const localPerson = eventActorForPrincipal({ kind: "local-window" });
+    const device = eventActorForPrincipal({
+      kind: "remote-device",
+      deviceId: "90000000-0000-4000-8000-0000000000e2",
+    });
+    for (const [index, adoptedBy] of [localPerson, device, undefined].entries()) {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const outside = decodeCodeNativeSessionId(`outside-session-actor-${index}`);
+      const provider: ProviderDriver = {
+        ...providerDriver(providerConnection(queue)),
+        nativeSessions: {
+          list: () => Effect.succeed([]),
+          adopt: () => Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: "x" }),
+          history: () =>
+            Effect.succeed({
+              status: "read" as const,
+              messages: [{ role: "person" as const, text: "Rename the login handler" }],
+            }),
+        },
+      };
+      const fixture = runtimeFixture({
+        provider,
+        recordExternalContentIngestion: () => ({
+          kind: "recorded" as const,
+          taint: { externalContentIngested: true, ingestedSources: [] },
+        }),
+      });
+      try {
+        expect(
+          await fixture.runtime.nativeSessions!.adopt(windowId, threadId, outside, adoptedBy),
+        ).toMatchObject({ kind: "code-native-session-adopted" });
+        const named = ["code-operation", "native-session-history"].flatMap((aggregateType) =>
+          fixture.journal.replayAggregateType({ aggregateType, afterSequence: 0, limit: 1_000 }),
+        );
+        // The adoption, its session-ready record and the imported history.
+        expect(named).toHaveLength(3);
+        expect(new Set(named.map((envelope) => JSON.stringify(envelope.actor)))).toEqual(
+          new Set([JSON.stringify(adoptedBy ?? actor)]),
+        );
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
     }
   });
 

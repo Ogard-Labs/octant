@@ -231,6 +231,7 @@ export function driverLabel(driverKind: ProviderInstance["driverKind"]): string 
   // An outside driver package never borrows a bundled provider's name.
   if (driverKind === "outside-harness-endpoint") return "Outside driver";
   if (driverKind === "outside-image") return "Outside image driver";
+  if (driverKind === "outside-video") return "Outside video driver";
   if (driverKind === "acp-agent") return "Added ACP agent";
   return "OpenAI-compatible";
 }

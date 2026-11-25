@@ -18,6 +18,7 @@ import {
   isOutsideDriverProviderInstance,
   type OutsideDriverProviderInstance,
   type OutsideImageProviderConfiguration,
+  type OutsideVideoProviderConfiguration,
   type OutsideProviderDriverListing,
   type OutsideProviderDriverReference,
   type ProviderDriverKind,
@@ -69,6 +70,7 @@ import {
   changeOllamaConfiguration,
   changeOutsideHarnessEndpointConfiguration,
   changeOutsideImageConfiguration,
+  changeOutsideVideoConfiguration,
   changePiConfiguration,
   changeOpenAiCompatibleConfiguration,
   changeOpenAiImageConfiguration,
@@ -96,6 +98,7 @@ import {
   createOllamaProvider,
   createOutsideHarnessEndpointProvider,
   createOutsideImageProvider,
+  createOutsideVideoProvider,
   rebindOutsideProviderDriver,
   isOutsideDriverQuarantined,
   quarantineOutsideProviderDriver,
@@ -278,6 +281,10 @@ export interface ProviderServiceOptions {
   readonly outsideImageDriverModelIds?: (
     driver: OutsideProviderDriverReference,
   ) => ReadonlyArray<string> | undefined;
+  /** The same for an outside video driver's package. */
+  readonly outsideVideoDriverModelIds?: (
+    driver: OutsideProviderDriverReference,
+  ) => ReadonlyArray<string> | undefined;
   /** The outside drivers the provider catalog lists. Reading them starts nothing. */
   readonly outsideDriverListings?: () => ReadonlyArray<OutsideProviderDriverListing>;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
@@ -353,6 +360,9 @@ export class ProviderService implements ProviderServiceApi {
   readonly #outsideImageDriverModelIds: NonNullable<
     ProviderServiceOptions["outsideImageDriverModelIds"]
   >;
+  readonly #outsideVideoDriverModelIds: NonNullable<
+    ProviderServiceOptions["outsideVideoDriverModelIds"]
+  >;
   readonly #outsideDriverRebindTarget: NonNullable<
     ProviderServiceOptions["outsideDriverRebindTarget"]
   >;
@@ -399,6 +409,7 @@ export class ProviderService implements ProviderServiceApi {
     this.#outsideDriverRebindTarget = options.outsideDriverRebindTarget ?? (() => undefined);
     this.#outsideDriverListings = options.outsideDriverListings ?? (() => []);
     this.#outsideImageDriverModelIds = options.outsideImageDriverModelIds ?? (() => undefined);
+    this.#outsideVideoDriverModelIds = options.outsideVideoDriverModelIds ?? (() => undefined);
     this.#clearResumeIdentities = options.clearResumeIdentities;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
     this.#ensureAccountDirectory =
@@ -1121,7 +1132,8 @@ export class ProviderService implements ProviderServiceApi {
             command.kind === "create-runway-video-provider" ||
             command.kind === "create-fal-video-provider" ||
             command.kind === "create-outside-harness-endpoint-provider" ||
-            command.kind === "create-outside-image-provider"
+            command.kind === "create-outside-image-provider" ||
+            command.kind === "create-outside-video-provider"
           ) {
             if (current !== undefined || command.expectedVersion !== 0) {
               throw this.#invalid("Provider configuration changed; reload and retry.");
@@ -1294,6 +1306,18 @@ export class ProviderService implements ProviderServiceApi {
                 this.#assertOutsideImageModelsDeclared(command.configuration);
                 // Always created off; the command carries no switch.
                 instance = createOutsideImageProvider({
+                  id: common.id,
+                  displayName: common.displayName,
+                  existingInstances: common.existingInstances,
+                  expectedVersion: common.expectedVersion,
+                  createdAt: common.createdAt,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-outside-video-provider":
+                this.#assertOutsideVideoModelsDeclared(command.configuration);
+                // Always created off; the command carries no switch.
+                instance = createOutsideVideoProvider({
                   id: common.id,
                   displayName: common.displayName,
                   existingInstances: common.existingInstances,
@@ -1748,6 +1772,14 @@ export class ProviderService implements ProviderServiceApi {
             // enables nothing; the listed models must still be declared.
             this.#assertOutsideImageModelsDeclared(command.configuration);
             instance = changeOutsideImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-outside-video-configuration") {
+            if (current.driverKind !== "outside-video") {
+              throw this.#unsupported("This provider is not from an outside video driver.");
+            }
+            this.#assertOutsideVideoModelsDeclared(command.configuration);
+            instance = changeOutsideVideoConfiguration(current, command.configuration, updatedAt);
             await this.#runtime.invalidateRuntime(current.id);
             eventName = "provider.instance-configuration-changed@1";
           } else if (command.kind === "install-acp-agent") {
@@ -3005,6 +3037,17 @@ export class ProviderService implements ProviderServiceApi {
     }
   }
 
+  /** The same for a video profile: only a declared model has a price and limits to check. */
+  #assertOutsideVideoModelsDeclared(configuration: OutsideVideoProviderConfiguration): void {
+    const declared = this.#outsideVideoDriverModelIds(configuration.driver);
+    if (
+      declared === undefined ||
+      !configuration.modelAllowlist.every((id) => declared.includes(String(id)))
+    ) {
+      throw this.#invalid("List only video models this driver declares.");
+    }
+  }
+
   #assertDriverPluginEffective(instance: ProviderInstance): void {
     if (!this.#isInstanceDriverAvailable(instance)) {
       throw this.#unsupported("This provider driver is not available.");
@@ -3158,7 +3201,8 @@ function credentialBinding(instance: ProviderInstance): string | undefined {
       ].join("\n");
     }
     case "outside-harness-endpoint":
-    case "outside-image": {
+    case "outside-image":
+    case "outside-video": {
       // The key is sent to one address, and a provider that stops sending one
       // has no use for what the host holds.
       const { baseUrl, key } = instance.configuration;

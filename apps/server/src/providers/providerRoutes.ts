@@ -311,6 +311,8 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
             command.kind === "change-outside-harness-endpoint-configuration" ||
             command.kind === "create-outside-image-provider" ||
             command.kind === "change-outside-image-configuration" ||
+            command.kind === "create-outside-video-provider" ||
+            command.kind === "change-outside-video-configuration" ||
             command.kind === "verify-model-tools" ||
             command.kind === "set-claude-artifact-delivery" ||
             command.kind === "set-provider-native-setup" ||

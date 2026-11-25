@@ -242,8 +242,8 @@ Its radio items are **Use default (Low)**
 levels, with short descriptions that fit a phone-width menu: "Thinking and
 finished tool calls folded", "Thinking's first line, tool calls listed",
 "Thinking, tool calls, and results open". A client that cannot change the
-level shows no menu (today a paired browser; not built yet: a paired device
-changes it as a local window does).
+level shows no menu (a paired browser the host's own person paired changes it
+as a local window does; any other paired browser shows none).
 
 **Change reply detail in this thread** (`reply-detail-cycle`, Mod+Shift+D by
 default, remappable in Settings › Keyboard shortcuts) steps the thread in front
@@ -274,8 +274,8 @@ The default and the threads' own levels live in the host's shell settings
 (`replyDetail`, `threadReplyDetail`), the document that already holds every
 other per-person presentation choice, keyed maps included. That is the
 narrowest home that keeps it a preference: it is written only by the shell
-route, which a window on the host reaches (a paired device too by maintainer
-decision, 2026-11-12; not built yet); it is not part of any thread's
+route, which a window on the host reaches (a device the host's own person
+paired too, by maintainer decision, 2026-11-12); it is not part of any thread's
 journal, so forks, exports and provider context never see it; and host export
 does not carry it. Code's pin is the one per-thread presentation choice kept on
 a thread's own record, and Chat and Work have no such record to share, so a
@@ -432,6 +432,53 @@ Shift+Enter, paste (as plain text), copy, cut and undo work as in a text
 field, and a label names it. Rejected: a chip row above a text field with the
 tag kept as text (not inline), and a styled highlight behind the tag text (no
 logo or names).
+
+## Mentioning a thread in a prompt
+
+A thread chosen from the `#` list, dropped on the composer, or attached from
+its row menu sits in the prompt as one inline chip: its Project's mark (a `#`
+where it has none), its title, and a dot while it works or waits on the person
+(maintainer decision, 2026-11-25). There is no chip row above the prompt. The
+prompt's text stays `#[Title]`, so a copy, a queued message and the provider
+read what they always did. The caret and deletion treat a chip as one unit, and
+a cut and paste or an undo that brings the text back brings its thread back.
+Chips whose threads share a title keep their own places through an edit, so
+deleting one removes that thread and not the other; deleting the chip stops the
+mention, and Remove takes the chip and its text together.
+
+Hovering a chip opens the thread's card; pressing it, by pointer, touch or key,
+opens the same card with focus in it. The card is the
+[sidebar row's](workspace.md#sidebar): title, age, live state,
+Project, checkout, provider and model. Below a rule it says what the turn gets:
+"This turn reads up to its last 12 messages, read-only.", or that a mentioned
+Chat can receive a message. Its actions are **Open thread**, **Side Chat** where
+the composer offers it, and **Remove**. Pull requests and issues read there as
+facts, not links. Hovering never moves focus from the prompt.
+
+The card's facts are the threads the host already lists to the window, read by
+thread id, so drawing it asks the host for nothing. A worker the sidebar leaves
+out (Show workers off) is listed all the same, as it is for Needs you and
+search. A thread the window does not list shows what the host's search said of it (title,
+mode and Project) and no Open thread. A thread the host refused is outlined and
+shows its reason and no other fact, even where the window lists it.
+
+Each hit of the `#` list shows the same facts in a row: the Project's mark, the
+title, the live state or the age, the provider and model, and the mode and
+Project. A phone's row leaves out the model.
+
+A sent message keeps its chips. The turn stores the mentioned ids and nothing
+else of their threads ([Architecture](../architecture.md#modes-chat-work-and-code)),
+in the order the text shows them. A message with exactly one chip text per id
+pairs them in that order, renamed threads included; otherwise an id takes the
+text its thread's title reads as now, unless an unlisted or renamed thread could
+stand there instead. A chip only ever opens a thread the message mentioned.
+A mention of a thread the window does not list, text no id
+claims, and a message sent before ids were stored stay the text they were. A
+side task's receipt opens the same card from the title of the thread it
+started, while the window lists that thread.
+
+Rejected: opening the thread on a press, which would leave a half-written prompt
+by accident and leave touch with no way to the card.
 
 ## Subagents in a thread
 
@@ -998,6 +1045,39 @@ An uncertain response never resends automatically. Host-settled requests collaps
 to a quiet status row; an unavailable status disables entry rather than trusting
 a stale card.
 The card is not an administrator-password dialog and is not a saved sign-in.
+
+### Secret cards
+
+A request for a [thread secret](../architecture.md#thread-secrets) appears inline
+at the end of a Code or Work conversation as a compact rounded card: its title and
+reason; where the agent named a setup page, a button named **Open** and the page's
+host, with its whole address under it in monospace; one row of the source picker,
+the input with its show button, and **Save securely**; then a quiet line with a
+shield that says what can read the secret and for how long, the **Keep for** picker
+and **Decline**. With several fields their labelled inputs are stacked and Save
+securely moves to the footer. An account password adds a warning that it unlocks
+the whole computer and that Octant cannot fill in a system dialog. The source
+picker shows only where there is a choice: a value, a 1Password item or a
+remembered secret of the same name. A 1Password source takes a typed `op://`
+address or the item picker at the input's trailing edge, which goes from vault to
+item to field with a filter and Back, and a checkbox to read the item again at
+each use. Choosing another source keeps nothing of the one before. A field the
+agent marked not secret shows what is typed, except on an account password's card,
+which masks every field.
+
+Clicking the card, outside its controls and not to select text, focuses its first
+empty input. Enter submits, except during text composition. What is typed is sent
+exactly as typed, stays in the card alone, and leaves the input as it is sent; it
+comes back only when the host says it took nothing. A pasted value of several lines
+is kept exactly and shown as their number, with a control to clear it; one longer
+than 4,096 characters is not pasted, and the card says so. An outcome that is not known
+says so, and nothing is sent twice. A value too short to hide, if a command prints
+it, says so before it is sent. A refusal stays on the open card with what to do.
+An answered card becomes one quiet row with its title and **Saved securely** or
+**Declined**, until its turn ends. At narrow widths the row and the footer wrap.
+A card never times out. The phone's card has the same parts in the phone's own
+controls, asks for the phone's confirmation before Save, takes a value of one line,
+and offers no 1Password.
 
 ## Native Code approvals
 

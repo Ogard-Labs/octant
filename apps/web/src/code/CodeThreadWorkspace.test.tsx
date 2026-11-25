@@ -2174,7 +2174,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "#Rel");
     const hit = await screen.findByRole("option", { name: /Release notes/ });
     await user.click(hit);
-    expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Release notes");
+    expect(await screen.findByRole("button", { name: /^Thread: Release notes/ })).toBeVisible();
 
     await user.type(composer, "does this still hold?");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));

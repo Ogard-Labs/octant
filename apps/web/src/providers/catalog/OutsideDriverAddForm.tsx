@@ -1,6 +1,7 @@
 import {
   OutsideHarnessEndpointProviderConfiguration,
   OutsideImageProviderConfiguration,
+  OutsideVideoProviderConfiguration,
   type OutsideProviderDriverListing,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -18,12 +19,48 @@ type KeyChoice = "none" | "bearer" | "header";
 
 const decodeConfiguration = Schema.decodeUnknownEither(OutsideHarnessEndpointProviderConfiguration);
 const decodeImageConfiguration = Schema.decodeUnknownEither(OutsideImageProviderConfiguration);
+const decodeVideoConfiguration = Schema.decodeUnknownEither(OutsideVideoProviderConfiguration);
 
 /** A declared per-image price as a person reads it, from integer micro-dollars. */
 function perImagePrice(usdMicros: number | undefined): string {
   if (usdMicros === undefined) return "No published price";
   const dollars = usdMicros / 1_000_000;
   return `$${dollars.toFixed(dollars < 0.01 ? 4 : 2)} per image`;
+}
+
+interface DeclaredModel {
+  readonly id: string;
+  readonly label: string;
+  readonly price: string;
+}
+
+/** The models a media driver's package declares, as the person chooses among them. */
+function declaredMediaModels(
+  listing: OutsideProviderDriverListing,
+):
+  | { readonly media: "image" | "video"; readonly models: ReadonlyArray<DeclaredModel> }
+  | undefined {
+  if (listing.imageGeneration !== undefined) {
+    return {
+      media: "image",
+      models: listing.imageGeneration.models.map((model) => ({
+        id: String(model.modelId),
+        label: String(model.modelId),
+        price: perImagePrice(model.usdMicrosPerImage),
+      })),
+    };
+  }
+  if (listing.videoGeneration !== undefined) {
+    return {
+      media: "video",
+      models: listing.videoGeneration.models.map((model) => ({
+        id: String(model.modelId),
+        label: model.displayName,
+        price: model.publishesPrice ? "Price shown on each card" : "No published price",
+      })),
+    };
+  }
+  return undefined;
 }
 
 export interface OutsideDriverAddFormProps {
@@ -34,7 +71,10 @@ export interface OutsideDriverAddFormProps {
   readonly credentialManagementAvailable: boolean;
   readonly onAdd: (
     displayName: string,
-    configuration: OutsideHarnessEndpointProviderConfiguration | OutsideImageProviderConfiguration,
+    configuration:
+      | OutsideHarnessEndpointProviderConfiguration
+      | OutsideImageProviderConfiguration
+      | OutsideVideoProviderConfiguration,
     credential: TransientProviderCredential,
   ) => void;
 }
@@ -45,9 +85,9 @@ export interface OutsideDriverAddFormProps {
  * models to offer. The host checks every field again and creates the provider
  * off; the driver itself only ever learns the address and the model IDs.
  *
- * For an image driver the models are not typed: the person chooses among the
- * ones its package declares, each shown with the price the package publishes,
- * since only a declared model has a price the host can hold a spend limit to.
+ * For an image or video driver the models are not typed: the person chooses
+ * among the ones its package declares, since only a declared model has a price
+ * the host can hold a spend limit to.
  */
 export function OutsideDriverAddForm(props: OutsideDriverAddFormProps) {
   const ids = useId();
@@ -57,9 +97,9 @@ export function OutsideDriverAddForm(props: OutsideDriverAddFormProps) {
   const [keyChoice, setKeyChoice] = useState<KeyChoice>("bearer");
   const [header, setHeader] = useState("x-api-key");
   const [models, setModels] = useState("");
-  const declaredImageModels = props.listing.imageGeneration?.models;
-  const [chosenImageModels, setChosenImageModels] = useState<ReadonlyArray<string>>(() =>
-    (declaredImageModels ?? []).map((model) => String(model.modelId)),
+  const declared = declaredMediaModels(props.listing);
+  const [chosenModels, setChosenModels] = useState<ReadonlyArray<string>>(() =>
+    (declared?.models ?? []).map((model) => model.id),
   );
   const [problem, setProblem] = useState<string>();
   const credentialInput = useRef<HTMLInputElement>(null);
@@ -72,13 +112,21 @@ export function OutsideDriverAddForm(props: OutsideDriverAddFormProps) {
         : keyChoice === "bearer"
           ? { header: "authorization", scheme: "Bearer" }
           : { header: header.trim().toLowerCase() };
+    const common = {
+      driver: props.listing.driver,
+      baseUrl: address.trim(),
+      ...(key === undefined ? {} : { key }),
+    };
+    const media = {
+      ...common,
+      modelAllowlist: chosenModels,
+      defaultModel: chosenModels[0],
+    };
     const decoded =
-      declaredImageModels === undefined
+      declared === undefined
         ? decodeConfiguration({
             kind: "outside-harness-endpoint",
-            driver: props.listing.driver,
-            baseUrl: address.trim(),
-            ...(key === undefined ? {} : { key }),
+            ...common,
             modelIds: [
               ...new Set(
                 models
@@ -88,17 +136,12 @@ export function OutsideDriverAddForm(props: OutsideDriverAddFormProps) {
               ),
             ],
           })
-        : decodeImageConfiguration({
-            kind: "outside-image",
-            driver: props.listing.driver,
-            baseUrl: address.trim(),
-            ...(key === undefined ? {} : { key }),
-            modelAllowlist: chosenImageModels,
-            defaultModel: chosenImageModels[0],
-          });
+        : declared.media === "image"
+          ? decodeImageConfiguration({ kind: "outside-image", ...media })
+          : decodeVideoConfiguration({ kind: "outside-video", ...media });
     if (name.trim().length === 0 || decoded._tag === "Left") {
       setProblem(
-        declaredImageModels === undefined
+        declared === undefined
           ? "Give it a name, an address, at least one model ID, and a key header other than proxy-authorization, cookie, or host."
           : "Give it a name, an address, at least one model, and a key header other than proxy-authorization, cookie, or host.",
       );
@@ -195,43 +238,38 @@ export function OutsideDriverAddForm(props: OutsideDriverAddFormProps) {
           desktop app on {thisComputerName(hostPlatform)}.
         </p>
       )}
-      {declaredImageModels === undefined ? null : (
+      {declared === undefined ? null : (
         <fieldset className="endpoint-flow__field">
           <legend>Models</legend>
-          {declaredImageModels.map((model) => {
-            const id = String(model.modelId);
-            return (
-              <label className="endpoint-flow__check" key={id}>
-                <OctantCheckbox
-                  checked={chosenImageModels.includes(id)}
-                  onChange={(event) => {
-                    const checked = event.currentTarget.checked;
-                    setChosenImageModels((current) =>
-                      checked
-                        ? declaredImageModels
-                            .map((declared) => String(declared.modelId))
-                            .filter((declared) => declared === id || current.includes(declared))
-                        : current.filter((chosen) => chosen !== id),
-                    );
-                  }}
-                />
-                <span>
-                  <span>{id}</span>
-                  <span className="endpoint-flow__hint">
-                    {perImagePrice(model.usdMicrosPerImage)}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
+          {declared.models.map((model) => (
+            <label className="endpoint-flow__check" key={model.id}>
+              <OctantCheckbox
+                checked={chosenModels.includes(model.id)}
+                onChange={(event) => {
+                  const checked = event.currentTarget.checked;
+                  setChosenModels((current) =>
+                    checked
+                      ? declared.models
+                          .map((entry) => entry.id)
+                          .filter((id) => id === model.id || current.includes(id))
+                      : current.filter((chosen) => chosen !== model.id),
+                  );
+                }}
+              />
+              <span>
+                <span>{model.label}</span>
+                <span className="endpoint-flow__hint">{model.price}</span>
+              </span>
+            </label>
+          ))}
           <span className="endpoint-flow__hint">
-            The first one chosen is the default. Octant estimates each image from the price the
-            driver&apos;s package publishes; a model with none is refused while a spend limit is
-            set.
+            The first one chosen is the default. Octant estimates each{" "}
+            {declared.media === "image" ? "image" : "clip"} from the price the driver&apos;s package
+            publishes; a model with none is refused while a spend limit is set.
           </span>
         </fieldset>
       )}
-      {declaredImageModels !== undefined ? null : (
+      {declared !== undefined ? null : (
         <div className="endpoint-flow__field">
           <label htmlFor={`${ids}-models`}>Model IDs</label>
           <OctantTextarea

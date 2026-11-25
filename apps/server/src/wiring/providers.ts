@@ -2114,6 +2114,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       outsideDriverListings: () => outsideDriverAdmission.listings(),
       outsideImageDriverModelIds: (driver) =>
         outsideDriverAdmission.imageDriverModels(driver)?.map((model) => model.modelId),
+      outsideVideoDriverModelIds: (driver) =>
+        outsideDriverAdmission.videoDriverModels(driver)?.map((model) => String(model.modelId)),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       clearResumeIdentities: async (instanceId) => {
@@ -2736,6 +2738,14 @@ export function wireProviders(deps: ProvidersDependencies) {
       journal: persistence.journal,
       projection: persistence.videoJobProjection,
       clips: new VideoClipStore(persistence.dataDirectory),
+      outsideVideoDrivers: {
+        // A crash-limit hold journaled at the bound digest refuses before
+        // anything is reserved, and outlives a restart.
+        admits: (instance) =>
+          !isOutsideDriverQuarantined(instance) && outsideDriverAdmission.isAdmitted(instance),
+        adapter: (instance, current, ports, sends) =>
+          outsideDriverAdmission.videoAdapter(instance, current, ports, sends),
+      },
       readProviderInstance: (id) => persistence.readProviderInstance(id),
       listProviderInstances: () => persistence.readProviderInstances(),
       credentialResolver:

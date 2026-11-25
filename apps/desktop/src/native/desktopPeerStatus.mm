@@ -369,6 +369,45 @@ bool validate_artifact(SecStaticCodeRef disk, SecCodeRef dynamic, bool stable,
   }
   return true;
 }
+// The kernel resolves an audit token to the one process incarnation it names,
+// so an exited or replaced peer has no guest.
+bool copy_guest(audit_token_t token, OwnedCF<SecCodeRef> &dynamic) {
+  OwnedCF<CFDataRef> audit;
+  audit.value = CFDataCreate(nullptr, reinterpret_cast<const UInt8 *>(&token),
+                             sizeof(token));
+  if (!audit.value)
+    return false;
+  const void *keys[] = {kSecGuestAttributeAudit}, *values[] = {audit.value};
+  OwnedCF<CFDictionaryRef> attributes;
+  attributes.value = CFDictionaryCreate(nullptr, keys, values, 1,
+                                        &kCFTypeDictionaryKeyCallBacks,
+                                        &kCFTypeDictionaryValueCallBacks);
+  return attributes.value &&
+         SecCodeCopyGuestWithAttributes(nullptr, attributes.value,
+                                        kSecCSDefaultFlags,
+                                        &dynamic.value) == errSecSuccess;
+}
+// Whether a peer whose full identity was just validated is still that running,
+// validly signed process. Reads kernel state only: no bundle is hashed again.
+bool guest_is_current(audit_token_t token, const Scope &scope,
+                      const std::string &identifier, const std::string &team) {
+  const auto requirement_text =
+      octant::desktop_peer::developer_id_requirement(identifier, team);
+  OwnedCF<SecCodeRef> dynamic;
+  if (!same_scope(token, scope) || !requirement_text ||
+      !copy_guest(token, dynamic))
+    return false;
+  OwnedCF<CFStringRef> requirement_string;
+  requirement_string.value = CFStringCreateWithCString(
+      nullptr, requirement_text->c_str(), kCFStringEncodingUTF8);
+  OwnedCF<SecRequirementRef> requirement;
+  return requirement_string.value &&
+         SecRequirementCreateWithString(requirement_string.value,
+                                        kSecCSDefaultFlags,
+                                        &requirement.value) == errSecSuccess &&
+         SecCodeCheckValidity(dynamic.value, kSecCSDefaultFlags,
+                              requirement.value) == errSecSuccess;
+}
 bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
                        const std::string &required_team, Identity &identity,
                        Deadline deadline, std::string &reason) {
@@ -380,20 +419,8 @@ bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
     reason = "invalid-scope";
     return false;
   }
-  OwnedCF<CFDataRef> audit;
-  audit.value = CFDataCreate(nullptr, reinterpret_cast<const UInt8 *>(&token),
-                             sizeof(token));
-  if (!audit.value)
-    return false;
-  const void *keys[] = {kSecGuestAttributeAudit}, *values[] = {audit.value};
-  OwnedCF<CFDictionaryRef> attributes;
-  attributes.value = CFDictionaryCreate(nullptr, keys, values, 1,
-                                        &kCFTypeDictionaryKeyCallBacks,
-                                        &kCFTypeDictionaryValueCallBacks);
   OwnedCF<SecCodeRef> dynamic;
-  if (!attributes.value || SecCodeCopyGuestWithAttributes(
-                               nullptr, attributes.value, kSecCSDefaultFlags,
-                               &dynamic.value) != errSecSuccess) {
+  if (!copy_guest(token, dynamic)) {
     reason = "invalid-peer";
     return false;
   }
@@ -408,6 +435,17 @@ bool validate_identity(audit_token_t token, const Scope &scope, bool stable,
   return true;
 }
 
+// This process's own validated identity. The running code cannot become another
+// app, and the peer validates this process in full on every exchange, so one
+// success is kept. A full check hashes the whole bundle twice; in November 2026
+// that was 0.56s for a 970 MB app on an 18-core Mac, and repeating it left a
+// window registration no room inside operation_bound. A refusal is never kept.
+struct SelfIdentity {
+  std::timed_mutex lock;
+  bool validated = false;
+  Identity identity;
+} stable_self, nightly_self;
+
 bool self_identity(bool stable, Identity &identity, Deadline deadline,
                    std::string &reason) {
   Scope scope;
@@ -415,13 +453,31 @@ bool self_identity(bool stable, Identity &identity, Deadline deadline,
     reason = "invalid-scope";
     return false;
   }
-  if (!validate_identity(scope.token, scope, stable, "", identity, deadline,
-                         reason))
-    return false;
-  if (!ordinary_self(stable)) {
-    reason = "invalid-peer";
+  auto &self = stable ? stable_self : nightly_self;
+  // Octant starts its status and window servers together: the second waits for
+  // the first's check rather than hashing the same bundle beside it.
+  std::unique_lock guard(self.lock, deadline);
+  if (!guard.owns_lock()) {
+    reason = "deadline-exceeded";
     return false;
   }
+  if (!self.validated) {
+    Identity validated;
+    if (!validate_identity(scope.token, scope, stable, "", validated, deadline,
+                           reason))
+      return false;
+    if (!ordinary_self(stable)) {
+      reason = "invalid-peer";
+      return false;
+    }
+    self.identity = validated;
+    self.validated = true;
+  }
+  if (!same_scope(scope.token, self.identity.scope)) {
+    reason = "invalid-scope";
+    return false;
+  }
+  identity = self.identity;
   return true;
 }
 std::string endpoint(const Scope &scope) {

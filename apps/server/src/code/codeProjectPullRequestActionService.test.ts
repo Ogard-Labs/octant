@@ -65,15 +65,31 @@ function fixture(
       number,
       { state: "open" | "closed" | "merged"; headBranch: string; baseBranch: string }
     >;
+    /** A merge GitHub takes without landing it, as a required merge queue does. */
+    readonly lands?: boolean;
   } = {},
 ) {
   const store = openJournal();
+  // What GitHub holds, as merging and retargeting leave it.
+  const live = new Map(
+    Object.entries(options.summaries ?? {}).map(([number, summary]) => [
+      Number(number),
+      { ...summary },
+    ]),
+  );
   const done = { status: "done" } as const;
   const forge = {
     editLabels: vi.fn(options.forge?.editLabels ?? (async () => done)),
     comment: vi.fn(options.forge?.comment ?? (async () => done)),
     replyToReviewThread: vi.fn(options.forge?.replyToReviewThread ?? (async () => done)),
-    retarget: vi.fn(options.forge?.retarget ?? (async () => done)),
+    retarget: vi.fn(
+      options.forge?.retarget ??
+        (async (request: { readonly number: number; readonly baseBranch: string }) => {
+          const summary = live.get(request.number);
+          if (summary !== undefined) summary.baseBranch = request.baseBranch;
+          return done;
+        }),
+    ),
     review: vi.fn(options.forge?.review ?? (async () => done)),
     readContext: vi.fn(
       options.forge?.readContext ??
@@ -88,10 +104,15 @@ function fixture(
     summary: vi.fn(
       options.forge?.summary ??
         (async (request: { readonly number: number }) => {
-          const summary = options.summaries?.[request.number];
+          const summary = live.get(request.number);
           return summary === undefined
             ? ({ status: "unavailable" } as const)
-            : ({ status: "read", headSha: "a".repeat(40), ...summary } as const);
+            : ({
+                status: "read",
+                headSha: "a".repeat(40),
+                mergeability: "mergeable",
+                ...summary,
+              } as const);
         }),
     ),
   };
@@ -107,22 +128,31 @@ function fixture(
   const merge = vi.fn(
     async (
       _window: unknown,
-      command: { readonly number: number },
+      command: { readonly number: number; readonly baseBranch?: string | undefined },
       _signal: AbortSignal,
       _caller: "local-window" | "remote-device",
-    ) =>
-      options.merge?.(command.number) ??
-      ({
-        status: "merged",
-        number: command.number,
-        method: "squash",
-        mergedAt,
-      } as const),
+    ) => {
+      const outcome =
+        options.merge?.(command.number) ??
+        ({
+          status: "merged",
+          number: command.number,
+          method: "squash",
+          mergedAt,
+        } as const);
+      const summary = live.get(command.number);
+      if (outcome.status === "merged" && options.lands !== false && summary !== undefined) {
+        summary.state = "merged";
+      }
+      return outcome;
+    },
   );
+  const wait = vi.fn(async () => undefined);
   const service = new CodeProjectPullRequestActionService({
     authority,
     forge,
     merge,
+    wait,
     record: (record, actor) =>
       journalPullRequestAction(store.journal, record, {
         uuid: () => crypto.randomUUID(),
@@ -130,7 +160,7 @@ function fixture(
         ...(actor === undefined ? {} : { actor }),
       }),
   });
-  return { service, forge, authority, merge, store };
+  return { service, forge, authority, live, merge, store, wait };
 }
 
 describe("project pull-request actions", () => {
@@ -522,6 +552,170 @@ describe("stack merge", () => {
     }
   });
 
+  it("stops at a layer GitHub took but has not landed, and leaves the one above it alone", async () => {
+    const { service, forge, merge, store } = fixture({ summaries: chain, lands: false });
+    try {
+      expect(
+        await service.mergeStack(windowId, command([1, 2, 3]), signal(), "local-window"),
+      ).toEqual({
+        status: "stopped",
+        merged: [],
+        stoppedAt: 1,
+        outcome: { status: "not-landed" },
+      });
+      expect(merge).toHaveBeenCalledTimes(1);
+      expect(forge.retarget).not.toHaveBeenCalled();
+    } finally {
+      store.close();
+    }
+  });
+
+  it("waits for GitHub to work out a retargeted layer's mergeability before merging it", async () => {
+    const reads: Record<number, number> = {};
+    const layers: Record<number, { state: "open" | "merged"; headBranch: string; base: string }> = {
+      1: { state: "open", headBranch: "a", base: "main" },
+      2: { state: "open", headBranch: "b", base: "a" },
+    };
+    const { service, merge, store, wait } = fixture({
+      merge: (number) => {
+        const layer = layers[number];
+        // The single merge refuses anything GitHub does not call mergeable yet.
+        if (number === 2 && (reads[2] ?? 0) < 4) {
+          return { status: "refused", reason: "not-mergeable" };
+        }
+        if (layer !== undefined) layer.state = "merged";
+        return { status: "merged", number, method: "squash", mergedAt };
+      },
+      forge: {
+        retarget: async (request) => {
+          const layer = layers[request.number];
+          if (layer !== undefined) layer.base = request.baseBranch;
+          return { status: "done" };
+        },
+        summary: async (request) => {
+          reads[request.number] = (reads[request.number] ?? 0) + 1;
+          const layer = layers[request.number];
+          if (layer === undefined) return { status: "unavailable" };
+          return {
+            status: "read",
+            state: layer.state,
+            headBranch: layer.headBranch,
+            baseBranch: layer.base,
+            headSha: "a".repeat(40),
+            mergeability:
+              request.number === 2 && layer.base === "main" && (reads[2] ?? 0) < 4
+                ? "unknown"
+                : "mergeable",
+          };
+        },
+      },
+    });
+    try {
+      expect(await service.mergeStack(windowId, command([1, 2]), signal(), "local-window")).toEqual(
+        { status: "merged", merged: [1, 2] },
+      );
+      expect(wait).toHaveBeenCalled();
+      expect(merge).toHaveBeenCalledTimes(2);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("still sees the last of ten layers land after GitHub was slow about every one before it", async () => {
+    const layers = Array.from({ length: 10 }, (_, index) => ({
+      state: "open" as "open" | "merged",
+      base: index === 0 ? "main" : `layer-${String(index)}`,
+      readsSinceMerge: 0,
+    }));
+    const { service, store, wait } = fixture({
+      merge: (number) => {
+        const layer = layers[number - 1];
+        if (layer !== undefined) layer.state = "merged";
+        return { status: "merged", number, method: "squash", mergedAt };
+      },
+      forge: {
+        retarget: async (request) => {
+          const layer = layers[request.number - 1];
+          if (layer !== undefined) layer.base = request.baseBranch;
+          return { status: "done" };
+        },
+        summary: async (request) => {
+          const layer = layers[request.number - 1];
+          if (layer === undefined) return { status: "unavailable" };
+          // The first read after a merge still shows it open.
+          const landed = layer.state === "merged" && layer.readsSinceMerge++ > 0;
+          return {
+            status: "read",
+            state: landed ? "merged" : "open",
+            headBranch: `layer-${String(request.number)}`,
+            baseBranch: layer.base,
+            headSha: "a".repeat(40),
+            mergeability: "unknown",
+          };
+        },
+      },
+    });
+    try {
+      const numbers = layers.map((_, index) => index + 1);
+      expect(
+        await service.mergeStack(windowId, command(numbers), signal(), "local-window"),
+      ).toEqual({ status: "merged", merged: numbers });
+      // 1.5 seconds each: the request answers well inside the host's 255.
+      expect(wait.mock.calls.length).toBeLessThanOrEqual(80);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("holds every layer to the branch the person confirmed", async () => {
+    const { service, merge, store } = fixture({ summaries: chain });
+    try {
+      await service.mergeStack(
+        windowId,
+        { ...command([1, 2]), baseBranch: "main" },
+        signal(),
+        "local-window",
+      );
+      expect(merge.mock.calls.map(([, merged]) => merged.baseBranch)).toEqual(["main", "main"]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("refuses a stack whose bottom was pointed at another branch, or whose head moved, before merging anything", async () => {
+    const { service, forge, live, merge, store } = fixture({ summaries: chain });
+    try {
+      const bottom = live.get(1);
+      if (bottom !== undefined) bottom.baseBranch = "release";
+      expect(
+        await service.mergeStack(
+          windowId,
+          { ...command([1, 2, 3]), baseBranch: "main" },
+          signal(),
+          "local-window",
+        ),
+      ).toEqual({ status: "refused", reason: "base-changed" });
+      const moved = command([1, 2, 3]);
+      expect(
+        await service.mergeStack(
+          windowId,
+          {
+            ...moved,
+            items: moved.items.map((item) =>
+              item.number === 3 ? { ...item, headSha: "b".repeat(40) } : item,
+            ),
+          },
+          signal(),
+          "local-window",
+        ),
+      ).toEqual({ status: "refused", reason: "stale" });
+      expect(merge).not.toHaveBeenCalled();
+      expect(forge.retarget).not.toHaveBeenCalled();
+    } finally {
+      store.close();
+    }
+  });
+
   it("refuses a stack that is not one chain before merging anything", async () => {
     const { service, merge, store } = fixture({
       summaries: { ...chain, 3: { state: "open", headBranch: "c", baseBranch: "main" } },
@@ -602,6 +796,8 @@ describe("stack merge", () => {
         status: "stopped",
         merged: [1],
         stoppedAt: 2,
+        // It was pointed at main before its checks were read, and stays there.
+        retargetedTo: "main",
         outcome: { status: "refused", reason: "checks-not-passing" },
       });
       expect(merge).toHaveBeenCalledTimes(2);

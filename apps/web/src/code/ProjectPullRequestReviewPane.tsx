@@ -14,7 +14,7 @@ import {
   type PullRequestReviewTarget,
 } from "@octant/contracts";
 import { Activity, GitBranch, MessageSquare, RefreshCw } from "../ui/icons";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -36,6 +36,11 @@ import {
   safeGithubUrl,
 } from "./ProjectPullRequestSupport";
 import { ProjectPullRequestPage } from "./ProjectPullRequestPage";
+import {
+  ProjectPullRequestStack,
+  type ProjectPullRequestStackProps,
+  type StackMergeResult,
+} from "./ProjectPullRequestStack";
 import { PullRequestDiffWithNotes } from "./ProjectPullRequestDiff";
 import type { CodeLineNotesSendResult } from "./CodeLineNotes";
 import {
@@ -93,6 +98,26 @@ export interface ProjectPullRequestReviewPaneProps {
   readonly layout?: "dock" | "page";
   /** When the list last saw the pull request change; the page's meta line says it. */
   readonly updatedAt?: string;
+  /** The stack this pull request is a layer of, when the snapshot holds one. */
+  readonly stack?: Pick<
+    ProjectPullRequestStackProps,
+    "layers" | "onMergeStack" | "partial" | "readLayer"
+  >;
+}
+
+/**
+ * What merging this layer alone does, said before it is confirmed: its base is
+ * the branch of the layer below, so nothing reaches where the stack lands.
+ */
+function mergesIntoLayerNote(
+  stack: ProjectPullRequestReviewPaneProps["stack"],
+  detail: CodeProjectPullRequestDetailObserved,
+): string | undefined {
+  const index = stack?.layers.findIndex((layer) => layer.number === detail.number) ?? -1;
+  const below = stack?.layers[index - 1];
+  const destination = stack?.layers[0]?.baseBranch;
+  if (below === undefined || destination === undefined) return undefined;
+  return `This merges into ${detail.baseBranch}, the branch of #${String(below.number)}, not into ${destination}.`;
 }
 
 export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPaneProps) {
@@ -108,6 +133,8 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
   const [mergeOutcome, setMergeOutcome] = useState<
     CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven
   >();
+  const [stackResult, setStackResult] = useState<StackMergeResult>();
+  const stackResultLine = useRef<HTMLParagraphElement>(null);
   const stale = (section: CodeProjectPullRequestDetailSection) =>
     detail.staleSections.includes(section);
   const waiting = detail.ambiguous || detail.freshness === "stale";
@@ -130,6 +157,10 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       mergeResult.current?.focus();
     }
   }, [mergeConfirmationOpen, mergePending]);
+
+  useEffect(() => {
+    if (stackResult !== undefined) stackResultLine.current?.focus();
+  }, [stackResult]);
 
   function cancelConfirmation() {
     if (mergePending) return;
@@ -156,10 +187,42 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
     }
   }
 
+  const mergeNote = mergesIntoLayerNote(props.stack, detail);
+  const stackSection: ReactNode = (
+    <>
+      {props.stack === undefined ? null : (
+        <ProjectPullRequestStack
+          {...props.stack}
+          // A layer that lands changes the stack under an open confirmation.
+          key={props.stack.layers.map((layer) => layer.number).join("-")}
+          method={mergeMethod}
+          number={detail.number}
+          onSettled={(result) => {
+            setStackResult(result);
+            props.onRefresh?.();
+          }}
+        />
+      )}
+      {stackResult === undefined ? null : (
+        /* ui-boundary-exception: compact-status */
+        <p
+          className={`code-pr-review__merge-result code-pr-review__merge-result--${stackResult.merged ? "merged" : "refused"}`}
+          ref={stackResultLine}
+          role={stackResult.merged ? "status" : "alert"}
+          tabIndex={-1}
+        >
+          {stackResult.text}
+        </p>
+      )}
+    </>
+  );
+
   if (props.layout === "page") {
     return (
       <ProjectPullRequestPage
         {...props}
+        mergeNote={mergeNote}
+        stackSection={stackSection}
         merge={{
           available: mergeAvailable,
           cancel: cancelConfirmation,
@@ -316,6 +379,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               merging.
             </p>
           )}
+          {mergeNote === undefined ? null : <p>{mergeNote}</p>}
           <div className="code-pr-review__actions">
             <OctantButton
               disabled={mergePending}
@@ -350,6 +414,8 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           {mergeOutcomeCopy(mergeOutcome)}
         </p>
       )}
+
+      {stackSection}
 
       {props.switches === undefined ? null : (
         <PullRequestSwitches

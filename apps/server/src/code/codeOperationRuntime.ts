@@ -1261,6 +1261,8 @@ export interface CodeOperationRuntime {
       windowId: WindowId,
       threadId: CodeThreadId,
       nativeSessionId: CodeNativeSessionId,
+      /** Who asked: the local person or the paired device; absent, the host. */
+      actor?: EventActor,
     ) => Promise<AdoptCodeNativeSessionResult>;
   };
   close(): Promise<void>;
@@ -2550,7 +2552,7 @@ export function createCodeOperationRuntime(
           }),
         };
       },
-      adopt: async (windowId, threadId, nativeSessionId) => {
+      adopt: async (windowId, threadId, nativeSessionId, adoptingActor) => {
         const key = String(threadId);
         if (adoptingThreads.has(key))
           return {
@@ -2619,6 +2621,7 @@ export function createCodeOperationRuntime(
                 .digest("hex")}`,
               correlationId: options.uuid(),
               authorized: true,
+              actor: adoptingActor ?? options.actor,
             });
             if (
               marked === undefined ||
@@ -2633,46 +2636,51 @@ export function createCodeOperationRuntime(
             const cursor = adopted.right;
             // One journal unit: an adoption is recorded whole or not at all, so
             // a claim given back never leaves half an adoption behind.
-            options.persistence.journal.transaction(() => {
-              events.append({
-                threadId: thread.id,
-                operationId,
-                expectedCursor: 0,
-                event: {
-                  kind: "native-session-adopted",
-                  nativeSessionId,
-                  providerInstanceId: thread.providerInstanceId,
-                },
+            const releaseActor = events.actingFor(operationId, adoptingActor);
+            try {
+              options.persistence.journal.transaction(() => {
+                events.append({
+                  threadId: thread.id,
+                  operationId,
+                  expectedCursor: 0,
+                  event: {
+                    kind: "native-session-adopted",
+                    nativeSessionId,
+                    providerInstanceId: thread.providerInstanceId,
+                  },
+                });
+                events.append({
+                  threadId: thread.id,
+                  operationId,
+                  expectedCursor: 1,
+                  event: {
+                    kind: "provider-session-ready",
+                    sessionId,
+                    providerInstanceId: thread.providerInstanceId,
+                    modelId: thread.modelId,
+                    checkoutId: thread.checkoutId,
+                    resumeCursor: cursor,
+                  },
+                });
+                // The session's earlier conversation, as the thread's own record:
+                // never prompt context, since the provider already holds it.
+                options.persistence.journal.append(
+                  nativeSessionHistoryAppend({
+                    threadId: String(thread.id),
+                    mode: "code",
+                    providerInstanceId: thread.providerInstanceId,
+                    nativeSessionId,
+                    history,
+                    eventId: options.uuid(),
+                    correlationId: options.uuid(),
+                    actor: adoptingActor ?? options.actor,
+                    occurredAt: options.clock(),
+                  }),
+                );
               });
-              events.append({
-                threadId: thread.id,
-                operationId,
-                expectedCursor: 1,
-                event: {
-                  kind: "provider-session-ready",
-                  sessionId,
-                  providerInstanceId: thread.providerInstanceId,
-                  modelId: thread.modelId,
-                  checkoutId: thread.checkoutId,
-                  resumeCursor: cursor,
-                },
-              });
-              // The session's earlier conversation, as the thread's own record:
-              // never prompt context, since the provider already holds it.
-              options.persistence.journal.append(
-                nativeSessionHistoryAppend({
-                  threadId: String(thread.id),
-                  mode: "code",
-                  providerInstanceId: thread.providerInstanceId,
-                  nativeSessionId,
-                  history,
-                  eventId: options.uuid(),
-                  correlationId: options.uuid(),
-                  actor: options.actor,
-                  occurredAt: options.clock(),
-                }),
-              );
-            });
+            } finally {
+              releaseActor();
+            }
             committed = true;
             return { kind: "code-native-session-adopted", threadId, nativeSessionId };
           } finally {

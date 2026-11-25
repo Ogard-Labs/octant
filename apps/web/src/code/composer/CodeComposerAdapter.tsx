@@ -105,11 +105,7 @@ import {
 } from "../../work/composer/useWorkComposerImages";
 import { useSeesImages } from "../../harness/useSeesImages";
 import { WorkImageAttachmentChips } from "../../work/composer/WorkImageAttachmentChips";
-import {
-  ThreadMentionChips,
-  ThreadMentionTypeahead,
-  useThreadMentionTypeahead,
-} from "../../chat/ThreadMentionPicker";
+import { ThreadMentionTypeahead, useThreadMentionTypeahead } from "../../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../../chat/useThreadMentions";
 import { useComposerThreadDropRegistration } from "../../chat/composerThreadDrop";
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
@@ -1176,16 +1172,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     ))}
                   </ul>
                 ) : null}
-                <ThreadMentionChips
-                  chips={threadMentions.chips}
-                  onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
-                />
                 <TrackerReferenceComposerHints draft={prompt} />
                 <WorkImageAttachmentChips images={images} withMessage={false} />
               </>
             }
             input={
               <ComposerInput
+                inlineChips={mention.inlineChips}
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"

@@ -7,6 +7,7 @@ import {
   type ThreadMentionCandidate,
   type ThreadMentionTranscriptEntry,
 } from "@octant/contracts";
+import { formatThreadMentionChip } from "./threadMentionChipText";
 
 /**
  * The active `#` token under the caret. `start`/`end` are draft offsets so the
@@ -17,17 +18,6 @@ export interface ThreadMentionToken {
   readonly query: string;
   readonly start: number;
   readonly end: number;
-}
-
-/**
- * A chip is written into the draft as `#[Title]`. Bracket delimiters exist
- * because thread titles contain spaces: a bare `#Title` chip could not be
- * told apart from ordinary prose that follows it, so deleting part of the
- * title would silently leave a chip pointing at text the user no longer sees.
- * Brackets make chip presence a decidable substring check.
- */
-export function formatThreadMentionChip(title: string): string {
-  return `#[${collapseChipTitle(title)}]`;
 }
 
 /**
@@ -68,48 +58,6 @@ export function applyThreadMentionChip(
   const chip = `${formatThreadMentionChip(title)} `;
   const next = `${draft.slice(0, token.start)}${chip}${draft.slice(token.end)}`;
   return { draft: next, caretIndex: token.start + chip.length };
-}
-
-/**
- * Drop chips whose text the user has since edited out of the draft, and cap the
- * survivors at the per-turn bound. Chips are structured selections, so a chip
- * that no longer appears in the draft must not keep contributing context the
- * user believes they deleted.
- */
-export function reconcileThreadMentionChips<T extends { readonly title: string }>(
-  draft: string,
-  chips: ReadonlyArray<T>,
-): ReadonlyArray<T> {
-  // Two selected threads can share a title, so both chips serialize to the
-  // same token text. Counting occurrences keeps exactly as many chips as the
-  // draft still shows: deleting one of two identical tokens must drop one
-  // chip, not keep both contributing context the user removed.
-  const remaining = new Map<string, number>();
-  const kept: T[] = [];
-  for (const chip of chips) {
-    if (kept.length >= MAX_THREAD_MENTIONS_PER_TURN) break;
-    const text = formatThreadMentionChip(chip.title);
-    const available = remaining.get(text) ?? countOccurrences(draft, text);
-    if (available <= 0) {
-      remaining.set(text, 0);
-      continue;
-    }
-    remaining.set(text, available - 1);
-    kept.push(chip);
-  }
-  return kept;
-}
-
-/** Non-overlapping occurrences of `needle` in `haystack`. */
-function countOccurrences(haystack: string, needle: string): number {
-  if (needle.length === 0) return 0;
-  let count = 0;
-  let from = haystack.indexOf(needle);
-  while (from !== -1) {
-    count += 1;
-    from = haystack.indexOf(needle, from + needle.length);
-  }
-  return count;
 }
 
 /**
@@ -342,29 +290,6 @@ export function appendThreadMentionChip(
   const separator = draft.length === 0 || /\s$/.test(draft) ? "" : " ";
   const next = `${draft}${separator}${chip}`;
   return { draft: next, caretIndex: next.length };
-}
-
-/**
- * Title a Side Chat sidecar as being *about* its source thread, so the sidecar
- * reads as a question lane rather than a duplicate of the source conversation.
- */
-export function sideChatTitle(sourceTitle: string): string {
-  const trimmed = collapseChipTitle(sourceTitle);
-  const title = `Side Chat about ${trimmed.length === 0 ? "this thread" : trimmed}`;
-  return title.length <= 400 ? title : `${title.slice(0, 399)}…`;
-}
-
-/**
- * Chip titles are single-line and length-capped: a chip is an inline token in a
- * textarea, so an embedded newline would break the draft it lives in.
- */
-function collapseChipTitle(title: string): string {
-  const collapsed = title
-    .replace(/[\r\n\t]+/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/[[\]]/g, "")
-    .trim();
-  return collapsed.length <= 120 ? collapsed : `${collapsed.slice(0, 119)}…`;
 }
 
 export type ThreadDialogueAskDecision =

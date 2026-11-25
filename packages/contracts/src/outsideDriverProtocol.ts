@@ -9,6 +9,7 @@ import {
   ProviderToolDefinition,
   ProviderToolImage,
 } from "./providers";
+import { VideoClipOptions } from "./videoGeneration";
 
 /**
  * The harness endpoint wire protocol between the host and an outside provider
@@ -27,10 +28,11 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * An outside driver wire protocol major version: a harness endpoint
- * (`harness-endpoint/1`) or an image generator (`image-generation/1`).
+ * (`harness-endpoint/1`), an image generator (`image-generation/1`), or a
+ * video generator (`video-generation/1`).
  */
 export const OutsideProviderDriverProtocolVersion = Schema.String.pipe(
-  Schema.pattern(/^(harness-endpoint|image-generation)\/[1-9][0-9]{0,3}$/),
+  Schema.pattern(/^(harness-endpoint|image-generation|video-generation)\/[1-9][0-9]{0,3}$/),
   Schema.brand("OutsideProviderDriverProtocolVersion"),
 );
 export type OutsideProviderDriverProtocolVersion = typeof OutsideProviderDriverProtocolVersion.Type;
@@ -51,11 +53,22 @@ export const HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS: ReadonlyArray<OutsideProvi
 export const HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS: ReadonlyArray<OutsideProviderDriverProtocolVersion> =
   [OutsideProviderDriverProtocolVersion.make("image-generation/1")];
 
+/**
+ * The video generation protocol versions this host speaks. It shares the
+ * framing, `initialize`, failures, and the brokered `http/*` calls, and adds
+ * `video/start`, `video/poll`, `video/cancel` and `video/forget`, which follow
+ * the video seam's adapter one call for one.
+ */
+export const HOST_VIDEO_GENERATION_PROTOCOL_VERSIONS: ReadonlyArray<OutsideProviderDriverProtocolVersion> =
+  [OutsideProviderDriverProtocolVersion.make("video-generation/1")];
+
 /** The protocol family a version belongs to: what kind of driver speaks it. */
 export function outsideDriverProtocolFamily(
   version: OutsideProviderDriverProtocolVersion,
-): "harness-endpoint" | "image-generation" {
-  return version.startsWith("image-generation/") ? "image-generation" : "harness-endpoint";
+): "harness-endpoint" | "image-generation" | "video-generation" {
+  if (version.startsWith("image-generation/")) return "image-generation";
+  if (version.startsWith("video-generation/")) return "video-generation";
+  return "harness-endpoint";
 }
 
 export const OUTSIDE_DRIVER_METHODS = {
@@ -72,6 +85,10 @@ export const OUTSIDE_DRIVER_METHODS = {
   imageGenerate: "image/generate",
   imageCancel: "image/cancel",
   imageChunk: "image/chunk",
+  videoStart: "video/start",
+  videoPoll: "video/poll",
+  videoCancel: "video/cancel",
+  videoForget: "video/forget",
   httpRequest: "http/request",
   httpChunk: "http/chunk",
   httpEnd: "http/end",
@@ -91,6 +108,10 @@ export type OutsideDriverSessionRef = typeof OutsideDriverSessionRef.Type;
 
 const PositiveCount = Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(100_000_000));
 const TokenCount = Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(1_000_000_000));
+const PositiveTokenCount = Schema.Int.pipe(
+  Schema.positive(),
+  Schema.lessThanOrEqualTo(1_000_000_000),
+);
 
 // ── host → driver ──────────────────────────────────────────────────────────
 
@@ -315,7 +336,12 @@ const HttpHeaderValue = Schema.String.pipe(
 export const OutsideDriverHttpRequestParams = Schema.Struct({
   requestId: Schema.optional(OutsideDriverMessageId),
   url: Schema.String.pipe(Schema.maxLength(8_192)),
-  method: Schema.Literal("GET", "POST"),
+  /**
+   * `PUT` and `DELETE` are for the calls that stop a video job or remove the
+   * provider's copy; the host refuses them on any call that is not one of a
+   * video driver's own.
+   */
+  method: Schema.Literal("GET", "POST", "PUT", "DELETE"),
   headers: Schema.optional(
     Schema.Array(Schema.Tuple(HttpHeaderName, HttpHeaderValue)).pipe(Schema.maxItems(64)),
   ),
@@ -493,6 +519,109 @@ export type OutsideDriverImageGenerateResult = typeof OutsideDriverImageGenerate
 
 export const decodeOutsideDriverImageGenerateResult = Schema.decodeUnknownEither(
   OutsideDriverImageGenerateResult,
+);
+
+// ── video generation ───────────────────────────────────────────────────────
+
+/** The provider's name for one clip, as the driver reported it when the clip started. */
+export const OutsideDriverVideoRemoteId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
+export type OutsideDriverVideoRemoteId = typeof OutsideDriverVideoRemoteId.Type;
+
+const OutsideDriverVideoImage = Schema.Struct({
+  mediaType: OutsideDriverImageMediaType,
+  data: Base64ReferenceImage,
+}).annotations(strict);
+
+/**
+ * One clip as it crosses to the driver. The host has already checked the
+ * options against the package's declaration, reserved the spend, and read the
+ * images; they cross as bytes, never as a path or an address.
+ */
+export const OutsideDriverVideoStartParams = Schema.Struct({
+  modelId: ProviderModelId,
+  prompt: Schema.String,
+  options: VideoClipOptions,
+  firstFrame: Schema.optional(OutsideDriverVideoImage),
+  lastFrame: Schema.optional(OutsideDriverVideoImage),
+  references: Schema.Array(OutsideDriverVideoImage).pipe(Schema.maxItems(16)),
+}).annotations(strict);
+export type OutsideDriverVideoStartParams = typeof OutsideDriverVideoStartParams.Type;
+
+/** `video/poll`, `video/cancel` and `video/forget` each name the clip the start returned. */
+export const OutsideDriverVideoJobParams = Schema.Struct({
+  remoteId: OutsideDriverVideoRemoteId,
+}).annotations(strict);
+export type OutsideDriverVideoJobParams = typeof OutsideDriverVideoJobParams.Type;
+
+/** A started clip, or the provider's safety refusal, which carries no text. */
+export const OutsideDriverVideoStartResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("started"),
+    remoteId: OutsideDriverVideoRemoteId,
+  }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("refused") }).annotations(strict),
+);
+export type OutsideDriverVideoStartResult = typeof OutsideDriverVideoStartResult.Type;
+
+/**
+ * What the provider counted, never what it charged: the host turns counts into
+ * money with the package's declared price, so a running driver names no
+ * amount. A count of nothing is left out rather than sent as zero.
+ */
+export const OutsideDriverVideoUsage = Schema.Struct({
+  inputTokens: Schema.optional(PositiveTokenCount),
+  outputTokens: Schema.optional(PositiveTokenCount),
+  billedSeconds: Schema.optional(
+    Schema.Number.pipe(Schema.finite(), Schema.positive(), Schema.lessThanOrEqualTo(86_400)),
+  ),
+}).annotations(strict);
+export type OutsideDriverVideoUsage = typeof OutsideDriverVideoUsage.Type;
+
+/**
+ * How a clip stands. A finished clip is named by address only, because a clip
+ * can be far larger than a line; the host fetches it itself, once, without the
+ * key, and only when the provider's own answer named that address. Nothing
+ * here carries text: the host writes every sentence a person reads.
+ */
+export const OutsideDriverVideoPollResult = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("running") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("completed"),
+    url: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_192)),
+    usage: Schema.optional(OutsideDriverVideoUsage),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    billed: Schema.optional(Schema.Literal(true)),
+    usage: Schema.optional(OutsideDriverVideoUsage),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("failed"),
+    category: ProviderFailureCategory,
+    billed: Schema.optional(Schema.Literal(true)),
+    usage: Schema.optional(OutsideDriverVideoUsage),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("cancelled"),
+    usage: Schema.optional(OutsideDriverVideoUsage),
+  }).annotations(strict),
+);
+export type OutsideDriverVideoPollResult = typeof OutsideDriverVideoPollResult.Type;
+
+/** The provider's copy is gone. Anything else is a failure, which the host tries again. */
+export const OutsideDriverVideoForgetResult = Schema.Struct({
+  status: Schema.Literal("removed"),
+}).annotations(strict);
+export type OutsideDriverVideoForgetResult = typeof OutsideDriverVideoForgetResult.Type;
+
+export const decodeOutsideDriverVideoStartResult = Schema.decodeUnknownEither(
+  OutsideDriverVideoStartResult,
+);
+export const decodeOutsideDriverVideoPollResult = Schema.decodeUnknownEither(
+  OutsideDriverVideoPollResult,
+);
+export const decodeOutsideDriverVideoForgetResult = Schema.decodeUnknownEither(
+  OutsideDriverVideoForgetResult,
 );
 
 export const decodeOutsideDriverToHostMessage = Schema.decodeUnknownEither(

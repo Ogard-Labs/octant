@@ -198,7 +198,7 @@ function makeFakeGhCommand(options: {
       if (
         args[0] === "pr" &&
         args[1] === "view" &&
-        args.includes("state,headRefName,baseRefName,headRefOid,baseRefOid")
+        args.includes("state,headRefName,baseRefName,headRefOid,baseRefOid,mergeable")
       ) {
         return {
           exitCode: 0,

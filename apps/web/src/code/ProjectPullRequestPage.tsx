@@ -74,6 +74,9 @@ export interface ProjectPullRequestMergeFlow {
 
 export interface ProjectPullRequestPageProps extends ProjectPullRequestReviewPaneProps {
   readonly merge: ProjectPullRequestMergeFlow;
+  /** Said in the merge confirmation of a layer that merges into another one's branch. */
+  readonly mergeNote: string | undefined;
+  readonly stackSection: ReactNode;
 }
 
 type Tab = "summary" | "changes" | "timeline";
@@ -400,6 +403,7 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                 merging.
               </p>
             )}
+            {props.mergeNote === undefined ? null : <p>{props.mergeNote}</p>}
             <div className="code-pr-review__actions">
               <OctantButton
                 disabled={merge.pending}
@@ -489,6 +493,8 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                 </p>
               ) : null}
             </section>
+
+            {props.stackSection}
 
             <section aria-label="Checks" className="pr-detail__group">
               <h2 className="oct-nav-group">

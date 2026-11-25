@@ -1297,6 +1297,26 @@ describe("outside driver brokered requests", () => {
       }
     });
 
+    it.each(["PUT", "DELETE"] as const)(
+      "stops a driver that asks for a %s, which only a video call may make",
+      async (method) => {
+        const handler: FixtureDriverHandler = async (_params, context) => {
+          await context.http({ requestId: context.id, url: `${baseUrl}chat`, method });
+          return { text: "x", toolCalls: [] };
+        };
+        const fetch = vi.fn<OutsideDriverFetch>(async () => new Response("ok"));
+        const { probe, proxy, channel } = harness({ "session/send": handler }, { fetch });
+        await probe();
+        const session = await proxy.harnessEndpoint.open(modelId);
+        await rejection(
+          session.send(request(), { signal: new AbortController().signal, onEvent: () => {} }),
+        );
+
+        expect(channel.driver.stopped()).toBe(true);
+        expect(fetch).not.toHaveBeenCalled();
+      },
+    );
+
     it("closes a send's brokered calls when its deadline passes", async () => {
       const service = stallingService();
       const streaming = streamingDriver();

@@ -157,18 +157,19 @@ the Browser pane
 
 - `POST /api/browser/captures` lists the retained captures, newest first.
   `POST /api/browser/captures/image` returns one as an image data URL.
-- Both answer a local window or a paired device that can open the thread (403
-  otherwise; maintainer decision, 2026-11-12; not built yet: today a local
-  window only),
-  under the same rule that lets a window read the thread's generated images.
+- Both answer a local window or a device the host's own person paired that
+  can open the thread (403 otherwise, a hub-introduced device included;
+  maintainer decision, 2026-11-12), under the same rule that lets a window read the thread's generated images.
   The thread need not be live: an archived thread, a thread in an archived
   Project, and a thread whose provider is switched off still show what they
   kept. A capture id the thread does not retain is 404.
 - The take route drives the Browser, so it needs the thread's live Browser
   authority as well, and the context must belong to the named thread. An
   archived thread shows its captures and takes no new one.
-- Not built yet: today the product route classifier leaves all three unlisted,
-  so a paired device is stopped before the route too.
+- The product route classifier forwards all three under its `/api/browser/`
+  prefix, so a device the host's own person paired reaches them. Its Chat,
+  Work and Code threads list the captures and answer the Browser prompts; the
+  live Browser pane is not offered over the session.
 
 ## Canvas design assets
 
@@ -459,9 +460,8 @@ request, and only by choosing to.
   typed.
 - **Reads.** `POST /api/browser/steps` lists them, oldest first, and answers
   exactly the callers `POST /api/browser/captures` answers: a local window or a
-  paired device that can open the thread, archived or not. Not built yet: today
-  the product route classifier leaves it unlisted, so a paired device is stopped
-  before the route.
+  device the host's own person paired that can open the thread, archived or
+  not.
 - Rationale: the proof names pages and elements the person browsed and sits
   beside the pictures, so reading it is the same authority as reading a capture,
   not wider. Today a paired device therefore cannot view, attach, or save the
@@ -506,11 +506,11 @@ request, and only by choosing to.
   works: nothing is uploaded, no new credential or host is involved, and the
   picker is the person's consent for the one folder.
 - **Paired devices.** A paired device reads and attaches the proof as a window
-  does (maintainer decision, 2026-11-12). Not built yet: today reading the proof
-  is refused for a paired device, so a
-  pull-request form reached from one says "Browser proof can be attached only
-  from a window on this computer." and creates nothing until the person turns
-  the choice off. "Save screenshots…" exists only where the desktop app's bridge
+  does (maintainer decision, 2026-11-12). The host reads the proof for a
+  device its own person paired and refuses it to every other. The paired shell
+  has no pull-request form yet, so a form reached from a device that cannot read
+  the proof says "Browser proof can be attached only from a window on this
+  computer." and creates nothing until the person turns the choice off. "Save screenshots…" exists only where the desktop app's bridge
   does. The product route classifier already lets a paired device send other
   Code commands; this adds nothing to what it may do there.
 - **Signed-in pages.** A capture or step of a page in a Project or Personal

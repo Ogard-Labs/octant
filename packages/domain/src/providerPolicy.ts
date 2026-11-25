@@ -95,6 +95,8 @@ import type {
   OutsideImageProviderConfiguration,
   OutsideImageProviderInstance,
   OutsideProviderDriverReference,
+  OutsideVideoProviderConfiguration,
+  OutsideVideoProviderInstance,
 } from "@octant/contracts/providers";
 
 export type ProviderPolicyRejectionCode =
@@ -151,9 +153,12 @@ export function isImageProfileDriverKind(
  */
 export function isVideoProfileDriverKind(
   driverKind: ProviderDriverKind,
-): driverKind is "gemini-video" | "runway-video" | "fal-video" {
+): driverKind is "gemini-video" | "runway-video" | "fal-video" | "outside-video" {
   return (
-    driverKind === "gemini-video" || driverKind === "runway-video" || driverKind === "fal-video"
+    driverKind === "gemini-video" ||
+    driverKind === "runway-video" ||
+    driverKind === "fal-video" ||
+    driverKind === "outside-video"
   );
 }
 
@@ -1489,10 +1494,10 @@ export function changeOutsideHarnessEndpointConfiguration(
   };
 }
 
-interface CreateOutsideImageProviderInput {
+interface CreateOutsideMediaProviderInput<Configuration> {
   readonly id: ProviderInstanceId;
   readonly displayName: string;
-  readonly configuration: OutsideImageProviderConfiguration;
+  readonly configuration: Configuration;
   readonly existingInstances: ReadonlyArray<ProviderInstance>;
   readonly expectedVersion: AggregateVersion;
   readonly createdAt: UtcTimestamp;
@@ -1505,7 +1510,7 @@ interface CreateOutsideImageProviderInput {
  * declares, since only a declared model has a price the host can reserve.
  */
 export function createOutsideImageProvider(
-  input: CreateOutsideImageProviderInput,
+  input: CreateOutsideMediaProviderInput<OutsideImageProviderConfiguration>,
 ): OutsideImageProviderInstance {
   return {
     id: input.id,
@@ -1520,25 +1525,50 @@ export function createOutsideImageProvider(
   };
 }
 
-function normalizeOutsideImageConfiguration(
-  configuration: OutsideImageProviderConfiguration,
-): OutsideImageProviderConfiguration {
+/** The address, key and model rules an outside media profile of either family follows. */
+function normalizeOutsideMediaFields(
+  configuration: OutsideImageProviderConfiguration | OutsideVideoProviderConfiguration,
+  media: "image" | "video",
+) {
   const baseUrl = normalizeOpenAiCompatibleBaseUrl(configuration.baseUrl);
   if (configuration.key === undefined && !isLoopbackHostname(new URL(baseUrl).hostname)) {
     reject("invalid-authentication", "Unauthenticated providers must use a loopback endpoint.");
   }
   const modelAllowlist = normalizeManualModelIds(configuration.modelAllowlist);
   if (!modelAllowlist.some((id) => String(id) === String(configuration.defaultModel))) {
-    reject("invalid-configuration", "The default image model must be one of the listed models.");
+    reject("invalid-configuration", `The default ${media} model must be one of the listed models.`);
   }
   return {
-    kind: "outside-image",
     driver: configuration.driver,
     baseUrl,
     ...(configuration.key === undefined ? {} : { key: configuration.key }),
     modelAllowlist: modelAllowlist as OutsideImageProviderConfiguration["modelAllowlist"],
     defaultModel: configuration.defaultModel,
   };
+}
+
+function normalizeOutsideImageConfiguration(
+  configuration: OutsideImageProviderConfiguration,
+): OutsideImageProviderConfiguration {
+  return { kind: "outside-image", ...normalizeOutsideMediaFields(configuration, "image") };
+}
+
+function normalizeOutsideVideoConfiguration(
+  configuration: OutsideVideoProviderConfiguration,
+): OutsideVideoProviderConfiguration {
+  return { kind: "outside-video", ...normalizeOutsideMediaFields(configuration, "video") };
+}
+
+function assertSameOutsideDriver(
+  bound: OutsideProviderDriverReference,
+  named: OutsideProviderDriverReference,
+): void {
+  if (!isSameOutsideDriver(bound, named)) {
+    reject(
+      "invalid-configuration",
+      "A provider keeps the driver it was added with; add a new provider to use another.",
+    );
+  }
 }
 
 /**
@@ -1550,15 +1580,46 @@ export function changeOutsideImageConfiguration(
   configuration: OutsideImageProviderConfiguration,
   updatedAt: UtcTimestamp,
 ): OutsideImageProviderInstance {
-  if (!isSameOutsideDriver(provider.configuration.driver, configuration.driver)) {
-    reject(
-      "invalid-configuration",
-      "A provider keeps the driver it was added with; add a new provider to use another.",
-    );
-  }
+  assertSameOutsideDriver(provider.configuration.driver, configuration.driver);
   return {
     ...provider,
     configuration: normalizeOutsideImageConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+/**
+ * A video profile from an admitted outside video driver, under exactly the
+ * rules an outside image profile is added by: created off, and the host
+ * checks separately that the package declares every listed model.
+ */
+export function createOutsideVideoProvider(
+  input: CreateOutsideMediaProviderInput<OutsideVideoProviderConfiguration>,
+): OutsideVideoProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "outside-video",
+    configuration: normalizeOutsideVideoConfiguration(input.configuration),
+    enabled: false,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+/** Changes an outside video profile's address, key placement, or models; never its driver. */
+export function changeOutsideVideoConfiguration(
+  provider: OutsideVideoProviderInstance,
+  configuration: OutsideVideoProviderConfiguration,
+  updatedAt: UtcTimestamp,
+): OutsideVideoProviderInstance {
+  assertSameOutsideDriver(provider.configuration.driver, configuration.driver);
+  return {
+    ...provider,
+    configuration: normalizeOutsideVideoConfiguration(configuration),
     version: nextVersion(provider.version),
     updatedAt,
   };
@@ -1608,6 +1669,10 @@ export function rebindOutsideProviderDriver(
   const moved = { version: nextVersion(provider.version), updatedAt, ...held };
   // Rebuilt per family so the compiler keeps each configuration with its own kind.
   if (provider.driverKind === "outside-image") {
+    const { driverQuarantine: _left, ...rest } = provider;
+    return { ...rest, configuration: { ...provider.configuration, driver }, ...moved };
+  }
+  if (provider.driverKind === "outside-video") {
     const { driverQuarantine: _left, ...rest } = provider;
     return { ...rest, configuration: { ...provider.configuration, driver }, ...moved };
   }

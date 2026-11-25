@@ -12,6 +12,14 @@ export interface NightlyClientWindow {
   readonly onClosed: (listener: () => void) => void;
 }
 
+/** A busy or still-starting Octant gives these; an identity or receipt refusal never changes. */
+const RETRYABLE_REGISTRATION_REFUSALS: ReadonlySet<string> = new Set([
+  "deadline-exceeded",
+  "native-unavailable",
+  "not-running",
+  "unavailable",
+]);
+
 /** Owns one native client handle; its server window ID is issued by Stable. */
 export async function openNightlyClientWindow(options: {
   readonly native: NativeDesktopWindows;
@@ -26,7 +34,13 @@ export async function openNightlyClientWindow(options: {
       readonly kind: "opened";
       readonly close: () => Promise<{ readonly kind: "closed" | "failed" }>;
     }
-  | { readonly kind: "refused"; readonly reason: string; readonly cleanupFailed?: true }
+  | {
+      readonly kind: "refused";
+      readonly reason: string;
+      readonly cleanupFailed?: true;
+      /** Octant was slow or still starting, and no window was made: asking again may work. */
+      readonly retryable?: true;
+    }
 > {
   const handle = randomUUID();
   const generation = 1;
@@ -40,14 +54,23 @@ export async function openNightlyClientWindow(options: {
     });
   const began = elapsedNow();
   const isClosing = () => options.isClosing?.() === true || options.signal?.aborted === true;
-  const revoke = async () => {
+  const revoke = async (refusedRegistration?: string) => {
     const reply = await boundedDesktopPeerOperation(() =>
       options.native.revokeWindow(handle, generation),
     );
-    return typeof reply === "object" &&
-      reply !== null &&
-      "kind" in reply &&
-      reply.kind === "revoked"
+    if (typeof reply !== "object" || reply === null || !("kind" in reply)) return "failed" as const;
+    if (reply.kind === "revoked") return "closed" as const;
+    // A registration that was never granted leaves nothing to clean up once the
+    // host says it holds no such window, or no host is listening. Only Octant
+    // answers `unavailable`, and a registration it answered that way is already
+    // dropped there; a revoke during the same host start gets that answer too.
+    // Counting these as failures would refuse this session's app update after a
+    // retry.
+    return refusedRegistration !== undefined &&
+      "reason" in reply &&
+      (reply.reason === "expired" ||
+        reply.reason === "not-running" ||
+        (reply.reason === "unavailable" && refusedRegistration === "unavailable"))
       ? ("closed" as const)
       : ("failed" as const);
   };
@@ -59,7 +82,12 @@ export async function openNightlyClientWindow(options: {
   const registration = await registerNightlyWindow(options.native, handle, generation);
   if (registration.kind === "refused") {
     // A missing receipt does not prove the peer failed to mint the lease.
-    return refused(registration.reason, await revoke());
+    return {
+      ...refused(registration.reason, await revoke(registration.reason)),
+      ...(RETRYABLE_REGISTRATION_REFUSALS.has(registration.reason)
+        ? { retryable: true as const }
+        : {}),
+    };
   }
   if (isClosing()) {
     return refused("native-unavailable", await revoke());

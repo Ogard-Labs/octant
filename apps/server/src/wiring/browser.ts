@@ -37,6 +37,7 @@ import {
 import { Effect } from "effect";
 import { createHostPersonScopes, createPersonProjectReach } from "../hostPersonScope";
 import {
+  readDeviceAccessLevel,
   readDeviceApprovedByPerson,
   readDeviceRegistration,
   readDeviceRegistrations,
@@ -174,6 +175,8 @@ export function wireBrowser(deps: BrowserDependencies) {
       localWindows: () => windowAuthorityStore.listWindowIds(),
       devices: () => readDeviceRegistrations(persistence.connection),
       approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+      hasFullAccess: (deviceId) =>
+        readDeviceAccessLevel(persistence.connection, deviceId) === "full",
     });
     const rememberedBrowserOrigins = () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings())
@@ -215,8 +218,12 @@ export function wireBrowser(deps: BrowserDependencies) {
       isHostScope: isRoutineHostScope,
       isLocalWindow: hostPersonScopes.actsAsHostPerson,
       isRestrictedDevice: (windowId) =>
-        isRestrictedDeviceScope(windowId) ||
-        (!hostPersonScopes.actsAsHostPerson(windowId) && !isRoutineHostScope(windowId)),
+        isRestrictedBrowserDevice({
+          hostPersonScopes,
+          isRestrictedDeviceScope,
+          isRoutineHostScope,
+          windowId,
+        }),
       extensionsEnabledIn: (profile) => extensionFoldersFor(profile).length,
       profileLabel: async (profile) => {
         if (profile.kind !== "account") return undefined;
@@ -1057,6 +1064,24 @@ export function wireBrowser(deps: BrowserDependencies) {
       windowHoldsProject,
     };
   });
+}
+
+/**
+ * Whether a Browser approval's answerer is held to one answer instead of the
+ * person's remembered one: a hub-introduced, below-Full or unproved device, or
+ * any scope that is neither a person's window or Full device nor the host.
+ */
+export function isRestrictedBrowserDevice(input: {
+  readonly hostPersonScopes: ReturnType<typeof createHostPersonScopes>;
+  readonly isRestrictedDeviceScope: (windowId: WindowId) => boolean;
+  readonly isRoutineHostScope: (windowId: WindowId) => boolean;
+  readonly windowId: WindowId;
+}): boolean {
+  return (
+    input.isRestrictedDeviceScope(input.windowId) ||
+    (!input.hostPersonScopes.actsAsHostPerson(input.windowId) &&
+      !input.isRoutineHostScope(input.windowId))
+  );
 }
 
 export type BrowserWiring = Effect.Effect.Success<ReturnType<typeof wireBrowser>>;

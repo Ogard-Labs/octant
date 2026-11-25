@@ -186,12 +186,13 @@ const LOCAL_HOST_ACTIONS = new Set([
   "code.remember-full-access",
   "code.open-external-editor",
   // Local servers: stopping a leftover the user did not start through Octant
-  // signals a
-  // process outside Octant's ownership, so it stays on the host.
+  // signals a process outside Octant's ownership, so only the host's own
+  // person does it, at a window or on a device they paired.
   "code.local-servers.stop-leftover",
   // Opening, navigating, closing, or typing into the host's browser is driving
   // the host rather than watching it, and terminal input runs commands there,
-  // so both stay with the person at the machine.
+  // so both stay with the host's own person, at a window or on a device they
+  // paired, and are refused to every other device.
   "browser.session.manage",
   "terminal.write",
   "host-key.rotate",

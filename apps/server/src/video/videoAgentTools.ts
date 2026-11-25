@@ -258,6 +258,14 @@ function imageCounts(images: DescribedImages) {
   };
 }
 
+/** The images' size as described; the queue checks the bytes actually read. */
+function imageBytes(images: DescribedImages): number {
+  return [images.firstFrame, images.lastFrame, ...images.references].reduce(
+    (sum, image) => sum + (image?.source.size ?? 0),
+    0,
+  );
+}
+
 /** The profiles in the shape the image rule reads: id, models, and the first declared model as default. */
 function asChoiceProfiles(ready: ReadonlyArray<ReadyProfile>) {
   return ready.flatMap(({ instance, models }) => {
@@ -359,6 +367,7 @@ async function generateVideo(
       prompt: request.prompt,
       options: clip,
       ...counts,
+      imageBytes: imageBytes(images),
       ...(signal === undefined ? {} : { signal }),
     });
   const first = await quoteFor(proposed);
@@ -439,6 +448,7 @@ async function generateVideo(
       prompt: request.prompt,
       options: clip,
       references,
+      ...(first.outsideTerms === undefined ? {} : { outsideTerms: first.outsideTerms }),
       ...(signal === undefined ? {} : { signal }),
       ...(firstFrame === undefined ? {} : { firstFrame }),
       ...(lastFrame === undefined ? {} : { lastFrame }),

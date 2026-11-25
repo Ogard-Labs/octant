@@ -66,8 +66,28 @@
   font-size: var(--oct-text-xs);
 }
 
-.thread-row-info-card__fact svg {
+.thread-row-info-card__fact svg:not(.provider-glyph) {
   flex: 0 0 auto;
+  color: var(--oct-meta);
+}
+
+/* Every mark takes one slot, so a Project's tile, a provider's glyph and a line
+   icon leave their labels on one edge. */
+.thread-row-info-card__mark {
+  display: grid;
+  flex: 0 0 16px;
+  place-items: center;
+}
+
+.thread-row-info-card__fact[data-live="working"] svg {
+  color: var(--octant-accent-text);
+}
+
+.thread-row-info-card__fact[data-live="attention"] svg {
+  color: var(--oct-warn-fg);
+}
+
+.thread-row-info-card__step {
   color: var(--oct-meta);
 }
 
@@ -108,6 +128,40 @@
   align-items: center;
   gap: 2px;
   min-width: 0;
+}
+
+/* A layer and the one it is based on are joined glyph to glyph, each line
+   drawing its own half. An indent per layer would take the title's width. */
+.thread-row-info-card__pr[data-stack-join] {
+  position: relative;
+}
+
+.thread-row-info-card__pr:is([data-stack-join="previous"], [data-stack-join="both"])::before,
+.thread-row-info-card__pr:is([data-stack-join="next"], [data-stack-join="both"])::after {
+  position: absolute;
+  z-index: 1;
+  /* The reference's inset, then the middle of its 14px glyph. */
+  inset-inline-start: calc(var(--oct-space-2) + 1px + 6.5px);
+  width: 1px;
+  height: calc(50% - 8px);
+  background: var(--oct-hairline-strong);
+  content: "";
+  pointer-events: none;
+}
+
+.thread-row-info-card__pr::before {
+  top: 0;
+}
+
+.thread-row-info-card__pr::after {
+  bottom: 0;
+}
+
+.thread-row-info-card__pr-stack {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* The state glyph, checks dot, number, title and (when the pull requests span
