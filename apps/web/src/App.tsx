@@ -9557,6 +9557,12 @@ function LaunchedShell(
                           inboxOpen={inboxOpen}
                           {...(todosOpen ? { todosPage } : {})}
                           isNarrow={isNarrow}
+                          computerSnapshots={computerSnapshots}
+                          {...(hostFederationTransports === undefined
+                            ? {}
+                            : { hostFederationTransports })}
+                          onOpenPairedComputerThread={openPairedComputerThreadLatest}
+                          pairedComputerReads={pairedComputerReads}
                           linearClient={linearClient}
                           linearIssuesOpen={linearIssuesOpen}
                           linearIssuesRead={linearIssuesRead}

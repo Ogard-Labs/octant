@@ -175,6 +175,8 @@ export interface WorkspaceRailLayersProps {
   /** The host's agent-messaging facts client, when the surface has one. */
   readonly agentMessageClient?: AgentMessageClient;
   readonly projectNames: ReadonlyMap<string, string>;
+  /** The work on every computer this window reaches, for the Agents page. */
+  readonly activeWork?: NonNullable<AgentsCenterProps["activeWork"]>;
   readonly onCloseAgentsCenter: () => void;
   readonly onOpenAgentsThread: (
     target: AgentsCenterThreadTarget & { readonly title: string },
@@ -452,6 +454,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
           <LazyRailSurface label="Agents">
             <AgentsCenter
               client={props.agentRunClient}
+              {...(props.activeWork === undefined ? {} : { activeWork: props.activeWork })}
               {...(props.agentMessageClient === undefined
                 ? {}
                 : { messagingClient: props.agentMessageClient })}

@@ -13,6 +13,7 @@ import {
   type AgentRunClient,
 } from "@octant/client-runtime/agent-run-client";
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
+import { ActiveWorkView, type ActiveWorkViewProps } from "../activeWork/ActiveWorkView";
 import { Bot, Ellipsis, Search } from "../ui/icons";
 import { useCallback, useMemo, useState } from "react";
 import { SubagentProviderMark, useSubagentProviders } from "./subagentProviders";
@@ -69,6 +70,8 @@ export interface AgentsCenterProps {
   readonly narrow?: boolean;
   readonly projectNames?: ReadonlyMap<string, string>;
   readonly providerLabels?: ReadonlyMap<string, string>;
+  /** The work on every computer this window reaches; the page opens on it when present. */
+  readonly activeWork?: ActiveWorkViewProps;
 }
 
 const STATUS_FILTERS = [
@@ -84,10 +87,23 @@ const MODE_FILTERS = [
   { value: "code", label: "Code" },
 ] as const;
 
-const VIEW_FILTERS = [
+type AgentsCenterView = "active" | "list" | "graph";
+
+interface ViewChoice {
+  readonly value: AgentsCenterView;
+  readonly label: string;
+}
+
+const RUN_VIEWS: ReadonlyArray<ViewChoice> = [
   { value: "list", label: "List" },
   { value: "graph", label: "Graph" },
-] as const;
+];
+
+const ACTIVE_WORK_VIEWS: ReadonlyArray<ViewChoice> = [
+  { value: "active", label: "Active work" },
+  { value: "list", label: "Runs" },
+  { value: "graph", label: "Graph" },
+];
 
 export function AgentsCenter(props: AgentsCenterProps) {
   const controller = useAgentsCenterController({ client: props.client });
@@ -98,7 +114,9 @@ export function AgentsCenter(props: AgentsCenterProps) {
   );
   const detailOpen = controller.selectedId !== undefined;
   const hideListForNarrow = props.narrow === true && detailOpen;
-  const [view, setView] = useState<(typeof VIEW_FILTERS)[number]["value"]>("list");
+  const [view, setView] = useState<AgentsCenterView>(
+    props.activeWork === undefined ? "list" : "active",
+  );
   const showGraph = props.narrow !== true && view === "graph";
   const [savingCanvas, setSavingCanvas] = useState(false);
 
@@ -140,97 +158,124 @@ export function AgentsCenter(props: AgentsCenterProps) {
     <Surface ariaLabel="Agents" className="agents-center" measure="wide">
       <SurfaceHeader
         title="Agents"
+        {...(props.activeWork === undefined
+          ? {}
+          : {
+              actions: (
+                <AgentsCenterViewToggle
+                  onViewChange={setView}
+                  view={view}
+                  views={props.narrow === true ? ACTIVE_WORK_VIEWS.slice(0, 2) : ACTIVE_WORK_VIEWS}
+                />
+              ),
+            })}
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
-      {props.messagingClient === undefined ? null : (
-        <AgentMessagingFactsRow client={props.messagingClient} />
+      {props.activeWork !== undefined && view === "active" ? (
+        <ActiveWorkView {...props.activeWork} />
+      ) : (
+        renderRuns()
       )}
-
-      {controller.notice === undefined ? null : (
-        <div className="agents-center__notice" role="status">
-          <span>{controller.notice}</span>
-          <OctantButton onClick={controller.clearNotice} type="button" variant="ghost">
-            Dismiss
-          </OctantButton>
-        </div>
-      )}
-
-      <div
-        className="agents-center__body"
-        data-detail-open={detailOpen ? "true" : "false"}
-        data-narrow={props.narrow === true}
-      >
-        {hideListForNarrow ? null : (
-          <div className="agents-center__list-pane">
-            {/* Search and filters appear once there is something to filter; a
-                filter that is already on keeps its bar so it can be cleared. */}
-            {controller.list.status === "ready" &&
-            controller.list.items.length === 0 &&
-            !filtersAreActive(controller) ? null : (
-              <AgentsCenterToolbar
-                controller={controller}
-                savingCanvas={savingCanvas}
-                {...(props.narrow === true ? {} : { onViewChange: setView, view })}
-                {...(showGraph && controller.visibleItems.length > 0
-                  ? { onSaveCanvas: () => void saveGraphAsCanvas() }
-                  : {})}
-              />
-            )}
-            {showGraph &&
-            controller.list.status !== "loading" &&
-            controller.list.status !== "unavailable" &&
-            controller.visibleItems.length > 0 ? (
-              <AgentsCenterGraph
-                items={controller.visibleItems}
-                onSelect={(runId) => controller.select(runId)}
-                providerLabels={props.providerLabels ?? new Map()}
-                refreshing={controller.list.status === "refreshing"}
-                {...(controller.selectedId === undefined
-                  ? {}
-                  : { selectedId: controller.selectedId })}
-                {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
-              />
-            ) : (
-              <AgentsCenterListBody
-                controller={controller}
-                controls={controls}
-                onOpenThread={props.onOpenThread}
-                onStartThread={props.onStartThread}
-                projectNames={props.projectNames ?? new Map()}
-                providerLabels={props.providerLabels ?? new Map()}
-                onSelect={(runId) => controller.select(runId)}
-              />
-            )}
-          </div>
-        )}
-
-        {selected === undefined ? null : (
-          <div className="agents-center__detail-pane">
-            <AgentsCenterDetail
-              // A different run is a different pane: without the key, a Stop
-              // confirmation raised for one run carried over to the next and
-              // its handler cancelled the newly selected run.
-              key={String(selected.runId)}
-              controls={controls}
-              controller={controller}
-              narrow={props.narrow === true}
-              onBack={() => controller.select(undefined)}
-              onOpenThread={props.onOpenThread}
-              projectNames={props.projectNames ?? new Map()}
-              providerLabels={props.providerLabels ?? new Map()}
-              summary={selected}
-            />
-          </div>
-        )}
-      </div>
     </Surface>
   );
+
+  function renderRuns() {
+    return (
+      <>
+        {props.messagingClient === undefined ? null : (
+          <AgentMessagingFactsRow client={props.messagingClient} />
+        )}
+
+        {controller.notice === undefined ? null : (
+          <div className="agents-center__notice" role="status">
+            <span>{controller.notice}</span>
+            <OctantButton onClick={controller.clearNotice} type="button" variant="ghost">
+              Dismiss
+            </OctantButton>
+          </div>
+        )}
+
+        <div
+          className="agents-center__body"
+          data-detail-open={detailOpen ? "true" : "false"}
+          data-narrow={props.narrow === true}
+        >
+          {hideListForNarrow ? null : (
+            <div className="agents-center__list-pane">
+              {/* Search and filters appear once there is something to filter; a
+                filter that is already on keeps its bar so it can be cleared. */}
+              {controller.list.status === "ready" &&
+              controller.list.items.length === 0 &&
+              !filtersAreActive(controller) ? null : (
+                <AgentsCenterToolbar
+                  controller={controller}
+                  savingCanvas={savingCanvas}
+                  {...(props.narrow === true || props.activeWork !== undefined
+                    ? {}
+                    : { onViewChange: setView, view })}
+                  {...(showGraph && controller.visibleItems.length > 0
+                    ? { onSaveCanvas: () => void saveGraphAsCanvas() }
+                    : {})}
+                />
+              )}
+              {showGraph &&
+              controller.list.status !== "loading" &&
+              controller.list.status !== "unavailable" &&
+              controller.visibleItems.length > 0 ? (
+                <AgentsCenterGraph
+                  items={controller.visibleItems}
+                  onSelect={(runId) => controller.select(runId)}
+                  providerLabels={props.providerLabels ?? new Map()}
+                  refreshing={controller.list.status === "refreshing"}
+                  {...(controller.selectedId === undefined
+                    ? {}
+                    : { selectedId: controller.selectedId })}
+                  {...(props.onOpenThread === undefined
+                    ? {}
+                    : { onOpenThread: props.onOpenThread })}
+                />
+              ) : (
+                <AgentsCenterListBody
+                  controller={controller}
+                  controls={controls}
+                  onOpenThread={props.onOpenThread}
+                  onStartThread={props.onStartThread}
+                  projectNames={props.projectNames ?? new Map()}
+                  providerLabels={props.providerLabels ?? new Map()}
+                  onSelect={(runId) => controller.select(runId)}
+                />
+              )}
+            </div>
+          )}
+
+          {selected === undefined ? null : (
+            <div className="agents-center__detail-pane">
+              <AgentsCenterDetail
+                // A different run is a different pane: without the key, a Stop
+                // confirmation raised for one run carried over to the next and
+                // its handler cancelled the newly selected run.
+                key={String(selected.runId)}
+                controls={controls}
+                controller={controller}
+                narrow={props.narrow === true}
+                onBack={() => controller.select(undefined)}
+                onOpenThread={props.onOpenThread}
+                projectNames={props.projectNames ?? new Map()}
+                providerLabels={props.providerLabels ?? new Map()}
+                summary={selected}
+              />
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }
 }
 
 function AgentsCenterToolbar(props: {
   readonly controller: AgentsCenterController;
-  readonly view?: (typeof VIEW_FILTERS)[number]["value"];
-  readonly onViewChange?: (view: (typeof VIEW_FILTERS)[number]["value"]) => void;
+  readonly view?: AgentsCenterView;
+  readonly onViewChange?: (view: AgentsCenterView) => void;
   readonly onSaveCanvas?: () => void;
   readonly savingCanvas?: boolean;
 }) {
@@ -269,7 +314,11 @@ function AgentsCenterToolbar(props: {
         />
       </FilterMenu>
       {props.view === undefined || props.onViewChange === undefined ? null : (
-        <AgentsCenterViewToggle onViewChange={props.onViewChange} view={props.view} />
+        <AgentsCenterViewToggle
+          onViewChange={props.onViewChange}
+          view={props.view}
+          views={RUN_VIEWS}
+        />
       )}
       {props.onSaveCanvas === undefined ? null : (
         <OctantMenuRoot>
@@ -295,11 +344,12 @@ function AgentsCenterToolbar(props: {
 }
 
 function AgentsCenterViewToggle(props: {
-  readonly view: (typeof VIEW_FILTERS)[number]["value"];
-  readonly onViewChange: (view: (typeof VIEW_FILTERS)[number]["value"]) => void;
+  readonly view: AgentsCenterView;
+  readonly views: ReadonlyArray<ViewChoice>;
+  readonly onViewChange: (view: AgentsCenterView) => void;
 }) {
   return (
-    <OctantToggleGroup<(typeof VIEW_FILTERS)[number]["value"]>
+    <OctantToggleGroup<AgentsCenterView>
       aria-label="View"
       className="agents-center__filters segmented"
       onValueChange={(value) => {
@@ -308,7 +358,7 @@ function AgentsCenterViewToggle(props: {
       }}
       value={[props.view]}
     >
-      {VIEW_FILTERS.map((filter) => (
+      {props.views.map((filter) => (
         <OctantToggleGroupItem
           className="agents-center__filter segment"
           key={filter.value}

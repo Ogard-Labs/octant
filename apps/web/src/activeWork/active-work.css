@@ -1,0 +1,82 @@
+/* Active work: list rows under the Board's status headings. One row recipe at
+   every width; the facts wrap when a narrow window cannot hold them. */
+
+.active-work {
+  display: grid;
+  gap: var(--oct-space-5);
+}
+
+.active-work__head {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 var(--oct-space-2) var(--oct-space-1);
+}
+
+.active-work__head > h2 {
+  margin: 0;
+  color: inherit;
+  font: inherit;
+}
+
+.active-work__rows,
+.active-work__notes {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.active-work__notes {
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2);
+}
+
+.active-work__row.active-work__row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: stretch;
+  width: 100%;
+  height: auto;
+  gap: 2px var(--oct-space-3);
+  padding: var(--oct-space-2);
+  /* A row nothing opens is not a button; it keeps the button's edge so both start alike. */
+  border: 1px solid transparent;
+  border-radius: var(--oct-radius-sm);
+  text-align: left;
+  white-space: normal;
+}
+
+button.active-work__row:hover {
+  background: var(--oct-wash-hover);
+}
+
+.active-work__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-work__facts {
+  display: flex;
+  grid-column: 2 / -1;
+  gap: var(--oct-space-3);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.active-work__facts-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .active-work__reason {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+}

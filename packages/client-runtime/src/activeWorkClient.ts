@@ -46,13 +46,13 @@ export function createActiveWorkClient(options: ActiveWorkClientOptions): Active
         const work = decodeWork(body);
         return work === undefined ? { status: "unreachable" } : { status: "answered", work };
       }
-      // A host that knows this read refuses it in its own words; an older one,
-      // or its listener, refuses the path with something else.
+      // A host that knows this read refuses it in its own words; an older one
+      // and its listener both answer 404 for a path they do not know.
       try {
         const failure = decodeFailure(body);
         return { status: failure.code === "unauthorized" ? "refused" : "unreachable" };
       } catch {
-        return { status: response.status >= 500 ? "unreachable" : "unsupported" };
+        return { status: response.status === 404 ? "unsupported" : "unreachable" };
       }
     },
   };

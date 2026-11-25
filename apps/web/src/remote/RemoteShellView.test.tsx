@@ -470,6 +470,24 @@ function answerProduct(
         ],
       });
     }
+    if (method === "GET" && path === "/api/active-work") {
+      return Response.json({
+        rows: [
+          {
+            kind: "thread",
+            mode: "work",
+            threadId: "20000000-0000-4000-8000-000000000001",
+            title: "Remote Work",
+            projectName: "Reports",
+            board: { status: "waiting", reason: "awaiting-input" },
+            pullRequests: [],
+            issues: [],
+            updatedAt: now,
+          },
+        ],
+        truncated: false,
+      });
+    }
     if (method === "GET" && path === "/api/replica-sync/status") {
       return Response.json({
         kind: "replica-sync-status",
@@ -670,6 +688,30 @@ describe("RemoteShellView", () => {
       expect(request.headers.get("x-octant-window-capability")).toBeNull();
     }
     expect(screen.queryByRole("button", { name: /verify .* mutation/i })).not.toBeInTheDocument();
+  });
+
+  it("lists the host's active work in a paired browser and opens a row in its own mode there", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={() => undefined} />);
+
+    const toggle = await screen.findByRole("button", { name: "Active work" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(seen.some((request) => request.path === "/api/active-work")).toBe(false);
+    await user.click(toggle);
+    // The panel is its own chunk, loaded on this click.
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" }, { timeout: 10_000 });
+    expect(within(waiting).getByText("Waiting for a decision or answer")).toBeVisible();
+
+    await user.click(within(waiting).getByRole("button", { name: /Remote Work/ }));
+    expect(screen.queryByRole("region", { name: "Waiting (1)" })).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Remote Work" })).toHaveAttribute(
+        "aria-current",
+        "true",
+      ),
+    );
   });
 
   it("lets a read-only browser watch Chat without offering sends, approval, or thread creation", async () => {

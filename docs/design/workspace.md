@@ -1193,9 +1193,10 @@ Projects list shows each Work or Code Project's thread count at the trailing
 edge in place of "Available"; only a state that needs the person (Archived,
 Relink required, Unverified) is a word. Issues open on the current Project's
 GitHub repository when the Project has one and the host has used it. The
-Agents toolbar is one row: search, one Filter menu (Status and Mode as two
-labelled groups), the List and Graph switch, and a "…" menu that holds Save as
-Canvas. A run's Open thread shows while the pointer or focus is on its row and
+Agents page's header holds one switch, Active work, Runs and Graph (Graph only
+in a wide window), and opens on [Active work](#active-work). Runs and Graph
+share one toolbar row: search, one Filter menu (Status and Mode as two
+labelled groups), and a "…" menu that holds Save as Canvas. A run's Open thread shows while the pointer or focus is on its row and
 always on touch, keeping its space; pressing the row still opens the run's
 detail (maintainer request, 2026-11-16). The Artifacts toolbar is search, one
 Filter menu (Kind, Project, Mode and Tag as radio groups), the gallery and list
@@ -2209,6 +2210,58 @@ generation, never a filesystem path or the parent's live checkout. Changing the
 active thread clears that selection. Saved comparisons use the normal read-only
 diff renderer, expose capture/truncation facts, and offer a return to the thread's
 ordinary Review views.
+
+## Active work
+
+Agents opens on **Active work**: everything that is not Done on every computer
+this window already reaches, in one list, so nobody has to open the right
+Project, computer, or thread to learn what is running and why something is
+stuck. It is a view of the Agents page rather than a page of its own because
+Agents is already in the rail in every mode, cannot be switched off, and spans
+Projects. The Board is per mode and a plugin a person may turn off; Home's In
+progress holds five rows of one mode pair; the sidebar's Running list is one
+mode's threads; the Inbox holds only what asks for an answer. Those all keep
+working as they do.
+
+- **Rows** stand under the Board's own headings, Waiting, In progress and Ready,
+  newest first, and say the Board's own state: the same derivation, and for a
+  waiting row the Board's own reason. No other status word exists here. A row
+  is a thread, a coordinator, a subagent under the thread it works for, or a
+  thread whose routine run has not ended. A coordinator delivers nothing, so no
+  delivery evidence ever files it. A Chat thread, which has no board, is a row
+  only while it runs or waits on the person. Settled, archived and Done threads
+  are not rows, and neither is a routine run that has no thread yet, which
+  Automations lists.
+- **Facts**: the kind when it is not a plain thread, the computer, the Project,
+  the GitHub repository, the branch (marked when the worktree is the thread's
+  own), each linked pull request and issue by identifier, and the age. Each is
+  one the computer already holds; nothing is fetched for a row, and an unknown
+  one is left out. A linked pull request's or issue's title is never carried.
+- **Who sees what.** Each computer answers for itself, and only with threads the
+  asking window or device already lists there
+  ([Architecture: Active work read](../architecture.md#security-and-authority)). A
+  subagent's task shows only where the Agents page's own rule lets the window
+  read that run; elsewhere the row reads "Subagent" under its thread.
+- **Opening** a row makes the choice the sidebar makes. A Code thread on a
+  paired computer opens in that computer's Code start screen, as under "On your
+  other computers"; a Work or Chat thread there cannot be shown by that screen,
+  so its row says which computer to open it on.
+- **A computer that does not answer** is named under the list: unreachable with
+  when the window was last connected to it, an older Octant that does not list
+  its work, or one that refuses this device. It has no rows, not even its last
+  ones, since what it was doing is not what it is doing. A computer that holds
+  more rows than it answers says so.
+- **Reads.** One read per computer, in parallel, each over the session the
+  window already holds, so a slow one holds back no other. The last answer of a
+  session is kept while the window lives and shown at once when the page opens
+  again. A read follows the window's change feed here, and the existing refresh
+  of paired computers there; the page adds no timer, at most one read per
+  computer is in flight, a burst of changes becomes one more, and a hidden
+  window reads nothing. A read that takes longer than ten seconds counts as no
+  answer.
+- **A paired browser** opens the same list for its one host from **Active work**
+  in its header, read over its own session and refreshed by the host's change
+  feed; a row opens the thread in its mode. The phone has no such list.
 
 ## Boards and integrations
 

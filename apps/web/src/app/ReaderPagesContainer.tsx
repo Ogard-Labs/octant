@@ -5,6 +5,10 @@ import { decodeCodeThreadId, type CodeThread } from "@octant/contracts/code";
 import { decodeUtcTimestamp, decodeWorkThreadId, type WorkThread } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { memo, useMemo } from "react";
+import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
+import type { ActiveWorkViewProps } from "../activeWork/ActiveWorkView";
+import { canOpenActiveWork, openActiveWork } from "../activeWork/openActiveWork";
+import { useActiveWorkHosts, type ActiveWorkHostsInput } from "../activeWork/useActiveWorkHosts";
 import type { CodeProjectPullRequestRow } from "@octant/contracts";
 import { ProjectReviewModule } from "../dockModules/ProjectReviewModule";
 import { useMinuteTick } from "../polling/useMinuteTick";
@@ -131,6 +135,11 @@ export interface ReaderPagesContainerProps {
   /** Present while the To-dos page is open. */
   readonly todosPage?: TodosPageProps;
   readonly isNarrow: boolean;
+  /** The computers this window is paired with, for the Agents page's active work. */
+  readonly computerSnapshots: ActiveWorkHostsInput["snapshots"];
+  readonly hostFederationTransports?: HostFederationTransports;
+  readonly pairedComputerReads: unknown;
+  readonly onOpenPairedComputerThread: (hostId: string, threadId: string) => void;
   readonly linearClient: WorkspaceRailLayersProps["linearClient"];
   readonly linearIssuesOpen: boolean;
   readonly linearIssuesRead: boolean;
@@ -252,6 +261,39 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
   const workerCoordinatorTitles = useMemo(
     () => coordinatorTitleByWorker(codeNavigationRows),
     [codeNavigationRows],
+  );
+  const { onOpenPairedComputerThread } = props;
+  const activeWorkHosts = useActiveWorkHosts({
+    localName: environmentNames.get(String(LOCAL_HOST_ID)) ?? "This computer",
+    local: props.clients.accessActivityPort,
+    localRevision: navigationRevision,
+    snapshots: props.computerSnapshots,
+    transports: props.hostFederationTransports,
+    pairedRevision: props.pairedComputerReads,
+  });
+  const activeWork = useMemo<ActiveWorkViewProps>(
+    () => ({
+      hosts: activeWorkHosts,
+      canOpen: canOpenActiveWork,
+      onOpen: (host, row) => {
+        actions.setAgentsCenterOpen(false);
+        openActiveWork(
+          {
+            selectChatThread: actions.selectChatThread,
+            selectWorkThread: actions.selectWorkThread,
+            selectCodeThread: actions.selectCodeThread,
+            openPairedComputerThread: onOpenPairedComputerThread,
+          },
+          host,
+          row,
+        );
+      },
+      onStartThread: () => {
+        actions.closeWorkspaceReaders();
+        actions.startNewThreadDraft(activeMode);
+      },
+    }),
+    [actions, activeMode, activeWorkHosts, onOpenPairedComputerThread],
   );
   // The Inbox answers the decisions finished turns asked with the same
   // reader and send clients as the Needs you card.
@@ -776,6 +818,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         agentRunClient={agentRunClient}
         agentMessageClient={agentMessageClient}
         projectNames={projectNames}
+        activeWork={activeWork}
         onCloseAgentsCenter={() => actions.setAgentsCenterOpen(false)}
         onOpenAgentsThread={(target) => {
           actions.setAgentsCenterOpen(false);
