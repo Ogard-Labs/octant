@@ -11,6 +11,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useState,
   type ComponentType,
   type LazyExoticComponent,
@@ -32,17 +33,23 @@ type ListedOfferCard = LazyExoticComponent<ComponentType<ListedOfferCardProps>>;
 
 /**
  * Each kind's card brings its payload schema with it, when the first such
- * offer shows. A card that cannot load shows nothing, as an offer this build
- * cannot read does, rather than taking the thread's pane down with it; the
- * offer stays listed and waiting.
+ * offer shows. A card that cannot load is set aside as an offer this build
+ * cannot read is, rather than taking the thread's pane down with it; the
+ * offer stays listed and waiting, and the thread's next offer is asked.
  */
 const card = (load: () => Promise<ComponentType<ListedOfferCardProps>>): ListedOfferCard =>
   lazy(() =>
     load().then(
       (Card) => ({ default: Card }),
-      () => ({ default: () => null }),
+      () => ({ default: UnloadedCard }),
     ),
   );
+
+/** Set aside like a refused offer, so the thread's next offer is asked. */
+function UnloadedCard({ offer, refuse }: ListedOfferCardProps) {
+  useLayoutEffect(() => refuse(offer.offerId), [offer.offerId, refuse]);
+  return null;
+}
 
 const CARDS: Record<ServiceOffer["kind"], ListedOfferCard> = {
   generate: card(async () => (await import("../image/imageOfferCards")).ImageGenerateOfferCard),

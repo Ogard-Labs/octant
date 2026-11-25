@@ -570,3 +570,41 @@ describe("ServiceOfferPrompt", () => {
     expect(card).toHaveTextContent("nothing is written");
   });
 });
+
+describe("ServiceOfferPrompt when a card cannot load", () => {
+  it("sets the offer aside and asks the thread's next one", async () => {
+    vi.resetModules();
+    vi.doMock("./NarrationOfferCard", () => Promise.reject(new Error("chunk is gone")));
+    const { ServiceOfferPrompt: Prompt } = await import("./ServiceOfferPrompt");
+    const fake = client([
+      decodeNarrationOffer({
+        kind: "narrate",
+        threadKind: "code-thread",
+        scopeId,
+        offerId,
+        requestedAt: "2026-11-07T10:00:00.000Z",
+        excerpt: "Welcome",
+        characters: 7,
+        relativePath: "narration/intro.mp3",
+        voice: "nova",
+        endpointName: "Studio",
+        modelId: "tts-1",
+        format: "mp3",
+      }),
+      offer({ offerId: "cc000000-0000-4000-8000-000000000022" as never }),
+    ]);
+    render(
+      <Prompt
+        client={fake}
+        keptIn="project"
+        profiles={profiles}
+        scopeId={scopeId}
+        threadKind="code-thread"
+        turnActive={false}
+      />,
+    );
+    expect(await screen.findByRole("article", { name: "Image generation request" })).toBeVisible();
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    vi.doUnmock("./NarrationOfferCard");
+  });
+});
