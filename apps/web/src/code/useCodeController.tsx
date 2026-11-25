@@ -3150,6 +3150,7 @@ export function useCodeController(options: CodeControllerOptions) {
         text: trimmed,
         checkoutId: view.checkout.id,
         ...(reviewReferences.length === 0 ? {} : { reviewFindingReferences: reviewReferences }),
+        ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
         providerInstanceId: view.thread.providerInstanceId,
         modelId: view.thread.modelId,
         at: new Date().toISOString(),

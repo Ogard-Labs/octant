@@ -2386,6 +2386,10 @@ export class CodeOperationService {
                       ...(command.reviewFindingReferences === undefined
                         ? {}
                         : { reviewFindingReferences: command.reviewFindingReferences }),
+                      ...(command.threadMentionIds === undefined ||
+                      command.threadMentionIds.length === 0
+                        ? {}
+                        : { threadMentionIds: command.threadMentionIds }),
                       ...(command.extensionSelections === undefined ||
                       command.extensionSelections.length === 0
                         ? {}

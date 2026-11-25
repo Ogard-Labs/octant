@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 
 import { hasProviderLogo, ProviderGlyph } from "../providers/ProviderGlyph";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import "./composer-chip.css";
 import "./subagent-model.css";
 
 /** One provider instance serving one model, as a subagent route the person can tag. */

@@ -1,4 +1,8 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ComposerInputElement } from "../composer/ComposerInput";
+import { useThreadMentions } from "./useThreadMentions";
+import { listsOf } from "../threadReferences/threadReferenceLists.test-support";
+import { ThreadReferencesContext } from "../threadReferences/ThreadReferences";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -120,6 +124,57 @@ describe("ChatComposer thread mentions", () => {
     expect(message).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("shows a listed thread's Project, state and model beside its hit", async () => {
+    const user = userEvent.setup();
+    render(
+      <ThreadReferencesContext.Provider
+        value={listsOf({
+          code: [
+            {
+              threadId: "thread-release-notes",
+              title: "Release notes",
+              projectId: "project-1",
+              activity: "attention",
+              awaitingKind: "approval",
+              provider: { displayName: "Claude", driverKind: "claude" },
+              modelId: "claude-opus-5-5",
+            },
+          ],
+        })}
+      >
+        <ControlledComposer
+          isSending={false}
+          model={{ options: [{ id: "model-a", label: "Model A" }], value: "model-a" }}
+          onFileSelected={vi.fn()}
+          onModelChange={vi.fn()}
+          onProviderChange={vi.fn()}
+          onResearchEnabledChange={vi.fn()}
+          onResearchRoutingChange={vi.fn()}
+          onSend={vi.fn(async () => true)}
+          provider={{ options: [{ id: "provider-a", label: "Provider A" }], value: "provider-a" }}
+          research={{ backend: { kind: "disabled" }, enabled: false, routing: "automatic" }}
+          threadMentions={mentions({
+            candidates: [
+              candidate("Release notes", {
+                mode: "code",
+                placement: { kind: "project", label: "octant" },
+              }),
+            ],
+          })}
+        />
+      </ThreadReferencesContext.Provider>,
+    );
+
+    await user.type(screen.getByLabelText("Message"), "#rel");
+
+    const option = await screen.findByRole("option", { name: /Release notes/ });
+    // The row's marks load with the list, so the host's words show first.
+    await waitFor(() => expect(option).toHaveTextContent("Needs you"));
+    expect(option).toHaveTextContent("Opus 5.5");
+    expect(option).toHaveTextContent("Code · octant");
+    expect(option.querySelector(".project-mark, .project-icon")).not.toBeNull();
+  });
+
   it("closes the typeahead on Escape without touching the draft", async () => {
     const user = userEvent.setup();
     const onQueryChange = vi.fn();
@@ -213,11 +268,13 @@ describe("ChatComposer thread mentions", () => {
     expect(onSend).toHaveBeenCalledWith("#nothing");
   });
 
-  it("renders a chip as a read-only receipt with a removable control", async () => {
+  it("shows a mention as one inline chip whose card says it is read-only and removes it with its text", async () => {
     const user = userEvent.setup();
     const onRemoveChip = vi.fn();
+    const onDraftChange = vi.fn();
     renderComposer({
-      draft: "#[Release notes] ",
+      draft: "See #[Release notes] first",
+      onDraftChange,
       threadMentions: mentions({
         chips: [
           {
@@ -231,16 +288,79 @@ describe("ChatComposer thread mentions", () => {
       }),
     });
 
-    const list = screen.getByRole("list", { name: "Mentioned threads" });
-    expect(list).toHaveTextContent("Work · Launch · Read-only");
-    const remove = screen.getByRole("button", { name: "Remove Release notes thread mention" });
-    remove.focus();
+    const chip = await screen.findByRole("button", {
+      name: "Thread: Release notes, Work, Launch, Read-only",
+    });
+    expect(screen.getByRole("textbox", { name: "Message" })).toContainElement(chip);
+    expect(screen.getByRole("textbox", { name: "Message" })).not.toHaveTextContent("#[");
+    chip.focus();
     await user.keyboard("{Enter}");
+    const card = await screen.findByRole("dialog", { name: "Thread details" });
+    expect(card).toHaveTextContent("This turn reads up to its last 12 messages, read-only.");
+    await user.click(within(card).getByRole("button", { name: "Remove" }));
 
     expect(onRemoveChip).toHaveBeenCalledWith("thread-1");
+    expect(onDraftChange).toHaveBeenLastCalledWith("See first", 4);
   });
 
-  it("labels an explicitly mentioned Chat as able to receive a message", () => {
+  it("keeps and sends the thread that was not cut when two share a title side by side", async () => {
+    const roadmap = (threadId: string) => ({
+      threadId: threadId as never,
+      title: "Roadmap",
+      mode: "chat" as const,
+      placementLabel: "Recents",
+    });
+    // Held outside the component: a client made on each render restarts the search.
+    const client = {
+      search: vi.fn(),
+      searchThread: vi.fn(),
+      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
+    } as never;
+    let send: (() => Promise<ReadonlyArray<unknown>>) | undefined;
+    function Mentions() {
+      const [draft, setDraft] = useState("#[Roadmap] #[Roadmap]");
+      const threadMentions = useThreadMentions({
+        client,
+        draft,
+        initialChips: [roadmap("thread-a"), roadmap("thread-b")],
+      });
+      send = threadMentions.resolveForSend;
+      return (
+        <ChatComposer
+          draft={draft}
+          isSending={false}
+          model={{ options: [{ id: "model-a", label: "Model A" }], value: "model-a" }}
+          onDraftChange={setDraft}
+          onFileSelected={vi.fn()}
+          onModelChange={vi.fn()}
+          onProviderChange={vi.fn()}
+          onResearchEnabledChange={vi.fn()}
+          onResearchRoutingChange={vi.fn()}
+          onSend={vi.fn(async () => true)}
+          provider={{ options: [{ id: "provider-a", label: "Provider A" }], value: "provider-a" }}
+          research={{ backend: { kind: "disabled" }, enabled: false, routing: "automatic" }}
+          {...(threadMentions.composer === undefined
+            ? {}
+            : { threadMentions: threadMentions.composer })}
+        />
+      );
+    }
+    render(<Mentions />);
+    const message = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    message.focus();
+    message.setSelectionRange(0, 11);
+
+    fireEvent.cut(message, { clipboardData: { setData: vi.fn() } });
+
+    await waitFor(() => expect(message).toHaveValue("#[Roadmap]"));
+    let sent: ReadonlyArray<unknown> | undefined;
+    await act(async () => {
+      sent = await send?.();
+    });
+    expect(sent).toEqual(["thread-b"]);
+  });
+
+  it("labels an explicitly mentioned Chat as able to receive a message", async () => {
     renderComposer({
       draft: "#[Target Chat] ",
       threadMentions: mentions({
@@ -256,12 +376,15 @@ describe("ChatComposer thread mentions", () => {
       }),
     });
 
-    expect(screen.getByRole("list", { name: "Mentioned threads" })).toHaveTextContent(
-      "Chat · Recents · Can receive a message",
-    );
+    expect(
+      await screen.findByRole("button", {
+        name: "Thread: Target Chat, Chat, Recents, Can receive a message",
+      }),
+    ).toBeVisible();
   });
 
-  it("shows an unavailable chip without a Side Chat affordance", () => {
+  it("shows why a chip is unavailable and no fact about its thread", async () => {
+    const user = userEvent.setup();
     renderComposer({
       draft: "#[Secret] ",
       threadMentions: mentions({
@@ -271,17 +394,24 @@ describe("ChatComposer thread mentions", () => {
             title: "Secret",
             mode: "chat",
             placementLabel: "Unfiled",
-            unavailableReason: "You cannot open this thread.",
+            unavailableReason: "you cannot open this thread",
           },
         ],
         onOpenSideChat: vi.fn(),
       }),
     });
 
-    expect(screen.getByRole("list", { name: "Mentioned threads" })).toHaveTextContent(
-      "Unavailable: You cannot open this thread.",
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Thread: Secret, Unavailable: you cannot open this thread",
+      }),
     );
-    expect(screen.getByRole("button", { name: "Open Side Chat about Secret" })).toBeDisabled();
+    const card = await screen.findByRole("dialog", { name: "Thread details" });
+    expect(card).toHaveTextContent(
+      "Unavailable: you cannot open this thread. Nothing from it is included.",
+    );
+    expect(card).not.toHaveTextContent("Unfiled");
+    expect(within(card).getByRole("button", { name: "Side Chat" })).toBeDisabled();
   });
 
   it("offers to reopen an existing Side Chat sidecar from a chip", async () => {
@@ -303,12 +433,10 @@ describe("ChatComposer thread mentions", () => {
       }),
     });
 
-    await user.click(screen.getByRole("button", { name: "Open Side Chat about Release notes" }));
+    await user.click(await screen.findByRole("button", { name: /^Thread: Release notes/ }));
+    await user.click(await screen.findByRole("button", { name: "Reopen Side Chat" }));
 
     expect(onOpenSideChat).toHaveBeenCalledWith("thread-1");
-    expect(
-      screen.getByRole("button", { name: "Open Side Chat about Release notes" }),
-    ).toHaveTextContent("Reopen Side Chat");
   });
 });
 

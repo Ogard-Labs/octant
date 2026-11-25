@@ -2814,6 +2814,23 @@ describe("ChatService", () => {
     expect(view.contents.filter((content) => content.role === "user").map((c) => c.body)).toEqual([
       "Compare this with #[Release notes]",
     ]);
+    // Beside it the turn keeps which thread the text names, as an id alone,
+    // and a branch's copy of the message keeps it too.
+    expect(view.turns.map((turn) => turn.threadMentionIds)).toEqual([["release-notes-thread"]]);
+    const turnId = view.turns[0]?.id;
+    if (turnId === undefined) throw new Error("Expected a turn.");
+    const branched = await service.execute({
+      kind: "branch-chat-thread",
+      threadId: created.thread.id,
+      expectedVersion: view.thread.version,
+      turnId,
+      title: "Second direction",
+      branchThreadId: "84000000-0000-4000-8000-0000000000b7",
+    });
+    if (branched.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(service.read(branched.thread.id).turns.map((turn) => turn.threadMentionIds)).toEqual([
+      ["release-notes-thread"],
+    ]);
     // Mention context is workspace context like any other selection, so the
     // planner may compact or omit it; it is never `required`.
     const mentionEntries = planTurn.mock.calls
@@ -2862,6 +2879,10 @@ describe("ChatService", () => {
       { windowId },
     );
 
+    expect(service.read(created.thread.id).turns.map((turn) => turn.threadMentionIds)).toEqual([
+      ["release-notes-thread"],
+      undefined,
+    ]);
     // A mention is context for the turn that made it. The second turn replays
     // the first turn's message, and that message is the user's own words.
     const secondContext = (fakeDriver.sentTurns[1]?.context ?? []).map((block) => block.text);

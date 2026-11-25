@@ -2723,6 +2723,7 @@ describe("CodeOperationService", () => {
         event: expect.objectContaining({
           kind: "conversation-turn-started",
           prompt: startProviderTurn.prompt,
+          threadMentionIds: ["release-notes-thread"],
         }),
       }),
     );

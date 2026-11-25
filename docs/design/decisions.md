@@ -1178,6 +1178,8 @@ Status: Partly built. Since: 2026-10-12. Detail: [Architecture: Modes: Chat, Wor
 
 A `#thread` mention is a bounded, read-only view of a thread the sender can already open. Side Chat is a Chat-mode sidecar about exactly one source thread.
 
+- A mentioned thread is one inline chip in the prompt, whose card is the sidebar row's with what the turn reads and Open thread, Side Chat and Remove; there is no chip row above the prompt, and the prompt's text stays `#[Title]` (maintainer decision, 2026-11-25). The card reads only threads the window already lists, and a refused thread shows its reason and no other fact.
+- A turn in every mode stores the ids of the threads its message mentioned, and nothing else of them, so a sent message keeps its chips through a reload, a replay and a copy into a fork (maintainer decision, 2026-11-25). An id the window does not list stays the text the person wrote.
 - `@file` completes only a path inside the thread's bound root, and the host refuses an outside path before reading.
 - An `@` or `/` picker chip never installs, trusts, enables or elevates anything; the host re-resolves it at send.
 - A Side Chat has no inherited Work or Code authority and no agent path that messages, approves, steers or appends to its source.

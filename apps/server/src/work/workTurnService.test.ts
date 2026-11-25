@@ -3018,6 +3018,23 @@ describe("WorkTurnService", () => {
     expect(confirmed).not.toHaveBeenCalled();
   });
 
+  it("keeps which threads a Work message mentioned, as ids alone, through a replay", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      threadMentionIds: ["release-notes-thread"],
+    });
+    await fixture.waitForIdle();
+    const accepted = fixture.persistence.journal.append.mock.calls[0]?.[0]?.events[0]?.payload;
+    expect(accepted).toMatchObject({
+      prompt: startCommand().prompt,
+      threadMentionIds: ["release-notes-thread"],
+    });
+    const replayed = new WorkTurnProjection();
+    replayed.apply(decodeWorkTurnAccepted(accepted));
+    expect(replayed.lookup(ids.request)?.threadMentionIds).toEqual(["release-notes-thread"]);
+  });
+
   it("refuses changed skill selections when a Work request is retried", async () => {
     const fixture = serviceFixture({
       resolveSelectedExtensions: async () => ({
