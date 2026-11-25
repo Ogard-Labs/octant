@@ -14,6 +14,7 @@
  */
 
 import { Schema } from "effect";
+import { AgentRunResultDeliveryMark } from "./agentRun";
 import { FollowUpSuggestedBy } from "./followUpSuggestions";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
@@ -293,3 +294,23 @@ export const SideTaskReportingResumed = Schema.Struct({
   resumedAt: UtcTimestamp,
 }).annotations(strict);
 export type SideTaskReportingResumed = typeof SideTaskReportingResumed.Type;
+
+/**
+ * The idempotency mark a delivery turn carries when it entered the parent:
+ * which reports it delivered, so replaying or retrying the admission never
+ * mints a second turn. Mirrors the agent-result delivery mark but keyed by
+ * report rather than run — a side-task child is a person-confirmed thread,
+ * not a managed run, and the journal says so honestly.
+ */
+export const SideTaskReportDeliveryMark = Schema.Struct({
+  kind: Schema.Literal("side-task-report"),
+  reportIds: Schema.Array(Schema.UUID).pipe(Schema.minItems(1)),
+}).annotations(strict);
+export type SideTaskReportDeliveryMark = typeof SideTaskReportDeliveryMark.Type;
+
+/** What a journaled delivery turn may carry as its idempotency mark. */
+export const ThreadDeliveryMark = Schema.Union(
+  AgentRunResultDeliveryMark,
+  SideTaskReportDeliveryMark,
+);
+export type ThreadDeliveryMark = typeof ThreadDeliveryMark.Type;
