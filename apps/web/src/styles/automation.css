@@ -238,14 +238,21 @@
   color: var(--oct-meta);
 }
 
-/* A paused or archived routine reads as resting: its name, schedule, runs
-   and times step back, and the switch beside them stays at full strength
-   because it is the way back. The name and its schedule step back together:
-   with the name alone at 55%, it read weaker than the schedule under it
-   (seen 2026-11-25). */
+/* A paused or archived routine reads as resting: its tile and its runs step
+   back, and its name takes the secondary ink. The switch stays at full
+   strength because it is the way back. The name is an ink, not a fade: at 55%
+   it read weaker than the schedule under it, and fading the two together took
+   the schedule to 2.3:1 on a light page, under the 4.5:1 floor (seen
+   2026-11-25). */
 .automation-row:is([data-lifecycle="paused"], [data-lifecycle="archived"])
-  :is(.automation-row__kind, .automation-row__text, .automation-row__runs) {
+  :is(.automation-row__kind, .automation-row__runs) {
   opacity: 0.55;
+}
+
+.automation-row:is([data-lifecycle="paused"], [data-lifecycle="archived"])
+  .automation-row__text
+  > .surface-table__label {
+  color: var(--oct-muted);
 }
 
 .automation-row__toggle {

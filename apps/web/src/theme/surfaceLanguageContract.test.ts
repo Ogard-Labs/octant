@@ -118,11 +118,15 @@ describe("surface language", () => {
       const redrawn: string[] = [];
       for (const block of rules.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
         const selectors = (block[1] ?? "").split(",").map((each) => each.trim());
-        // A hover on the row itself is the table's too; a rule about a cell
-        // inside the row is the page's own.
-        const named = selectors.filter((selector) =>
-          page.own.some((own) => selector === own || selector === `${own}:hover`),
-        );
+        // What a selector styles is its last compound, whatever it stands
+        // under and whatever state it is in: a hover on the row is the
+        // table's, and so is the row inside the dock's list. A rule about a
+        // cell inside the row is the page's own.
+        const named = selectors.filter((selector) => {
+          const subject = selector.split(/\s*[>+~]\s*|\s+/).pop() ?? "";
+          const classes: ReadonlyArray<string> = subject.match(/\.[A-Za-z0-9_-]+/g) ?? [];
+          return page.own.some((own) => classes.includes(own));
+        });
         if (named.length > 0 && theTables.test(block[2] ?? "")) redrawn.push(...named);
       }
       expect(redrawn).toEqual([]);
