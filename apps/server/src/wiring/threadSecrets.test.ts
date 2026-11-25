@@ -216,13 +216,15 @@ describe("where a secret's card may be answered", () => {
   const window = decodeWindowId("92000000-0000-4000-8000-00000000000a");
   const otherWindow = decodeWindowId("92000000-0000-4000-8000-00000000000b");
   const phone = decodeWindowId("92000000-0000-4000-8000-00000000000c");
+  const narrowed = decodeWindowId("92000000-0000-4000-8000-00000000000f");
   const restricted = decodeWindowId("92000000-0000-4000-8000-00000000000d");
   const unknown = decodeWindowId("92000000-0000-4000-8000-00000000000e");
   const reach = (canAccessWindow = true) =>
     threadSecretReach({
       isLocalWindow: (id) => id === window || id === otherWindow,
-      isPairedDeviceScope: (id) => id === phone || id === restricted,
+      isPairedDeviceScope: (id) => id === phone || id === narrowed || id === restricted,
       isRestrictedDeviceScope: (id) => id === restricted,
+      deviceAccessLevel: (id) => (id === narrowed ? "approve-and-steer" : "full"),
       browserAuthority: { canAccessWindow: () => canAccessWindow } as never,
     });
   const raised = (by: typeof window) => ({
@@ -232,14 +234,21 @@ describe("where a secret's card may be answered", () => {
   });
   const at = (scope: typeof window, paired: boolean) => ({ scopeId: String(scope), paired });
 
-  it("offers the tool to a window here and to a device the person paired, and to no other", () => {
+  it("offers the tool to a window here and to a device the person paired at Full, and to no other", () => {
     const { scopeCurrent } = reach();
-    expect([window, phone, restricted, unknown].map(scopeCurrent)).toEqual([
+    expect([window, phone, narrowed, restricted, unknown].map(scopeCurrent)).toEqual([
       true,
       true,
+      false,
       false,
       false,
     ]);
+  });
+
+  it("lets a device the person paired below Full answer no card", () => {
+    const { mayAnswer } = reach();
+    expect(mayAnswer(at(narrowed, true), raised(window))).toBe(false);
+    expect(mayAnswer(at(narrowed, true), raised(phone))).toBe(false);
   });
 
   it("lets the person's phone answer any of the host's cards, and a restricted or unknown device none", () => {

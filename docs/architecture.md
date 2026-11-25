@@ -19699,15 +19699,15 @@ approval-gated` command that undoes it. The terminal shows no one-time
     opening. A card never expires: it ends with its answer, its turn, its
     thread's archive, its window, its authority or the host. The agent asks
     with `octant_credential` in a Code or Work turn started at a window here or
-    at a device this host's person paired; a routine's turn has nobody to
-    answer and is offered none of it, and Plan refuses each use.
+    at a device this host's person paired at Full; a routine's turn has nobody
+    to answer and is offered none of it, and Plan refuses each use.
   - **Where it is answered.** The [card](design/thread-view.md#secret-cards)
     submits to `/api/thread-secrets`, which the private listener never forwards
     and which takes a local window alone: the window that raised it, or, for a
     paired device's card, a window that could drive its thread. A phone this
-    host's person paired reads a thread's cards and answers one on
-    `/api/thread-secrets/paired`; an agent's grant and a device the hub
-    introduced or the person restricted are refused, and the grant is
+    host's person paired at Full reads a thread's cards and answers one on
+    `/api/thread-secrets/paired`; an agent's grant, a device the hub introduced
+    and a device the person paired below Full are refused, and the grant is
     journaled as the device that answered. A phone takes a typed value or a
     remembered typed one. A linked store stays with its person at the computer:
     its sources are left out of a phone's card and an answer naming one is

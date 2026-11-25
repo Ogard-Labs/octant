@@ -17,7 +17,9 @@ import type {
 } from "@octant/contracts/secret-stores";
 import { isToolAllowedByAllowlist } from "@octant/domain";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
+import type { DeviceAccessLevel } from "@octant/contracts/remote-access";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import { readDeviceAccessLevel } from "../persistence/remoteAccessProjection";
 import { turnHoldsSandboxPolicy } from "../process/sandboxRuntimePolicy";
 import { holdSecretValue } from "../process/secretRedaction";
 import { makeThreadSecretCredentialBrokerClient } from "../providers/credentialBrokerClient";
@@ -74,6 +76,7 @@ export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
   const { options, persistence } = deps;
   const reach = threadSecretReach({
     ...deps,
+    deviceAccessLevel: (id) => readDeviceAccessLevel(persistence.connection, String(id)),
     isLocalWindow: (id) =>
       deps.windowAuthorityStore.listWindowIds().some((window) => String(window) === String(id)),
   });
@@ -125,11 +128,12 @@ export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
   };
 }
 
-/** Where the person can be when a card waits: at a window here, or at a device they paired. */
+/** Where the person can be when a card waits: at a window here, or at a device they paired at Full. */
 export function threadSecretReach(
   deps: Pick<AuthorityWiring, "isPairedDeviceScope" | "isRestrictedDeviceScope"> &
     Pick<FoundationsWiring, "browserAuthority"> & {
       readonly isLocalWindow: (windowId: WindowId) => boolean;
+      readonly deviceAccessLevel: (scopeId: WindowId) => DeviceAccessLevel;
     },
 ): {
   readonly mayAnswer: NonNullable<ThreadSecretServiceOptions["mayAnswer"]>;
@@ -137,7 +141,10 @@ export function threadSecretReach(
 } {
   const scopeCurrent = (scopeId: WindowId): boolean =>
     deps.isLocalWindow(scopeId) ||
-    (deps.isPairedDeviceScope(scopeId) && !deps.isRestrictedDeviceScope(scopeId));
+    (deps.isPairedDeviceScope(scopeId) &&
+      !deps.isRestrictedDeviceScope(scopeId) &&
+      // A device the person holds below Full is theirs, and still not them.
+      deps.deviceAccessLevel(scopeId) === "full");
   return {
     scopeCurrent,
     mayAnswer: (reader, raised) => {
