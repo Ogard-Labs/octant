@@ -118,8 +118,9 @@ the attempt can be finished that way.
   ([Architecture: extensions and skills](../architecture.md#extensions-and-skills)):
   one pinned to the thread's Project, one selected with `@` in the composer, or one
   a queued message carries. In Chat the latest turn's selections count too, since
-  Retry and Regenerate send them again, and in Work those of a turn waiting on a
-  scheduled resume. An `@` name the composer refuses counts when the thread could
+  Retry and Regenerate send them again (a rewound turn does not count), and in Work
+  those of a turn waiting on a scheduled resume. A queued message counts until it
+  starts running. An `@` name the composer refuses counts when the thread could
   use that server: one failed connection makes the composer refuse it, and signing
   in selects it again. A server the person has switched off, not trusted, or not chosen for
   this thread is never named, whatever state it is in.

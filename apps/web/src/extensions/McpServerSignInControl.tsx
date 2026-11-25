@@ -23,6 +23,11 @@ export interface McpServerSignInControlProps {
     readonly setupSteps?: readonly string[];
     readonly permissionNotice?: string;
   };
+  /**
+   * The host already said the server needs a sign-in, so a first read that
+   * fails offers Check sign-in rather than showing nothing.
+   */
+  readonly knownToNeedSignIn?: boolean;
   /** Told when the sign-in state changes after the first read, so a listing beside it can read again. */
   readonly onChanged?: (view: McpServerSignInView) => void;
 }
@@ -152,7 +157,15 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
         setView(next);
       })
       .catch(() => {
-        if (!cancelled && generation === requestGeneration.current) setView(undefined);
+        if (cancelled || generation !== requestGeneration.current) return;
+        setView(
+          props.knownToNeedSignIn === true
+            ? {
+                kind: "status-unavailable",
+                message: "Sign-in status is unavailable. Check sign-in when the host is available.",
+              }
+            : undefined,
+        );
       });
     return () => {
       cancelled = true;

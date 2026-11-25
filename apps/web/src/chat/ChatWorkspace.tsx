@@ -1721,13 +1721,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             mode="chat"
             receipts={pendingExtensionSelections}
             onResolveReference={extensionDraft.resolveReference}
-            selections={[
-              ...(messageQueue.snapshot?.items.flatMap(
-                (item) => item.payload?.extensionSelections ?? [],
-              ) ?? []),
-              // Retry and Regenerate send the latest turn's selections again.
-              ...(view.turns.at(-1)?.extensionSelections ?? []),
-            ]}
+            queued={messageQueue.snapshot?.items}
+            // Retry and Regenerate send the latest turn's selections again.
+            selections={activeChatTurns(view.turns).at(-1)?.extensionSelections ?? []}
             threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
             turnActive={turnActive}
           />

@@ -4,7 +4,7 @@ import {
 } from "@octant/client-runtime/extension-client";
 import type { McpServerConnection } from "@octant/contracts/extension-rpc";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { McpServerSignInControl } from "../extensions/McpServerSignInControl";
 import { samePollingData } from "../polling/samePollingData";
 import { THREAD_ACTIVITY_RECOVERY_MS } from "../polling/ThreadActivityRevisions";
@@ -40,15 +40,39 @@ export function McpSignInNotices(
 
   // Held as one string so a new array each render does not read again.
   const refused = props.receipts.filter((receipt) => receipt.selection === undefined);
+  const selections = new Map<string, ExtensionSelection>();
+  for (const selection of [
+    ...props.receipts.flatMap((receipt) =>
+      receipt.selection === undefined ? [] : [receipt.selection],
+    ),
+    ...props.selections,
+    // A message already running is this turn, not the next one.
+    ...(props.queued ?? []).flatMap((item) =>
+      item.status === "accepted" ? [] : (item.payload?.extensionSelections ?? []),
+    ),
+  ])
+    selections.set(JSON.stringify(selection), selection);
   const carried = JSON.stringify({
-    selections: [
-      ...props.receipts.flatMap((receipt) =>
-        receipt.selection === undefined ? [] : [receipt.selection],
-      ),
-      ...props.selections,
-    ].slice(0, 32),
-    references: refused.map((receipt) => receipt.reference.slice(0, 256)).slice(0, 32),
+    selections: [...selections.values()].slice(0, 32),
+    references: [...new Set(refused.map((receipt) => receipt.reference.slice(0, 256)))].slice(
+      0,
+      32,
+    ),
   });
+  // A name the composer refused while the server could not connect stays
+  // refused in the draft; it is resolved again once the thread stops waiting
+  // on a sign-in, wherever that sign-in finished.
+  const latest = useRef({ refused, onResolveReference: props.onResolveReference });
+  latest.current = { refused, onResolveReference: props.onResolveReference };
+  const listed = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    const now = new Set(servers.map(serverKey));
+    const left = [...listed.current].some((key) => !now.has(key));
+    listed.current = now;
+    if (left)
+      for (const receipt of latest.current.refused)
+        void latest.current.onResolveReference(receipt.reference);
+  }, [servers]);
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       if (client.mcpServersAwaitingSignIn === undefined) return;
@@ -122,15 +146,13 @@ export function McpSignInNotices(
               componentId={String(server.componentId)}
               disabled={false}
               extensionId={String(server.extensionId)}
+              knownToNeedSignIn
               onChanged={(view) => {
                 if (view.kind === "signed-in") {
                   setSignedIn(label);
                   setServers((current) =>
                     current.filter((other) => serverKey(other) !== serverKey(server)),
                   );
-                  // A name the composer refused while the server could not
-                  // connect would otherwise stay refused in the draft.
-                  for (const receipt of refused) void props.onResolveReference(receipt.reference);
                 }
                 setChanges((count) => count + 1);
               }}

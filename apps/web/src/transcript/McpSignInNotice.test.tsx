@@ -92,6 +92,7 @@ function notice(
       client={client}
       mode="code"
       onResolveReference={async () => true}
+      queued={undefined}
       receipts={[]}
       selections={[]}
       threadId={threadId}
@@ -190,13 +191,50 @@ describe("signing in to a server from the thread", () => {
     expect(screen.queryByText("Linear needs sign-in")).toBeNull();
   });
 
-  it("clears when the server is signed in elsewhere, at the next read", async () => {
+  it("clears when the server is signed in elsewhere, and selects a refused name again", async () => {
     const { client, state } = host();
-    const { rerender } = render(notice(client));
+    const onResolveReference = vi.fn(async () => true);
+    const refused = {
+      label: "@linear",
+      reference: "@linear",
+      status: { kind: "blocked", reason: "unavailable" },
+    } as const;
+    const { rerender } = render(notice(client, { receipts: [refused], onResolveReference }));
     await card();
+    expect(onResolveReference).not.toHaveBeenCalled();
     state.signedIn = true;
-    rerender(notice(client, { turnActive: true }));
+    rerender(notice(client, { receipts: [refused], onResolveReference, turnActive: true }));
     await waitFor(() => expect(screen.queryByText("Linear needs sign-in")).toBeNull());
+    expect(onResolveReference).toHaveBeenCalledExactlyOnceWith("@linear");
+  });
+
+  it("offers Check sign-in when the control's first read fails", async () => {
+    const { client, calls } = host();
+    calls.mcpServerSignIn.mockRejectedValueOnce(new TypeError("offline"));
+    render(notice(client));
+    expect(
+      await within(await card()).findByRole("button", { name: "Check sign-in" }),
+    ).toBeEnabled();
+  });
+
+  it("counts a queued message until it starts running, and each selection once", async () => {
+    const { client, calls } = host();
+    const queued = (status: string) => ({
+      messageId: crypto.randomUUID(),
+      status,
+      payload: { mode: "code", prompt: "x", extensionSelections: [receipt.selection] },
+    });
+    render(
+      notice(client, {
+        receipts: [receipt],
+        queued: [queued("accepted"), queued("queued"), queued("dispatching")] as never,
+      }),
+    );
+    await card();
+    expect(calls.mcpServersAwaitingSignIn).toHaveBeenCalledWith(
+      { mode: "code", threadId, selections: [receipt.selection], references: [] },
+      expect.any(AbortSignal),
+    );
   });
 
   it("stays through a read that could not reach the host, and goes when the host refuses it", async () => {

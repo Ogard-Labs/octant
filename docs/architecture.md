@@ -14851,8 +14851,8 @@ and those names, each put through the checks the turn itself makes against the
 thread's own activation. It does not ask the sessions, because a turn drops a
 server whose connection failed, the composer refuses it, and a missing sign-in is
 what makes it fail. A thread whose turns carry no extension tools (a Project on
-a server, Strict on Windows, a model known not to carry Octant's tools) names
-none. The answer is told only to a principal the sign-in routes admit, a local
+a server, Strict on Windows, or in Work and Code a model known not to carry
+Octant's tools) names none. The answer is told only to a principal the sign-in routes admit, a local
 window or a device the host's own person paired; every other device session is
 refused, so it is never shown a sign-in it cannot do. The read writes nothing,
 and no address, code or token passes through it: the sign-in and its one-time

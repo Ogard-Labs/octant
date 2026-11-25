@@ -2940,11 +2940,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           mode="code"
           onResolveReference={extensionDraft.resolveReference}
           receipts={extensionDraft.receipts}
-          selections={
-            messageQueue.snapshot?.items.flatMap(
-              (item) => item.payload?.extensionSelections ?? [],
-            ) ?? []
-          }
+          queued={messageQueue.snapshot?.items}
+          selections={[]}
           threadId={String(props.threadId)}
           turnActive={busy}
         />

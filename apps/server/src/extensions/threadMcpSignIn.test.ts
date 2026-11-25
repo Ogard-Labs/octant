@@ -121,6 +121,15 @@ function fixture(
           },
     connections: connections as never,
   });
+  const draftEpoch = activation.resolve(snapshot, {
+    scope: {
+      hostId: LOCAL_HOST_ID,
+      mode,
+      projectId: projectId as never,
+      threadId: null,
+      providerFamily,
+    },
+  }).catalogEpoch;
   const selection = (extensionId: string, slug: string, epoch?: string) =>
     Schema.decodeUnknownSync(ExtensionSelection)({
       kind: "plugin",
@@ -149,7 +158,7 @@ function fixture(
     (await reader({ kind: "thread-sign-in", mode, threadId, selections, references })).servers.map(
       (server) => server.serverName,
     );
-  return { read, selection, connections };
+  return { read, selection, connections, draftEpoch };
 }
 
 describe("servers a thread's next turn needs signed in", () => {
@@ -201,6 +210,15 @@ describe("servers a thread's next turn needs signed in", () => {
     await expect(
       fixture({ linear: { ...on, pluginDesired: false } }).read([], ["@linear"]),
     ).resolves.toEqual([]);
+  });
+
+  it("names the server a Work turn's new-task draft selected, which its resume sends again", async () => {
+    const test = fixture({ mode: "work", pins: [linear] });
+    // Rebinding the draft's selection keeps the pin from being counted twice.
+    await expect(test.read([test.selection(docs, "docs", test.draftEpoch)])).resolves.toEqual([
+      "linear",
+      "docs",
+    ]);
   });
 
   it("names a server once when the draft selects it and the Project pins it", async () => {

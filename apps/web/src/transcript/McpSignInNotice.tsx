@@ -1,5 +1,6 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
+import type { ThreadMessageQueueItem } from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
 import { lazy, Suspense } from "react";
 import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
@@ -15,7 +16,9 @@ export interface McpSignInNoticeProps {
   readonly threadId: string | undefined;
   /** The composer's selections, which the next message carries. */
   readonly receipts: ReadonlyArray<ComposerExtensionSelection>;
-  /** What a queued message, a Retry or a scheduled resume would send besides. */
+  /** The thread's message queue; a message not yet running is a next turn too. */
+  readonly queued: ReadonlyArray<ThreadMessageQueueItem> | undefined;
+  /** What a Retry or a scheduled resume would send besides. */
   readonly selections: ReadonlyArray<ExtensionSelection>;
   /** Resolves a composer reference again, for one refused before the sign-in. */
   readonly onResolveReference: (reference: string) => Promise<unknown>;

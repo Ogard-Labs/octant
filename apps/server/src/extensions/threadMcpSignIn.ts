@@ -20,7 +20,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { resolveDraftExtensionReference, revalidateExtensionSelection } from "@octant/plugin-host";
 import { Schema } from "effect";
 import { buildCatalogs, type ExtensionSelectionSubject } from "./extensionChatResolver";
-import { pinnedSelections } from "./selectedExtensions";
+import { draftAddressing, pinnedSelections, rebindDraftSelections } from "./selectedExtensions";
 
 const decodeProviderFamily = Schema.decodeUnknownSync(ExtensionProviderFamily);
 
@@ -133,7 +133,15 @@ export function createThreadMcpSignInReader(options: {
       providerInstanceId: thread.providerInstanceId,
       modelId: thread.modelId,
     });
-    const carried = selections.filter(
+    // Work and Code rebind a selection the new-task draft made, as their turn
+    // does; Chat takes none over to a thread.
+    const rebound =
+      mode === "chat"
+        ? selections
+        : rebindDraftSelections(selections, addressing.epoch, () =>
+            draftAddressing(options.resolveEffectiveState, snapshot, effective, thread, mode),
+          ).flatMap((result) => (result.kind === "selected" ? [result.selection] : []));
+    const carried = rebound.filter(
       (selection) =>
         revalidateExtensionSelection(selection, addressing, "provider-handoff").kind === "selected",
     );
@@ -149,7 +157,7 @@ export function createThreadMcpSignInReader(options: {
         ...named,
         ...pinnedSelections(
           thread.pinnedExtensionIds,
-          selections,
+          carried,
           addressing,
           String(thread.projectId),
         ),
