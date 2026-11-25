@@ -339,6 +339,45 @@ describe("restorable cleanup of a managed worktree", () => {
     expect(startsMeanwhile.state.calls).not.toContain("removeWorktree");
   });
 
+  it("gives up and leaves the worktree ready when a commit, a checkout or an edit lands after the receipt left ready", async () => {
+    const changes: Array<[string, (w: Awaited<ReturnType<typeof world>>) => void]> = [
+      [
+        "commit",
+        (w) => w.state.worktrees.set(target, { branch: `refs/heads/${branch}`, head: moved }),
+      ],
+      [
+        "checkout",
+        (w) => w.state.worktrees.set(target, { branch: "refs/heads/other", head }),
+      ],
+      ["edit", (w) => (w.state.dirty = true)],
+    ];
+    for (const [, change] of changes) {
+      const w = await world();
+      // The first look is the one before the cleanup begins; the next is the last one.
+      w.state.onObserve = (count) => {
+        if (count === 2) change(w);
+      };
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "refused" });
+      expect(await w.current()).toMatchObject({ state: "ready" });
+      expect((await w.current()).reclaim).toBeUndefined();
+      expect(w.state.calls).not.toContain("removalStarted");
+      expect(w.state.disk.has(target)).toBe(true);
+    }
+  });
+
+  it("hands a worktree back whole when a commit lands after a removal was cut short, instead of finishing it", async () => {
+    const w = await world();
+    w.state.failures.add("removeWorktree");
+    await w.reclaim();
+    expect((await w.current()).reclaim).toMatchObject({ removalStarted: true });
+    w.state.worktrees.set(target, { branch: `refs/heads/${branch}`, head: moved });
+    w.state.damage = { missingTrackedFiles: 3, otherChanges: 0 };
+    await expect(w.reclaim()).resolves.toEqual({ status: "refused", reason: "mismatched" });
+    expect((await w.current()).state).toBe("ready");
+    expect(w.state.calls).toContain("restoreMissingFiles");
+    expect(w.state.calls.filter((call) => call === "removeWorktree")).toHaveLength(1);
+  });
+
   it("refuses a dirty or untracked checkout", async () => {
     const w = await world();
     w.state.dirty = true;

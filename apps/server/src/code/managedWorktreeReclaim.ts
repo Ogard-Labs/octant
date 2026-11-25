@@ -284,6 +284,12 @@ export class ManagedWorktreeReclaimService {
     // A turn may have started between the first look and the receipt leaving
     // `ready`; from here none can, so one more look settles it.
     if (!input.isIdle()) return this.#giveUp(receipt, "working", signal);
+    // The branch, commit and changes were read before the receipt left `ready`,
+    // and a commit or checkout in a terminal outside Octant may have landed
+    // since: a recorded commit that no longer matches the folder would leave
+    // a receipt Restore refuses for ever. Read once more, right before Git.
+    const changed = await this.#changedSince(receipt, observation.repositoryRoot, signal);
+    if (changed !== undefined) return this.#giveUp(receipt, changed, signal);
 
     try {
       // Recorded before Git is asked, so a missing file found later is known to
@@ -297,6 +303,28 @@ export class ManagedWorktreeReclaimService {
       return { status: "interrupted", receipt };
     }
     return this.#finishReclaim(receipt, observation.repositoryRoot, signal);
+  }
+
+  /**
+   * What changed in the folder since the cleanup recorded its branch and commit,
+   * or nothing. Anything that cannot be read counts as changed: the worktree
+   * stays the thread's.
+   */
+  async #changedSince(
+    receipt: ManagedWorktreeReceipt,
+    repositoryRoot: string,
+    signal: AbortSignal,
+  ): Promise<ManagedWorktreeRefusalReason | undefined> {
+    const reclaim = receipt.reclaim;
+    if (reclaim === undefined) return "unverified";
+    try {
+      if (!(await this.#stillThere(receipt, repositoryRoot, signal))) return "mismatched";
+      const dirty = await this.#git.isDirty(receipt.canonicalWorktreePath, signal);
+      if (dirty.status !== "observed") return "unverified";
+      return dirty.dirty ? "dirty" : undefined;
+    } catch {
+      return "unverified";
+    }
   }
 
   /**
