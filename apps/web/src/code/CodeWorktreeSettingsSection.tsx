@@ -38,6 +38,7 @@ export function CodeWorktreeSettingsSection(props: {
 }
 
 function WorktreeSettingsControls(props: {
+  readonly focusedSetting?: SettingsSettingId | undefined;
   readonly settings: CodeSettings;
   readonly worktrees: CodeWorktreeSettings;
   readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
@@ -143,6 +144,7 @@ function WorktreeSettingsControls(props: {
           description="When you archive a thread, remove its worktree folder if everything is committed and pushed or merged. The branch stays."
           label="Clean up when a thread is archived"
           scope="app"
+          focused={props.focusedSetting === "code-worktree-cleanup-archive"}
           settingId="code-worktree-cleanup-archive"
         >
           <OctantSwitch
@@ -155,6 +157,7 @@ function WorktreeSettingsControls(props: {
           description="Also remove the worktree folder of a thread that is still open, a day after its last activity, once everything is committed and pushed or merged. The branch stays, and Cleaned-up worktrees below brings the folder back."
           label="Clean up merged worktrees"
           scope="app"
+          focused={props.focusedSetting === "code-worktree-cleanup-merged"}
           settingId="code-worktree-cleanup-merged"
         >
           <OctantSwitch
@@ -167,6 +170,7 @@ function WorktreeSettingsControls(props: {
           description="Remove the worktree folder of a thread nobody has used for a while, open or archived. Only a folder with no uncommitted, untracked or ignored files goes. The branch, the thread and its checkpoints stay, and the thread takes no new turn until you restore the folder under Cleaned-up worktrees."
           label="Clean up after inactivity"
           scope="app"
+          focused={props.focusedSetting === "code-worktree-cleanup-inactivity"}
           settingId="code-worktree-cleanup-inactivity"
         >
           <OctantSwitch
@@ -187,6 +191,7 @@ function WorktreeSettingsControls(props: {
             description="Days without a turn or a change before the folder is removed."
             label="Days of inactivity"
             scope="app"
+            focused={props.focusedSetting === "code-worktree-cleanup-days"}
             settingId="code-worktree-cleanup-days"
           >
             <OctantInput
