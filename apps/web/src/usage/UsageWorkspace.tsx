@@ -808,7 +808,12 @@ function DetailSection(props: {
                 <td>
                   {(() => {
                     const subjectId = row.subjectId;
-                    if (props.onOpenSubject === undefined || subjectId === null) {
+                    // Only a thread opens from here; a Project's own spend names its Project.
+                    if (
+                      props.onOpenSubject === undefined ||
+                      subjectId === null ||
+                      !row.subjectType.endsWith("-thread")
+                    ) {
                       return <UsageName kind={row.subjectType} id={subjectId} />;
                     }
                     return (

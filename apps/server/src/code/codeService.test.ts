@@ -4,6 +4,8 @@ import {
   decodeHostAnswer,
   decodeCodeOperationId,
   decodeProjectWorkingFolderId,
+  decodeProviderInstanceId,
+  decodeProviderModelId,
 } from "@octant/contracts";
 import type { CodeTranscriptSearchRows } from "../persistence/codeTranscriptSearchProjection";
 import {
@@ -78,6 +80,8 @@ import {
   codeNavigationCheckoutChip,
   type CodeServiceOptions,
   type CodePersistencePort,
+  type CodeWorktreeBranchNamesPort,
+  type CodeWorktreeBranchSuggestionPort,
   type CodeWorktreeRefsPort,
   type CodeWorktreeSourcePreviewPort,
   type ManagedCodeThreadCreationPort,
@@ -1317,6 +1321,40 @@ describe("CodeService commands", () => {
     });
     if (back.kind !== "settings-updated") throw new Error("settings were not updated");
     expect(back.settings.windowsTerminalShell).toBeUndefined();
+  });
+
+  it("stores worktree naming choices, keeps them across later default changes, and stores nothing for the defaults", async () => {
+    const fixture = serviceFixture();
+    const defaults = {
+      kind: "update-code-settings",
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+    } as const;
+    const worktrees = {
+      branchPrefix: "henrik/",
+      branchNaming: "prompt",
+    } as const;
+    const chosen = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 0,
+      worktrees,
+    });
+    expect(chosen).toMatchObject({ settings: { worktrees } });
+    if (chosen.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: chosen.settings } as never);
+
+    const later = await fixture.service.execute(ids.window, { ...defaults, expectedVersion: 1 });
+    expect(later).toMatchObject({ settings: { worktrees } });
+    if (later.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: later.settings } as never);
+
+    const back = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 2,
+      worktrees: {},
+    });
+    if (back.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(back.settings.worktrees).toBeUndefined();
   });
 
   it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
@@ -4480,7 +4518,7 @@ describe("CodeService managed thread creation", () => {
       failure: {
         category: "conflict",
         message:
-          "The delivery branch already exists. Choose a different delivery branch and retry.",
+          "That branch name was taken since it was shown: a branch, a remote branch or a tag now uses it, or sits above or below it. The name has been refreshed. Check it and send again.",
       },
     });
     expect(port.commit).not.toHaveBeenCalled();
@@ -4664,6 +4702,142 @@ describe("CodeService managed thread creation", () => {
         projectId: ids.project,
       }),
     ).resolves.toMatchObject({ kind: "worktree-refs-listed", refs: [] });
+  });
+
+  it("asks the model the person selected for branch words only on request, and keeps the local name when it declines or throws", async () => {
+    const request = {
+      kind: "suggest-code-worktree-branch",
+      projectId: ids.project,
+      providerInstanceId: decodeProviderInstanceId(ids.provider),
+      modelId: decodeProviderModelId("model-a"),
+      draft: "Fix the login redirect",
+    } as const;
+    const suggest = vi.fn(async () => ({
+      status: "suggested" as const,
+      words: "fix-login-redirect",
+    }));
+    const fixture = serviceFixture({ threads: [], worktreeBranchSuggestion: { suggest } });
+    await expect(fixture.service.execute(ids.window, request)).resolves.toEqual({
+      kind: "worktree-branch-suggested",
+      projectId: ids.project,
+      words: "fix-login-redirect",
+    });
+    expect(suggest).toHaveBeenCalledWith({
+      projectId: ids.project,
+      providerInstanceId: request.providerInstanceId,
+      modelId: request.modelId,
+      draft: "Fix the login redirect",
+    });
+
+    const refusing = serviceFixture({
+      threads: [],
+      worktreeBranchSuggestion: {
+        suggest: vi.fn(async () => ({
+          status: "refused" as const,
+          reason: "spend-limited" as const,
+        })),
+      },
+    });
+    await expect(refusing.service.execute(ids.window, request)).resolves.toMatchObject({
+      kind: "worktree-branch-suggestion-declined",
+      reason: "spend-limited",
+    });
+    const throwing = serviceFixture({
+      threads: [],
+      worktreeBranchSuggestion: {
+        suggest: vi.fn(async () => {
+          throw new Error("provider down");
+        }),
+      },
+    });
+    await expect(throwing.service.execute(ids.window, request)).resolves.toMatchObject({
+      kind: "worktree-branch-suggestion-declined",
+      reason: "failed",
+    });
+    const absent = serviceFixture({ threads: [] });
+    await expect(absent.service.execute(ids.window, request)).resolves.toMatchObject({
+      reason: "provider-unavailable",
+    });
+  });
+
+  it("lets a window have one branch suggestion in flight, and hands the caller's stop signal on", async () => {
+    let release: (value: { status: "suggested"; words: string }) => void = () => undefined;
+    const suggest = vi.fn(
+      () =>
+        new Promise<{ status: "suggested"; words: string }>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const fixture = serviceFixture({ threads: [], worktreeBranchSuggestion: { suggest } });
+    const request = {
+      kind: "suggest-code-worktree-branch",
+      projectId: ids.project,
+      providerInstanceId: decodeProviderInstanceId(ids.provider),
+      modelId: decodeProviderModelId("model-a"),
+      draft: "Fix the login redirect",
+    } as const;
+    const stop = new AbortController();
+    const first = fixture.service.execute(ids.window, request, stop.signal);
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(1));
+    expect(suggest).toHaveBeenCalledWith(expect.objectContaining({ signal: stop.signal }));
+    await expect(fixture.service.execute(ids.window, request)).resolves.toMatchObject({
+      kind: "worktree-branch-suggestion-declined",
+      reason: "busy",
+    });
+    expect(suggest).toHaveBeenCalledTimes(1);
+    release({ status: "suggested", words: "fix-login-redirect" });
+    await expect(first).resolves.toMatchObject({ kind: "worktree-branch-suggested" });
+    // The window is free again once the first ended.
+    const second = fixture.service.execute(ids.window, request);
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
+    release({ status: "suggested", words: "fix-login-redirect" });
+    await second;
+  });
+
+  it("lists the names a new branch must not collide with, and answers that nothing is proven free when it cannot", async () => {
+    const list = vi.fn(async () => ({ names: ["octant/fix-login", "v1"], truncated: false }));
+    const fixture = serviceFixture({ threads: [], worktreeBranchNames: { list } });
+    const request = { kind: "list-code-worktree-branch-names", projectId: ids.project } as const;
+    await expect(fixture.service.execute(ids.window, request)).resolves.toEqual({
+      kind: "worktree-branch-names-listed",
+      projectId: ids.project,
+      names: ["octant/fix-login", "v1"],
+      truncated: false,
+    });
+    const failing = serviceFixture({
+      threads: [],
+      worktreeBranchNames: {
+        list: async () => {
+          throw new Error("git failed");
+        },
+      },
+    });
+    await expect(failing.service.execute(ids.window, request)).resolves.toMatchObject({
+      names: [],
+      truncated: true,
+    });
+    const absent = serviceFixture({ threads: [] });
+    await expect(absent.service.execute(ids.window, request)).resolves.toMatchObject({
+      truncated: true,
+    });
+    await expect(
+      fixture.service.execute(ids.window, { ...request, projectId: ids.unauthorizedProject }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+  });
+
+  it("refuses a branch suggestion for a Project the window may not act on, without calling the model", async () => {
+    const suggest = vi.fn();
+    const fixture = serviceFixture({ threads: [], worktreeBranchSuggestion: { suggest } });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "suggest-code-worktree-branch",
+        projectId: ids.unauthorizedProject,
+        providerInstanceId: decodeProviderInstanceId(ids.provider),
+        modelId: decodeProviderModelId("model-a"),
+        draft: "Fix it",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(suggest).not.toHaveBeenCalled();
   });
 
   it("F3: appends a compensating checkout-removed when thread journal fails after checkout journal succeeds", async () => {
@@ -6617,6 +6791,8 @@ function serviceFixture(
     readonly sessionAuthority?: CodeSessionAuthorityStore;
     readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
     readonly worktreeRefs?: CodeWorktreeRefsPort;
+    readonly worktreeBranchSuggestion?: CodeWorktreeBranchSuggestionPort;
+    readonly worktreeBranchNames?: CodeWorktreeBranchNamesPort;
     readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
     readonly worktreeRemoteFacts?: CodeWorktreeRemoteFacts;
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
@@ -6752,6 +6928,12 @@ function serviceFixture(
       ? {}
       : { worktreeSourcePreview: options.worktreeSourcePreview }),
     ...(options.worktreeRefs === undefined ? {} : { worktreeRefs: options.worktreeRefs }),
+    ...(options.worktreeBranchSuggestion === undefined
+      ? {}
+      : { worktreeBranchSuggestion: options.worktreeBranchSuggestion }),
+    ...(options.worktreeBranchNames === undefined
+      ? {}
+      : { worktreeBranchNames: options.worktreeBranchNames }),
     ...(options.managedThreadCreation === undefined
       ? {}
       : { managedThreadCreation: options.managedThreadCreation }),

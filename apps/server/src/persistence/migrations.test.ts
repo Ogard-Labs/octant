@@ -202,6 +202,7 @@ describe("applyMigrations", () => {
         "agent_run_content_store",
         "aggregate_heads",
         "binding_receipt_store",
+        "browser_page_projection",
         "bundled_plugin_switch_projection",
         "chat_attachment_projection",
         "chat_attempt_projection",

@@ -1,0 +1,88 @@
+/* A thread named in text, and the card it opens. Loaded with the chip's own
+   chunk, the first time a text names a thread. */
+.thread-reference {
+  max-width: 100%;
+  vertical-align: baseline;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* The prompt breaks long words anywhere; a tile's two letters stay a pair. */
+.thread-reference .project-mark__letters {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.thread-reference > svg {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.thread-reference:hover,
+.thread-reference[data-popup-open] {
+  background: var(--oct-fg-soft);
+}
+
+.thread-reference-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--oct-radius-pill);
+  background: var(--octant-accent-text);
+}
+
+.thread-reference-dot[data-status="attention"] {
+  background: var(--oct-warn-fg);
+}
+
+/* The bare name of a thread in a sentence: the text's own weight, underlined
+   on approach as a link is. */
+.thread-reference-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.thread-reference-link:hover .thread-reference-link__title,
+.thread-reference-link[data-popup-open] .thread-reference-link__title,
+.thread-reference-link:focus-visible .thread-reference-link__title {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.thread-reference-card {
+  display: flex;
+  width: min(320px, calc(100vw - 24px));
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) 12px;
+  line-height: 1.25;
+}
+
+.thread-reference-card > .thread-row-info-card {
+  max-width: none;
+}
+
+.thread-reference-card__notice,
+.thread-reference-card__receipt {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
+.thread-reference-card__receipt {
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.thread-reference-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}

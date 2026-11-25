@@ -55,7 +55,7 @@ import { PreviewContextSelection } from "./previews";
 import { CanvasContextSelection, MAX_CHAT_TURN_CANVAS_SELECTIONS } from "./canvasContext";
 import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
-import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
+import { ThreadMentionIds } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
 import { ThreadToolStep, ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
@@ -460,6 +460,8 @@ export const ChatTurn = Schema.Struct({
   sequence: PositiveInt,
   userMessageRef: ChatContentReference,
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
+  /** The threads this turn's message mentioned; absent when it mentioned none. */
+  threadMentionIds: Schema.optional(ThreadMentionIds),
   attachmentIds: Schema.Array(ChatAttachmentId),
   originalInputs: Schema.optional(
     Schema.Array(ConversationInputReference).pipe(Schema.maxItems(MAX_CHAT_TURN_ATTACHMENTS)),
@@ -805,9 +807,7 @@ export const SendChatTurnCommand = Schema.Struct({
    * context to this turn alone and never becomes part of the user's message.
    * A transcript the browser resolved is never trusted, and never sent.
    */
-  threadMentionIds: Schema.optional(
-    Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
-  ),
+  threadMentionIds: Schema.optional(ThreadMentionIds),
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
 }).annotations(strict);
 

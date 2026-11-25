@@ -21,7 +21,12 @@ import { OctantButton } from "../ui/base/OctantButton";
 export function RemoteCoordinatorProposals(props: {
   readonly client: Pick<
     CodeClient,
-    "readPlanner" | "execute" | "executePlannerProposal" | "putEvidence" | "executeOperation"
+    | "readPlanner"
+    | "execute"
+    | "executePlannerProposal"
+    | "putEvidence"
+    | "executeOperation"
+    | "bootstrap"
   >;
   readonly thread: CodeThread;
   /** What the host said of this session; absent or false shows no decision. */
@@ -60,6 +65,7 @@ export function RemoteCoordinatorProposals(props: {
           executePlannerProposal,
           putEvidence: (threadId, text) => client.putEvidence(threadId, text),
           executeOperation: (command) => client.executeOperation(command),
+          readBranchPrefix: async () => (await client.bootstrap()).settings.worktrees?.branchPrefix,
         },
         entry,
         coordinator: thread,

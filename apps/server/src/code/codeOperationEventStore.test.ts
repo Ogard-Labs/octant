@@ -539,6 +539,7 @@ describe("CodeOperationEventStore", () => {
         modelId: "model-one",
         sessionId: "89000000-0000-4000-8000-000000000050",
         prompt,
+        threadMentionIds: ["release-notes-thread"],
       }),
     });
     store.append({
@@ -580,6 +581,7 @@ describe("CodeOperationEventStore", () => {
           operationId,
           modelId: "model-one",
           prompt,
+          threadMentionIds: ["release-notes-thread"],
           assistant: [prompt],
           status: "completed",
         },
@@ -594,6 +596,7 @@ describe("CodeOperationEventStore", () => {
       hasMore: false,
       turns: [{ operationId: otherOperationId, modelId: "model-two", status: "waiting" }],
     });
+    expect(secondPage.turns[0]?.threadMentionIds).toBeUndefined();
     expect(
       restarted.conversation({ threadId: otherThreadId, afterCursor: 0, limit: 10 }).turns,
     ).toEqual([]);

@@ -803,6 +803,34 @@ function request(url: string, token: string, body: unknown, path = "v1/contexts/
   });
 }
 
+describe("BrowserRuntimeBroker gone pages", () => {
+  it("reports a page gone when the runtime lost it, and not while the app is quitting", async () => {
+    const goneListeners: Array<(contextId: string) => void> = [];
+    const surface = {
+      ...host(),
+      onContextGone: vi.fn((listener: (contextId: string) => void) => {
+        goneListeners.push(listener);
+        return () => undefined;
+      }),
+    };
+    let quitting = false;
+    const broker = await startBrowserRuntimeBroker(surface as never, undefined, () => quitting);
+    try {
+      const gone = async () =>
+        (await (
+          await broker.fetchForTest(request(broker.url, broker.token, {}, "v1/contexts/gone"))
+        ).json()) as { contextIds: string[] };
+      goneListeners[0]?.(contextId);
+      expect((await gone()).contextIds).toEqual([contextId]);
+      quitting = true;
+      goneListeners[0]?.(contextId);
+      expect((await gone()).contextIds).toEqual([]);
+    } finally {
+      await broker.close();
+    }
+  });
+});
+
 describe("BrowserRuntimeBroker profiles", () => {
   const projectId = "40000000-0000-4000-8000-000000000001";
   function store() {

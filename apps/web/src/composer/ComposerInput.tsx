@@ -14,6 +14,7 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type FocusEvent,
+  type FormEvent,
   type HTMLAttributes,
   type KeyboardEvent,
   type MouseEvent,
@@ -24,8 +25,9 @@ import { createPortal, flushSync } from "react-dom";
 /**
  * The composer prompt as its callers see it: the element, plus the text-field
  * surface they already read (`value`, the selection, `setSelectionRange`).
- * The prompt is plain text; `@model(...)` tags in it render as chips, and a
- * chip counts as its whole tag in every offset.
+ * The prompt is plain text; `@model(...)` tags and the caller's own inline
+ * chips in it render as chips, and a chip counts as its whole text in every
+ * offset.
  */
 export interface ComposerInputElement extends HTMLElement {
   value: string;
@@ -38,6 +40,24 @@ export interface ComposerInputElement extends HTMLElement {
 export interface ComposerInputChangeEvent {
   readonly target: ComposerInputElement;
   readonly currentTarget: ComposerInputElement;
+}
+
+/** One place a caller's inline chip stands in the prompt. */
+export interface ComposerInlineChipPlace {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+  /** Names what the chip stands for; two chips can read alike in the text. */
+  readonly id: string;
+}
+
+/** Reads a chip's range in the value now, as typing before the chip moves it. */
+export type LocateComposerChip = () => { readonly start: number; readonly end: number };
+
+/** Chips a caller owns in the prompt's text, such as mentioned threads. */
+export interface ComposerInlineChips {
+  readonly find: (value: string) => ReadonlyArray<ComposerInlineChipPlace>;
+  readonly render: (id: string, locate: LocateComposerChip) => ReactNode;
 }
 
 type ForwardedAttributes = Omit<
@@ -82,31 +102,61 @@ export interface ComposerInputProps extends ForwardedAttributes {
    * text in a chip.
    */
   readonly renderModelChip?:
-    | ((
-        match: SubagentModelTagMatch,
-        locate: () => { readonly start: number; readonly end: number },
-      ) => ReactNode)
+    | ((match: SubagentModelTagMatch, locate: LocateComposerChip) => ReactNode)
     | undefined;
+  readonly inlineChips?: ComposerInlineChips | undefined;
 }
 
 const TAG_NAME = "octant-composer-input";
 const CHIP_ATTRIBUTE = "data-composer-chip";
+const CHIP_ID_ATTRIBUTE = "data-composer-chip-id";
 const FILLER_ATTRIBUTE = "data-composer-filler";
 /** Keystrokes closer together than this undo as one step, as a text field's do. */
 const TYPING_COALESCE_MS = 800;
 const MAX_HISTORY = 200;
 
+type Chip =
+  | {
+      readonly kind: "model";
+      readonly start: number;
+      readonly end: number;
+      readonly text: string;
+      readonly id: string;
+      readonly match: SubagentModelTagMatch;
+    }
+  | ({ readonly kind: "inline" } & ComposerInlineChipPlace);
+
 type Segment =
   | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "chip"; readonly match: SubagentModelTagMatch };
+  | { readonly kind: "chip"; readonly chip: Chip };
 
-function segmentsOf(value: string): ReadonlyArray<Segment> {
+type FindInlineChips = ComposerInlineChips["find"] | undefined;
+
+/** Every chip in the prompt, in order; a tag inside a caller's chip is that chip's text. */
+function chipsOf(value: string, findInline: FindInlineChips): ReadonlyArray<Chip> {
+  const inline = (findInline?.(value) ?? []).map((place): Chip => ({ ...place, kind: "inline" }));
+  const models = findSubagentModelTags(value)
+    .filter((match) => !inline.some((chip) => match.start < chip.end && chip.start < match.end))
+    .map(
+      (match): Chip => ({
+        kind: "model",
+        start: match.start,
+        end: match.end,
+        text: match.text,
+        id: "",
+        match,
+      }),
+    );
+  return [...inline, ...models].sort((left, right) => left.start - right.start);
+}
+
+function segmentsOf(value: string, findInline: FindInlineChips): ReadonlyArray<Segment> {
   const segments: Array<Segment> = [];
   let at = 0;
-  for (const match of findSubagentModelTags(value)) {
-    if (match.start > at) segments.push({ kind: "text", text: value.slice(at, match.start) });
-    segments.push({ kind: "chip", match });
-    at = match.end;
+  for (const chip of chipsOf(value, findInline)) {
+    if (chip.start > at) segments.push({ kind: "text", text: value.slice(at, chip.start) });
+    segments.push({ kind: "chip", chip });
+    at = chip.end;
   }
   if (at < value.length) segments.push({ kind: "text", text: value.slice(at) });
   return segments;
@@ -145,6 +195,10 @@ function textOf(node: Node): string {
   for (const child of node.childNodes) text += textOf(child);
   const blockBreak = BLOCK_TAGS.has(node.tagName) && node.previousSibling !== null ? "\n" : "";
   return blockBreak + text;
+}
+
+function lineBreaks(text: string): number {
+  return text.split("\n").length - 1;
 }
 
 function serialize(root: HTMLElement): string {
@@ -221,8 +275,12 @@ function positionOf(root: HTMLElement, index: number): { node: Node; offset: num
   return { node: root, offset: children.length };
 }
 
-function isCanonical(root: HTMLElement, value: string): boolean {
-  const expected = segmentsOf(value);
+function chipId(node: Node): string {
+  return isElement(node) ? (node.getAttribute(CHIP_ID_ATTRIBUTE) ?? "") : "";
+}
+
+function isCanonical(root: HTMLElement, value: string, findInline: FindInlineChips): boolean {
+  const expected = segmentsOf(value, findInline);
   const nodes = Array.from(root.childNodes);
   const filler = needsFiller(value) ? 1 : 0;
   if (nodes.length !== expected.length + filler) return false;
@@ -231,7 +289,11 @@ function isCanonical(root: HTMLElement, value: string): boolean {
     if (node === undefined) return false;
     if (segment.kind === "text") {
       if (node.nodeType !== Node.TEXT_NODE || node.nodeValue !== segment.text) return false;
-    } else if (!isChip(node) || chipText(node) !== segment.match.text) {
+    } else if (
+      !isChip(node) ||
+      chipText(node) !== segment.chip.text ||
+      chipId(node) !== segment.chip.id
+    ) {
       return false;
     }
   }
@@ -246,32 +308,36 @@ function isCanonical(root: HTMLElement, value: string): boolean {
 interface ChipHost {
   readonly key: string;
   readonly node: HTMLElement;
-  readonly match: SubagentModelTagMatch;
+  readonly chip: Chip;
 }
 
-/** Rebuilds the prompt's DOM from `value`, reusing chip hosts whose tag is unchanged. */
+/** Rebuilds the prompt's DOM from `value`, reusing chip hosts whose chip is unchanged. */
 function render(
   root: HTMLElement,
   value: string,
   keys: WeakMap<HTMLElement, string>,
   nextKey: () => string,
+  findInline: FindInlineChips,
 ): ReadonlyArray<ChipHost> {
   const reusable = new Map<string, Array<HTMLElement>>();
   for (const child of Array.from(root.childNodes)) {
     if (!isElement(child) || !isChip(child)) continue;
-    const text = chipText(child);
-    reusable.set(text, [...(reusable.get(text) ?? []), child]);
+    const identity = `${chipId(child)}\n${chipText(child)}`;
+    reusable.set(identity, [...(reusable.get(identity) ?? []), child]);
   }
   const document = root.ownerDocument;
   const hosts: Array<ChipHost> = [];
   const nodes: Array<Node> = [];
-  for (const segment of segmentsOf(value)) {
+  for (const segment of segmentsOf(value, findInline)) {
     if (segment.kind === "text") {
       nodes.push(document.createTextNode(segment.text));
       continue;
     }
-    const host = reusable.get(segment.match.text)?.shift() ?? document.createElement("span");
-    host.setAttribute(CHIP_ATTRIBUTE, segment.match.text);
+    const { chip } = segment;
+    const host =
+      reusable.get(`${chip.id}\n${chip.text}`)?.shift() ?? document.createElement("span");
+    host.setAttribute(CHIP_ATTRIBUTE, chip.text);
+    if (chip.id !== "") host.setAttribute(CHIP_ID_ATTRIBUTE, chip.id);
     host.setAttribute("contenteditable", "false");
     host.className = "composer-chip";
     let key = keys.get(host);
@@ -279,7 +345,7 @@ function render(
       key = nextKey();
       keys.set(host, key);
     }
-    hosts.push({ key, node: host, match: segment.match });
+    hosts.push({ key, node: host, chip });
     nodes.push(host);
   }
   if (needsFiller(value)) {
@@ -304,7 +370,8 @@ interface Snapshot {
 /**
  * The prompt every composer shares. It edits like a text field and holds
  * plain text, so drafts, sends, and copies stay text; what it adds is that a
- * `@model(...)` tag sits in the text as one chip. The DOM is rebuilt from the
+ * `@model(...)` tag, or a chip its caller finds in the text, sits in the text
+ * as one chip. The DOM is rebuilt from the
  * value only when it no longer matches it (a chip appeared or left, a line
  * break, a paste); ordinary typing and IME composition keep the browser's own
  * nodes, so the caret and composition are never disturbed.
@@ -328,6 +395,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       readOnly,
       autoFocus,
       renderModelChip,
+      inlineChips,
       ...attributes
     } = props;
     const rootRef = useRef<ComposerInputElement | null>(null);
@@ -364,6 +432,8 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     const onSelectRef = useRef(onSelect);
     onSelectRef.current = onSelect;
     const reportedSelectionRef = useRef<string | undefined>(undefined);
+    const findInlineRef = useRef(inlineChips?.find);
+    findInlineRef.current = inlineChips?.find;
 
     // React re-renders a controlled text field synchronously after each change,
     // so its caller's state is current before the next key arrives; the prompt
@@ -422,8 +492,11 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     };
 
     const rebuild = (root: HTMLElement) => {
-      setChipHosts(render(root, modelRef.current, keysRef.current, nextKey));
+      setChipHosts(render(root, modelRef.current, keysRef.current, nextKey, findInlineRef.current));
     };
+
+    const rebuildRef = useRef(rebuild);
+    rebuildRef.current = rebuild;
 
     // Only a run of plain typing undoes as one step; a line break, a paste, a
     // chip added or removed, or an undo each stand alone, as in a text field.
@@ -490,7 +563,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           // prompt, as assigning a text field's value does.
           set: (next: unknown) => {
             modelRef.current = typeof next === "string" ? next : String(next ?? "");
-            setChipHosts(render(root, modelRef.current, keysRef.current, nextKey));
+            rebuildRef.current(root);
             lastSelectionRef.current = {
               start: modelRef.current.length,
               end: modelRef.current.length,
@@ -527,7 +600,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         },
       });
       rootRef.current = root;
-      setChipHosts(render(root, modelRef.current, keysRef.current, nextKey));
+      rebuildRef.current(root);
     }, []);
 
     useImperativeHandle<ComposerInputElement | null, ComposerInputElement | null>(
@@ -560,7 +633,12 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         }
       }
       if (composingRef.current) return;
-      if (!isCanonical(root, modelRef.current)) rebuild(root);
+      if (!isCanonical(root, modelRef.current, findInlineRef.current)) {
+        // Text can become a chip with no edit of its own (the caller chose it
+        // after writing it), and rebuilding the DOM would drop the caret.
+        pendingRef.current ??= readSelection(root);
+        rebuild(root);
+      }
       const pending = pendingRef.current;
       if (pending !== undefined) {
         pendingRef.current = undefined;
@@ -687,6 +765,21 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       root.setAttribute("aria-labelledby", name.id);
     }, [id, named, labelId]);
 
+    // A label activates its first button when it is clicked, and a chip is the
+    // only button a wrapping label holds: clicking the prompt's text opened
+    // the chip instead of placing the caret. A click on a chip is its own.
+    useEffect(() => {
+      const label = rootRef.current?.closest("label");
+      if (label === null || label === undefined) return;
+      const onLabelClick = (event: Event) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest(`[${CHIP_ATTRIBUTE}]`) !== null) return;
+        event.preventDefault();
+      };
+      label.addEventListener("click", onLabelClick);
+      return () => label.removeEventListener("click", onLabelClick);
+    }, []);
+
     useEffect(() => {
       if (autoFocus === true) rootRef.current?.focus();
     }, []);
@@ -771,14 +864,23 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       },
       // Through React's own `onInput`, so the caller's state update lands
       // before the next key event, as it does for a text field's `onChange`.
-      onInput: () => {
+      onInput: (event: FormEvent<ComposerInputElement>) => {
         const root = rootRef.current;
         if (root === null) return;
-        const next = serialize(root);
-        const caret = readSelection(root)?.start ?? next.length;
+        const read = serialize(root);
+        // Deleting the text after a chip leaves a line break that holds the
+        // line open. A deletion adds no line, so it is no part of the prompt.
+        const held =
+          event.nativeEvent instanceof InputEvent &&
+          event.nativeEvent.inputType.startsWith("delete") &&
+          read.endsWith("\n") &&
+          lineBreaks(read) > lineBreaks(modelRef.current);
+        const next = held ? read.slice(0, -1) : read;
+        const caret = Math.min(readSelection(root)?.start ?? next.length, next.length);
         if (next === modelRef.current && next === reportedRef.current) return;
         const chipsChanged =
-          findSubagentModelTags(next).length !== findSubagentModelTags(modelRef.current).length;
+          chipsOf(next, findInlineRef.current).length !==
+          chipsOf(modelRef.current, findInlineRef.current).length;
         emit(next, caret, { typing: !chipsChanged });
       },
     });
@@ -786,17 +888,23 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     return (
       <>
         {element}
-        {chipHosts.map((host) =>
-          createPortal(
-            renderModelChip?.(host.match, () => {
-              const root = rootRef.current;
-              const start = root === null ? host.match.start : offsetOf(root, host.node, 0);
-              return { start, end: start + host.match.text.length };
-            }) ?? <span className="composer-chip__label">{host.match.text}</span>,
-            host.node,
+        {chipHosts.map((host) => {
+          const { chip, node } = host;
+          const locate = () => {
+            const root = rootRef.current;
+            const start = root === null ? chip.start : offsetOf(root, node, 0);
+            return { start, end: start + chip.text.length };
+          };
+          const drawn =
+            chip.kind === "model"
+              ? renderModelChip?.(chip.match, locate)
+              : inlineChips?.render(chip.id, locate);
+          return createPortal(
+            drawn ?? <span className="composer-chip__label">{chip.text}</span>,
+            node,
             host.key,
-          ),
-        )}
+          );
+        })}
       </>
     );
   },

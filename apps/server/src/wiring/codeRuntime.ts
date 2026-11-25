@@ -1103,8 +1103,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               browserAutomationService.inspectThread(windowId, threadId),
             create: (input) => browserAutomationService.create(input),
             act: (input) => browserAutomationService.act(input),
-            releaseThread: (windowId, threadId) =>
-              browserAutomationService.releaseThread(windowId, threadId),
+            releaseThread: (windowId, threadId, endedBy, actor) =>
+              browserAutomationService.releaseThread(windowId, threadId, endedBy, actor),
             holdForAsk: (windowId, threadId) =>
               browserAutomationService.holdForAsk(windowId, threadId),
           },
@@ -1687,8 +1687,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           create: (input) => browserAutomationService.create(input),
           act: (input) => browserAutomationService.act(input),
           saveDownload: (input) => browserAutomationService.saveDownload(input),
-          releaseThread: (windowId, threadId) =>
-            browserAutomationService.releaseThread(windowId, threadId),
+          releaseThread: (windowId, threadId, endedBy, actor) =>
+            browserAutomationService.releaseThread(windowId, threadId, endedBy, actor),
           holdForPerson: (windowId, threadId) =>
             browserAutomationService.holdForPerson(windowId, threadId),
           holdForAsk: (windowId, threadId) =>

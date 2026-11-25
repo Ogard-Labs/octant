@@ -192,4 +192,70 @@ describe("ComposerInput", () => {
     rerender(<ComposerInput aria-label="Prompt" readOnly value="" />);
     expect(screen.getByRole("textbox", { name: "Prompt" })).toHaveAttribute("readonly");
   });
+
+  it("draws a caller's chips in the text and keeps the caret when text becomes one", () => {
+    const find = (value: string) => {
+      const start = value.indexOf("#[Plan]");
+      return start === -1 ? [] : [{ start, end: start + 7, text: "#[Plan]", id: "thread-1" }];
+    };
+    function Mention(props: { readonly chosen: boolean }) {
+      return (
+        <ComposerInput
+          aria-label="Prompt"
+          inlineChips={{
+            find: (value) => (props.chosen ? find(value) : []),
+            render: (id) => <b data-testid="mention">{id}</b>,
+          }}
+          value="See #[Plan] now"
+        />
+      );
+    }
+    const { rerender } = render(<Mention chosen={false} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Prompt" });
+    expect(input).toHaveTextContent("See #[Plan] now");
+    input.focus();
+    input.setSelectionRange(13, 13);
+
+    rerender(<Mention chosen />);
+
+    expect(screen.getByTestId("mention")).toHaveTextContent("thread-1");
+    expect(input).toHaveTextContent("See thread-1 now");
+    expect(input).toHaveValue("See #[Plan] now");
+    expect(input.selectionStart).toBe(13);
+  });
+
+  it("does not press a chip when the text of a labelled prompt is clicked", async () => {
+    const onPress = vi.fn();
+    render(
+      <label>
+        <span>Message</span>
+        <ComposerInput
+          renderModelChip={() => (
+            <button onClick={onPress} type="button">
+              chip
+            </button>
+          )}
+          value={`Review ${tag} now`}
+        />
+      </label>,
+    );
+    await userEvent.click(screen.getByRole("textbox", { name: "Message" }));
+    expect(onPress).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByText("chip"));
+    expect(onPress).toHaveBeenCalledOnce();
+  });
+
+  it("keeps no line break the browser leaves when the text after a chip is deleted", () => {
+    const onValue = vi.fn();
+    render(<Prompt initial={`${tag} `} onValue={onValue} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    // What Chromium does for Backspace on the last character after a chip.
+    input.lastChild?.remove();
+    input.append(document.createElement("br"));
+    fireEvent(
+      input,
+      new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }),
+    );
+    expect(onValue).toHaveBeenLastCalledWith(tag, tag.length);
+  });
 });

@@ -1,13 +1,21 @@
 import type { MentionableThreadId, ThreadMentionCandidate } from "@octant/contracts";
 import {
   applyThreadMentionChip,
+  findThreadMentionTags,
   parseThreadMentionToken,
   type ThreadMentionToken,
 } from "@octant/domain";
-import { Hash, MessagesSquare, X } from "../ui/icons";
 import { useState, type KeyboardEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import type { ComposerInputElement } from "../composer/ComposerInput";
+import type { ComposerInlineChips, ComposerInputElement } from "../composer/ComposerInput";
+import { lazyOr } from "../lib/lazyOr";
+import type { ThreadMentionChipProps } from "./ThreadMentionInlineChip";
+import { LazyThreadMentionOption } from "./LazyThreadMentionOption";
+
+const LazyThreadMentionChip = lazyOr<ThreadMentionChipProps>(
+  async () => (await import("./ThreadMentionInlineChip")).ThreadMentionInlineChip,
+  ({ chip }) => <span>{chip.title}</span>,
+);
 
 /**
  * A `#thread` chip a composer is currently carrying. The chip is a structured
@@ -38,6 +46,8 @@ export interface ThreadMentions {
   readonly dialogueEnabled?: boolean;
   /** Receives the text after `#`, or `undefined` when the typeahead closes. */
   readonly onQueryChange: (query: string | undefined) => void;
+  /** Receives each edit with the caret it left, which says where it was made. */
+  readonly onDraftEdited?: (draft: string, caretIndex: number) => void;
   readonly onSelectCandidate: (candidate: ThreadMentionCandidate) => void;
   readonly onRemoveChip: (threadId: MentionableThreadId) => void;
   readonly onOpenSideChat?: (threadId: MentionableThreadId) => void;
@@ -55,6 +65,8 @@ export interface ThreadMentionTypeaheadController {
   /** Returns `true` when the typeahead consumed the key. */
   readonly handleKeyDown: (event: KeyboardEvent<ComposerInputElement>) => boolean;
   readonly choose: (candidate: ThreadMentionCandidate) => void;
+  /** The mentioned threads as chips in the prompt's own text. */
+  readonly inlineChips: ComposerInlineChips | undefined;
 }
 
 /**
@@ -84,6 +96,7 @@ export function useThreadMentionTypeahead(input: {
 
   function sync(draft: string, caretIndex: number | null) {
     if (mentions === undefined) return;
+    if (caretIndex !== null) mentions.onDraftEdited?.(draft, caretIndex);
     const next = caretIndex === null ? undefined : parseThreadMentionToken(draft, caretIndex);
     setToken(next);
     setActiveIndex(0);
@@ -134,7 +147,41 @@ export function useThreadMentionTypeahead(input: {
     return false;
   }
 
-  return { open, activeIndex, activeCandidate, setActiveIndex, sync, handleKeyDown, choose };
+  const inlineChips: ComposerInlineChips | undefined =
+    mentions === undefined
+      ? undefined
+      : {
+          find: (value) =>
+            findThreadMentionTags(value, mentions.chips).map((tag) => ({
+              start: tag.start,
+              end: tag.end,
+              text: tag.text,
+              id: String(tag.chip.threadId),
+            })),
+          render: (id) => {
+            const chip = mentions.chips.find((each) => String(each.threadId) === id);
+            return chip === undefined ? null : (
+              <LazyThreadMentionChip
+                chip={chip}
+                draft={input.draft}
+                mentions={mentions}
+                onDraftChange={input.onDraftChange}
+                textarea={input.textarea}
+              />
+            );
+          },
+        };
+
+  return {
+    open,
+    activeIndex,
+    activeCandidate,
+    setActiveIndex,
+    sync,
+    handleKeyDown,
+    choose,
+    inlineChips,
+  };
 }
 
 /**
@@ -181,11 +228,7 @@ export function ThreadMentionTypeahead(props: {
                 type="button"
                 variant={index === props.activeIndex ? "secondary" : "ghost"}
               >
-                <Hash aria-hidden="true" size={12} />
-                <span>{candidate.title}</span>
-                <span className="thread-mention__meta">
-                  {`${threadModeLabel(candidate.mode)} · ${threadPlacementLabel(candidate.placement)}`}
-                </span>
+                <LazyThreadMentionOption candidate={candidate} />
               </OctantButton>
             </li>
           ))}
@@ -193,74 +236,4 @@ export function ThreadMentionTypeahead(props: {
       )}
     </div>
   );
-}
-
-/**
- * The chips the current turn will carry. Each chip states, in words, that the
- * mention is read-only, and reports the host's refusal instead of quietly
- * dropping a selection the user still sees in the draft.
- */
-export function ThreadMentionChips(props: {
-  readonly chips: ReadonlyArray<ThreadMentionChip>;
-  readonly dialogueEnabled?: boolean;
-  readonly disabled?: boolean;
-  readonly onRemove: (threadId: MentionableThreadId) => void;
-  readonly onOpenSideChat?: (threadId: MentionableThreadId) => void;
-}) {
-  if (props.chips.length === 0) return null;
-  return (
-    <ul aria-label="Mentioned threads" className="thread-mention__chips">
-      {props.chips.map((chip) => (
-        <li className="chip thread-mention__chip" key={String(chip.threadId)}>
-          <Hash aria-hidden="true" size={12} />
-          <span>{chip.title}</span>
-          <span className="thread-mention__chip-receipt">
-            {chip.unavailableReason === undefined
-              ? `${threadModeLabel(chip.mode)} · ${chip.placementLabel} · ${
-                  props.dialogueEnabled && chip.mode === "chat"
-                    ? "Can receive a message"
-                    : "Read-only"
-                }`
-              : `Unavailable: ${chip.unavailableReason}`}
-          </span>
-          {props.onOpenSideChat === undefined ? null : (
-            <OctantButton
-              aria-label={`Open Side Chat about ${chip.title}`}
-              disabled={props.disabled === true || chip.unavailableReason !== undefined}
-              onClick={() => props.onOpenSideChat?.(chip.threadId)}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              <MessagesSquare aria-hidden="true" size={12} />
-              <span>{chip.hasSideChat === true ? "Reopen Side Chat" : "Side Chat"}</span>
-            </OctantButton>
-          )}
-          <OctantButton
-            aria-label={`Remove ${chip.title} thread mention`}
-            className="chip-x window-no-drag"
-            disabled={props.disabled === true}
-            onClick={() => props.onRemove(chip.threadId)}
-            type="button"
-            variant="bare"
-          >
-            <X aria-hidden="true" size={12} />
-          </OctantButton>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** Words, never colour alone, for the mode a mentioned thread belongs to. */
-export function threadModeLabel(mode: "chat" | "work" | "code"): string {
-  if (mode === "work") return "Work";
-  if (mode === "code") return "Code";
-  return "Chat";
-}
-
-/** Words for where the host says a mentionable thread is filed. */
-export function threadPlacementLabel(placement: ThreadMentionCandidate["placement"]): string {
-  if (placement.kind === "project") return placement.label;
-  return placement.kind === "recents" ? "Recents" : "Unfiled";
 }

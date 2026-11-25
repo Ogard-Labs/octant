@@ -5,6 +5,7 @@ import {
   type ThreadMentionCandidate,
   type ThreadMentionTranscriptEntry,
 } from "@octant/contracts";
+import { formatThreadMentionChip, sideChatTitle } from "./threadMentionChipText";
 import {
   appendThreadMentionChip,
   applyThreadMentionChip,
@@ -13,12 +14,9 @@ import {
   composerThreadDropLocalRefusal,
   composerThreadDropMessage,
   decideThreadDialogueAsk,
-  formatThreadMentionChip,
   formatThreadMentionContext,
   parseThreadMentionToken,
   rankThreadMentionCandidates,
-  reconcileThreadMentionChips,
-  sideChatTitle,
 } from "./threadMentionPolicy";
 
 function candidate(
@@ -85,37 +83,6 @@ describe("applyThreadMentionChip", () => {
   it("strips brackets and newlines from a title so the chip stays decidable", () => {
     const result = applyThreadMentionChip("#x", { query: "x", start: 0, end: 2 }, "a\n[b]");
     expect(result.draft).toBe("#[a b] ");
-  });
-});
-
-describe("reconcileThreadMentionChips", () => {
-  it("drops a chip the user edited out of the draft", () => {
-    const chips = [{ title: "Release notes" }, { title: "Roadmap" }];
-    const draft = `${formatThreadMentionChip("Roadmap")} only`;
-    expect(reconcileThreadMentionChips(draft, chips)).toEqual([{ title: "Roadmap" }]);
-  });
-
-  it("keeps one same-title chip per surviving token", () => {
-    const chips = [{ title: "Roadmap" }, { title: "Roadmap" }];
-    const draft = `${formatThreadMentionChip("Roadmap")} only`;
-    expect(reconcileThreadMentionChips(draft, chips)).toEqual([{ title: "Roadmap" }]);
-    expect(
-      reconcileThreadMentionChips(
-        `${formatThreadMentionChip("Roadmap")} and ${formatThreadMentionChip("Roadmap")}`,
-        chips,
-      ),
-    ).toEqual(chips);
-  });
-
-  it("caps surviving chips at the per-turn bound", () => {
-    const titles = ["One", "Two", "Three", "Four", "Five"];
-    const draft = titles.map((title) => formatThreadMentionChip(title)).join(" ");
-    expect(
-      reconcileThreadMentionChips(
-        draft,
-        titles.map((title) => ({ title })),
-      ),
-    ).toHaveLength(4);
   });
 });
 

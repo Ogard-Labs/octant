@@ -2207,6 +2207,9 @@ function startTurn(
     ...(frame.event.reviewFindingReferences === undefined
       ? {}
       : { reviewFindingReferences: frame.event.reviewFindingReferences }),
+    ...(frame.event.threadMentionIds === undefined
+      ? {}
+      : { threadMentionIds: frame.event.threadMentionIds }),
     ...(frame.event.checkpoint === undefined ? {} : { checkpoint: frame.event.checkpoint }),
     ...(frame.event.executionPolicy === undefined
       ? {}
@@ -2357,6 +2360,7 @@ type CodeConversationBuilder = {
   prompt: CodeConversationTurn["prompt"];
   checkoutId?: CodeConversationTurn["checkoutId"];
   reviewFindingReferences?: CodeConversationTurn["reviewFindingReferences"];
+  threadMentionIds?: CodeConversationTurn["threadMentionIds"];
   checkpoint?: CodeConversationTurn["checkpoint"];
   executionPolicy?: CodeConversationTurn["executionPolicy"];
   describedImages?: CodeConversationTurn["describedImages"];

@@ -22,7 +22,6 @@ import type { ChatAttachmentId } from "@octant/contracts/chat";
 import type { ProjectId } from "@octant/contracts";
 import { clipboardHasImage, collectPastedImages } from "./composerImagePaste";
 import {
-  ThreadMentionChips,
   ThreadMentionTypeahead,
   useThreadMentionTypeahead,
   type ThreadMentionChip,
@@ -536,16 +535,6 @@ export function ChatComposer(props: ChatComposerProps) {
 
   const chips = (
     <>
-      <ThreadMentionChips
-        chips={props.threadMentions?.chips ?? []}
-        {...(props.threadMentions?.dialogueEnabled === undefined
-          ? {}
-          : { dialogueEnabled: props.threadMentions.dialogueEnabled })}
-        onRemove={(threadId) => props.threadMentions?.onRemoveChip(threadId)}
-        {...(props.threadMentions?.onOpenSideChat === undefined
-          ? {}
-          : { onOpenSideChat: props.threadMentions.onOpenSideChat })}
-      />
       <TrackerReferenceComposerHints draft={props.draft} />
       {(props.pendingAttachments ?? []).length > 0 ? (
         <ul aria-label="Attached files" className="composer-chips chat-composer__selections">
@@ -671,6 +660,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   const input = (
     <ComposerInput
+      inlineChips={mention.inlineChips}
       renderModelChip={atMenu.renderModelChip}
       aria-activedescendant={
         atMenu.active !== undefined

@@ -2694,6 +2694,83 @@ computer and removal deletes from its disk). The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the
 other cleanup callers.
 
+_Branch naming (maintainer decision, 2026-11-25)._ A new managed worktree's
+delivery branch is a configurable prefix (`octant/` unless changed in Settings ›
+Code › Worktrees) and either a short id, the default, or words from the person's
+own prompt (`deriveDeliveryBranch` in the domain, derived on this computer). The
+words are conservative, because a branch name is pushed: after a word that says
+a secret follows (password, passwd, pass, secret, token, key, credential,
+bearer, auth, pin, login code, compounds such as `DB_PASS` and `API_KEY`, and the
+Norwegian passord, hemmelig, nøkkel and kode) the rest of that clause is dropped;
+so is every word with `=`, every URL, path, email and host, every word that
+mixes letters and digits beyond an ordinary shape (`v2`, `utf8`, `h264`,
+`oauth2`, issue numbers such as `#123` stay), long digit runs and protected
+names (`.env`, `.ssh`, `id_rsa`). A clause ends at a sentence stop or a line end.
+When a line ends inside a clause that named a secret, the lines after it are left
+out too, up to a blank line, since the value is often pasted there.
+The text is redacted first, so a token shaped like a key never gets this far.
+At most 40 characters are kept, and with fewer than two words left the id name
+is used. Windows reserved names (`con`, `prn`, `aux`, `nul`, `com1` to `com9`,
+`lpt1` to `lpt9`, with or without an extension) are never produced and are
+refused when typed or used as a prefix segment. A name is always a valid Git ref
+and never the base branch (a prefix that is not one is ignored). A branch or tag
+named like the prefix, or like a part of it, blocks every name below it, so the
+prefix's slashes then become dashes (`feature/` with a `feature` branch gives
+`feature-abc123`). The phone's start, which shows the
+name in its delivery target sheet, and the starts that show none (a paired
+browser, a worker) read the taken names too when the person chose a prefix; a
+host that cannot say leaves the name to its own check.
+
+A name is numbered (`-2`, `-3`) when a branch of that name, or one above or below
+it, exists, compared without case, against every name the host lists with
+`list-code-worktree-branch-names`: local branches, remote branches with the
+remote's name removed, and tags. That read is names only, apart from the
+200-entry display list the Where picker shows, and returns at most 20,000
+names; a repository with more, a host that cannot read them, and a Project on a
+server (whose refs this host cannot read) answer `truncated`, and the composer
+then falls back to the id name, since nothing proves a worded name is free. The
+composer shows the name in Worktree options before Send and sends exactly it. The
+host holds creation to the same rule (the same names, case-insensitive, above and
+below) before it makes the worktree, and when the previewed name was taken in the
+meantime it refuses with a message and does not choose another name; the composer
+reads the names again after a refused creation, so the name shown is the one
+that would be tried next. The host keeps its exact local-branch check when the
+listing is cut short or fails. A choice (typed or suggested) belongs to the
+Project and base branch it was made for, and is forgotten when either changes.
+A typed name that is refused is not shown as if it would be used: the field
+returns to the name Send will create and says why.
+
+A model is asked for words only when the person presses **Suggest name**:
+`suggest-code-worktree-branch` carries the draft and the model the composer has
+selected, and nothing else about the Project or checkout. The client sends the
+draft after redaction and after the reduction above, so no dropped clause is
+sent, and at most 2,000 characters, so a long draft works. The host redacts and
+reduces it again, checks the Project's provider rules, sign-in and spend ceilings
+(the request is not a turn and is reserved against token ceilings as 4,000
+tokens, or refused where a monetary ceiling cannot price it), runs one short
+request, and reduces the reply with the same word rules. What a sent request used
+is recorded under the Code Project on the usage ledger before its reservation is
+released (a `worktree-branch-suggestion` request on its own
+`worktree-branch-suggestion-usage` aggregate, whose id is the Project's, since no
+thread exists yet), so the Project's ceilings and the usage view count it. A sent
+request that got no answer is recorded as unreported usage, as a stopped turn is;
+one that was never sent gives its reservation back. The call stops when the composer goes away, when the
+Project changes, or when the person types a name; a window has at most one
+suggestion in flight on the host, and a second is declined as busy. A refused,
+failed or outdated answer changes nothing and the local name stays. A device the host's own person paired
+may ask for one; a hub-introduced or agent-gated caller may not.
+
+The prefix applies wherever a person starts a new Code thread: the composer on
+the host's start screen, a paired browser's thread start, the phone's thread
+start, and a worker approved from a paired browser or the phone or started by a
+coordinator on the host. Follow-up suggestion, checkpoint, automation,
+delegation, benchmark and other host-made threads keep their own names
+(`octant/<short id>` and the like). The words of a prompt are used only on the
+host's start screen, where the taken names are known; the other starts use the
+prefix and an id. The `settings.worktrees` field is read by older clients as a
+host answer, which ignores a field it does not know, so they keep working
+without showing the choices.
+
 The host reads a worktree's changes outside any sandbox, so it runs nothing a
 repository configured: Git starts with `core.fsmonitor=false`,
 `GIT_OPTIONAL_LOCKS=0`, no global or system config, and
@@ -5028,7 +5105,14 @@ time. Dragging a sidebar thread onto a composer, or choosing Attach as context
 from that thread's row menu, uses this same path: the mention search, given
 the thread's id, returns that thread only when this window can Open it, so
 where its title would rank does not matter, and the renderer does not read the
-transcript to attach the chip. In Chat, an explicit mention of a Chat thread also grants the source
+transcript to attach the chip. A turn records the ids its message mentioned
+(`threadMentionIds` on the Chat turn, on Work's `work.turn-accepted@1` and on
+Code's `conversation-turn-started`; absent when it mentioned none), so a reader
+can show which thread a `#[Title]` in the message names (maintainer decision,
+2026-11-25). They are presentation alone: no title, transcript or authority of
+the mentioned thread is stored, a later turn never reads them as context, and a
+retry or resume resolves nothing from them. A Chat branch's and a Work fork's
+copies of the message keep them. In Chat, an explicit mention of a Chat thread also grants the source
 provider the bounded `octant_ask_thread` tool for that turn: it may send one of
 the user's instructions to the mentioned Chat thread and receive its completed
 reply, at most three times a turn by default, a count the person can change
@@ -6466,6 +6550,77 @@ flowchart LR
   built yet, a paired device that can open the thread,
   added to a pull request body only when the person chooses, and never in
   telemetry. Detail is in [Browser captures](design/browser-captures.md).
+- **Browser sessions.** A Browser session is the person's open page in a
+  thread's Browser pane in a Work or Code thread (maintainer decision,
+  2026-11-25). The host journals its start as `browser.page-opened@1` and its
+  end as `browser.page-closed@1`, one aggregate per page, so a start with no end
+  when the host next starts is what a restart, a crash or a Quit took. A record
+  names the page id, the thread, the window, the mode, the profile kind
+  (Private, Project, Personal, or a named account by its stored profile id,
+  never a site account or an email) and the thread's Project, and never an
+  address, a title, or page content. Only the person's own open route records a
+  page: it says the person opened it, and an agent, a subagent, a routine, a
+  saved flow, a terminal grant and a page the host runs for its own owner open
+  pages in the same context without saying so, so none is recorded, nor is a
+  page opened for one Open of its own, and Chat has no Browser. Every ordinary
+  ending writes the end, with the actor of the request that caused it (the
+  device at any access level, the local person for a window, the agent whose
+  Browser stop it was): the person closing the page, the agent stopping its
+  Browser, the window closing, a remote device's session ending, the thread's
+  authority ending, a cleared or removed profile, a profile switch (which
+  records the replacement page and ends the old record as superseded), the page
+  expiring, and the Browser runtime being lost; the last two are the host's own
+  doing and carry the host's actor. Only a Quit and the host's own shutdown
+  keep the record open. The desktop says on the window-revoke request itself
+  that its app is quitting (`desktopQuitAccepted`, set once the quit was
+  accepted, whether the person, the system, a signal or an update asked for it,
+  and for a Quit that closes the windows and leaves a host running for other
+  clients); the host reads it per request, holds that window's pages' records,
+  and offers them again at once from the running host as well as at the next
+  start. Only the desktop's bridge secret reaches that route, so no paired
+  device can use the field, and a desktop or host that predates it keeps
+  working (the desktop asks again without the field when a host refuses it).
+  After a quit is accepted the desktop stops reporting pages gone to the host,
+  so its windows closing is not recorded as a lost Browser runtime. A person
+  closing a window while the app keeps running writes the end. A crash or a power
+  loss revokes nothing and
+  offers the page. The start settles what is left: a page whose thread is
+  archived or deleted is ended, a page whose thread is live but cannot open a
+  Browser now (its mode switched off, its Project archived) is held and not
+  shown until it can, only the newest page of each thread stays, and no more
+  than 25 pages stay in all. The projection holds only the pages open now. A run
+  deletes nothing from the journal: the persistence start removes the events of
+  ended pages before it records the journal verification watermark, as it does
+  for superseded checkout observations. A whole ended page leaves with both of
+  its events, so the rows that stay are the rows the scan decoded, and that
+  start records the watermark again at the head that is left. A thread purge takes a thread's records
+  and a Project erase takes a Project's, and no export, replica sync, usage or
+  activity view, or support bundle carries them beyond the event name in the
+  bundle's recent-event list and the kind-name count in Journal growth. The
+  thread's Browser read carries the offer for the host's person only: a local
+  window, or a device the person paired at Full; a device paired below Full, a
+  restricted device, and a hub-introduced device see no offer and cannot claim,
+  release or dismiss one, checked on the host before any record is read. A claim
+  is a short exclusive reservation in memory for one window or device: of two
+  windows only one holds the page, and it is given back when the open it was for
+  fails or is declined, when the window goes away, or after two minutes (a remote device's session ending leaves its reservation to lapse that way). An
+  open that names the page after its reservation lapsed takes it again in one
+  step unless another window or device holds it, which refuses that open with
+  a reason the pane shows and keeps what the person typed. The offer ends only
+  when the reserved open's first navigation succeeds, which records the new page,
+  ends the old record as reopened and supersedes the thread's other older
+  offers, or on dismiss, archive, delete or purge. A reserved page that has
+  loaded no address records nothing, so a failed first address, a page that
+  ends first, or a crash in between leaves exactly the old offer, and the next
+  start offers that one alone. The thread's Browser
+  read carries the offer while no page of the thread is open, and a dock tab
+  reads it from the thread when its saved page is gone or it is added fresh,
+  without taking another tab's page. Reopening never restores the page: it names the profile, the
+  start page preselects it, and the person's address goes through the ordinary
+  open with its site approval. A profile that no longer exists is said so
+  instead of offered; a profile list that cannot be read now keeps the offer and
+  says it could not be checked. Detail is in
+  [Browser profiles: Reopening a page a restart took](design/browser-profiles.md#reopening-a-page-a-restart-took).
 - **Browser flows.** An agent's Browser run can be saved as a named flow in the
   thread's Work or Code Project and replayed by name with no model turn between
   steps, each step admitted like a call of its own. The host keeps up to 50 flows
@@ -22080,10 +22235,12 @@ documents its authority, privacy, and release boundaries):
   ([process topology](#process-topology)), the desktop keeps local crash
   records (an unwatched host keeps its own at its next start), the next
   start's notice names them, and the recovery screen saves a support bundle.
-  Not built yet: one-click reopening of a Browser session a restart ended.
-  Code thread and Project terminals, debug sessions and saved Project action
-  runs a restart ended are offered back through their ordinary start
-  ([Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
+  Code thread and Project terminals, debug sessions, saved Project action runs
+  and the person's Browser page a restart ended are offered back: the first four
+  through their ordinary start, the page through a **Reopen page** control that
+  opens a blank page in the same profile
+  ([Browser sessions](#browser-sessions);
+  [Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
 - Public Canvas links, under
   [Canvas public links](design/canvas-public-links.md), served by the
   self-hostable reference app at `apps/share` in this repository. Ogard Labs

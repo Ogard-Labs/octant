@@ -1057,15 +1057,14 @@ describe("ChatWorkspace", () => {
     await user.type(composer, " send now");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
-    await user.click(screen.getByRole("button", { name: "Remove First context thread mention" }));
+    await user.click(await screen.findByRole("button", { name: /^Thread: First context/ }));
+    await user.click(await screen.findByRole("button", { name: "Remove" }));
     await user.clear(composer);
     await user.type(composer, "#First");
     await user.click(await screen.findByRole("option", { name: /First context/ }));
     finish?.(true);
 
-    expect(await screen.findByRole("list", { name: "Mentioned threads" })).toHaveTextContent(
-      "First context",
-    );
+    expect(await screen.findByRole("button", { name: /^Thread: First context/ })).toBeVisible();
   });
 
   it.each(["accepted", "refused"] as const)(
@@ -3059,7 +3058,8 @@ describe("ChatWorkspace", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Message" }), "#Release");
     await user.click(await screen.findByRole("option", { name: /Release notes/ }));
-    await user.click(screen.getByRole("button", { name: "Open Side Chat about Release notes" }));
+    await user.click(await screen.findByRole("button", { name: /^Thread: Release notes/ }));
+    await user.click(await screen.findByRole("button", { name: "Side Chat" }));
 
     await waitFor(() => expect(onOpenSideChat).toHaveBeenCalledWith(sidecar));
     expect(threadMentionClient.openSideChat).toHaveBeenCalledWith(expect.any(String), "thread-1");
@@ -3113,9 +3113,6 @@ describe("ChatWorkspace", () => {
     const composer = screen.getByRole("textbox", { name: "Message" });
     await user.type(composer, "#Release");
     await user.click(await screen.findByRole("option", { name: /Release notes/ }));
-    expect(
-      screen.queryByRole("button", { name: "Open Side Chat about Release notes" }),
-    ).not.toBeInTheDocument();
     await user.type(composer, "Compare these{Enter}");
 
     await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());

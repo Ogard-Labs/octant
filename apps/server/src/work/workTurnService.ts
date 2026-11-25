@@ -2513,6 +2513,9 @@ export class WorkTurnService {
             ...(command.sideChatReturns === undefined
               ? {}
               : { sideChatReturns: command.sideChatReturns }),
+            ...(command.threadMentionIds === undefined || command.threadMentionIds.length === 0
+              ? {}
+              : { threadMentionIds: command.threadMentionIds }),
             ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
             ...(describedImages === undefined ? {} : { describedImages }),
             ...(command.extensionSelections === undefined ||

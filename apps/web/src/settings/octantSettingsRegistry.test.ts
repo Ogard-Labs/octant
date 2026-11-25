@@ -398,6 +398,8 @@ describe("octantSettingsRegistry", () => {
       "code-auto-reviewer",
       "code-strict",
       "code-terminal-shell",
+      "code-worktree-branch-prefix",
+      "code-worktree-branch-naming",
       "code-editor-executable",
       "code-editor-arguments",
       "archived-worktrees",
