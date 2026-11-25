@@ -16,6 +16,7 @@ describe("provider limits reporting", () => {
   it("waits for the CLI sign-in before a provider read from its account can show limits", () => {
     expect(unavailableLimitsReason("devin", undefined)).toBe("not-ready");
     expect(unavailableLimitsReason("opencode", "silent")).toBe("not-ready");
+    expect(unavailableLimitsReason("mistral-vibe", undefined)).toBe("not-ready");
   });
 
   it("closes the question for runtimes that never report and for local models", () => {
@@ -23,7 +24,6 @@ describe("provider limits reporting", () => {
       "pi",
       "oh-my-pi",
       "kilo",
-      "mistral-vibe",
       "goose",
       "glm",
       "gemini",

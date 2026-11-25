@@ -8107,9 +8107,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Claude and Codex plan usage limits (rolling windows, per-model weekly,
   overage) come only from the provider's own process: session
   `rate-limit-window` events, or a process reading a person asks for.
-  Devin and OpenCode Go have no such channel in their runtimes, so their
-  plan windows come from the account usage endpoint under the
-  account usage endpoint rule in
+  Devin, OpenCode Go, and Mistral Vibe have no such channel in their
+  runtimes, so their plan windows come from the account usage endpoint
+  under the account usage endpoint rule in
   [Security and authority](#security-and-authority). The Claude
   reading starts
   the provider's process, so it is made only on an explicit refresh
@@ -20974,9 +20974,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   deleted, and a request the plan route's profile cannot express is refused
   before send. The wire details are in
   [Provider runtimes](design/provider-runtimes.md#subscription-sign-in-dialects).
-- **Account usage endpoints.** Devin and OpenCode Go report plan windows only from an account endpoint, so the
-  host reads the sign-in their own CLI saved and asks that endpoint. Devin:
-  `windsurf_api_key` (and an `https` `api_server_url`, else
+- **Account usage endpoints.** Devin, OpenCode Go, and Mistral Vibe report plan windows only from an account endpoint, so the
+  host reads a credential already on this computer and asks that endpoint.
+  Devin: `windsurf_api_key` (and an `https` `api_server_url`, else
   `server.codeium.com`) from `~/.local/share/devin/credentials.toml`, sent in
   the body of a Connect `POST` to
   `SeatManagementService/GetUserStatus`; daily and weekly remaining
@@ -20986,14 +20986,28 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `~/.local/share/opencode`), opened read-only with no pragmas, else
   `auth.json` when no database keeps sign-ins; sent as a bearer token to
   `GET opencode.ai/zen/go/v1/usage`, whose 5-hour, weekly, and monthly
-  used percentages become windows. The reads run in the host process, only
+  used percentages become windows. Mistral Vibe: the Mistral API key Settings
+  already holds for that instance, sent as a bearer token to
+  `GET api.mistral.ai/v1/billing/budget`; `vibe_budget.usage_percentage`
+  becomes the monthly window, `reset_at` its reset, and `payg_enabled` (or a
+  best-effort `GET /v1/billing/subscription` `vibe_payg_enabled`) a label on
+  that window, not a second bar. A spent included window with pay-as-you-go
+  on stays an available account: remaining capacity shows 0% left and the
+  PAYG label, and automatic calls and coordinator selection keep using it.
+  Pay-as-you-go off at 100% is an account limit until reset. Octant never reads Vibe's Keychain item
+  `ai.mistral.vibe` / `MISTRAL_API_KEY`, never scans `~/.vibe/.env` or a host
+  `MISTRAL_API_KEY`, and never scrapes `admin.mistral.ai`. A missing
+  `vibe_budget`, a zero `initial_budget`, or a key without usage permission
+  (HTTP 403) is plan limits not applying, never 0% used; a missing key or an
+  instance not on API-key authentication is not ready, with the existing Vibe
+  sign-in guidance. The reads run in the host process, only
   for an enabled instance of that provider. Only a refresh a person asks for
   waits on the endpoint. Every other caller, the limits service's
   five-minute schedule and the service-limits read before each Chat turn,
   gets the last reading at once and starts at most one background read per
   five minutes, so a turn never waits on the endpoint and frequent turns
   never multiply the calls. The request sends nothing else and follows no
-  redirect. Octant never writes, copies, or stores either key. It
+  redirect. Octant never writes, copies, or stores the key. It
   stays out of logs, the journal, snapshots, and errors: every failure carries
   a fixed message. A missing sign-in reads as not ready, an OpenCode sign-in
   without Go as plan limits not applying, a refused key as unauthenticated,

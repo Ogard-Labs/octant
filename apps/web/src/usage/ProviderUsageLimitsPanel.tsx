@@ -278,6 +278,7 @@ const WINDOW_LABELS: Readonly<Record<string, string>> = {
   seven_day_opus: "7-day Opus window",
   seven_day_sonnet: "7-day Sonnet window",
   seven_day_overage_included: "7-day overage included",
+  monthly: "Monthly window",
   overage: "Overage",
 };
 
@@ -455,7 +456,11 @@ function overageCopy(
   overage: NonNullable<ProviderServiceLimits["rateLimitWindows"]>[number]["overage"],
 ): string {
   if (overage === undefined) return "Overage available";
-  if (overage.disabledReason !== undefined) return `Overage: ${overage.disabledReason}`;
+  if (overage.disabledReason !== undefined) {
+    return overage.disabledReason.startsWith("Pay as you go")
+      ? overage.disabledReason
+      : `Overage: ${overage.disabledReason}`;
+  }
   if (overage.inUse === true) return "Overage in use";
   if (overage.status === "exhausted") return "Overage exhausted";
   if (overage.status === "warning") return "Overage warning";
