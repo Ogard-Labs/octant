@@ -2221,6 +2221,34 @@ except where a bullet says otherwise.
   forgotten is learned afterwards. A
   thread with nothing the person wrote is recorded as remembered without a
   call.
+- **Saving at once.** Telling an agent "remember that I prefer X" does not wait
+  for the sweep (maintainer decision, 2026-11-16). `octant_remember_person` is a
+  host tool offered beside `octant_past_threads` in Chat (a thread with no
+  Project too, but not a Side Chat), Work, and Code, under the same rules as the
+  block (memory on, Project not kept out, thread not Leave no trace), to a turn
+  a local window or a paired device the host's own person approved started. It
+  takes the text and a kind, and the host keeps the text only if it is a
+  quotation from the person's own latest message in this thread, compared
+  without regard to whitespace or letter case; the entry stores the person's
+  stretch of that message, never the model's copy. This holds on every thread,
+  including one that has read outside content: a tool result, a web page, or
+  the agent's own words are not the person's and are refused with a reason the
+  model can read, so outside content cannot create an entry by this route. The
+  text is redacted as above before storage, and refused when it is over 400
+  characters or names a protected path; the caps run through the same merge as
+  the sweep. A routine's run, another turn the host starts as itself, and a
+  subagent are not offered the tool at all: they read person memory but carry no
+  words of the person's own. The entry names the open thread as its source, with
+  the moment the person said it as the source's end time (an open thread has not
+  ended, and keeping the one source shape lets every stored event decode as
+  before). It is journaled as its own event, `person-memory.entry-saved@1`, which
+  an edit, a new source, deletion, Forget everything, Leave no trace, and a
+  purge treat like any entry. Saving writes no digest and does not mark the
+  thread remembered, so the sweep still learns from the thread when it ends and
+  a wording already saved gains no duplicate. The thread's own block does not
+  show the entry (it holds only entries older than the thread); every later
+  thread, in any Project, mode, or provider, does. The tool step in the thread
+  is the record of what was stored.
 - **What the distiller reads.** Only what the person wrote in the thread and
   its title: never the agent's answers, tool output, attachments, or files.
   Rationale: an agent's answer can carry outside content (a web page, a tool
@@ -2318,8 +2346,10 @@ except where a bullet says otherwise.
     its lead sees and never more. A child whose originating scope is absent or
     restricted, or whose lead is peer-delegated, in a kept-out Project, or in a
     Leave no trace thread, gets neither.
-  - Only turns with the person's own message can write person memory (through
-    distillation of ended threads); routines, host-started turns, and subagents
+  - Only turns with the person's own message can write person memory: the
+    distillation of ended threads, and `octant_remember_person` in a turn a
+    local window or a paired device started, with the person's own words from
+    that thread's latest message. Routines, host-started turns, and subagents
     read it without writing to it, and all caps stay unchanged.
   - A hub, spoke, or peer host: person memory stays on the host that wrote
     it and is never synced or relayed.
