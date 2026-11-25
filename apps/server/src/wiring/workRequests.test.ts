@@ -30,6 +30,7 @@ import { ServiceOfferService } from "../offers/serviceOfferService";
 import { makePersistenceLive, Persistence } from "../persistence/persistenceService";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { createActiveWorkProjects } from "../activeWork/activeWorkProjects";
 import { wireWorkRequests, type WorkRequestsDependencies } from "./workRequests";
 
 const tempDirs: string[] = [];
@@ -424,6 +425,9 @@ describe("wireWorkRequests active work", () => {
             thread("Done", { completionConfirmed: true }),
             thread("Settled", { completedAt: now }),
           ];
+          // A turn that moved after every thread record, as a running turn's
+          // progress does, dates its thread as the board dates its card.
+          const lastTurn = new Date(Date.parse(now) + 60_000).toISOString();
           const titleOf = (threadId: unknown) =>
             threads.find((entry) => String(entry.id) === String(threadId))?.title;
           const windowId = decodeWindowId(randomUUID());
@@ -448,6 +452,18 @@ describe("wireWorkRequests active work", () => {
             },
             workProjectStatusReader: { hasDueItems: async () => false },
             codeActiveWorkForWindow: async () => [],
+            activeWorkProjects: createActiveWorkProjects({
+              readProjects: () => [
+                {
+                  id: projectId,
+                  type: "work",
+                  name: "Reports",
+                  lifecycle: "active",
+                  bindingRevisionId,
+                },
+              ],
+              bootstrap: async () => ({ active: [] }),
+            }),
             codeTurnDecisions: {},
             baseRouteCodeService: {},
             routeCodeService: {},
@@ -467,7 +483,10 @@ describe("wireWorkRequests active work", () => {
             finishedReceipts: { boardMark: () => undefined },
             workArtifactProjection: { snapshot: () => new Map() },
             workThreadProjection: { read: () => undefined, list: emptyList },
-            workTurnProjection: { listForThread: emptyList },
+            workTurnProjection: {
+              listForThread: (threadId: unknown) =>
+                titleOf(threadId) === "Idle" ? [{ updatedAt: lastTurn }] : [],
+            },
           } as unknown as WorkRequestsDependencies);
           const headers = { "x-octant-window-capability": capability };
           const answer = yield* Effect.promise(async () => {
@@ -476,7 +495,12 @@ describe("wireWorkRequests active work", () => {
             );
             expect(response?.status).toBe(200);
             return (await response?.json()) as {
-              rows: ReadonlyArray<{ title: string; projectName: string; board: unknown }>;
+              rows: ReadonlyArray<{
+                title: string;
+                projectName: string;
+                board: { status: string };
+                updatedAt: string;
+              }>;
             };
           });
           const board = yield* Effect.promise(async () => {
@@ -507,6 +531,9 @@ describe("wireWorkRequests active work", () => {
             "Stopped",
           ]);
           expect(answer.rows[0]?.projectName).toBe("Reports");
+          const ready = answer.rows.filter((row) => row.board.status === "ready");
+          expect(ready.map((row) => row.title)).toEqual(["Idle"]);
+          expect(ready[0]?.updatedAt).toBe(lastTurn);
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory }))),
       ),
     );

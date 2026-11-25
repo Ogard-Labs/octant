@@ -153,6 +153,8 @@ import {
   isNativeHarnessDriverKind,
   projectExtraFolderRoots,
 } from "@octant/domain";
+import { createActiveWorkProjects } from "../activeWork/activeWorkProjects";
+import { toSummary as projectSummary } from "../projectService";
 import {
   activeWorkProject,
   codeActiveWork,
@@ -2964,16 +2966,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     );
     // The same derivation over the sidebar's own thread list, coordinators
     // included: a navigation read, so no checkout is observed for it.
+    // Active work names Projects as stored: a Projects read checks every
+    // folder and Git remote, which a list refreshed on every change must not.
+    const activeWorkProjects = createActiveWorkProjects({
+      readProjects: () => persistence.readProjects().map(projectSummary),
+      bootstrap: () => projectService.bootstrap(ROUTINE_HOST_SCOPE_ID),
+    });
     const codeActiveWorkForWindow = async (
       windowId: WindowId,
     ): Promise<ReadonlyArray<ActiveWorkFacts>> => {
-      const [navigation, projects] = await Promise.all([
+      const [navigation, projectById] = await Promise.all([
         baseRouteCodeService.navigation(windowId),
-        projectService.bootstrap(windowId),
+        activeWorkProjects(),
       ]);
-      const projectById = new Map(
-        projects.active.map((project) => [String(project.id), project] as const),
-      );
       const plannerThreadIds = new Set((navigation.plannerThreadIds ?? []).map(String));
       const runtimeByThread = new Map(
         navigation.runtime.map((entry) => [String(entry.threadId), entry] as const),
@@ -3398,6 +3403,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeCompletedThreadSource,
       codeOperationRuntime,
       codeService,
+      activeWorkProjects,
       codeActiveWorkForWindow,
       codeTurnDecisions,
       mergedThreadPutAway,

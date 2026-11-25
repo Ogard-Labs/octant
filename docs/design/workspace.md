@@ -2241,7 +2241,10 @@ working as they do.
   asking window or device already lists there
   ([Architecture: Active work read](../architecture.md#security-and-authority)). A
   subagent's task shows only where the Agents page's own rule lets the window
-  read that run; elsewhere the row reads "Subagent" under its thread.
+  read that run; elsewhere the row reads "Subagent" under its thread. A
+  subagent the host holds back on its own (for sibling runs, a free request
+  slot, or a model in its pool) is In progress, like a queued one; any other
+  wait is Waiting.
 - **Opening** a row makes the choice the sidebar makes. A Code thread on a
   paired computer opens in that computer's Code start screen, as under "On your
   other computers"; a Work or Chat thread there cannot be shown by that screen,
@@ -2254,14 +2257,17 @@ working as they do.
 - **Reads.** One read per computer, in parallel, each over the session the
   window already holds, so a slow one holds back no other. The last answer of a
   session is kept while the window lives and shown at once when the page opens
-  again. A read follows the window's change feed here, and the existing refresh
-  of paired computers there; the page adds no timer, at most one read per
+  again. A read follows the window's change feed here, and each start of the
+  existing refresh of paired computers there, so no computer waits for a slower
+  one; the page adds no timer, at most one read per
   computer is in flight, a burst of changes becomes one more, and a hidden
   window reads nothing. A read that takes longer than ten seconds counts as no
   answer.
 - **A paired browser** opens the same list for its one host from **Active work**
   in its header, read over its own session and refreshed by the host's change
-  feed; a row opens the thread in its mode. The phone has no such list.
+  feed; a row opens the thread in its mode, in the workspace already shown, so
+  opening the thread that is open keeps its draft and staged attachments. The
+  phone has no such list.
 
 ## Boards and integrations
 

@@ -17,6 +17,8 @@ export interface ActiveWorkSubagent {
   readonly mode: OctantMode;
   readonly task: string;
   readonly lifecycleStatus: AgentRunLifecycleStatus;
+  /** Why a waiting run waits, as the run records it. */
+  readonly recoveryReason?: string;
   readonly updatedAt: string;
   /** Whether this window may read the run itself, by the Agents page's own rule. */
   readonly readableBy: (windowId: WindowId) => boolean;
@@ -90,7 +92,7 @@ export class ActiveWorkService {
           mode: subagent.mode,
           threadId: subagent.parentThreadId,
           title: parent.title,
-          board: subagentBoard(subagent.lifecycleStatus),
+          board: subagentBoard(subagent.lifecycleStatus, subagent.recoveryReason),
           updatedAt: subagent.updatedAt,
           ...(parent.project === undefined ? {} : { project: parent.project }),
           subagent: {

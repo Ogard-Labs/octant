@@ -17359,7 +17359,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   transitions and a Chat attempt's question are journaled, a Code request's ask,
   answer, and turn end are journaled stream events, and a Code tool ask that
   is withdrawn or abandoned — which journals nothing — publishes
-  `code-navigation` itself.
+  `code-navigation` itself. A subagent's or a routine run's request or state
+  change publishes all three navigation topics, since either can move the
+  work lists while its thread journals nothing.
 - **Fleet activity.** `GET /api/fleet-activity` returns the threads that need
   the calling window's person and the threads that are running, needs you
   first, at most 64 with a `truncated` flag, each naming its mode, title,
@@ -17379,11 +17381,15 @@ approval-gated` command that undoes it. The terminal shows no one-time
   mode's own navigation read for the caller, and one row builder
   (`activeWorkRow`) gives each the `ThreadBoardDerivation` its board card would
   have, with the checkout, pull-request and issue facts its sidebar row already
-  carries. Linked pull requests and issues are identities only, because a title
+  carries. Projects are named as stored; their GitHub repository comes from a
+  Projects read at most once a minute, because that read observes every
+  Project's folder and remotes. Linked pull requests and issues are identities only, because a title
   on a forge is text an outsider may have written. A coordinator is derived
   without delivery evidence; a Chat thread is a row only while it runs or waits;
   a subagent is a row only under a thread already listed, In progress while
-  queued, starting or running and Waiting while it waits, and its task is named only to a local window the
+  queued, starting, running or held by the host (on sibling runs, a free
+  request slot, or an eligible pool model) and Waiting on any other wait, and
+  its task is named only to a local window the
   AgentRun authorization admits, the same one the Agents center applies. A Chat
   thread's subagents are listed to such a window alone. The read takes a local
   window and any paired device the overview read admits (one the person paired

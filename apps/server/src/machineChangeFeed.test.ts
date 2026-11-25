@@ -243,6 +243,32 @@ describe("MachineChangeFeed", () => {
     expect(feed.head()).toBe(7);
   });
 
+  it("invalidates the navigation reads when a subagent or a routine run changes state, and for no other record of theirs", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+    feed.publishCommitted({
+      events: [{ aggregateType: "agent-run", eventName: "agent.run-result-acknowledged@1" }],
+    });
+    for (const event of [
+      { aggregateType: "agent-run", eventName: "agent.run-requested@1" },
+      { aggregateType: "agent-run", eventName: "agent.run-status-changed@1" },
+      { aggregateType: "automation-run", eventName: "automation-run-created@1" },
+      { aggregateType: "automation-run", eventName: "automation-run-status-changed@1" },
+    ]) {
+      feed.publishCommitted({ events: [event] });
+    }
+    for (const sequence of [1, 2, 3, 4]) {
+      await expect(stream.next()).resolves.toMatchObject({
+        value: {
+          sequence,
+          topics: ["chat-navigation", "work-navigation", "code-navigation"],
+        },
+      });
+    }
+    controller.abort();
+  });
+
   it("requires a snapshot when the requested cursor fell outside replay", async () => {
     const feed = new MachineChangeFeed({ maxFrames: 1 });
     feed.publish(["chat-navigation"]);

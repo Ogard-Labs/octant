@@ -126,6 +126,7 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
   Pick<ProvidersWiring, "providerDataDirectory"> &
   Pick<
     CodeRuntimeWiring,
+    | "activeWorkProjects"
     | "baseRouteCodeService"
     | "codeActiveWorkForWindow"
     | "codeOperationRuntime"
@@ -166,6 +167,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     windowCanOpenThread,
     projectMemoryAccess,
     routineProposalService,
+    activeWorkProjects,
     chatService,
     codeActiveWorkForWindow,
     codeOperationRuntime,
@@ -591,13 +593,10 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
       readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
       code: codeActiveWorkForWindow,
       work: async (windowId) => {
-        const [navigation, projects] = await Promise.all([
+        const [navigation, projectById] = await Promise.all([
           workThreadServiceWithWorkflows.navigation(windowId),
-          projectService.bootstrap(windowId),
+          activeWorkProjects(),
         ]);
-        const projectById = new Map(
-          projects.active.map((project) => [String(project.id), project] as const),
-        );
         const threads = new Map(
           navigation.threads
             .filter((thread) => thread.completedAt === undefined)
@@ -610,12 +609,16 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
                 workBoardThread(thread, projectById.get(String(thread.projectId)), false),
               ),
           },
-          // The card's evidence decides no state, and the rows show none of it.
           evidence: {
-            forThread: () =>
+            // Turns and requests date the card as the board dates it; the
+            // rest of the evidence decides no state, and the rows show none.
+            forThread: (entry) =>
               composeWorkBoardEvidence({
-                turns: [],
-                pendingRequests: [],
+                turns: workTurnProjection.listForThread(entry.thread.id),
+                pendingRequests: workRequestService.listForThread(
+                  entry.thread.projectId,
+                  entry.thread.id,
+                ),
                 artifacts: [],
                 citations: [],
                 goal: null,
@@ -659,6 +662,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
             mode: run.routingReceipt.mode,
             task: run.task,
             lifecycleStatus: run.lifecycleStatus,
+            ...(run.recoveryReason === undefined ? {} : { recoveryReason: run.recoveryReason }),
             updatedAt: run.updatedAt,
             readableBy: (windowId) =>
               authorizeAgentRunCancellation({ persistence, workThreadProjection, run, windowId }) &&

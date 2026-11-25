@@ -98,7 +98,11 @@ const local: ClientPrincipal = {
 
 function subagent(
   lifecycleStatus: AgentRunLifecycleStatus,
-  overrides: { readonly mode?: "chat" | "code"; readonly readable?: boolean } = {},
+  overrides: {
+    readonly mode?: "chat" | "code";
+    readonly readable?: boolean;
+    readonly recoveryReason?: string;
+  } = {},
 ) {
   return {
     runId: id("61"),
@@ -108,6 +112,7 @@ function subagent(
     lifecycleStatus,
     updatedAt: at,
     readableBy: () => overrides.readable ?? true,
+    ...(overrides.recoveryReason === undefined ? {} : { recoveryReason: overrides.recoveryReason }),
   };
 }
 
@@ -308,6 +313,27 @@ describe("a host's active work", () => {
     const row = onDevice.rows.find((candidate) => candidate.kind === "subagent");
     expect(row).toMatchObject({ parentTitle: "Fix the parser", runId: id("61") });
     expect(JSON.stringify(onDevice)).not.toContain("release notes");
+  });
+
+  it("files a subagent the host holds back on its own as In progress, and only a wait on the person as Waiting", async () => {
+    const listed = { code: async () => [facts({ threadId: id("21") })] };
+    const boardOf = async (recoveryReason?: string) =>
+      (
+        await service({
+          ...listed,
+          subagents: () => [
+            subagent("waiting", recoveryReason === undefined ? {} : { recoveryReason }),
+          ],
+        }).list(windowId, local)
+      ).rows.find((row) => row.kind === "subagent")?.board;
+    for (const automatic of [
+      "waiting-on-dependencies",
+      "Waiting for a free request slot",
+      "multi-model-pool-no-eligible-candidate",
+    ]) {
+      expect(await boardOf(automatic)).toEqual({ status: "in-progress", reason: "executing" });
+    }
+    expect(await boardOf()).toEqual({ status: "waiting", reason: "awaiting-input" });
   });
 
   it("keeps a Chat thread's subagents from a reader that may not read them", async () => {
