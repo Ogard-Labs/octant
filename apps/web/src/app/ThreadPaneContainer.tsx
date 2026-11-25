@@ -1040,6 +1040,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                             draftPermissionPersistence ??
                             codeController.bootstrap?.settings.defaultPermissionPersistence ??
                             "current-session",
+                          draftWorktreeSettings: codeController.bootstrap?.settings.worktrees,
                         }
                       : {})}
                     onDraftSelectProvider={(selection) => {

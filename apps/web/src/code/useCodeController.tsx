@@ -36,6 +36,7 @@ import type {
   CodeThread,
   CodeThreadId,
   CodeThreadView,
+  CodeWorktreeSettings,
 } from "@octant/contracts/code";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import {
@@ -2309,8 +2310,16 @@ export function useCodeController(options: CodeControllerOptions) {
       signal?: AbortSignal,
       onWorktreeProgress?: (progress: CodeWorktreeCreationProgress) => void,
     ): Promise<CodeCommandResult | undefined> => {
-      clearFailure();
-      lastExecuteError.current = undefined;
+      // The branch name field falls back to a name of its own and says so there,
+      // so neither read shows a failure banner: a host older than these commands
+      // refuses them every time a draft opens.
+      const namesBranch =
+        command.kind === "list-code-worktree-branch-names" ||
+        command.kind === "suggest-code-worktree-branch";
+      if (!namesBranch) {
+        clearFailure();
+        lastExecuteError.current = undefined;
+      }
       try {
         const result =
           onWorktreeProgress !== undefined
@@ -2333,6 +2342,7 @@ export function useCodeController(options: CodeControllerOptions) {
       } catch (error) {
         if (!mounted.current) return undefined;
         if (signal?.aborted) return undefined;
+        if (namesBranch) return undefined;
         const failure = codeFailure(error);
         lastExecuteError.current = failure;
         if (failure.category === "stale" || failure.category === "conflict") {
@@ -2968,6 +2978,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
       readonly restartContinuation?: boolean;
       readonly windowsTerminalShell?: WindowsTerminalShell;
+      readonly worktrees?: CodeWorktreeSettings;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({
@@ -3072,6 +3083,7 @@ export function useCodeController(options: CodeControllerOptions) {
         text: trimmed,
         checkoutId: view.checkout.id,
         ...(reviewReferences.length === 0 ? {} : { reviewFindingReferences: reviewReferences }),
+        ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
         providerInstanceId: view.thread.providerInstanceId,
         modelId: view.thread.modelId,
         at: new Date().toISOString(),

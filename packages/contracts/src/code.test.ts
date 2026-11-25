@@ -1,5 +1,7 @@
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import * as codeContracts from "./code";
+import { decodeHostAnswer } from "./hostAnswer";
 import {
   decodeCodeCheckoutIdentity,
   decodeCodeCommand,
@@ -157,6 +159,70 @@ describe("Code aggregate contracts", () => {
         deliveryTarget,
       }),
     ).toThrow();
+  });
+
+  it("replays worktree settings stored before they existed, and refuses a prefix Git would reject", () => {
+    const settings = {
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      version: 1,
+      updatedAt: now,
+    } as const;
+    expect(decodeCodeSettings(settings)).not.toHaveProperty("worktrees");
+    const worktrees = {
+      branchPrefix: "feat/team-a/",
+      branchNaming: "prompt",
+    } as const;
+    expect(decodeCodeSettings({ ...settings, worktrees })).toMatchObject({ worktrees });
+    for (const branchPrefix of [
+      "",
+      "/",
+      "a b/",
+      "a..b/",
+      "-x/",
+      "x.lock/",
+      "a@{/",
+      "x".repeat(41),
+    ]) {
+      expect(
+        () => decodeCodeSettings({ ...settings, worktrees: { branchPrefix } }),
+        branchPrefix,
+      ).toThrow();
+    }
+  });
+
+  it("is accepted by a client built before worktree settings existed, in every answer that carries the settings", () => {
+    // What an older client decodes with: the same schemas, without the field.
+    const olderSettings = codeContracts.CodeSettings.omit("worktrees").annotations({
+      parseOptions: { onExcessProperty: "error" },
+    });
+    const olderBootstrap = Schema.Struct({
+      settings: olderSettings,
+      threads: Schema.Array(codeContracts.CodeThread),
+      checkouts: Schema.Array(codeContracts.CodeCheckoutIdentity),
+    });
+    const settings = {
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      worktrees: { branchPrefix: "henrik/", branchNaming: "prompt" },
+      version: 2,
+      updatedAt: now,
+    } as const;
+    // The answer the host sends now, and what an older reader keeps of it.
+    expect(decodeHostAnswer(olderSettings)(settings)).not.toHaveProperty("worktrees");
+    expect(
+      decodeHostAnswer(olderBootstrap)({ settings, threads: [], checkouts: [] }).settings,
+    ).toMatchObject({ version: 2 });
+    const olderUpdated = Schema.Struct({
+      kind: Schema.Literal("settings-updated"),
+      settings: olderSettings,
+    });
+    expect(decodeHostAnswer(olderUpdated)({ kind: "settings-updated", settings })).toMatchObject({
+      kind: "settings-updated",
+    });
+    // The strict decoder is the host's own and for what a person sends it.
+    expect(() => Schema.decodeUnknownSync(olderSettings)(settings)).toThrow();
+    expect(decodeCodeSettings(settings)).toMatchObject({ worktrees: settings.worktrees });
   });
 
   it("decodes shell-free Code settings and rejects raw checkout/file paths", () => {

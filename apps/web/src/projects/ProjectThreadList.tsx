@@ -17,9 +17,7 @@ import {
   Archive,
   BellRing,
   ChevronRight,
-  CircleAlert,
   CircleCheck,
-  LoaderCircle,
   Check,
   Clock,
   GitBranch,
@@ -30,21 +28,13 @@ import {
   RotateCcw,
   Undo2,
 } from "../ui/icons";
-import type { IconComponent } from "../ui/icons";
 import { resolveSnoozePresets } from "@octant/domain";
 import {
-  sidebarThreadStatusInput,
   threadRowActivity,
   threadRowStatusInput,
   type ChatThreadNavigationItem,
-  type ThreadRowActivity,
 } from "../shell/navigationModel";
-import {
-  resolveSidebarThreadStatus,
-  sidebarThreadStatuses,
-  SIDEBAR_THREAD_STATUS_LABEL,
-} from "@octant/domain/sidebar-thread-status-policy";
-import type { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
+import { SIDEBAR_THREAD_STATUS_LABEL } from "@octant/domain/sidebar-thread-status-policy";
 import {
   morePullRequestsThanTheFirst,
   THREAD_ROW_MENU_INLINE_PULL_REQUESTS,
@@ -63,11 +53,8 @@ import {
 import { readFoldedCoordinators, writeFoldedCoordinators } from "../shell/activityViewModel";
 import { useMinuteClock } from "./minuteClock";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
-import {
-  SidebarThreadRowContent,
-  sidebarThreadRowLabel,
-  type SidebarThreadRowState,
-} from "./SidebarThreadRowContent";
+import { SidebarThreadRowContent, sidebarThreadRowLabel } from "./SidebarThreadRowContent";
+import { NO_THREAD_ROW_STATE, sidebarThreadStatusIcon, threadRowState } from "./threadRowState";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
 import {
@@ -120,75 +107,6 @@ export function ProjectThreadStatus(props: ProjectThreadStatusProps) {
       )}
     </div>
   );
-}
-
-/**
- * The mark one status wears. `unread` and `idle` have none: the stylesheet
- * draws unread as a dot and idle as nothing at all, so an icon here would be a
- * second, louder reading of the same state.
- */
-export function sidebarThreadStatusIcon(status: SidebarThreadStatus): IconComponent | undefined {
-  switch (status) {
-    case "working":
-      return LoaderCircle;
-    case "attention":
-      return CircleAlert;
-    case "woke":
-      return Clock;
-    default:
-      return undefined;
-  }
-}
-
-export interface ThreadRowStateReading {
-  readonly state?: SidebarThreadRowState;
-  readonly unread: boolean;
-  /** Every state the thread is in, for the row's one accessible name. */
-  readonly label?: string;
-}
-
-/** A row that hides its status says nothing of it. */
-export const NO_THREAD_ROW_STATE: ThreadRowStateReading = { unread: false };
-
-/**
- * What a row says of its thread's state, in words: how long a turn has run
- * ("Working 14m"), that the thread waits on the person ("Needs you"), or that a
- * snooze ended. A thread with none of those has no state to say, and its row
- * ends with how long ago it moved; new activity alone is a dot beside that
- * time. One state is shown, the strongest, as in the status policy.
- */
-export function threadRowState(props: {
-  readonly activity: ThreadRowActivity;
-  readonly unread: boolean;
-  readonly woke: boolean;
-  readonly followUp?: boolean;
-  readonly startedAt?: string | undefined;
-}): ThreadRowStateReading {
-  const facts = sidebarThreadStatusInput(props);
-  const status = resolveSidebarThreadStatus(facts);
-  if (status === undefined) return { unread: false };
-  const label = [
-    ...sidebarThreadStatuses(facts).map((each) => SIDEBAR_THREAD_STATUS_LABEL[each]),
-    ...(props.followUp === true ? ["Follow-up"] : []),
-  ].join(", ");
-  if (status === "unread") return { unread: true, label };
-  const elapsed =
-    status === "working" && props.startedAt !== undefined
-      ? threadRowShortAge(props.startedAt)
-      : undefined;
-  const text =
-    status === "working"
-      ? elapsed === undefined || elapsed === "now"
-        ? "Working"
-        : `Working ${elapsed}`
-      : status === "attention"
-        ? "Needs you"
-        : "Snooze ended";
-  return {
-    state: { status, text, icon: sidebarThreadStatusIcon(status) },
-    unread: false,
-    label,
-  };
 }
 
 /**

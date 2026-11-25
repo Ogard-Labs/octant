@@ -112,6 +112,7 @@ import {
   type CodeRelativePath,
   type CodeRepositoryTestListing,
   type CodeSettings,
+  type CodeWorktreeSettings,
   type CodeThread,
   type CodeThreadActivity,
   type CodeThreadForkOrigin,
@@ -128,6 +129,7 @@ import {
   type TerminalSessionImportRequest,
   type ProviderExecutionPolicy,
   type ProviderInstance,
+  type ProviderInstanceId,
   type ProviderModelId,
   type ProviderModelOptionValues,
   type ProviderProbeResult,
@@ -152,7 +154,8 @@ import {
   type ProfileThreadContextSnapshot,
 } from "@octant/domain/agent-profile-policy";
 import { ACCESS_POSTURE_RANK, authorizeCodeOperation } from "@octant/domain/code-policy";
-import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
+import { deriveDeliveryBranch } from "@octant/domain/code-worktree-naming";
+import type { WorktreeBranchSuggestion } from "./worktreeBranchSuggestion";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import {
   completedThreadArchiveDue,
@@ -260,7 +263,7 @@ const CODE_CHECKOUT_RECOVERY_PROBE_PATH = decodeCodeRelativePath("package.json")
  */
 const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "branch-collision":
-    "The delivery branch already exists. Choose a different delivery branch and retry.",
+    "That branch name was taken since it was shown: a branch, a remote branch or a tag now uses it, or sits above or below it. The name has been refreshed. Check it and send again.",
   "path-collision": "A managed worktree already exists for this thread.",
   "source-files-unavailable":
     "The forked files could not be laid down in the new worktree, so nothing was created.",
@@ -283,6 +286,13 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "plan-on-server":
     "Plan changes nothing on a server, so it cannot start a thread in a new worktree there. Choose another level or Current checkout.",
 };
+
+/** An empty choice is the defaults, so it is stored as none. */
+function worktreeSettingsField(worktrees: CodeWorktreeSettings | undefined): {
+  readonly worktrees?: CodeWorktreeSettings;
+} {
+  return worktrees === undefined || Object.keys(worktrees).length === 0 ? {} : { worktrees };
+}
 
 /** Absent reads as Windows PowerShell, so only another choice is stored. */
 function windowsTerminalShellSetting(shell: WindowsTerminalShell | undefined): {
@@ -531,6 +541,26 @@ export interface CodeWorktreeRefsPort {
     input: { readonly projectId: ProjectId },
     signal: AbortSignal,
   ) => Promise<ReadonlyArray<CodeWorktreeRef>>;
+}
+
+/** Every name a new branch must not collide with, read apart from the display list. */
+export interface CodeWorktreeBranchNamesPort {
+  readonly list: (
+    input: { readonly projectId: ProjectId },
+    signal: AbortSignal,
+  ) => Promise<Readonly<{ names: ReadonlyArray<string>; truncated: boolean }>>;
+}
+
+export interface CodeWorktreeBranchSuggestionPort {
+  readonly suggest: (
+    input: Readonly<{
+      projectId: ProjectId;
+      providerInstanceId: ProviderInstanceId;
+      modelId: ProviderModelId;
+      draft: string;
+      signal?: AbortSignal;
+    }>,
+  ) => Promise<WorktreeBranchSuggestion>;
 }
 
 export interface ManagedCodeThreadCreationInput {
@@ -823,6 +853,8 @@ export interface CodeServiceOptions {
   readonly sessionAuthority?: CodeSessionAuthorityStore;
   readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
   readonly worktreeRefs?: CodeWorktreeRefsPort;
+  readonly worktreeBranchSuggestion?: CodeWorktreeBranchSuggestionPort;
+  readonly worktreeBranchNames?: CodeWorktreeBranchNamesPort;
   readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
   /** Where a fork starts; without it a fork refuses as unavailable. */
   readonly forkPoints?: CodeForkPointPort;
@@ -1154,6 +1186,10 @@ export class CodeService {
   readonly #sessionAuthority: CodeSessionAuthorityStore;
   readonly #worktreeSourcePreview: CodeWorktreeSourcePreviewPort | undefined;
   readonly #worktreeRefs: CodeWorktreeRefsPort | undefined;
+  readonly #worktreeBranchSuggestion: CodeWorktreeBranchSuggestionPort | undefined;
+  readonly #worktreeBranchNames: CodeWorktreeBranchNamesPort | undefined;
+  /** Windows with a branch-name suggestion in flight: a window has at most one. */
+  readonly #suggestingWindows = new Set<string>();
   readonly #managedThreadCreation: ManagedCodeThreadCreationPort | undefined;
   readonly #forkPoints: CodeForkPointPort | undefined;
   readonly #forkMergeBack: CodeServiceOptions["forkMergeBack"];
@@ -1224,6 +1260,8 @@ export class CodeService {
     this.#sessionAuthority = options.sessionAuthority ?? new CodeSessionAuthorityStore();
     this.#worktreeSourcePreview = options.worktreeSourcePreview;
     this.#worktreeRefs = options.worktreeRefs;
+    this.#worktreeBranchSuggestion = options.worktreeBranchSuggestion;
+    this.#worktreeBranchNames = options.worktreeBranchNames;
     this.#managedThreadCreation = options.managedThreadCreation;
     this.#forkPoints = options.forkPoints;
     this.#forkMergeBack = options.forkMergeBack;
@@ -2228,6 +2266,77 @@ export class CodeService {
         }
         return { kind: "worktree-refs-listed", projectId: command.projectId, refs };
       }
+      if (command.kind === "list-code-worktree-branch-names") {
+        if (!(await this.#access.canAccessProject(authenticatedWindowId, command.projectId))) {
+          throw this.#failure("unauthorized", "Code Project branch names are unauthorized.");
+        }
+        // Nothing proves a name is free when the host cannot read them all.
+        const unknown = {
+          kind: "worktree-branch-names-listed" as const,
+          projectId: command.projectId,
+          names: [],
+          truncated: true,
+        };
+        if (this.#worktreeBranchNames === undefined) return unknown;
+        try {
+          const listed = await this.#worktreeBranchNames.list(
+            { projectId: command.projectId },
+            signal ?? new AbortController().signal,
+          );
+          return {
+            kind: "worktree-branch-names-listed",
+            projectId: command.projectId,
+            names: listed.names,
+            truncated: listed.truncated,
+          };
+        } catch {
+          return unknown;
+        }
+      }
+      if (command.kind === "suggest-code-worktree-branch") {
+        // A model call is the person's explicit request, from a window that may
+        // act on this Project; it never runs because a draft changed.
+        if (!(await this.#access.canAccessProject(authenticatedWindowId, command.projectId))) {
+          throw this.#failure("unauthorized", "Code Project branch suggestions are unauthorized.");
+        }
+        const declined = (
+          reason: Extract<
+            CodeCommandResult,
+            { kind: "worktree-branch-suggestion-declined" }
+          >["reason"],
+        ) => ({
+          kind: "worktree-branch-suggestion-declined" as const,
+          projectId: command.projectId,
+          reason,
+        });
+        if (this.#worktreeBranchSuggestion === undefined) return declined("provider-unavailable");
+        // One question at a time per window: a second one waits for the first to end.
+        const windowKey = String(authenticatedWindowId);
+        if (this.#suggestingWindows.has(windowKey)) return declined("busy");
+        this.#suggestingWindows.add(windowKey);
+        let suggestion: WorktreeBranchSuggestion;
+        try {
+          suggestion = await this.#worktreeBranchSuggestion.suggest({
+            projectId: command.projectId,
+            providerInstanceId: command.providerInstanceId,
+            modelId: command.modelId,
+            draft: command.draft,
+            ...(signal === undefined ? {} : { signal }),
+          });
+        } catch {
+          return declined("failed");
+        } finally {
+          this.#suggestingWindows.delete(windowKey);
+        }
+        if (suggestion.status === "suggested") {
+          return {
+            kind: "worktree-branch-suggested",
+            projectId: command.projectId,
+            words: suggestion.words,
+          };
+        }
+        return declined(suggestion.status === "refused" ? suggestion.reason : "failed");
+      }
       if (command.kind === "update-code-settings") {
         const current = this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings();
         if (current.version !== command.expectedVersion) {
@@ -2319,6 +2428,7 @@ export class CodeService {
           ...windowsTerminalShellSetting(
             command.windowsTerminalShell ?? current.windowsTerminalShell,
           ),
+          ...worktreeSettingsField(command.worktrees ?? current.worktrees),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -5667,10 +5777,11 @@ export class CodeService {
         permissionPersistence: "current-session",
         deliveryTarget: {
           ...deliveryTarget,
-          branchIntent: defaultDeliveryBranchIntent(
-            deliveryTarget.branchIntent,
-            String(command.threadId).replace(/-/g, "").slice(0, 12),
-          ),
+          branchIntent: deriveDeliveryBranch({
+            baseBranch: deliveryTarget.branchIntent,
+            shortId: String(command.threadId).replace(/-/g, "").slice(0, 12),
+            prefix: this.#persistence.readCodeSettings()?.settings.worktrees?.branchPrefix,
+          }),
         },
         sourceBranch: deliveryTarget.branchIntent,
         startFromOrigin: false,

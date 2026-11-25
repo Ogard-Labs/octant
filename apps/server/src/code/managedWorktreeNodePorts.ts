@@ -219,6 +219,7 @@ export function createManagedWorktreeNodePorts(): {
       );
       return { status: result.exitCode === 0 ? "created" : "rejected" };
     },
+    listBranchNames: (repositoryRoot, signal) => listBranchNames(repositoryRoot, signal),
     isDirty: async (targetPath, signal) => {
       // Read without running anything the repository configured: removal on
       // archive calls this with no person watching, outside any sandbox. A
@@ -399,6 +400,61 @@ export async function listWorktreeRefs(
     if (entries.length >= 200) break;
   }
   return entries;
+}
+
+/** The most names one read returns; matches the contract's bound. */
+export const MAX_BRANCH_NAMES = 20_000;
+
+/**
+ * Every name a new branch must not collide with: local branches, remote
+ * branches without the remote's name, and tags. Names only, so a repository
+ * with thousands of refs is read in one cheap call, apart from the 200-entry
+ * display list. More than the bound is `truncated`, which callers treat as
+ * "cannot prove a name is free".
+ */
+export async function listBranchNames(
+  repositoryRoot: string,
+  signal: AbortSignal,
+  limit: number = MAX_BRANCH_NAMES,
+): Promise<
+  | Readonly<{ status: "observed"; names: ReadonlyArray<string>; truncated: boolean }>
+  | Readonly<{ status: "failed" }>
+> {
+  const listed = await run(
+    "git",
+    [
+      "-C",
+      repositoryRoot,
+      "for-each-ref",
+      `--count=${limit + 1}`,
+      "--format=%(refname)",
+      "refs/heads",
+      "refs/remotes",
+      "refs/tags",
+    ],
+    signal,
+  );
+  if (listed.exitCode !== 0) return { status: "failed" };
+  const names = new Set<string>();
+  let seen = 0;
+  for (const line of listed.stdout.split("\n")) {
+    const ref = line.trim();
+    if (ref === "") continue;
+    seen += 1;
+    if (seen > limit) return { status: "observed", names: [...names], truncated: true };
+    let name: string | undefined;
+    if (ref.startsWith("refs/heads/")) name = ref.slice("refs/heads/".length);
+    else if (ref.startsWith("refs/tags/")) name = ref.slice("refs/tags/".length);
+    else if (ref.startsWith("refs/remotes/")) {
+      // `refs/remotes/<remote>/<branch>`: the remote's name is not part of the branch.
+      const rest = ref.slice("refs/remotes/".length);
+      const slash = rest.indexOf("/");
+      const branch = slash === -1 ? undefined : rest.slice(slash + 1);
+      if (branch !== undefined && branch !== "HEAD") name = branch;
+    }
+    if (name !== undefined && name.length > 0 && name.length <= 255) names.add(name);
+  }
+  return { status: "observed", names: [...names], truncated: false };
 }
 
 function isMissingError(error: unknown): boolean {

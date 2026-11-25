@@ -121,6 +121,7 @@ import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverP
 import { serverCodeThreadProviderGroups } from "./composer/serverCodeComposer";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
+import { SentMessageText } from "../transcript/SentMessageText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { SteeredMessages } from "../messageQueue/SteeredMessages";
 import { isChildResultDelivery } from "../agents/childResultDelivery";
@@ -159,11 +160,7 @@ import {
   type ThreadImageVerdict,
 } from "../composer/threadImageOffers";
 import type { CodeThreadControllers } from "./codeThreadControllers";
-import {
-  ThreadMentionChips,
-  ThreadMentionTypeahead,
-  useThreadMentionTypeahead,
-} from "../chat/ThreadMentionPicker";
+import { ThreadMentionTypeahead, useThreadMentionTypeahead } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
@@ -2380,9 +2377,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             <div className="bubble">
                               {gallery}
                               {message.text.length > 0 ? (
-                                <TrackerReferenceText
-                                  asParagraph
+                                <SentMessageText
                                   text={followUpPrompt ?? message.text}
+                                  threadMentionIds={message.threadMentionIds}
                                 />
                               ) : null}
                             </div>
@@ -3084,12 +3081,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   ))}
                 </ul>
               ) : null}
-              <ThreadMentionChips
-                chips={threadMentions.chips}
-                onRemove={(mentionedThreadId) =>
-                  threadMentions.composer?.onRemoveChip(mentionedThreadId)
-                }
-              />
               <TrackerReferenceComposerHints draft={draft} />
               {attachments.staged.length === 0 ? null : (
                 <div className="code-thread-workspace__attachments" aria-label="Attached files">
@@ -3134,6 +3125,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           }}
           input={
             <ComposerInput
+              inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-activedescendant={
                 atMenu.active !== undefined

@@ -4,11 +4,14 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { decodeProviderInstance, decodeProviderObservedState } from "@octant/contracts";
 import { SUPPORT_BUNDLE_SECTIONS } from "@octant/domain";
+import { randomUUID } from "node:crypto";
+import { BrowserPageSessions } from "./browser/browserPageSessions";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
 import { recordDiagnosticsFailureIncident } from "./diagnosticsExportService";
+import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import {
   exportSupportBundle,
   previewSupportBundle,
@@ -175,6 +178,42 @@ function filesOf(outcome: Awaited<ReturnType<typeof exportSupportBundle>>) {
   if (outcome.kind !== "exported") throw new Error("expected an exported bundle");
   return outcome.files;
 }
+
+describe("exportSupportBundle and Browser session records", () => {
+  it("names the Browser session events and nothing that identifies a page, a thread, a Project or a profile", async () => {
+    const base = store();
+    const pageId = "b0000000-0000-4000-8000-0000000000e1";
+    const threadId = "b0000000-0000-4000-8000-0000000000e2";
+    const projectId = "b0000000-0000-4000-8000-0000000000e3";
+    const accountId = "b0000000-0000-4000-8000-0000000000e4";
+    const sessions = new BrowserPageSessions({
+      journal: base.journal,
+      connection: base.connection,
+      uuid: randomUUID,
+      clock: () => NOW,
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    sessions.opened({
+      pageId: pageId as never,
+      threadId: threadId as never,
+      windowId: "b0000000-0000-4000-8000-0000000000e5" as never,
+      mode: "code",
+      profileKind: "account",
+      accountId: accountId as never,
+      projectId: projectId as never,
+    });
+    sessions.ended(pageId, threadId, "closed-by-person");
+    const files = filesOf(
+      await exportSupportBundle({ destinationCategory: "downloads" }, sources(base)),
+    );
+    const everything = files.map((file) => file.contents).join("\n");
+    expect(everything).toContain("browser.page-opened@1");
+    expect(everything).toContain("browser.page-closed@1");
+    for (const identifier of [pageId, threadId, projectId, accountId, "closed-by-person"]) {
+      expect(everything).not.toContain(identifier);
+    }
+  });
+});
 
 describe("exportSupportBundle", () => {
   it("writes every listed section and journals the export by category without a path", async () => {

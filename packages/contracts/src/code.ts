@@ -646,6 +646,31 @@ export const CodeDefaultModel = Schema.Struct({
   modelId: ProviderModelId,
 }).annotations(strict);
 
+/**
+ * The start of a branch name Octant generates for a new managed worktree
+ * (`octant/`, `henrik/`, `wip-`). It uses the characters Octant generates and
+ * none Git treats specially: no segment ends with `.` or `.lock`, and none holds
+ * `..`. The domain naming policy repeats the check.
+ */
+export const CodeBranchPrefix = Schema.String.pipe(
+  Schema.maxLength(40),
+  Schema.pattern(
+    /^(?!.*\.(?:\.|(?:lock)?(?:\/|$)))[A-Za-z0-9][\w.-]*(?:\/[A-Za-z0-9][\w.-]*)*\/?$/,
+  ),
+);
+
+export const CodeWorktreeNaming = Schema.Literal("short-id", "prompt");
+export type CodeWorktreeNaming = typeof CodeWorktreeNaming.Type;
+
+/** Settings › Code › Worktrees: how new worktrees are named. */
+export const CodeWorktreeSettings = Schema.Struct({
+  /** Absent is `octant/`. */
+  branchPrefix: Schema.optional(CodeBranchPrefix),
+  /** Absent is `short-id`: the prefix and a short id, with no words from the prompt. */
+  branchNaming: Schema.optional(CodeWorktreeNaming),
+}).annotations(strict);
+export type CodeWorktreeSettings = typeof CodeWorktreeSettings.Type;
+
 export const CodeSettings = Schema.Struct({
   defaultModel: Schema.optional(CodeDefaultModel),
   defaultExecutionPolicy: ProviderExecutionPolicy,
@@ -745,6 +770,8 @@ export const CodeSettings = Schema.Struct({
    * reads as.
    */
   windowsTerminalShell: Schema.optional(WindowsTerminalShell),
+  /** Settings › Code › Worktrees. Absent is the host's own defaults. */
+  worktrees: Schema.optional(CodeWorktreeSettings),
   fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
@@ -941,6 +968,27 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("list-code-worktree-refs"),
     projectId: ProjectId,
   }).annotations(strict),
+  /**
+   * The names a new worktree's branch must not collide with: local branches,
+   * remote branches without the remote's name, and tags. A bounded read of
+   * names only, apart from the display list the Where picker shows.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("list-code-worktree-branch-names"),
+    projectId: ProjectId,
+  }).annotations(strict),
+  /**
+   * The person asked a model for words to name a new worktree's branch. It
+   * carries the draft text and the model the composer has selected, and nothing
+   * else about the Project or the checkout.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("suggest-code-worktree-branch"),
+    projectId: ProjectId,
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    draft: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_000)),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("preview-code-worktree-source"),
     projectId: ProjectId,
@@ -989,6 +1037,8 @@ export const CodeCommand = Schema.Union(
     restartContinuation: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
     windowsTerminalShell: Schema.optional(WindowsTerminalShell),
+    /** Absent keeps the stored choice; a present value replaces it, `{}` returns to the defaults. */
+    worktrees: Schema.optional(CodeWorktreeSettings),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({
@@ -1563,6 +1613,31 @@ export const CodeWorktreeRemoteFactsRetrieved = Schema.Struct({
   facts: CodeWorktreeRemoteFacts,
 }).annotations(strict);
 export type CodeWorktreeRemoteFactsRetrieved = typeof CodeWorktreeRemoteFactsRetrieved.Type;
+/** The most names one read returns; a repository with more is `truncated` and the composer falls back to the id name. */
+export const MAX_WORKTREE_BRANCH_NAMES = 20_000;
+export const CodeWorktreeBranchNamesListed = Schema.Struct({
+  kind: Schema.Literal("worktree-branch-names-listed"),
+  projectId: ProjectId,
+  names: Schema.Array(Schema.String.pipe(Schema.maxLength(255))).pipe(
+    Schema.maxItems(MAX_WORKTREE_BRANCH_NAMES),
+  ),
+  /** More names exist than were returned, or they could not be read: nothing here proves a name is free. */
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type CodeWorktreeBranchNamesListed = typeof CodeWorktreeBranchNamesListed.Type;
+export const CodeWorktreeBranchSuggested = Schema.Struct({
+  kind: Schema.Literal("worktree-branch-suggested"),
+  projectId: ProjectId,
+  /** Lower-case words joined by dashes; the composer adds the prefix and checks collisions. */
+  words: Schema.String.pipe(Schema.pattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), Schema.maxLength(40)),
+}).annotations(strict);
+export type CodeWorktreeBranchSuggested = typeof CodeWorktreeBranchSuggested.Type;
+export const CodeWorktreeBranchSuggestionDeclined = Schema.Struct({
+  kind: Schema.Literal("worktree-branch-suggestion-declined"),
+  projectId: ProjectId,
+  reason: Schema.Literal("provider-unavailable", "not-allowed", "spend-limited", "busy", "failed"),
+}).annotations(strict);
+export type CodeWorktreeBranchSuggestionDeclined = typeof CodeWorktreeBranchSuggestionDeclined.Type;
 export const CodeWorktreeRefsListed = Schema.Struct({
   kind: Schema.Literal("worktree-refs-listed"),
   projectId: ProjectId,
@@ -1659,6 +1734,9 @@ export const CodeCommandResult = Schema.Union(
   CodeManagedThreadCreated,
   CodeWorktreeRemoteFactsRetrieved,
   CodeWorktreeRefsListed,
+  CodeWorktreeBranchNamesListed,
+  CodeWorktreeBranchSuggested,
+  CodeWorktreeBranchSuggestionDeclined,
   CodeThreadCheckoutRebound,
   CodeForkContextMerged,
 );

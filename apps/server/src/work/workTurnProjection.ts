@@ -162,6 +162,9 @@ export class WorkTurnProjection {
         ...(accepted.sideChatReturns === undefined
           ? {}
           : { sideChatReturns: accepted.sideChatReturns }),
+        ...(accepted.threadMentionIds === undefined
+          ? {}
+          : { threadMentionIds: accepted.threadMentionIds }),
         transcript: [{ role: "user", text: accepted.prompt }],
         ...(accepted.attachments === undefined || accepted.attachments.length === 0
           ? {}

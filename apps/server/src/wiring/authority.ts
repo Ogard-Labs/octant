@@ -10,7 +10,7 @@ import { workThreadAccessOf, threadAccessOf } from "@octant/domain/guardrail-pol
 import { decodeWorkThreadId } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts";
-import { notifyWindowRevocations } from "../windowRevocations";
+import { notifyWindowRevocations, type WindowRevocation } from "../windowRevocations";
 import { createHash, randomUUID } from "node:crypto";
 import { defaultShellSettings } from "@octant/domain";
 import {
@@ -492,29 +492,36 @@ export function wireAuthority(deps: AuthorityDependencies) {
   // it builds the service, so the window store never holds a later area's
   // service. A revocation that arrives before an area registers finds nothing
   // to revoke, as before.
-  const windowRevocations: Array<(windowId: WindowId) => void> = [];
-  const onWindowRevoked = (revoke: (windowId: WindowId) => void): void => {
+  const windowRevocations: Array<(windowId: WindowId, revocation?: WindowRevocation) => void> = [];
+  const onWindowRevoked = (
+    revoke: (windowId: WindowId, revocation?: WindowRevocation) => void,
+  ): void => {
     windowRevocations.push(revoke);
   };
   const windowAuthorityStore = new WindowAuthorityStore(
-    (windowId) => {
-      const notified = notifyWindowRevocations(windowId, [
-        (id) => codeApprovalStore.revokeWindow(id),
-        (id) => simulatorInputGrants.revokeWindow(String(id)),
-        (id) => androidInputGrants.revokeWindow(String(id)),
-        (id) => extensionToolApprovalService.revokeWindow(id),
-        (id) => routineProposalService.revokeWindow(id),
-        (id) => serviceOffers.revokeWindow(id),
-        (id) => threadNarration.revokeWindow(id),
-        (id) => threadTranscription.revokeWindow(id),
-        (id) => codeSessionAuthority.revokeWindow(id),
-        (id) => {
-          for (const [requestId, binding] of agentRunExecutionWindows) {
-            if (String(binding.windowId) === String(id)) agentRunExecutionWindows.delete(requestId);
-          }
-        },
-        ...windowRevocations,
-      ]);
+    (windowId, revocation) => {
+      const notified = notifyWindowRevocations(
+        windowId,
+        [
+          (id) => codeApprovalStore.revokeWindow(id),
+          (id) => simulatorInputGrants.revokeWindow(String(id)),
+          (id) => androidInputGrants.revokeWindow(String(id)),
+          (id) => extensionToolApprovalService.revokeWindow(id),
+          (id) => routineProposalService.revokeWindow(id),
+          (id) => serviceOffers.revokeWindow(id),
+          (id) => threadNarration.revokeWindow(id),
+          (id) => threadTranscription.revokeWindow(id),
+          (id) => codeSessionAuthority.revokeWindow(id),
+          (id) => {
+            for (const [requestId, binding] of agentRunExecutionWindows) {
+              if (String(binding.windowId) === String(id))
+                agentRunExecutionWindows.delete(requestId);
+            }
+          },
+          ...windowRevocations,
+        ],
+        revocation,
+      );
       if (notified.kind === "failed")
         throw new Error("Octant could not notify every revoked window owner.");
     },

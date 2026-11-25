@@ -1,4 +1,5 @@
 import { CoordinatorWorkerCounts } from "./ProjectThreadList";
+import { NO_THREAD_ROW_STATE, sidebarThreadStatusIcon, threadRowState } from "./threadRowState";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import type {
   ProjectAvailability,
@@ -144,9 +145,6 @@ import {
   ThreadRowInfoPopup,
   ProjectThreadRows,
   ProjectThreadStatus,
-  NO_THREAD_ROW_STATE,
-  threadRowState,
-  sidebarThreadStatusIcon,
   threadRowAgeFact,
   hasInlineActions,
   ThreadRowContextMenu,

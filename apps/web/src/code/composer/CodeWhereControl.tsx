@@ -22,6 +22,8 @@ export interface CodeWhereControlProps {
    * (`CodeBranchSelector` with `presentation="row"`).
    */
   readonly baseBranchPicker?: ReactNode;
+  /** The branch name field, shown in the Worktree options dialog above the source settings. */
+  readonly branchNameControl?: ReactNode;
   /** The worktree's source settings, shown in the Worktree options dialog. */
   readonly sourceControl?: ReactNode;
   /** The working-folder fields, shown in the Subfolder pop-out. */
@@ -246,7 +248,10 @@ export function CodeWhereControl(props: CodeWhereControlProps) {
           The new worktree gets its own branch, <code>{props.worktreeBranch}</code>, made from{" "}
           {props.branch}.
         </p>
-        <div className="code-where-dialog__body">{props.sourceControl}</div>
+        <div className="code-where-dialog__body">
+          {props.branchNameControl}
+          {props.sourceControl}
+        </div>
         <div className="code-where-dialog__actions">
           <OctantButton onClick={() => setDialog(undefined)} type="button">
             Done

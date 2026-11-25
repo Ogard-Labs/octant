@@ -934,7 +934,9 @@ composer itself is the drop target, not the pane behind it. The row menu's
 or the only composer when one is open. Dropping the composer's own thread,
 a thread already attached, something that is not a thread, or a thread this
 window cannot Open leaves the draft unchanged and says so without reading
-the thread. Showing several Projects adds no reach here: a Code thread's
+the thread. The attached thread shows as an
+[inline chip](thread-view.md#mentioning-a-thread-in-a-prompt) in the prompt.
+Showing several Projects adds no reach here: a Code thread's
 composer attaches Code threads of its own Project only, and any other
 composer the Code threads of the window's lead Project, exactly as in a
 window that shows only that Project. Image and file drops, and dropping a thread on a pane rather
@@ -1942,7 +1944,12 @@ they were reached (address bar, server row, conversation link, or a navigation
 inside the page), newest first. It is kept in the renderer's local storage,
 which the computer's windows share like a browser's history, and never sent
 to the host; a running server's address is not repeated there, and choosing a row
-opens it. With neither, the start page invites an address. **Browser profiles.**
+opens it. With neither, the start page invites an address. After a restart or crash that
+took the page the person had open, a line above it offers **Reopen page**, which
+reserves that page for this window, moves focus to the address field and
+preselects the page's profile for the next address, and **Dismiss**, which
+moves focus to the address field too
+([Browser profiles](browser-profiles.md#reopening-a-page-a-restart-took)). **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
 the profile icon after the address field, which names a signed-in profile beside
 itself (a Private page stays an icon) and whose menu also signs out of a
@@ -2885,9 +2892,13 @@ request names the first in the order below and counts the rest after it in the
 meta ink (#327 open +15); its name says "and 15 more pull requests".
 
 Pointing at a row, or focusing it, opens its details card after a short delay,
-beside the sidebar: the title and age, the states in words, then the Project,
-branch, provider and model ("Claude · Opus 5.5", the model read from its id),
-and fork lineage, one fact per line. Below a rule come the pull requests the
+beside the sidebar: the title and age, the states in words, then, while the
+thread works or waits on the person, its live state with the running step or
+what it waits on ("Working 14m · Running tests"), the Project under its own
+mark, the branch, the provider under its own glyph with the model ("Claude ·
+Opus 5.5", the model read from its id), and fork lineage, one fact per line. A
+mentioned thread's chip opens the same card
+([Mentioning a thread in a prompt](thread-view.md#mentioning-a-thread-in-a-prompt)). Below a rule come the pull requests the
 thread worked on, up to 50, in flight first (open and draft), then merged, then
 closed, each group newest first, with any past 50 counted as "+N more". Each is
 one line: the state glyph in the state colour, a checks dot while it can still

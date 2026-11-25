@@ -168,6 +168,8 @@ function harness(
     readonly observations?: readonly ReturnType<typeof repositoryObservation>[];
     readonly pathExists?: boolean;
     readonly branchExists?: boolean;
+    /** Names the listing read finds (remote names already stripped); absent is a read that failed. */
+    readonly branchNames?: { readonly names: ReadonlyArray<string>; readonly truncated?: boolean };
     readonly refStatus?: "resolved" | "missing" | "ambiguous" | "failed";
     readonly add?: "created" | "rejected" | "throw";
     readonly remove?: "removed" | "rejected" | "throw";
@@ -199,6 +201,15 @@ function harness(
             : { status: "resolved" as const, oid: head },
     ),
     branchExists: vi.fn(async () => options.branchExists ?? false),
+    listBranchNames: vi.fn(async () =>
+      options.branchNames === undefined
+        ? { status: "failed" as const }
+        : {
+            status: "observed" as const,
+            names: options.branchNames.names,
+            truncated: options.branchNames.truncated ?? false,
+          },
+    ),
     addWorktree: vi.fn(async () => {
       events.push("git:add");
       if (options.add === "throw") throw new Error("connection lost");
@@ -594,6 +605,29 @@ describe("ManagedWorktreeService", () => {
       reason,
     });
     expect(git.addWorktree).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a tag of that name", [branchIntent]],
+    ["a remote branch of that name, whatever its remote", [branchIntent]],
+    ["the same name in another case", [branchIntent.toUpperCase()]],
+    ["a branch the name would sit inside", ["octant"]],
+    ["a branch below the name", [`${branchIntent}/old`]],
+  ])("refuses a delivery branch when there is %s, as the preview does", async (_label, names) => {
+    const { service, git } = harness({ branchNames: { names } });
+    await expect(
+      service.planCreation(planInput, new AbortController().signal),
+    ).resolves.toMatchObject({ status: "refused", reason: "branch-collision" });
+    expect(git.addWorktree).not.toHaveBeenCalled();
+  });
+
+  it("does not claim a name is taken when the listing was cut short or failed", async () => {
+    for (const branchNames of [{ names: [branchIntent], truncated: true }, undefined]) {
+      const { service } = harness(branchNames === undefined ? {} : { branchNames });
+      await expect(
+        service.planCreation(planInput, new AbortController().signal),
+      ).resolves.toMatchObject({ status: "planned" });
+    }
   });
 
   it("refuses cleanup without explicit local confirmation or a durable ownership receipt", async () => {

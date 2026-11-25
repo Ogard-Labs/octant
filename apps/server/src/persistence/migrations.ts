@@ -407,6 +407,21 @@ CREATE TABLE project_terminal_projection (
 ) STRICT;
 `;
 
+const BROWSER_PAGE_PROJECTION_SQL = `
+CREATE TABLE browser_page_projection (
+  page_id TEXT PRIMARY KEY CHECK(length(trim(page_id)) > 0),
+  thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+  window_id TEXT NOT NULL CHECK(length(trim(window_id)) > 0),
+  mode TEXT NOT NULL CHECK(mode IN ('work', 'code')),
+  profile_kind TEXT NOT NULL CHECK(profile_kind IN ('private', 'project', 'personal', 'account')),
+  account_id TEXT,
+  project_id TEXT NOT NULL CHECK(length(trim(project_id)) > 0),
+  opened_at TEXT NOT NULL,
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+CREATE INDEX browser_page_thread_idx ON browser_page_projection (thread_id);
+`;
+
 const REMOTE_SERVER_GRANT_PROJECTION_SQL = `
 CREATE TABLE remote_server_grant_projection (
   grant_id TEXT PRIMARY KEY CHECK(length(grant_id) = 68),
@@ -2916,6 +2931,13 @@ CREATE INDEX validation_evidence_authority_idx
         changed_at TEXT NOT NULL
       ) STRICT;
     `,
+  },
+  {
+    // The pages of a thread's Browser pane a restart can offer back. No journal
+    // written before this migration holds either event, so nothing is backfilled.
+    version: 113,
+    name: "create_browser_page_projection",
+    sql: BROWSER_PAGE_PROJECTION_SQL,
   },
 ];
 

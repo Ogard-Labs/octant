@@ -1,4 +1,5 @@
 import type { ChildWorktreeSnapshotData } from "@octant/contracts";
+import { branchNameTaken } from "@octant/domain/code-worktree-naming";
 import { dirname, join } from "node:path";
 import type {
   BindingRevisionId,
@@ -60,6 +61,19 @@ export interface ManagedWorktreeGitPort {
   ): Promise<
     | Readonly<{ status: "fetched"; remoteHead: string }>
     | Readonly<{ status: "failed" | "interrupted" }>
+  >;
+  /**
+   * Every name a new branch must not collide with, by the rule the composer
+   * previews with: local branches, remote branches without the remote's name,
+   * and tags. A port without it, or a read that failed or was cut short
+   * (`truncated`), leaves only the exact local-branch check.
+   */
+  listBranchNames?(
+    repositoryRoot: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; names: ReadonlyArray<string>; truncated: boolean }>
+    | Readonly<{ status: "failed" }>
   >;
   addWorktree(
     input: Readonly<{
@@ -1009,6 +1023,17 @@ export class ManagedWorktreeService {
         return { status: "refused", reason: "path-collision" };
       }
       if (await this.#git.branchExists(observation.repositoryRoot, input.branchIntent, signal)) {
+        return { status: "refused", reason: "branch-collision" };
+      }
+      // The name the composer previewed was checked against more than the local
+      // branches (remote branches, tags, one above or below it, any case); the
+      // host holds the creation to the same rule instead of choosing another name.
+      const names = await this.#git.listBranchNames?.(observation.repositoryRoot, signal);
+      if (
+        names?.status === "observed" &&
+        !names.truncated &&
+        branchNameTaken(input.branchIntent, names.names)
+      ) {
         return { status: "refused", reason: "branch-collision" };
       }
     } catch {

@@ -56,6 +56,7 @@ import { RepositoryTestDiscoveryService } from "../code/repositoryTestDiscoveryS
 import {
   type CodeCheckoutObservationPort,
   type CodeFileRootAuthorityPort,
+  type CodeWorktreeBranchSuggestionPort,
   CodeService,
 } from "../code/codeService";
 import type { CompletedThreadArchiveInput } from "../completedThreadArchiveSweep";
@@ -659,11 +660,14 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "managedCodeThreadCreation"
     | "managedWorktreeService"
     | "managedWorktreeRefsList"
+    | "managedWorktreeBranchNames"
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
     | "providerFolderDiscoveryPorts"
     | "refreshStandaloneSkills"
   > & {
+    /** The model call behind Suggest name in the Code composer. */
+    readonly worktreeBranchSuggestion: CodeWorktreeBranchSuggestionPort;
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
     /** The member's Act item, which bounds the Code Projects a hub-introduced device reads. */
@@ -692,6 +696,7 @@ export function wireCode(deps: CodeDependencies) {
     managedCodeThreadCreation,
     managedWorktreeReceipts,
     managedWorktreeRefsList,
+    managedWorktreeBranchNames,
     managedWorktreeService,
     managedWorktreeSourcePreview,
     onGithubPullRequestsUnreadable,
@@ -1071,6 +1076,15 @@ export function wireCode(deps: CodeDependencies) {
             preview: (input, signal) => managedWorktreeSourcePreview(input, signal),
           },
           // A server Project's branches and worktrees are its server's.
+          worktreeBranchSuggestion: deps.worktreeBranchSuggestion,
+          // A server Project's names are its server's, which this host cannot read:
+          // nothing proves a name is free there, so the composer uses the id name.
+          worktreeBranchNames: {
+            list: async (input, signal) =>
+              serverProjectStore.codeProject(String(input.projectId)) !== undefined
+                ? { names: [], truncated: true }
+                : managedWorktreeBranchNames(input, signal),
+          },
           worktreeRefs: {
             list: async (input, signal) =>
               (await listServerWorktreeRefs(
