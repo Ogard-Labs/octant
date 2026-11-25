@@ -150,6 +150,8 @@ secret, and the revoke through this computer's own device and grant
 controls. A window's notice stack
 shows the newest notice with **Review**, which opens this section, and a
 browser paired at Full shows the notices beside its new-device alerts. The
+phone shows the same list and notices in each paired computer's Settings
+panel, to a session the host says acts as its own person alone. The
 rule is in [Architecture: Security and authority](../architecture.md#security-and-authority).
 
 Selecting a page replaces its controls as well as its heading. Plugin pages
