@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { MERGED_CLEANUP_GRACE_MS, worktreeReclaimTrigger } from "./codeWorktreeCleanupPolicy";
+import {
+  MERGED_CLEANUP_GRACE_MS,
+  cleanedUpWorktreeSentence,
+  worktreeReclaimTrigger,
+} from "./codeWorktreeCleanupPolicy";
 
 const now = Date.parse("2026-11-25T12:00:00.000Z");
 const daysAgo = (days: number) => now - days * 86_400_000;
@@ -52,5 +56,14 @@ describe("worktreeReclaimTrigger", () => {
         now,
       }),
     ).toBe(undefined);
+  });
+});
+
+describe("what a thread says while its worktree is gone", () => {
+  it("names the cleanup, says the branch and thread are kept, and says no turn runs until it is restored", () => {
+    for (const standing of ["cleaned-up", "cleaning-up", "restoring"] as const) {
+      expect(cleanedUpWorktreeSentence(standing), standing).toMatch(/no new turn until/);
+    }
+    expect(cleanedUpWorktreeSentence("cleaned-up")).toContain("branch and the thread are kept");
   });
 });

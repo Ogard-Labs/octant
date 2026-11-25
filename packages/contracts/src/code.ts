@@ -1759,6 +1759,14 @@ export const CodeThreadView = Schema.Struct({
   thread: CodeThread,
   checkout: CodeCheckoutIdentity,
   lastSequence: GlobalSequence,
+  /**
+   * Present while the host has removed the thread's managed worktree folder
+   * (or is part way through removing or restoring it). The thread keeps its
+   * branch but takes no turn, and the thread view offers a restore. Optional
+   * so an earlier client, which drops a field it does not know, sees the
+   * unavailable checkout it always saw.
+   */
+  worktreeCleanup: Schema.optional(Schema.Literal("cleaned-up", "cleaning-up", "restoring")),
 }).annotations(strict);
 export type CodeThreadView = typeof CodeThreadView.Type;
 

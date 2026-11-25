@@ -197,10 +197,14 @@ export class ThreadMessageQueueService {
       return { status: "refused", requestId: raw.requestId, reason: "invalid-payload" };
     }
     return this.#serial(command.scope, async () => {
-      const refused = (reason: ThreadMessageQueueRefusalReason): ThreadMessageQueueResult => ({
+      const refused = (
+        reason: ThreadMessageQueueRefusalReason,
+        message?: string,
+      ): ThreadMessageQueueResult => ({
         status: "refused",
         requestId: command.requestId,
         reason,
+        ...(message === undefined ? {} : { message }),
       });
       const result = (status: "applied" | "duplicate" | "conflict"): ThreadMessageQueueResult => ({
         status,
@@ -221,7 +225,7 @@ export class ThreadMessageQueueService {
         intent: receipt !== undefined || previous !== undefined ? "read" : command.kind,
         ...(command.kind === "enqueue" ? { payload: command.payload } : {}),
       });
-      if (inspection.status === "held") return refused(inspection.reason);
+      if (inspection.status === "held") return refused(inspection.reason, inspection.message);
       if (this.#purging.has(queueId(command.scope)) || this.#store.purged(command.scope))
         return refused("thread-unavailable");
       const id = queueId(command.scope);

@@ -5,7 +5,7 @@ import { removeHostWorktree } from "../code/hostWorktreeRemoval";
 import { createDiskCleanupRouteHandler } from "../diskCleanupRoutes";
 import { createArchivedWorktreeRouteHandler } from "../archivedWorktreeRoutes";
 import { createArchivedWorktrees } from "../code/archivedWorktrees";
-import { createCleanedUpWorktrees } from "../code/cleanedUpWorktrees";
+import { cleanedUpWorktreeOf, createCleanedUpWorktrees } from "../code/cleanedUpWorktrees";
 import { WorktreeReclaimSweep } from "../code/worktreeReclaimSweep";
 import {
   decodeThreadWorkingDirectory,
@@ -1135,6 +1135,7 @@ export function wireCode(deps: CodeDependencies) {
           },
           // A server Project's branches and worktrees are its server's.
           worktreeBranchSuggestion: deps.worktreeBranchSuggestion,
+          worktreeCleanup: cleanedUpWorktreeOf((id) => managedWorktreeReceipts.load(id)),
           worktreeRefs: {
             list: async (input, signal) =>
               (await listServerWorktreeRefs(

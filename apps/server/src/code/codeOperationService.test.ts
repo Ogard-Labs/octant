@@ -1,3 +1,4 @@
+import { cleanedUpWorktreeSentence } from "@octant/domain/code-worktree-cleanup-policy";
 import {
   decodeAgentRun,
   decodeEventActor,
@@ -121,7 +122,9 @@ describe("CodeOperationService", () => {
       repositoryId: `repo_${"c".repeat(64)}`,
     });
     let approved = true;
+    let standing: "cleaned-up" | undefined;
     const authority = {
+      cleanedUpWorktree: vi.fn(async () => standing),
       readThread: vi.fn((threadId) => (threadId === otherThread.id ? otherThread : activeThread)),
       readCheckout: vi.fn((checkoutId) => {
         const owner = checkoutId === otherThread.checkoutId ? otherThread : activeThread;
@@ -223,6 +226,25 @@ describe("CodeOperationService", () => {
       failure: { category: "waiting" },
     });
     expect(terminals.write).not.toHaveBeenCalled();
+    // A thread whose worktree was cleaned up is refused in the host's words,
+    // even while the stored checkout still reads available.
+    approved = true;
+    standing = "cleaned-up";
+    await expect(
+      service.execute("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as WindowId, {
+        kind: "write-terminal",
+        operationId: decodeCodeOperationId("adadadad-adad-4dad-8dad-adadadadadad"),
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        terminalId: ids.terminal,
+        data: "whoami",
+      }),
+    ).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "waiting", message: cleanedUpWorktreeSentence("cleaned-up") },
+    });
+    standing = undefined;
+    approved = false;
     activeThread = thread();
     await expect(
       service.execute("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as WindowId, {

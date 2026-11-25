@@ -1,3 +1,7 @@
+import {
+  cleanedUpWorktreeSentence,
+  type CleanedUpWorktreeStanding,
+} from "@octant/domain/code-worktree-cleanup-policy";
 import type { EventActor, ProviderDriverKind } from "@octant/contracts";
 import type { CodeOperationEventAuthor } from "./codeOperationEventStore";
 import {
@@ -299,6 +303,10 @@ export interface CodeOperationAuthorityPort {
     windowId: WindowId,
     projectId: CodeThread["projectId"],
   ) => Awaitable<boolean>;
+  /** Where a managed worktree's cleanup stands, when the host removed its folder. */
+  readonly cleanedUpWorktree?: (
+    checkout: CodeCheckoutIdentity,
+  ) => Promise<CleanedUpWorktreeStanding | undefined>;
   /**
    * Keeps the running request's admission for a held stream, which must prove
    * its window may still read after that request has returned. Called inside
@@ -4008,6 +4016,17 @@ export class CodeOperationService {
     if (!(await this.#options.authority.canAccessProject(windowId, thread.projectId)))
       return { failure: "unauthorized", message: "Code thread is unauthorized." };
     const checkout = this.#options.authority.readCheckout(command.checkoutId);
+    if (
+      checkout !== undefined &&
+      checkout.repositoryId === thread.repositoryId &&
+      thread.lifecycle === "active"
+    ) {
+      // The folder may be gone while the stored checkout still reads available.
+      const standing = await this.#options.authority.cleanedUpWorktree?.(checkout);
+      if (standing !== undefined) {
+        return { failure: "waiting", message: cleanedUpWorktreeSentence(standing) };
+      }
+    }
     if (
       checkout === undefined ||
       checkout.repositoryId !== thread.repositoryId ||

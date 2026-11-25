@@ -7,6 +7,7 @@ import type {
   CodeThreadId,
   RestoreCleanedUpWorktreeResult,
 } from "@octant/contracts";
+import type { CleanedUpWorktreeStanding } from "@octant/domain";
 import type { ManagedWorktreeReceipt } from "./managedWorktreeReceiptStore";
 import type { ManagedWorktreeReclaimResult } from "./managedWorktreeReclaim";
 
@@ -44,6 +45,39 @@ export function cleanedUpRefusal(
   return { kind: "cleaned-up-worktree-refused", reason, message: REFUSALS[reason] };
 }
 
+/** Where a receipt's cleanup stands, or nothing while the thread may use its folder. */
+export function cleanedUpStanding(
+  receipt: Pick<ManagedWorktreeReceipt, "state" | "reclaim"> | undefined,
+): CleanedUpWorktreeStanding | undefined {
+  if (receipt?.reclaim === undefined) return undefined;
+  switch (receipt.state) {
+    case "reclaimed":
+      return "cleaned-up";
+    case "restoring":
+      return "restoring";
+    case "cleanup-pending":
+      return "cleaning-up";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Where the cleanup of a checkout's managed worktree stands, for the thread
+ * view, a turn's refusal and a queued message's refusal alike. A receipt that
+ * cannot be read says nothing here: the callers keep their own refusals.
+ */
+export function cleanedUpWorktreeOf(
+  loadReceipt: (receiptId: string) => Promise<ManagedWorktreeReceipt | undefined>,
+): (checkout: CodeCheckoutIdentity) => Promise<CleanedUpWorktreeStanding | undefined> {
+  return async (checkout) =>
+    checkout.kind === "managed-worktree"
+      ? cleanedUpStanding(
+          await loadReceipt(String(checkout.ownershipReceiptId)).catch(() => undefined),
+        )
+      : undefined;
+}
+
 /**
  * The managed worktrees the host cleaned up and can restore: the receipt still
  * names the branch and commit to return to. Listing and restoring are the
@@ -65,14 +99,7 @@ export function createCleanedUpWorktrees(dependencies: CleanedUpWorktreesDepende
       for (const thread of dependencies.readCodeThreads()) {
         const receipt = await receiptOf(thread);
         if (receipt?.reclaim === undefined) continue;
-        const state =
-          receipt.state === "reclaimed"
-            ? "cleaned-up"
-            : receipt.state === "restoring"
-              ? "restoring"
-              : receipt.state === "cleanup-pending"
-                ? "cleaning-up"
-                : undefined;
+        const state = cleanedUpStanding(receipt);
         if (state === undefined) continue;
         listed.push({
           threadId: thread.id,

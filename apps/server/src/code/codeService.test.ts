@@ -964,6 +964,22 @@ describe("CodeService reads", () => {
     expect(result.checkouts).toContainEqual(managedCheckout);
   });
 
+  it("names a cleaned-up worktree in the thread view, and says nothing when the folder is in use", async () => {
+    const cleaned = serviceFixture({ worktreeCleanup: async () => "cleaned-up" });
+    await expect(cleaned.service.read(ids.window, ids.thread)).resolves.toMatchObject({
+      worktreeCleanup: "cleaned-up",
+    });
+    const unreadable = serviceFixture({
+      worktreeCleanup: async () => {
+        throw new Error("receipt unreadable");
+      },
+    });
+    const view = await unreadable.service.read(ids.window, ids.thread);
+    expect(view).not.toHaveProperty("worktreeCleanup");
+    const plain = await serviceFixture().service.read(ids.window, ids.thread);
+    expect(plain).not.toHaveProperty("worktreeCleanup");
+  });
+
   it("fails closed when a thread is missing or outside the authenticated window", async () => {
     const hidden = thread({ projectId: ids.unauthorizedProject });
     const fixture = serviceFixture({ threads: [hidden] });
@@ -6727,6 +6743,7 @@ function serviceFixture(
     readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
     readonly worktreeRefs?: CodeWorktreeRefsPort;
     readonly worktreeBranchSuggestion?: CodeWorktreeBranchSuggestionPort;
+    readonly worktreeCleanup?: CodeServiceOptions["worktreeCleanup"];
     readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
     readonly worktreeRemoteFacts?: CodeWorktreeRemoteFacts;
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
@@ -6865,6 +6882,7 @@ function serviceFixture(
     ...(options.worktreeBranchSuggestion === undefined
       ? {}
       : { worktreeBranchSuggestion: options.worktreeBranchSuggestion }),
+    ...(options.worktreeCleanup === undefined ? {} : { worktreeCleanup: options.worktreeCleanup }),
     ...(options.managedThreadCreation === undefined
       ? {}
       : { managedThreadCreation: options.managedThreadCreation }),

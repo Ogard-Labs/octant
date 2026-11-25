@@ -451,6 +451,12 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly readProject?: (projectId: CodeThread["projectId"]) => Project | undefined;
   /**
+   * Where a managed worktree's cleanup stands once the host removed its
+   * folder. A turn for that thread is refused with the host's sentence about
+   * it instead of a bare "unavailable checkout".
+   */
+  readonly cleanedUpWorktree?: CodeOperationAuthorityPort["cleanedUpWorktree"];
+  /**
    * The paired device a lease confirmation names, as the host last saw it.
    * Absent on a host with no device layer, where no lease is ever confirmed.
    */
@@ -1331,6 +1337,9 @@ export function createCodeOperationRuntime(
       options.sessionAuthority?.effectiveThread(windowId, thread) ?? thread,
     readCheckout: (checkoutId) => options.persistence.readCodeCheckout(checkoutId),
     canAccessProject: options.windowAccess.canAccessProject,
+    ...(options.cleanedUpWorktree === undefined
+      ? {}
+      : { cleanedUpWorktree: options.cleanedUpWorktree }),
     ...(options.windowAccess.currentProjectAccess === undefined
       ? {}
       : { currentProjectAccess: options.windowAccess.currentProjectAccess }),
