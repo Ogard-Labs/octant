@@ -1,8 +1,11 @@
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ShellSettings } from "@octant/contracts/shell";
-import { render, screen, within } from "@testing-library/react";
+import type { SpeechLocalEngineStatus, VoiceSettings } from "@octant/contracts";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { SpeechCapabilityProvider } from "../voice/SpeechCapabilityContext";
+import { fakeSpeechClient } from "../voice/speechTestSupport";
 import { VoiceSettingsView } from "./VoiceSettingsView";
 
 const now = "2026-09-05T10:00:00.000Z";
@@ -323,5 +326,178 @@ describe("VoiceSettingsView", () => {
 
     await user.click(screen.getByRole("button", { name: "Remove OAuth" }));
     expect(onSettingsChange).toHaveBeenLastCalledWith({ voice: { dictionary: ["Octant"] } });
+  });
+});
+
+describe("Apple Speech in Voice settings", () => {
+  const endpoint = {
+    providerInstanceId: compatibleId as never,
+    modelId: "gpt-4o-mini-transcribe" as never,
+  };
+
+  async function show(
+    settings: VoiceSettings,
+    engine: SpeechLocalEngineStatus,
+    options: { readonly withEndpoint?: boolean } = {},
+  ) {
+    const onSettingsChange = vi.fn<(patch: Partial<ShellSettings>) => void>();
+    const localEngine = vi.fn(async () => engine);
+    const downloadLocalModel = vi.fn(
+      async (): Promise<SpeechLocalEngineStatus> => ({
+        status: "downloading",
+        language: "fr-FR" as never,
+        fraction: 0,
+      }),
+    );
+    const status = vi.fn(async () => {
+      throw new Error("not under test");
+    });
+    render(
+      <SpeechCapabilityProvider
+        client={{ ...fakeSpeechClient().client, status, localEngine, downloadLocalModel }}
+        instances={[]}
+        settings={settings}
+      >
+        <VoiceSettingsView
+          onSettingsChange={onSettingsChange}
+          settings={settings}
+          {...(options.withEndpoint === false ? {} : { providerSnapshot: providerSnapshot() })}
+        />
+      </SpeechCapabilityProvider>,
+    );
+    await act(async () => undefined);
+    return { onSettingsChange, localEngine, downloadLocalModel, status };
+  }
+
+  const pick = async (name: string) => {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "Transcribe with" }));
+    await user.click(await screen.findByRole("option", { name }));
+  };
+  const said = () => within(transcriptionRow()).getByRole("status").textContent;
+
+  it("is offered beside the endpoints and keeps the saved one when it is picked", async () => {
+    const { onSettingsChange, downloadLocalModel } = await show(
+      { transcription: endpoint, language: "no" },
+      { status: "ready", language: "nb-NO" as never },
+    );
+    await pick("Apple Speech on this Mac");
+    expect(onSettingsChange).toHaveBeenCalledWith({
+      voice: { transcription: endpoint, language: "no", transcriptionEngine: "apple-speech" },
+    });
+    expect(downloadLocalModel).not.toHaveBeenCalled();
+  });
+
+  it("is offered to a person with no endpoint at all", async () => {
+    const { onSettingsChange } = await show(
+      {},
+      { status: "ready", language: "nb-NO" as never },
+      { withEndpoint: false },
+    );
+    await pick("Apple Speech on this Mac");
+    expect(onSettingsChange).toHaveBeenCalledWith({
+      voice: { transcriptionEngine: "apple-speech" },
+    });
+    expect(screen.getByText("No endpoint for reading aloud yet")).toBeVisible();
+  });
+
+  it("is not offered where it cannot run", async () => {
+    await show(
+      { transcription: endpoint },
+      { status: "unsupported", reason: "Apple Speech needs a Mac with macOS 26 or later." },
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: "Transcribe with" }));
+    expect(
+      (await screen.findAllByRole("option")).map((option) => option.textContent),
+    ).not.toContain("Apple Speech on this Mac");
+  });
+
+  it("says why it cannot run where settings already name it", async () => {
+    await show(
+      { transcriptionEngine: "apple-speech" },
+      { status: "unsupported", reason: "Apple Speech needs a Mac with macOS 26 or later." },
+    );
+    expect(said()).toBe("Apple Speech needs a Mac with macOS 26 or later.");
+  });
+
+  it("says speech stays on the Mac, and who cannot dictate meanwhile", async () => {
+    await show(
+      { transcription: endpoint, transcriptionEngine: "apple-speech", language: "no" },
+      { status: "ready", language: "nb-NO" as never },
+    );
+    expect(said()).toMatch(/Norwegian/);
+    expect(said()).toMatch(/no recording leaves it/);
+    expect(said()).toMatch(/Paired phones and browsers/);
+  });
+
+  it("goes back to the saved endpoint, or off, on request", async () => {
+    const settings = { transcription: endpoint, transcriptionEngine: "apple-speech" as const };
+    const { onSettingsChange } = await show(settings, {
+      status: "ready",
+      language: "nb-NO" as never,
+    });
+    await pick("gpt-4o-mini-transcribe on OpenAI");
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ voice: { transcription: endpoint } });
+    await pick("Off");
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ voice: {} });
+  });
+
+  it("goes back to a saved model no endpoint lists", async () => {
+    const typed = { ...endpoint, modelId: "my-whisper" as never };
+    const { onSettingsChange } = await show(
+      { transcription: typed, transcriptionEngine: "apple-speech" },
+      { status: "ready", language: "nb-NO" as never },
+    );
+    await pick("my-whisper on OpenAI");
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ voice: { transcription: typed } });
+  });
+
+  it("downloads the model only when asked, and shows how far it has come", async () => {
+    const { localEngine, downloadLocalModel } = await show(
+      { transcriptionEngine: "apple-speech", language: "fr" },
+      { status: "not-downloaded", language: "fr-FR" as never },
+    );
+    expect(said()).toMatch(/French.*not on this Mac/);
+    expect(said()).toMatch(/from Apple/);
+    expect(downloadLocalModel).not.toHaveBeenCalled();
+    localEngine.mockResolvedValue({
+      status: "downloading",
+      language: "fr-FR" as never,
+      fraction: 0.42,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Download model" }));
+    expect(downloadLocalModel).toHaveBeenCalledWith("fr");
+    expect(screen.queryByRole("button", { name: "Download model" })).toBeNull();
+    expect(await screen.findByText(/42%/, {}, { timeout: 3_000 })).toBeVisible();
+  });
+
+  it("tells the composers once the model has arrived", async () => {
+    const { localEngine, status } = await show(
+      { transcriptionEngine: "apple-speech", language: "fr" },
+      { status: "downloading", language: "fr-FR" as never, fraction: 0.9 },
+    );
+    const before = status.mock.calls.length;
+    localEngine.mockResolvedValue({ status: "ready", language: "fr-FR" as never });
+    expect(await screen.findByText(/no recording leaves it/, {}, { timeout: 3_000 })).toBeVisible();
+    expect(status.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it("says a download failed and offers it again", async () => {
+    const { downloadLocalModel } = await show(
+      { transcriptionEngine: "apple-speech" },
+      { status: "download-failed", language: "nb-NO" as never },
+    );
+    expect(said()).toMatch(/could not be downloaded/);
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(downloadLocalModel).toHaveBeenCalledWith(undefined);
+  });
+
+  it("names the language problem without offering a download", async () => {
+    await show(
+      { transcriptionEngine: "apple-speech", language: "uk" },
+      { status: "unsupported-language" },
+    );
+    expect(said()).toMatch(/no on-device model/);
+    expect(screen.queryByRole("button", { name: "Download model" })).toBeNull();
   });
 });

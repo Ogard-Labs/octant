@@ -17,6 +17,7 @@ import { endpointPreset } from "./addEndpointSteps";
 import { AddEndpointFlow, type AddEndpointFlowProps, type AddedEndpoint } from "./AddEndpointFlow";
 import { EndpointChoices } from "./AddModelEndpoint";
 import { endpointStatus, type EndpointStatus, type ModelEndpointInstance } from "./endpointStatus";
+import { VoiceTip } from "./VoiceTip";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-0000000004a7");
 const READY: EndpointStatus = { tone: "ready", label: "Ready" };
@@ -1109,6 +1110,24 @@ describe("voice models on a new endpoint", () => {
     expect(tip).toHaveTextContent("whisper-1 can turn your speech into text.");
     await user.click(within(tip).getByRole("button", { name: "Use for Transcription" }));
     expect(onUseForTranscription).toHaveBeenCalledWith(id, "whisper-1");
+  });
+
+  it("still offers the endpoint's model while Apple Speech transcribes instead", () => {
+    const transcription = { providerInstanceId: id, modelId: "whisper-1" as never };
+    const tip = (settings: NonNullable<Parameters<typeof VoiceTip>[0]["links"]["settings"]>) =>
+      render(
+        <VoiceTip
+          instanceId={id}
+          instanceName="Team gateway"
+          links={{ settings, onUseForTranscription: vi.fn(), onOpenVoice: vi.fn() }}
+          voiceModels={{ transcription: "whisper-1" }}
+        />,
+      );
+    const { unmount } = tip({ transcription });
+    expect(screen.getByTestId("voice-tip")).toHaveTextContent("Transcription uses whisper-1");
+    unmount();
+    tip({ transcription, transcriptionEngine: "apple-speech" });
+    expect(screen.getByRole("button", { name: "Use for Transcription" })).toBeVisible();
   });
 
   it("offers no voice tip for an endpoint Voice could not use, even when it lists a voice model", async () => {
