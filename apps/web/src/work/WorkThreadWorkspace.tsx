@@ -205,6 +205,7 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
+import { ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
 import {
@@ -3270,33 +3271,41 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             restoreKey={`work:${String(props.threadId)}`}
             role="log"
             trail={
-              (imageClient === undefined || props.imageGenerationProfiles === undefined) &&
-              props.browserAutomationClient === undefined ? null : (
-                <div className="work-thread-workspace__transcript-trail">
-                  {imageClient === undefined ||
-                  props.imageGenerationProfiles === undefined ? null : (
-                    <GeneratedImageJobs
-                      canSaveToProject
-                      client={imageClient}
-                      jobs={threadImages.jobs.filter(
-                        (job) => !imagePlacement.placed.has(String(job.id)),
-                      )}
-                      onAttach={(file) => images.attach([file])}
-                      onEnqueued={threadImages.refresh}
-                      onSaveToProject={saveGeneratedImage}
-                      profiles={props.imageGenerationProfiles}
-                      scopeId={decodeImageGenerationScopeId(String(props.threadId))}
-                      threadKind="work-thread"
-                    />
-                  )}
-                  {props.browserAutomationClient === undefined ? null : (
-                    <BrowserCaptureList
-                      client={props.browserAutomationClient}
-                      threadId={decodeBrowserThreadId(String(props.threadId))}
-                    />
-                  )}
-                </div>
-              )
+              <>
+                <ThreadSecrets
+                  key={`secrets-${String(props.threadId)}`}
+                  threadId={String(props.threadId)}
+                  serverUrl={props.serverUrl}
+                  windowCapability={props.windowCapability}
+                />
+                {(imageClient === undefined || props.imageGenerationProfiles === undefined) &&
+                props.browserAutomationClient === undefined ? null : (
+                  <div className="work-thread-workspace__transcript-trail">
+                    {imageClient === undefined ||
+                    props.imageGenerationProfiles === undefined ? null : (
+                      <GeneratedImageJobs
+                        canSaveToProject
+                        client={imageClient}
+                        jobs={threadImages.jobs.filter(
+                          (job) => !imagePlacement.placed.has(String(job.id)),
+                        )}
+                        onAttach={(file) => images.attach([file])}
+                        onEnqueued={threadImages.refresh}
+                        onSaveToProject={saveGeneratedImage}
+                        profiles={props.imageGenerationProfiles}
+                        scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                        threadKind="work-thread"
+                      />
+                    )}
+                    {props.browserAutomationClient === undefined ? null : (
+                      <BrowserCaptureList
+                        client={props.browserAutomationClient}
+                        threadId={decodeBrowserThreadId(String(props.threadId))}
+                      />
+                    )}
+                  </div>
+                )}
+              </>
             }
           />
         </SelectionThreadScope>
