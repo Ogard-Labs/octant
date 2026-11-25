@@ -23,11 +23,15 @@ export interface ThreadArtifactPurgeInput {
    */
   readonly managedWorktreeRootPath: (repositoryRoot: string, repositoryId: string) => string;
   /**
-   * Runs one receipt's removal while no cleanup or restore of it is in flight,
-   * so a restore cannot recreate a folder and branch for a thread the purge is
-   * erasing. Absent runs it at once.
+   * Runs the purge while it holds each of the thread's worktree receipts, with
+   * no cleanup or restore of one in flight, so a restore cannot recreate a
+   * folder and branch for a thread the purge is erasing. The turns are taken
+   * before anything is deleted: one that is not granted throws, and the thread
+   * is left whole for the purge to be tried again. Absent runs it at once.
    */
   readonly whileReceiptIdle?: (receiptId: string, run: () => Promise<void>) => Promise<void>;
+  /** Runs once the receipts are held, before the first deletion. */
+  readonly beforeRemoval?: () => Promise<void>;
   readonly purgeChatAttachments: (threadId: string) => Promise<void>;
   readonly purgeWorkAttachments: (threadId: string) => Promise<void>;
   readonly purgeCodeAttachments: (threadId: string) => Promise<void>;
@@ -44,6 +48,25 @@ export interface ThreadArtifactPurgeInput {
 }
 
 export async function purgeThreadArtifacts(input: ThreadArtifactPurgeInput): Promise<void> {
+  const receipts = await readWorktreeReceipts(input);
+  const idle = input.whileReceiptIdle ?? ((_receiptId, run) => run());
+  const ours = receipts.filter(
+    (receipt) => receipt.threadId === input.threadId && receipt.deletable,
+  );
+  const hold = (index: number): Promise<void> => {
+    const receipt = ours[index];
+    return receipt === undefined
+      ? purgeHeld(input, receipts)
+      : idle(receipt.receiptId, () => hold(index + 1));
+  };
+  await hold(0);
+}
+
+async function purgeHeld(
+  input: ThreadArtifactPurgeInput,
+  receipts: ReadonlyArray<StoredWorktreeReceipt>,
+): Promise<void> {
+  await input.beforeRemoval?.();
   const anchors = listThreadFileAnchors(input.connection, input.mode, input.threadId);
   await removeMirrorFiles(input.connection, anchors.canvasIds);
   await input.purgeChatAttachments(input.threadId);
@@ -64,7 +87,7 @@ export async function purgeThreadArtifacts(input: ThreadArtifactPurgeInput): Pro
       input.dataDirectory,
     );
   }
-  await removeOwnedWorktrees(input);
+  await removeOwnedWorktrees(input, receipts);
 }
 
 /**
@@ -167,7 +190,9 @@ interface StoredWorktreeReceipt {
   readonly deletable: boolean;
 }
 
-async function removeOwnedWorktrees(input: ThreadArtifactPurgeInput): Promise<void> {
+async function readWorktreeReceipts(
+  input: ThreadArtifactPurgeInput,
+): Promise<ReadonlyArray<StoredWorktreeReceipt>> {
   const directory = join(input.dataDirectory, "managed-worktree-receipts");
   const receipts: Array<StoredWorktreeReceipt> = [];
   for (const name of await readNames(directory)) {
@@ -180,20 +205,25 @@ async function removeOwnedWorktrees(input: ThreadArtifactPurgeInput): Promise<vo
       ...worktreeReceiptEvidence(parsed, input),
     });
   }
+  return receipts;
+}
+
+/** Runs with the thread's receipts held; see `whileReceiptIdle`. */
+async function removeOwnedWorktrees(
+  input: ThreadArtifactPurgeInput,
+  receipts: ReadonlyArray<StoredWorktreeReceipt>,
+): Promise<void> {
   const kept = new Set<string>();
   for (const receipt of receipts) {
     if (receipt.path !== undefined && receipt.threadId !== input.threadId) kept.add(receipt.path);
   }
   const blocked = receipts.some((receipt) => !receipt.deletable);
-  const idle = input.whileReceiptIdle ?? ((_receiptId, run) => run());
   for (const receipt of receipts) {
     if (receipt.threadId !== input.threadId || !receipt.deletable) continue;
-    await idle(receipt.receiptId, async () => {
-      await rm(receipt.file, { force: true });
-      if (!blocked && receipt.path !== undefined && !kept.has(receipt.path)) {
-        await removeDirectory(receipt.path, input.dataDirectory);
-      }
-    });
+    await rm(receipt.file, { force: true });
+    if (!blocked && receipt.path !== undefined && !kept.has(receipt.path)) {
+      await removeDirectory(receipt.path, input.dataDirectory);
+    }
   }
 }
 
