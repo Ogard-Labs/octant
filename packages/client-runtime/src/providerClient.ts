@@ -5,9 +5,9 @@ import {
   type ProviderRegistryCommand,
   type ProviderRegistryCommandResult,
   ProviderRegistrySnapshot,
-  ThreadNativeSetupResult,
-  ThreadProjectCodeResult,
-  ThreadProviderMentionsResult,
+  type ThreadNativeSetupResult,
+  type ThreadProjectCodeResult,
+  type ThreadProviderMentionsResult,
   decodeHostAnswer,
   type ThreadNativeSetupRequest,
 } from "@octant/contracts";
@@ -86,7 +86,8 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
         "command",
       );
     },
-    threadNativeSetup(threadRequest) {
+    async threadNativeSetup(threadRequest) {
+      const { ThreadNativeSetupResult } = await import("@octant/contracts/provider-commands");
       return request(
         options.fetch,
         new URL("/api/providers/thread-native-setup", options.baseUrl).toString(),
@@ -99,7 +100,8 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
         "command",
       );
     },
-    threadProjectCode(threadRequest) {
+    async threadProjectCode(threadRequest) {
+      const { ThreadProjectCodeResult } = await import("@octant/contracts/provider-commands");
       return request(
         options.fetch,
         new URL("/api/providers/thread-native-setup", options.baseUrl).toString(),
@@ -112,7 +114,8 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
         "command",
       );
     },
-    threadProviderMentions(threadRequest) {
+    async threadProviderMentions(threadRequest) {
+      const { ThreadProviderMentionsResult } = await import("@octant/contracts/provider-commands");
       return request(
         options.fetch,
         new URL("/api/providers/thread-native-setup", options.baseUrl).toString(),

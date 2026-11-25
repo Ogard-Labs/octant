@@ -810,6 +810,18 @@ describe("an outside image driver's later fixes", () => {
         }),
         "https://evil.example.test/x",
       ],
+      [
+        '{"url":"https://cdn.images.example.test/image.png?label=\\u0022https://evil.example.test/x\\u0022"}',
+        "https://evil.example.test/x",
+      ],
+      [
+        '{"url":"https://cdn.images.example.test/image.png?label=\\u0022https://evil.example.test/x\\u0022"}',
+        "https://cdn.images.example.test/image.png?label=",
+      ],
+      [
+        'data: {"url":"https://cdn.images.example.test/image.png?label=\\u0022https://evil.example.test/x\\u0022"}\n\n',
+        "https://evil.example.test/x",
+      ],
     ] as const) {
       const run = harness({
         handlers: {

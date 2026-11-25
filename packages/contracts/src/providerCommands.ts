@@ -571,3 +571,9 @@ export const decodeProviderRegistryCommand = Schema.decodeUnknownSync(ProviderRe
 export const decodeProviderRegistryCommandResult = Schema.decodeUnknownSync(
   ProviderRegistryCommandResult,
 );
+
+export {
+  ThreadNativeSetupResult,
+  ThreadProjectCodeResult,
+  ThreadProviderMentionsResult,
+} from "./threadNativeSetup";

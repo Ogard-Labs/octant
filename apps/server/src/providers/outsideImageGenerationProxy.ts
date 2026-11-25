@@ -418,18 +418,18 @@ function extractReturnedAddresses(responseText: string, out: Set<string>, comple
       }
     }
   }
-  const text = responseText
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_escape, hex: string) =>
-      String.fromCharCode(Number.parseInt(hex, 16)),
-    )
-    .replaceAll("\\/", "/");
-  // Complete double-quoted strings (e.g. JSON inside SSE chunks) may contain
-  // apostrophes or pipes; requiring both unescaped quotes ensures truncated
-  // chunks never match a partial URL.
-  for (const match of text.matchAll(/(?<!\\)"(https?:\/\/[^"\\\s<>`{}^]+)(?<!\\)"/g)) {
-    if (match[1] !== undefined) add(match[1]);
+  // Parse complete JSON string literals (e.g. inside SSE chunks) directly so
+  // escaped quotes or delimiters never split one URL into inner URLs, and
+  // truncated chunks without a closing quote match nothing.
+  for (const match of responseText.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+    try {
+      const decoded: unknown = JSON.parse(match[0]);
+      if (typeof decoded === "string") collectJsonStringAddresses(decoded, add);
+    } catch {
+      // Incomplete or non-JSON quoted text; ignore.
+    }
   }
-  for (const match of text.matchAll(/(?:^|\s)<(https?:\/\/[^\s"<>\\`{}^]+)>/g)) {
+  for (const match of responseText.matchAll(/(?:^|\s)<(https?:\/\/[^\s"<>\\`{}^]+)>/g)) {
     if (match[1] !== undefined) add(match[1]);
   }
   // SSE `data:` fields allow zero or one space after the colon and LF, CRLF,
@@ -438,20 +438,23 @@ function extractReturnedAddresses(responseText: string, out: Set<string>, comple
   const sseData = complete
     ? /(?:^|\r\n|\n|\r)data: ?(https?:\/\/[^\s"<>\\`{}^]+)(?=$|\r\n|\n|\r)/g
     : /(?:^|\r\n|\n|\r)data: ?(https?:\/\/[^\s"<>\\`{}^]+)(?=\r\n|\n|\r)/g;
-  for (const match of text.matchAll(sseData)) {
+  for (const match of responseText.matchAll(sseData)) {
     if (match[1] !== undefined) add(match[1]);
   }
   const bare = complete
     ? /(?:^|[\s(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=$|[\s"<>\\`{}^)\]}])/g
     : /(?:^|[\s(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=[\s"<>\\`{}^)\]}])/g;
-  for (const match of text.matchAll(bare)) {
+  for (const match of responseText.matchAll(bare)) {
     if (match[1] !== undefined) add(match[1]);
   }
 }
 
 function collectJsonStringAddresses(text: string, add: (candidate: string) => void): void {
-  if ((text.startsWith("http://") || text.startsWith("https://")) && !/[\s"<>\\`{}^]/.test(text)) {
-    add(text);
+  // Treat any whitespace-free string starting with http(s):// as an atomic URL:
+  // accept it only if it contains no forbidden characters, and never fall
+  // through to prose-link scanning that could split on embedded quotes.
+  if ((text.startsWith("http://") || text.startsWith("https://")) && !/\s/.test(text)) {
+    if (!/["<>\\`{}^]/.test(text)) add(text);
     return;
   }
   for (const match of text.matchAll(/(?:^|\s)<(https?:\/\/[^\s"<>\\`{}^]+)>/g)) {

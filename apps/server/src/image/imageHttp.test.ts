@@ -341,4 +341,51 @@ describe("the pinned approved-image transport", () => {
       await new Promise<void>((closed) => server.close(() => closed()));
     }
   });
+
+  it("succeeds when a deflate or Brotli response cleanly finishes trailing bytes after decoder EOF", async () => {
+    const payloads = {
+      "/deflate-trailing.png": {
+        encoding: "deflate",
+        body: deflateSync(Buffer.from(png)),
+      },
+      "/brotli-trailing.png": {
+        encoding: "br",
+        body: brotliCompressSync(Buffer.from(png)),
+      },
+    } as const;
+    const server = createServer((request, response) => {
+      const entry =
+        request.url === "/deflate-trailing.png" || request.url === "/brotli-trailing.png"
+          ? payloads[request.url]
+          : undefined;
+      if (entry === undefined) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      response.writeHead(200, {
+        "content-type": "image/png",
+        "content-encoding": entry.encoding,
+        "content-length": String(entry.body.byteLength + 2),
+      });
+      response.write(entry.body, () => {
+        setTimeout(() => response.end(Buffer.from([0x00, 0x00])), 10);
+      });
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const origin = `http://images.proxy.test:${port}`;
+      const fetch = makePinnedImageFetch({
+        resolveAll: async () => ["127.0.0.1"],
+        allowedOrigin: origin,
+      });
+      for (const path of ["/deflate-trailing.png", "/brotli-trailing.png"] as const) {
+        const result = await fetchWith(fetch, `${origin}${path}`);
+        expect(result).toEqual({ bytes: png });
+      }
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
+  });
 });
