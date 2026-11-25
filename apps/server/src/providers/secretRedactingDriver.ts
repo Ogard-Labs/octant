@@ -81,7 +81,12 @@ export function redactProviderRuntimeEvent(event: ProviderRuntimeEvent): Provide
   const readable = (forgeReferences ?? []).flatMap((reference, index) => {
     const { forge, kind, action } = event.forgeReferences?.[index] ?? reference;
     const kept: unknown = { ...reference, forge, kind, action };
-    return isForgeReference(kept) ? [kept] : [];
+    if (isForgeReference(kept)) return [kept];
+    // Its address only helps to find it; the rest still names it.
+    if (!("url" in reference)) return [];
+    const { url: _url, ...rest } = reference;
+    const named: unknown = { ...rest, forge, kind, action };
+    return isForgeReference(named) ? [named] : [];
   });
   return readable.length === 0 ? rest : { ...rest, forgeReferences: readable };
 }

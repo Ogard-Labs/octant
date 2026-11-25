@@ -178,6 +178,20 @@ describe("secret redaction at the driver boundary", () => {
               summary: "Done.",
               forgeReferences: [{ ...reference, owner: "acme-private" }],
             }),
+            event({
+              kind: "tool-success",
+              toolCallId: "call",
+              summary: "Done.",
+              forgeReferences: [
+                {
+                  forge: "linear",
+                  kind: "issue",
+                  action: "edited",
+                  identifier: "ABC-1",
+                  url: "https://linear.app/team/issue/ABC-1/acme-private",
+                },
+              ],
+            }),
           ]),
         ),
       );
@@ -191,6 +205,11 @@ describe("secret redaction at the driver boundary", () => {
         },
         { forgeReferences: [{ ...reference, title: `Use ${SECRET_REDACTION}` }] },
         { summary: "Done." },
+        {
+          forgeReferences: [
+            { forge: "linear", kind: "issue", action: "edited", identifier: "ABC-1" },
+          ],
+        },
       ]);
       expect(events[2]).not.toHaveProperty("forgeReferences");
       for (const item of events) expect(decodeProviderRuntimeEvent(item)).toEqual(item);
