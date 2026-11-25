@@ -185,7 +185,9 @@
 }
 
 .pr-page .work-list__list {
-  gap: 4px;
+  --work-list-gap: 4px;
+
+  gap: var(--work-list-gap);
   margin: 0;
 }
 

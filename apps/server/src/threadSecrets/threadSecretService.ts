@@ -3,6 +3,15 @@ import type {
   CredentialRequestResolution,
 } from "@octant/contracts/credential-request";
 import type {
+  SecretStoreBrowseResult,
+  SecretStoreBrowseStep,
+} from "@octant/contracts/secret-stores";
+import {
+  MAX_THREAD_SECRETS_LISTED,
+  type ThreadSecretsHostView,
+} from "@octant/contracts/thread-secrets";
+import type { EventActor } from "@octant/contracts";
+import type {
   ActiveThreadSecret,
   ThreadSecretAnswer,
   ThreadSecretAnswerField,
@@ -83,8 +92,28 @@ export interface ThreadSecretServiceOptions {
     | undefined;
   /** Absent on a host with no credential store, which offers to remember nothing. */
   readonly remembered?: RememberedThreadSecrets | undefined;
+  /** Lists names in the store linked on this computer, and never anything an item holds. */
+  readonly browse?:
+    | ((step: SecretStoreBrowseStep, signal: AbortSignal) => Promise<SecretStoreBrowseResult>)
+    | undefined;
+  /** Names a thread for the person's list of active secrets. */
+  readonly threadTitle?: ((threadId: string) => string | undefined) | undefined;
   /** The waiting cards or the active list changed. */
   readonly onChanged?: (() => void) | undefined;
+  /**
+   * Whether a reader other than the window that raised a card may answer it.
+   * Absent, only that window may.
+   */
+  readonly mayAnswer?:
+    | ((
+        reader: { readonly scopeId: string; readonly paired: boolean },
+        raised: {
+          readonly windowId: string;
+          readonly threadId: string;
+          readonly mode: "work" | "code";
+        },
+      ) => boolean)
+    | undefined;
   /** A card began to wait. Names the thread and the card and nothing of its content. */
   readonly onAsked?:
     | ((ask: { readonly threadId: string; readonly askId: string }) => void)
@@ -139,7 +168,27 @@ interface RetriedAnswer {
   settled: boolean;
 }
 
+/** Who reads or answers: a window here, or a device the person at this host paired. */
+export interface ThreadSecretReader {
+  readonly paired: boolean;
+  /** Whom a grant is journaled as; absent means the person at this host. */
+  readonly actor?: EventActor | undefined;
+  /** Whether a device's session still stands. Asked again after each wait. */
+  readonly current?: (() => boolean) | undefined;
+}
+
+/** A card waiting on the person, as a list of asks names it. Nothing typed is in it. */
+export interface WaitingThreadSecret {
+  readonly askId: string;
+  readonly threadId: string;
+  readonly kind: ThreadSecretRequestCard["kind"];
+  readonly label: string;
+  readonly reason: string;
+  readonly requestedAt: string;
+}
+
 interface PendingRequest {
+  readonly requestedAt: number;
   readonly caller: ThreadSecretCaller;
   readonly input: ThreadSecretRequestInput;
   readonly card: ThreadSecretRequestCard;
@@ -185,6 +234,7 @@ export type ThreadSecretLoan =
 const MAX_PENDING_REQUESTS = 256;
 /** Few enough that no thread's cards can keep another thread's from opening. */
 const MAX_PENDING_PER_THREAD = 2;
+const MAX_ANSWERED_PER_THREAD = 4;
 const MAX_ACTIVE_PER_THREAD = 64;
 /** A handle the agent never uses is not kept past this many newer ones. */
 const MAX_HANDLES_PER_SECRET = 8;
@@ -241,6 +291,11 @@ const refusal = (failure: ThreadSecretFailure): ThreadSecretRequestResult => ({
 export class ThreadSecretService {
   readonly #options: ThreadSecretServiceOptions;
   readonly #pending = new Map<string, PendingRequest>();
+  /** How the turn's last cards ended, so each can say so until its turn does. */
+  readonly #answered: Array<{
+    readonly caller: ThreadSecretCaller;
+    readonly card: ThreadSecretRequestCard;
+  }> = [];
   readonly #active = new Map<string, ActiveSecret>();
   /** Handle to secret id, oldest first. */
   readonly #handles = new Map<string, string>();
@@ -318,18 +373,18 @@ export class ThreadSecretService {
     return answer;
   }
 
-  /** The person's answer to a card in their own window. */
+  /** The person's answer to a card, from the window that raised it or another place they are. */
   async answer(
-    windowId: string,
+    scopeId: string,
     threadId: string,
     answer: ThreadSecretAnswer,
-    from: { readonly paired: boolean },
+    from: ThreadSecretReader,
   ): Promise<ThreadSecretCommandResult> {
     this.sweep();
     const pending = this.#pending.get(answer.id);
     if (
       pending === undefined ||
-      pending.caller.windowId !== windowId ||
+      !this.#answerableBy(pending.caller, scopeId, from) ||
       pending.caller.threadId !== threadId ||
       pending.state !== "pending"
     )
@@ -342,7 +397,9 @@ export class ThreadSecretService {
     pending.state = "saving";
     pending.failure = undefined;
     this.#changed();
-    const result = await this.#save(pending, answer, from).catch(
+    const permitted = () =>
+      from.current?.() !== false && this.#answerableBy(pending.caller, scopeId, from);
+    const result = await this.#save(pending, answer, from, permitted).catch(
       (): ThreadSecretFailure => "unavailable",
     );
     // The turn, thread or window may have ended while an item was read.
@@ -350,32 +407,74 @@ export class ThreadSecretService {
     if (typeof result === "string") {
       // The card stays open: a locked store can be unlocked, a value retyped.
       pending.state = "pending";
-      pending.failure = result;
+      const stands = permitted();
+      if (stands) pending.failure = result;
       this.#changed();
-      return { status: "refused", failure: result };
+      return stands ? { status: "refused", failure: result } : { status: "gone" };
     }
     pending.settle(result);
     return { status: "accepted" };
   }
 
   /**
-   * What a window may see of a thread: the cards it raised itself, and every
-   * active secret, which the person ends from whichever window they are in.
+   * What a window or device may see of a thread: the cards it may answer, and
+   * every active secret, which the person ends from wherever they are.
    */
-  view(windowId: string, threadId: string): ThreadSecretsView {
+  view(
+    scopeId: string,
+    threadId: string,
+    from: ThreadSecretReader = { paired: false },
+  ): ThreadSecretsView {
     this.sweep();
+    const own = (caller: ThreadSecretCaller) =>
+      caller.threadId === threadId && this.#answerableBy(caller, scopeId, from);
+    const shown = (card: ThreadSecretRequestCard) => (from.paired ? withoutStore(card) : card);
     return {
-      requests: [...this.#pending.values()]
-        .filter(
-          (pending) => pending.caller.windowId === windowId && pending.caller.threadId === threadId,
-        )
-        .map((pending) => ({
-          ...pending.card,
-          state: pending.state,
-          ...(pending.failure === undefined ? {} : { failure: pending.failure }),
-        })),
+      requests: [
+        ...this.#answered.filter(({ caller }) => own(caller)).map(({ card }) => shown(card)),
+        ...[...this.#pending.values()]
+          .filter(({ caller }) => own(caller))
+          .map((pending) => ({
+            ...shown(pending.card),
+            state: pending.state,
+            ...(pending.failure === undefined ? {} : { failure: pending.failure }),
+          })),
+      ],
       active: this.active(threadId),
     };
+  }
+
+  /** The cards waiting on this reader, for the list of everything that waits. */
+  waiting(scopeId: string, from: ThreadSecretReader): ReadonlyArray<WaitingThreadSecret> {
+    this.sweep();
+    return [...this.#pending.values()]
+      .filter(
+        ({ caller, state }) => state === "pending" && this.#answerableBy(caller, scopeId, from),
+      )
+      .map(({ caller, card, requestedAt }) => ({
+        askId: card.id,
+        threadId: caller.threadId,
+        kind: card.kind,
+        label: card.label,
+        reason: card.reason,
+        requestedAt: new Date(requestedAt).toISOString(),
+      }));
+  }
+
+  /**
+   * The window or device that raised a card answers it. Another place does
+   * only while the thread still stands and its host admits it there.
+   */
+  #answerableBy(caller: ThreadSecretCaller, scopeId: string, from: ThreadSecretReader): boolean {
+    if (caller.windowId === scopeId) return true;
+    const mode = this.#authority(caller)?.mode;
+    return (
+      (mode === "work" || mode === "code") &&
+      this.#options.mayAnswer?.(
+        { scopeId, paired: from.paired },
+        { windowId: caller.windowId, threadId: caller.threadId, mode },
+      ) === true
+    );
   }
 
   active(threadId?: string): ReadonlyArray<ActiveThreadSecret> {
@@ -397,11 +496,81 @@ export class ThreadSecretService {
       }));
   }
 
+  /** Whether a path is the file of a secret this thread holds. */
+  ownsFile(threadId: string, path: string): boolean {
+    return [...this.#active.values()].some(
+      (secret) => secret.threadId === threadId && secret.path === path,
+    );
+  }
+
+  /**
+   * Names in the linked store, while a card this window may answer waits for a
+   * 1Password answer: nothing else has a reason to see them.
+   */
+  async browse(
+    windowId: string,
+    threadId: string,
+    requestId: string,
+    step: SecretStoreBrowseStep,
+  ): Promise<SecretStoreBrowseResult> {
+    this.sweep();
+    const waiting = (): PendingRequest | undefined => {
+      const pending = this.#pending.get(requestId);
+      return pending !== undefined &&
+        pending.state === "pending" &&
+        this.#answerableBy(pending.caller, windowId, { paired: false }) &&
+        pending.caller.threadId === threadId &&
+        pending.card.sources.includes("onepassword") &&
+        this.#authority(pending.caller) !== undefined
+        ? pending
+        : undefined;
+    };
+    const pending = waiting();
+    if (pending === undefined) return { status: "unavailable" };
+    if (this.#options.browse === undefined) return { status: "not-linked" };
+    const result = await this.#options
+      .browse(
+        step,
+        AbortSignal.any([pending.lookup.signal, AbortSignal.timeout(LOOKUP_TIMEOUT_MS)]),
+      )
+      .catch(() => ({ status: "unavailable" as const }));
+    return waiting() === pending ? result : { status: "unavailable" };
+  }
+
+  /** Everything the person may end: the newest active secrets and all that is remembered. */
+  hostView(): ThreadSecretsHostView {
+    this.sweep();
+    return {
+      active: this.active()
+        .slice(-MAX_THREAD_SECRETS_LISTED)
+        .map((secret) => {
+          const threadTitle = this.#options.threadTitle?.(secret.threadId);
+          return { ...secret, ...(threadTitle === undefined ? {} : { threadTitle }) };
+        }),
+      remembered: this.#options.remembered?.list() ?? [],
+    };
+  }
+
+  /** Removes a remembered secret; a thread it was given to keeps it for its own time. */
+  async forget(id: string): Promise<ThreadSecretCommandResult> {
+    const { remembered } = this.#options;
+    if (remembered === undefined || !remembered.list().some((entry) => entry.id === id))
+      return { status: "gone" };
+    return (await remembered.forget(id))
+      ? { status: "accepted" }
+      : { status: "refused", failure: "unavailable" };
+  }
+
   revoke(threadId: string, secretId: string): ThreadSecretCommandResult {
     const secret = this.#active.get(secretId);
     if (secret === undefined || secret.threadId !== threadId) return { status: "gone" };
     this.#end([secret], "person");
     return { status: "accepted" };
+  }
+
+  /** Whether anything on this host can use a handle. */
+  hasConsumer(): boolean {
+    return this.#consumers.size > 0;
   }
 
   /**
@@ -562,6 +731,7 @@ export class ThreadSecretService {
       "turn-ended",
     );
     this.#endLeases((lease) => lease.threadId === threadId && lease.turnId === turnId);
+    this.#dropAnswered((caller) => caller.threadId === threadId && caller.turnId === turnId);
   }
 
   /** The thread was archived or deleted. */
@@ -573,10 +743,12 @@ export class ThreadSecretService {
       "thread-archived",
     );
     this.#endLeases((lease) => lease.threadId === threadId);
+    this.#dropAnswered((caller) => caller.threadId === threadId);
     this.#answers.delete(threadId);
   }
 
   revokeWindow(windowId: string): void {
+    this.#dropAnswered((caller) => caller.windowId === windowId);
     for (const pending of this.#pending.values())
       if (pending.caller.windowId === windowId) this.#cancel(pending);
   }
@@ -701,6 +873,7 @@ export class ThreadSecretService {
           const stop = () => this.#cancel(pending);
           let settled = false;
           const pending: PendingRequest = {
+            requestedAt: this.#options.now(),
             caller,
             input,
             card,
@@ -715,6 +888,8 @@ export class ThreadSecretService {
               signal?.removeEventListener("abort", stop);
               pending.lookup.abort();
               this.#pending.delete(id);
+              if (result.status === "saved" || result.status === "declined")
+                this.#keepAnswered(caller, { ...card, state: result.status });
               this.#changed();
               resolve(result);
             },
@@ -777,7 +952,8 @@ export class ThreadSecretService {
   async #save(
     pending: PendingRequest,
     answer: Extract<ThreadSecretAnswer, { readonly action: "save" }>,
-    from: { readonly paired: boolean },
+    from: ThreadSecretReader,
+    permitted: () => boolean,
   ): Promise<ThreadSecretFailure | ThreadSecretRequestResult> {
     const { card, caller, input } = pending;
     if (
@@ -792,6 +968,7 @@ export class ThreadSecretService {
       answered.set(entry.name, read);
     }
     if (this.#pending.get(card.id) !== pending) return "revoked";
+    if (!permitted()) return "unavailable";
     // Read after every await: a card drawn before Strict came on grants nothing
     // Strict refuses.
     const authority = this.#authority(caller);
@@ -805,7 +982,7 @@ export class ThreadSecretService {
     // The tool call is back on record before it has any effect.
     pending.answered();
     if (answer.lifetime !== "remember")
-      return this.#grant(pending, answered, answer.lifetime, authority, authority.mode);
+      return this.#grant(pending, answered, answer.lifetime, authority, authority.mode, from.actor);
     const kept = await this.#remember(pending, answered);
     if (kept === undefined) return "unavailable";
     // Kept while the thread, window or Strict could change; granted only if they did not.
@@ -816,6 +993,7 @@ export class ThreadSecretService {
         : decideThreadSecretLifetime({ ...still, kind: input.kind }, answer.lifetime);
     if (
       this.#pending.get(card.id) !== pending ||
+      !permitted() ||
       still === undefined ||
       still.mode === "chat" ||
       decision?.status !== "allowed"
@@ -823,7 +1001,7 @@ export class ThreadSecretService {
       await this.#forgetAll(kept);
       return decision?.status === "refused" ? decision.failure : "unavailable";
     }
-    const result = this.#grant(pending, answered, answer.lifetime, still, still.mode);
+    const result = this.#grant(pending, answered, answer.lifetime, still, still.mode, from.actor);
     if (typeof result === "string") await this.#forgetAll(kept);
     else
       for (const [secretName, id] of kept)
@@ -864,7 +1042,7 @@ export class ThreadSecretService {
   async #answeredField(
     pending: PendingRequest,
     entry: ThreadSecretAnswerField,
-    from: { readonly paired: boolean },
+    from: ThreadSecretReader,
   ): Promise<AnsweredField | { readonly failure: ThreadSecretFailure }> {
     switch (entry.source) {
       case "pasted":
@@ -933,6 +1111,7 @@ export class ThreadSecretService {
     lifetime: ThreadSecretLifetime,
     authority: ThreadSecretAuthority,
     mode: "work" | "code",
+    actor: EventActor | undefined,
   ): ThreadSecretFailure | ThreadSecretRequestResult {
     const { input, caller, card } = pending;
     const wanted = resolveThreadSecretDelivery({
@@ -963,9 +1142,13 @@ export class ThreadSecretService {
           return "unavailable";
         }
         // "Shown as typed" is the agent's word. It spares an email address the
-        // person typed and saw; it never spares an account's own password, or
-        // a stored value nobody looked at.
-        const plain = !shown.secret && value.source === "pasted" && input.kind === "token";
+        // person typed and saw; it never spares an account's own password, a
+        // stored value nobody looked at, or several lines, which no card shows.
+        const plain =
+          !shown.secret &&
+          value.source === "pasted" &&
+          input.kind === "token" &&
+          !/[\r\n]/u.test(value.value);
         // Nothing of an item read at each use is kept, so nothing is there to print.
         const release = plain || value.eachUse ? undefined : this.#options.hold(value.value);
         const secret: ActiveSecret = {
@@ -1017,6 +1200,7 @@ export class ThreadSecretService {
             delivery: secret.delivery,
           }),
         ),
+        actor,
       );
     } catch {
       undo();
@@ -1108,6 +1292,19 @@ export class ThreadSecretService {
     return [...this.#active.values()].find(
       (secret) => secret.threadId === threadId && secret.secretName === secretName,
     );
+  }
+
+  #keepAnswered(caller: ThreadSecretCaller, card: ThreadSecretRequestCard): void {
+    this.#answered.push({ caller, card });
+    const own = this.#answered.filter((entry) => entry.caller.threadId === caller.threadId);
+    const [oldest] = own;
+    if (own.length > MAX_ANSWERED_PER_THREAD && oldest !== undefined)
+      this.#answered.splice(this.#answered.indexOf(oldest), 1);
+  }
+
+  #dropAnswered(which: (caller: ThreadSecretCaller) => boolean): void {
+    for (const entry of this.#answered.filter(({ caller }) => which(caller)))
+      this.#answered.splice(this.#answered.indexOf(entry), 1);
   }
 
   #cancel(pending: PendingRequest): void {
@@ -1349,5 +1546,17 @@ function journaled(secret: ActiveSecret): JournaledCommon {
     mode: secret.mode,
     secretName: secret.secretName,
     kind: secret.kind,
+  };
+}
+
+/** A card as a device away from this computer sees it: the linked store stays with its person there. */
+function withoutStore(card: ThreadSecretRequestCard): ThreadSecretRequestCard {
+  const remembered = card.remembered.filter(({ source }) => source === "pasted");
+  return {
+    ...card,
+    remembered,
+    sources: card.sources.filter(
+      (source) => source === "pasted" || (source === "remembered" && remembered.length > 0),
+    ),
   };
 }

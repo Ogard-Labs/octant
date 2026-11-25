@@ -1611,6 +1611,10 @@ describe("Codex thread and turn lifecycle", () => {
     expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
       dynamicTools: [{ type: "function", ...tool }],
     });
+    // Codex lists a tool that is not deferred; a deferred one is found only by search.
+    expect(JSON.stringify(f.calls.find(({ method }) => method === "thread/start"))).not.toContain(
+      "deferLoading",
+    );
 
     const eventsPromise = takeEvents(acquired.connection, 1);
     await Effect.runPromise(

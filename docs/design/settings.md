@@ -593,7 +593,7 @@ program in the terminal asked, not the thread's agent
 ## Secret stores
 
 Settings › Secret stores sits with Permissions under Safety and is
-host-scoped. It has two cards. **Linked secret stores** is a plain row per
+host-scoped. Its first two cards concern the store. **Linked secret stores** is a plain row per
 tool: the tool's name, one line saying whether it is linked and whether the
 store is ready, locked, not installed, or unreachable, and one button, Link or
 Unlink. Unlink waits for a confirmation that says which providers stop getting
@@ -602,6 +602,15 @@ a missing tool) appears in the card's feedback slot, in the host's own words.
 **Check an item** takes an item reference and answers Found, locked, missing, or
 unreachable; it never shows what an item holds. On a host with no credential
 broker the card says so and offers no button.
+
+**Active secrets** lists every thread's
+[active secrets](../architecture.md#thread-secrets), a row each: its title, then
+its time left, its source, its thread and its name, and **Revoke**, which ends it
+at once. **Remembered secrets** lists what Octant remembers by name, with whether
+the value is in this computer's credential store or is a 1Password item's address,
+and **Forget**, which waits for a confirmation that says what is deleted and that
+a thread that has it keeps it. Neither list shows a value. An action that did not
+happen keeps the row and says so.
 
 A provider's key from a store lives on the provider's own card, under **Key from
 a secret store**, beside the API keys. It appears only when a store is linked or

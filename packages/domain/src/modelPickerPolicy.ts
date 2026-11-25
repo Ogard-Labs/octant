@@ -54,6 +54,7 @@ const driverLabels: Readonly<Record<Exclude<ProviderDriverKind, AcpAgentKind>, s
   // as what it is, beside its package's own display name.
   "outside-harness-endpoint": "Outside driver",
   "outside-image": "Outside image driver",
+  "outside-video": "Outside video driver",
   "acp-agent": "Added ACP agent",
 };
 

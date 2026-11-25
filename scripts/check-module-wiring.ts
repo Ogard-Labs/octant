@@ -92,10 +92,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Remaining ──
   [
-    "apps/server/src/threadSecrets/threadSecretTools.ts",
-    "The thread-secret operations, ahead of the credential tool that offers them (docs/architecture.md, Thread secrets). Remove once the tool does.",
-  ],
-  [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",
     "Browser-realm bundle entry built by remoteExitEvidenceA.smoke.test.ts via `bun build`; excluded from the server tsconfig on purpose. Remove once that evidence is served by a product caller or the smoke is retired.",
   ],
@@ -680,10 +676,6 @@ export function findUnregisteredRouteModules(
  * served endpoint has a caller (or is a routing prefix).
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
-  [
-    "/api/thread-secrets",
-    "The thread-secret service, served ahead of the card that calls it (docs/architecture.md, Thread secrets). Remove once the card reads and answers it.",
-  ],
   [
     "/api/code/language/documents",
     "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",

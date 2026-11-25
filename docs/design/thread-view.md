@@ -992,6 +992,39 @@ to a quiet status row; an unavailable status disables entry rather than trusting
 a stale card.
 The card is not an administrator-password dialog and is not a saved sign-in.
 
+### Secret cards
+
+A request for a [thread secret](../architecture.md#thread-secrets) appears inline
+at the end of a Code or Work conversation as a compact rounded card: its title and
+reason; where the agent named a setup page, a button named **Open** and the page's
+host, with its whole address under it in monospace; one row of the source picker,
+the input with its show button, and **Save securely**; then a quiet line with a
+shield that says what can read the secret and for how long, the **Keep for** picker
+and **Decline**. With several fields their labelled inputs are stacked and Save
+securely moves to the footer. An account password adds a warning that it unlocks
+the whole computer and that Octant cannot fill in a system dialog. The source
+picker shows only where there is a choice: a value, a 1Password item or a
+remembered secret of the same name. A 1Password source takes a typed `op://`
+address or the item picker at the input's trailing edge, which goes from vault to
+item to field with a filter and Back, and a checkbox to read the item again at
+each use. Choosing another source keeps nothing of the one before. A field the
+agent marked not secret shows what is typed, except on an account password's card,
+which masks every field.
+
+Clicking the card, outside its controls and not to select text, focuses its first
+empty input. Enter submits, except during text composition. What is typed is sent
+exactly as typed, stays in the card alone, and leaves the input as it is sent; it
+comes back only when the host says it took nothing. A pasted value of several lines
+is kept exactly and shown as their number, with a control to clear it; one longer
+than 4,096 characters is not pasted, and the card says so. An outcome that is not known
+says so, and nothing is sent twice. A value too short to hide, if a command prints
+it, says so before it is sent. A refusal stays on the open card with what to do.
+An answered card becomes one quiet row with its title and **Saved securely** or
+**Declined**, until its turn ends. At narrow widths the row and the footer wrap.
+A card never times out. The phone's card has the same parts in the phone's own
+controls, asks for the phone's confirmation before Save, takes a value of one line,
+and offers no 1Password.
+
 ## Native Code approvals
 
 Native Code approvals use a compact 216px surface above the composer, with a

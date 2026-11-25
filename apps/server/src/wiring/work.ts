@@ -1,3 +1,5 @@
+import { createCredentialTool } from "../credentials/credentialTool";
+import { workThreadSecrets, type ThreadSecretTurnFacts } from "./threadSecrets";
 import type { HubActScopeSlot } from "../hub/hubActScope";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -187,6 +189,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   readonly imageDescriber?: ImageDescriber;
   readonly narrationForTurn: NarrationForTurn;
   readonly transcriptionForTurn: TranscriptionForTurn;
+  readonly threadSecretFacts: ThreadSecretTurnFacts;
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -319,6 +322,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
 export function wireWork(deps: WorkDependencies) {
   const imageDescriber = deps.imageDescriber;
   const {
+    threadSecretFacts,
     resolveThreadStrict,
     conversationInputTransfer,
     agentRunPersistence,
@@ -1212,10 +1216,28 @@ export function wireWork(deps: WorkDependencies) {
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
+        const secretTools = !browserSupported
+          ? undefined
+          : createCredentialTool({
+              secrets: workThreadSecrets(threadSecretFacts, {
+                windowId: input.windowId,
+                thread: input.thread,
+                readThread: () => workThreadProjection.read(input.thread.id),
+                projectRoot: input.projectRoot,
+                extraFolders: input.extraFolders,
+                turnId: String(input.turnId),
+                routineRun: input.routineRun !== undefined,
+                posture: () =>
+                  workTurnToolLevel(
+                    runningWorkTurns.get(String(input.thread.id))?.access ?? input.thread.access,
+                  ).posture,
+              }),
+            });
         if (
           pastThreads === undefined &&
           projectMemoryTools === undefined &&
           reportFinishedTools === undefined &&
+          secretTools === undefined &&
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
@@ -1248,6 +1270,7 @@ export function wireWork(deps: WorkDependencies) {
           pastThreads,
           projectMemoryTools,
           reportFinishedTools,
+          secretTools,
         );
       },
       nativeHarness: nativeHarnessHooks,

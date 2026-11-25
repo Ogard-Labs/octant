@@ -1,3 +1,4 @@
+import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
 import type { ProviderToolDefinition } from "@octant/provider-sdk/driver";
 import type { ProviderToolImage } from "@octant/contracts/providers";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -7,6 +8,12 @@ import {
   ToolSchema,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+
+/**
+ * Claude Code can keep a tool back until it is searched for. An agent that has
+ * not seen this one asks for a password in chat instead, so it is always listed.
+ */
+const ALWAYS_LISTED = { "anthropic/alwaysLoad": true } as const;
 
 export interface ManagedToolAnswer {
   readonly resultJson: string;
@@ -34,7 +41,11 @@ export function createManagedMcpTools(
     const parsed = ToolSchema.safeParse(definition);
     if (!parsed.success || names.has(definition.name)) return { kind: "invalid" };
     names.add(definition.name);
-    tools.push(parsed.data);
+    tools.push(
+      definition.name === OCTANT_CREDENTIAL_TOOL.name
+        ? { ...parsed.data, _meta: { ...parsed.data._meta, ...ALWAYS_LISTED } }
+        : parsed.data,
+    );
   }
   const server = new McpServer({ name: "octant", version: "1" }, { capabilities: { tools: {} } });
   server.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));

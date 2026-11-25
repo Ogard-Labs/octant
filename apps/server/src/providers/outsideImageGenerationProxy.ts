@@ -80,17 +80,17 @@ export interface OutsideImageGenerationProxyOptions {
   readonly resolve?: (hostname: string) => Promise<ReadonlyArray<string>>;
 }
 
-async function resolveAddresses(hostname: string): Promise<ReadonlyArray<string>> {
+export async function resolveAddresses(hostname: string): Promise<ReadonlyArray<string>> {
   return (await lookup(hostname, { all: true })).map((entry) => entry.address);
 }
 
 /**
- * Whether every address an image's host name resolves to is one the internet
+ * Whether every address an image or clip's host name resolves to is one the internet
  * routes to, or the address is on the configured origin. A name that does not
  * resolve is refused. The fetch resolves again, so this narrows rather than
  * closes the window for a name that changes between the two answers.
  */
-async function resolvesPublicly(
+export async function resolvesPublicly(
   url: string,
   origin: string | undefined,
   resolve: (hostname: string) => Promise<ReadonlyArray<string>>,
@@ -236,7 +236,7 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
       bytes = assembleStreamedImageBlocks(streamed);
       named = image.mediaType;
     } else {
-      if (!isFetchableImageAddress(image.url, origin) || !hasReturnedAddress(image.url)) {
+      if (!isFetchableProviderAddress(image.url, origin) || !hasReturnedAddress(image.url)) {
         throw outsideDriverFailure(
           "unauthorized",
           "The image driver named an image address the provider did not return.",
@@ -402,7 +402,11 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
  * fallback over raw JSON escapes). A truncated chunk cannot authorize a URL
  * prefix, and an embedded query parameter cannot authorize an inner URL.
  */
-function extractReturnedAddresses(responseText: string, out: Set<string>, complete: boolean): void {
+export function extractReturnedAddresses(
+  responseText: string,
+  out: Set<string>,
+  complete: boolean,
+): void {
   const add = (candidate: string) => {
     if (out.size >= MAX_RELAYED_ADDRESSES_PER_JOB) return;
     if (candidate.length <= MAX_RELAYED_ADDRESS_LENGTH) out.add(candidate);
@@ -752,12 +756,12 @@ function collectJsonAddresses(root: unknown, add: (candidate: string) => void): 
 }
 
 /**
- * Where the host fetches an image the driver names: HTTPS on the default
- * port, as provider image stores answer, or the configured origin itself.
+ * Where the host fetches an image or clip the driver names: HTTPS on the
+ * default port, as provider stores answer, or the configured origin itself.
  * Never another scheme, a credential in the address, or a loopback address
  * the person did not configure.
  */
-function isFetchableImageAddress(url: string, origin: string | undefined): boolean {
+export function isFetchableProviderAddress(url: string, origin: string | undefined): boolean {
   let target: URL;
   try {
     target = new URL(url);
