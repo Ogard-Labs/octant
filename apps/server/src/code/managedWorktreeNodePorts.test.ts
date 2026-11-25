@@ -562,6 +562,7 @@ describe("managed worktree Node ports", () => {
       await committedFile(w);
       const head = (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim();
       await w.receipts.beginReclaim(w.receiptId, { branch: "feature/restorable", head });
+      await w.receipts.markRemovalStarted(w.receiptId);
       await rm(join(w.created.targetPath, "tracked.txt"));
       await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
       expect(await w.ports.filesystem.pathExists(w.created.targetPath, signal)).toBe(false);
@@ -573,6 +574,7 @@ describe("managed worktree Node ports", () => {
       await committedFile(w);
       const head = (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim();
       await w.receipts.beginReclaim(w.receiptId, { branch: "feature/restorable", head });
+      await w.receipts.markRemovalStarted(w.receiptId);
     }
 
     async function listed(w: Awaited<ReturnType<typeof readyWorktree>>): Promise<string> {
@@ -604,6 +606,7 @@ describe("managed worktree Node ports", () => {
       await w.git("-C", w.created.targetPath, "update-index", "--assume-unchanged", "edited.txt");
       const head = (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim();
       await w.receipts.beginReclaim(w.receiptId, { branch: "feature/restorable", head });
+      await w.receipts.markRemovalStarted(w.receiptId);
       await rm(join(w.created.targetPath, "tracked.txt"));
       await writeFile(join(w.created.targetPath, "edited.txt"), "an edit status cannot see\n");
       await expect(w.reclaim()).resolves.toEqual({
@@ -649,9 +652,133 @@ describe("managed worktree Node ports", () => {
         branch: "feature/restorable",
         head: (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim(),
       });
+      await w.receipts.markRemovalStarted(w.receiptId);
       await rm(w.created.targetPath, { recursive: true });
       await w.receipts.transition(w.receiptId, "reclaimed");
       await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
+      expect(await w.state()).toBe("ready");
+    });
+
+    /** The folder of a restore killed during `git worktree add`: locked, no index, a lock left, files missing. */
+    async function killedAdd(w: Awaited<ReturnType<typeof readyWorktree>>) {
+      await committedFile(w);
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+      const repository = await realpath(w.fixture.repository);
+      await w.git("-C", repository, "worktree", "add", w.created.targetPath, "feature/restorable");
+      await w.git(
+        "-C",
+        repository,
+        "worktree",
+        "lock",
+        "--reason",
+        "initializing",
+        w.created.targetPath,
+      );
+      const admin = (
+        await w.git("-C", w.created.targetPath, "rev-parse", "--absolute-git-dir")
+      ).stdout.trim();
+      await rm(join(admin, "index"));
+      await writeFile(join(admin, "index.lock"), "");
+      await w.receipts.transition(w.receiptId, "restoring");
+      return { repository, admin };
+    }
+
+    it("recovers a restore killed during git worktree add by discarding exactly that attempt and adding again", async () => {
+      const w = await readyWorktree();
+      await killedAdd(w);
+      await rm(join(w.created.targetPath, "tracked.txt"));
+      expect(await listed(w)).toContain("locked initializing");
+      await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
+      expect(await w.state()).toBe("ready");
+      expect(await readFile(join(w.created.targetPath, "tracked.txt"), "utf8")).toBe("one\n");
+      expect(await listed(w)).not.toContain("locked");
+      expect((await w.git("-C", w.created.targetPath, "status", "--porcelain")).stdout).toBe("");
+    });
+
+    it("keeps a killed add's folder and deletes nothing when it holds a file the commit does not", async () => {
+      const w = await readyWorktree();
+      await killedAdd(w);
+      await writeFile(join(w.created.targetPath, "notes.txt"), "keep me");
+      await expect(w.restore()).resolves.toEqual({ status: "refused", reason: "partial-folder" });
+      expect(await readFile(join(w.created.targetPath, "notes.txt"), "utf8")).toBe("keep me");
+      expect(await listed(w)).toContain("locked initializing");
+      expect(await w.state()).toBe("restoring");
+      // A file the commit has but holds differently is the person's too.
+      await rm(join(w.created.targetPath, "notes.txt"));
+      await writeFile(join(w.created.targetPath, "tracked.txt"), "edited\n");
+      await expect(w.restore()).resolves.toEqual({ status: "refused", reason: "partial-folder" });
+      expect(await readFile(join(w.created.targetPath, "tracked.txt"), "utf8")).toBe("edited\n");
+    });
+
+    it("does not call a restored folder ready while it has no index or a lock left, and makes it whole", async () => {
+      const w = await readyWorktree();
+      const { admin } = await killedAdd(w);
+      // Git got as far as releasing its lock, but the checkout never finished.
+      await w.git("-C", w.fixture.repository, "worktree", "unlock", w.created.targetPath);
+      await expect(
+        w.ports.git.inspectRestoredFolder?.(w.created.targetPath, signal),
+      ).resolves.toEqual({ status: "observed", whole: false });
+      await rm(join(admin, "index.lock"));
+      await expect(
+        w.ports.git.inspectRestoredFolder?.(w.created.targetPath, signal),
+      ).resolves.toEqual({ status: "observed", whole: false });
+      await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
+      await expect(
+        w.ports.git.inspectRestoredFolder?.(w.created.targetPath, signal),
+      ).resolves.toEqual({ status: "observed", whole: true });
+      expect(await w.state()).toBe("ready");
+    });
+
+    it("drops a registration a removal left after it was killed while Git deleted its admin directory", async () => {
+      for (const damage of ["HEAD", "branch"] as const) {
+        const w = await readyWorktree();
+        await begun(w);
+        await w.receipts.markRemovalStarted(w.receiptId);
+        const admin = (
+          await w.git("-C", w.created.targetPath, "rev-parse", "--absolute-git-dir")
+        ).stdout.trim();
+        if (damage === "HEAD") await rm(join(admin, "HEAD"));
+        else await writeFile(join(admin, "HEAD"), `${"0".repeat(40)}\n`);
+        await rm(w.created.targetPath, { recursive: true });
+        expect(await listed(w), damage).toContain("prunable");
+        await expect(w.reclaim(), damage).resolves.toMatchObject({ status: "reclaimed" });
+        expect(await listed(w), damage).not.toContain(w.created.targetPath);
+        await expect(w.restore(), damage).resolves.toMatchObject({ status: "restored" });
+      }
+    });
+
+    it("links a folder back when the repository records worktree paths relative to each other", async () => {
+      const w = await readyWorktree();
+      await begun(w);
+      await w.receipts.markRemovalStarted(w.receiptId);
+      await w.git("-C", w.fixture.repository, "worktree", "repair", "--relative-paths");
+      const recorded = await readFile(
+        join(
+          (
+            await w.git("-C", w.created.targetPath, "rev-parse", "--absolute-git-dir")
+          ).stdout.trim(),
+          "gitdir",
+        ),
+        "utf8",
+      );
+      expect(recorded.startsWith("/")).toBe(false);
+      await rm(join(w.created.targetPath, ".git"));
+      await rm(join(w.created.targetPath, "tracked.txt"));
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+      await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
+    });
+
+    it("does not treat a file the person deleted while the cleanup sat pending as Git's partial removal", async () => {
+      const w = await readyWorktree();
+      await committedFile(w);
+      const head = (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim();
+      // No removal of ours was ever started for this receipt.
+      await w.receipts.beginReclaim(w.receiptId, { branch: "feature/restorable", head });
+      await rm(join(w.created.targetPath, "tracked.txt"));
+      await expect(w.reclaim()).resolves.toEqual({ status: "refused", reason: "dirty" });
+      expect(
+        await w.ports.filesystem.pathExists(join(w.created.targetPath, "tracked.txt"), signal),
+      ).toBe(false);
       expect(await w.state()).toBe("ready");
     });
 

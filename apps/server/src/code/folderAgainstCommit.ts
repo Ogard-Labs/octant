@@ -107,11 +107,7 @@ export async function readFolderAgainstCommit(
   return { status: "observed", matches: true };
 }
 
-function blobId(
-  algorithm: "sha1" | "sha256",
-  size: number,
-  chunks: ReadonlyArray<Buffer>,
-): string {
+function blobId(algorithm: "sha1" | "sha256", size: number, chunks: ReadonlyArray<Buffer>): string {
   const hash = createHash(algorithm).update(`blob ${size}\0`);
   for (const chunk of chunks) hash.update(chunk);
   return hash.digest("hex");

@@ -295,7 +295,11 @@ export function createManagedWorktreeNodePorts(): {
         : { status: "failed" };
     },
     inspectRestoredFolder: async (targetPath, signal) => {
-      const directory = await run("git", ["-C", targetPath, "rev-parse", "--absolute-git-dir"], signal);
+      const directory = await run(
+        "git",
+        ["-C", targetPath, "rev-parse", "--absolute-git-dir"],
+        signal,
+      );
       if (directory.exitCode !== 0) return { status: "failed" };
       const admin = directory.stdout.trim();
       const present = async (name: string): Promise<boolean> =>

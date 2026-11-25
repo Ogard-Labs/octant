@@ -74,6 +74,10 @@ type Inventory =
       interruptedAdd?: ObservedGitWorktree;
     }>;
 
+function isZeroHead(head: string | undefined): boolean {
+  return head === undefined || /^0+$/.test(head);
+}
+
 function pathOf(worktree: ObservedGitWorktree): string {
   return worktree.status === "present" ? worktree.canonicalPath : worktree.reportedPath;
 }
@@ -518,6 +522,7 @@ export class ManagedWorktreeReclaimService {
   async #restore(
     input: Readonly<{ receiptId: string }>,
     signal: AbortSignal,
+    retried = false,
   ): Promise<ManagedWorktreeReclaimResult> {
     let receipt: ManagedWorktreeReceipt | undefined;
     try {
@@ -546,7 +551,7 @@ export class ManagedWorktreeReclaimService {
       // A restore that was interrupted after Git made the folder: it is
       // trusted only once it matches the record, and is otherwise undone.
       if (receipt.state !== "restoring") return { status: "refused", reason: "path-collision" };
-      return this.#verifyRestored(receipt, reclaim, placed, observation.repositoryRoot, signal);
+      return this.#settleRestored(input, receipt, reclaim, placed, observation, signal, retried);
     }
     try {
       if (await this.#filesystem.pathExists(receipt.canonicalWorktreePath, signal)) {
@@ -577,7 +582,7 @@ export class ManagedWorktreeReclaimService {
           targetPath: receipt.canonicalWorktreePath,
           branch: reclaim.branch,
         },
-        signal,
+        this.#boundedSignal(signal),
       );
     } catch {
       return { status: "interrupted", receipt };
@@ -593,7 +598,7 @@ export class ManagedWorktreeReclaimService {
       // only a checkout that is truly absent goes back to cleaned up.
       const [here] = this.#presentAt(confirmation, receipt);
       if (here !== undefined) {
-        return this.#verifyRestored(receipt, reclaim, here, observation.repositoryRoot, signal);
+        return this.#settleRestored(input, receipt, reclaim, here, observation, signal, retried);
       }
       try {
         if (!(await this.#filesystem.pathExists(receipt.canonicalWorktreePath, signal))) {
@@ -615,7 +620,31 @@ export class ManagedWorktreeReclaimService {
     ) {
       return { status: "waiting", receipt };
     }
-    return this.#verifyRestored(receipt, reclaim, restored, observation.repositoryRoot, signal);
+    return this.#settleRestored(input, receipt, reclaim, restored, observation, signal, retried);
+  }
+
+  /**
+   * Trusts the folder Git made, or undoes it. A folder that needed undoing and
+   * held only the recorded commit's files is added again once.
+   */
+  async #settleRestored(
+    input: Readonly<{ receiptId: string }>,
+    receipt: ManagedWorktreeReceipt,
+    reclaim: ManagedWorktreeReclaim,
+    target: PresentWorktree,
+    observation: AvailableObservation,
+    signal: AbortSignal,
+    retried: boolean,
+  ): Promise<ManagedWorktreeReclaimResult> {
+    const verified = await this.#verifyRestored(
+      receipt,
+      reclaim,
+      target,
+      observation.repositoryRoot,
+      signal,
+    );
+    if (verified !== "again") return verified;
+    return retried ? { status: "waiting", receipt } : this.#restore(input, signal, true);
   }
 
   #presentAt(
@@ -709,6 +738,15 @@ export class ManagedWorktreeReclaimService {
     if (inventory.kind === "ambiguous") {
       return { status: "stopped", result: { status: "refused", reason: "inventory-ambiguous" } };
     }
+    if (inventory.interruptedAdd !== undefined) {
+      // Only the person's Restore, which knows the add was ours, may undo it.
+      if (settle !== "drop") {
+        return { status: "stopped", result: { status: "refused", reason: "inventory-ambiguous" } };
+      }
+      const discarded = await this.#discardInterruptedAdd(receipt, observation, signal);
+      if (discarded !== undefined) return { status: "stopped", result: discarded };
+      return this.#observe(receipt, signal, "refuse");
+    }
     if (inventory.leftover !== undefined) {
       if (settle === "refuse") {
         return { status: "stopped", result: { status: "refused", reason: "inventory-ambiguous" } };
@@ -737,35 +775,77 @@ export class ManagedWorktreeReclaimService {
   /**
    * Only worktrees about this receipt can make its inventory ambiguous: a lock
    * on, or a registration gone stale for, its own folder or a branch it holds.
-   * What other worktrees of the repository look like is not its business.
+   * What other worktrees of the repository look like is not its business. Two
+   * entries at the receipt's own folder are this service's own debris and are
+   * settled instead of refused: the interrupted `git worktree add` of a restore
+   * (locked `initializing`), and the registration a removal left after it
+   * stopped while Git deleted its admin directory (prunable, with no branch or
+   * an all-zero head, or the recorded branch and commit).
    */
   #inventory(observation: AvailableObservation, receipt: ManagedWorktreeReceipt): Inventory {
     const branches = new Set([branchRef(receipt.branchIntent)]);
     if (receipt.currentBranch !== undefined) branches.add(branchRef(receipt.currentBranch));
     if (receipt.reclaim !== undefined) branches.add(branchRef(receipt.reclaim.branch));
     let leftover: ObservedGitWorktree | undefined;
+    let interruptedAdd: ObservedGitWorktree | undefined;
     for (const worktree of observation.worktrees) {
       const here = pathOf(worktree) === receipt.canonicalWorktreePath;
       if (!here && (worktree.branch === undefined || !branches.has(worktree.branch))) continue;
-      if (worktree.locked !== undefined) return { kind: "ambiguous" };
+      if (worktree.locked !== undefined) {
+        if (interruptedAdd === undefined && here && this.#isInterruptedAdd(worktree, receipt)) {
+          interruptedAdd = worktree;
+          continue;
+        }
+        return { kind: "ambiguous" };
+      }
       if (worktree.prunable === undefined) continue;
-      const reclaim = receipt.reclaim;
-      const own =
-        here &&
-        reclaim !== undefined &&
-        !worktree.detached &&
-        worktree.branch === branchRef(reclaim.branch) &&
-        worktree.head === reclaim.head;
-      if (leftover !== undefined || !own) return { kind: "ambiguous" };
+      if (leftover !== undefined || !here || !this.#isOwnLeftover(worktree, receipt)) {
+        return { kind: "ambiguous" };
+      }
       leftover = worktree;
     }
-    return leftover === undefined ? { kind: "clear" } : { kind: "clear", leftover };
+    return {
+      kind: "clear",
+      ...(leftover === undefined ? {} : { leftover }),
+      ...(interruptedAdd === undefined ? {} : { interruptedAdd }),
+    };
+  }
+
+  /** Locked `initializing` at the folder of a restore in progress, on the recorded branch. */
+  #isInterruptedAdd(worktree: ObservedGitWorktree, receipt: ManagedWorktreeReceipt): boolean {
+    const reclaim = receipt.reclaim;
+    return (
+      receipt.state === "restoring" &&
+      reclaim !== undefined &&
+      worktree.locked === "initializing" &&
+      (worktree.branch === branchRef(reclaim.branch) ||
+        // Killed before Git wrote the branch into the new worktree's HEAD.
+        (worktree.branch === undefined && isZeroHead(worktree.head)))
+    );
+  }
+
+  /** A prunable entry at the receipt's folder that a stopped removal of ours could have left. */
+  #isOwnLeftover(worktree: ObservedGitWorktree, receipt: ManagedWorktreeReceipt): boolean {
+    const reclaim = receipt.reclaim;
+    if (reclaim === undefined) return false;
+    const exact =
+      !worktree.detached &&
+      worktree.branch === branchRef(reclaim.branch) &&
+      worktree.head === reclaim.head;
+    // Git was deleting the entry's own files: what is left may have no HEAD, so
+    // it reads as detached, headless or on all-zero commit.
+    const broken = worktree.detached || worktree.branch === undefined || isZeroHead(worktree.head);
+    return exact || broken;
   }
 
   /** The receipt's own worktrees are all in order, with no leftover registration. */
   #settled(observation: AvailableObservation, receipt: ManagedWorktreeReceipt): boolean {
     const inventory = this.#inventory(observation, receipt);
-    return inventory.kind === "clear" && inventory.leftover === undefined;
+    return (
+      inventory.kind === "clear" &&
+      inventory.leftover === undefined &&
+      inventory.interruptedAdd === undefined
+    );
   }
 
   /**
@@ -796,13 +876,21 @@ export class ManagedWorktreeReclaimService {
       ) {
         const dropped = await this.#git.removeWorktree(
           { repositoryRoot: observation.repositoryRoot, targetPath: path },
-          signal,
+          this.#boundedSignal(signal),
         );
         return dropped.status === "removed"
           ? undefined
           : { status: "refused", reason: "git-refused" };
       }
-      if (!relink || this.#git.relinkWorktree === undefined) {
+      // A folder is linked back only when its entry is what the record says;
+      // anything else at the folder is not ours to adopt.
+      const reclaim = receipt.reclaim;
+      const exact =
+        reclaim !== undefined &&
+        !leftover.detached &&
+        leftover.branch === branchRef(reclaim.branch) &&
+        leftover.head === reclaim.head;
+      if (!relink || !exact || this.#git.relinkWorktree === undefined) {
         return { status: "refused", reason: "path-collision" };
       }
       const linked = await this.#git.relinkWorktree(
@@ -812,6 +900,57 @@ export class ManagedWorktreeReclaimService {
       return linked.status === "linked"
         ? undefined
         : { status: "refused", reason: "path-collision" };
+    } catch {
+      return { status: "interrupted", receipt };
+    }
+  }
+
+  /** The caller's stop signal, and the time limit one Git change may run. */
+  #boundedSignal(signal: AbortSignal): AbortSignal {
+    return AbortSignal.any([signal, AbortSignal.timeout(this.#removalTimeLimitMs)]);
+  }
+
+  /**
+   * A restore killed during `git worktree add` leaves its entry locked
+   * `initializing`, a partial folder, an `index.lock` and no index. It is this
+   * service's own attempt, so it is discarded, and only when nothing in the
+   * folder can be a person's work: every file in it is the recorded commit's
+   * file. A folder with anything else is kept, and the person is told to move
+   * it away. The add is then made again by the restore that found this.
+   */
+  async #discardInterruptedAdd(
+    receipt: ManagedWorktreeReceipt,
+    observation: AvailableObservation,
+    signal: AbortSignal,
+  ): Promise<ManagedWorktreeReclaimResult | undefined> {
+    const reclaim = receipt.reclaim;
+    if (reclaim === undefined) return { status: "refused", reason: "inventory-ambiguous" };
+    try {
+      const path = receipt.canonicalWorktreePath;
+      if (await this.#filesystem.pathExists(path, signal)) {
+        if (this.#git.readFolderAgainstCommit === undefined) {
+          return { status: "refused", reason: "unverified" };
+        }
+        const compared = await this.#git.readFolderAgainstCommit(
+          { repositoryRoot: observation.repositoryRoot, targetPath: path, head: reclaim.head },
+          signal,
+        );
+        if (compared.status === "unavailable") return { status: "refused", reason: "unverified" };
+        if (compared.status !== "observed") return { status: "waiting", receipt };
+        if (!compared.matches) return { status: "refused", reason: "partial-folder" };
+      }
+      const removed = await this.#git.removeWorktree(
+        {
+          repositoryRoot: observation.repositoryRoot,
+          targetPath: path,
+          force: true,
+          overrideLock: true,
+        },
+        this.#boundedSignal(signal),
+      );
+      return removed.status === "removed"
+        ? undefined
+        : { status: "refused", reason: "git-refused" };
     } catch {
       return { status: "interrupted", receipt };
     }
@@ -932,35 +1071,58 @@ export class ManagedWorktreeReclaimService {
     return undefined;
   }
 
+  /**
+   * `again`: the folder Git made was not whole (no index, an `index.lock`, or
+   * changes against the commit), held nothing but the recorded commit's files,
+   * and was taken away; the caller adds it once more.
+   */
   async #verifyRestored(
     receipt: ManagedWorktreeReceipt,
     reclaim: ManagedWorktreeReclaim,
     target: PresentWorktree,
     repositoryRoot: string,
     signal: AbortSignal,
-  ): Promise<ManagedWorktreeReclaimResult> {
-    if (
+  ): Promise<ManagedWorktreeReclaimResult | "again"> {
+    const listedRight =
       !target.detached &&
       target.locked === undefined &&
       target.prunable === undefined &&
       target.branch === branchRef(reclaim.branch) &&
-      target.head === reclaim.head
-    ) {
+      target.head === reclaim.head;
+    if (listedRight) {
+      // Git listing the branch and commit is not enough: a restore killed while
+      // checking files out lists the same and has no index, or a lock left.
+      if (this.#git.inspectRestoredFolder === undefined) {
+        return { status: "refused", reason: "unverified" };
+      }
+      let inspected: Awaited<
+        ReturnType<NonNullable<ManagedWorktreeGitPort["inspectRestoredFolder"]>>
+      >;
       try {
-        return {
-          status: "restored",
-          receipt: await this.#receipts.transition(receipt.receiptId, "ready"),
-        };
+        inspected = await this.#git.inspectRestoredFolder(receipt.canonicalWorktreePath, signal);
       } catch {
         return { status: "interrupted", receipt };
       }
+      if (inspected.status === "unavailable") return { status: "refused", reason: "unverified" };
+      if (inspected.status !== "observed") return { status: "waiting", receipt };
+      if (inspected.whole) {
+        try {
+          return {
+            status: "restored",
+            receipt: await this.#receipts.transition(receipt.receiptId, "ready"),
+          };
+        } catch {
+          return { status: "interrupted", receipt };
+        }
+      }
+      return this.#discardUnsound(receipt, reclaim, repositoryRoot, signal);
     }
     // Not what was recorded: take the fresh, untouched folder away again and
     // leave the checkout reclaimed, so no turn runs on the wrong commit.
     try {
       const removed = await this.#git.removeWorktree(
         { repositoryRoot, targetPath: receipt.canonicalWorktreePath },
-        signal,
+        this.#boundedSignal(signal),
       );
       if (removed.status === "removed") {
         await this.#receipts.transition(receipt.receiptId, "reclaimed");
@@ -970,6 +1132,38 @@ export class ManagedWorktreeReclaimService {
       return { status: "interrupted", receipt };
     }
     return { status: "waiting", receipt };
+  }
+
+  /** The folder is not whole: it goes only when every file in it is the commit's own. */
+  async #discardUnsound(
+    receipt: ManagedWorktreeReceipt,
+    reclaim: ManagedWorktreeReclaim,
+    repositoryRoot: string,
+    signal: AbortSignal,
+  ): Promise<ManagedWorktreeReclaimResult | "again"> {
+    try {
+      if (this.#git.readFolderAgainstCommit === undefined) {
+        return { status: "refused", reason: "unverified" };
+      }
+      const compared = await this.#git.readFolderAgainstCommit(
+        {
+          repositoryRoot,
+          targetPath: receipt.canonicalWorktreePath,
+          head: reclaim.head,
+        },
+        signal,
+      );
+      if (compared.status === "unavailable") return { status: "refused", reason: "unverified" };
+      if (compared.status !== "observed") return { status: "waiting", receipt };
+      if (!compared.matches) return { status: "refused", reason: "partial-folder" };
+      const removed = await this.#git.removeWorktree(
+        { repositoryRoot, targetPath: receipt.canonicalWorktreePath, force: true },
+        this.#boundedSignal(signal),
+      );
+      return removed.status === "removed" ? "again" : { status: "waiting", receipt };
+    } catch {
+      return { status: "interrupted", receipt };
+    }
   }
 
   /**

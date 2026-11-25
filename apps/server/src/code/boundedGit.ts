@@ -44,7 +44,7 @@ export interface BoundedGitOptions {
  */
 export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitResult> {
   const { signal } = options;
-  signal.throwIfAborted();
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("git was stopped"));
   return new Promise<BoundedGitResult>((resolve, reject) => {
     const maxBuffer = options.maxBuffer ?? 16 * 1024 * 1024;
     const grace = options.graceMs ?? GIT_KILL_GRACE_MS;
