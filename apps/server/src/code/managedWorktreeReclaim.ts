@@ -95,8 +95,10 @@ export class ManagedWorktreeReclaimService {
       if (!resuming) return { status: "refused", reason: "mismatched" };
       return this.#finishReclaim(receipt, observation.repositoryRoot, signal);
     }
-    if (targets.length !== 1) return { status: "refused", reason: "inventory-ambiguous" };
-    const target = targets[0]!;
+    const [target, ...extra] = targets;
+    if (target === undefined || extra.length > 0) {
+      return { status: "refused", reason: "inventory-ambiguous" };
+    }
     if (target.detached || target.locked !== undefined || target.prunable !== undefined) {
       return { status: "refused", reason: "inventory-ambiguous" };
     }
@@ -196,19 +198,14 @@ export class ManagedWorktreeReclaimService {
     const observed = await this.#observe(receipt, signal);
     if (observed.status !== "available") return observed.result;
     const { observation, targets } = observed;
-    if (targets.length > 1) return { status: "refused", reason: "inventory-ambiguous" };
+    const [placed, ...others] = targets;
+    if (others.length > 0) return { status: "refused", reason: "inventory-ambiguous" };
 
-    if (targets.length === 1) {
+    if (placed !== undefined) {
       // A restore that was interrupted after Git made the folder: it is
       // trusted only once it matches the record, and is otherwise undone.
       if (receipt.state !== "restoring") return { status: "refused", reason: "path-collision" };
-      return this.#verifyRestored(
-        receipt,
-        reclaim,
-        targets[0]!,
-        observation.repositoryRoot,
-        signal,
-      );
+      return this.#verifyRestored(receipt, reclaim, placed, observation.repositoryRoot, signal);
     }
     try {
       if (await this.#filesystem.pathExists(receipt.canonicalWorktreePath, signal)) {
@@ -262,14 +259,16 @@ export class ManagedWorktreeReclaimService {
               worktree.canonicalPath === receipt.canonicalWorktreePath,
           )
         : [];
+    const [restored] = present;
     if (
       confirmation.status !== "available" ||
       confirmation.repositoryId !== receipt.repositoryId ||
-      present.length !== 1
+      present.length !== 1 ||
+      restored === undefined
     ) {
       return { status: "waiting", receipt };
     }
-    return this.#verifyRestored(receipt, reclaim, present[0]!, observation.repositoryRoot, signal);
+    return this.#verifyRestored(receipt, reclaim, restored, observation.repositoryRoot, signal);
   }
 
   /** The thread and repository the receipt names are still the ones the host holds. */
