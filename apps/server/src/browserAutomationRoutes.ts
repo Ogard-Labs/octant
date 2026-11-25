@@ -63,6 +63,7 @@ import {
   type BrowserAutomationFailure,
   type BrowserThreadId,
 } from "@octant/contracts/browser-automation";
+import { decodeBrowserPageOfferCommand } from "@octant/contracts/browser-page-sessions";
 import {
   decodeBrowserCaptureImage,
   decodeBrowserCaptureImageCommand,
@@ -78,6 +79,7 @@ import type {
   BrowserTaskProfileCommit,
 } from "./browser/browserAutomationService";
 import type { BrowserCaptureService } from "./browser/browserCaptureService";
+import type { BrowserPageOffers } from "./browser/browserPageOffers";
 import { remoteBrowserActionReach } from "@octant/domain";
 import {
   decodeProjectAgentPages,
@@ -152,6 +154,11 @@ export interface BrowserAutomationRouteDependencies {
     readonly windowCanOpenProject: (windowId: WindowId, projectId: string) => Promise<boolean>;
     readonly threadTitle: (threadId: BrowserThreadId, mode: "work" | "code") => string | undefined;
   };
+  /** The page a restart took, offered back; absent on a host that records none. */
+  readonly pageOffers?: Pick<
+    BrowserPageOffers,
+    "read" | "claim" | "dismiss" | "release" | "holdForOpen"
+  >;
   /** The thread's kept screenshots; absent on a host that keeps none. */
   readonly captures?: Pick<BrowserCaptureService, "list" | "read" | "listSteps">;
   /**
@@ -568,6 +575,7 @@ export function createBrowserAutomationRouteHandler(
             ? {}
             : { expectedContextId: selection.expectedContextId }),
           ...(selection.url === undefined ? {} : { url: selection.url }),
+          actor,
           isCurrent: () => {
             const live = profiles.read(selection.threadId, selection.mode);
             const granted = dependencies.authority.resolve(selection.threadId, selection.mode);
@@ -953,11 +961,41 @@ export function createBrowserAutomationRouteHandler(
             origin,
           );
         }
+        const reopenHold =
+          input.reopenPageId !== undefined && actsAsHostPerson
+            ? dependencies.pageOffers?.holdForOpen(windowId, {
+                threadId: input.threadId,
+                mode: input.action.authority.mode === "code" ? "code" : "work",
+                pageId: input.reopenPageId,
+              })
+            : undefined;
+        if (reopenHold === "held-by-other") {
+          return failure(
+            {
+              category: "unavailable",
+              message:
+                "Another window or device is reopening this page. Try again once it has finished.",
+            },
+            409,
+            origin,
+          );
+        }
         return success(
           decodeBrowserAutomationSnapshot(
             await dependencies.service.create({
               windowId,
               ...input,
+              // The one route a person opens a page from. Every other caller
+              // of `create` leaves this unsaid, so only this page is recorded
+              // as the person's.
+              openedByPerson: true,
+              actor,
+              // Honoured only while this window or device holds the page's
+              // reservation, which an open that names it takes again if it
+              // lapsed; otherwise it is an ordinary open.
+              ...(reopenHold === "held" && input.reopenPageId !== undefined
+                ? { reopensPageId: String(input.reopenPageId) }
+                : {}),
               // A signed-in page opens for the host's own person (at a local
               // window or on a device they paired); a hub-introduced or
               // restricted device is refused before any runtime is asked.
@@ -1017,8 +1055,37 @@ export function createBrowserAutomationRouteHandler(
           dependencies.service.peekThread === undefined || input.freshPicture === false
             ? dependencies.service.inspectThread(windowId, input.threadId)
             : await dependencies.service.peekThread(windowId, input.threadId, request.signal);
+        // The offer is the host's person's: a below-Full, restricted or
+        // hub-introduced device is shown none.
+        const reopenOffer = actsAsHostPerson
+          ? await dependencies.pageOffers?.read(windowId, input.threadId)
+          : undefined;
         return success(
-          shown(decodeBrowserAutomationSnapshot(withAvailability(windowId, snapshot))),
+          shown(
+            decodeBrowserAutomationSnapshot({
+              ...withAvailability(windowId, snapshot),
+              ...(reopenOffer === undefined ? {} : { reopenOffer }),
+            }),
+          ),
+          origin,
+        );
+      }
+      if (
+        url.pathname === "/api/browser/page-offer/claim" ||
+        url.pathname === "/api/browser/page-offer/release" ||
+        url.pathname === "/api/browser/page-offer/dismiss"
+      ) {
+        const input = decodeBrowserPageOfferCommand(decoded.value);
+        // Refused before any record is read or changed.
+        if (!actsAsHostPerson || dependencies.pageOffers === undefined) {
+          return success({ status: "refused", reason: "not-allowed" }, origin);
+        }
+        return success(
+          url.pathname === "/api/browser/page-offer/claim"
+            ? await dependencies.pageOffers.claim(windowId, input)
+            : url.pathname === "/api/browser/page-offer/release"
+              ? dependencies.pageOffers.release(windowId, input)
+              : dependencies.pageOffers.dismiss(windowId, input, actor),
           origin,
         );
       }
@@ -1119,7 +1186,7 @@ export function createBrowserAutomationRouteHandler(
         const input = decodeBrowserThreadContextCommand(decoded.value);
         return success(
           decodeBrowserAutomationSnapshot(
-            await dependencies.service.releaseThread(windowId, input.threadId),
+            await dependencies.service.releaseThread(windowId, input.threadId, "person", actor),
           ),
           origin,
         );
@@ -1289,7 +1356,13 @@ export function createBrowserAutomationRouteHandler(
         const input = decodeBrowserContextStopCommand(decoded.value);
         return success(
           decodeBrowserAutomationSnapshot(
-            await dependencies.service.stop(windowId, input.threadId, input.contextId),
+            await dependencies.service.stop(
+              windowId,
+              input.threadId,
+              input.contextId,
+              "person",
+              actor,
+            ),
           ),
           origin,
         );

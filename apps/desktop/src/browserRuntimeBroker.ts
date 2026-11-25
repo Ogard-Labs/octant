@@ -98,6 +98,7 @@ export interface BrowserRuntimeBroker {
 export async function startBrowserRuntimeBroker(
   host: ReturnTypeOfBrowserSurfaceHost,
   profiles?: BrowserProfileStore,
+  appQuitting: () => boolean = () => false,
 ): Promise<BrowserRuntimeBroker> {
   await host.persistentOwner?.restart();
   const token = randomBytes(32).toString("base64url");
@@ -106,7 +107,12 @@ export async function startBrowserRuntimeBroker(
     personInput: new Set<string>(),
     pairedControlReclaimed: new Set<string>(),
   };
-  const removeGoneListener = host.onContextGone((contextId) => events.gone.add(contextId));
+  // Once the app is quitting, its windows closing take their pages with them;
+  // that is not the Browser runtime being lost, and the host must not record
+  // the pages as lost before the window revocation says the app is leaving.
+  const removeGoneListener = host.onContextGone((contextId) => {
+    if (!appQuitting()) events.gone.add(contextId);
+  });
   const removePersonInputListener = host.onPersonInput((contextId) =>
     events.personInput.add(contextId),
   );

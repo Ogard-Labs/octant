@@ -63,6 +63,8 @@ import {
 import { createBrowserCookieReader } from "../browser/cookieImport/browserCookieReader";
 import { readKeychainPasswordWithSecurityTool } from "../browser/cookieImport/keychainPassword";
 import { ProjectBrowserService } from "../browser/projectBrowserService";
+import { BrowserPageOffers } from "../browser/browserPageOffers";
+import { BrowserPageSessions } from "../browser/browserPageSessions";
 import { OCTANT_LOCAL_ACTOR_ID, ShellServiceError, type ShellService } from "../shellService";
 import type { PersistenceService } from "../persistence/persistenceService";
 import {
@@ -715,7 +717,33 @@ export function wireBrowser(deps: BrowserDependencies) {
       }
     });
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeProjectBrowserAuthority));
+    // The pages the person had open when the last run ended, settled before any
+    // command is served: a page whose thread can no longer open a Browser is
+    // ended, and the newest page of each other thread stays offered.
+    const pageSessions = new BrowserPageSessions({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    // Only an archived or deleted thread ends its page for good. A thread whose
+    // mode is off or whose Project is archived keeps the record, unseen, until
+    // it can open a Browser again.
+    const offeredPageIds = pageSessions.settleAtStart((page) => {
+      const thread =
+        page.mode === "work"
+          ? workThreadProjection.read(decodeWorkThreadId(page.threadId))
+          : persistence.readCodeThread(decodeCodeThreadId(page.threadId));
+      return thread === undefined || thread.lifecycle !== "active";
+    });
+    onThreadArchived((threadId) => {
+      for (const page of pageSessions.openOfThread(threadId)) {
+        pageSessions.ended(page.pageId, threadId, "thread-ended");
+      }
+    });
     const browserAutomationService = new BrowserAutomationService({
+      pageSessions,
       runtime: browserRuntime,
       pageScriptPolicy: (windowId, threadId, mode) => {
         if (
@@ -776,7 +804,28 @@ export function wireBrowser(deps: BrowserDependencies) {
       clock: () => new Date().toISOString(),
       now: Date.now,
     });
-    onWindowRevoked((windowId) => void browserAutomationService.revokeWindow(windowId));
+    onWindowRevoked(
+      (windowId, revocation) =>
+        void browserAutomationService.revokeWindow(
+          windowId,
+          // The desktop's revoke route is the local person's own request.
+          revocation === undefined
+            ? undefined
+            : {
+                appQuitting: revocation.appQuitting,
+                actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+              },
+        ),
+    );
+    const browserPageOffers = new BrowserPageOffers({
+      sessions: pageSessions,
+      offeredAtStart: offeredPageIds,
+      canOpenBrowser: (windowId, threadId, mode) =>
+        browserAuthority.canAccessWindow(windowId, threadId, mode),
+      hasOpenPage: (threadId) => browserAutomationService.hasOpenPage(threadId),
+      profileState: (profile) => browserAutomationService.profileState(profile),
+    });
+    onWindowRevoked((windowId) => browserPageOffers.releaseWindow(windowId));
     const credentialMetadataBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
@@ -1050,6 +1099,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       terminalBrowserTools,
       browserDelegatedChildren,
       browserAutomationService,
+      browserPageOffers,
       browserCredentialUseService,
       browserExtensionService,
       browserFlowService,

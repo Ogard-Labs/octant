@@ -8,6 +8,7 @@ export * from "./browserPageSnapshot";
 export * from "./browserPageAudit";
 export * from "./browserPageTools";
 export * from "./browserCapturePolicy";
+export * from "./browserPageSessionPolicy";
 export * from "./browserProofPolicy";
 export * from "./browserRecording";
 export * from "./browserProfilePolicy";

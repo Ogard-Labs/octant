@@ -297,6 +297,7 @@ describe("Code persistence restart", () => {
       { projection_name: "aggregate-heads", reason: "unsupported-event-version" },
       { projection_name: "automations", reason: "unsupported-event-version" },
       { projection_name: "benchmarks", reason: "unsupported-event-version" },
+      { projection_name: "browser-page", reason: "unsupported-event-version" },
       { projection_name: "bundled-plugin-switches", reason: "unsupported-event-version" },
       { projection_name: "canvas", reason: "unsupported-event-version" },
       { projection_name: "chat", reason: "unsupported-event-version" },

@@ -2334,7 +2334,12 @@ describe("Code app-managed tools", () => {
     });
 
     expect(result).toEqual({ result: { status: "ready" }, isError: false });
-    expect(releaseThread).toHaveBeenCalledWith(windowId, threadId);
+    expect(releaseThread).toHaveBeenCalledWith(
+      windowId,
+      threadId,
+      "agent",
+      expect.objectContaining({ kind: "agent", threadId: String(threadId) }),
+    );
   });
 
   it("returns a bounded image block to an agent that requests a screenshot", async () => {
