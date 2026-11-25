@@ -264,6 +264,9 @@
   /* Ambient loops, not interaction durations: a spinner turn and the breathing
      dot that says something is live. */
   --oct-motion-spin: 900ms;
+  /* a spinner's turn under reduced motion: slow enough to trouble nobody, and
+     still a turn, since a frozen spinner reads as a hung app */
+  --oct-motion-spin-slow: 2s;
   --oct-motion-pulse: 1.6s;
   /* CSS fallback for the Flowing ground: one slow drift, not an interaction. */
   --oct-motion-flowing: 36s;
@@ -2165,6 +2168,87 @@ input.switch:checked::after {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ─── the three small marks ───────────────────────────────────────────
+   One rule each for the spinner, the key cap and the status dot that
+   OctantSpinner, OctantKbd and OctantStatusDot draw. A feature places them
+   and never repaints them. */
+
+.octant-spinner {
+  flex: none;
+  animation: oct-spin var(--oct-motion-spin) linear infinite;
+}
+
+/* A chord is set in the interface face, as a native menu sets its
+   shortcuts: it takes the face of the text it stands in, where the browser's
+   own style for a kbd is the mono face. */
+.octant-kbd {
+  color: var(--oct-meta);
+  font-family: inherit;
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.octant-kbd[data-form="cap"] {
+  display: inline-block;
+  padding: 0 var(--oct-space-1);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  line-height: 1.4;
+}
+
+/* Resting is a share of the ink, so the dot lands at the same weight on any
+   fill and on glass; a status takes its role's own ink. */
+.octant-status-dot {
+  display: inline-block;
+  flex: none;
+  width: var(--oct-space-2);
+  height: var(--oct-space-2);
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 22%, transparent);
+}
+
+.octant-status-dot[data-size="sm"] {
+  width: 6px;
+  height: 6px;
+}
+
+.octant-status-dot[data-tone="active"] {
+  background: color-mix(in oklab, var(--oct-fg) 45%, transparent);
+}
+
+.octant-status-dot[data-tone="success"] {
+  background: var(--oct-success);
+}
+
+.octant-status-dot[data-tone="warning"] {
+  background: var(--oct-warn);
+}
+
+.octant-status-dot[data-tone="danger"] {
+  background: var(--oct-danger);
+}
+
+.octant-status-dot[data-tone="accent"] {
+  background: var(--oct-accent);
+}
+
+.octant-status-dot[data-live="true"] {
+  animation: oct-pulse var(--oct-motion-pulse) ease-in-out infinite;
+}
+
+/* Octant's own Reduce motion setting, as the system's below: a spinner turns
+   slowly, since a frozen one reads as a hung app, and a live dot holds still,
+   since the word beside it already says it is live. */
+html[data-octant-reduced-motion="true"] .octant-spinner {
+  animation-duration: var(--oct-motion-spin-slow);
+}
+
+html[data-octant-reduced-motion="true"] .octant-status-dot[data-live="true"] {
+  animation: none;
 }
 
 /* ─── skeleton ──────────────────────────────────────────────────────── */
@@ -10079,8 +10163,9 @@ html[data-octant-native-host="true"]
   }
   /* the spinner keeps turning — a frozen spinner reads as a hung app —
      but slowly enough not to trigger anyone */
-  .spinner {
-    animation-duration: 2s !important;
+  .spinner,
+  .octant-spinner {
+    animation-duration: var(--oct-motion-spin-slow) !important;
   }
   .skeleton::after {
     display: none;
