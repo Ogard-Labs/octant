@@ -443,6 +443,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
   const fetch = bindFetchPort(options.fetch);
   validateLoopbackBaseUrl(options.baseUrl);
   const headers = { "x-octant-window-capability": options.windowCapability };
+  /** False once this host has refused the cleaned-up worktree query, so later reads send one request. */
+  let hostReadsWorktreeCleanup = true;
   /** A merge route: sent once, and again with an owner unlock when the host asks for one. */
   const mergeRequest = <T extends { readonly status: string }>(
     path: string,
@@ -498,18 +500,26 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeHostAnswer(CodeTranscriptSearch),
       );
     },
-    thread(threadId, signal) {
-      return request(
-        fetch,
+    async thread(threadId, signal) {
+      const path = `/api/code/threads/${encodeURIComponent(threadId)}`;
+      const init = { method: "GET", headers, ...(signal === undefined ? {} : { signal }) };
+      if (hostReadsWorktreeCleanup) {
         // Says this client reads the cleaned-up worktree field, which an older
         // client's strict view decoder would refuse.
-        new URL(
-          `/api/code/threads/${encodeURIComponent(threadId)}?reads=worktree-cleanup`,
-          options.baseUrl,
-        ).toString(),
-        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
-        decodeThreadView,
-      );
+        const response = await requestRaw(
+          fetch,
+          new URL(`${path}?reads=worktree-cleanup`, options.baseUrl).toString(),
+          init,
+        );
+        // A host built before the query answers 400 to any query. A 400 that
+        // the plain read shares is a real one and is shown as it is.
+        if (response.status !== 400) return readJsonAnswer(response, decodeThreadView);
+        await response.body?.cancel().catch(() => undefined);
+        const plain = await requestRaw(fetch, new URL(path, options.baseUrl).toString(), init);
+        if (plain.ok) hostReadsWorktreeCleanup = false;
+        return readJsonAnswer(plain, decodeThreadView);
+      }
+      return request(fetch, new URL(path, options.baseUrl).toString(), init, decodeThreadView);
     },
     async execute(command, signal, onWorktreeProgress) {
       let validated: CodeCommand;
