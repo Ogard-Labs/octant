@@ -89,6 +89,7 @@ describe("a report's turn that fails", () => {
     ["work", work("failed")],
     ["code", code({ kind: "operation-state", state: "failed" })],
     ["code", code(failedResult)],
+    ["code", code({ kind: "operation-state", state: "interrupted" })],
   ])("ends the %s parent's snooze", async (mode, event) => {
     await expect(woken(event, report)).resolves.toEqual([mode]);
   });
@@ -113,9 +114,32 @@ describe("a report's turn that fails", () => {
     ["a Work turn the person stopped", work("cancelled")],
     ["a failed Work turn a fork carried", work("failed", { carried: true })],
     ["a completed Code turn", code({ kind: "operation-state", state: "completed" })],
-    ["a Code turn the person stopped", code({ kind: "operation-state", state: "interrupted" })],
   ])("leaves the snooze alone after %s", async (_name, event) => {
     await expect(woken(event, report)).resolves.toEqual([]);
+  });
+
+  it("leaves the snooze alone after a Code turn the person stopped", async () => {
+    const wakes: string[] = [];
+    const service = new SideTaskReportFailureWake({
+      chatTurnMark: () => report,
+      workTurnMark: () => report,
+      codeTurnMark: () => report,
+      wakeChat: () => wakes.push("chat"),
+      wakeWork: () => wakes.push("work"),
+      wakeCode: () => wakes.push("code"),
+    });
+    service.onCommittedEvents([
+      code({ kind: "conversation-turn-stop-requested" }) as EventEnvelope,
+      code({ kind: "operation-state", state: "interrupted" }) as EventEnvelope,
+    ]);
+    await Promise.resolve();
+    expect(wakes).toEqual([]);
+    // The Stop belonged to that turn alone; a later provider exit still wakes it.
+    service.onCommittedEvents([
+      code({ kind: "operation-state", state: "interrupted" }) as EventEnvelope,
+    ]);
+    await Promise.resolve();
+    expect(wakes).toEqual(["code"]);
   });
 
   it.each([

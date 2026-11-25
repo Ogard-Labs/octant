@@ -330,17 +330,19 @@ export function createChatSideTaskReportDeliveryPort(input: {
           ? sideTaskReportReceipt(reports, result.turn.delivery)
           : { kind: "deferred", detail: "The delivery was not admitted." };
       } catch (error) {
-        // Busy, or changed under the delivery a moment ago: both clear on
-        // their own, so the report still holds a settle meanwhile.
-        if (
-          error instanceof ChatServiceError &&
-          (error.failure.category === "waiting" || error.failure.category === "stale")
-        ) {
+        // A thread changed under the delivery a moment ago clears by itself,
+        // so the report still holds a settle meanwhile. `waiting` also covers a
+        // model pool with no model to take the turn, which only the person can
+        // change: whether a turn is running is asked of the thread itself.
+        if (error instanceof ChatServiceError && error.failure.category === "stale") {
           return {
             kind: "deferred",
-            detail: "The parent Chat thread is mid-turn.",
+            detail: "The parent Chat thread changed; trying again.",
             parentRunning: true,
           };
+        }
+        if (error instanceof ChatServiceError && error.failure.category === "waiting") {
+          return { kind: "deferred", detail: error.failure.message };
         }
         return {
           kind: "deferred",

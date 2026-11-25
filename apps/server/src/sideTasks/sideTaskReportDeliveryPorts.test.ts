@@ -73,6 +73,27 @@ describe("a parent that cannot take a side task's report", () => {
     });
   });
 
+  it("counts a Chat parent changed a moment ago as busy, but not one whose model pool has no model", async () => {
+    const stale = chatPort(
+      "active",
+      new ChatServiceError({ category: "stale", message: "Chat thread changed." }),
+    );
+    await expect(stale.port.dispatch(parent, [report("chat")])).resolves.toMatchObject({
+      kind: "deferred",
+      parentRunning: true,
+    });
+    const noModel = chatPort(
+      "active",
+      new ChatServiceError({
+        category: "waiting",
+        message: "No model in this thread's pool can take a turn now.",
+      }),
+    );
+    await expect(noModel.port.dispatch(parent, [report("chat")])).resolves.not.toHaveProperty(
+      "parentRunning",
+    );
+  });
+
   it("says a deferred report waits for the parent's running turn, even one that ended during the try", async () => {
     let running = true;
     const { port } = chatPort("active");

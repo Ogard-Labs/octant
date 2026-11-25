@@ -2,9 +2,10 @@
  * Ends a person's snooze when the turn a side task's report started fails. The
  * report's turn runs under the snooze, so without this its failure would stay
  * hidden until the wake time. Each mode says in its own journal how a turn
- * ended, read as the turn-end hooks read it: a turn the person stopped is not a
- * failure, and Code's `interrupted` is a stop. A turn a restart cut off is left
- * to restart recovery, which may still continue it.
+ * ended: a turn the person stopped is not a failure. Chat records that as
+ * `cancelled`; Code's `interrupted` is the person's only after the Stop marker
+ * it journals first, and a provider that exits mid-turn is a failure. A turn a
+ * restart cut off is left to restart recovery, which may still continue it.
  */
 import {
   decodeChatAttemptUpdated,
@@ -50,17 +51,31 @@ interface CodeFramePeek {
   };
 }
 
-function codeFrameFailed(payload: unknown): boolean {
+/** How a Code frame ends its turn, if it does: `interrupted` may be a Stop. */
+function codeFrameEnd(payload: unknown): "failed" | "interrupted" | "other" | undefined {
   const event = (payload as CodeFramePeek | undefined)?.event;
-  if (event?.kind === "operation-state") return event.state === "failed";
-  return (
-    event?.kind === "operation-result" &&
-    (event.result?.kind === "operation-failed" || event.result?.state === "failed")
-  );
+  const state =
+    event?.kind === "operation-state"
+      ? event.state
+      : event?.kind === "operation-result"
+        ? event.result?.kind === "operation-failed"
+          ? "failed"
+          : event.result?.kind === "provider-turn-state"
+            ? event.result.state
+            : undefined
+        : undefined;
+  if (state === undefined || state === "running" || state === "waiting") return undefined;
+  return state === "failed" || state === "interrupted" ? state : "other";
+}
+
+function isCodeStopRequest(payload: unknown): boolean {
+  return (payload as CodeFramePeek | undefined)?.event?.kind === "conversation-turn-stop-requested";
 }
 
 export class SideTaskReportFailureWake {
   readonly #ports: SideTaskReportFailureWakePorts;
+  /** Code turns a person asked to stop, until their end is journaled. */
+  readonly #codeStops = new Set<string>();
 
   constructor(ports: SideTaskReportFailureWakePorts) {
     this.#ports = ports;
@@ -111,8 +126,16 @@ export class SideTaskReportFailureWake {
         ? () => ports.wakeWork(turn.threadId)
         : undefined;
     }
-    if (event.eventName === "code.operation-event-recorded@1" && codeFrameFailed(event.payload)) {
+    if (event.eventName === "code.operation-event-recorded@1") {
+      if (isCodeStopRequest(event.payload)) {
+        this.#codeStops.add(String(decodeCodeOperationEventFrame(event.payload).operationId));
+        return undefined;
+      }
+      const end = codeFrameEnd(event.payload);
+      if (end === undefined) return undefined;
       const frame = decodeCodeOperationEventFrame(event.payload);
+      const stopped = this.#codeStops.delete(String(frame.operationId));
+      if (end === "other" || (end === "interrupted" && stopped)) return undefined;
       return isReport(ports.codeTurnMark(frame.threadId, frame.operationId))
         ? () => ports.wakeCode(frame.threadId)
         : undefined;
