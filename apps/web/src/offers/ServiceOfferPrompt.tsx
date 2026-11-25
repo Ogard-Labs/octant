@@ -30,26 +30,29 @@ const IDLE_OFFER_POLL_MS = 5_000;
 
 type ListedOfferCard = LazyExoticComponent<ComponentType<ListedOfferCardProps>>;
 
-/** Each kind's card brings its payload schema with it, when the first such offer shows. */
+/**
+ * Each kind's card brings its payload schema with it, when the first such
+ * offer shows. A card that cannot load shows nothing, as an offer this build
+ * cannot read does, rather than taking the thread's pane down with it; the
+ * offer stays listed and waiting.
+ */
+const card = (load: () => Promise<ComponentType<ListedOfferCardProps>>): ListedOfferCard =>
+  lazy(() =>
+    load().then(
+      (Card) => ({ default: Card }),
+      () => ({ default: () => null }),
+    ),
+  );
+
 const CARDS: Record<ServiceOffer["kind"], ListedOfferCard> = {
-  generate: lazy(async () => ({
-    default: (await import("../image/imageOfferCards")).ImageGenerateOfferCard,
-  })),
-  save: lazy(async () => ({
-    default: (await import("../image/imageOfferCards")).ImageSaveOfferCard,
-  })),
-  transcribe: lazy(async () => ({
-    default: (await import("./TranscriptionOfferCard")).TranscriptionOfferCard,
-  })),
-  narrate: lazy(async () => ({
-    default: (await import("./NarrationOfferCard")).NarrationOfferCard,
-  })),
-  "video-generate": lazy(async () => ({
-    default: (await import("../video/videoOfferCards")).VideoGenerateOfferCard,
-  })),
-  "video-save": lazy(async () => ({
-    default: (await import("../video/videoOfferCards")).VideoSaveOfferCard,
-  })),
+  generate: card(async () => (await import("../image/imageOfferCards")).ImageGenerateOfferCard),
+  save: card(async () => (await import("../image/imageOfferCards")).ImageSaveOfferCard),
+  transcribe: card(async () => (await import("./TranscriptionOfferCard")).TranscriptionOfferCard),
+  narrate: card(async () => (await import("./NarrationOfferCard")).NarrationOfferCard),
+  "video-generate": card(
+    async () => (await import("../video/videoOfferCards")).VideoGenerateOfferCard,
+  ),
+  "video-save": card(async () => (await import("../video/videoOfferCards")).VideoSaveOfferCard),
 };
 
 const CARD_KINDS: ReadonlyMap<string, ListedOfferCard> = new Map(Object.entries(CARDS));
