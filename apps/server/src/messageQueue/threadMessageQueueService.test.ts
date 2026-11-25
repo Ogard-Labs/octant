@@ -383,13 +383,21 @@ describe("durable ordinary thread queue", () => {
     expect(await claimOf(String(typedEnqueue.messageId))).toBe(true);
     expect(await claimOf(String(plain.messageId))).toBeUndefined();
 
+    // Changed with the person's own claim, a claimed message keeps it.
+    await edit(String(typedEnqueue.messageId), "I prefer tabs, always", true);
+    expect(await claimOf(String(typedEnqueue.messageId))).toBe(true);
+
     // Changed by a route that makes no claim: no longer the person's typing.
     await edit(String(typedEnqueue.messageId), "I prefer spaces");
     expect(await claimOf(String(typedEnqueue.messageId))).toBeUndefined();
 
-    // Changed with the person's own claim.
+    // A message that never carried the claim does not gain it from an edit.
     await edit(String(plain.messageId), "I prefer tabs now", true);
-    expect(await claimOf(String(plain.messageId))).toBe(true);
+    expect(await claimOf(String(plain.messageId))).toBeUndefined();
+
+    // Once the claim is gone, a later claimed edit does not bring it back.
+    await edit(String(typedEnqueue.messageId), "I prefer tabs again", true);
+    expect(await claimOf(String(typedEnqueue.messageId))).toBeUndefined();
   });
 
   it("sends only one item at a time and advances only after durable normal completion", async () => {

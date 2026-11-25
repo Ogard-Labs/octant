@@ -2326,8 +2326,8 @@ except where a bullet says otherwise.
   by the person's input when it was current, so undoing back to what a button
   wrote does not count; deleting back to it by hand does, because that is the
   person's own input. A person's own edit in a queued message's editor claims
-  typing the same way; a save that changes nothing keeps the claim the message
-  had and gives none. A message that carries a quote of transcript text does not
+  typing the same way, but only for a message that already carried the claim; a
+  save that changes nothing keeps the claim the message had and gives none. A message that carries a quote of transcript text does not
   count. Side tasks (start and "Do it here"),
   thread dialogue, answers to pending requests that build a prompt, pull
   request and review buttons, Canvas and planner sends, routines, goal rounds,
@@ -2340,9 +2340,9 @@ except where a bullet says otherwise.
   `person-memory.turn-typed@1` (mode, thread id, and the turn, Code operation,
   or steered message id; no text, hash, or excerpt) appended with the turn, so
   a turn with no mark is not the person's words. A queued message keeps its
-  claim on the queue entry; an edit that changes it keeps the claim only when
-  the person's own route made it with the edit, and any other changing edit
-  clears it. A message steered into a running turn is marked on its own. The marks are
+  claim on the queue entry; an edit never gives a message the claim; a message
+  that carried it keeps it through an edit only when the person's own route made
+  the claim again with the edit, and any other changing edit clears it. A message steered into a running turn is marked on its own. The marks are
   erased with their thread, with Leave no trace, and by Forget everything, and
   a thread counts only its newest 200. A mark beyond the 200 stays in the
   journal until the next start removes it, so a turn whose mark was compacted
