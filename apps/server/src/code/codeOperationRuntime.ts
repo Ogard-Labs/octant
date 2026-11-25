@@ -699,6 +699,12 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
   }) => AppManagedToolSet | undefined;
+  /** Optional Project-fixed, read-only Linear tools composed per active turn. */
+  readonly linearReadTools?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
+  }) => AppManagedToolSet | undefined;
   /**
    * The threads tool for one turn: a view of the other Code threads of this
    * thread's Project, messaging them where the host admits it, and the
@@ -6376,6 +6382,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             : { android: this.#options.androidToolchain }),
         }),
         this.#options.githubReadTools?.({
+          windowId: active.windowId,
+          thread: active.thread,
+          readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
+        }),
+        this.#options.linearReadTools?.({
           windowId: active.windowId,
           thread: active.thread,
           readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),

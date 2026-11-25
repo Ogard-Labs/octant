@@ -47,6 +47,7 @@ export type LinearIssuePageSize = typeof LinearIssuePageSize.Type;
 
 export const LINEAR_ISSUE_LIST_OPERATION = "list-issues";
 export const LINEAR_ISSUE_GET_OPERATION = "get-issue";
+export const LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION = "get-issue-by-identifier";
 export const LINEAR_ISSUE_FILTERS_OPERATION = "list-issue-filters";
 
 export function linearIssueBrowseAvailable(
@@ -100,6 +101,9 @@ export const LinearIssueRow = Schema.Struct({
   title: safeText(256),
   state: LinearIssueState,
   assignee: Schema.optional(safeText(128)),
+  teamId: Schema.optional(LinearNodeId),
+  teamKey: Schema.optional(safeText(16)),
+  projectId: Schema.optional(LinearNodeId),
   url: LinearIssueUrl,
 }).annotations(strict);
 export type LinearIssueRow = typeof LinearIssueRow.Type;
@@ -120,6 +124,9 @@ export const LinearIssueDetail = Schema.Struct({
   title: safeText(256),
   state: LinearIssueState,
   assignee: Schema.optional(safeText(128)),
+  teamId: Schema.optional(LinearNodeId),
+  teamKey: Schema.optional(safeText(16)),
+  projectId: Schema.optional(LinearNodeId),
   url: LinearIssueUrl,
   description: boundedBody(ISSUE_BODY_MAX_BYTES),
   descriptionTruncated: Schema.Boolean,
@@ -127,9 +134,13 @@ export const LinearIssueDetail = Schema.Struct({
 }).annotations(strict);
 export type LinearIssueDetail = typeof LinearIssueDetail.Type;
 
+export const LinearIssueStateCategory = Schema.Literal("open", "closed", "all");
+export type LinearIssueStateCategory = typeof LinearIssueStateCategory.Type;
+
 export const LinearIssueListFilter = Schema.Struct({
   teamId: Schema.optional(LinearNodeId),
   stateId: Schema.optional(LinearNodeId),
+  stateCategory: Schema.optional(LinearIssueStateCategory),
   assigneeId: Schema.optional(LinearAssigneeFilterId),
   projectId: Schema.optional(LinearNodeId),
 }).annotations(strict);
@@ -148,6 +159,11 @@ export const LinearIssueGetInput = Schema.Struct({
 }).annotations(strict);
 export type LinearIssueGetInput = typeof LinearIssueGetInput.Type;
 
+export const LinearIssueGetByIdentifierInput = Schema.Struct({
+  identifier: LinearIssueIdentifier,
+}).annotations(strict);
+export type LinearIssueGetByIdentifierInput = typeof LinearIssueGetByIdentifierInput.Type;
+
 export const LinearIssueListPage = Schema.Struct({
   rows: Schema.Array(LinearIssueRow).pipe(Schema.maxItems(50)),
   hasNextPage: Schema.Boolean,
@@ -158,6 +174,8 @@ export type LinearIssueListPage = typeof LinearIssueListPage.Type;
 export const LinearIssueFilterOption = Schema.Struct({
   id: Schema.Union(LinearNodeId, LinearUnassignedAssigneeId),
   label: safeText(128),
+  key: Schema.optional(safeText(16)),
+  name: Schema.optional(safeText(128)),
 }).annotations(strict);
 export type LinearIssueFilterOption = typeof LinearIssueFilterOption.Type;
 
@@ -174,6 +192,11 @@ export const decodeLinearIssueListInput = Schema.decodeUnknownSync(LinearIssueLi
 
 /** Decodes an unknown value as a Linear issue detail request. */
 export const decodeLinearIssueGetInput = Schema.decodeUnknownSync(LinearIssueGetInput);
+
+/** Decodes an unknown value as a Linear issue lookup by public identifier. */
+export const decodeLinearIssueGetByIdentifierInput = Schema.decodeUnknownSync(
+  LinearIssueGetByIdentifierInput,
+);
 
 /** Decodes an unknown value as a Linear issue list page. */
 export const decodeLinearIssueListPage = Schema.decodeUnknownSync(LinearIssueListPage);

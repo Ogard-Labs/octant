@@ -162,6 +162,7 @@ export interface ThreadPaneContainerProps {
     | "askAgainForProjectGeneration"
     | "setProjectBrandKit"
     | "setProjectDesignSystem"
+    | "setProjectLinearTarget"
     | "setProjectDesktopRecipe"
     | "setProjectActions"
     | "setProjectWorkStatusFile"
@@ -447,6 +448,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     askAgainForProjectGeneration,
     setProjectBrandKit,
     setProjectDesignSystem,
+    setProjectLinearTarget,
     setProjectDesktopRecipe,
     setProjectActions,
     setProjectWorkStatusFile,
@@ -900,6 +902,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     onGenerationAskAgain={askAgainForProjectGeneration}
                     onBrandKitChange={setProjectBrandKit}
                     onDesignSystemChange={setProjectDesignSystem}
+                    onLinearTargetChange={setProjectLinearTarget}
                     onDesktopRecipeChange={setProjectDesktopRecipe}
                     onActionsChange={setProjectActions}
                     onWorkStatusFileChange={(projectId, enabled) =>

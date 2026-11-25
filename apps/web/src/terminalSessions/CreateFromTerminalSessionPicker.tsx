@@ -4,29 +4,20 @@ import type { TerminalSessionClient } from "@octant/client-runtime/terminal-sess
 import type {
   ProjectId,
   TerminalSessionImportRequest,
-  TerminalSessionProvider,
   TerminalSessionSummary,
 } from "@octant/contracts";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PopupSkeletonRows } from "../ui/base/PopupSkeletonRows";
-import { loadList, peekList } from "../composer/createFromCache";
+import { peekList } from "../composer/createFromCache";
+import {
+  loadTerminalSessions,
+  TERMINAL_SESSION_TOOL_NAMES,
+  terminalSessionsKey,
+} from "./terminalSessionsReadAhead";
 
-export const TERMINAL_SESSION_TOOL_NAMES: Record<TerminalSessionProvider, string> = {
-  claude: "Claude Code",
-  codex: "Codex",
-};
-
-const terminalSessionsKey = (projectId: ProjectId) => `terminal-sessions:${String(projectId)}`;
-
-/** The sessions kept for a Project's folder, shared with whoever reads ahead of the popup opening. */
-export function loadTerminalSessions(
-  client: TerminalSessionClient,
-  projectId: ProjectId,
-): Promise<ReadonlyArray<TerminalSessionSummary>> {
-  return loadList(client, terminalSessionsKey(projectId), () => client.list(projectId));
-}
+export { loadTerminalSessions, TERMINAL_SESSION_TOOL_NAMES } from "./terminalSessionsReadAhead";
 
 const HANDOFF_NOTE =
   "Sessions from Claude Code and Codex in this Project's folders. Choose a text handoff to start a new session with read-only visible conversation. Native adoption is unavailable because this host cannot verify the source account and exclusive session ownership. Original inputs, tool activity and hidden reasoning are omitted.";

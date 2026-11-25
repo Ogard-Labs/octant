@@ -2443,6 +2443,14 @@ this surface.
 
 Composer `Create from…` also exposes a Linear tab when the Settings-owned
 connection reports `list-issues` available and the Linear plugin is effective.
+When the active Project is bound to a Linear team (and optional Linear
+project), the Linear tab and the Code Linear issue browser default to that
+binding while letting the person switch back to the whole Linear workspace;
+picking a Linear issue on Start automatically selects the uniquely matching
+bound Octant Project. Project-to-Linear bindings are edited on the host from
+Settings › Linear (Projects matrix, alongside connected user, workspace,
+linked-project count, and personal API key controls with a direct creation
+link) and from each Project's Overview page.
 Selecting a row attaches only `{ id }`. At creation the server reauthorizes
 through the Integration port, frames redacted issue text
 (`identifier`, status, description, comments, links) as external content and

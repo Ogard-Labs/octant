@@ -357,6 +357,11 @@ export interface SettingsViewProps {
   readonly hostFederationLifecycle?: HostFederationLifecycle;
   readonly githubClient?: GithubClient;
   readonly integrationClient?: IntegrationClient;
+  readonly linearProjects?: ReadonlyArray<import("@octant/contracts").ProjectSummary>;
+  readonly onProjectLinearTargetChange?: (
+    projectId: ProjectId,
+    target: import("@octant/contracts").ProjectLinearTarget | null,
+  ) => Promise<boolean>;
   readonly extensionClient?: ExtensionClient;
   /** Project names by Project id, to head the remembered tool approvals. */
   readonly projectNames?: ReadonlyMap<string, string>;
@@ -1043,8 +1048,11 @@ function ActiveSectionContent({
     return (
       <PluginSettingsSection
         entryPoint={pluginEntryPoint}
+        focusedSetting={focusedSetting}
         githubClient={props.githubClient}
         integrationClient={props.integrationClient}
+        linearProjects={props.linearProjects}
+        onProjectLinearTargetChange={props.onProjectLinearTargetChange}
       />
     );
   }

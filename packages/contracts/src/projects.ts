@@ -14,6 +14,7 @@ import {
   ProviderModelId,
 } from "./providers";
 import { AutoReviewer } from "./shield";
+import { LinearNodeId } from "./linearIssues";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -76,6 +77,29 @@ export const ConnectedGitHubRepository = Schema.Struct({
   ),
 }).annotations(strict);
 export type ConnectedGitHubRepository = typeof ConnectedGitHubRepository.Type;
+
+/**
+ * The Linear team (and optional Linear project) a bound Octant Project scopes
+ * its Linear issues and project-pinned `octant_linear` reads to. Set from a
+ * local window on this host; never carries credentials or arbitrary URLs.
+ */
+export const ProjectLinearTarget = Schema.Struct({
+  teamId: LinearNodeId,
+  teamKey: Schema.NonEmptyTrimmedString.pipe(Schema.pattern(/^[A-Z][A-Z0-9]{0,9}$/)),
+  teamName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  projectId: Schema.optional(LinearNodeId),
+  projectName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (target) => (target.projectId === undefined) === (target.projectName === undefined),
+      {
+        message: () => "Linear project id and name must be provided together.",
+      },
+    ),
+  );
+export type ProjectLinearTarget = typeof ProjectLinearTarget.Type;
 
 /**
  * How a Code Project prefers new threads to start: in a managed
@@ -305,6 +329,8 @@ const BoundProjectFields = {
    * they turned design systems off. Absent follows the automatic rule.
    */
   designSystem: Schema.optional(DesignSystemChoice),
+  /** Linear team (and optional Linear project) bound to this Project. */
+  linearTarget: Schema.optional(ProjectLinearTarget),
 } as const;
 
 export const ChatProject = Schema.Struct({
@@ -563,6 +589,7 @@ const WorkProjectSummary = Schema.Struct({
   defaultStrict: Schema.optional(Schema.Boolean),
   actions: Schema.optional(ProjectActions),
   designSystem: Schema.optional(DesignSystemChoice),
+  linearTarget: Schema.optional(ProjectLinearTarget),
 }).annotations(strict);
 
 const CodeProjectSummary = Schema.Struct({
@@ -593,6 +620,7 @@ const CodeProjectSummary = Schema.Struct({
   nativeProviders: Schema.optional(KeyProviderDriverKinds),
   extraFolders: Schema.optional(ProjectExtraFolders),
   designSystem: Schema.optional(DesignSystemChoice),
+  linearTarget: Schema.optional(ProjectLinearTarget),
 }).annotations(strict);
 
 export const ProjectSummary = Schema.Union(ChatProject, WorkProjectSummary, CodeProjectSummary);
@@ -946,6 +974,12 @@ export const ProjectCommand = Schema.Union(
     designSystem: Schema.NullOr(DesignSystemChoice),
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-project-linear-target"),
+    ...ProjectCommandFields,
+    /** `null` unbinds the Project from Linear. */
+    linearTarget: Schema.NullOr(ProjectLinearTarget),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-code-project-desktop-recipe"),
     ...ProjectCommandFields,
     /** `null` removes the recipe. */
@@ -1087,6 +1121,10 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("project-design-system-changed"),
     project: Project,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-linear-target-changed"),
+    project: BoundProject,
   }).annotations(strict),
 );
 export type ProjectCommandResult = typeof ProjectCommandResult.Type;
@@ -1378,6 +1416,11 @@ export const ProjectBrandKitChanged = Schema.Struct({ project: Project }).annota
 export type ProjectBrandKitChanged = typeof ProjectBrandKitChanged.Type;
 export const ProjectDesignSystemChanged = Schema.Struct({ project: Project }).annotations(strict);
 export type ProjectDesignSystemChanged = typeof ProjectDesignSystemChanged.Type;
+/** Journaled once per host-owner Linear team/project binding change. */
+export const ProjectLinearTargetChanged = Schema.Struct({ project: BoundProject }).annotations(
+  strict,
+);
+export type ProjectLinearTargetChanged = typeof ProjectLinearTargetChanged.Type;
 /** Journaled once per person's save or removal; the lease service reads the Project it leaves. */
 export const CodeProjectDesktopRecipeChanged = Schema.Struct({
   project: CodeProject,
@@ -1411,6 +1454,7 @@ export const decodeProjectRank = Schema.decodeUnknownSync(ProjectRank);
 export const decodeProject = Schema.decodeUnknownSync(Project);
 export const decodeProjectSummary = Schema.decodeUnknownSync(ProjectSummary);
 export const decodeConnectedGitHubRepository = Schema.decodeUnknownSync(ConnectedGitHubRepository);
+export const decodeProjectLinearTarget = Schema.decodeUnknownSync(ProjectLinearTarget);
 export const decodeProjectAvailability = Schema.decodeUnknownSync(ProjectAvailability);
 export const decodeProjectBootstrap = Schema.decodeUnknownSync(ProjectBootstrap);
 export const decodeProjectCommand = Schema.decodeUnknownSync(ProjectCommand);
@@ -1494,6 +1538,9 @@ export const decodeProjectImageGenerationChoiceChanged = Schema.decodeUnknownSyn
 export const decodeProjectBrandKitChanged = Schema.decodeUnknownSync(ProjectBrandKitChanged);
 export const decodeProjectDesignSystemChanged = Schema.decodeUnknownSync(
   ProjectDesignSystemChanged,
+);
+export const decodeProjectLinearTargetChanged = Schema.decodeUnknownSync(
+  ProjectLinearTargetChanged,
 );
 export const decodeCodeProjectDesktopRecipeChanged = Schema.decodeUnknownSync(
   CodeProjectDesktopRecipeChanged,

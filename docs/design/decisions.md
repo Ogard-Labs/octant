@@ -34,7 +34,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Key providers](#key-providers)                                                       | 10        | 7       | 3            | 0                   |
 | [Release scope](#release-scope)                                                       | 8         | 2       | 5            | 1                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 8         | 7       | 1            | 0                   |
-| [App-managed tools](#app-managed-tools)                                               | 6         | 5       | 1            | 0                   |
+| [App-managed tools](#app-managed-tools)                                               | 7         | 6       | 1            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 17        | 10      | 7            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **299**   | **180** | **115**      | **4**               |
+| **All areas**                                                                         | **300**   | **181** | **115**      | **4**               |
 
 ## Principles and hard lines
 
@@ -766,6 +766,16 @@ A Code thread's agent reads its Project's delivery repository through one read-o
 - A successful read is journaled as outside content before the model sees it, and withheld when it cannot be.
 
 Status: Built. Since: —. Detail: [Architecture: Reading GitHub](../architecture.md#modes-chat-work-and-code).
+
+### Linear Project mapping and reads for Code agents
+
+Work and Code Projects may bind a Linear team (and optional Linear project) on the host, scoping the Linear issue browser, `Create from…` picker, Start issue auto-selection, and the project-pinned read-only Code agent tool `octant_linear` (maintainer decision, 2026-11-24).
+
+- Only a local window on the host may set or clear a Project's Linear binding (`change-project-linear-target`, journaled as `project.linear-target-changed@1`); Chat and archived Projects refuse it.
+- `octant_linear` (`list`, `get`, `search`, `help`) is offered only to Code threads whose Project holds a Linear binding while the Linear integration is effective, and never writes to Linear or requests a new OAuth scope.
+- Every call re-checks thread authority, profile allowlists, and Linear capability state on a fresh snapshot, pins list and search queries to the bound team and optional Linear project, refuses `get` for any issue outside that scope, redacts secret shapes, bounds body and comments, and journals `thread.external-content-ingested@1` before returning data.
+
+Status: Built. Since: 2026-11-24. Detail: [Host reads and commands: Linear issues](host-reads-and-commands.md#linear-issues).
 
 ### Zen assistant tool
 

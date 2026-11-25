@@ -19,6 +19,7 @@ import { GithubCapabilityService } from "../github/githubCapabilityService";
 import { GithubCatalogueService } from "../github/githubCatalogueService";
 import { GithubIssueContextService } from "../github/githubIssueContextService";
 import { LinearIssueContextService } from "../plugins/linear/linearIssueContextService";
+import { LinearReadToolService } from "../plugins/linear/linearReadToolService";
 import { linearRoutineEventSources } from "../plugins/linear/linearRoutineEventSources";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "../github/githubReadToolService";
@@ -463,6 +464,19 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       uuid: randomUUID,
       isEffective: linearIntegrationIsEffective,
     });
+    const linearReadToolService = new LinearReadToolService({
+      reader: {
+        snapshot: (signal) => integrationService.snapshot("linear", signal),
+        executeOperation: (operationId, input, signal) =>
+          integrationService.executeOperation(
+            "linear",
+            { kind: "operation", operationId, input },
+            signal,
+          ),
+      },
+      ingestion: externalContentIngestionStore,
+      uuid: randomUUID,
+    });
     // The person's own command-line homes, where those tools keep sessions.
     const claudeHome = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
     const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
@@ -546,6 +560,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       ],
       linearConnected,
       linearIssueContextService,
+      linearReadToolService,
       linearRoutineEventSources: linearRoutineEventSources(
         integrationService,
         linearIntegrationIsEffective,

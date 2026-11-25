@@ -41,6 +41,8 @@ export const IntegrationAccount = Schema.Struct({
   login: safeText(128),
   source: safeText(128),
   scopes: Schema.Array(safeText(128)).pipe(Schema.maxItems(64)),
+  displayName: Schema.optional(safeText(128)),
+  workspace: Schema.optional(safeText(128)),
 }).annotations(strict);
 export type IntegrationAccount = typeof IntegrationAccount.Type;
 
@@ -73,6 +75,7 @@ export const IntegrationAuthenticationSnapshot = Schema.Struct({
   capabilities: Schema.Array(IntegrationCapability).pipe(Schema.maxItems(32)),
   remediation: Schema.optional(safeText(512)),
   interaction: Schema.optional(IntegrationAuthenticationInteraction),
+  personalCredentialStored: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type IntegrationAuthenticationSnapshot = typeof IntegrationAuthenticationSnapshot.Type;
 
