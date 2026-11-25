@@ -667,11 +667,12 @@ function declaresReservablePrice(price: VideoPrice): boolean {
 }
 
 function declaresBoundedClips(model: VideoModelCapabilities): boolean {
-  const longest =
-    model.durations.kind === "range" ? model.durations.max : Math.max(...model.durations.values);
+  const { durations } = model;
   return (
-    longest <= MAX_DECLARED_VIDEO_SECONDS &&
-    (model.durations.kind === "range" || model.durations.values.length <= 128) &&
+    (durations.kind === "range"
+      ? durations.max <= MAX_DECLARED_VIDEO_SECONDS
+      : durations.values.length <= 128 &&
+        durations.values.every((seconds) => seconds <= MAX_DECLARED_VIDEO_SECONDS)) &&
     model.resolutions.length <= 32 &&
     model.aspectRatios.length <= 64 &&
     model.inputs.maxReferenceImages <= MAX_VIDEO_REFERENCES &&

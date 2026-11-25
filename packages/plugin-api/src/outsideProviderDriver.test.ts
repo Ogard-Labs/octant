@@ -233,6 +233,10 @@ describe("outside provider driver entry", () => {
       ["a clip length past the bound", { durations: { kind: "range", min: 1, max: 601 } }],
       ["a listed length past the bound", { durations: { kind: "values", values: [5, 601] } }],
       [
+        "hundreds of thousands of lengths",
+        { durations: { kind: "values", values: Array.from({ length: 300_000 }, () => 5) } },
+      ],
+      [
         "a provider copy kept past a year",
         { job: { ...videoModel.job, removal: { kind: "expires", afterHours: 8_761 } } },
       ],

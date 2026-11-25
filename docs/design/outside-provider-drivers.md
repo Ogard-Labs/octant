@@ -227,8 +227,12 @@ an image driver, each rule taking the fail-closed option:
   text. Images are capped at 2.5 MiB combined, as for an outside image job.
 - **Brokered calls.** Every `http/request` names the call it serves; one that
   names none stops the driver, so nothing billable travels outside a call the
-  host accounts for. A `PUT` or `DELETE`, which a stop or a removal needs, may
-  serve only a video call; from any other family or call it stops the driver.
+  host accounts for. Reads aside, a start may send one `POST` (another only
+  after the provider refused the first outright, because one reservation covers
+  one clip), a stop one `PUT` or `DELETE`, a removal one `DELETE`, and a check
+  nothing. Anything else stops the driver before it leaves, and no other family
+  may send a `PUT` or `DELETE` at all. A provider that stops a clip only by
+  `POST` is therefore declared as one that cannot cancel.
 - **What a start may have cost.** Decided from what the host saw leave and come
   back, never from what the driver says. When a request that could start a clip
   left and the provider did not refuse it outright (a 4xx other than 408, or a

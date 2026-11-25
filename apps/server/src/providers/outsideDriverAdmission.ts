@@ -475,7 +475,7 @@ export class OutsideDriverAdmission {
    *
    * A clip outlives the moment it was asked for, so every call asks again
    * whether the profile is still the one the clip was started on: on, bound to
-   * the same driver and address, and admitted. When it is not, nothing more is
+   * the same driver, address and key placement, and admitted. When it is not, nothing more is
    * sent, and a clip the provider already accepted is counted as billed,
    * because no one can say any longer how it ended.
    */
@@ -485,14 +485,19 @@ export class OutsideDriverAdmission {
     ports: OutsideVideoClipPorts,
     sends: OutsideVideoSends,
   ): VideoGenerationAdapter {
-    const binding = JSON.stringify(instance.configuration);
+    const { driver: bound, baseUrl, key } = instance.configuration;
+    const binding = JSON.stringify([bound, baseUrl, key]);
     const driver = async () => {
       const now = current();
       if (
         now === undefined ||
         now.driverKind !== "outside-video" ||
         !now.enabled ||
-        JSON.stringify(now.configuration) !== binding
+        JSON.stringify([
+          now.configuration.driver,
+          now.configuration.baseUrl,
+          now.configuration.key,
+        ]) !== binding
       ) {
         throw notAdmitted();
       }

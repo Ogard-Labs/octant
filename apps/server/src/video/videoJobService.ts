@@ -39,6 +39,7 @@ import {
   type VideoModelCapabilities,
   type VideoProviderCopy,
 } from "@octant/contracts/video-generation";
+import { OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES } from "@octant/contracts/outside-driver-protocol";
 import { isVideoProfileDriverKind } from "@octant/domain";
 import { admittedBundledVideoDriverKinds } from "@octant/plugin-host/provider-drivers";
 import {
@@ -539,6 +540,15 @@ export class VideoJobService {
       throw new VideoJobServiceError("ineligible", "Video generation was stopped.");
     }
     if (quote.status === "refused") throw new VideoJobServiceError("ineligible", quote.reason);
+    if (
+      quote.driverKind === "outside-video" &&
+      imageBytesOf(input) > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES
+    ) {
+      throw new VideoJobServiceError(
+        "ineligible",
+        "Images for an outside video driver cannot exceed 2.5 MiB combined.",
+      );
+    }
     if (this.#options.projection.countQueued() >= MAX_QUEUED_VIDEO_JOBS) {
       throw new VideoJobServiceError("busy", "Too many video jobs are queued.");
     }
@@ -1527,6 +1537,13 @@ export class VideoJobService {
 
 function isTerminal(job: VideoJob): boolean {
   return job.status === "completed" || job.status === "failed" || job.status === "cancelled";
+}
+
+function imageBytesOf(inputs: VideoJobInputs): number {
+  return [inputs.firstFrame, inputs.lastFrame, ...inputs.references].reduce(
+    (sum, image) => sum + (image?.bytes.byteLength ?? 0),
+    0,
+  );
 }
 
 /** What an outside clip was reserved against: the trusted digest, the address, and the model as declared. */

@@ -692,23 +692,96 @@ describe("what an outside video start may have cost", () => {
     expect(h.brokered).toEqual([]);
   });
 
-  it("refuses images past the channel's bound before the driver is asked", async () => {
-    const h = harness();
-    const queued = await h.enqueue({
-      references: [
-        {
-          mediaType: "image/png",
-          bytes: new Uint8Array(OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES + 1),
+  it("stops a driver that sends a second billable request for one clip, and counts the clip", async () => {
+    const h = harness({
+      handlers: {
+        "video/start": async (_params, context) => {
+          await call(context, "POST", "/v1/videos", { body: "{}" });
+          await call(context, "POST", "/v1/videos", { body: "{}" });
+          return { status: "started", remoteId: "remote-1" };
         },
-      ],
+      },
     });
-    const done = await h.service.whenTerminal(queued.id);
-    expect(done).toMatchObject({
+    const queued = await h.enqueue();
+    expect(await h.service.whenTerminal(queued.id)).toMatchObject({
       status: "failed",
-      failure: { category: "invalid-configuration" },
+      settledCostUsdMicros: 250_000,
     });
-    expect(done?.settledCostUsdMicros).toBeUndefined();
-    expect(h.received("video/start")).toEqual([]);
+    expect(h.brokered).toHaveLength(1);
+  });
+
+  it("lets a driver ask again after the provider refused the first request outright", async () => {
+    let requests = 0;
+    const h = harness({
+      provider: (_url, init) =>
+        init.method === "POST" && (requests += 1) === 1
+          ? new Response("{}", { status: 429 })
+          : new Response(JSON.stringify({ output: CLIP_URL }), { status: 200 }),
+      handlers: {
+        "video/start": async (_params, context) => {
+          await call(context, "POST", "/v1/videos", { body: "{}" });
+          await call(context, "POST", "/v1/videos", { body: "{}" });
+          return { status: "started", remoteId: "remote-1" };
+        },
+      },
+    });
+    const queued = await h.enqueue();
+    expect(await h.service.whenTerminal(queued.id)).toMatchObject({ status: "completed" });
+  });
+
+  it.each([
+    ["video/poll", "POST"],
+    ["video/poll", "DELETE"],
+    ["video/cancel", "POST"],
+    ["video/forget", "POST"],
+    ["video/forget", "PUT"],
+  ] as const)(
+    "stops a driver whose %s sends a %s, before anything leaves",
+    async (method, sent) => {
+      let polls = 0;
+      const misbehave: FixtureDriverHandler = async (_params, context) => {
+        await call(context, sent, "/v1/videos", { body: "{}" });
+        return { status: "running" };
+      };
+      const h = harness({
+        handlers: {
+          "video/poll": async (_params, context) => {
+            polls += 1;
+            if (method !== "video/cancel") return videoHandlers["video/poll"]?.({}, context);
+            return NO_ANSWER;
+          },
+          [method]: misbehave,
+        },
+      });
+      const queued = await h.enqueue();
+      if (method === "video/cancel") {
+        await vi.waitFor(() => expect(polls).toBeGreaterThan(0));
+        h.service.stop(queued.id);
+      }
+      await h.service.whenTerminal(queued.id);
+      await vi.waitFor(() => expect(h.received(method).length).toBeGreaterThan(0));
+      await vi.waitFor(() => expect(h.drivers.some(({ end }) => end.stopped())).toBe(true));
+      const billable = h.brokered.filter((entry) => entry.method !== "GET");
+      expect(billable.map((entry) => entry.method)).toEqual(["POST"]);
+      expect(h.service.getById(queued.id)?.providerCopy).not.toBe("removed");
+    },
+  );
+
+  it("refuses images past the channel's bound before anything is reserved", async () => {
+    const h = harness();
+    h.setCeiling(100);
+    await expect(
+      h.enqueue({
+        references: [
+          {
+            mediaType: "image/png",
+            bytes: new Uint8Array(OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES + 1),
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ category: "ineligible" });
+    expect(h.used()).toBe(0);
+    expect(h.drivers).toHaveLength(0);
   });
 
   it("releases a queued clip unstarted when its driver moves to a newly trusted digest", async () => {
@@ -919,6 +992,25 @@ describe("how an outside clip the provider accepted can end", () => {
     });
     expect(polls).toBe(1);
     expect(h.brokered).toHaveLength(sent);
+  });
+
+  it("finishes a running clip when only the profile's model list changes", async () => {
+    let polls = 0;
+    const h: ReturnType<typeof harness> = harness(
+      polling(async (context) => {
+        polls += 1;
+        if (polls === 1) {
+          h.state.profile = outsideProfile({
+            configuration: { ...outsideProfile().configuration, modelAllowlist: [pricedModel] },
+          });
+          return { status: "running" };
+        }
+        await call(context, "GET", "/v1/videos/remote-1");
+        return { status: "completed", url: CLIP_URL };
+      }),
+    );
+    const queued = await h.enqueue();
+    expect(await h.service.whenTerminal(queued.id)).toMatchObject({ status: "completed" });
   });
 
   it("fails a clip that never finishes at its estimate when its time runs out", async () => {

@@ -59,6 +59,9 @@ import {
  * The driver is untrusted, and a video can cost real money, so what may have
  * been billed is decided from what the host saw leave and come back, never
  * from what the driver says about it:
+ * - only a start may send a request that could start a clip, and only one that
+ *   was not refused outright; a check only reads, and a stop or a removal sends
+ *   one `PUT` or `DELETE`;
  * - a start that failed after a request left, with no answer that rules a job
  *   out, is reported as one that may have started, so the estimate is counted;
  * - a clip the provider accepted whose end the driver cannot state properly
@@ -133,6 +136,19 @@ function usageOf(usage: OutsideDriverVideoUsage | undefined): {
 function rulesOutStart(response: Response): boolean {
   if (isVideoStartRejection(response)) return true;
   return response.status >= 400 && response.status < 500 && response.status !== 408;
+}
+
+const readsOnly = (method: string) => method === "GET";
+
+/** Reads, and one request of the named methods: a stop or a removal, never a start. */
+function readsAndOneOf(methods: ReadonlyArray<string>): (method: string) => boolean {
+  let used = false;
+  return (method) => {
+    if (method === "GET") return true;
+    if (used || !methods.includes(method)) return false;
+    used = true;
+    return true;
+  };
 }
 
 function wireImage(image: ImageAdapterReference) {
@@ -225,8 +241,10 @@ export function makeOutsideVideoGenerationProxy(options: OutsideVideoGenerationP
     sends: OutsideVideoSends,
   ): Promise<VideoAdapterStart> => {
     sends.reached(request.signal);
-    // Requests that could start a clip: the ones handed to the network, and
-    // the ones the provider refused outright. A GET cannot start one.
+    // Requests that could start a clip: the ones let through, the ones handed
+    // to the network, and the ones the provider refused outright. A GET cannot
+    // start one.
+    let admitted = 0;
     let sent = 0;
     let refusedOutright = 0;
     const mayHaveStarted = () => sent > refusedOutright;
@@ -265,6 +283,14 @@ export function makeOutsideVideoGenerationProxy(options: OutsideVideoGenerationP
         decodeOutsideDriverVideoStartResult(
           await callWithin(OUTSIDE_DRIVER_METHODS.videoStart, params, request.signal, {
             timeoutMs: limits.sendTimeoutMs,
+            // One reservation covers one clip, so a second request that could
+            // start one is let through only after the first was refused.
+            admitsRequest: (method) => {
+              if (method === "GET") return true;
+              if (method !== "POST" || admitted > refusedOutright) return false;
+              admitted += 1;
+              return true;
+            },
             observer: {
               sent: (method) => {
                 if (method === "GET") return;
@@ -335,6 +361,7 @@ export function makeOutsideVideoGenerationProxy(options: OutsideVideoGenerationP
     remoteId: string,
     signal: AbortSignal | undefined,
     ports: OutsideVideoClipPorts,
+    admitsRequest: (method: string) => boolean,
   ): Promise<VideoAdapterPoll> => {
     const inFlight = new Map<number, Array<string>>();
     const returned = new Set<string>();
@@ -349,6 +376,7 @@ export function makeOutsideVideoGenerationProxy(options: OutsideVideoGenerationP
         decodeOutsideDriverVideoPollResult(
           await callWithin(method, { remoteId }, signal, {
             timeoutMs: limits.callTimeoutMs,
+            admitsRequest,
             onRelayedResponseChunk: (httpId, text) => {
               const parts = inFlight.get(httpId);
               if (parts === undefined) inFlight.set(httpId, [text]);
@@ -404,15 +432,22 @@ export function makeOutsideVideoGenerationProxy(options: OutsideVideoGenerationP
   return {
     start,
     poll: (remoteId: string, signal: AbortSignal, ports: OutsideVideoClipPorts) =>
-      jobState(OUTSIDE_DRIVER_METHODS.videoPoll, remoteId, signal, ports),
+      jobState(OUTSIDE_DRIVER_METHODS.videoPoll, remoteId, signal, ports, readsOnly),
     cancel: (remoteId: string, signal: AbortSignal | undefined, ports: OutsideVideoClipPorts) =>
-      jobState(OUTSIDE_DRIVER_METHODS.videoCancel, remoteId, signal, ports),
+      jobState(
+        OUTSIDE_DRIVER_METHODS.videoCancel,
+        remoteId,
+        signal,
+        ports,
+        readsAndOneOf(["PUT", "DELETE"]),
+      ),
     forget: async (remoteId: string): Promise<VideoAdapterForget> => {
       try {
         read(
           decodeOutsideDriverVideoForgetResult(
             await callWithin(OUTSIDE_DRIVER_METHODS.videoForget, { remoteId }, undefined, {
               timeoutMs: limits.callTimeoutMs,
+              admitsRequest: readsAndOneOf(["DELETE"]),
             }),
           ),
         );

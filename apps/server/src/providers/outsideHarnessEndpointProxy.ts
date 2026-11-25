@@ -226,6 +226,8 @@ interface PendingCall {
   readonly onImageChunk: ((image: number, data: string) => void) | undefined;
   readonly onProviderResponse: (() => void) | undefined;
   readonly observer: OutsideDriverBrokerObserver | undefined;
+  /** Which requests this call may make; absent, only `GET` and `POST`. */
+  readonly admitsRequest: ((method: BrokeredMethod) => boolean) | undefined;
   /** Whether to abort any still-open brokered HTTP streams when the call settles normally. */
   readonly closeBrokeredOnSettle: boolean;
 }
@@ -244,14 +246,7 @@ type BrokeredRequest = (
   observer?: OutsideDriverBrokerObserver,
 ) => Promise<Response>;
 
-/** The calls only a video driver is asked; a brokered `PUT` or `DELETE` may serve only one of them. */
-const VIDEO_METHODS: ReadonlySet<string> = new Set([
-  OUTSIDE_DRIVER_METHODS.videoStart,
-  OUTSIDE_DRIVER_METHODS.videoPoll,
-  OUTSIDE_DRIVER_METHODS.videoCancel,
-  OUTSIDE_DRIVER_METHODS.videoForget,
-]);
-
+type BrokeredMethod = OutsideDriverHttpRequestParams["method"];
 /**
  * The JSON-RPC conversation with one driver. It numbers the host's calls,
  * holds what is pending, answers the driver's `http/request` through the
@@ -314,6 +309,11 @@ class OutsideDriverLink {
       readonly onImageChunk?: (image: number, data: string) => void;
       readonly onProviderResponse?: () => void;
       readonly observer?: OutsideDriverBrokerObserver;
+      /**
+       * Which brokered requests this call may make, asked once for each as it
+       * arrives. A refused one stops the driver before anything goes upstream.
+       */
+      readonly admitsRequest?: (method: BrokeredMethod) => boolean;
       readonly closeBrokeredOnSettle?: boolean;
     },
   ): {
@@ -325,7 +325,7 @@ class OutsideDriverLink {
     const owns =
       method === OUTSIDE_DRIVER_METHODS.sessionSend ||
       method === OUTSIDE_DRIVER_METHODS.imageGenerate ||
-      VIDEO_METHODS.has(method) ||
+      method.startsWith("video/") ||
       method.startsWith("cloud/");
     if (owns) this.#sends.add(id);
     const cancelMethod =
@@ -361,6 +361,7 @@ class OutsideDriverLink {
         onImageChunk: options.onImageChunk,
         onProviderResponse: options.onProviderResponse,
         observer: options.observer,
+        admitsRequest: options.admitsRequest,
         closeBrokeredOnSettle: options.closeBrokeredOnSettle === true,
       });
       this.#write({ jsonrpc: "2.0", id, method, params });
@@ -475,12 +476,10 @@ class OutsideDriverLink {
       this.#refuseHttp(httpId, interrupted());
       return;
     }
-    if (
-      (params.method === "PUT" || params.method === "DELETE") &&
-      (owner === undefined || !VIDEO_METHODS.has(owner.method))
-    ) {
-      return this.#violate();
-    }
+    const admitted =
+      owner?.admitsRequest?.(params.method) ??
+      (params.method === "GET" || params.method === "POST");
+    if (!admitted) return this.#violate();
     if (isOpenAiAgentsRequest(params.url) && owner?.cloudPorts === undefined) {
       this.#refuseHttp(
         httpId,
