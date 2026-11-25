@@ -804,7 +804,11 @@ describe("managed worktree Node ports", () => {
         await w.git("-C", w.created.targetPath, "rev-parse", "--git-common-dir")
       ).stdout.trim();
       await writeFile(
-        join(exclude.startsWith("/") ? exclude : join(w.created.targetPath, exclude), "info", "exclude"),
+        join(
+          exclude.startsWith("/") ? exclude : join(w.created.targetPath, exclude),
+          "info",
+          "exclude",
+        ),
         ".env\n",
       );
       await writeFile(join(w.created.targetPath, ".env"), "SECRET=1\n");

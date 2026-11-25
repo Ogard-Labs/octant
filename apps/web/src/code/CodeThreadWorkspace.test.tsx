@@ -887,6 +887,39 @@ describe("CodeThreadWorkspace", () => {
       expect(screen.getByText(cleanedUpWorktreeSentence("cleaned-up"))).toBeVisible();
     });
 
+    it("keeps the host's warning after a restore that left some files missing, until it is dismissed", async () => {
+      const user = userEvent.setup();
+      const message = "Some files could not be put back. Check the folder before you go on.";
+      const worktreePort = restorePort(async () => ({
+        kind: "cleaned-up-worktree-refused",
+        reason: "files-missing",
+        message,
+      }));
+      const view = render(
+        <CodeThreadWorkspace
+          controller={withCleanup({ reloadThreadView: vi.fn(async () => undefined) })}
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+          worktreePort={worktreePort}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Restore worktree" }));
+      expect(await screen.findByText(message)).toBeVisible();
+      // The host handed the folder back to the thread: no cleanup standing is left.
+      view.rerender(
+        <CodeThreadWorkspace
+          controller={controller({ reloadThreadView: vi.fn(async () => undefined) })}
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+          worktreePort={worktreePort}
+        />,
+      );
+      expect(screen.queryByRole("button", { name: "Restore worktree" })).not.toBeInTheDocument();
+      expect(screen.getByText(message)).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByText(message)).not.toBeInTheDocument();
+    });
+
     it("gives a device the hub introduced no button even when a session client exists", () => {
       render(
         <CodeThreadWorkspace

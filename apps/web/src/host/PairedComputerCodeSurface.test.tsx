@@ -1,7 +1,11 @@
 import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { decodeHostId, LOCAL_HOST_ID, type HostIdentity } from "@octant/contracts/host";
-import { decodeCodeThreadId, decodeImageGenerationScopeId, decodeVideoJobId } from "@octant/contracts";
+import {
+  decodeCodeThreadId,
+  decodeImageGenerationScopeId,
+  decodeVideoJobId,
+} from "@octant/contracts";
 import { createArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import { useContext, type ContextType } from "react";
 import { ComposerStashScopeContext } from "../composer/ComposerStashControls";

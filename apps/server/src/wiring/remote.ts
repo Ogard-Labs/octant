@@ -2919,19 +2919,19 @@ export function wireRemote(deps: RemoteDependencies) {
       // whole: its queue, its debug session and its remote children included.
       await purgeThreadArtifacts({
         beforeRemoval: async () => {
-        // A running debug session ends before the purge takes its records and
-        // its checkout, so nothing it writes as it ends outlives the purge.
-        if (mode === "code") await debugService.endThread(decodeCodeThreadId(String(threadId)));
-        // Remote children the thread started are stopped while this host still
-        // knows where they run, then what it kept of them (a result included)
-        // goes with the thread.
-        await delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
-        delegatingSpoke.forgetParent(String(threadId));
-        const released = await threadMessageQueue.purgeThread(
-          decodeThreadMessageQueueScope({ mode, threadId }),
-        );
-        if (released.status !== "released")
-          throw new Error("Queued attachments could not be purged.");
+          // A running debug session ends before the purge takes its records and
+          // its checkout, so nothing it writes as it ends outlives the purge.
+          if (mode === "code") await debugService.endThread(decodeCodeThreadId(String(threadId)));
+          // Remote children the thread started are stopped while this host still
+          // knows where they run, then what it kept of them (a result included)
+          // goes with the thread.
+          await delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
+          delegatingSpoke.forgetParent(String(threadId));
+          const released = await threadMessageQueue.purgeThread(
+            decodeThreadMessageQueueScope({ mode, threadId }),
+          );
+          if (released.status !== "released")
+            throw new Error("Queued attachments could not be purged.");
         },
         connection: persistence.connection,
         dataDirectory: persistence.dataDirectory,

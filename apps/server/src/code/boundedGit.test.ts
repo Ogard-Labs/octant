@@ -106,7 +106,12 @@ describe("runBoundedGit", () => {
       graceMs: 300,
     });
     await expect
-      .poll(() => readFile(join(directory, "ready"), "utf8").then(() => true, () => false))
+      .poll(() =>
+        readFile(join(directory, "ready"), "utf8").then(
+          () => true,
+          () => false,
+        ),
+      )
       .toBe(true);
     const helper = Number(await readFile(join(directory, "helper"), "utf8"));
     expect(alive(helper)).toBe(true);

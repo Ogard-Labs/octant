@@ -3475,13 +3475,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     : () => void restoreWorktree(),
               }),
             ].filter((notice) => notice !== undefined),
-            ...(worktreeCleanup === undefined || restoreProblem === undefined
+            // Kept after the host hands the folder back to the thread (files
+            // it could not put back), until it is dismissed or the next restore.
+            ...(restoreProblem === undefined
               ? []
               : [
                   {
                     key: "worktree-restore-problem",
                     tone: "danger" as const,
                     text: restoreProblem,
+                    action: (
+                      <OctantButton
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setRestoreProblem(undefined)}
+                      >
+                        Dismiss
+                      </OctantButton>
+                    ),
                   },
                 ]),
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),

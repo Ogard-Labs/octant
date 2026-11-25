@@ -72,6 +72,32 @@ describe("CleanedUpWorktreesSettings", () => {
     expect(screen.getByText("Fix the sidebar")).toBeVisible();
   });
 
+  it("keeps the host's warning visible after the row is gone, until it is dismissed", async () => {
+    const user = userEvent.setup();
+    const message = "Some files could not be put back. Check the folder before you go on.";
+    const fake = {
+      list: vi.fn(),
+      remove: vi.fn(),
+      listCleanedUp: vi
+        .fn<() => Promise<ReadonlyArray<CleanedUpWorktree>>>()
+        .mockResolvedValueOnce([cleaned])
+        .mockResolvedValue([]),
+      restore: vi.fn(async () => ({
+        kind: "cleaned-up-worktree-refused" as const,
+        reason: "files-missing" as const,
+        message,
+      })),
+    } as never as ArchivedWorktreesClient;
+    render(<CleanedUpWorktreesSettings client={fake} projectNames={new Map()} />);
+    await user.click(await screen.findByRole("button", { name: "Restore worktree" }));
+    // The abandoned cleanup is back to a working checkout, so the list is empty.
+    await waitFor(() => expect(fake.listCleanedUp).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(screen.queryByText("Fix the sidebar")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(screen.queryByText(message)).not.toBeInTheDocument());
+  });
+
   it("shows nothing when no worktree was cleaned up, and on a host that lists none", async () => {
     const empty = {
       list: vi.fn(),

@@ -64,7 +64,9 @@ export function CleanedUpWorktreesSettings(props: CleanedUpWorktreesSettingsProp
 
   // A host with nothing cleaned up shows no section at all: most people never
   // turn cleanup on, and an empty list would only ask a question they never had.
-  if (client === undefined || (worktrees !== undefined && worktrees.length === 0)) return null;
+  // A warning from a restore stays, though its row is gone, until dismissed.
+  if (client === undefined) return null;
+  if (worktrees !== undefined && worktrees.length === 0 && problem === undefined) return null;
 
   return (
     <SettingsSection description={CLEANED_UP_WORKTREES_FACT} title="Cleaned-up worktrees">
@@ -74,37 +76,49 @@ export function CleanedUpWorktreesSettings(props: CleanedUpWorktreesSettingsProp
         </SettingsState>
       ) : (
         <>
-          <div className="setgroup">
-            {worktrees.map((worktree, index) => (
-              <SettingRow
-                description={
-                  <>
-                    {props.projectNames.get(String(worktree.projectId)) ?? "Code Project"} ·{" "}
-                    <span className="archived-worktrees__mono">{worktree.branch}</span> ·{" "}
-                    {STATE_COPY[worktree.state]}
-                  </>
-                }
-                focused={props.focusedSetting === "cleaned-up-worktrees" && index === 0}
-                key={String(worktree.threadId)}
-                label={worktree.title.trim() === "" ? "Untitled thread" : worktree.title}
-                scope="host"
-                settingId="cleaned-up-worktrees"
-              >
+          {worktrees.length === 0 ? null : (
+            <div className="setgroup">
+              {worktrees.map((worktree, index) => (
+                <SettingRow
+                  description={
+                    <>
+                      {props.projectNames.get(String(worktree.projectId)) ?? "Code Project"} ·{" "}
+                      <span className="archived-worktrees__mono">{worktree.branch}</span> ·{" "}
+                      {STATE_COPY[worktree.state]}
+                    </>
+                  }
+                  focused={props.focusedSetting === "cleaned-up-worktrees" && index === 0}
+                  key={String(worktree.threadId)}
+                  label={worktree.title.trim() === "" ? "Untitled thread" : worktree.title}
+                  scope="host"
+                  settingId="cleaned-up-worktrees"
+                >
+                  <OctantButton
+                    disabled={busy !== undefined}
+                    onClick={() => void restore(worktree)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    {busy === String(worktree.threadId) ? "Restoring…" : "Restore worktree"}
+                  </OctantButton>
+                </SettingRow>
+              ))}
+            </div>
+          )}
+          <div className="settings-feedback-slot" aria-live="polite">
+            {problem === undefined ? null : (
+              <>
+                <OctantFieldError className="settings-section-line">{problem}</OctantFieldError>
                 <OctantButton
-                  disabled={busy !== undefined}
-                  onClick={() => void restore(worktree)}
+                  onClick={() => setProblem(undefined)}
                   size="sm"
                   type="button"
                   variant="secondary"
                 >
-                  {busy === String(worktree.threadId) ? "Restoring…" : "Restore worktree"}
+                  Dismiss
                 </OctantButton>
-              </SettingRow>
-            ))}
-          </div>
-          <div className="settings-feedback-slot" aria-live="polite">
-            {problem === undefined ? null : (
-              <OctantFieldError className="settings-section-line">{problem}</OctantFieldError>
+              </>
             )}
           </div>
         </>

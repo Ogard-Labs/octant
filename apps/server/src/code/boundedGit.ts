@@ -211,11 +211,7 @@ export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitRes
 }
 
 /** Looks at a group that survived SIGKILL until it is gone, killing it again each time. */
-function outlive(
-  pid: number,
-  probe: (pid: number) => boolean,
-  child: ChildProcess,
-): Promise<void> {
+function outlive(pid: number, probe: (pid: number) => boolean, child: ChildProcess): Promise<void> {
   return new Promise<void>((resolve) => {
     const look = () => {
       if (!probe(pid)) {
