@@ -69,7 +69,7 @@ function AppShell(props: {
       {props.mockScenario !== undefined ? (
         <SafeAreaView edges={["top"]}>
           <View accessibilityRole="text" style={styles.mockBanner} testID="mobile-mock-banner">
-            <Text style={styles.mockBannerText}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.mockBannerText}>
               {props.onLeaveDemo === undefined
                 ? `Mock data · ${props.mockScenario.label}`
                 : "Offline demo · sample data"}
@@ -81,7 +81,9 @@ function AppShell(props: {
                 onPress={props.onLeaveDemo}
                 testID="mobile-demo-leave"
               >
-                <Text style={styles.mockBannerText}>Leave demo</Text>
+                <Text maxFontSizeMultiplier={1.3} style={styles.mockBannerText}>
+                  Leave demo
+                </Text>
               </Pressable>
             )}
           </View>

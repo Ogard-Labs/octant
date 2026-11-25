@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { space, typography, useTheme } from "../../design-system";
 
@@ -19,6 +19,9 @@ export function MessageActions(props: {
   readonly testID?: string;
 }) {
   const { colors } = useTheme();
+  // The glyphs stand for words, so they follow the text size as words would.
+  const { fontScale } = useWindowDimensions();
+  const iconSize = Math.round(16 * Math.min(Math.max(fontScale, 1), 2));
   const [activeId, setActiveId] = useState<string | undefined>();
   const styles = useMemo(
     () =>
@@ -75,7 +78,7 @@ export function MessageActions(props: {
             <Ionicons
               color={active ? colors.accent : colors.textTertiary}
               name={active && action.id === "copy" ? "checkmark" : action.icon}
-              size={16}
+              size={iconSize}
             />
             {active && action.id === "copy" ? (
               <Text style={[styles.label, styles.labelActive]}>Copied</Text>

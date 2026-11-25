@@ -6,6 +6,10 @@ import type { ComposerVoice } from "../voice/useVoiceDictation";
 import { ComposerVoiceButton } from "./ComposerVoiceButton";
 import { IconButton } from "./IconButton";
 
+// The chip shares one line with the message, so its name stops growing before
+// it takes the message's room. The message itself follows the system size.
+const CONTROL_TEXT_SCALE = 1.3;
+
 export interface FloatingComposerProps {
   readonly placeholder: string;
   readonly value?: string;
@@ -67,7 +71,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
           flexDirection: "row",
           alignItems: "center",
           gap: 4,
-          height: 30,
+          minHeight: 30,
           marginVertical: 2,
           paddingHorizontal: 10,
           borderRadius: radii.pill,
@@ -137,13 +141,21 @@ export function FloatingComposer(props: FloatingComposerProps) {
             style={styles.modelChip}
             testID="mobile-composer-model"
           >
-            <Text style={styles.modelLabel} numberOfLines={1}>
+            <Text
+              maxFontSizeMultiplier={CONTROL_TEXT_SCALE}
+              numberOfLines={1}
+              style={styles.modelLabel}
+            >
               {props.modelLabel}
             </Text>
             <Ionicons color={colors.textSecondary} name="chevron-down" size={13} />
           </Pressable>
         ) : props.modelLabel !== undefined ? (
-          <Text style={styles.modelLabel} numberOfLines={1}>
+          <Text
+            maxFontSizeMultiplier={CONTROL_TEXT_SCALE}
+            numberOfLines={1}
+            style={styles.modelLabel}
+          >
             {props.modelLabel}
           </Text>
         ) : null}

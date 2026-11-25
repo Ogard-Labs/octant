@@ -39,6 +39,23 @@ final class OfflineDemoTests: XCTestCase {
         XCTAssertTrue(element("mobile-inbox-home").exists)
     }
 
+    /// Every place in the system's bar, photographed and left on Home again.
+    @MainActor
+    private func visitPlaces() {
+        for (tab, screen) in [
+            ("mobile-tab-threads", "mobile-threads"),
+            ("mobile-tab-inbox", "mobile-inbox"),
+            ("mobile-tab-home", "mobile-inbox-home"),
+        ] {
+            tap(element(tab))
+            XCTAssertTrue(element(screen).waitForExistence(timeout: 15))
+            let evidence = XCTAttachment(screenshot: app.screenshot())
+            evidence.name = "Place \(screen)"
+            evidence.lifetime = .keepAlways
+            add(evidence)
+        }
+    }
+
     @MainActor
     private func createReply(_ prompt: String) {
         // New beside the bar starts a thread from every place.
@@ -135,6 +152,7 @@ final class OfflineDemoTests: XCTestCase {
     func testColdDemoReplyForegroundAndReset() {
         app.launch()
         enterDemo()
+        visitPlaces()
         createReply("Native iOS sample reply")
         XCUIDevice.shared.press(.home)
         app.activate()
@@ -155,6 +173,7 @@ final class OfflineDemoTests: XCTestCase {
     func testLargeTextEntryAndReply() {
         app.launch()
         enterDemo()
+        visitPlaces()
         createReply("Native iOS large text reply")
         tap(element("mobile-demo-leave"))
         XCTAssertTrue(element("mobile-entry-demo").waitForExistence(timeout: 15))

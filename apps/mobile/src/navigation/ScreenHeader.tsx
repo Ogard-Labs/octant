@@ -10,6 +10,10 @@ import { ToolbarButton } from "../ui/NativeChrome";
 import type { MobileIconName } from "../ui/IconButton";
 import { typography, useTheme } from "../../design-system";
 
+// A system bar keeps its height at every text size, so two lines in it stop
+// growing where they would no longer fit. The system's own bar titles do too.
+const BAR_TEXT_SCALE = 1.15;
+
 export interface ScreenHeaderAction {
   readonly label: string;
   readonly icon: MobileIconName;
@@ -89,10 +93,19 @@ export function ScreenHeader(props: {
         : {
             headerTitle: () => (
               <View style={styles.titles}>
-                <Text accessibilityRole="header" numberOfLines={1} style={styles.title}>
+                <Text
+                  accessibilityRole="header"
+                  maxFontSizeMultiplier={BAR_TEXT_SCALE}
+                  numberOfLines={1}
+                  style={styles.title}
+                >
                   {title}
                 </Text>
-                <Text numberOfLines={1} style={styles.subtitle}>
+                <Text
+                  maxFontSizeMultiplier={BAR_TEXT_SCALE}
+                  numberOfLines={1}
+                  style={styles.subtitle}
+                >
                   {subtitle}
                 </Text>
               </View>
