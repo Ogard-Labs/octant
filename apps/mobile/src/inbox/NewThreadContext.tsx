@@ -71,7 +71,7 @@ export function NewThreadProvider(props: {
     | undefined;
 }) {
   const { onOpenThread, onTodoLinked, onTodoStartOpened, todoStart } = props;
-  const { environment, transport, hostsLoaded } = useMobileSession();
+  const { environment, transport, hosts, hostsLoaded, setPlacementHostId } = useMobileSession();
   const { refresh } = useMobileThreads();
   const [creating, setCreating] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -424,7 +424,11 @@ export function NewThreadProvider(props: {
               onRemoveSource: () => setTodoSource(undefined),
             })}
         onRefreshHost={refreshPlacement}
+        hosts={hosts.map((host) => ({ id: host.hostId, label: host.label }))}
+        modelDriverKind={selectedModel?.driverKind}
+        onSelectHost={setPlacementHostId}
         placementLabel={placementLabel}
+        selectedHostId={placementTransport?.hostId}
         placementDisabledReason={placementDisabledReason}
         projectLabel={chosenProject?.name}
         projects={projectChoices}

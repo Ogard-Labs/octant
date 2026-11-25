@@ -114,7 +114,8 @@ final class OfflineDemoTests: XCTestCase {
         XCTAssertTrue(project.exists)
         XCTAssertTrue(host.exists)
         XCTAssertEqual(project.label, "New conversation")
-        XCTAssertEqual(host.label, "Studio Mac")
+        // The computer is a menu here, which says what it chooses before the choice.
+        XCTAssertTrue(host.label.hasSuffix("Studio Mac"), host.label)
         XCTAssertGreaterThan(project.frame.width, 0)
         XCTAssertGreaterThan(host.frame.width, 0)
         XCTAssertTrue(context.frame.contains(project.frame))
