@@ -197,21 +197,16 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       {nothingMade ? null : (
         <>
           <div className="surface-toolbar">
-            <div className="surface-toolbar__search artifact-library__search">
+            <label className="surface-toolbar__search">
+              <span className="sr-only">Search artifacts</span>
               <Search aria-hidden="true" size={14} />
-              <label className="sr-only" htmlFor="artifact-library-search">
-                Search artifacts
-              </label>
               <OctantInput
-                className="artifact-library__search-input"
-                id="artifact-library-search"
                 onChange={(event) => change({ query: event.target.value })}
                 placeholder="Search artifacts"
                 type="search"
-                unstyled
                 value={filters.query}
               />
-            </div>
+            </label>
 
             <FilterMenu count={filterCount} onReset={resetFilters}>
               <FilterMenuGroup<string>
@@ -325,7 +320,6 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
 
             <OctantToggleGroup<LibraryViewMode>
               aria-label="Artifact view"
-              className="artifact-library__view"
               onValueChange={(value) => {
                 const next = value[0];
                 if (next === "gallery" || next === "list") props.onViewChange(next);
@@ -349,7 +343,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
             }}
             value={filters.tab}
           >
-            <OctantTabsList aria-label="Artifact groups" className="surface-tabs">
+            <OctantTabsList aria-label="Artifact groups">
               {TABS.map((tab) => (
                 <OctantTabsTab key={tab.id} value={tab.id}>
                   {tab.label}
@@ -501,7 +495,7 @@ function ArtifactEntries(
     return (
       <div className="artifact-table">
         <ArtifactTableHead />
-        <ul className="artifact-table__rows">
+        <ul className="surface-table__rows">
           {entries.map((entry) => (
             <ArtifactTableRow entry={entry} key={String(entry.canvasId)} {...actions} />
           ))}

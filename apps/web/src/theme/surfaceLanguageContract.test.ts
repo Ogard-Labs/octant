@@ -11,6 +11,49 @@ function read(relative: string): string {
 }
 
 /**
+ * A selector list's selectors, or a selector's compounds: split only outside
+ * brackets, since `:is(.a, .b)` and `[data-x="a b"]` hold commas and spaces
+ * of their own.
+ */
+function splitOutsideBrackets(text: string, separator: RegExp): ReadonlyArray<string> {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const char of text) {
+    if (char === "(" || char === "[") depth += 1;
+    else if (char === ")" || char === "]") depth -= 1;
+    if (depth === 0 && separator.test(char)) {
+      parts.push(current);
+      current = "";
+    } else current += char;
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
+/**
+ * The classes a compound selector asks of its own element. `:has()` and
+ * `:not()` name other elements or what the element is not, so what they hold
+ * is left out; `:is()` and `:where()` describe the element itself and stay.
+ */
+function ownClasses(compound: string): ReadonlyArray<string> {
+  let own = "";
+  let skipUntilDepth: number | undefined;
+  let depth = 0;
+  for (let index = 0; index < compound.length; index += 1) {
+    const char = compound[index] ?? "";
+    if (skipUntilDepth === undefined && /^:(?:has|not)\($/.test(compound.slice(index, index + 5))) {
+      skipUntilDepth = depth;
+    }
+    if (char === "(" || char === "[") depth += 1;
+    else if (char === ")" || char === "]") depth -= 1;
+    if (skipUntilDepth === undefined) own += char;
+    else if (char === ")" && depth === skipUntilDepth) skipUntilDepth = undefined;
+  }
+  return own.match(/\.[A-Za-z0-9_-]+/g) ?? [];
+}
+
+/**
  * DESIGN.md "Voice" and "Face" are the part of the system that leaves the renderer.
  * These checks keep the renderer honest about it: one face, one set of type
  * roles, and no uppercase kickers creeping back into headings.
@@ -75,6 +118,62 @@ describe("surface language", () => {
     expect(surface).toContain(".surface-empty {");
     expect(component.match(/Back to workspace/g)).toHaveLength(1);
     expect(component).not.toContain(">Close<");
+  });
+
+  it("draws the Agents, Artifacts and Automations lists as the one page table", () => {
+    const table = read("styles/surface-table.css");
+    expect(table).toMatch(
+      /\.surface-table__head,\s*\.surface-table__row \{[^}]*grid-template-columns: var\(--surface-table-columns\)/,
+    );
+    // The table loads with the pages that draw it, not with the window.
+    expect(read("styles/surface.css")).not.toContain(".surface-table");
+    // Each page names its columns and draws its cells; the head, the rows'
+    // rail and hover, and the open button's reset are the table's. Three
+    // hand-drawn copies had three row heights and two label sizes, so a page's
+    // own head, row and open button may place themselves and nothing more.
+    const pages = [
+      {
+        markup: "agents/AgentsCenter.tsx",
+        sheet: "styles/agents-center.css",
+        own: [".agents-table__head", ".agents-center-row", ".agents-center-row__open"],
+      },
+      {
+        markup: "artifacts/ArtifactTableRow.tsx",
+        sheet: "styles/artifacts.css",
+        own: [".artifact-table__head", ".artifact-table-row", ".artifact-table-row__open"],
+      },
+      {
+        markup: "automation/AutomationCenter.tsx",
+        sheet: "styles/automation.css",
+        own: [".automation-table__head", ".automation-row", ".automation-row__open"],
+      },
+    ] as const;
+    const theTables =
+      /(?:^|[\s;])(?:min-height|height|padding(?:-block|-inline)?|border(?:-bottom|-width)?|background|grid-template-columns|column-gap|font-size|font-weight)\s*:/;
+    for (const page of pages) {
+      const component = read(page.markup);
+      expect(component).toContain('className="surface-table__head ');
+      expect(component).toMatch(/className="surface-table__row /);
+      expect(component).toContain("oct-row-label surface-table__label");
+      expect(component).toContain("oct-meta surface-table__meta");
+      const rules = read(page.sheet).replace(/\/\*[\s\S]*?\*\//g, "");
+      expect(rules).toContain("--surface-table-columns:");
+      const redrawn: string[] = [];
+      for (const block of rules.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const selectors = splitOutsideBrackets(block[1] ?? "", /,/);
+        // What a selector styles is its last compound, whatever it stands
+        // under and whatever state it is in: a hover on the row is the
+        // table's, and so is the row inside the dock's list. A rule about a
+        // cell inside the row is the page's own.
+        const named = selectors.filter((selector) => {
+          const subject = splitOutsideBrackets(selector, /[\s>+~]/).at(-1) ?? "";
+          const classes = ownClasses(subject);
+          return page.own.some((own) => classes.includes(own));
+        });
+        if (named.length > 0 && theTables.test(block[2] ?? "")) redrawn.push(...named);
+      }
+      expect(redrawn).toEqual([]);
+    }
   });
 
   it("gives destinations and Settings one page title", () => {

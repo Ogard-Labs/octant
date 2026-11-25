@@ -1,3 +1,4 @@
+import "../styles/surface-table.css";
 import { Inbox, Play, Settings as SettingsIcon, SquareTerminal } from "../ui/icons";
 import { useState } from "react";
 import { SettingGroup, SettingRow, SettingsPageScope } from "../settings/primitives";
@@ -94,6 +95,51 @@ function SettingsGroup() {
   );
 }
 
+/**
+ * The page table as Agents, Artifacts and Automations draw it: the page names
+ * its columns, and the head, the rail, the hover and the open button are the
+ * table's (styles/surface-table.css).
+ */
+function PageTable() {
+  const rows = [
+    ["Summarize the design", "Design chat · Chat · No Project", "Running", "20m ago"],
+    ["Compare the two pricing pages", "Pricing review · Chat · Storefront", "Completed", "1h ago"],
+    [
+      "List the open accessibility issues",
+      "Release checklist · Code · Octant",
+      "Failed",
+      "18h ago",
+    ],
+  ] as const;
+  return (
+    <div className="gallery-page-table">
+      <div aria-hidden="true" className="surface-table__head">
+        <span>Agent</span>
+        <span>Status</span>
+        <span>Started</span>
+      </div>
+      <ul aria-label="Agent runs" className="surface-table__rows">
+        {rows.map(([name, where, status, started]) => (
+          <li className="surface-table__row" key={name}>
+            <OctantButton
+              className="surface-table__open surface-table__open--cells surface-table__open--top gallery-page-table__open"
+              type="button"
+              variant="bare"
+            >
+              <span className="gallery-page-table__name">
+                <span className="oct-row-label surface-table__label">{name}</span>
+                <span className="oct-meta surface-table__meta">{where}</span>
+              </span>
+              <span className="oct-row-detail">{status}</span>
+              <span className="oct-row-detail">{started}</span>
+            </OctantButton>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function PatternSections() {
   return (
     <Section
@@ -115,6 +161,14 @@ export function PatternSections() {
         wide
       >
         <SettingsGroup />
+      </Specimen>
+      <Specimen
+        adapters={["OctantButton"]}
+        props={`.surface-table__head + ul.surface-table__rows > li.surface-table__row > OctantButton.surface-table__open.surface-table__open--cells; --surface-table-columns on the page`}
+        note="the page table: a head naming the columns once, hairline rows on its columns, the Row label over a Meta line"
+        wide
+      >
+        <PageTable />
       </Specimen>
       <Specimen
         adapters={[

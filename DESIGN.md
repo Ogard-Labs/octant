@@ -1635,6 +1635,7 @@ Surface (measure 880px, or wide)
   surface-toolbar search · filters · view switch
   SurfaceSection  section label over a hairline
     surface-row   label + detail left, control right
+  surface-table   a head naming the columns once, rows on its columns
   OctantEmpty layout="line"
                   a 20px mark, one line, one outline button
   SurfaceLoading  the page in outline
@@ -1836,6 +1837,34 @@ button. Chips above a composer are 24px; Work's starter chips
 are the one borderless 28px chip, and Code Home's prompt suggestions are the
 suggestion card (see Start screen).
 
+**Page table.** A page that lists things with several facts each (Agents,
+Artifacts, Automations) draws them as one table, `surface-table` in
+`styles/surface-table.css`, which those pages import so the window's first
+paint does not carry it. A 32px head in the Meta role names the columns once, and
+each row is a hairline rail on the head's own columns. The page sets
+`--surface-table-columns`: the name column takes the room and the trailing
+columns have fixed widths, so a status changing or a figure ticking changes a
+cell's words and never moves a column. A row's name is the Row label over a
+Meta line, each cut to one line, and a row is as tall as those two lines with
+8px above and below. The button that opens a row
+(`surface-table__open`) has no padding or border of its own, so its words
+stand under the head's; where it spans several columns (`--cells`) it lays its
+cells on the row's columns, and `--top` starts cells of one line and of two on
+one line. In a narrow pane the page drops its least important columns first,
+so the name keeps the room: Agents lets run time and usage go at 840px, and
+Artifacts the edited time at 800px. A page names its columns and draws its
+cells; it never redraws the head, the rail, the hover or the open button.
+Until 2026-11-25 the three pages each drew this by hand: three row heights, a
+15px and a 14px label, and on Artifacts a name 9px right of its head, a 34px
+search field and view switch beside the others' 28px, and underlined tabs
+(maintainer request).
+
+**A name keeps its room.** Text that follows a name on its line (a path, a
+latest line) starts from no width and takes what the name leaves
+(`flex: 1 1 0`). Letting it start from its own width with a large shrink factor
+still takes a fraction of a pixel from the name, and an ellipsis needs a whole
+letter's room: the Environment section showed "Octa…" beside 190px of path.
+
 Rows are hairline rails, never cards. They reserve stable gutters for marks;
 hover actions fade in over a slot already kept for them (a thread row's slot
 holds its age; a section head's actions keep their width), so nothing beside
@@ -1942,7 +1971,7 @@ but never repaint a shared control.
 | `theme/visualLanguageContract.test.ts`                                               | Radii from tokens; the framed panel's outline, gap, clip and pane lines; flat resting surfaces; one hairline and one drop on floats; the composer pill, outline and float shadow; one focus edge                                                                                                                                                          |
 | `theme/roundThingsContract.test.ts`                                                  | The pill token only on round things                                                                                                                                                                                                                                                                                                                       |
 | `theme/sharedControlPaintContract.test.ts`                                           | Composer-row controls quiet; the composer and a Settings group flat                                                                                                                                                                                                                                                                                       |
-| `theme/surfaceLanguageContract.test.ts`                                              | Faces; each type role defined once; one page shell                                                                                                                                                                                                                                                                                                        |
+| `theme/surfaceLanguageContract.test.ts`                                              | Faces; each type role defined once; one page shell; one page table                                                                                                                                                                                                                                                                                        |
 | `theme/alignmentContract.test.ts`                                                    | Band gaps and insets, rail faces, dock bar, Settings rhythm, the one hairline                                                                                                                                                                                                                                                                             |
 | `theme/composerColumnsContract.test.ts`, `theme/interfaceTypographyContract.test.ts` | Composer columns; interface typography reach                                                                                                                                                                                                                                                                                                              |
 | `ui/iconScaleContract.test.ts`, `ui/focusOwnershipContract.test.ts`                  | Icon sizes and stroke; focus ownership                                                                                                                                                                                                                                                                                                                    |

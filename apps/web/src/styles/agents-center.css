@@ -91,46 +91,11 @@
   container-type: inline-size;
 }
 
-/* The list is one table: the agent (its task, where it ran and on what), its
-   status, when it started, how long it ran, and what it used. Every row
-   shares the head's columns and the trailing columns have fixed widths, so a
-   status changing or a figure ticking changes a cell's words, never a column. */
+/* The list is the page table (surface-table.css): the agent (its task, where it
+   ran and on what), its status, when it started, how long it ran, and what
+   it used. This sheet names the columns and draws the cells. */
 .agents-table {
-  --agents-columns: minmax(0, 1fr) 7rem 5.5rem 5rem 6rem 12rem;
-}
-
-.agents-table__head {
-  display: grid;
-  grid-template-columns: var(--agents-columns);
-  align-items: center;
-  column-gap: var(--oct-space-4);
-  height: var(--oct-space-8);
-  padding-inline: var(--oct-space-3);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-.agents-center__rows {
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.agents-center-row {
-  display: grid;
-  grid-template-columns: var(--agents-columns);
-  align-items: center;
-  column-gap: var(--oct-space-4);
-  min-height: 3rem;
-  padding-inline: var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-.agents-center-row:hover {
-  background: var(--oct-wash-hover);
+  --surface-table-columns: minmax(0, 1fr) 7rem 5.5rem 5rem 6rem 12rem;
 }
 
 /* The open button spans every column but the actions, so a click anywhere on
@@ -138,24 +103,6 @@
    their own controls. */
 .agents-center-row__open {
   grid-column: 1 / span 5;
-  display: grid;
-  grid-template-columns: subgrid;
-  align-items: center;
-  /* The shared button recipe gives a button one line's height; a row of two
-     lines needs its own. */
-  height: auto;
-  min-height: 0;
-  min-width: 0;
-  padding-block: var(--oct-space-2);
-  /* The button's inline padding and border would push its subgrid cells off
-     the column head's edges (measured 9px right, then 6px left, 2026-11-17),
-     and a subgrid keeps its own gap, which the recipe sets to 4px. */
-  padding-inline: 0;
-  border-width: 0;
-  column-gap: inherit;
-  color: inherit;
-  text-align: start;
-  cursor: default;
 }
 
 .agents-center-row__agent,
@@ -164,24 +111,6 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-.agents-center-row__task,
-.agents-center-row__where {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agents-center-row__task {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-medium);
-}
-
-.agents-center-row__where {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
 }
 
 .agents-center-row__provider {
@@ -263,10 +192,13 @@
 }
 
 /* In a narrow list the run time and usage give way first: the task, status,
-   start and the row's actions are what a row must keep. */
-@container (max-width: 620px) {
+   start and the row's actions are what a row must keep. The tier starts where
+   the task would otherwise fall under about 240px: at 620px it began too late,
+   and a 712px list cut every task to "Summarize t…" beside two empty columns
+   (seen 2026-11-25). */
+@container (max-width: 840px) {
   .agents-table {
-    --agents-columns: minmax(0, 1fr) 6.5rem 5rem 11rem;
+    --surface-table-columns: minmax(0, 1fr) 6.5rem 5rem 11rem;
   }
 
   .agents-table__head > :nth-child(4),

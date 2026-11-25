@@ -1,3 +1,4 @@
+import "../styles/surface-table.css";
 import "../styles/automation.css";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
@@ -442,25 +443,6 @@ export function AutomationCenter(props: AutomationCenterProps) {
                     {automationTotalsLine(listTotals)}
                   </span>
                 )}
-                <OctantToggleGroup<typeof view>
-                  aria-label="Choose a view"
-                  className="automation-center__views segmented"
-                  onValueChange={(value) => {
-                    const next = value[0];
-                    if (next !== undefined) setView(next);
-                  }}
-                  value={[view]}
-                >
-                  <OctantToggleGroupItem className="automation-center__view segment" value="list">
-                    List
-                  </OctantToggleGroupItem>
-                  <OctantToggleGroupItem
-                    className="automation-center__view segment"
-                    value="calendar"
-                  >
-                    Calendar
-                  </OctantToggleGroupItem>
-                </OctantToggleGroup>
                 <FilterMenu count={filterCount} onReset={resetFilters}>
                   <FilterMenuGroup<ListStatusFilter>
                     label="Status"
@@ -499,6 +481,25 @@ export function AutomationCenter(props: AutomationCenterProps) {
                     Show completed
                   </OctantMenuCheckboxItem>
                 </FilterMenu>
+                <OctantToggleGroup<typeof view>
+                  aria-label="Choose a view"
+                  className="automation-center__views segmented"
+                  onValueChange={(value) => {
+                    const next = value[0];
+                    if (next !== undefined) setView(next);
+                  }}
+                  value={[view]}
+                >
+                  <OctantToggleGroupItem className="automation-center__view segment" value="list">
+                    List
+                  </OctantToggleGroupItem>
+                  <OctantToggleGroupItem
+                    className="automation-center__view segment"
+                    value="calendar"
+                  >
+                    Calendar
+                  </OctantToggleGroupItem>
+                </OctantToggleGroup>
               </div>
             )}
 
@@ -687,7 +688,7 @@ function AutomationListBody(props: {
     >
       {/* The column names, drawn once over every group. Each row says the
           same things in its own accessible name, so this line is for the eye. */}
-      <div aria-hidden="true" className="automation-table__head">
+      <div aria-hidden="true" className="surface-table__head automation-table__head">
         <span>Automation</span>
         <span>Last 7 runs</span>
         <span>Next run</span>
@@ -701,7 +702,7 @@ function AutomationListBody(props: {
           )}
           <ul
             aria-label={group.heading === "" ? "Automations" : `Automations in ${group.heading}`}
-            className="automation-center__rows"
+            className="surface-table__rows automation-center__rows"
           >
             {group.items.map((summary) => {
               const KindIcon = triggerKindIcon(summary.trigger);
@@ -718,7 +719,7 @@ function AutomationListBody(props: {
               return (
                 <li
                   aria-label={summary.displayName}
-                  className="automation-row"
+                  className="surface-table__row automation-row"
                   data-lifecycle={summary.lifecycle}
                   key={String(summary.id)}
                 >
@@ -728,7 +729,7 @@ function AutomationListBody(props: {
                     // screen reader hears the name first and the rest after.
                     aria-describedby={`${rowId}-schedule ${rowId}-runs ${rowId}-next`}
                     aria-label={summary.displayName}
-                    className="automation-row__open"
+                    className="surface-table__open surface-table__open--cells automation-row__open"
                     data-automation-row={String(summary.id)}
                     onClick={() => props.onSelect(String(summary.id))}
                     type="button"
@@ -739,8 +740,10 @@ function AutomationListBody(props: {
                         <KindIcon size={16} />
                       </span>
                       <span className="automation-row__text">
-                        <span className="automation-row__name">{summary.displayName}</span>
-                        <span className="automation-row__schedule" id={`${rowId}-schedule`}>
+                        <span className="oct-row-label surface-table__label">
+                          {summary.displayName}
+                        </span>
+                        <span className="oct-meta surface-table__meta" id={`${rowId}-schedule`}>
                           {`${sentence} · ${projectName}`}
                           {String(summary.hostId) === props.localHostId ? null : (
                             // Only a routine that belongs somewhere else names its
