@@ -32,6 +32,7 @@ import {
 import { OctantButton } from "../ui/base/OctantButton";
 import { ChatStarterIdeas } from "./ChatStarterIdeas";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
+import { ComposerAttachmentIcon } from "../composer/ComposerAttachmentIcon";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ComposerStartTray } from "../composer/ComposerStartTray";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -322,24 +323,28 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 <>
                   {stagedFiles.length === 0 ? null : (
                     <ul aria-label="Attachments" className="composer-chips">
-                      {stagedFiles.map((file, index) => (
-                        <li className="chip" key={`${file.name}-${index}`}>
-                          <span>{pastedImageName(file)}</span>
-                          <OctantButton
-                            aria-label={`Remove ${pastedImageName(file)} attachment`}
-                            className="chip-x window-no-drag"
-                            onClick={() =>
-                              setStagedFiles((current) =>
-                                current.filter((staged) => staged !== file),
-                              )
-                            }
-                            type="button"
-                            variant="bare"
-                          >
-                            ×
-                          </OctantButton>
-                        </li>
-                      ))}
+                      {stagedFiles.map((file, index) => {
+                        const name = pastedImageName(file);
+                        return (
+                          <li className="chip min-w-0" key={`${file.name}-${index}`}>
+                            <ComposerAttachmentIcon name={name} />
+                            <span className="truncate">{name}</span>
+                            <OctantButton
+                              aria-label={`Remove ${name} attachment`}
+                              className="chip-x shrink-0 window-no-drag"
+                              onClick={() =>
+                                setStagedFiles((current) =>
+                                  current.filter((staged) => staged !== file),
+                                )
+                              }
+                              type="button"
+                              variant="bare"
+                            >
+                              ×
+                            </OctantButton>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                   {extensionDraft.receipts.length === 0 ? null : (

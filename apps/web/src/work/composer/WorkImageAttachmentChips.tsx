@@ -1,5 +1,6 @@
-import { FileText, X } from "../../ui/icons";
+import { X } from "../../ui/icons";
 import { useState } from "react";
+import { ComposerAttachmentIcon } from "../../composer/ComposerAttachmentIcon";
 import { ImagePreviewDialog } from "../../composer/ImagePreviewDialog";
 import type { WorkComposerImages } from "./useWorkComposerImages";
 import { OctantButton } from "../../ui/base/OctantButton";
@@ -28,16 +29,12 @@ export function WorkImageAttachmentChips(props: {
   return (
     <div className="composer-chips work-composer-adapter__attachments" aria-label="Attached files">
       {images.staged.map((attachment) => (
-        <span className="chip work-composer-adapter__attachment" key={attachment.id}>
+        <span className="chip min-w-0 work-composer-adapter__attachment" key={attachment.id}>
           {attachment.previewUrl === "" ? (
             // A file that is not a picture has nothing to preview: its glyph
             // and name stand in the chip, and only pictures open the viewer.
             <>
-              <FileText
-                aria-hidden="true"
-                className="work-composer-adapter__attachment-thumb"
-                size={16}
-              />
+              <ComposerAttachmentIcon name={attachment.displayName} />
               <span className="work-composer-adapter__attachment-name">
                 {attachment.displayName}
               </span>
@@ -62,7 +59,7 @@ export function WorkImageAttachmentChips(props: {
           )}
           <OctantButton
             aria-label={`Remove ${attachment.displayName}`}
-            className="chip-x window-no-drag"
+            className="chip-x shrink-0 window-no-drag"
             onClick={() => images.remove(attachment.id)}
             type="button"
             variant="bare"
