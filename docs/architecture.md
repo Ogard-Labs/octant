@@ -7456,10 +7456,19 @@ ls-remote` against the thread's remote and the GitHub reads they already
   "Sent while the turn ran", on the desktop and the phone alike. Its journal
   append invalidates the turn's mode on the change feed (`work-navigation` or
   `code-navigation`), as any turn change does, so readers of the thread list
-  and of a transcript read afresh see it at once. A desktop transcript
-  already open follows its turn's stream, which carries no steered message,
-  and shows it when the turn settles or the transcript is read again;
-  carrying it on the turn stream is a follow-up. When the running turn is
+  and of a transcript read afresh see it at once. An open desktop Work
+  transcript follows its turn's stream, which carries no steered message, so
+  the host also sends that stream `snapshot-required`: the view reads the
+  transcript again while the turn runs and shows the message. That read
+  holds the reply, tool steps and task list streamed so far, so none is
+  rolled back. A retry notice it does not hold is cleared until the next one
+  is announced. The subscription stays open after this frame, because no
+  frame was lost and a goal-loop round on the same feed still waits for the
+  turn to settle; a feed that did lose its place ends as before. A separate
+  frame for the message was rejected because an older client cannot decode a
+  frame kind it does not know. An open desktop Code transcript shows the
+  message when the turn settles or the transcript is read again; showing it
+  there at once is a follow-up. When the running turn is
   one the queue admitted itself, that message stays at the head as
   `accepted` until its turn settles, and the message behind it is offered to
   that turn under the same checks, one at a time, in order. A message
@@ -7488,7 +7497,10 @@ ls-remote` against the thread's remote and the GitHub reads they already
   re-read unchanged data each second. A provider-switch handoff, a child's parent
   context and a thread export carry each steered message as a user message
   of its turn, after that turn's prompt, with the time it was sent, under the
-  same limits and redaction as the turn's other messages. The message is not marked as dispatching
+  same limits and redaction as the turn's other messages. The conversation a
+  Code compaction's handover summary reads carries them too, in the order
+  they were sent, after their turn's prompt, each under a source of its own
+  that names the turn and the message. The message is not marked as dispatching
   before the steer: a restart while the runtime takes it also ends the turn
   that took it, and the still-queued message then follows the ordinary
   restart rules rather than being lost. Which runtimes steer is the provider
