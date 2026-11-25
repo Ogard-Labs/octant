@@ -260,9 +260,9 @@ describe("quoting the person's own words", () => {
   });
 
   it("matches a word whose last letter lowers to another form than the same letter within it", () => {
-    expect(
-      personQuotationsIn("λογος", ["Ο ΛΟΓΟΣ μου"]).map((quotation) => quotation.raw),
-    ).toEqual(["ΛΟΓΟΣ"]);
+    expect(personQuotationsIn("λογος", ["Ο ΛΟΓΟΣ μου"]).map((quotation) => quotation.raw)).toEqual([
+      "ΛΟΓΟΣ",
+    ]);
   });
 
   it("returns every place a text appears, and nothing for reworded, invented, or empty text", () => {
