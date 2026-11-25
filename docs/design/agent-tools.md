@@ -53,7 +53,7 @@ tools from plugins or MCP servers the person added are not listed.
   no headroom, and CI fails when one grows past it, so a tool offered somewhere
   new raises the budget visibly, by what it needs. The person's own skills,
   memory, files, plugins and MCP servers, and a runtime's own prompt, are not
-  counted.
+  counted. The tool lists are upper bounds per context, kept with this page.
 
 "Code + tools" below means a Code thread on a provider that carries
 app-managed tools, subject to the thread profile's tool constraints.

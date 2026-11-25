@@ -69,6 +69,14 @@ export function windowsShellInstruction(shell: WindowsTerminalShell | undefined)
   }
 }
 
+/**
+ * Codex and Claude Code tell the model the date themselves; nothing else did
+ * here, and a Work status file asks for today's date. Sent on every turn.
+ */
+export function harnessTodayInstruction(now: string): string {
+  return `Today is ${now.slice(0, 10)} (UTC).`;
+}
+
 export function nativeHarnessInstructions(
   mode: OctantMode,
   host: {

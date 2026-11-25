@@ -1,18 +1,18 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { nativeHarnessToolDefinitionsFor } from "../harness/nativeHarnessTools";
 import { appToolHostLines } from "../providers/appToolHostLines";
+import { firstPartyToolNames } from "../providers/firstPartyToolNames.test-support";
 import {
   AGENT_PROMPT_CONTEXTS,
   AGENT_PROMPT_RUNTIMES,
+  budgetFor,
   measureAgentPrompts,
   NOT_MEASURED_TOOLS,
   overBudget,
   promptTools,
   readAgentPromptBudget,
+  underBudget,
 } from "./agentPromptSize";
-
-const REPOSITORY = join(import.meta.dirname, "../../../..");
 
 describe("agent prompt size", () => {
   it("reports each runtime's instruction and tool sizes", () => {
@@ -53,17 +53,27 @@ describe("agent prompt size", () => {
     const measured = new Set(
       AGENT_PROMPT_CONTEXTS.flatMap((context) => promptTools(context).map((tool) => tool.name)),
     );
-    const specification = readFileSync(join(REPOSITORY, "docs/design/agent-tools.md"), "utf8");
-    const listed = new Set(
-      [...specification.matchAll(/`(octant_[a-z]+(?:_[a-z]+)*)`/g)].flatMap((match) =>
-        match[1] === undefined ? [] : [match[1]],
-      ),
-    );
-    const guided = [...listed].filter((name) => appToolHostLines([{ name }]).length > 0);
+    const guided = firstPartyToolNames().filter((name) => appToolHostLines([{ name }]).length > 0);
     expect(guided.length).toBeGreaterThan(20);
     expect(guided.filter((name) => !measured.has(name) && !(name in NOT_MEASURED_TOOLS))).toEqual(
       [],
     );
+  });
+
+  it("measures the workspace tools a child run is really given", () => {
+    const offered = { askUser: {}, filesystem: {}, webFetch: {}, webSearch: {} };
+    for (const [context, mode, ports] of [
+      ["chat-child", "chat", { askUser: {}, webFetch: {}, webSearch: {} }],
+      ["work-child", "work", offered],
+      ["code-child", "code", { ...offered, shell: {} }],
+    ] as const) {
+      const given = nativeHarnessToolDefinitionsFor(mode, ports as never).map((tool) => tool.name);
+      expect(
+        promptTools(context)
+          .map((tool) => tool.name)
+          .filter((name) => !name.startsWith("octant_")),
+      ).toEqual(given);
+    }
   });
 
   it("fails when a runtime grows past its budget", () => {
@@ -88,6 +98,7 @@ describe("agent prompt size", () => {
     const read = readAgentPromptBudget(exact);
     if (read.status === "refused") throw new Error(read.message);
     expect(overBudget(report, read.budget)).toEqual([]);
+    expect(underBudget(report, read.budget)).toEqual([]);
 
     const tighter = structuredClone(exact);
     const codex = tighter["codex"]?.["code"];
@@ -103,6 +114,20 @@ describe("agent prompt size", () => {
         measured: codex.firstPromptBytes + 1,
         budget: codex.firstPromptBytes,
       },
+    ]);
+  });
+
+  it("asks for a shrunk prompt to be recorded, so later growth cannot hide in the gap", () => {
+    const report = measureAgentPrompts();
+    const loose = structuredClone(budgetFor(report)) as {
+      pi: { work: { laterTurnBytes: number } };
+    };
+    loose.pi.work.laterTurnBytes += 10;
+    const read = readAgentPromptBudget(loose);
+    if (read.status === "refused") throw new Error(read.message);
+    expect(overBudget(report, read.budget)).toEqual([]);
+    expect(underBudget(report, read.budget)).toEqual([
+      { runtime: "pi", context: "work", measure: "laterTurnBytes", measured: 0, budget: 10 },
     ]);
   });
 

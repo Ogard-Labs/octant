@@ -8,13 +8,14 @@ import {
   measureAgentPrompts,
   overBudget,
   readAgentPromptBudget,
+  underBudget,
 } from "../apps/server/src/agentPromptSize/agentPromptSize";
 
 /**
  * Reports the size of the instructions and tool definitions Octant gives each
  * runtime, and fails when one grew past its recorded budget. The budget is the
- * exact size with no headroom, so every growth is a visible change to the
- * budget file: raise it with `--write`, only by what the change needs, and say
+ * exact size with no headroom, checked both ways, so every change is visible in
+ * the budget file: raise it with `--write`, only by what the change needs, and say
  * so in the pull request.
  */
 async function main() {
@@ -42,7 +43,12 @@ async function main() {
     console.error(
       `${overrun.runtime} ${overrun.context} ${overrun.measure} grew to ${String(overrun.measured)} B, ${String(overrun.measured - overrun.budget)} B over its budget in ${AGENT_PROMPT_BUDGET_PATH}. Shorten what Octant sends, or raise the budget by exactly what the change needs with bun scripts/check-agent-prompt-size.ts --write and say so in the pull request.`,
     );
-  if (overruns.length > 0) process.exitCode = 1;
+  const savings = underBudget(report, read.budget);
+  for (const saving of savings)
+    console.error(
+      `${saving.runtime} ${saving.context} ${saving.measure} shrank to ${String(saving.measured)} B, under its ${String(saving.budget)} B budget in ${AGENT_PROMPT_BUDGET_PATH}. Record it with bun scripts/check-agent-prompt-size.ts --write.`,
+    );
+  if (overruns.length + savings.length > 0) process.exitCode = 1;
 }
 
 if (import.meta.main) await main();
