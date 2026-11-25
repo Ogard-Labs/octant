@@ -7979,6 +7979,7 @@ describe("CodeOperationRuntime", () => {
     readonly kind: "enter-plan" | "exit-plan";
     readonly inPlace: ProviderInPlaceLevelChange;
     readonly operation: number;
+    readonly decision?: "approved" | "denied";
   }) {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const order: string[] = [];
@@ -7996,7 +7997,12 @@ describe("CodeOperationRuntime", () => {
         Effect.sync(() => order.push("answer")).pipe(Effect.zipRight(base.answerApproval(answer))),
     };
     const changeThreadLevel = vi.fn(async () => true);
-    const fixture = runtimeFixture({ provider: providerDriver(connection), changeThreadLevel });
+    const onPlanApproved = vi.fn(async () => undefined);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      changeThreadLevel,
+      onPlanApproved,
+    });
     if (input.kind === "exit-plan")
       fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
     const turn = operationId(input.operation);
@@ -8038,12 +8044,22 @@ describe("CodeOperationRuntime", () => {
       threadId,
       checkoutId,
       approvalId: approvalId!,
-      decision: "approved",
+      decision: input.decision ?? "approved",
     });
     const answeredEvent = (await operationEvents(fixture.runtime, turn)).find(
       (event) => event.kind === "approval-answered",
     );
-    return { fixture, base, answered, answeredEvent, order, changeLevelInPlace };
+    return {
+      fixture,
+      base,
+      queue,
+      turn,
+      answered,
+      answeredEvent,
+      order,
+      changeLevelInPlace,
+      onPlanApproved,
+    };
   }
 
   it("enters Plan inside the running turn when the provider can hold its session to Plan", async () => {
@@ -8077,6 +8093,165 @@ describe("CodeOperationRuntime", () => {
       expect(answered).toMatchObject({ state: "interrupted" });
       expect(base.interrupt).toHaveBeenCalled();
       expect(answeredEvent).toMatchObject({ levelChangeApplied: "next-turn" });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("hands an approved plan to the host to carry out once the planning turn has closed, and never a declined or an entered Plan", async () => {
+    const approved = await answeredLevelChangeWithInPlaceDriver({
+      kind: "exit-plan",
+      inPlace: { status: "applied" },
+      operation: 1401,
+    });
+    try {
+      expect(approved.answered).toMatchObject({ state: "interrupted" });
+      // Not while the planning turn is still closing: a turn started now
+      // would run beside it.
+      expect(approved.onPlanApproved).not.toHaveBeenCalled();
+      await Effect.runPromise(
+        Queue.offer(approved.queue, providerEvent({ kind: "interrupted", message: "Stopped." })),
+      );
+      await vi.waitFor(() =>
+        expect(approved.onPlanApproved).toHaveBeenCalledExactlyOnceWith(threadId),
+      );
+      expect(
+        terminalStates(await operationEvents(approved.fixture.runtime, approved.turn)),
+      ).toEqual(["interrupted"]);
+    } finally {
+      approved.fixture.close();
+    }
+
+    const declined = await answeredLevelChangeWithInPlaceDriver({
+      kind: "exit-plan",
+      inPlace: { status: "applied" },
+      operation: 1403,
+      decision: "denied",
+    });
+    try {
+      expect(declined.answered).toMatchObject({ state: "running" });
+      await Effect.runPromise(
+        Queue.offer(declined.queue, providerEvent({ kind: "interrupted", message: "Stopped." })),
+      );
+      await vi.waitFor(async () =>
+        expect(
+          terminalStates(await operationEvents(declined.fixture.runtime, declined.turn)),
+        ).toEqual(["interrupted"]),
+      );
+      expect(declined.onPlanApproved).not.toHaveBeenCalled();
+    } finally {
+      declined.fixture.close();
+    }
+
+    const entered = await answeredLevelChangeWithInPlaceDriver({
+      kind: "enter-plan",
+      inPlace: { status: "failed", reason: "Claude did not switch to plan mode." },
+      operation: 1405,
+    });
+    try {
+      await Effect.runPromise(
+        Queue.offer(entered.queue, providerEvent({ kind: "interrupted", message: "Stopped." })),
+      );
+      await vi.waitFor(async () =>
+        expect(
+          terminalStates(await operationEvents(entered.fixture.runtime, entered.turn)),
+        ).toEqual(["interrupted"]),
+      );
+      expect(entered.onPlanApproved).not.toHaveBeenCalled();
+    } finally {
+      entered.fixture.close();
+    }
+  });
+
+  it("lets the host's follow-on turn after an approved plan resume the same session at the level the thread returned to", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    let setThread: (next: CodeThread) => void = () => undefined;
+    const changeThreadLevel = vi.fn(
+      async (input: { readonly executionPolicy: ProviderExecutionPolicy }) => {
+        setThread(decodeCodeThread({ ...thread(), executionPolicy: input.executionPolicy }));
+        return true;
+      },
+    );
+    let followOn: Promise<unknown> | undefined;
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      changeThreadLevel,
+      // What the host does with it: an ordinary turn start of its own.
+      onPlanApproved: async (approvedThread) => {
+        followOn = fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(1409),
+          threadId: approvedThread,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await followOn;
+      },
+    });
+    setThread = (next) => fixture.setThread(next);
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        executionPolicy: "plan",
+        planReturnPolicy: "auto-accept-edits",
+      }),
+    );
+    const planning = operationId(1407);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: planning,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "plan-done",
+            action: "ExitPlanMode",
+            description: "Claude asks to leave Plan.",
+            levelChange: { kind: "exit-plan", plan: "1. Fix it." },
+          }),
+        ),
+      );
+      let approvalId: CodeApprovalId | undefined;
+      await vi.waitFor(async () => {
+        const asked = (await operationEvents(fixture.runtime, planning)).find(
+          (event) => event.kind === "approval-requested",
+        );
+        expect(asked?.kind).toBe("approval-requested");
+        if (asked?.kind === "approval-requested") approvalId = asked.approvalId;
+      });
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1408),
+        threadId,
+        checkoutId,
+        approvalId: approvalId!,
+        decision: "approved",
+      });
+      await Effect.runPromise(
+        Queue.offer(queue, providerEvent({ kind: "interrupted", message: "Stopped." })),
+      );
+      await vi.waitFor(() => expect(followOn).toBeDefined());
+      await expect(followOn).resolves.toMatchObject({ state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+      const starts = [
+        ...vi.mocked(connection.start).mock.calls,
+        ...vi.mocked(connection.resume).mock.calls,
+      ].map(([input]) => input.executionPolicy);
+      expect(starts.at(0)).toBe("plan");
+      expect(vi.mocked(connection.resume).mock.calls.at(-1)?.[0]).toMatchObject({
+        executionPolicy: "auto-accept-edits",
+        resumeCursor: { value: "native-code-session" },
+      });
     } finally {
       fixture.close();
     }
@@ -13900,6 +14075,7 @@ function runtimeFixture(options: {
   probeProvider?: Parameters<typeof createCodeOperationRuntime>[0]["probeProvider"];
   isRuntimeStartedTurn?: Parameters<typeof createCodeOperationRuntime>[0]["isRuntimeStartedTurn"];
   changeThreadLevel?: Parameters<typeof createCodeOperationRuntime>[0]["changeThreadLevel"];
+  onPlanApproved?: Parameters<typeof createCodeOperationRuntime>[0]["onPlanApproved"];
   outlivingSessions?: Parameters<typeof createCodeOperationRuntime>[0]["outlivingSessions"];
   readonly resolveProviderDriver?: Parameters<
     typeof createCodeOperationRuntime
@@ -14166,6 +14342,7 @@ function runtimeFixture(options: {
     ...(options.changeThreadLevel === undefined
       ? {}
       : { changeThreadLevel: options.changeThreadLevel }),
+    ...(options.onPlanApproved === undefined ? {} : { onPlanApproved: options.onPlanApproved }),
     ...(options.outlivingSessions === undefined
       ? {}
       : { outlivingSessions: options.outlivingSessions }),

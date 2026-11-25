@@ -811,7 +811,11 @@ interface SessionState {
   terminal: boolean;
   active: boolean;
   context?: CodexEventContext;
-  readonly pendingApprovals: Map<string, CodexPendingApproval>;
+  /**
+   * `outsideProject` marks an ask that reaches outside the Project's folders:
+   * it is answered for that one call, never kept for the session.
+   */
+  readonly pendingApprovals: Map<string, CodexPendingApproval & { readonly outsideProject?: true }>;
   readonly pendingTools: Map<
     string,
     {
@@ -3517,25 +3521,49 @@ function makeConnection(
         return "admitted";
       }
       if (state.executionPolicy === "full-access") {
-        terminalEvent(state, {
-          kind: "failed",
-          failure: failure("protocol", "Codex requested approval while Full access was active."),
-        });
-        return "stopped";
+        if (state.strict !== false) {
+          terminalEvent(state, {
+            kind: "failed",
+            failure: failure("protocol", "Codex requested approval while Full access was active."),
+          });
+          return "stopped";
+        }
+        // Full access starts Codex with its approval policy at `never`, so a
+        // request here means Codex asked anyway (the session's settings do
+        // not bind every thread Codex runs for it). Full access asks nobody,
+        // so outside Strict the request is accepted and the turn goes on;
+        // failing the turn here ended work the person had already allowed.
+        respondInBackground(state, item.approval.providerRequestId, () =>
+          approvalResult(item.approval, true, "project-default"),
+        );
+        return "admitted";
       }
+      const outsideProject = !approvalRequestIsProjectConfined(
+        item.approval,
+        state.projectRoot,
+        extraFolders,
+      );
       if (
         state.executionPolicy === "plan" ||
         // Chat has no filesystem or shell authority at all, so nothing
         // Codex asks for is anyone's to approve.
         mode === "chat" ||
-        !approvalRequestIsProjectConfined(item.approval, state.projectRoot, extraFolders)
+        // Strict holds the session to the Project's folders. Outside it the
+        // person decides, as in Codex itself (maintainer decision,
+        // 2026-11-25): declining here unseen left the agent refused with
+        // nothing for the person to answer.
+        (outsideProject && state.strict !== false)
       ) {
         respondInBackground(state, item.approval.providerRequestId, () =>
           declinedApprovalResult(item.approval),
         );
         return "admitted";
       }
-      if (state.executionPolicy === "auto-accept-edits" && item.approval.kind === "file-change") {
+      if (
+        !outsideProject &&
+        state.executionPolicy === "auto-accept-edits" &&
+        item.approval.kind === "file-change"
+      ) {
         // Auto-accept edits waives exactly the project-confined file writes
         // proven above; commands and permission grants still ask.
         respondInBackground(state, item.approval.providerRequestId, () => ({
@@ -3550,13 +3578,24 @@ function makeConnection(
         });
         return "stopped";
       }
-      state.pendingApprovals.set(item.approval.requestId, item.approval);
-      pendingApprovalOwners.set(item.approval.requestId, state.sessionId);
+      const approval =
+        outsideProject && item.approval.event.kind === "approval-request"
+          ? {
+              ...item.approval,
+              outsideProject: true as const,
+              event: {
+                ...item.approval.event,
+                description: `Codex asks to reach outside the Project's folders: ${approvalOutsideReach(item.approval)}. Approval applies to this request only.`,
+              },
+            }
+          : item.approval;
+      state.pendingApprovals.set(approval.requestId, approval);
+      pendingApprovalOwners.set(approval.requestId, state.sessionId);
       if (message.kind === "request") {
-        const call = codexApprovalCall(item.approval.event, message.params);
-        if (call !== undefined) approvalCalls.set(item.approval.requestId, call);
+        const call = codexApprovalCall(approval.event, message.params);
+        if (call !== undefined) approvalCalls.set(approval.requestId, call);
       }
-      offer(item.approval.event);
+      offer(approval.event);
       return "admitted";
     };
     const respondInBackground = (
@@ -4448,11 +4487,17 @@ function makeConnection(
                 result: approvalResult(
                   pending,
                   input.approved,
-                  // A one-call answer is never accepted for the session. Nor
-                  // is a command in Codex's own sandbox: Codex would run a
-                  // later matching command outside it unasked, and an
-                  // approved escalation runs that one command only.
-                  input.scope === "once" || state.sandbox.kind === "native"
+                  // A one-call answer is never accepted for the session, nor
+                  // is an ask that reaches outside the Project's folders.
+                  // Under Strict a command in Codex's own sandbox is not
+                  // either: Codex would run a later matching command outside
+                  // it unasked. Outside Strict the person's choice to keep the
+                  // approval reaches Codex, as it does in Codex itself
+                  // (maintainer decision, 2026-11-25): always answering
+                  // `accept` made Codex ask again for every such command.
+                  input.scope === "once" ||
+                    pending.outsideProject === true ||
+                    (state.sandbox.kind === "native" && state.strict !== false)
                     ? "project-default"
                     : permissionPersistence(options),
                 ),
@@ -4633,6 +4678,31 @@ export function approvalRequestIsProjectConfined(
     if (path.value.kind !== "project_roots") return false;
     return path.value.subpath === null || inProject(path.value.subpath, projectRoot);
   });
+}
+
+/** What an approval outside the Project's folders asks to reach, for the person's card. */
+function approvalOutsideReach(pending: CodexApprovalScope): string {
+  if (pending.kind === "command") {
+    return typeof pending.requestedCwd === "string"
+      ? `a command in ${pending.requestedCwd}`
+      : "a command with no working directory";
+  }
+  if (pending.kind === "file-change") return `file changes under ${String(pending.grantRoot)}`;
+  const fileSystem = pending.permissions.fileSystem;
+  const paths = [
+    ...(fileSystem?.read ?? []),
+    ...(fileSystem?.write ?? []),
+    ...(fileSystem?.entries ?? []).map(({ path }) =>
+      path.type === "path"
+        ? path.path
+        : path.type === "glob_pattern"
+          ? path.pattern
+          : path.value.kind,
+    ),
+  ];
+  return paths.length === 0
+    ? `permissions in ${pending.requestedCwd}`
+    : `permissions for ${paths.join(", ")}`;
 }
 
 function pathIsProjectConfined(path: string, projectRoot: string, cwd: string): boolean {

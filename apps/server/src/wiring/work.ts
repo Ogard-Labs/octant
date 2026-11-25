@@ -55,6 +55,7 @@ import { readJournaledSessionHistory } from "../providers/nativeSessionHistory";
 import { createWorkSessionRouteHandler } from "../work/workSessionRoutes";
 import { stopKeptSessionsOfChangedWorkThreads } from "../work/workKeptSessions";
 import { codeThreadTurns } from "../code/codeForkPoint";
+import { PLAN_APPROVED_TURN_PROMPT } from "../code/codeOperationRuntime";
 import { SERVER_WORK_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
 import {
   bindServerWorkTurn,
@@ -722,6 +723,12 @@ export function wireWork(deps: WorkDependencies) {
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       onUsageLimitStop: (threadId) => workThreadService.handOffAfterUsageLimit(threadId),
+      // The turn that carries an approved plan out starts as a wake-up's
+      // does: the host's own turn, through the ordinary admission, at the
+      // level the thread returned to.
+      onPlanApproved: async (threadId) => {
+        await workThreadWakeupPort.startTurn(String(threadId), PLAN_APPROVED_TURN_PROMPT);
+      },
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),
       persistence: {
         ...persistence,

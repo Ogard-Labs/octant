@@ -1183,6 +1183,47 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it("hands an approved plan to the host to carry out once the planning turn has ended, and never an approved ask to plan first", async () => {
+    for (const [threadAccess, continues] of [
+      ["plan", true],
+      ["ask-first", false],
+    ] as const) {
+      const activeWhenHandedOver: boolean[] = [];
+      const onPlanApproved = vi.fn(async () => {
+        activeWhenHandedOver.push(fixture.service.isTurnActive(ids.thread));
+      });
+      let running = false;
+      const fixture = serviceFixture({
+        threadAccess,
+        onPlanApproved,
+        turnRuntime: {
+          run: async (input) => {
+            running = true;
+            await new Promise<void>((resolve) => {
+              if (input.signal.aborted) resolve();
+              else input.signal.addEventListener("abort", () => resolve(), { once: true });
+            });
+            return { kind: "cancelled" };
+          },
+        },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await vi.waitFor(() => expect(running).toBe(true));
+      // The person's approval of the level change ends the turn that asked.
+      fixture.service.endTurnForLevelChange(ids.thread);
+      // Not while the planning turn is still ending: a turn started now
+      // would be refused as running beside it.
+      expect(onPlanApproved).not.toHaveBeenCalled();
+      await fixture.waitForIdle();
+      expect(fixture.service.isTurnActive(ids.thread)).toBe(false);
+      if (continues) {
+        expect(onPlanApproved).toHaveBeenCalledExactlyOnceWith(ids.thread);
+        // The thread is free for the host's own turn by then.
+        expect(activeWhenHandedOver).toEqual([false]);
+      } else expect(onPlanApproved).not.toHaveBeenCalled();
+    }
+  });
+
   it("starts a sandboxed Full access turn with the sandbox, and records it for the turn's commands", async () => {
     const release = deferred<void>();
     const seen: Array<unknown> = [];
@@ -7048,6 +7089,7 @@ function serviceFixture(
     readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly onTurnCancelled?: WorkTurnServiceDependencies["onTurnCancelled"];
+    readonly onPlanApproved?: WorkTurnServiceDependencies["onPlanApproved"];
     readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
     readonly runningAccess?: RunningWorkTurnAccess;
     readonly toolStepSettings?: WorkTurnServiceDependencies["toolStepSettings"];
@@ -7300,6 +7342,7 @@ function serviceFixture(
       : { readImportedSessionHistory: options.readImportedSessionHistory }),
     ...(options.stopKeptSession === undefined ? {} : { stopKeptSession: options.stopKeptSession }),
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
+    ...(options.onPlanApproved === undefined ? {} : { onPlanApproved: options.onPlanApproved }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     ...(options.runningAccess === undefined ? {} : { runningAccess: options.runningAccess }),
     ...(options.toolStepSettings === undefined

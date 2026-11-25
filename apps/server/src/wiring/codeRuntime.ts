@@ -56,6 +56,7 @@ import {
   type CodeOperationRuntimeOptions,
   type CodeStoppedTurn,
   createCodeOperationRuntime,
+  PLAN_APPROVED_TURN_PROMPT,
 } from "../code/codeOperationRuntime";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
@@ -1553,6 +1554,33 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         onProviderStop: async (threadId, availability, stopped) => {
           await continueWorkerOnFallback.current?.(threadId, availability, stopped);
         },
+        // The turn that carries an approved plan out is the host's own send
+        // through the ordinary turn admission, as a restart continuation's
+        // is. It does not go through a wake-up's start: the planning turn
+        // ended interrupted, which that path reads as a thread waiting on the
+        // person, and would never start.
+        onPlanApproved: async (threadId) => {
+          const thread = persistence.readCodeThread(threadId);
+          if (
+            thread === undefined ||
+            baseRouteCodeService.stageEvidence === undefined ||
+            baseRouteCodeService.executeOperation === undefined
+          )
+            return;
+          const staged = await baseRouteCodeService.stageEvidence(
+            ROUTINE_HOST_SCOPE_ID,
+            threadId,
+            PLAN_APPROVED_TURN_PROMPT,
+          );
+          await baseRouteCodeService.executeOperation(ROUTINE_HOST_SCOPE_ID, {
+            kind: "start-provider-turn",
+            operationId: decodeCodeOperationId(randomUUID()),
+            threadId,
+            checkoutId: thread.checkoutId,
+            sessionId: decodeProviderSessionId(randomUUID()),
+            prompt: staged,
+          });
+        },
         // The agent's ask to plan, or to leave Plan, changes the level the way
         // the person's own level menu does, for the window that approved it.
         changeThreadLevel: async ({ windowId, threadId, executionPolicy, planReturnPolicy }) => {
@@ -2508,6 +2536,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         codePlannerService.isPlannerThread(decodeCodeThreadId(threadId)),
       isMarked: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+      isStrict: (threadId) => resolveThreadStrict(threadId),
       threadState: (threadId) => {
         const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
         if (thread === undefined) return undefined;

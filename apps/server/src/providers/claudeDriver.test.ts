@@ -1086,6 +1086,229 @@ describe("Claude execution policy", () => {
     }
   });
 
+  it("lets Claude work from a folder outside the Project outside Strict: unasked at Full access, after one ask below it", async () => {
+    const elsewhere = "/tmp/octant-claude-elsewhere";
+    const signal = new AbortController().signal;
+    const started = async (launch: {
+      readonly executionPolicy: "approval-gated" | "full-access" | "plan";
+      readonly strict: boolean;
+    }) => {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      await Effect.runPromise(acquired.connection.start({ sessionId, modelId, ...launch }));
+      const open = f.opens[0]!;
+      const pre = (toolName: string, input: Record<string, unknown>, toolUseId: string) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot: elsewhere,
+          toolName,
+          input,
+          toolUseId,
+          signal,
+        });
+      return { acquired, open, pre };
+    };
+
+    const full = await started({ executionPolicy: "full-access", strict: false });
+    try {
+      await expect(
+        full.pre("Read", { file_path: `${elsewhere}/a.ts` }, "full-read"),
+      ).resolves.toEqual({ behavior: "allow" });
+      await expect(full.pre("Bash", { command: "git status" }, "full-shell")).resolves.toEqual({
+        behavior: "allow",
+      });
+    } finally {
+      await full.acquired.close();
+    }
+
+    for (const refusing of [
+      { executionPolicy: "approval-gated", strict: true },
+      { executionPolicy: "full-access", strict: true },
+      { executionPolicy: "plan", strict: false },
+    ] as const) {
+      const refused = await started(refusing);
+      try {
+        await expect(
+          refused.pre("Read", { file_path: `${elsewhere}/a.ts` }, "refused-read"),
+        ).resolves.toEqual({
+          behavior: "deny",
+          message: "Claude tool request is outside the Project.",
+        });
+      } finally {
+        await refused.acquired.close();
+      }
+    }
+
+    const gated = await started({ executionPolicy: "approval-gated", strict: false });
+    try {
+      const shell = { command: "git status" };
+      const approvalEvent = Effect.runPromise(
+        Stream.runHead(
+          Stream.unwrapScoped(gated.acquired.connection.subscribe).pipe(
+            Stream.filter((event) => event.kind === "approval-request"),
+          ),
+        ),
+      );
+      await expect(gated.pre("Bash", shell, "gated-shell")).resolves.toEqual({ behavior: "ask" });
+      const callback = gated.open.canUseTool({
+        toolName: "Bash",
+        input: shell,
+        toolUseId: "gated-shell",
+        signal,
+      });
+      const raised = Option.getOrUndefined(await approvalEvent);
+      if (raised?.kind !== "approval-request") throw new Error("Expected an approval card");
+      expect(raised.description).toContain(elsewhere);
+      await Effect.runPromise(
+        gated.acquired.connection.answerApproval({
+          sessionId,
+          requestId: raised.requestId,
+          approved: true,
+        }),
+      );
+      await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+      // The allowed folder is now one the session holds: a later call from
+      // it is judged as one from the Project is.
+      await expect(gated.pre("Bash", shell, "gated-later")).resolves.toEqual({
+        behavior: "own-rules",
+      });
+    } finally {
+      await gated.acquired.close();
+    }
+  });
+
+  it("hands Claude its own session rule when the person keeps an approval for the session, and a bare allow otherwise", async () => {
+    const sessionPermissions = [
+      {
+        type: "addRules",
+        rules: [{ toolName: "Bash", ruleContent: "npm test:*" }],
+        behavior: "allow",
+        destination: "session",
+      },
+    ] as const;
+    const shell = { command: "npm test" };
+    const signal = new AbortController().signal;
+    for (const [strict, scope, kept] of [
+      [false, undefined, true],
+      [false, "once", false],
+      [true, undefined, false],
+    ] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            strict,
+          }),
+        );
+        const open = f.opens[0]!;
+        const approvalEvent = Effect.runPromise(
+          Stream.runHead(
+            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+              Stream.filter((event) => event.kind === "approval-request"),
+            ),
+          ),
+        );
+        await open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Bash",
+          input: shell,
+          toolUseId: "kept-shell",
+          signal,
+        });
+        const callback = open.canUseTool({
+          toolName: "Bash",
+          input: shell,
+          toolUseId: "kept-shell",
+          sessionPermissions,
+          signal,
+        });
+        const raised = Option.getOrUndefined(await approvalEvent);
+        if (raised?.kind !== "approval-request") throw new Error("Expected an approval card");
+        await Effect.runPromise(
+          acquired.connection.answerApproval({
+            sessionId,
+            requestId: raised.requestId,
+            approved: true,
+            ...(scope === undefined ? {} : { scope }),
+          }),
+        );
+        await expect(callback).resolves.toEqual(
+          kept
+            ? { behavior: "allow", updatedPermissions: sessionPermissions }
+            : { behavior: "allow" },
+        );
+      } finally {
+        await acquired.close();
+      }
+    }
+  });
+
+  it("keeps the ask for a folder outside the Project per call, with no session rule for Claude", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      );
+      const open = f.opens[0]!;
+      const signal = new AbortController().signal;
+      const outside = { file_path: "/tmp/octant-claude-outside/notes.md" };
+      const approvalEvent = Effect.runPromise(
+        Stream.runHead(
+          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.filter((event) => event.kind === "approval-request"),
+          ),
+        ),
+      );
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: outside,
+          toolUseId: "outside-read",
+          signal,
+        }),
+      ).resolves.toEqual({ behavior: "ask" });
+      const callback = open.canUseTool({
+        toolName: "Read",
+        input: outside,
+        toolUseId: "outside-read",
+        sessionPermissions: [
+          {
+            type: "addRules",
+            rules: [{ toolName: "Read", ruleContent: "//tmp/octant-claude-outside/**" }],
+            behavior: "allow",
+            destination: "session",
+          },
+        ],
+        signal,
+      });
+      const raised = Option.getOrUndefined(await approvalEvent);
+      if (raised?.kind !== "approval-request") throw new Error("Expected an approval card");
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: raised.requestId,
+          approved: true,
+        }),
+      );
+      await expect(callback).resolves.toEqual({ behavior: "allow" });
+    } finally {
+      await acquired.close();
+    }
+  });
+
   it("drops the secret refusals at Full access and keeps them at every posture below it", async () => {
     const protectedFile = join(homedir(), ".aws", "credentials");
     for (const executionPolicy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {

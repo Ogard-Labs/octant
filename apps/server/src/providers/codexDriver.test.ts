@@ -4049,32 +4049,43 @@ describe("Codex execution authority and approvals", () => {
     });
   });
 
-  it("approves an escalation from Codex's own sandbox for that one command, never for the session", async () => {
-    const f = fixture();
-    const acquired = await acquireConnection(
-      makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
-      "code",
-    );
-    await Effect.runPromise(
-      acquired.connection.start({
-        sessionId,
-        modelId: "gpt-5.4" as never,
-        executionPolicy: "approval-gated",
-        strict: false,
-      }),
-    );
-    await Effect.runPromise(
-      acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
-    );
-    const event = takeEvents(acquired.connection, 1);
-    f.emit(commandApproval());
-    await expect(event).resolves.toMatchObject([{ kind: "approval-request" }]);
-    await Effect.runPromise(
-      acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
-    );
-    expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
-    await acquired.close();
-  });
+  it.each([
+    ["kept for the session", undefined, "acceptForSession"],
+    ["given for one call", "once", "accept"],
+  ] as const)(
+    "answers an approval %s in Codex's own sandbox with Codex's own decision for it",
+    async (_answer, scope, decision) => {
+      const f = fixture();
+      const acquired = await acquireConnection(
+        makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
+        "code",
+      );
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
+      );
+      const event = takeEvents(acquired.connection, 1);
+      f.emit(commandApproval());
+      await expect(event).resolves.toMatchObject([{ kind: "approval-request" }]);
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: "request-1",
+          approved: true,
+          ...(scope === undefined ? {} : { scope }),
+        }),
+      );
+      expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision } });
+      await acquired.close();
+    },
+  );
 
   it("never shares one Codex process between a Strict and a non-Strict session", async () => {
     const registry = new ProviderRuntimeRegistry();
@@ -4835,6 +4846,77 @@ describe("Codex execution authority and approvals", () => {
     expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(0);
     await acquired.close();
   });
+
+  it("accepts a provider approval at Full access outside Strict and lets the turn go on", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "full", attachments: [], tools: [] }),
+    );
+    f.emit(commandApproval({ cwd: "/private/outside" }));
+    await vi.waitFor(() =>
+      expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(1),
+    );
+    expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
+    // The turn is still running: a later request is answered too.
+    f.emit(fileApproval({ id: "provider-file-request-2" }));
+    await vi.waitFor(() =>
+      expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(2),
+    );
+    expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
+    await acquired.close();
+  });
+
+  it.each([
+    ["a command in a folder outside the Project", commandApproval({ cwd: "/private/outside" })],
+    ["a file change outside the Project", fileApproval({ grantRoot: "/private/outside" })],
+  ] as const)(
+    "shows %s to the person outside Strict and answers Codex with their decision for that one request",
+    async (_kind, requestMessage) => {
+      for (const approved of [true, false]) {
+        const f = fixture();
+        const acquired = await acquireConnection(
+          makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
+          "code",
+        );
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId: "gpt-5.4" as never,
+            executionPolicy: "auto-accept-edits",
+            strict: false,
+          }),
+        );
+        await Effect.runPromise(
+          acquired.connection.send({ sessionId, prompt: "outside", attachments: [], tools: [] }),
+        );
+        const event = takeEvents(acquired.connection, 1);
+        f.emit(requestMessage);
+        const [raised] = await event;
+        expect(raised).toMatchObject({ kind: "approval-request", requestId: "request-1" });
+        expect(raised?.kind === "approval-request" ? raised.description : "").toContain(
+          "/private/outside",
+        );
+        expect(f.calls.some(({ method }) => method === "approval/respond")).toBe(false);
+        await Effect.runPromise(
+          acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved }),
+        );
+        // Kept per request even though the person keeps approvals for the session.
+        expect(f.calls.at(-1)?.input).toMatchObject({
+          result: { decision: approved ? "accept" : "decline" },
+        });
+        await acquired.close();
+      }
+    },
+  );
 
   it("removes a pending approval before writing its response", async () => {
     let release!: () => void;
