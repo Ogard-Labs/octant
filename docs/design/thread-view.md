@@ -53,7 +53,9 @@ variants for a cleanup or a restore still under way). The card carries
 **Restore worktree**, which asks the host's existing restore route and then
 reads the thread again; the card goes with the host's answer, even when that
 read fails and waits for the next refresh, and a worktree another window already
-restored counts as back. A refusal, such as a branch that moved, shows as a
+restored counts as back. That answer belongs to the thread and to the cleanup it
+answered: moving to another thread while a restore runs never hides that
+thread's card, and a later cleanup of the same thread shows its card again. A refusal, such as a branch that moved, shows as a
 second quiet line (naming what to do where waiting would not help) and the card
 stays. Sending is held while the card shows: the
 send button is disabled, Enter sends nothing, and the draft stays. The files and

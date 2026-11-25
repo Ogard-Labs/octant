@@ -2556,32 +2556,7 @@ deletes from its disk). The receipt's
 other cleanup callers. Cleanup on archive is on unless a person turns it off in
 Settings › Code › Worktrees.
 
-_Naming and restorable cleanup (maintainer decision, 2026-11-25)._ A new managed
-worktree's delivery branch is a configurable prefix (`octant/` unless changed)
-and either a short id, the default, or a slug of the person's own prompt. The
-slug is derived on this computer by `deriveDeliveryBranch` in the domain: words
-only, at most 40 characters, with credential-shaped text, file paths, protected
-names (`.env`, `.ssh`, `id_rsa` and the like) and long key-shaped words left
-out, numbered (`-2`, `-3`) when a branch of that name, or one above or below it,
-exists (compared without case), never the base branch, and always a valid Git
-ref (a prefix that is not one is ignored). The composer shows that name in
-Worktree options before Send, from the branches the host listed, and sends
-exactly it. A model is asked for words only when the person presses **Suggest
-name**: `suggest-code-worktree-branch` carries the draft text and the model the
-composer has selected, and nothing else about the Project or checkout. The host
-redacts and bounds the text (2,000 characters), checks the Project's provider
-rules, sign-in and spend ceilings for that Project (the request is not a turn
-and is reserved against token ceilings as 4,000 tokens, or refused where a
-monetary ceiling cannot price it), runs one short request, and reduces the reply
-with the same word rules. A refused, failed or outdated answer (the draft, the
-Project or the model changed, or the person typed a name) changes nothing, and
-the local name stays. A suggestion is not yet recorded on a thread's usage
-ledger, since the thread does not exist. A device the host's own person paired
-may ask for one; a hub-introduced or agent-gated caller may not. The delivery
-branch of a worker a coordinator starts takes the same prefix; follow-up,
-checkpoint and other host-made threads keep `octant/<short id>`.
-
-A managed worktree folder can also be removed so that it can be brought back
+_Restorable cleanup (maintainer decision, 2026-11-25)._ A managed worktree folder can also be removed so that it can be brought back
 (`ManagedWorktreeReclaimService`). It runs for a person's choices in
 `worktrees.cleanup`: **inactivity** (a number of days without a turn or change,
 off by default; open and archived threads alike) and **merged** (a day after the
@@ -2616,7 +2591,16 @@ on archive makes the same check, except that it does not count a shell
 somewhere in the Project: the host cannot say which folder a shell is in (it can
 move between the Project's folders), and archive has never waited for one. A
 language server the host started for the folder is not stopped by cleanup,
-because the host has no per-folder stop; it ends with its own idle sweep. It
+because the host has no per-folder stop; it ends with its own idle sweep, and
+the host's own dev-server listings only observe a server, so neither is counted
+as work or made to register before it resolves a folder: neither writes a
+person's files. A shell or a debug session does, so each counts as work from the
+first line of its start, before it resolves any folder: a start that resolved
+the folder just before the receipt left `ready` and spawns after the second idle
+check is therefore seen by that check, and one that resolves after finds the
+receipt not `ready` and is refused. Removal on archive asks the idle check again
+once it has the receipt's lock, since a restore or another cleanup may have held
+it while work began. It
 uses `git worktree remove` without force and never deletes a branch or
 releases checkpoint refs, so the thread's history and checkpoints survive. Git
 is not stopped once it has started deleting: the host's stop does not reach the
@@ -2624,29 +2608,47 @@ removal. A removal Git rejects while the folder is still whole returns the
 receipt to `ready`. A cut-short removal is settled by what it left,
 and never leaves the thread without a way back. A folder with tracked files
 missing and nothing else changed is finished with force on the next pass (the
-recorded branch and commit hold every file). That forced removal, the only one
+recorded branch and commit hold every file), but only after a removal of this
+host's was started: the receipt's record notes that just before Git is asked
+(`reclaim.removalStarted`, in the receipt, not the journal), because before it a
+missing file is one the person deleted while the cleanup sat pending, and that
+folder is handed back as it is with their deletion left alone. That forced removal, the only one
 the service makes, is proven fresh each time: the folder is still registered on
 the recorded branch and commit, no hidden flag, sparse checkout, submodule or
-operation is present, only tracked files are missing, and the thread is idle;
-any failing proof hands the folder back instead. A folder with other changes
+operation is present, the thread is idle, and, read last, right before the
+removal, only tracked files are missing; any failing proof hands the folder back
+instead. A folder with other changes
 beside the missing files, or with a hidden flag, is handed back whole: the
 missing tracked files are put back from the folder's own index with
 `checkout-index`, which replaces no existing file, the cleanup is dropped and the
-receipt is `ready`; nothing is deleted. A person's Restore of a cleanup still
+receipt is `ready`; nothing is deleted. Handing back never leaves the receipt
+`cleanup-pending`: when nothing is missing it goes straight to `ready`, and when
+putting files back fails it still goes to `ready` (the thread has its folder)
+and the person is told what to do (`git checkout -- .` in the folder). A person's Restore of a cleanup still
 pending does the same and never forces a removal. A removal that stopped after
-Git deleted the folder's `.git` file leaves the receipt's own registration
-(its path, branch and commit, listed as prunable). If the folder is gone, that
+Git deleted the folder's `.git` file, or while it was deleting the registration's own
+admin directory, leaves the receipt's own registration: its path with the
+recorded branch and commit, or with no branch, a detached HEAD or an all-zero
+head, listed as prunable. An entry at the receipt's own path is matched on that
+path alone and its branch and head are taken from the receipt. If the folder is gone, that
 one registration is dropped with `git worktree remove` on its path, which deletes
 that admin entry and nothing else (never the repository-wide `git worktree
 prune`, which would also drop other worktrees' entries), and the cleanup
-finishes. If the folder remains, its `.git` file is written back, naming the
-registration's own admin directory and replacing nothing, so Git lists it as the
+finishes. If the folder remains and the entry is the recorded branch and commit, its `.git`
+file is written back, naming the registration's own admin directory (found the
+way worktree discovery finds it, so relative paths and Windows separators and
+case match) and replacing nothing, so Git lists it as the
 worktree it was and any file the commit does not hold is an ordinary change;
 the rules above then decide between finishing and handing back. A folder Octant
-cannot relink asks the person to move it away. A Git removal is bounded (15
-minutes, then it is stopped and the cleanup left pending), so the receipt's lock
-cannot be held for ever, and a person's Restore that finds a cleanup still
-running for more than 10 seconds answers that it is running. The receipt records the branch and commit (`reclaim`) when the
+cannot relink asks the person to move it away. Every Git call made under a receipt's lock is bounded and the lock is
+released only after the child has exited: SIGTERM, a two-second grace, then
+SIGKILL to the child's process group, then a wait for it to close. Reads stop at two
+minutes and a removal, forced removal, leftover drop, `git worktree add`, the
+mismatch removal, an archive removal and a Benchmarks discard at fifteen, and a
+stopped call is interrupted, not failed, so the next pass settles it. A person's
+Restore waits at most 10 seconds in all, however many are queued, and says
+whether a cleanup or another restore holds the receipt; the ones that gave up
+do not run later. The receipt records the branch and commit (`reclaim`) when the
 cleanup starts and ends `reclaimed`; `cleanup-pending` with a record is an
 interrupted restorable cleanup, which the sweep resumes while its choice still
 stands, or returns to a working checkout when it does not and the folder is
@@ -2666,17 +2668,25 @@ after that finds it not `ready` and is refused. The checkout root resolves only 
 reader of a managed receipt's folder (turns, tools, terminals, child runs,
 mentions, Files) checks that state, so a thread takes no turn while its cleanup
 is under way, once it is cleaned up, and while a restore is under way. The
-thread says so: `CodeThreadView.worktreeCleanup` (optional, so an earlier client
-that drops fields it does not know sees the unavailable checkout it always saw)
-makes the thread view show "This thread's worktree was cleaned up…" with
+thread says so: `CodeThreadView.worktreeCleanup` (sent only to a client that
+reads the thread with `?reads=worktree-cleanup`, because an earlier client's
+strict view decoder refuses a key it does not know; it sees the unavailable
+checkout it always saw) makes the thread view show "This thread's worktree was cleaned up…" with
 **Restore worktree** and hold sending, and the host's refusal of a turn, a
 queued message or a wake-up that fires names the same sentence. **Restore
 worktree** (the thread's notice and Settings › Code › Worktrees › Cleaned-up
 worktrees) recreates the folder with `git worktree add` on the recorded branch
 and makes the receipt `ready` only after the new folder reports that branch and
-commit; a branch that moved or was deleted, a branch another worktree holds, or
-a folder that is already there refuses it, and a folder that does not match is
-taken away again. A refusal that needs the person says what to do (move or
+commit and its own index exists, no `index.lock` is left and status is clean;
+a branch that moved or was deleted, a branch another worktree holds, or a folder
+that is already there refuses it, and a folder that does not match is taken away
+again. A restore killed during `git worktree add` leaves its entry locked
+`initializing` with a partial folder, an `index.lock` and no index: it is
+recognised as this service's own on its path and recorded branch, discarded
+(`git worktree remove --force --force`) only when every file in the folder is
+the recorded commit's file, byte for byte, and added again once. A folder with
+anything else is kept, nothing is deleted, and the person is told to move it
+away; a checkout filter that changes file bytes also keeps the folder. A refusal that needs the person says what to do (move or
 unlock the folder, look at the repository's worktrees); "try again in a moment"
 is said only where waiting can help. A restore a restart interrupted resumes the same way. The
 setup recipe is not run again by a restore; it stays under its existing explicit
