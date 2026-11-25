@@ -2669,10 +2669,14 @@ group is confirmed absent, however the direct child and its pipes ended (a
 helper that ignores SIGTERM and closed its pipes is still found and killed). A
 group still there ten seconds after SIGKILL (a process stuck in the kernel)
 settles the call so it cannot hang, but is kept in a registry that is looked
-at and killed again every quarter second, and the receipt lock neither starts
-nor releases an operation while the registry holds one: a restore that has to
-wait is told a cleanup still holds the receipt, and nothing writes in the
-folder while that helper might. Windows has no process groups: the tree is
+at and killed again every quarter second, under the receipt whose operation
+started that Git. That receipt's lock neither starts nor releases an operation
+while the registry holds one of its groups: a restore that has to wait is told
+a cleanup still holds the receipt, and nothing writes in the folder while that
+helper might. Other receipts are not held up by it. A group counts as gone when
+it has no running process: one that has exited and that its parent never reaps
+(a container without an init) writes nothing and cannot be killed. A process
+list that cannot be read counts the group as still there. Windows has no process groups: the tree is
 ended with `taskkill /T /F` at the stop, while the root still names it, and
 only the root is confirmed gone. Reads stop at two
 minutes and a removal, forced removal, leftover drop, `git worktree add`, the
@@ -2689,12 +2693,14 @@ changes one step at a time: cleanup, resume, abandon and restore, and the
 archive cleanup of the same receipt, take turns on one in-memory lock per
 receipt in the service, so a restore of a row still cleaning up waits for the
 removal and then restores what it left. A restore never demotes `restoring` to
-`reclaimed` while a matching folder is there. Erasing a thread (one
-receipt at a time, holding no other) and a Benchmarks discard take the same
-lock, so a restore in flight cannot recreate a folder and branch for a thread
-being erased; the erase takes the thread's receipts first, before it stops,
-releases or deletes anything, waits for one at most 30 seconds, and a wait that
-gives up leaves the thread whole to be purged again. A turn cannot start between the `ready` read and the receipt
+`reclaimed` while a matching folder is there. Erasing a thread and a
+Benchmarks discard take the same lock, so a restore in flight cannot recreate a
+folder and branch for a thread being erased. The erase takes the locks of all
+the thread's receipts before it stops, releases or deletes anything, and holds
+them until it is done. It takes them in receipt order, every other operation
+holds one receipt and waits for no second, and it waits at most 30 seconds for
+each, so no two can wait for each other; a wait that gives up leaves the thread
+whole to be purged again. A turn cannot start between the `ready` read and the receipt
 leaving `ready`: a turn holds its thread as starting before it reads any
 receipt, and the second idle check, made after the receipt has left `ready`,
 sees that hold or the live turn it became, while a turn that reads the receipt

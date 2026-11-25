@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runBoundedGit, waitForSurvivingGit } from "./boundedGit";
+import { forReceipt, runBoundedGit, waitForSurvivingGit } from "./boundedGit";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -122,27 +122,84 @@ describe("runBoundedGit", () => {
 
   it("settles when a group cannot be confirmed gone, and keeps reporting it until it is", async () => {
     let present = true;
-    const result = await runBoundedGit({
-      executable: "sh",
-      args: ["-c", "sleep 60"],
-      env,
-      signal: new AbortController().signal,
-      timeoutMs: 100,
-      graceMs: 50,
-      confirmMs: 100,
-      probeGroup: () => present,
-    });
+    const result = await forReceipt("outer", () =>
+      forReceipt("inner", () =>
+        runBoundedGit({
+          executable: "sh",
+          args: ["-c", "sleep 60"],
+          env,
+          signal: new AbortController().signal,
+          timeoutMs: 100,
+          graceMs: 50,
+          confirmMs: 100,
+          probeGroup: () => present,
+        }),
+      ),
+    );
     expect(result.timedOut).toBe(true);
-    let drained = false;
-    const waiting = waitForSurvivingGit().then(() => {
-      drained = true;
-    });
+    const drained: string[] = [];
+    const waiting = ["outer", "inner"].map((receiptId) =>
+      waitForSurvivingGit(receiptId).then(() => drained.push(receiptId)),
+    );
+    await waitForSurvivingGit("unrelated");
     await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(drained).toBe(false);
+    expect(drained).toEqual([]);
     present = false;
-    await waiting;
-    expect(drained).toBe(true);
+    await Promise.all(waiting);
+    expect(drained).toHaveLength(2);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "counts a group of only exited, unreaped processes as gone",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "octant-bounded-git-"));
+      directories.push(directory);
+      // A member of the group exits, and its parent, in a group of its own,
+      // never reaps it: what a container without an init leaves behind.
+      const script = `
+        my $group = $$;
+        if (fork == 0) {
+          setpgrp(0, 0);
+          close STDOUT; close STDERR;
+          if (fork == 0) { setpgrp(0, $group); open(my $f, ">", "${directory}/ready"); close $f; sleep 60; exit; }
+          open(my $f, ">", "${directory}/keeper"); print $f $$; close $f;
+          sleep 60;
+          exit;
+        }
+        sleep 60;
+      `;
+      const stop = new AbortController();
+      const running = forReceipt("zombies", () =>
+        runBoundedGit({
+          executable: "perl",
+          args: ["-e", script],
+          env,
+          signal: stop.signal,
+          timeoutMs: 60_000,
+          graceMs: 100,
+          confirmMs: 4_000,
+        }),
+      );
+      const written = (name: string) =>
+        readFile(join(directory, name), "utf8").then(
+          (text) => (name === "ready" ? true : text.length > 0),
+          () => false,
+        );
+      await expect.poll(() => written("ready")).toBe(true);
+      await expect.poll(() => written("keeper")).toBe(true);
+      const keeper = Number(await readFile(join(directory, "keeper"), "utf8"));
+      try {
+        const began = Date.now();
+        stop.abort(new Error("stopped"));
+        await expect(running).rejects.toThrow("stopped");
+        expect(Date.now() - began).toBeLessThan(3_000);
+        expect(alive(keeper)).toBe(true);
+        await waitForSurvivingGit("zombies");
+      } finally {
+        process.kill(keeper, "SIGKILL");
+      }
+    },
+  );
 
   it("refuses to start under a signal that has already stopped", async () => {
     await expect(

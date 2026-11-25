@@ -24,6 +24,7 @@ import type {
   ManagedWorktreeReceiptState,
   ManagedWorktreeSourceProvenance,
 } from "./managedWorktreeReceiptStore";
+import { forReceipt } from "./boundedGit";
 import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
 import type { RepositoryIdentityObservation } from "./repositoryIdentity";
 
@@ -533,14 +534,16 @@ export class ManagedWorktreeService {
     }
 
     try {
-      const added = await this.#git.addWorktree(
-        {
-          repositoryRoot: fresh.state.repositoryRoot,
-          targetPath: fresh.state.targetPath,
-          branchIntent: input.branchIntent,
-          startPoint: input.startPoint,
-        },
-        signal,
+      const added = await forReceipt(receipt.receiptId, () =>
+        this.#git.addWorktree(
+          {
+            repositoryRoot: fresh.state.repositoryRoot,
+            targetPath: fresh.state.targetPath,
+            branchIntent: input.branchIntent,
+            startPoint: input.startPoint,
+          },
+          signal,
+        ),
       );
       if (added.status !== "created") return { status: "waiting", receipt };
     } catch {
@@ -684,9 +687,12 @@ export class ManagedWorktreeService {
     if (present) {
       let removed: Awaited<ReturnType<ManagedWorktreeGitPort["removeWorktree"]>>;
       try {
-        removed = await this.#git.removeWorktree(
-          { repositoryRoot: observation.repositoryRoot, targetPath: receipt.canonicalWorktreePath },
-          signal,
+        const targetPath = receipt.canonicalWorktreePath;
+        removed = await forReceipt(receiptId, () =>
+          this.#git.removeWorktree(
+            { repositoryRoot: observation.repositoryRoot, targetPath },
+            signal,
+          ),
         );
       } catch {
         return { status: "interrupted" };

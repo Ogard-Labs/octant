@@ -1049,28 +1049,37 @@ describe("a cleanup or restore killed at any instant", () => {
 });
 
 describe("the receipt lock and a Git helper that outlived its kill", () => {
-  it("does not start or release an operation while such a group is still there", async () => {
+  it("holds up only the receipt whose operation left it", async () => {
     let present = true;
-    await runBoundedGit({
-      executable: "sh",
-      args: ["-c", "sleep 60"],
-      env: { PATH: process.env.PATH ?? "" },
-      signal: new AbortController().signal,
-      timeoutMs: 50,
-      graceMs: 20,
-      confirmMs: 50,
-      probeGroup: () => present,
-    });
     const w = await world({ restoreWaitMs: 100 });
+    const left = () =>
+      runBoundedGit({
+        executable: "sh",
+        args: ["-c", "sleep 60"],
+        env: { PATH: process.env.PATH ?? "" },
+        signal: new AbortController().signal,
+        timeoutMs: 50,
+        graceMs: 20,
+        confirmMs: 50,
+        probeGroup: () => present,
+      });
+    let released = false;
+    const leaving = w.service.exclusive(w.receiptId, left).then(() => {
+      released = true;
+    });
     let ran = false;
     const held = w.service.exclusive(w.receiptId, async () => {
       ran = true;
     });
     await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(released).toBe(false);
     expect(ran).toBe(false);
+    // Another receipt's operation, in any repository, goes on meanwhile.
+    await expect(w.service.exclusive("another-receipt", async () => "done")).resolves.toBe("done");
     // A person's restore that has to wait says a cleanup still holds the receipt.
     await expect(w.restore()).resolves.toEqual({ status: "refused", reason: "cleanup-running" });
     present = false;
+    await leaving;
     await held;
     expect(ran).toBe(true);
   });

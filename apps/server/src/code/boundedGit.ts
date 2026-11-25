@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { readFile, readdir } from "node:fs/promises";
 
 /** The longest an ordinary Git read or ref change may run before it is stopped. */
 export const GIT_READ_TIME_LIMIT_MS = 2 * 60 * 1_000;
@@ -16,7 +18,7 @@ export const GIT_KILL_GRACE_MS = 2_000;
 const PIPE_CLOSE_MS = 1_000;
 
 /** How often a stopped process group is looked at to see whether it is gone. */
-const GROUP_POLL_MS = 20;
+const GROUP_POLL_MS = 50;
 
 /** How long after SIGKILL a process group may stay before it is reported as surviving. */
 export const GIT_GROUP_CONFIRM_MS = 10_000;
@@ -24,20 +26,46 @@ export const GIT_GROUP_CONFIRM_MS = 10_000;
 /** How often a surviving group is looked at, and sent SIGKILL again. */
 const SURVIVOR_POLL_MS = 250;
 
-/**
- * Groups that outlived the kill and the confirmation time: a process stuck in
- * the kernel cannot be killed until it returns. Each entry settles when its
- * group is finally gone.
- */
-const survivors = new Set<Promise<void>>();
+/** The receipts the running code works for, so a Git it starts is known to be theirs. */
+const workingFor = new AsyncLocalStorage<ReadonlyArray<string>>();
 
 /**
- * Settles when every process group a stopped Git left behind is gone. A lock
- * that guards a folder Git was writing in waits on it before it lets go, so a
- * helper that outlived its Git is never writing while the next operation runs.
+ * Groups that outlived the kill and the confirmation time, by the receipts
+ * whose folder they may still write in: a process stuck in the kernel cannot
+ * be killed until it returns. Each entry settles when its group is finally gone.
  */
-export async function waitForSurvivingGit(): Promise<void> {
-  while (survivors.size > 0) await Promise.all(survivors);
+const survivors = new Map<string, Set<Promise<void>>>();
+
+/** Runs `run` so that every Git it starts counts as working in this receipt's folder. */
+export function forReceipt<T>(receiptId: string, run: () => T): T {
+  return workingFor.run([...(workingFor.getStore() ?? []), receiptId], run);
+}
+
+/**
+ * Settles when every process group a stopped Git left behind for this receipt
+ * is gone. The receipt's lock waits on it before it lets go, so a helper that
+ * outlived its Git is never writing while the next operation runs. A helper
+ * left by another receipt's Git is not waited on: one that never leaves would
+ * otherwise hold up every worktree on the host.
+ */
+export async function waitForSurvivingGit(receiptId: string): Promise<void> {
+  for (;;) {
+    const left = survivors.get(receiptId);
+    if (left === undefined) return;
+    await Promise.all(left);
+  }
+}
+
+function registerSurvivor(receiptIds: ReadonlyArray<string>, gone: Promise<void>): void {
+  for (const receiptId of receiptIds) {
+    const left = survivors.get(receiptId) ?? new Set();
+    survivors.set(receiptId, left);
+    left.add(gone);
+    void gone.then(() => {
+      left.delete(gone);
+      if (left.size === 0) survivors.delete(receiptId);
+    });
+  }
 }
 
 export interface BoundedGitResult {
@@ -57,8 +85,8 @@ export interface BoundedGitOptions {
   readonly graceMs?: number;
   /** How long after SIGKILL the group may stay before it is reported as surviving. */
   readonly confirmMs?: number;
-  /** Whether any process of the group led by this pid is still there; tests replace it. */
-  readonly probeGroup?: (pid: number) => boolean;
+  /** Whether any process of the group led by this pid still runs; tests replace it. */
+  readonly probeGroup?: (pid: number) => boolean | Promise<boolean>;
   readonly maxBuffer?: number;
 }
 
@@ -77,6 +105,60 @@ function groupExists(pid: number): boolean {
   }
 }
 
+/** The state and process group of one process, as `/proc/<pid>/stat` states them. */
+function memberFromStat(stat: string): GroupMember | undefined {
+  // The command name is in parentheses and may hold any character.
+  const [state, , group] = stat
+    .slice(stat.lastIndexOf(")") + 1)
+    .trim()
+    .split(/\s+/);
+  return state === undefined || group === undefined ? undefined : { state, group: Number(group) };
+}
+
+interface GroupMember {
+  readonly state: string;
+  readonly group: number;
+}
+
+async function readProcesses(): Promise<ReadonlyArray<GroupMember>> {
+  if (process.platform === "linux") {
+    const ids = (await readdir("/proc")).filter((name) => /^\d+$/.test(name));
+    const stats = await Promise.all(
+      // A process that left since the listing has no file to read.
+      ids.map((id) => readFile(`/proc/${id}/stat`, "utf8").catch(() => "")),
+    );
+    return stats.flatMap((stat) => memberFromStat(stat) ?? []);
+  }
+  const listed = await new Promise<string>((resolve, reject) => {
+    execFile("/bin/ps", ["-axo", "pgid=,stat="], { timeout: 5_000 }, (error, stdout) =>
+      error === null ? resolve(stdout) : reject(error),
+    );
+  });
+  return listed.split("\n").flatMap((line) => {
+    const [group, state] = line.trim().split(/\s+/);
+    return group === undefined || state === undefined ? [] : { state, group: Number(group) };
+  });
+}
+
+/**
+ * Whether any process of the group still runs. A signal also reaches one that
+ * has exited and that its parent has not reaped yet; such a process writes
+ * nothing more and cannot be killed, so a group of only those is gone. A
+ * process list that cannot be read answers that one is still there.
+ */
+async function groupRuns(pid: number): Promise<boolean> {
+  if (!groupExists(pid)) return false;
+  if (process.platform === "win32") return true;
+  try {
+    const members = (await readProcesses()).filter((member) => member.group === pid);
+    // A group the list does not name at all left between the two looks, or is
+    // hidden from this process: the next look decides.
+    return members.length === 0 || members.some((member) => !/^[ZX]/i.test(member.state));
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Runs Git and returns only after the child has exited. Stopping it (the
  * caller's signal or the time limit) sends SIGTERM to its process group, waits
@@ -92,12 +174,13 @@ function groupExists(pid: number): boolean {
  */
 export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitResult> {
   const { signal } = options;
+  const receiptIds = workingFor.getStore() ?? [];
   if (signal.aborted) return Promise.reject(signal.reason ?? new Error("git was stopped"));
   return new Promise<BoundedGitResult>((resolve, reject) => {
     const maxBuffer = options.maxBuffer ?? 16 * 1024 * 1024;
     const grace = options.graceMs ?? GIT_KILL_GRACE_MS;
     const confirm = options.confirmMs ?? GIT_GROUP_CONFIRM_MS;
-    const probe = options.probeGroup ?? groupExists;
+    const probe = options.probeGroup ?? groupRuns;
     const child = spawn(options.executable, [...options.args], {
       env: options.env,
       shell: false,
@@ -137,9 +220,10 @@ export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitRes
       });
     };
     const watchGroup = (pid: number, killedAt: number) => {
-      const look = () => {
+      const look = async (): Promise<void> => {
+        const present = await probe(pid);
         if (settled) return;
-        if (!probe(pid)) {
+        if (!present) {
           groupGone = true;
           settleIfDone();
           return;
@@ -147,18 +231,15 @@ export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitRes
         if (Date.now() >= killedAt + confirm) {
           // Still there after SIGKILL: keep looking after this call has gone,
           // and let the lock that guards the folder wait for it.
-          const surviving: Promise<void> = outlive(pid, probe, child).then(() => {
-            survivors.delete(surviving);
-          });
-          survivors.add(surviving);
+          registerSurvivor(receiptIds, outlive(pid, probe, child));
           groupGone = true;
           closed = true;
           settleIfDone();
           return;
         }
-        timers.push(setTimeout(look, GROUP_POLL_MS));
+        timers.push(setTimeout(() => void look(), GROUP_POLL_MS));
       };
-      look();
+      void look();
     };
     const stop = (why: "aborted" | "timeout" | "buffer") => {
       if (stopped !== undefined || settled) return;
@@ -211,18 +292,16 @@ export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitRes
 }
 
 /** Looks at a group that survived SIGKILL until it is gone, killing it again each time. */
-function outlive(pid: number, probe: (pid: number) => boolean, child: ChildProcess): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const look = () => {
-      if (!probe(pid)) {
-        resolve();
-        return;
-      }
-      signalTree(child, "SIGKILL");
-      setTimeout(look, SURVIVOR_POLL_MS);
-    };
-    setTimeout(look, SURVIVOR_POLL_MS);
-  });
+async function outlive(
+  pid: number,
+  probe: (pid: number) => boolean | Promise<boolean>,
+  child: ChildProcess,
+): Promise<void> {
+  for (;;) {
+    await new Promise<void>((resolve) => setTimeout(resolve, SURVIVOR_POLL_MS));
+    if (!(await probe(pid))) return;
+    signalTree(child, "SIGKILL");
+  }
 }
 
 function signalTree(child: ChildProcess, name: "SIGTERM" | "SIGKILL"): void {

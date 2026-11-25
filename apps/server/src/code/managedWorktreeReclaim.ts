@@ -1,4 +1,4 @@
-import { waitForSurvivingGit } from "./boundedGit";
+import { forReceipt, waitForSurvivingGit } from "./boundedGit";
 import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
 import type { ManagedWorktreeReceipt, ManagedWorktreeReclaim } from "./managedWorktreeReceiptStore";
 import {
@@ -140,13 +140,13 @@ export class ManagedWorktreeReclaimService {
       try {
         // A Git that was stopped may have left a helper that outlived its kill
         // (see `runBoundedGit`). It could still be writing in a folder, so the
-        // receipt is not handed on, nor started on, until every such group is
-        // gone; a person's restore that waits on it is told a cleanup holds it.
-        await waitForSurvivingGit();
+        // receipt is not handed on, nor started on, until every such group of
+        // its own is gone; a person's restore that waits on it is told a cleanup holds it.
+        await waitForSurvivingGit(receiptId);
         started?.();
-        return await run();
+        return await forReceipt(receiptId, run);
       } finally {
-        await waitForSurvivingGit();
+        await waitForSurvivingGit(receiptId);
         this.#holders.delete(receiptId);
       }
     });

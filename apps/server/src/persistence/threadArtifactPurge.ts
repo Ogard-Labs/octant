@@ -50,9 +50,11 @@ export interface ThreadArtifactPurgeInput {
 export async function purgeThreadArtifacts(input: ThreadArtifactPurgeInput): Promise<void> {
   const receipts = await readWorktreeReceipts(input);
   const idle = input.whileReceiptIdle ?? ((_receiptId, run) => run());
-  const ours = receipts.filter(
-    (receipt) => receipt.threadId === input.threadId && receipt.deletable,
-  );
+  // Always in the same order, so two purges of one thread cannot each hold a
+  // receipt the other waits for.
+  const ours = receipts
+    .filter((receipt) => receipt.threadId === input.threadId && receipt.deletable)
+    .sort((left, right) => (left.receiptId < right.receiptId ? -1 : 1));
   const hold = (index: number): Promise<void> => {
     const receipt = ours[index];
     return receipt === undefined
