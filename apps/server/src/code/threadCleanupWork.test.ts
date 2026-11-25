@@ -38,6 +38,17 @@ describe("whether a thread still has work in its folder", () => {
     }
   });
 
+  it("leaves out a shell somewhere in the Project when asked, and nothing else", () => {
+    const shell = { ...quiet, projectTerminalRunning: () => true };
+    expect(threadHasWork(shell, threadId)).toBe(true);
+    expect(threadHasWork(shell, threadId, { ignoreProjectTerminals: true })).toBe(false);
+    expect(
+      threadHasWork({ ...shell, queuedMessage: () => true }, threadId, {
+        ignoreProjectTerminals: true,
+      }),
+    ).toBe(true);
+  });
+
   it("counts a read that cannot answer as work", () => {
     expect(threadHasWork({ ...quiet, pendingWakeups: () => undefined }, threadId)).toBe(true);
     expect(threadHasWork({ ...quiet, projectOf: () => undefined }, threadId)).toBe(true);

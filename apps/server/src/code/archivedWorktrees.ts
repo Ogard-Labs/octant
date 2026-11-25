@@ -29,6 +29,14 @@ export interface ArchivedWorktreesDependencies {
    */
   readonly turnInProgress: (threadId: CodeThreadId) => boolean;
   /**
+   * Whether anything else the host tracks (a child run, a debug session, a
+   * waiting message or wake-up) may still be working in the thread's folder;
+   * the same check the reclaim path makes. Only removal on archive asks, and
+   * a shell somewhere in the Project does not count, as before. Absent counts
+   * nothing.
+   */
+  readonly workGoing?: (threadId: CodeThreadId) => boolean;
+  /**
    * Whether archiving a thread removes its clean, delivered worktree. Absent is
    * on: a person turns it off in Settings › Code › Worktrees.
    */
@@ -114,7 +122,8 @@ export function createArchivedWorktrees(dependencies: ArchivedWorktreesDependenc
       if (thread?.lifecycle !== "archived") return;
       if (dependencies.cleanupOnArchive?.() === false) return;
       // A turn still running keeps its worktree; it stays listed in Settings.
-      if (dependencies.turnInProgress(threadId)) return;
+      if (dependencies.turnInProgress(threadId) || dependencies.workGoing?.(threadId) === true)
+        return;
       const receipt = await ownedReceipt(thread);
       if (receipt?.state !== "ready") return;
       await dependencies

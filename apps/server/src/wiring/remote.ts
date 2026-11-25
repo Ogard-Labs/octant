@@ -321,6 +321,7 @@ export type RemoteDependencies = {
     | "generatedImageStore"
     | "videoJobService"
     | "imageJobService"
+    | "managedWorktreeReclaim"
     | "providerDataDirectory"
     | "providerService"
   > &
@@ -2927,6 +2928,7 @@ export function wireRemote(deps: RemoteDependencies) {
         mode,
         threadId: String(threadId),
         managedWorktreeRootPath: managedWorktreeRoot,
+        whileReceiptIdle: (receiptId, run) => deps.managedWorktreeReclaim.exclusive(receiptId, run),
         purgeChatAttachments: (id) => chatAttachmentStore.purgeThread(decodeChatThreadId(id)),
         purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
         purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),

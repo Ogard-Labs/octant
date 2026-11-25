@@ -41,6 +41,7 @@ function setup(options: {
   readonly receiptState?: "ready" | "cleanup-pending" | "removed";
   readonly cleanup?: CleanupResult;
   readonly turnRunning?: boolean;
+  readonly workGoing?: boolean;
   readonly cleanupOnArchive?: () => boolean;
 }) {
   const thread = {
@@ -61,6 +62,7 @@ function setup(options: {
     loadReceipt: async () => receipt(options.receiptState ?? "ready"),
     cleanup,
     turnInProgress: () => options.turnRunning === true,
+    workGoing: () => options.workGoing === true,
     ...(options.cleanupOnArchive === undefined
       ? {}
       : { cleanupOnArchive: options.cleanupOnArchive }),
@@ -144,6 +146,14 @@ describe("archived worktrees", () => {
       reason: "turn-running",
     });
     expect(running.cleanup).not.toHaveBeenCalled();
+  });
+
+  it("keeps the worktree of a thread archived while the host still tracks other work for it", async () => {
+    const going = setup({ workGoing: true });
+    await going.worktrees.reclaimOnArchive(threadId);
+    expect(going.cleanup).not.toHaveBeenCalled();
+    // It stays listed, so a person who knows nothing runs can still remove it.
+    await expect(going.worktrees.list()).resolves.toHaveLength(1);
   });
 
   it("measures a folder without following links and reports a missing one as absent", async () => {

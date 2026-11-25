@@ -1657,6 +1657,7 @@ export function startOctantServer(
       codeEvidence,
       benchmarkCheckCommands,
       managedWorktreeReceipts,
+      managedWorktreeReclaim,
       managedWorktreeService,
       roots,
       routeCodeService,
@@ -2218,6 +2219,7 @@ export function startOctantServer(
       evictGeneratedImageScope: (scopeId) => imageRoutes.evictScope(scopeId),
       liveTurns,
       managedWorktreeReceipts,
+      managedWorktreeReclaim,
       movedThreadHistory,
       threadMoveHolds,
       threadMoveState,
@@ -2297,7 +2299,7 @@ export function startOctantServer(
     todos.setDefaultListHost(defaultTodoListHost);
     // The idle check of a restorable worktree cleanup: every kind of work the
     // host tracks for a thread, the same turns and child runs a move waits for.
-    setThreadWorkCheck((threadId) =>
+    setThreadWorkCheck((threadId, options) =>
       threadHasWork(
         {
           projectOf: (id) => persistence.readCodeThread(id)?.projectId,
@@ -2313,6 +2315,7 @@ export function startOctantServer(
           pendingWakeups: (id) => threadWakeups.service?.list("code", String(id)).length,
         },
         threadId,
+        options,
       ),
     );
     benchmarkThreadPurge.purge = async (threadId, mode) => {
