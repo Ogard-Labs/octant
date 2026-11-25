@@ -215,6 +215,8 @@ describe("signing in to a server from the thread", () => {
     expect(
       await within(await card()).findByRole("button", { name: "Check sign-in" }),
     ).toBeEnabled();
+    // No attempt is known, so Cancel would sign out the account the server holds.
+    expect(within(await card()).queryByRole("button", { name: "Cancel sign-in" })).toBeNull();
   });
 
   it("counts a queued message until it starts running, and each selection once", async () => {

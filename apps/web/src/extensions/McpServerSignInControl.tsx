@@ -40,6 +40,9 @@ export interface McpServerSignInControlProps {
  */
 export function McpServerSignInControl(props: McpServerSignInControlProps) {
   const [view, setView] = useState<McpServerSignInView>();
+  // A first read that failed shows Check sign-in with no attempt known, and
+  // Cancel there would sign out the account the server already holds.
+  const [attemptUnknown, setAttemptUnknown] = useState(false);
   const [busy, setBusy] = useState(false);
   const [relayInput, setRelayInput] = useState("");
   const [relayError, setRelayError] = useState<string | undefined>();
@@ -61,6 +64,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
       try {
         const next = await client.mcpServerSignIn(request);
         if (generation !== requestGeneration.current) return undefined;
+        setAttemptUnknown(false);
         setView(next);
         if (next.kind !== "awaiting-consent") {
           setRelayInput("");
@@ -154,10 +158,12 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
           void ask({ kind: "begin", ...target });
           return;
         }
+        setAttemptUnknown(false);
         setView(next);
       })
       .catch(() => {
         if (cancelled || generation !== requestGeneration.current) return;
+        setAttemptUnknown(props.knownToNeedSignIn === true);
         setView(
           props.knownToNeedSignIn === true
             ? {
@@ -392,15 +398,17 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
             Check sign-in
           </OctantButton>
         ) : null}
-        <OctantButton
-          disabled={props.disabled || busy}
-          onClick={() => void ask({ kind: "sign-out", ...target })}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          Cancel sign-in
-        </OctantButton>
+        {view.kind === "status-unavailable" && attemptUnknown ? null : (
+          <OctantButton
+            disabled={props.disabled || busy}
+            onClick={() => void ask({ kind: "sign-out", ...target })}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Cancel sign-in
+          </OctantButton>
+        )}
       </div>
     );
   }
