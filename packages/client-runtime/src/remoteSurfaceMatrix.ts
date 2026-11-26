@@ -68,6 +68,7 @@ export type RemoteShellSurfaceKind =
   | "preview"
   | "provider-models"
   | "settings-read"
+  | "agent-revoke"
   | "shell-settings"
   | "design-systems"
   | "usage-ledger"
@@ -143,6 +144,13 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     description: "Read non-secret settings and tool configuration.",
     availability: "remote",
     catalogAction: "settings.read-non-secret",
+  },
+  {
+    id: "agent-revoke",
+    label: "Agent grants",
+    description: "See outside agents' grants and revoke one, which only takes authority away.",
+    availability: "remote",
+    catalogAction: "agent-access.revoke",
   },
   {
     id: "shell-settings",
@@ -233,8 +241,7 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
   {
     id: "agent-access",
     label: "Agent access",
-    description:
-      "Make, change and revoke outside agents' grants, issue connection codes and confirm keys.",
+    description: "Make and change outside agents' grants, issue connection codes and confirm keys.",
     availability: "local-host-only",
     catalogAction: "agent-access.manage",
   },

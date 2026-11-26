@@ -18,9 +18,10 @@ const windowId = decodeWindowId("61000000-0000-4000-8000-000000000001");
 const deviceId = "61000000-0000-4000-8000-000000000002";
 const grantId = "61000000-0000-4000-8000-000000000003";
 
-function principal(origin: string, admittedBy?: "host-person") {
+function principal(origin: string, admittedBy?: "host-person", accessLevel?: "read-only") {
   return createRemoteDevicePrincipal({
     ...(admittedBy === undefined ? {} : { admittedBy }),
+    ...(accessLevel === undefined ? {} : { accessLevel }),
     hostId: "61000000-0000-4000-8000-000000000004" as StableHostId,
     deviceId: deviceId as DeviceId,
     credentialGeneration: 1,
@@ -36,8 +37,11 @@ function request(
   init: {
     method?: string;
     body?: unknown;
-    /** `phone` is a device the hub's roster introduced; `paired` one the host's person paired. */
-    from?: "window" | "phone" | "paired" | "agent";
+    /**
+     * `phone` is a device the hub's roster introduced; `paired` one the host's
+     * person paired; `read-only` one they paired at Read only.
+     */
+    from?: "window" | "phone" | "paired" | "read-only" | "agent";
   } = {},
 ): Request {
   const from = init.from ?? "window";
@@ -53,7 +57,8 @@ function request(
     bindPrincipalRouteContext(made, {
       principal: principal(
         from === "agent" ? AGENT_ACCESS_ORIGIN : "https://phone.example",
-        from === "paired" ? "host-person" : undefined,
+        from === "paired" || from === "read-only" ? "host-person" : undefined,
+        from === "read-only" ? "read-only" : undefined,
       ),
       scopeId: decodeWindowId(deviceId),
     });
@@ -125,6 +130,33 @@ describe("agent grant routes", () => {
       },
     ]);
     expect(stopped).toEqual([grantId]);
+  });
+
+  it("lets a Read only device revoke a grant but not stop the turns that were running", async () => {
+    const { handler, executed, stopped } = routes();
+    const refused = await handler(
+      request(AGENT_GRANT_ROUTES.revoke, {
+        method: "POST",
+        from: "read-only",
+        body: { grantId, stopRunningTurns: true },
+      }),
+    );
+    expect(refused?.status).toBe(403);
+    expect(executed).toEqual([]);
+    expect(stopped).toEqual([]);
+
+    const revoked = await handler(
+      request(AGENT_GRANT_ROUTES.revoke, {
+        method: "POST",
+        from: "read-only",
+        body: { grantId, stopRunningTurns: false },
+      }),
+    );
+    expect(revoked?.status).toBe(200);
+    expect(executed.map((entry) => entry.command)).toEqual([
+      { kind: "revoke", grantId, stopRunningTurns: false },
+    ]);
+    expect(stopped).toEqual([]);
   });
 
   it("lets a device the person paired make a grant, journaled as that device", async () => {

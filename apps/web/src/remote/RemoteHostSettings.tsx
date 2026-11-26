@@ -54,7 +54,9 @@ const SECTIONS: ReadonlyArray<{
   { id: "extensions", label: "Extensions", surface: "extension-install" },
   { id: "providers", label: "Providers", surface: "provider-setup" },
   { id: "devices", label: "Paired devices", surface: "device-management" },
-  { id: "agents", label: "Agent access", surface: "agent-access" },
+  // Every session that may revoke sees the grants; making and changing them
+  // needs the agent-access surface as well.
+  { id: "agents", label: "Agent access", surface: "agent-revoke" },
   { id: "permissions", label: "Permissions" },
   { id: "diagnostics", label: "Diagnostics", surface: "diagnostics" },
 ];
@@ -73,6 +75,8 @@ export interface RemoteHostSettingsProps {
   readonly diagnosticsClient: DiagnosticsExportClient;
   /** The host's Projects, which a grant names. */
   readonly projectClient: Pick<ProjectClient, "bootstrap">;
+  /** This device was paired Read only, so it may revoke a grant but not stop running turns. */
+  readonly readOnly?: boolean;
   /** The host's address as this browser reached it. */
   readonly origin: string;
   /** Starts and polls a provider sign-in over the session. */
@@ -138,7 +142,15 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
         <RemotePairedDevices client={props.pairedDevices} origin={props.origin} />
       ) : null}
       {open === "agents" ? (
-        <RemoteAgentAccess client={props.agentGrants} projectClient={props.projectClient} />
+        props.reachable.has("agent-access") ? (
+          <RemoteAgentAccess client={props.agentGrants} projectClient={props.projectClient} />
+        ) : (
+          <RemoteAgentRevoke
+            client={props.agentGrants}
+            projectClient={props.projectClient}
+            readOnly={props.readOnly === true}
+          />
+        )
       ) : null}
       {open === "diagnostics" && props.reachable.has("diagnostics") ? (
         <Suspense fallback={null}>
@@ -254,23 +266,8 @@ function RemoteAgentAccess(props: {
   readonly client: AgentGrantClient;
   readonly projectClient: Pick<ProjectClient, "bootstrap">;
 }) {
-  const { client, projectClient } = props;
-  const [projectNames, setProjectNames] = useState<ReadonlyMap<string, string>>(new Map());
-  useEffect(() => {
-    let current = true;
-    void projectClient
-      .bootstrap()
-      .then((bootstrap) => {
-        if (current)
-          setProjectNames(
-            new Map(bootstrap.active.map((project) => [String(project.id), project.name])),
-          );
-      })
-      .catch(() => undefined);
-    return () => {
-      current = false;
-    };
-  }, [projectClient]);
+  const { client } = props;
+  const projectNames = useProjectNames(props.projectClient);
   const administration = useMemo(
     () => ({
       agentAccessRequest: async (
@@ -292,4 +289,46 @@ function RemoteAgentAccess(props: {
       projectNames={projectNames}
     />
   );
+}
+
+/**
+ * The grant list with Revoke and nothing else, for a session that may end a
+ * grant but not make or change one: revoking only takes authority away.
+ */
+function RemoteAgentRevoke(props: {
+  readonly client: AgentGrantClient;
+  readonly projectClient: Pick<ProjectClient, "bootstrap">;
+  readonly readOnly: boolean;
+}) {
+  const projectNames = useProjectNames(props.projectClient);
+  return (
+    <AgentAccessSettingsSection
+      canStopTurns={!props.readOnly}
+      client={props.client}
+      projectNames={projectNames}
+    />
+  );
+}
+
+/** The host's Project names by id, which a grant's scope names. */
+function useProjectNames(
+  projectClient: Pick<ProjectClient, "bootstrap">,
+): ReadonlyMap<string, string> {
+  const [projectNames, setProjectNames] = useState<ReadonlyMap<string, string>>(new Map());
+  useEffect(() => {
+    let current = true;
+    void projectClient
+      .bootstrap()
+      .then((bootstrap) => {
+        if (current)
+          setProjectNames(
+            new Map(bootstrap.active.map((project) => [String(project.id), project.name])),
+          );
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [projectClient]);
+  return projectNames;
 }

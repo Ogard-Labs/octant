@@ -334,6 +334,8 @@ describe("remote access policy", () => {
     expect(decide("read-only", "project.overview.read")).toBe("allow");
     expect(decide("read-only", "settings.read-non-secret")).toBe("allow");
     expect(decide("read-only", "terminal.read")).toBe("allow");
+    // Ending an outside agent's grant only takes authority away.
+    expect(decide("read-only", "agent-access.revoke")).toBe("allow");
     for (const action of [
       "chat.send-turn",
       "extension.tool-call.answer-once",

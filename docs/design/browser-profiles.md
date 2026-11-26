@@ -263,10 +263,10 @@ into one stored profile, so they do not sign in again.
   nothing is opened to produce the list. The person chooses a browser and one of
   its profiles and presses Import. Octant never imports in the background, on
   startup, on a schedule, or because an agent, a routine, or a plugin asked. A
-  local window or a paired device sends the command, and any Keychain prompt
-  still appears on the Mac (maintainer decision, 2026-11-12; not built yet:
-  today only a local window can send it, and the host refuses a paired device
-  before it reads anything).
+  local window sends the command, since the Keychain prompt appears on the
+  Mac; the host refuses every paired device before it reads anything
+  (maintainer decision, 2026-11-19, which keeps Keychain cookie import with a
+  local window).
 - **Which browsers.** Chromium-family browsers (Chrome, Chromium, Brave, Edge,
   Vivaldi, Arc) and Firefox. Safari is not offered: its cookie store sits behind
   a macOS privacy permission Octant does not ask for.
@@ -485,8 +485,9 @@ Mac does; what changes is how the content travels and what may keep it.
 
 ## Delegated sessions
 
-A local person may review and grant a same-Project managed child, named
-routine or running terminal grant permission to use an existing sign-in. Settings › Data & storage › Browser session permissions
+The person, at a local window or a device they paired at Full, may review and
+grant a same-Project managed child, named routine or running terminal grant
+permission to use an existing sign-in; other devices are refused. Settings › Data & storage › Browser session permissions
 lists eligible callers and current permissions. The person explicitly chooses
 the caller, stored profile and exact HTTPS origins (including any non-default port).
 Child and terminal permissions last 15 minutes, one hour or eight hours; a
@@ -494,7 +495,7 @@ terminal permission always ends with its exact terminal grant. Routine permissio
 default to seven days, with an explicit duration capped at 30 days; Settings
 offers seven and 30 days. Every review shows the absolute expiry. A second review shows the
 host-derived caller, account label, model, host and expiry before Grant. The
-review is bound to that local window and expires after two minutes. Profile
+review is bound to the window or device that opened it and expires after two minutes. Profile
 choice, a remembered origin, parentage and an unlocked vault grant nothing.
 
 The permission binds one execution host, run/generation, model/provider,

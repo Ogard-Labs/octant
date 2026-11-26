@@ -27,8 +27,9 @@ import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 
-export type HarnessStateDependencies = Pick<ServerStart, "persistence"> &
-  Pick<
+export type HarnessStateDependencies = Pick<ServerStart, "persistence"> & {
+  readonly resolveThreadStrict: (threadId: string) => boolean;
+} & Pick<
     AuthorityWiring,
     "agentRunParentAuthority" | "agentRunPersistence" | "agentRunRequestOwner" | "onThreadArchived"
   > &
@@ -48,6 +49,7 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     agentRunRequestOwner,
     onThreadArchived,
     persistence,
+    resolveThreadStrict,
     workThreadProjection,
   } = deps;
 
@@ -86,6 +88,7 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     sessions: nativeHarnessSessions,
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
+    strict: resolveThreadStrict,
     onAsked: (input) => {
       for (const listener of questionAskedListeners) listener(input);
     },
@@ -98,6 +101,7 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
     outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
+    strict: resolveThreadStrict,
     posture: (threadId, mode) => {
       try {
         if (mode === "code") {

@@ -1330,10 +1330,11 @@ export function createBrowserAutomationRouteHandler(
               await dependencies.service.act({
                 windowId,
                 request: pictured,
-                // The address bar of a window of this computer. A paired
-                // device is left out: it reaches the page only through this
-                // route, which acts on approved origins alone, so a page that
-                // followed a redirect off them would leave it unable to act.
+                // The person's own typed address: a window of this computer,
+                // or a device the host's own person paired at Full, which is
+                // that person (maintainer decision, 2026-11-26). Its redirects
+                // are the person's, as in their own browser. A restricted or
+                // hub-introduced device keeps the approved-origin rule.
                 ...(actsAsHostPerson && pictured.kind === "navigate"
                   ? { startedBy: "person" as const }
                   : {}),

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useSyncExternalStore } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { DEFAULT_AGENT_GRANT_LIMITS } from "@octant/contracts";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import {
   createInMemoryDeviceKeyStore,
@@ -558,12 +559,41 @@ function answerProduct(
         },
       });
     }
+    if (method === "GET" && path === "/api/agent-grants") {
+      return Response.json({ kind: "grants", grants: [agentGrantView] });
+    }
     return Response.json(
       { category: "unavailable", message: "Not on this host." },
       { status: 404 },
     );
   };
 }
+
+const agentGrantView = {
+  grant: {
+    grantId: "63000000-0000-4000-8000-000000000001",
+    scopeId: "63000000-0000-4000-8000-000000000003",
+    name: "Home bot",
+    scope: {
+      projects: [],
+      modes: ["code"],
+      highestLevel: "ask-first",
+      threads: "own",
+      tools: ["start_work", "read_thread"],
+      limits: DEFAULT_AGENT_GRANT_LIMITS,
+      direct: false,
+    },
+    state: "active",
+    generation: 1,
+    keys: [],
+    createdAt: "2026-11-11T10:00:00.000Z",
+    expiresAt: "2026-12-11T10:00:00.000Z",
+  },
+  pendingClaims: [],
+  directKey: false,
+  threadsStarted: 0,
+  turnsToday: 0,
+};
 
 async function readyBridge(
   seen: ProductRequest[] = [],
@@ -1258,12 +1288,28 @@ describe("RemoteShellView", () => {
     }
   });
 
-  it("offers a restricted session no host settings", async () => {
-    const { bridge } = await readyBridge([], false, false);
-    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+  it("offers a restricted session and a Read only one only the agent grants among host settings", async () => {
+    for (const accessLevel of [undefined, "read-only"] as const) {
+      const user = userEvent.setup();
+      const seen: ProductRequest[] = [];
+      const { bridge } = await readyBridge(seen, false, false, false, false, accessLevel);
+      const view = render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-    await screen.findByRole("note", { name: "Local host only surfaces" });
-    expect(screen.queryByRole("region", { name: "Host settings" })).toBeNull();
+      const settings = await screen.findByRole("region", { name: "Host settings" });
+      expect(
+        within(settings)
+          .getAllByRole("button")
+          .map((button) => button.textContent),
+      ).toEqual(["Agent access"]);
+      await user.click(within(settings).getByRole("button", { name: "Agent access" }));
+      await user.click(await within(settings).findByRole("button", { name: "Revoke Home bot" }));
+      expect(within(settings).queryByRole("button", { name: "New agent grant…" })).toBeNull();
+      // Only a device paired Read only is kept from stopping the running turns.
+      expect(screen.queryByRole("checkbox", { name: "Also stop its running turns" }) === null).toBe(
+        accessLevel === "read-only",
+      );
+      view.unmount();
+    }
   });
 
   it("shows sync status and the computers read-only, with nothing to set up or revoke", async () => {

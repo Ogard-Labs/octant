@@ -5,6 +5,8 @@ import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   EventActor,
+  MAX_NATIVE_HARNESS_VIEW_ENTRIES,
+  decodeNativeHarnessQuestion,
   decodeNativeHarnessSlotCandidate,
   decodeNativeHarnessTurnRecord,
   type NativeHarnessTurnRecord,
@@ -314,5 +316,53 @@ describe("native harness task list", () => {
 
   it("refuses a thread that has no harness session", () => {
     expect(storeOn(openConnection()).replaceTasks(threadId, items)).toBe("no-session");
+  });
+});
+
+describe("waiting asks in a long session", () => {
+  const question = (id: string) =>
+    decodeNativeHarnessQuestion({
+      id,
+      prompt: "Which branch?",
+      options: [],
+      status: "pending",
+      askedAt: now,
+    });
+
+  it("keeps a waiting question answerable after more asks than the history holds", () => {
+    const connection = openConnection();
+    const live = storeOn(connection);
+    live.ensure({ threadId, mode: "code", leadSlotId: "default" as never, lead });
+    const waiting = uuid();
+    live.askQuestion(threadId, question(waiting));
+    for (let index = 0; index < MAX_NATIVE_HARNESS_VIEW_ENTRIES + 10; index += 1) {
+      const id = uuid();
+      live.askQuestion(threadId, question(id));
+      live.settleQuestion(threadId, id as never, { status: "cancelled" });
+    }
+    for (const store of [live, storeOn(connection)]) {
+      const questions = store.read(threadId)?.questions ?? [];
+      expect(questions.length).toBeLessThanOrEqual(MAX_NATIVE_HARNESS_VIEW_ENTRIES);
+      expect(
+        questions.filter((entry) => entry.status === "pending").map((entry) => entry.id),
+      ).toEqual([waiting]);
+    }
+    expect(
+      live.settleQuestion(threadId, waiting as never, { status: "answered", answer: "main" }),
+    ).not.toBe("question-not-found");
+  });
+
+  it("shows the oldest waiting questions first when more wait than the view holds", () => {
+    const live = storeOn(openConnection());
+    live.ensure({ threadId, mode: "code", leadSlotId: "default" as never, lead });
+    const ids = Array.from({ length: MAX_NATIVE_HARNESS_VIEW_ENTRIES + 5 }, () => uuid());
+    for (const id of ids) live.askQuestion(threadId, question(id));
+    expect(live.read(threadId)?.questions.map((entry) => entry.id)).toEqual(
+      ids.slice(0, MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+    );
+    live.settleQuestion(threadId, ids[0] as never, { status: "cancelled" });
+    const shown =
+      live.read(threadId)?.questions.filter((entry) => entry.status === "pending") ?? [];
+    expect(shown.at(-1)?.id).toBe(ids[MAX_NATIVE_HARNESS_VIEW_ENTRIES]);
   });
 });

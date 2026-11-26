@@ -26,8 +26,8 @@ Amazon Bedrock endpoint signs in at the organization's single sign-on portal
 with a device code, and the broker signs each Converse request (`cloud-iam`),
 against fakes; closing it waits only on the maintainer's real-account smoke
 below. Settings adds an Amazon Bedrock endpoint, lists it under Model
-endpoints, and signs it out; its sign-in still begins only in the host's
-terminal.
+endpoints, and signs it out; its sign-in begins only on the host, in its
+terminal or a local desktop window.
 Each slice below lands with its own implementation, tests, and the edits to
 this file that record what it built.
 
@@ -733,22 +733,14 @@ depends only on 1–3.
    default, since it makes Octant read another tool's credential store, but
    the person may opt in per endpoint with "Use my AWS profile", off by
    default, which reads their existing cloud profile (maintainer request,
-   2026-11-12; not built yet: today no cloud profile is read). Revised
-   (maintainer decision, 2026-11-16; designed, not built; [Provider reach Octant no longer narrows](../architecture.md#security-and-authority)):
-   "Use my AWS profile" is to be built, and long-lived access keys are
-   allowed in the broker with a warning that they are reusable until the
-   person revokes them. The read can
-   stay inside the broker, since a profile-sourced grant would sign through
-   the same `/v1/cloud-iam/sign` route under the same stored scope and no
-   runtime or journal would see it. Unresolved before it is built: which
-   profile kinds are read (a single sign-on profile, whose portal, account
-   and role are a grant's source fields; static access keys; an assumed
-   role; a credential process, which would run a configured command inside
-   the broker); whether the broker reads the cloud command line's cached
-   portal session, which is another tool's token store, and what happens
-   when that session ends; how the account and role are proved for a profile
-   that names neither; and whether `AWS_CONFIG_FILE` and its kin redirect
-   the read.
+   2026-11-12). Long-lived access keys are allowed in the broker with a
+   warning that they are reusable until the person revokes them (maintainer
+   decision, 2026-11-16; [Provider reach Octant no longer narrows](../architecture.md#security-and-authority)).
+   Both are built: the broker reads a named profile in place as the AWS
+   command line does (`packages/host-runtime/src/awsProfileCredentials.ts`)
+   and keeps an entered key pair, and a profile-sourced grant signs through
+   the same `/v1/cloud-iam/sign` route under the same stored scope, so no
+   runtime or journal sees it.
 5. **Google Vertex.** Deferred until an organization needs it. Its bearer is
    valid across the whole cloud account, so it may never reach the server;
    when it is built, the only acceptable shape is a broker-side relay that

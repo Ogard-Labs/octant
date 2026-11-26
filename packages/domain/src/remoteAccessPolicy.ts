@@ -149,6 +149,13 @@ const REMOTE_READ_ACTIONS = new Set([
   "usage.spend-ceiling.read",
 ]);
 /**
+ * What a device at `read-only` may do beyond the reads: acts that only take
+ * authority away. Ending an outside agent's grant is one, so a person can stop
+ * an agent from any paired device, a watching one included (maintainer
+ * decision, 2026-11-26).
+ */
+const REMOTE_AUTHORITY_REDUCING_ACTIONS = new Set(["agent-access.revoke"]);
+/**
  * What only the host's own person does: at a local window, or on a device they
  * paired. The comments below say "stays on the host" of the sessions this list
  * still holds: a device the hub's roster introduced, an agent grant, and any
@@ -313,7 +320,11 @@ export function authorizePrincipalAction(input: {
   ) {
     return { kind: "deny", reason: "local-host-required" };
   }
-  if (input.accessLevel === "read-only" && !REMOTE_READ_ACTIONS.has(input.action)) {
+  if (
+    input.accessLevel === "read-only" &&
+    !REMOTE_READ_ACTIONS.has(input.action) &&
+    !REMOTE_AUTHORITY_REDUCING_ACTIONS.has(input.action)
+  ) {
     return { kind: "deny", reason: "access-level" };
   }
   return { kind: "allow" };

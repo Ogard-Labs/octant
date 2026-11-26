@@ -1394,7 +1394,9 @@ A refused binding keeps the prior authorized Project and draft. A new Chat's
 first-run composer stages chosen or captured files as removable chips before the
 thread exists; they upload to the thread once it is created and leave with the
 first message, as a Work draft's images do, and the server's attachment checks
-apply to them unchanged. Cross-Project
+apply to them unchanged. If first-turn startup fails after the task opens, the
+provisional prompt is withdrawn and its text returns to the composer with the
+refusal reason. Cross-Project
 notices appear once beside the active draft composer, with a separate-window
 action when available, as one of the composer's notice cards above the box. A note that stays until
 the person acts is a card too; only a state its surface marks as passing is the
@@ -1407,7 +1409,14 @@ trailing edge, and a fade and a 4px rise on entry (none under reduced motion).
 Its look is [DESIGN.md: OctantAlert](../../DESIGN.md#octantalert).
 Authority confirmations appear beside the owning composer in a trusted surface
 owned by the desktop main process;
-ordinary notice content cannot issue an approval receipt.
+ordinary notice content cannot issue an approval receipt. That view is
+sandboxed with a restrictive content policy, no external resources and no
+ordinary host bridge, and only the live view decides its challenge. The
+ordinary renderer may only report geometry, palette, a covering overlay, or
+cancel. Cancel is the default, and expiry, teardown or a late decision fails
+closed; under an overlay the view leaves and refuses Allow. Escape cancels and
+focus starts on Cancel. A window holds at most eight pending confirmations per
+composer owner, and navigation never extends the five-minute expiry.
 
 When a local Code composer creates a managed worktree, show a compact
 disclosure below the composer. Move it below the first prompt when the

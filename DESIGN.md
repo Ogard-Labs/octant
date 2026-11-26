@@ -221,7 +221,11 @@ Mono. Bundled presets lean every role toward one hue and carry their accent; a
 custom theme overrides only validated roles, and an incomplete or low-contrast
 import falls back. Every derived surface and wash above is computed from the
 resolved roles, so a preset or custom theme gets the same ladder without
-writing it. Accent swatches and their per-mode fills are in
+writing it. An accent swatch is the person's choice and never recolours
+status; Mono is a swatch. Swatches cover chromatic hues and neutrals (Steel,
+Slate, Silver, Graphite, Carbon, White), and a swatch that cannot be seen on one
+mode's page writes a mode-only override with a silver for that mode. Accent
+swatches and their per-mode fills are in
 [Settings: Appearance](docs/design/settings.md). The editor and terminal draw
 from the same roles through `packages/theme/src/editorColors.ts` and
 `terminalColors.ts`. A plugin may contribute themes as data only, listed beside the built-in
@@ -974,7 +978,9 @@ Feature code imports the adapters in `apps/web/src/ui/base`, never
 `ui/shadcn` or `@base-ui/react`. The adapters wrap owned recipes in
 `apps/web/src/ui/shadcn` (Base UI-native shadcn `base-nova`). Recipes paint;
 feature classes position. A recipe styles the state attribute Base UI writes
-(`data-active`, `data-pressed`, `data-checked`), never one it invents. Every
+(`data-active`, `data-pressed`, `data-checked`), never one it invents. There
+is one interaction primitive backend, and a recipe style's own palette is
+never adopted: the `--octant-*` roles stay the theme source. Every
 control carries `window-no-drag`. "Glass" below means window glass is on; every
 float follows [Translucency](#translucency).
 
@@ -1797,6 +1803,16 @@ The kit is `settings/primitives.tsx`; contents are in
   "Default 8", once the value differs; while the value is the default the note
   keeps its width, hidden, so the sentence never rewraps. A switch needs no
   default note: its sentence says what on does.
+- **Long pages**: long lists draw as compact rows (the name opening the row's
+  detail of paths, permissions and secondary actions, a short state in the
+  meta ink, the one main control trailing), and only reference or empty
+  sections fold. A folding label is a button with `aria-expanded`, and the
+  closed line says what it holds. What is on, trusted, protected or allowed
+  stays readable closed, and a section holding a remembered approval, refusal
+  or removed protection opens by itself. Search and deep links open the fold
+  holding their row and focus it (maintainer request, 2026-11-11).
+- **Titlebar**: the shared Settings titlebar has no bottom rule, because the
+  strip it bounded is empty and read as a bar.
 - **Rhythm**: a 32px gutter, 24px between sections, 48px under the last, 12px
   under a label and under a note.
 - **Actions**: the secondary button; one main action may be primary; extras

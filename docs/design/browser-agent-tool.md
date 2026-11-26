@@ -266,13 +266,13 @@ the page, the workspace, or the person is reached.
     written; a public name that resolves to a private address is not caught,
     and the page it reaches is still one only the person's view shows.
   - The server marks the navigation, and only its action route does, for a
-    local window. A paired device is left out: it reaches the page only
-    through that route, which acts on approved origins alone, so a followed
-    redirect would leave it unable to act. The service drops the mark for an
-    agent's call or a flow's, and the desktop host accepts it on `navigate`
-    alone.
-  - Unchanged: a navigation the agent, a flow, a terminal grant, or a paired
-    device asks for refuses the redirect as before; a page under remote owner
+    local window or a device the host's own person paired at Full, which is
+    that person (maintainer decision, 2026-11-26). A restricted or
+    hub-introduced device is left out and keeps the approved-origin rule. The
+    service drops the mark for an agent's call or a flow's, and the desktop
+    host accepts it on `navigate` alone.
+  - Unchanged: a navigation the agent, a flow, a terminal grant, or a
+    restricted or hub-introduced device asks for refuses the redirect as before; a page under remote owner
     control keeps to its approved origins; an extension's load and a held page
     script grant nothing; a page's popup is still refused; profile site
     approvals, Plan, and sign-in are as they were. The headless Browser has no
@@ -596,7 +596,9 @@ window.
   names the file, its size, its type, the requesting page and the attested
   source origins separately. Without a native receipt, it says "Download
   source: unverified." A page address is never substituted as source proof.
-  The card carries the whole attested chain, in Code as in Work. The answer covers that file
+  The card carries the whole attested chain, in Code as in Work; Code refuses
+  a review whose chain cannot fit its approval-summary byte limit rather than
+  dropping an origin. The answer covers that file
   once, or, with "Always allow", later saves from that site into that folder
   in that profile: the remembered answer is keyed by site, folder and profile
   (maintainer decision, 2026-11-12). Built: "Always allow" covers later saves

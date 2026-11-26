@@ -1290,6 +1290,10 @@ stamps itself, whatever actor the request names, admitted by the
 pure `admitCanvasDiagramLayoutRevision` policy (the target must be a board —
 a diagram's nodes or a flow's screens — every moved node must exist, the
 sequence must be the head, budgets stand).
+A diagram holds at most 512 nodes and 1,024 edges (`CANVAS_MAX_DIAGRAM_NODES`
+and `CANVAS_MAX_DIAGRAM_EDGES`), re-checked by domain policy before it persists
+or renders. Boards embed no third-party canvas engine and run no markup or
+script.
 The generic diagram is also styled, from Canvas schema version 19. A node's
 `role` is closed to `process` (a box), `decision` (a diamond), and
 `terminator` (a pill); a node without one is the plain rounded box. A role
@@ -2089,11 +2093,12 @@ local network, cloud metadata addresses, and this host's own listeners
 
 **The switch.** `GET /api/canvas/network-access?canvasId=` reads it and `POST
 /api/canvas/network-access` sets it, under the window authorization `get` runs
-for that Canvas. The person sets it at a local window or a paired device,
-never an agent or a routine. Not built yet: a paired device setting it; today
-only a local window may set it: the route refuses any other
-principal (a paired device, an agent grant), the remote product classifier
-gives a paired device neither path although one is a `GET`, the agent's Canvas
+for that Canvas. The person sets it at a local window or on a device the
+host's own person paired (the route admits `principalActsAsHostPerson`, and
+such a device never reaches the restricted-device catalogue), never an agent
+or a routine. The route refuses every other principal (a hub-introduced or
+restricted device, an agent grant), the remote product classifier gives a
+restricted device neither path although one is a `GET`, the agent's Canvas
 tool has no operation for it, and nothing a Canvas holds can ask for it,
 because the bridge grants nothing and a page holds no credential. A change is
 journaled as `canvas.network-access-changed@1` with the local person as its

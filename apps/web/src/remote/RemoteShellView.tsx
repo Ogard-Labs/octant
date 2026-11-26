@@ -154,7 +154,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     [props.bridge],
   );
   // The matrix names what the host forwards for this session; a restricted
-  // session reaches neither settings surface, so it is shown none.
+  // session reaches only the grant list with Revoke among the settings surfaces.
   const reachableSettings = useMemo(
     () =>
       new Set(
@@ -323,6 +323,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         {...(personPort === undefined ? {} : { personPort })}
         providerOAuth={providerOAuth}
         reachable={reachableSettings}
+        readOnly={standing.accessLevel === "read-only"}
       />
 
       <RemoteDeviceSelfPanel
