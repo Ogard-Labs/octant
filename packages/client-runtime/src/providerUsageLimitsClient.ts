@@ -38,6 +38,80 @@ export class ProviderUsageLimitsClientFailure extends Error {
   override readonly name = "ProviderUsageLimitsClientFailure";
 }
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function decodeCaptureStatus(value: unknown): ProviderLimitsCaptureStatus {
+  if (
+    !isRecord(value) ||
+    typeof value.connected !== "boolean" ||
+    typeof value.summary !== "string" ||
+    typeof value.disconnectedHint !== "string" ||
+    typeof value.connectedHint !== "string" ||
+    typeof value.connectLabel !== "string" ||
+    (value.recordedAt !== undefined && typeof value.recordedAt !== "string") ||
+    (value.planTier !== undefined && typeof value.planTier !== "string") ||
+    (value.refreshActionLabel !== undefined && typeof value.refreshActionLabel !== "string")
+  ) {
+    throw new ProviderUsageLimitsClientFailure("Provider limits capture response is invalid.");
+  }
+  return {
+    connected: value.connected,
+    ...(value.recordedAt === undefined ? {} : { recordedAt: value.recordedAt }),
+    ...(value.planTier === undefined ? {} : { planTier: value.planTier }),
+    summary: value.summary,
+    disconnectedHint: value.disconnectedHint,
+    connectedHint: value.connectedHint,
+    connectLabel: value.connectLabel,
+    ...(value.refreshActionLabel === undefined
+      ? {}
+      : { refreshActionLabel: value.refreshActionLabel }),
+  };
+}
+
+function decodeCaptureMap(value: unknown): Readonly<Record<string, ProviderLimitsCaptureStatus>> {
+  if (!isRecord(value) || !isRecord(value.captures)) {
+    throw new ProviderUsageLimitsClientFailure("Provider limits capture list response is invalid.");
+  }
+  const result: Record<string, ProviderLimitsCaptureStatus> = {};
+  for (const [instanceId, status] of Object.entries(value.captures)) {
+    result[instanceId] = decodeCaptureStatus(status);
+  }
+  return result;
+}
+
+function decodeDisconnectResult(value: unknown): {
+  readonly restored: boolean;
+  readonly status: ProviderLimitsCaptureStatus;
+} {
+  if (!isRecord(value) || typeof value.restored !== "boolean") {
+    throw new ProviderUsageLimitsClientFailure(
+      "Provider limits capture disconnect response is invalid.",
+    );
+  }
+  return {
+    restored: value.restored,
+    status: decodeCaptureStatus(value.status),
+  };
+}
+
+function decodeRefreshResult(value: unknown): ProviderLimitsCaptureRefreshResult {
+  if (
+    !isRecord(value) ||
+    typeof value.launched !== "boolean" ||
+    (value.message !== undefined && typeof value.message !== "string")
+  ) {
+    throw new ProviderUsageLimitsClientFailure(
+      "Provider limits capture refresh response is invalid.",
+    );
+  }
+  return {
+    launched: value.launched,
+    ...(value.message === undefined ? {} : { message: value.message }),
+  };
+}
+
 export function createProviderUsageLimitsClient(options: {
   readonly baseUrl: string;
   readonly fetch: typeof globalThis.fetch;
@@ -102,29 +176,28 @@ export function createProviderUsageLimitsClient(options: {
   return {
     list: () => request("/api/provider-usage-limits", "GET"),
     refresh: () => request("/api/provider-usage-limits/refresh", "POST"),
-    listLimitsCaptures: async () => {
-      const body = (await requestJson("/api/provider-usage-limits/capture", "GET")) as {
-        readonly captures?: Readonly<Record<string, ProviderLimitsCaptureStatus>>;
-      };
-      return body.captures ?? {};
-    },
-    connectLimitsCapture: (instanceId) =>
-      requestJson(
-        `/api/provider-usage-limits/capture/${encodeURIComponent(instanceId)}/connect`,
-        "POST",
-      ) as Promise<ProviderLimitsCaptureStatus>,
-    disconnectLimitsCapture: (instanceId) =>
-      requestJson(
-        `/api/provider-usage-limits/capture/${encodeURIComponent(instanceId)}/disconnect`,
-        "POST",
-      ) as Promise<{
-        readonly restored: boolean;
-        readonly status: ProviderLimitsCaptureStatus;
-      }>,
-    triggerLimitsCaptureRefresh: (instanceId) =>
-      requestJson(
-        `/api/provider-usage-limits/capture/${encodeURIComponent(instanceId)}/trigger-refresh`,
-        "POST",
-      ) as Promise<ProviderLimitsCaptureRefreshResult>,
+    listLimitsCaptures: async () =>
+      decodeCaptureMap(await requestJson("/api/provider-usage-limits/capture", "GET")),
+    connectLimitsCapture: async (instanceId) =>
+      decodeCaptureStatus(
+        await requestJson(
+          `/api/provider-usage-limits/capture/${encodeURIComponent(instanceId)}/connect`,
+          "POST",
+        ),
+      ),
+    disconnectLimitsCapture: async (instanceId) =>
+      decodeDisconnectResult(
+        await requestJson(
+          `/api/provider-usage-limits/capture/${encodeURIComponent(instanceId)}/disconnect`,
+          "POST",
+        ),
+      ),
+    triggerLimitsCaptureRefresh: async (instanceId) =>
+      decodeRefreshResult(
+        await requestJson(
+          `/api/provider-usage-limits/capture/${encodeURIComponent(instanceId)}/trigger-refresh`,
+          "POST",
+        ),
+      ),
   };
 }

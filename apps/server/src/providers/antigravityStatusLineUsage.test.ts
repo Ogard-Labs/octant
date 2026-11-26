@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProviderInstanceId, UtcTimestamp } from "@octant/contracts";
@@ -86,7 +95,7 @@ describe("antigravity status-line usage", () => {
       "2026-11-26T11:05:00.000Z" as UtcTimestamp,
     );
     expect(limits?.scope).toBe("account");
-    expect(limits?.quota).toBe("available");
+    expect(limits?.quota).toBe("unknown");
     expect(limits?.rateLimitWindows?.map((w) => w.window)).toEqual([
       "gemini:five_hour",
       "gemini:seven_day",
@@ -97,7 +106,7 @@ describe("antigravity status-line usage", () => {
     expect(limits?.rateLimitWindows?.[2]?.resetsAt).toBeUndefined();
   });
 
-  it("treats omitted zero remaining_fraction with a future reset as exhausted and drops expired windows", () => {
+  it("keeps aggregate quota unknown when one model-family bucket is exhausted so unrelated models are not blocked", () => {
     const now = new Date("2026-11-26T11:00:00.000Z");
     const reading = parseAntigravityStatusLinePayload(
       JSON.stringify({
@@ -115,7 +124,8 @@ describe("antigravity status-line usage", () => {
       reading!,
       "2026-11-26T11:30:00.000Z" as UtcTimestamp,
     );
-    expect(active?.quota).toBe("exhausted");
+    expect(active?.quota).toBe("unknown");
+    expect(active?.rateLimitWindows?.[0]?.status).toBe("exhausted");
     expect(active?.rateLimitWindows).toHaveLength(2);
 
     const after5hReset = antigravityStatusLineLimits(
@@ -123,7 +133,7 @@ describe("antigravity status-line usage", () => {
       reading!,
       "2026-11-26T12:05:00.000Z" as UtcTimestamp,
     );
-    expect(after5hReset?.quota).toBe("available");
+    expect(after5hReset?.quota).toBe("unknown");
     expect(after5hReset?.rateLimitWindows?.map((w) => w.window)).toEqual(["gemini:seven_day"]);
   });
 
@@ -317,6 +327,64 @@ describe("antigravity status-line usage", () => {
       expect(afterReading.right.rateLimitWindows?.[0]?.window).toBe("gemini:five_hour");
       expect(afterReading.right.rateLimitWindows?.[0]?.utilization).toBeCloseTo(0.05, 6);
     }
+  });
+
+  it("preserves symlinked settings.json, refuses cross-profile overwrite, falls back to reset_in_seconds in bridge script, and keeps Disconnect available after sign-in switch", () => {
+    const root = makeTempDir();
+    const dotfilesDir = join(root, "dotfiles");
+    const configDir = join(root, "antigravity-cli");
+    mkdirSync(dotfilesDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true });
+    const targetSettings = join(dotfilesDir, "settings.json");
+    writeFileSync(targetSettings, JSON.stringify({ theme: "light" }));
+    const linkSettings = join(configDir, "settings.json");
+    symlinkSync(targetSettings, linkSettings);
+
+    const primaryBridge = new AntigravityStatusLineBridge({
+      dataDirectory: join(root, "primary-data"),
+      configDirectory: configDir,
+      nodeExecutable: process.execPath,
+    });
+    expect(primaryBridge.connect().connected).toBe(true);
+    expect(lstatSync(linkSettings).isSymbolicLink()).toBe(true);
+
+    // Second host profile refuses to wrap the first host's bridge as an original command.
+    const secondaryBridge = new AntigravityStatusLineBridge({
+      dataDirectory: join(root, "secondary-data"),
+      configDirectory: configDir,
+      nodeExecutable: process.execPath,
+    });
+    expect(() => secondaryBridge.connect()).toThrow(/another Octant host profile/i);
+
+    // Installed bridge script falls back to reset_in_seconds on malformed nonblank reset_time.
+    const runMalformedReset = spawnSync(process.execPath, [primaryBridge.scriptPath], {
+      input: JSON.stringify({
+        quota: {
+          "gemini-5h": {
+            remaining_fraction: 0.75,
+            reset_time: "not-a-timestamp",
+            reset_in_seconds: 1800,
+          },
+        },
+      }),
+      encoding: "utf8",
+    });
+    expect(runMalformedReset.status).toBe(0);
+    expect(primaryBridge.readReading()?.buckets[0]?.resetsAt).toBeDefined();
+
+    // Switching sign-in to api-key while connected still exposes Disconnect (without triggerRefresh).
+    const switchedFacts = makeAntigravityStatusLineUsageFacts({
+      instanceId,
+      authentication: "api-key",
+      bridge: primaryBridge,
+    });
+    expect(switchedFacts.limitsCapture?.status().connected).toBe(true);
+    expect(switchedFacts.limitsCapture?.triggerRefresh).toBeUndefined();
+
+    // Disconnect restores target file and preserves the symlink itself.
+    expect(primaryBridge.disconnect().restored).toBe(true);
+    expect(lstatSync(linkSettings).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(readFileSync(targetSettings, "utf8"))).toEqual({ theme: "light" });
   });
 
   it("builds an interactive agy launch script without headless print flags", () => {

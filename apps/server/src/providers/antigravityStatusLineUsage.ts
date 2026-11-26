@@ -3,6 +3,7 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -13,12 +14,13 @@ import { spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import type {
-  AcpAgentAuthentication,
-  ProviderInstanceId,
-  ProviderRateLimitWindow,
-  ProviderServiceLimits,
-  UtcTimestamp,
+import {
+  decodeProviderServiceLimits,
+  type AcpAgentAuthentication,
+  type ProviderInstanceId,
+  type ProviderRateLimitWindow,
+  type ProviderServiceLimits,
+  type UtcTimestamp,
 } from "@octant/contracts";
 import { planUsageWindowStatus } from "@octant/domain";
 import type {
@@ -28,7 +30,7 @@ import type {
   ProviderLimitsCaptureStatus,
 } from "@octant/provider-sdk/context-facts";
 import { Effect } from "effect";
-import { accountUsageFailure, accountWindowLimits, isRecord } from "./accountUsageEndpoint";
+import { accountUsageFailure, isRecord } from "./accountUsageEndpoint";
 
 const MAX_FILE_BYTES = 1_048_576;
 const MAX_BUCKETS = 32;
@@ -363,7 +365,23 @@ export function antigravityStatusLineLimits(
   }
 
   if (windows.length === 0) return undefined;
-  return accountWindowLimits(instanceId, windows, reading.recordedAt);
+  // Antigravity exposes independent quota buckets per model family (for
+  // example Gemini vs Claude & GPT). Exhausting one bucket must not mark the
+  // entire account exhausted and block turns for unrelated model families;
+  // leave hard refusal to `agy acp` while displaying every bucket honestly.
+  return decodeProviderServiceLimits({
+    providerInstanceId: instanceId,
+    scope: "account",
+    requests: { status: "unavailable" },
+    tokens: { status: "unavailable" },
+    concurrency: { status: "unavailable" },
+    retry: { status: "inactive" },
+    quota: "unknown",
+    source: "runtime-reported",
+    confidence: "high",
+    updatedAt: reading.recordedAt,
+    rateLimitWindows: windows,
+  });
 }
 
 /**
@@ -417,9 +435,12 @@ function parseReading(rawText, now) {
     const rs = raw.reset_in_seconds;
     if (rs !== undefined && rs !== null && (typeof rs !== "number" || !Number.isFinite(rs) || rs < 0)) return null;
     let resetsAt;
+    let parsedResetMs = Number.NaN;
     if (typeof raw.reset_time === "string" && raw.reset_time.trim().length > 0) {
-      const ms = Date.parse(raw.reset_time.trim());
-      if (Number.isFinite(ms) && ms > 0) resetsAt = new Date(ms).toISOString();
+      parsedResetMs = Date.parse(raw.reset_time.trim());
+    }
+    if (Number.isFinite(parsedResetMs)) {
+      if (parsedResetMs > 0) resetsAt = new Date(parsedResetMs).toISOString();
     } else if (typeof rs === "number") {
       if (!(rs === 0 && rf === 1)) resetsAt = new Date(now.getTime() + rs * 1000).toISOString();
     }
@@ -484,6 +505,27 @@ function writeAtomicPrivate(filePath: string, content: string, mode = 0o600): vo
   writeFileSync(temp, content, { encoding: "utf8", mode });
   chmodSync(temp, mode);
   renameSync(temp, filePath);
+}
+
+/**
+ * Resolves the target file path for `settings.json` without replacing an
+ * existing symlink. When `settingsPath` is a symlink, writes update the
+ * resolved target file atomically so dotfiles symlinks stay intact.
+ */
+function resolveSettingsWritePath(settingsPath: string): string {
+  try {
+    const info = lstatSync(settingsPath);
+    if (!info.isSymbolicLink()) return settingsPath;
+    const target = realpathSync(settingsPath);
+    const targetInfo = statSync(target);
+    if (!targetInfo.isFile()) {
+      throw new Error("Antigravity CLI settings.json symlink target is not a regular file.");
+    }
+    return target;
+  } catch (error) {
+    if (isEnoent(error)) return settingsPath;
+    throw error;
+  }
 }
 
 function readBoundedFile(filePath: string): string {
@@ -646,6 +688,8 @@ export class AntigravityStatusLineBridge {
       0o700,
     );
 
+    const settingsWritePath = resolveSettingsWritePath(this.settingsPath);
+
     // Already installed: keep existing originalStatusLine metadata intact.
     if (
       existingMetadata !== undefined &&
@@ -666,9 +710,21 @@ export class AntigravityStatusLineBridge {
           enabled: true,
         };
         settings.statusLine = nextStatusLine;
-        writeAtomicPrivate(this.settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 0o600);
+        writeAtomicPrivate(settingsWritePath, `${JSON.stringify(settings, null, 2)}\n`, 0o600);
       }
       return this.status();
+    }
+
+    // Never save another Octant host profile's bridge as the user's original
+    // command: disconnecting in connection order would lose the true backup.
+    if (
+      isRecord(currentStatusLine) &&
+      typeof currentStatusLine.command === "string" &&
+      currentStatusLine.command.includes(BRIDGE_SCRIPT_NAME)
+    ) {
+      throw new Error(
+        "Antigravity status-line capture is already connected by another Octant host profile. Disconnect it there first.",
+      );
     }
 
     const originalStatusLine = isRecord(currentStatusLine) ? { ...currentStatusLine } : null;
@@ -696,7 +752,7 @@ export class AntigravityStatusLineBridge {
       ...(hadActiveCommand ? {} : { stack_with_default: true }),
     };
     settings.statusLine = nextStatusLine;
-    writeAtomicPrivate(this.settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 0o600);
+    writeAtomicPrivate(settingsWritePath, `${JSON.stringify(settings, null, 2)}\n`, 0o600);
     return this.status();
   }
 
@@ -736,7 +792,7 @@ export class AntigravityStatusLineBridge {
           nextSettings.statusLine = { ...metadata.originalStatusLine };
         }
         writeAtomicPrivate(
-          metadata.settingsPath,
+          resolveSettingsWritePath(metadata.settingsPath),
           `${JSON.stringify(nextSettings, null, 2)}\n`,
           0o600,
         );
@@ -824,7 +880,33 @@ export function makeAntigravityStatusLineUsageFacts(options: {
           };
         },
       }
-    : undefined;
+    : options.bridge.status().connected
+      ? {
+          // If the person switched sign-in after connecting the host-wide
+          // statusLine hook, keep Disconnect reachable while withholding
+          // connect and terminal refresh actions.
+          status: () => {
+            const { refreshActionLabel: _omitted, ...base } = toCaptureStatus(
+              options.bridge.status(),
+            );
+            return {
+              ...base,
+              summary: "Plan limits do not apply · status-line hook still installed",
+              connectedHint:
+                "Plan limits do not apply to this sign-in, but the Antigravity CLI status-line hook is still installed.",
+            };
+          },
+          connect: async () => {
+            throw new Error(
+              "Plan limits capture is only available for personal Google Antigravity sign-ins.",
+            );
+          },
+          disconnect: async () => {
+            const result = options.bridge.disconnect();
+            return { restored: result.restored, status: toCaptureStatus(result.status) };
+          },
+        }
+      : undefined;
   return {
     observeModelLimits: () => Effect.succeed([]),
     observeServiceLimits: ({ instanceId }) => {
