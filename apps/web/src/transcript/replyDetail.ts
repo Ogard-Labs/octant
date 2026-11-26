@@ -74,8 +74,8 @@ export const REPLY_DETAIL_LABELS: Readonly<Record<ReplyDetailLevel, string>> = {
 };
 
 export const REPLY_DETAIL_DESCRIPTIONS: Readonly<Record<ReplyDetailLevel, string>> = {
-  answers: "Only the message and the reply; a finished turn's steps wait behind one line.",
-  failures: "Tool calls show while they run, and only failed ones stay.",
+  answers: "Only the message and the final reply; a finished turn's steps wait behind one line.",
+  failures: "Tool calls show while they run; only failed and unfinished ones stay.",
   low: "Thinking stays folded, and a finished turn's tool calls fold behind one line.",
   medium: "Thinking stays folded with its first line showing, and tool calls stay listed.",
   high: "Thinking, tool calls, and each call's recorded result stay open.",
