@@ -55,8 +55,9 @@ export function HubPublicEntranceSection(props: {
     <SettingsSection title="Public entrance">
       <div className="setgroup">
         <SettingRow
-          description="Open one narrow door to the internet for visitor links, webhooks, and your own devices away from home. It answers only those routes, never pairing, administration, or anything between your computers. Visitor links, webhooks, and the device relay each stay off until you turn them on. Pausing remote access closes it. Off by default."
+          description="Open one narrow door to the internet for visitor links, webhooks, and your own devices away from home."
           label="Public entrance"
+          more="It answers only those routes, never pairing, administration, or anything between your computers. Visitor links, webhooks, and the device relay each stay off until you turn them on. Pausing remote access closes it. Off by default."
           scope="host"
           settingId="hub-public-entrance"
         >
@@ -69,8 +70,9 @@ export function HubPublicEntranceSection(props: {
         </SettingRow>
         {!view.enabled && !view.funnel.enabled ? null : (
           <SettingRow
-            description="Let Tailscale carry the entrance on port 443 of this computer's tailnet name. TLS ends on this computer, so Tailscale's relays cannot read the traffic. Needs HTTPS, MagicDNS, and the funnel node attribute in your tailnet policy. Or point your own tunnel or proxy at the address below instead."
+            description="Let Tailscale carry the entrance on port 443 of this computer's tailnet name."
             label="Tailscale Funnel"
+            more="TLS ends on this computer, so Tailscale's relays cannot read the traffic. Needs HTTPS, MagicDNS, and the funnel node attribute in your tailnet policy. Or point your own tunnel or proxy at the address below instead."
             scope="host"
             settingId="hub-public-funnel"
           >
