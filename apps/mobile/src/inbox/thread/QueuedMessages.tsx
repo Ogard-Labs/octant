@@ -122,18 +122,23 @@ export function QueuedMessages(props: {
               <Text numberOfLines={2} style={styles.text}>
                 {row.text}
               </Text>
-              {action(
-                "Edit",
-                () => setEditing({ messageId: row.messageId, text: row.text }),
-                props.changing || !row.changeable,
-                "mobile-thread-queue-edit",
-              )}
-              {action(
-                "Remove",
-                () => void props.onRemove(row.messageId),
-                props.changing || !row.changeable,
-                "mobile-thread-queue-remove",
-              )}
+              {/* A phone that may only read the queue is shown no actions on it. */}
+              {props.allowChanges ? (
+                <>
+                  {action(
+                    "Edit",
+                    () => setEditing({ messageId: row.messageId, text: row.text }),
+                    props.changing || !row.changeable,
+                    "mobile-thread-queue-edit",
+                  )}
+                  {action(
+                    "Remove",
+                    () => void props.onRemove(row.messageId),
+                    props.changing || !row.changeable,
+                    "mobile-thread-queue-remove",
+                  )}
+                </>
+              ) : null}
             </View>
           ),
         )}
