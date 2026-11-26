@@ -2459,8 +2459,10 @@ async function resolvePersonCanvasContext(
  * Who reads a Canvas, and under which rule. A window on this host reads under
  * its active Project and mode. A paired device has neither (the shell route
  * that sets them is local-only), so it reads under thread read authority: a
- * Canvas whose thread it may open. That reach is read-only; every route that
- * changes, publishes, exports, or shares a Canvas keeps the window rule.
+ * Canvas whose thread it may open. A route that changes, publishes, exports,
+ * or shares a Canvas admits a device the host's own person paired through
+ * `resolvePersonCanvasContext`, since that device is the person; every other
+ * device keeps the window rule.
  */
 type CanvasReader =
   | { readonly kind: "window"; readonly windowId: WindowId }

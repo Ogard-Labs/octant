@@ -237,10 +237,11 @@ export function classifyProductAction(request: Request): string | undefined {
     return undefined;
   }
   if (path.startsWith("/api/canvas/")) {
-    // A Canvas's "Allow network" switch is a person's choice at the host, and
-    // the proxy its pages fetch through answers a frame on the host's own
-    // machine. Neither is a read a paired device is given, although both are
-    // reached with GET: a device never fetches through the person's host.
+    // A Canvas's "Allow network" switch is the person's choice, and the proxy
+    // its pages fetch through answers a frame on the host's own machine. A
+    // device the person paired at Full never reaches this catalogue: it is the
+    // person, and the route admits it. Neither is a read a restricted device is
+    // given, although both are reached with GET.
     if (path === "/api/canvas/network-access" || path.startsWith("/api/canvas/network/")) {
       return undefined;
     }

@@ -22,11 +22,13 @@ import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
 
 /**
- * At most this many harness approvals wait for a person at once across the
- * whole host, the same cap the MCP and browser tool approvals use. An
- * approval waits until it is answered or its turn stops, never for a fixed
- * time, so the cap is the only bound on a lead or child that keeps asking;
- * past it a call is refused at once and nothing is journaled.
+ * Under Strict, at most this many harness approvals wait for a person at once
+ * across the whole host; past it a Strict thread's call is refused at once
+ * and nothing is journaled. Outside Strict there is no cap: an approval waits
+ * until it is answered or its turn stops, as a provider's own approvals do,
+ * and stopping the turn is how a lead or child that keeps asking is ended.
+ * The cap protects no hard line, so it is one of Octant's own limits
+ * (maintainer decision, 2026-11-26).
  */
 export const MAX_WAITING_NATIVE_HARNESS_APPROVALS = 32;
 
@@ -103,6 +105,11 @@ export interface NativeHarnessApprovalStoreOptions {
    * Absent, approvals are not tied to a posture.
    */
   readonly posture?: (threadId: string, mode: OctantMode) => string | undefined;
+  /**
+   * Whether the thread runs under Strict, which alone caps how many
+   * approvals wait. Absent, every thread is held to the cap.
+   */
+  readonly strict?: (threadId: string) => boolean;
   readonly onAsked?: (input: {
     readonly threadId: string;
     readonly mode: OctantMode;
@@ -235,7 +242,10 @@ export class NativeHarnessApprovalStore {
     ) {
       return settled("approved");
     }
-    if (this.#waiters.size >= MAX_WAITING_NATIVE_HARNESS_APPROVALS) {
+    if (
+      this.#options.strict?.(input.threadId) !== false &&
+      this.#waiters.size >= MAX_WAITING_NATIVE_HARNESS_APPROVALS
+    ) {
       return settled("too-many-waiting");
     }
     const commandHosts = singleUse ? input.commandHosts : undefined;

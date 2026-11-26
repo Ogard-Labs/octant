@@ -16,11 +16,12 @@ import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 /**
- * At most this many harness questions wait for a person at once across the
- * whole host, the same cap harness, MCP, and browser tool approvals use. A
- * question waits until it is answered or its turn stops, never for a fixed
- * time, so the cap is the only bound on a lead or child that keeps asking;
- * past it a question is refused at once and nothing is journaled.
+ * Under Strict, at most this many harness questions wait for a person at once
+ * across the whole host; past it a Strict thread's question is refused at
+ * once and nothing is journaled. Outside Strict there is no cap: a question
+ * waits until it is answered or its turn stops, and stopping the turn is how
+ * a lead or child that keeps asking is ended. The cap protects no hard line,
+ * so it is one of Octant's own limits (maintainer decision, 2026-11-26).
  */
 export const MAX_WAITING_NATIVE_HARNESS_QUESTIONS = 32;
 
@@ -51,6 +52,11 @@ export interface NativeHarnessQuestionStoreOptions {
   >;
   readonly uuid: () => string;
   readonly clock: () => string;
+  /**
+   * Whether the thread runs under Strict, which alone caps how many
+   * questions wait. Absent, every thread is held to the cap.
+   */
+  readonly strict?: (threadId: string) => boolean;
   /**
    * Told when a question is asked on a thread, so a mode with its own inline
    * question surface (Code) can show it there as well.
@@ -101,7 +107,10 @@ export class NativeHarnessQuestionStore {
     | (SettledQuestionOutcome & { readonly questionId: NativeHarnessQuestionId })
     | RefusedQuestionOutcome
   > {
-    if (this.#waiters.size >= MAX_WAITING_NATIVE_HARNESS_QUESTIONS) {
+    if (
+      this.#options.strict?.(input.threadId) !== false &&
+      this.#waiters.size >= MAX_WAITING_NATIVE_HARNESS_QUESTIONS
+    ) {
       return Promise.resolve({ status: "too-many-waiting" });
     }
     this.#options.sessions.ensure({

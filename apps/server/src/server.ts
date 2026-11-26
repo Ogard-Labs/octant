@@ -362,6 +362,7 @@ export function startOctantServer(
       agentRunPersistence,
       onThreadArchived,
       persistence,
+      resolveThreadStrict,
       workThreadProjection,
     });
     const {
