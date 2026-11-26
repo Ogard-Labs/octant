@@ -261,7 +261,7 @@ import {
   FirstPartyPluginsEffectiveContext,
   useHostFirstPartyPluginsEffective,
 } from "./shell/firstPartyPluginsEffective";
-import { isThreadBoardAvailable } from "./shell/contributionRegistry";
+import { isSettingsSectionAvailable, isThreadBoardAvailable } from "./shell/contributionRegistry";
 import { useWhatsNewAfterUpdate } from "./settings/useWhatsNewAfterUpdate";
 import { hubAdministrationOf, type CodeDeepLink, type OctantHostBridge } from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
@@ -361,7 +361,7 @@ import { useRendererOverlayReport } from "./browser/useRendererOverlayReport";
 import { useHomeShortcut } from "./shell/useHomeShortcut";
 import { useNewThreadShortcut } from "./shell/useNewThreadShortcut";
 import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
-import { octantSettingsCommandPages } from "./settings/octantSettingsNavigation";
+import { settingsCommandPages } from "./settings/octantSettingsNavigation";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
 import { PlanUsageProvider } from "./usage/PlanUsageContext";
 import { FollowUpLineageProvider } from "./followUps/followUpLineage";
@@ -3193,7 +3193,7 @@ function LaunchedShell(
     windowCapability: props.projectWindowCapability,
   });
   // Where the list lives: this host by default, or another computer the
-  // person chose in Settings › To-dos, reached through this window's own
+  // person chose in Settings › Data & storage, reached through this window's own
   // pairing with it. No to-do is sent anywhere else, and nothing is queued
   // for a computer that cannot be reached.
   const todoListHost = useTodoListHost(launchedClients.todoListHostClient, machineChanges.todos);
@@ -9100,11 +9100,14 @@ function LaunchedShell(
       { id: "artifact-library", label: "Artifacts", onOpen: openArtifactLibrary },
       { id: "projects", label: "Projects", onOpen: openProjects },
     ],
-    settingsPages: octantSettingsCommandPages
+    settingsPages: settingsCommandPages((contributedSection) =>
+      isSettingsSectionAvailable(contributedSection, firstPartyPluginsEffective),
+    )
       .filter((section) => section.nativeRequired === undefined)
       .map((section) => ({
         sectionId: section.id,
         label: section.label,
+        alsoFoundAs: section.alsoFoundAs,
         onOpen: () => void controller.openSettings({ section: section.id }),
       })),
     dockTools: dockToolSurfaces.filter(

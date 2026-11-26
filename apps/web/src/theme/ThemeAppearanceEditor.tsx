@@ -35,15 +35,19 @@ import {
 import { usePluginThemes } from "./pluginThemes";
 
 export function ThemeAppearanceEditor(props: {
+  /**
+   * Which page's half of the theme this draws. Appearance takes the look
+   * (colour scheme, accessibility, import and export) and Text the typography;
+   * one page held both, and forty settings, until they were split.
+   */
+  readonly part: "look" | "text";
   readonly controller: ThemeController;
   readonly effectivePlugins?: ReadonlyMap<FirstPartyPluginComponentId, boolean>;
   /** The control a Settings deep link or search result landed on. */
   readonly focusedSetting?: string;
   /**
-   * Sections the page places between the theme's own: the window's glass and
-   * the background after the colour scheme, reading after typography. The
-   * page reads look, then text, then accessibility, rather than every theme
-   * control first and the rest after.
+   * Sections the page places among the theme's own: the window's glass after
+   * the colour scheme on Appearance, reading after typography on Text.
    */
   readonly afterScheme?: ReactNode;
   readonly afterTypography?: ReactNode;
@@ -82,6 +86,7 @@ export function ThemeAppearanceEditor(props: {
     stored !== undefined && presetOptions(mode).some((option) => option.id === stored)
       ? stored
       : "system";
+  const look = props.part === "look";
   if (draft === undefined) {
     // The page's own sections do not wait on the theme: glass and reading are
     // shell settings, and they stayed reachable while the theme loaded before
@@ -89,10 +94,9 @@ export function ThemeAppearanceEditor(props: {
     return (
       <>
         <p className="settings-view__empty" role="status">
-          Loading Appearance settings…
+          {look ? "Loading Appearance settings…" : "Loading Text settings…"}
         </p>
-        {props.afterScheme}
-        {props.afterTypography}
+        {look ? props.afterScheme : props.afterTypography}
       </>
     );
   }
@@ -108,7 +112,10 @@ export function ThemeAppearanceEditor(props: {
     });
   };
   return (
-    <div className="settings-theme-editor" aria-label="Appearance preview controls">
+    <div
+      className="settings-theme-editor"
+      aria-label={look ? "Appearance preview controls" : "Text preview controls"}
+    >
       <div className="settings-feedback-slot" aria-live="polite">
         {theme.error !== undefined ? (
           <OctantAlert className="settings-view__error" tone="danger">
@@ -116,326 +123,337 @@ export function ThemeAppearanceEditor(props: {
           </OctantAlert>
         ) : null}
       </div>
-      <SettingsSection
-        className="settings-theme-editor__scheme-section"
-        id="settings-color-scheme"
-        title="Colour scheme"
-      >
-        <div className="setgroup">
-          <div
-            aria-label="Theme mode"
-            className="settings-scheme"
-            onKeyDown={moveWithinRadioGroup}
-            role="radiogroup"
+      {look ? (
+        <>
+          <SettingsSection
+            className="settings-theme-editor__scheme-section"
+            id="settings-color-scheme"
+            title="Colour scheme"
           >
-            {(
-              [
-                { value: "system", label: "System" },
-                { value: "light", label: "Light" },
-                { value: "dark", label: "Dark" },
-              ] as const
-            ).map((option) => (
-              <OctantButton
-                aria-checked={draft.mode === option.value}
-                className="settings-scheme__card window-no-drag"
-                key={option.value}
-                onClick={() => void theme.applyPatch({ mode: option.value })}
-                role="radio"
-                type="button"
-                variant="bare"
+            <div className="setgroup">
+              <div
+                aria-label="Theme mode"
+                className="settings-scheme"
+                onKeyDown={moveWithinRadioGroup}
+                role="radiogroup"
               >
-                <span
-                  aria-hidden="true"
-                  className={`settings-scheme__preview settings-scheme__preview--${option.value}`}
-                >
-                  <span className="settings-scheme__preview-pane settings-scheme__preview-pane--light">
-                    <span className="settings-scheme__preview-sidebar" />
-                    <span className="settings-scheme__preview-content">
-                      <span />
-                      <span />
-                    </span>
-                  </span>
-                  <span className="settings-scheme__preview-pane settings-scheme__preview-pane--dark">
-                    <span className="settings-scheme__preview-sidebar" />
-                    <span className="settings-scheme__preview-content">
-                      <span />
-                      <span />
-                    </span>
-                  </span>
-                </span>
-                <span className="settings-scheme__label">{option.label}</span>
-              </OctantButton>
-            ))}
-          </div>
-          <SettingRow
-            label="Light preset"
-            scope="app"
-            settingId="appearance.scheme.light-preset"
-            focused={focusedSetting === "appearance.scheme.light-preset"}
-          >
-            <span className="settings-preset-choice">
-              <PresetSwatch mode="light" presetId={shownPreset("light", draft.lightPresetId)} />
-              <OctantSelectField
-                aria-label="Light preset"
-                className="settings-view__select"
-                onValueChange={(value) => void theme.applyPatch({ lightPresetId: value as never })}
-                options={presetOptions("light")}
-                value={shownPreset("light", draft.lightPresetId)}
-              />
-            </span>
-          </SettingRow>
-          <SettingRow
-            label="Dark preset"
-            scope="app"
-            settingId="appearance.scheme.dark-preset"
-            focused={focusedSetting === "appearance.scheme.dark-preset"}
-          >
-            <span className="settings-preset-choice">
-              <PresetSwatch mode="dark" presetId={shownPreset("dark", draft.darkPresetId)} />
-              <OctantSelectField
-                aria-label="Dark preset"
-                className="settings-view__select"
-                onValueChange={(value) => void theme.applyPatch({ darkPresetId: value as never })}
-                options={presetOptions("dark")}
-                value={shownPreset("dark", draft.darkPresetId)}
-              />
-            </span>
-          </SettingRow>
-          {draft.lightPresetId === CUSTOM_THEME_PRESET_ID ? (
-            <CustomSeedsEditor
-              focusedSetting={focusedSetting}
-              mode="light"
-              onChange={(seeds) => void theme.applyPatch({ customThemeLight: seeds })}
-              seeds={draft.customThemeLight}
-            />
-          ) : null}
-          {draft.darkPresetId === CUSTOM_THEME_PRESET_ID ? (
-            <CustomSeedsEditor
-              focusedSetting={focusedSetting}
-              mode="dark"
-              onChange={(seeds) => void theme.applyPatch({ customThemeDark: seeds })}
-              seeds={draft.customThemeDark}
-            />
-          ) : null}
-          <SettingRow
-            description="Comfortable is the default. Compact takes less room: shorter navigation and Settings rows, a narrower thread gutter, and a tighter prompt."
-            focused={focusedSetting === "appearance.density"}
-            label="Density"
-            scope="app"
-            settingId="appearance.density"
-          >
-            <OctantToggleGroup<ThemeDensity>
-              aria-label="Density"
-              onValueChange={(value) => {
-                const selected = value[0];
-                if (selected === undefined || selected === shownDensity) return;
-                void theme.applyPatch({ density: selected });
-              }}
-              value={[shownDensity]}
-            >
-              <OctantToggleGroupItem value="comfortable">Comfortable</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="compact">Compact</OctantToggleGroupItem>
-            </OctantToggleGroup>
-          </SettingRow>
-          <SettingRow
-            description="Colour gives Octant an accent, status hues, and coloured tiles, board marks, and Project accents. Mono keeps everything grey."
-            focused={focusedSetting === "appearance.scheme.style"}
-            label="Style"
-            scope="app"
-            settingId="appearance.scheme.style"
-          >
-            <OctantToggleGroup<ThemeStyle>
-              aria-label="Style"
-              onValueChange={(value) => {
-                const selected = value[0];
-                if (selected === undefined || selected === shownStyle) return;
-                void theme.applyPatch({ style: selected });
-              }}
-              value={[shownStyle]}
-            >
-              <OctantToggleGroupItem value="default">Colour</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="mono">Mono</OctantToggleGroupItem>
-            </OctantToggleGroup>
-          </SettingRow>
-          <SettingRow
-            description="Switches, primary buttons, and selected states. Mono is the grey look and sets Style to Mono."
-            focused={focusedSetting === "appearance.scheme.accent"}
-            label="Accent"
-            scope="app"
-            settingId="appearance.scheme.accent"
-          >
-            <div
-              aria-label="Accent colour"
-              className="settings-accent"
-              onKeyDown={moveWithinRadioGroup}
-              role="radiogroup"
-            >
-              {ACCENT_SWATCHES.map((swatch) => {
-                const checked = shownAccent === swatch.id;
-                return (
+                {(
+                  [
+                    { value: "system", label: "System" },
+                    { value: "light", label: "Light" },
+                    { value: "dark", label: "Dark" },
+                  ] as const
+                ).map((option) => (
                   <OctantButton
-                    aria-checked={checked}
-                    aria-label={swatch.label}
-                    className="settings-accent__swatch hover:no-underline"
-                    key={swatch.id}
-                    onClick={() =>
-                      void theme.applyPatch({
-                        ...(swatch.id === "mono" ? { style: "mono" as const } : {}),
-                        semanticOverrides: overridesForAccent(
-                          draft.semanticOverrides,
-                          swatch.id,
-                          draft.style,
-                        ),
-                      })
-                    }
+                    aria-checked={draft.mode === option.value}
+                    className="settings-scheme__card window-no-drag"
+                    key={option.value}
+                    onClick={() => void theme.applyPatch({ mode: option.value })}
                     role="radio"
-                    style={
-                      {
-                        "--settings-accent-swatch":
-                          swatchDotColor(swatch, shownMode) ?? "var(--octant-text-primary)",
-                      } as CSSProperties
-                    }
-                    title={swatch.label}
                     type="button"
-                    variant="link"
+                    variant="bare"
                   >
-                    <span aria-hidden="true" className="settings-accent__dot" />
+                    <span
+                      aria-hidden="true"
+                      className={`settings-scheme__preview settings-scheme__preview--${option.value}`}
+                    >
+                      <span className="settings-scheme__preview-pane settings-scheme__preview-pane--light">
+                        <span className="settings-scheme__preview-sidebar" />
+                        <span className="settings-scheme__preview-content">
+                          <span />
+                          <span />
+                        </span>
+                      </span>
+                      <span className="settings-scheme__preview-pane settings-scheme__preview-pane--dark">
+                        <span className="settings-scheme__preview-sidebar" />
+                        <span className="settings-scheme__preview-content">
+                          <span />
+                          <span />
+                        </span>
+                      </span>
+                    </span>
+                    <span className="settings-scheme__label">{option.label}</span>
                   </OctantButton>
-                );
-              })}
+                ))}
+              </div>
+              <SettingRow
+                label="Light preset"
+                scope="app"
+                settingId="appearance.scheme.light-preset"
+                focused={focusedSetting === "appearance.scheme.light-preset"}
+              >
+                <span className="settings-preset-choice">
+                  <PresetSwatch mode="light" presetId={shownPreset("light", draft.lightPresetId)} />
+                  <OctantSelectField
+                    aria-label="Light preset"
+                    className="settings-view__select"
+                    onValueChange={(value) =>
+                      void theme.applyPatch({ lightPresetId: value as never })
+                    }
+                    options={presetOptions("light")}
+                    value={shownPreset("light", draft.lightPresetId)}
+                  />
+                </span>
+              </SettingRow>
+              <SettingRow
+                label="Dark preset"
+                scope="app"
+                settingId="appearance.scheme.dark-preset"
+                focused={focusedSetting === "appearance.scheme.dark-preset"}
+              >
+                <span className="settings-preset-choice">
+                  <PresetSwatch mode="dark" presetId={shownPreset("dark", draft.darkPresetId)} />
+                  <OctantSelectField
+                    aria-label="Dark preset"
+                    className="settings-view__select"
+                    onValueChange={(value) =>
+                      void theme.applyPatch({ darkPresetId: value as never })
+                    }
+                    options={presetOptions("dark")}
+                    value={shownPreset("dark", draft.darkPresetId)}
+                  />
+                </span>
+              </SettingRow>
+              {draft.lightPresetId === CUSTOM_THEME_PRESET_ID ? (
+                <CustomSeedsEditor
+                  focusedSetting={focusedSetting}
+                  mode="light"
+                  onChange={(seeds) => void theme.applyPatch({ customThemeLight: seeds })}
+                  seeds={draft.customThemeLight}
+                />
+              ) : null}
+              {draft.darkPresetId === CUSTOM_THEME_PRESET_ID ? (
+                <CustomSeedsEditor
+                  focusedSetting={focusedSetting}
+                  mode="dark"
+                  onChange={(seeds) => void theme.applyPatch({ customThemeDark: seeds })}
+                  seeds={draft.customThemeDark}
+                />
+              ) : null}
+              <SettingRow
+                description="Comfortable is the default. Compact takes less room: shorter navigation and Settings rows, a narrower thread gutter, and a tighter prompt."
+                focused={focusedSetting === "appearance.density"}
+                label="Density"
+                scope="app"
+                settingId="appearance.density"
+              >
+                <OctantToggleGroup<ThemeDensity>
+                  aria-label="Density"
+                  onValueChange={(value) => {
+                    const selected = value[0];
+                    if (selected === undefined || selected === shownDensity) return;
+                    void theme.applyPatch({ density: selected });
+                  }}
+                  value={[shownDensity]}
+                >
+                  <OctantToggleGroupItem value="comfortable">Comfortable</OctantToggleGroupItem>
+                  <OctantToggleGroupItem value="compact">Compact</OctantToggleGroupItem>
+                </OctantToggleGroup>
+              </SettingRow>
+              <SettingRow
+                description="Colour gives Octant an accent, status hues, and coloured tiles, board marks, and Project accents. Mono keeps everything grey."
+                focused={focusedSetting === "appearance.scheme.style"}
+                label="Style"
+                scope="app"
+                settingId="appearance.scheme.style"
+              >
+                <OctantToggleGroup<ThemeStyle>
+                  aria-label="Style"
+                  onValueChange={(value) => {
+                    const selected = value[0];
+                    if (selected === undefined || selected === shownStyle) return;
+                    void theme.applyPatch({ style: selected });
+                  }}
+                  value={[shownStyle]}
+                >
+                  <OctantToggleGroupItem value="default">Colour</OctantToggleGroupItem>
+                  <OctantToggleGroupItem value="mono">Mono</OctantToggleGroupItem>
+                </OctantToggleGroup>
+              </SettingRow>
+              <SettingRow
+                description="Switches, primary buttons, and selected states. Mono is the grey look and sets Style to Mono."
+                focused={focusedSetting === "appearance.scheme.accent"}
+                label="Accent"
+                scope="app"
+                settingId="appearance.scheme.accent"
+              >
+                <div
+                  aria-label="Accent colour"
+                  className="settings-accent"
+                  onKeyDown={moveWithinRadioGroup}
+                  role="radiogroup"
+                >
+                  {ACCENT_SWATCHES.map((swatch) => {
+                    const checked = shownAccent === swatch.id;
+                    return (
+                      <OctantButton
+                        aria-checked={checked}
+                        aria-label={swatch.label}
+                        className="settings-accent__swatch hover:no-underline"
+                        key={swatch.id}
+                        onClick={() =>
+                          void theme.applyPatch({
+                            ...(swatch.id === "mono" ? { style: "mono" as const } : {}),
+                            semanticOverrides: overridesForAccent(
+                              draft.semanticOverrides,
+                              swatch.id,
+                              draft.style,
+                            ),
+                          })
+                        }
+                        role="radio"
+                        style={
+                          {
+                            "--settings-accent-swatch":
+                              swatchDotColor(swatch, shownMode) ?? "var(--octant-text-primary)",
+                          } as CSSProperties
+                        }
+                        title={swatch.label}
+                        type="button"
+                        variant="link"
+                      >
+                        <span aria-hidden="true" className="settings-accent__dot" />
+                      </OctantButton>
+                    );
+                  })}
+                </div>
+              </SettingRow>
             </div>
-          </SettingRow>
-        </div>
-      </SettingsSection>
-      {props.afterScheme}
-      {/* The interface font and its size are among the most-changed settings
-          in the app, so they are not worth a click to reach. */}
-      <SettingsSection
-        className="settings-theme-editor__disclosure"
-        id="settings-typography"
-        title="Typography"
-      >
-        <div className="setgroup settings-theme-editor__disclosure-body">
-          <TypographyControl
-            label="Interface typography"
-            familyLabel="Interface font"
-            surface="ui"
-            focusedSetting={focusedSetting}
-            value={draft.typography.ui}
-            onChange={(patch) => setTypography("ui", patch)}
-            hideLegend
-          />
-          {runsOnMac() ? (
-            <SettingRow
-              description="Smooth edges at a heavier weight, so text stays strong. Off draws the system's fuller, grainier strokes."
-              focused={focusedSetting === "appearance.typography.smoothing"}
-              label="Smooth text"
-              scope="app"
-              settingId="appearance.typography.smoothing"
-            >
-              <OctantSwitch
-                checked={smoothText}
-                label="Smooth text"
-                onCheckedChange={(value) =>
-                  void theme.applyPatch({ fontSmoothing: value ? "on" : "off" })
-                }
+          </SettingsSection>
+          {props.afterScheme}
+          <SettingsSection
+            className="settings-theme-editor__accessibility"
+            id="settings-accessibility"
+            title="Accessibility"
+          >
+            <div className="setgroup">
+              <SettingRow
+                label="Increased contrast"
+                scope="app"
+                settingId="appearance.accessibility.increased-contrast"
+                focused={focusedSetting === "appearance.accessibility.increased-contrast"}
+              >
+                <OctantSwitch
+                  checked={draft.increasedContrast}
+                  label="Increased contrast"
+                  onCheckedChange={(value) => void theme.applyPatch({ increasedContrast: value })}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Reduced motion"
+                scope="app"
+                settingId="appearance.accessibility.reduced-motion"
+                focused={focusedSetting === "appearance.accessibility.reduced-motion"}
+              >
+                <OctantSwitch
+                  checked={draft.reducedMotion}
+                  label="Reduced motion"
+                  onCheckedChange={(value) => void theme.applyPatch({ reducedMotion: value })}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Reduced transparency"
+                scope="app"
+                settingId="appearance.accessibility.reduced-transparency"
+                focused={focusedSetting === "appearance.accessibility.reduced-transparency"}
+              >
+                <OctantSwitch
+                  checked={draft.reducedTransparency}
+                  label="Reduced transparency"
+                  onCheckedChange={(value) => void theme.applyPatch({ reducedTransparency: value })}
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
+          <OctantCollapsible
+            chevron="end"
+            chevronSize={16}
+            className="settings-card-section settings-card-section--open settings-theme-editor__disclosure"
+            {...(focusedSetting === "appearance.theme-import-export" ? { open: true } : {})}
+            summary={<span>Import or export theme</span>}
+          >
+            <div className="setgroup settings-theme-editor__disclosure-body">
+              <ThemeTransfer
+                controller={theme}
+                focused={focusedSetting === "appearance.theme-import-export"}
+                photoLibrary={props.photoLibrary}
               />
-            </SettingRow>
-          ) : null}
-          <SettingsDisclosure
-            title="Code typography"
-            defaultOpen={focusedSetting?.startsWith("appearance.typography.editor.") === true}
-            description="Font, size, and spacing inside code editors."
+            </div>
+          </OctantCollapsible>
+        </>
+      ) : (
+        <>
+          {/* The interface font and its size are among the most-changed settings
+          in the app, so they are not worth a click to reach. */}
+          <SettingsSection
+            className="settings-theme-editor__disclosure"
+            id="settings-typography"
+            title="Typography"
           >
-            <TypographyControl
-              label="Code typography"
-              familyLabel="Code font"
-              surface="editor"
-              focusedSetting={focusedSetting}
-              value={draft.typography.editor}
-              onChange={(patch) => setTypography("editor", patch)}
-              extended
-              hideLegend
-            />
-          </SettingsDisclosure>
-          <SettingsDisclosure
-            title="Terminal typography"
-            defaultOpen={focusedSetting?.startsWith("appearance.typography.terminal.") === true}
-            description="Font, size, and spacing inside terminals."
-          >
-            <TypographyControl
-              label="Terminal typography"
-              familyLabel="Terminal font family"
-              surface="terminal"
-              focusedSetting={focusedSetting}
-              value={draft.typography.terminal}
-              onChange={(patch) => setTypography("terminal", patch)}
-              extended
-              hideLegend
-            />
-          </SettingsDisclosure>
-        </div>
-      </SettingsSection>
-      {props.afterTypography}
-      <SettingsSection
-        className="settings-theme-editor__accessibility"
-        id="settings-accessibility"
-        title="Accessibility"
-      >
-        <div className="setgroup">
-          <SettingRow
-            label="Increased contrast"
-            scope="app"
-            settingId="appearance.accessibility.increased-contrast"
-            focused={focusedSetting === "appearance.accessibility.increased-contrast"}
-          >
-            <OctantSwitch
-              checked={draft.increasedContrast}
-              label="Increased contrast"
-              onCheckedChange={(value) => void theme.applyPatch({ increasedContrast: value })}
-            />
-          </SettingRow>
-          <SettingRow
-            label="Reduced motion"
-            scope="app"
-            settingId="appearance.accessibility.reduced-motion"
-            focused={focusedSetting === "appearance.accessibility.reduced-motion"}
-          >
-            <OctantSwitch
-              checked={draft.reducedMotion}
-              label="Reduced motion"
-              onCheckedChange={(value) => void theme.applyPatch({ reducedMotion: value })}
-            />
-          </SettingRow>
-          <SettingRow
-            label="Reduced transparency"
-            scope="app"
-            settingId="appearance.accessibility.reduced-transparency"
-            focused={focusedSetting === "appearance.accessibility.reduced-transparency"}
-          >
-            <OctantSwitch
-              checked={draft.reducedTransparency}
-              label="Reduced transparency"
-              onCheckedChange={(value) => void theme.applyPatch({ reducedTransparency: value })}
-            />
-          </SettingRow>
-        </div>
-      </SettingsSection>
-      <OctantCollapsible
-        chevron="end"
-        chevronSize={16}
-        className="settings-card-section settings-card-section--open settings-theme-editor__disclosure"
-        {...(focusedSetting === "appearance.theme-import-export" ? { open: true } : {})}
-        summary={<span>Import or export theme</span>}
-      >
-        <div className="setgroup settings-theme-editor__disclosure-body">
-          <ThemeTransfer
-            controller={theme}
-            focused={focusedSetting === "appearance.theme-import-export"}
-            photoLibrary={props.photoLibrary}
-          />
-        </div>
-      </OctantCollapsible>
+            <div className="setgroup settings-theme-editor__disclosure-body">
+              <TypographyControl
+                label="Interface typography"
+                familyLabel="Interface font"
+                surface="ui"
+                focusedSetting={focusedSetting}
+                value={draft.typography.ui}
+                onChange={(patch) => setTypography("ui", patch)}
+                hideLegend
+              />
+              {runsOnMac() ? (
+                <SettingRow
+                  description="Smooth edges at a heavier weight, so text stays strong. Off draws the system's fuller, grainier strokes."
+                  focused={focusedSetting === "appearance.typography.smoothing"}
+                  label="Smooth text"
+                  scope="app"
+                  settingId="appearance.typography.smoothing"
+                >
+                  <OctantSwitch
+                    checked={smoothText}
+                    label="Smooth text"
+                    onCheckedChange={(value) =>
+                      void theme.applyPatch({ fontSmoothing: value ? "on" : "off" })
+                    }
+                  />
+                </SettingRow>
+              ) : null}
+              <SettingsDisclosure
+                title="Code typography"
+                defaultOpen={focusedSetting?.startsWith("appearance.typography.editor.") === true}
+                description="Font, size, and spacing inside code editors."
+              >
+                <TypographyControl
+                  label="Code typography"
+                  familyLabel="Code font"
+                  surface="editor"
+                  focusedSetting={focusedSetting}
+                  value={draft.typography.editor}
+                  onChange={(patch) => setTypography("editor", patch)}
+                  extended
+                  hideLegend
+                />
+              </SettingsDisclosure>
+              <SettingsDisclosure
+                title="Terminal typography"
+                defaultOpen={focusedSetting?.startsWith("appearance.typography.terminal.") === true}
+                description="Font, size, and spacing inside terminals."
+              >
+                <TypographyControl
+                  label="Terminal typography"
+                  familyLabel="Terminal font family"
+                  surface="terminal"
+                  focusedSetting={focusedSetting}
+                  value={draft.typography.terminal}
+                  onChange={(patch) => setTypography("terminal", patch)}
+                  extended
+                  hideLegend
+                />
+              </SettingsDisclosure>
+            </div>
+          </SettingsSection>
+          {props.afterTypography}
+        </>
+      )}
     </div>
   );
 }

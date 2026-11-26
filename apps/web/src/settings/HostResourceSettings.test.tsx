@@ -46,6 +46,12 @@ describe("computer resource settings", () => {
         />,
       );
       expect(await screen.findByText(/8 cores/)).toBeTruthy();
+      // The readings are the Load readings row's own description, in the card.
+      const readings = screen.getByRole("group", { name: "Load readings setting" });
+      expect(readings).toHaveAccessibleDescription(expect.stringContaining("8 cores"));
+      expect(readings.closest("fieldset")).toBe(
+        screen.getByRole("group", { name: "Computer resource limits" }),
+      );
       expect(screen.getByText((text) => text.includes(label))).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "Pause new work" }));
       await waitFor(() =>

@@ -31,7 +31,7 @@ function page(ownListEmpty: boolean, choose = vi.fn(async () => undefined)) {
   return choose;
 }
 
-describe("Settings › To-dos", () => {
+describe("Settings › Data & storage › To-dos", () => {
   it("keeps the list on a paired computer the person picks", async () => {
     const user = userEvent.setup();
     const choose = page(true);

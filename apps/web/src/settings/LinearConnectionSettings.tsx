@@ -232,7 +232,10 @@ export function LinearConnectionSettings({
       className="linear-settings"
       id="settings-linear"
     >
-      <SettingsSection description="Linear authentication on the selected host." title="Workspace">
+      <SettingsSection
+        description="Linear authentication on the selected host."
+        title="Linear workspace"
+      >
         <SettingsFactList
           facts={[
             { label: "State", value: STATE_LABELS[snapshot.state] },
@@ -268,7 +271,7 @@ export function LinearConnectionSettings({
         )}
       </SettingsSection>
 
-      <SettingsSection title="Connection">
+      <SettingsSection title="Linear connection">
         <div className="setgroup">
           <SettingRow
             description="Connect or reconnect, and refresh what Octant sees."
@@ -326,7 +329,7 @@ export function LinearConnectionSettings({
       {connected && bindableProjects.length > 0 ? (
         <SettingsSection
           description="Pick the Linear team (and optional Linear project) each Project scopes its issues and octant_linear reads to."
-          title="Projects"
+          title="Linear projects"
         >
           {filtersLoading && teams.length === 0 ? (
             <p className="settings-section-line">Loading Linear teams…</p>
@@ -435,7 +438,7 @@ export function LinearConnectionSettings({
 
       <SettingsSection
         description="A personal API key is stored in the same host secret store as OAuth tokens, and is never used as an OAuth fallback."
-        title="Advanced"
+        title="Linear API key"
       >
         <div className="linear-settings__controls">
           <OctantButton
@@ -522,7 +525,7 @@ export function LinearConnectionSettings({
       </SettingsSection>
 
       {connected ? (
-        <SettingsSection tone="danger" title="Disconnect">
+        <SettingsSection tone="danger" title="Disconnect Linear">
           <div className="setgroup">
             <SettingRow
               description="Removes Octant's Linear sign-in from this host. Your Linear workspace is untouched."

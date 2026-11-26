@@ -3,6 +3,7 @@ import { GitHubConnectionSettings } from "./GitHubConnectionSettings";
 
 export interface GitHubSettingsSectionModuleProps {
   readonly githubClient?: GithubClient | undefined;
+  readonly focusedSetting?: string | undefined;
 }
 
 /**
@@ -23,5 +24,7 @@ export default function GitHubSettingsSectionModule(props: GitHubSettingsSection
       </section>
     );
   }
-  return <GitHubConnectionSettings client={props.githubClient} />;
+  return (
+    <GitHubConnectionSettings client={props.githubClient} focusedSetting={props.focusedSetting} />
+  );
 }

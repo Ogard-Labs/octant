@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { octantSettingsRegistry } from "../settings/octantSettingsRegistry";
 import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
 
 const settingsStyles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
@@ -12,7 +13,7 @@ describe("SettingsNavigation", () => {
       { id: "general", label: "General" },
       { id: "appearance", label: "Appearance" },
       { id: "keybindings", label: "Keybindings" },
-      { id: "chat", label: "Chat" },
+      { id: "chat-work", label: "Chat & Work" },
       { id: "providers", label: "Providers" },
     ];
     render(
@@ -26,7 +27,7 @@ describe("SettingsNavigation", () => {
       "Appearance",
       "Keybindings",
       "Providers",
-      "Chat",
+      "Chat & Work",
     ]);
     expect(screen.queryByRole("button", { name: /theme|typography|extensions/i })).toBeNull();
   });
@@ -73,23 +74,63 @@ describe("SettingsNavigation", () => {
     expect(settingsStyles).toMatch(/\.settings-panel\s*\{[^}]*background:\s*transparent;/s);
   });
 
-  it("gives Device tools an icon of its own, apart from Computer use", () => {
+  // docs/design/settings.md, Groups and pages: the table there is the page
+  // list, and the rail is drawn from it and from nothing else.
+  it("lists the groups and pages the Settings specification lists, in its order", () => {
+    const specification = readFileSync(
+      resolve(process.cwd(), "../../docs/design/settings.md"),
+      "utf8",
+    );
+    const table = /\| Group +\| Pages, in order[^\n]*\n\|[- |]+\n((?:\|[^\n]*\n)+)/.exec(
+      specification,
+    )?.[1];
+    const specified = (table ?? "")
+      .trim()
+      .split("\n")
+      .map((row) => row.split("|").map((cell) => cell.trim()))
+      .map(([, group, pages]) => ({
+        group,
+        pages: (pages ?? "").split(",").map((page) => page.trim()),
+      }));
+    expect(specified).toHaveLength(6);
+
+    render(
+      <SettingsNavigation
+        sections={octantSettingsRegistry.sections.map(({ id, label }) => ({ id, label }))}
+        activeSection="general"
+        onSelect={vi.fn()}
+      />,
+    );
+    const drawn = [
+      ...screen
+        .getByRole("navigation", { name: "Settings sections" })
+        .querySelectorAll(".settings-navigation__group"),
+    ].map((group) => ({
+      group: group.querySelector("p")?.textContent,
+      pages: within(group as HTMLElement)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    }));
+    expect(drawn).toEqual(specified);
+  });
+
+  it("draws no row for a page that was folded into another", () => {
     render(
       <SettingsNavigation
         sections={[
           { id: "computer-use", label: "Computer use" },
           { id: "device-tools", label: "Device tools" },
+          { id: "todos", label: "To-dos" },
         ]}
         activeSection="computer-use"
         onSelect={vi.fn()}
       />,
     );
-    const icon = (name: string) =>
-      screen.getByRole("button", { name }).querySelector("svg")?.getAttribute("class");
-    expect(icon("Device tools")).not.toBe(icon("Computer use"));
     expect(
-      screen.getByRole("button", { name: "Device tools" }).querySelector("svg"),
-    ).toHaveAttribute("aria-hidden", "true");
+      within(screen.getByRole("navigation", { name: "Settings sections" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Computer use"]);
   });
 
   it("stays absent when search leaves no implemented section", () => {

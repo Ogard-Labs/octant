@@ -24,68 +24,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "general enabled modes startup default chat work updates version release threads completed settle settled put away archive snooze compact compaction context window profile name email avatar gravatar initials colour color picture identity notifications notify alerts push phone waiting approval failure completion automation routines",
       settings: [
         {
-          id: settingId("resource-limits"),
-          label: "Computer resources",
-          scope: "host",
-          keywords:
-            "cpu ram memory load hardware automatic resource limits throttle vitest testing workers processes helpers pause concurrency",
-        },
-        {
-          id: settingId("resource-maxCommands"),
-          label: "Concurrent commands",
-          scope: "host",
-          keywords: "commands process concurrent limit",
-        },
-        {
-          id: settingId("resource-maxWorkers"),
-          label: "Total test workers",
-          scope: "host",
-          keywords: "vitest test workers processes parallel",
-        },
-        {
-          id: settingId("resource-maxAgents"),
-          label: "Helper agent limit",
-          scope: "host",
-          keywords: "subagent helper concurrency",
-        },
-        {
-          id: settingId("resource-cpuTargetPercent"),
-          label: "CPU limit for new work",
-          scope: "host",
-          keywords: "cpu utilization load headroom target",
-        },
-        {
-          id: settingId("resource-memoryReservePercent"),
-          label: "Memory reserve",
-          scope: "host",
-          keywords: "ram memory available reserve pressure",
-        },
-        {
-          id: settingId("resource-save"),
-          label: "Save resource limits",
-          scope: "host",
-          keywords: "save resource limits apply",
-        },
-        {
-          id: settingId("resource-pause"),
-          label: "Pause new work",
-          scope: "host",
-          keywords: "pause throttle testing helper agents commands",
-        },
-        {
-          id: settingId("resource-keepAwake"),
-          label: "Keep the computer awake while agents work",
-          scope: "host",
-          keywords:
-            "keep awake sleep prevent idle battery power ac suspend routines turns computer awake",
-        },
-        {
-          id: settingId("resource-refresh"),
-          label: "Refresh host load",
-          scope: "host",
-          keywords: "refresh resources hardware cpu memory load",
-        },
-        {
           id: settingId("enable-chat"),
           label: "Enable Chat",
           scope: "app",
@@ -273,7 +211,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     {
       ...octantSettingsNavigation.appearance,
       keywords:
-        "appearance theme glass translucency material background typography font reading transcript accessibility",
+        "appearance theme colour color scheme preset accent density style glass translucency material tint accessibility contrast motion transparency",
       settings: [
         {
           id: settingId("sidebar-material"),
@@ -287,32 +225,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Glass tint",
           scope: "app",
           keywords: "glass tint opacity transparency see-through darkness window vibrancy",
-        },
-        {
-          id: settingId("transcript-text-size"),
-          label: "Transcript text size",
-          scope: "app",
-          keywords: "transcript conversation text font size small medium large",
-        },
-        {
-          id: settingId("transcript-width"),
-          label: "Transcript width",
-          scope: "app",
-          keywords: "transcript conversation composer width narrow medium wide centered",
-        },
-        {
-          id: settingId("reply-detail"),
-          label: "Reply detail",
-          scope: "app",
-          keywords:
-            "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
-        },
-        {
-          id: settingId("app-background"),
-          label: "Background",
-          scope: "app",
-          keywords:
-            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity flowing colour none",
         },
         {
           id: settingId("appearance.scheme.light-preset"),
@@ -340,34 +252,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "density compact comfortable rows spacing room tight",
         },
         {
-          id: settingId("appearance.typography.smoothing"),
-          label: "Smooth text",
-          scope: "app",
-          keywords: "smooth text smoothing antialiasing grayscale font rendering mac",
-        },
-        {
           id: settingId("appearance.scheme.style"),
           label: "Style",
           scope: "app",
           keywords: "style colour color colourful mono monochrome grey vivid tiles accent",
-        },
-        {
-          id: settingId("appearance.typography.ui.family"),
-          label: "Interface font",
-          scope: "app",
-          keywords: "interface typography font family size prose ui",
-        },
-        {
-          id: settingId("appearance.typography.editor.family"),
-          label: "Code font",
-          scope: "app",
-          keywords: "code editor typography font line height ligatures",
-        },
-        {
-          id: settingId("appearance.typography.terminal.family"),
-          label: "Terminal font",
-          scope: "app",
-          keywords: "terminal typography font line height ligatures",
         },
         {
           id: settingId("appearance.accessibility.increased-contrast"),
@@ -383,9 +271,9 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("reset-appearance"),
-          label: "Reset appearance",
+          label: "Reset theme",
           scope: "app",
-          keywords: "reset appearance defaults theme restore",
+          keywords: "reset appearance defaults theme restore background text fonts",
         },
         {
           id: settingId("appearance.scheme.accent"),
@@ -404,6 +292,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Reduce transparency",
           scope: "app",
           keywords: "reduce reduced transparency glass opaque accessibility",
+        },
+      ],
+    },
+    {
+      ...octantSettingsNavigation.background,
+      keywords:
+        "background wallpaper backdrop photo picture image scene effect pixels characters motion colours behind",
+      settings: [
+        {
+          id: settingId("app-background"),
+          label: "Background",
+          scope: "app",
+          keywords:
+            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity flowing colour none",
         },
         {
           id: settingId("app-background-motion"),
@@ -481,6 +383,37 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "background show behind start screens every page everywhere",
         },
+      ],
+    },
+    {
+      ...octantSettingsNavigation.text,
+      keywords:
+        "text typography font fonts size reading transcript width reply detail ligatures line height interface code terminal smoothing",
+      settings: [
+        {
+          id: settingId("appearance.typography.smoothing"),
+          label: "Smooth text",
+          scope: "app",
+          keywords: "smooth text smoothing antialiasing grayscale font rendering mac",
+        },
+        {
+          id: settingId("appearance.typography.ui.family"),
+          label: "Interface font",
+          scope: "app",
+          keywords: "interface typography font family size prose ui",
+        },
+        {
+          id: settingId("appearance.typography.editor.family"),
+          label: "Code font",
+          scope: "app",
+          keywords: "code editor typography font line height ligatures",
+        },
+        {
+          id: settingId("appearance.typography.terminal.family"),
+          label: "Terminal font",
+          scope: "app",
+          keywords: "terminal typography font line height ligatures",
+        },
         {
           id: settingId("appearance.typography.ui.size"),
           label: "Interface text size",
@@ -522,6 +455,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Terminal ligatures",
           scope: "app",
           keywords: "terminal ligatures typography",
+        },
+        {
+          id: settingId("transcript-text-size"),
+          label: "Transcript text size",
+          scope: "app",
+          keywords: "transcript conversation text font size small medium large",
+        },
+        {
+          id: settingId("transcript-width"),
+          label: "Transcript width",
+          scope: "app",
+          keywords: "transcript conversation composer width narrow medium wide centered",
+        },
+        {
+          id: settingId("reply-detail"),
+          label: "Reply detail",
+          scope: "app",
+          keywords:
+            "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
         },
       ],
     },
@@ -659,9 +611,9 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      ...octantSettingsNavigation.chat,
+      ...octantSettingsNavigation["chat-work"],
       keywords:
-        "chat defaults provider model fallback backup web research backend routing octant searxng base url personality instructions new threads",
+        "chat defaults provider model fallback backup web research backend routing octant searxng base url personality instructions new threads work defaults provider model access ask first auto-accept edits approvals files project folder new threads",
       settings: [
         {
           id: settingId("stream-replies"),
@@ -701,18 +653,11 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("chat-restart-continuation"),
-          label: "Continue after restart",
+          label: "Continue Chat threads after restart",
           scope: "mode",
           keywords:
             "continue after restart crash reboot quit resume interrupted answer automatically recovery chat",
         },
-      ],
-    },
-    {
-      ...octantSettingsNavigation.work,
-      keywords:
-        "work defaults provider model access ask first auto-accept edits approvals files project folder new threads",
-      settings: [
         {
           id: settingId("work-default-model"),
           label: "Default Work model",
@@ -734,7 +679,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("work-restart-continuation"),
-          label: "Continue after restart",
+          label: "Continue Work threads after restart",
           scope: "mode",
           keywords:
             "continue after restart crash reboot quit resume interrupted turn automatically recovery work",
@@ -1337,34 +1282,9 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      ...octantSettingsNavigation["web-search"],
-      keywords:
-        "web search backends data policy zdr eu searxng staan mojeek linkup brave exa api key fallback provider search",
-      settings: [
-        {
-          id: settingId("web-search-policy"),
-          label: "Data policy",
-          scope: "host",
-          keywords: "policy zdr eu processing region any",
-        },
-        {
-          id: settingId("web-search-provider-search"),
-          label: "A provider's own search",
-          scope: "host",
-          keywords: "provider native search anthropic openai web tools locked",
-        },
-        {
-          id: settingId("web-search-add"),
-          label: "Add backend",
-          scope: "host",
-          keywords: "add backend searxng staan mojeek linkup brave exa key",
-        },
-      ],
-    },
-    {
       ...octantSettingsNavigation["computer-use"],
       keywords:
-        "computer use computer automation cua driver permissions accessibility screen recording plugin updates upgrade",
+        "computer use computer automation cua driver permissions accessibility screen recording plugin updates upgrade device tools simulator emulator serve-sim serve-avd ios android stream updates upgrade bundled",
       settings: [
         {
           id: settingId("computer-use-enabled"),
@@ -1457,67 +1377,78 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "disposable desktop lease limit count host local how many",
         },
-      ],
-    },
-    {
-      ...octantSettingsNavigation["device-tools"],
-      keywords:
-        "device tools simulator emulator serve-sim serve-avd ios android stream updates upgrade bundled",
-      settings: [
         {
           id: settingId("managed-tools-automatic-updates"),
-          label: "Automatic updates",
+          label: "Update device tools automatically",
           scope: "host",
-          keywords: "automatic updates upgrade device tools",
+          keywords: "automatic updates upgrade device tools simulator emulator serve-sim serve-avd",
         },
         {
           id: settingId("managed-tools-update-check"),
-          label: "Update check",
+          label: "Check device tools for updates",
           scope: "host",
-          keywords: "check updates device tools",
+          keywords: "check updates device tools simulator emulator serve-sim serve-avd",
         },
       ],
     },
     {
-      ...octantSettingsNavigation.github,
+      ...octantSettingsNavigation.integrations,
       keywords:
-        "github account gh cli authentication connection setup sign in refresh scopes read:project logout revoke authorization repositories issues pull requests projects capability credential storage device code insecure external token rate limited diagnostics",
+        "integrations connections accounts services issues trackers web search backends data policy zdr eu searxng staan mojeek linkup brave exa api key fallback provider search",
       settings: [
+        {
+          id: settingId("web-search-policy"),
+          label: "Web search data policy",
+          scope: "host",
+          keywords: "policy zdr eu processing region any",
+        },
+        {
+          id: settingId("web-search-provider-search"),
+          label: "A provider's own search",
+          scope: "host",
+          keywords: "provider native search anthropic openai web tools locked",
+        },
+        {
+          id: settingId("web-search-add"),
+          label: "Add a web search backend",
+          scope: "host",
+          keywords: "add backend searxng staan mojeek linkup brave exa key",
+        },
         {
           id: settingId("github-connection"),
           label: "GitHub connection",
           scope: "host",
-          keywords: "connection scopes refresh credential token secure storage sign in login",
+          contributedSection: "github",
+          keywords:
+            "connection scopes refresh credential token secure storage sign in login github account gh cli authentication setup read:project logout revoke authorization repositories issues pull requests projects capability device code insecure external rate limited diagnostics",
         },
         {
           id: settingId("github-logout"),
           label: "Log out of GitHub",
           scope: "host",
+          contributedSection: "github",
           keywords: "log out logout sign out disconnect remove credential",
         },
-      ],
-    },
-    {
-      ...octantSettingsNavigation.linear,
-      keywords:
-        "linear workspace authentication connection setup oauth connect disconnect reconnect issues personal api key",
-      settings: [
         {
           id: settingId("linear-connection"),
           label: "Linear connection",
           scope: "host",
-          keywords: "connect reconnect refresh connection sign in login",
+          contributedSection: "linear",
+          keywords:
+            "connect reconnect refresh connection sign in login linear workspace authentication setup oauth disconnect issues personal api key",
         },
         {
           id: settingId("linear-projects"),
           label: "Linear project mapping",
           scope: "host",
+          contributedSection: "linear",
           keywords: "linear team project binding mapping scope octant_linear issues",
         },
         {
           id: settingId("linear-disconnect"),
           label: "Disconnect Linear",
           scope: "host",
+          contributedSection: "linear",
           keywords: "disconnect log out logout sign out remove credentials",
         },
       ],
@@ -1621,6 +1552,72 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "tool calls records inputs outputs keep store inspect what an agent ran returned chat work purge privacy switch",
         },
         {
+          id: settingId("browser-transfer-file-limit"),
+          label: "Largest file",
+          scope: "host",
+          keywords: "browser upload download largest file size limit megabytes cap agents transfer",
+        },
+        {
+          id: settingId("browser-held-download-limit"),
+          label: "Downloads kept waiting",
+          scope: "host",
+          keywords: "browser downloads kept waiting held files limit count cap agents page",
+        },
+        {
+          id: settingId("browser-upload-file-count-limit"),
+          label: "Files per upload",
+          scope: "host",
+          keywords: "browser upload files per upload count limit cap agents send page how many",
+        },
+        {
+          id: settingId("tool-approvals"),
+          label: "Remembered tool approvals",
+          scope: "host",
+          keywords:
+            "remembered tool approvals mcp plugin extension server project allow always revoke ask again permission",
+        },
+        {
+          id: settingId("network-limits"),
+          label: "Network limits",
+          scope: "host",
+          keywords:
+            "network limits switch on off runtime egress proxy open network restrict outbound next launch",
+        },
+        {
+          id: settingId("safe-networks"),
+          label: "Safe networks",
+          scope: "host",
+          keywords:
+            "safe networks trusted hosts domains address range cidr local network this mac private network overlay egress proxy refused recently refused trust every project own list port",
+        },
+        {
+          id: settingId("shield-servers-list"),
+          label: "Servers",
+          scope: "host",
+          keywords:
+            "servers ssh host alias login user profile read-only operate admin runbook notes change remove shield",
+        },
+        {
+          id: settingId("shield-servers-add"),
+          label: "Add a server",
+          scope: "host",
+          keywords:
+            "add register server ssh host alias user profile read-only operate admin deploy commands runbook notes ssh agent",
+        },
+        {
+          id: settingId("server-projects"),
+          label: "Bind a remote folder",
+          scope: "host",
+          keywords: "bind remote folder project code work ssh setup",
+        },
+      ],
+    },
+    {
+      ...octantSettingsNavigation.limits,
+      keywords:
+        "limits octant own limits unattended tool steps turns wake-ups wakeups messages shield denials coordinators pull requests watch auto-fix waiting follow-ups routines how many how long",
+      settings: [
+        {
           id: settingId("tool-steps-per-turn"),
           label: "Tool steps kept per turn",
           scope: "host",
@@ -1640,24 +1637,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "runtime turns background command watch monitor wake held turn count limit stop session",
-        },
-        {
-          id: settingId("browser-transfer-file-limit"),
-          label: "Largest file",
-          scope: "host",
-          keywords: "browser upload download largest file size limit megabytes cap agents transfer",
-        },
-        {
-          id: settingId("browser-held-download-limit"),
-          label: "Downloads kept waiting",
-          scope: "host",
-          keywords: "browser downloads kept waiting held files limit count cap agents page",
-        },
-        {
-          id: settingId("browser-upload-file-count-limit"),
-          label: "Files per upload",
-          scope: "host",
-          keywords: "browser upload files per upload count limit cap agents send page how many",
         },
         {
           id: settingId("thread-wakeups-waiting"),
@@ -1766,47 +1745,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Start agent-created routines active at Full access",
           scope: "host",
           keywords: "routines automation agent created paused enabled active full access",
-        },
-        {
-          id: settingId("tool-approvals"),
-          label: "Remembered tool approvals",
-          scope: "host",
-          keywords:
-            "remembered tool approvals mcp plugin extension server project allow always revoke ask again permission",
-        },
-        {
-          id: settingId("network-limits"),
-          label: "Network limits",
-          scope: "host",
-          keywords:
-            "network limits switch on off runtime egress proxy open network restrict outbound next launch",
-        },
-        {
-          id: settingId("safe-networks"),
-          label: "Safe networks",
-          scope: "host",
-          keywords:
-            "safe networks trusted hosts domains address range cidr local network this mac private network overlay egress proxy refused recently refused trust every project own list port",
-        },
-        {
-          id: settingId("shield-servers-list"),
-          label: "Servers",
-          scope: "host",
-          keywords:
-            "servers ssh host alias login user profile read-only operate admin runbook notes change remove shield",
-        },
-        {
-          id: settingId("shield-servers-add"),
-          label: "Add a server",
-          scope: "host",
-          keywords:
-            "add register server ssh host alias user profile read-only operate admin deploy commands runbook notes ssh agent",
-        },
-        {
-          id: settingId("server-projects"),
-          label: "Bind a remote folder",
-          scope: "host",
-          keywords: "bind remote folder project code work ssh setup",
         },
       ],
     },
@@ -1939,7 +1877,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     {
       ...octantSettingsNavigation.data,
       keywords:
-        "data privacy backup snapshot restore recovery stored data map location journal projections artifacts credentials keychain caches what leaves this machine retention purge export erase delete history",
+        "data privacy backup snapshot restore recovery stored data map location journal projections artifacts credentials keychain caches what leaves this machine retention purge export erase delete history to-dos todo list keep host hub paired computer where sync",
       settings: [
         {
           id: settingId("data-map"),
@@ -2013,15 +1951,9 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "thread retention window purge journal erase delete history",
         },
-      ],
-    },
-    {
-      ...octantSettingsNavigation.todos,
-      keywords: "to-dos todo list keep host hub paired computer where sync",
-      settings: [
         {
           id: settingId("todo-list-host"),
-          label: "Keep the list on",
+          label: "Keep the to-do list on",
           scope: "host",
           keywords: "to-dos list host hub paired computer this computer where",
         },
@@ -2297,8 +2229,70 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     {
       ...octantSettingsNavigation.host,
       keywords:
-        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities headless automation notifications push waiting approval failure completion apns fcm federated hosts maintenance reset layout window bounds diagnostics export support",
+        "host service lifecycle cpu ram memory load hardware resource limits pause keep awake stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities headless automation notifications push waiting approval failure completion apns fcm federated hosts maintenance reset layout window bounds diagnostics export support",
       settings: [
+        {
+          id: settingId("resource-limits"),
+          label: "Computer resources",
+          scope: "host",
+          keywords:
+            "cpu ram memory load hardware automatic resource limits throttle vitest testing workers processes helpers pause concurrency",
+        },
+        {
+          id: settingId("resource-maxCommands"),
+          label: "Concurrent commands",
+          scope: "host",
+          keywords: "commands process concurrent limit",
+        },
+        {
+          id: settingId("resource-maxWorkers"),
+          label: "Total test workers",
+          scope: "host",
+          keywords: "vitest test workers processes parallel",
+        },
+        {
+          id: settingId("resource-maxAgents"),
+          label: "Helper agent limit",
+          scope: "host",
+          keywords: "subagent helper concurrency",
+        },
+        {
+          id: settingId("resource-cpuTargetPercent"),
+          label: "CPU limit for new work",
+          scope: "host",
+          keywords: "cpu utilization load headroom target",
+        },
+        {
+          id: settingId("resource-memoryReservePercent"),
+          label: "Memory reserve",
+          scope: "host",
+          keywords: "ram memory available reserve pressure",
+        },
+        {
+          id: settingId("resource-save"),
+          label: "Save resource limits",
+          scope: "host",
+          keywords: "save resource limits apply",
+        },
+        {
+          id: settingId("resource-pause"),
+          label: "Pause new work",
+          scope: "host",
+          keywords: "pause throttle testing helper agents commands",
+        },
+        {
+          id: settingId("resource-keepAwake"),
+          label: "Keep the computer awake while agents work",
+          scope: "host",
+          keywords:
+            "keep awake sleep prevent idle battery power ac suspend routines turns computer awake",
+        },
+        {
+          id: settingId("resource-refresh"),
+          label: "Refresh host load",
+          scope: "host",
+          keywords: "refresh resources hardware cpu memory load",
+        },
         {
           id: settingId("reset-layout"),
           label: "Reset active mode layout",

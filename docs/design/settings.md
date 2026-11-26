@@ -33,22 +33,49 @@ workspace at every width.
 Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. There are six groups, each one question a
-person brings to Settings, and a group lists its pages in this order: General
-(General alone: who you are, app-wide defaults, and what Octant tells you), Look &
-feel (Appearance, Sidebar, Keybindings), AI (Providers & Models, Octant Harness,
-Voice & images, then Chat, Work and Code: which provider or model answers each
-job, and how each mode starts), Tools (Skills & Extensions, Web search, Computer use,
-Device tools, GitHub, Linear: what a running agent may reach; Web search's
-rules are in [Web search backends](web-search-backends.md#settings), and Computer use holds the plugin switch, guided setup, driver updates, **Remembered applications** listing each Project and application remembered from a below-Full-access approval with **Forget**, and **Remembered desktop files** listing each Project whose agents' files into a disposable desktop on this machine were remembered, with **Forget**), Safety (Permissions,
-Secret stores, Memory: what an agent may touch, reach and remember), and
-Data & devices (Data & storage, Sync, Remote access, Host, Usage: what this
-computer stores and the other machines it talks to). An earlier Privacy & data
+person brings to Settings, and a group lists its pages in this order:
+
+| Group          | Pages, in order                                                       | The question it answers                                                     |
+| -------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| General        | General                                                               | Who you are, app-wide defaults, and what Octant tells you                   |
+| Look & feel    | Appearance, Background, Text, Sidebar, Keybindings                    | How it looks and is driven                                                  |
+| AI             | Providers & Models, Octant Harness, Voice & images, Chat & Work, Code | Which provider or model answers each job, and how each mode starts          |
+| Tools          | Skills & Extensions, Computer use, Integrations                       | What a running agent may reach                                              |
+| Safety         | Permissions, Limits, Secret stores, Memory                            | What an agent may touch, reach and remember, and how far it runs unattended |
+| Data & devices | Data & storage, Sync, Remote access, Host, Usage                      | What this computer stores and the other machines it talks to                |
+
+A page holds the settings of one question. No page holds more than thirty
+settings, and a page of one to three is folded into the page that asks the
+same question (maintainer decisions, 2026-11-25 and 2026-11-26: Permissions
+had grown to fifty settings, Appearance to forty and General to thirty-eight,
+while GitHub, Linear, Web search, Device tools and To-dos held one to three
+each, and Chat and Work each held a single section of defaults). Keybindings
+and Usage are one tool each and stay pages. **Appearance** holds the colour
+scheme, the window's glass, accessibility, and theme import and export;
+**Background** holds what is drawn behind the window's content, under one
+heading, Source and effect; **Text** holds Typography (the interface, code and
+terminal fonts) and Reading (transcript text size and width, and reply
+detail). **Chat & Work** holds Chat defaults, Work defaults, and Replies (Stream
+replies, which covers every mode's transcript).
+**Computer use** holds the plugin switch, guided setup, driver updates, **Remembered applications** listing each Project and application remembered from a below-Full-access approval with **Forget**, **Remembered desktop files** listing each Project whose agents' files into a disposable desktop on this machine were remembered, with **Forget**, and then **Device tools** and **Device tool updates**, the simulator and emulator tools Octant ships.
+**Integrations** opens on web search (the data policy, then the backends) and
+then draws the Settings section each enabled plugin contributes, GitHub then
+Linear. Every heading on it names its integration (Web search backends, GitHub
+connection, Linear connection), and a plugin switched off takes its section
+with it. **Limits** holds Tool
+steps and Octant's own limits (see below). **Data & storage** ends on
+**To-dos**, the computer that keeps the list. A link to a folded page opens
+the page that holds its settings now, and the command palette finds a page by
+the command of a page it took in, typed whole ("Settings: GitHub") or by name;
+it does not offer the name of a switched-off plugin's page. Web search's rules are in
+[Web search backends](web-search-backends.md#settings). An earlier Privacy & data
 group had grown to seven pages answering three different questions, Modes stood
-apart from the models its pages choose, and Advanced held two pages. General opens on Computer resources (automatic or manual local-work limits,
+apart from the models its pages choose, and Advanced held two pages. Host opens on Computer resources (automatic or manual local-work limits,
 Pause new work, and **Keep the computer awake while agents work** — `While on
 power` by default, `Always`, or `Never`, with a quiet counts-only live status
 line on the desktop app that reports held, idle, or unavailable and never shows
-thread titles) and Your identity (the profile), followed by Your instructions (a
+thread titles), ahead of the facts about the background service; General had
+opened on those ten rows, before who the person is. General opens on Your identity (the profile), followed by Your instructions (a
 multi-line field with its count, limit, a likely-secret warning, and Save,
 read-only where the window cannot change it) and Orchestration, the same field
 for coordinator threads ([Octant instructions](octant-instructions.md#settings)),
@@ -59,8 +86,8 @@ back), which control the composer's Tab suggestion ([Thread view](thread-view.md
 and ends on Notifications (what Octant sends while a person is away); Permissions holds the files no agent may touch, then the provider tools the person blocked,
 then the network places and servers agents may reach (Network limits, Safe
 networks, Servers), then what a person has already allowed (remembered
-websites, remembered tool approvals, public links), with Octant's own limits
-on unattended work after Tool steps (see below). Profile and Notifications
+websites, remembered tool approvals, public links); the counts and waits that
+bound unattended work are on Limits (see below). Profile and Notifications
 were pages of one and two controls, and Access was the other half of the
 question Permissions answers, so the rail listed three pages a person rarely
 needed alone; links to those pages open the page that holds them now. Data &
@@ -91,8 +118,8 @@ endpoint's row says who is signed in, its detail page offers sign out and
 sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
-to its old page. Look & feel holds Appearance (theme, window glass, background,
-text, accessibility, and Reading: transcript text size and width, Reply detail)
+to its old page. Look & feel holds Appearance (theme, window glass, accessibility), Background,
+Text (typography, and Reading: transcript text size and width, Reply detail)
 and a separate Sidebar page (layout, destinations, sidebar
 background, and a thread-row grid of detail by list). A page names its scope once, under its title, and a row names
 its own only when it differs. Settings folds long choices it does not need
@@ -102,7 +129,7 @@ The ASCII field's pattern, characters, density and speed sit in one folded Custo
 Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
 
-**Octant's own limits** sit on Settings › Permissions after Tool steps, as
+**Octant's own limits** sit on Settings › Limits after Tool steps, as
 host settings in five sections of number steppers (1 to the stated top) and
 switches, each row naming its default in its description
 ([Octant's own limits become settings](../architecture.md#security-and-authority)):
@@ -236,8 +263,10 @@ Keep common preferences and host health visible. Use the shared
 `SettingsDisclosure` for optional inventories or specialist controls; it keeps
 its contents mounted so closing it does not discard an unfinished field.
 A deep-linked setting reveals its enclosing details before receiving focus.
-Appearance keeps interface typography visible, with editor and terminal fonts
-in named disclosures. Host data inventory lives under Stored data. Installed
+Text keeps interface typography visible, with editor and terminal fonts
+in named disclosures. Appearance's header carries **Reset theme**, which, like
+theme import and export on the same page, acts on the whole theme: the look,
+the background and the fonts. Host data inventory lives under Stored data. Installed
 skills and collision diagnostics scroll within a bounded collection while
 search, counts, and Show all remain outside that scroller.
 
@@ -392,7 +421,7 @@ local window also offers "Allow only this tool". For a network server on a
 thread that has read outside content the action is "Allow this server in this
 thread", and the detail says why. Otherwise it is "Approve once". Not built
 yet: the mobile approval card does not show these choices. Settings › Permissions lists those answers by
-Project, each with Revoke, beside Remembered websites. Settings › Work and
+Project, each with Revoke, beside Remembered websites. Settings › Chat & Work and
 Settings › Code show the global guardrail level with one-click change,
 which governs Work and Code alike; a Work or Code Project overrides it from
 its overview (Default mode), and each thread's header shows the level in force
@@ -746,7 +775,7 @@ The following canonical map applies to the Usage flow and its Settings entry:
 
 ## Web search
 
-Settings › Web search, in Tools after Skills & Extensions, follows
+Web search, which opens Settings › Integrations, follows
 [Web search backends and data policy](web-search-backends.md#settings). The
 data policy is a select of the four policies; each backend is a compact row
 whose name opens its address, the two statements (a statement the vendor's
@@ -757,7 +786,7 @@ key, Not eligible under this policy with the reason, or Not saved). The page
 keeps a draft and saves the policy and the list in one change with Save, and
 shows the host's refusal as it arrived. A key is asked for only once the list
 holding its entry is saved; it goes to the host's credential store and the
-field empties. Settings › Chat no longer shows the SearXNG address: a link to
+field empties. Settings › Chat & Work no longer shows the SearXNG address: a link to
 its old row opens this page, and a Chat save carries the stored address
 unchanged. The page says the policy covers only its backends: a provider's
 own search and a key provider's own web search and fetch are not locked by it.

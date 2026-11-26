@@ -27,12 +27,18 @@ function controller(): ThemeController {
   };
 }
 
+/** The blocks each page's half of the theme editor draws. */
+const BLOCKS_BY_PART = [
+  ["look", ["Colour scheme", "Accessibility", "Import or export theme"]],
+  ["text", ["Typography"]],
+] as const;
+
 describe("ThemeAppearanceEditor", () => {
   it("saves a chosen accent colour with dark ink on it, and Blue puts the theme's own back", async () => {
     const applyPatch = vi.fn(async (_patch: Partial<ThemeSettings>) => true);
     const user = userEvent.setup();
     const { rerender } = render(
-      <ThemeAppearanceEditor controller={{ ...controller(), applyPatch }} />,
+      <ThemeAppearanceEditor part="look" controller={{ ...controller(), applyPatch }} />,
     );
 
     expect(screen.getByRole("radio", { name: "Blue" })).toHaveAttribute("aria-checked", "true");
@@ -54,6 +60,7 @@ describe("ThemeAppearanceEditor", () => {
     };
     rerender(
       <ThemeAppearanceEditor
+        part="look"
         controller={{ ...controller(), applyPatch, settings: clay, draft: clay }}
       />,
     );
@@ -68,6 +75,7 @@ describe("ThemeAppearanceEditor", () => {
     const vivid = { ...DEFAULT_THEME_SETTINGS, style: "vivid" as const };
     render(
       <ThemeAppearanceEditor
+        part="look"
         controller={{ ...controller(), applyPatch, settings: vivid, draft: vivid }}
       />,
     );
@@ -78,7 +86,7 @@ describe("ThemeAppearanceEditor", () => {
 
   it("keeps specialist fonts behind named disclosures and omits the obsolete ring control", async () => {
     const user = userEvent.setup();
-    render(<ThemeAppearanceEditor controller={controller()} />);
+    render(<ThemeAppearanceEditor part="text" controller={controller()} />);
     expect(screen.getByLabelText("Interface font")).toBeVisible();
     expect(screen.getByLabelText("Code font")).not.toBeVisible();
     expect(screen.getByLabelText("Terminal font family")).not.toBeVisible();
@@ -91,7 +99,10 @@ describe("ThemeAppearanceEditor", () => {
     const user = userEvent.setup();
     const applyPatch = vi.fn(async () => true);
     render(
-      <ThemeAppearanceEditor controller={{ ...controller(), applyPatch, hasDraftChanges: true }} />,
+      <ThemeAppearanceEditor
+        part="look"
+        controller={{ ...controller(), applyPatch, hasDraftChanges: true }}
+      />,
     );
 
     await user.click(screen.getByRole("radio", { name: "Light" }));
@@ -100,25 +111,37 @@ describe("ThemeAppearanceEditor", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
   });
 
-  it("heads every Appearance block the way the rest of Settings is headed", () => {
-    render(<ThemeAppearanceEditor controller={controller()} />);
-
+  it("heads every Appearance and Text block the way the rest of Settings is headed", () => {
     // Appearance used to give each block its own card head — an h3 in a
     // section, a summary in a disclosure, a legend in a fieldset — so the page
     // did not read as the same surface as General. Every block now puts one
     // section label above one flat group.
-    for (const name of ["Colour scheme", "Typography", "Accessibility", "Import or export theme"]) {
-      const block = screen.getByText(name).closest(".settings-card-section");
-      expect(block, name).not.toBeNull();
-      // The label is the block's own first child, and everything it labels sits
-      // in the one group below it.
-      expect(block?.firstElementChild?.textContent, name).toContain(name);
-      expect(block?.querySelector(":scope > .setgroup"), name).not.toBeNull();
+    for (const [part, names] of BLOCKS_BY_PART) {
+      const { unmount } = render(<ThemeAppearanceEditor part={part} controller={controller()} />);
+      for (const name of names) {
+        const block = screen.getByText(name).closest(".settings-card-section");
+        expect(block, name).not.toBeNull();
+        // The label is the block's own first child, and everything it labels sits
+        // in the one group below it.
+        expect(block?.firstElementChild?.textContent, name).toContain(name);
+        expect(block?.querySelector(":scope > .setgroup"), name).not.toBeNull();
+      }
+      unmount();
+    }
+  });
+
+  it("draws the look on Appearance and the typography on Text, and neither on the other's page", () => {
+    for (const [part, names] of BLOCKS_BY_PART) {
+      const { unmount } = render(<ThemeAppearanceEditor part={part} controller={controller()} />);
+      const others = BLOCKS_BY_PART.filter(([other]) => other !== part).flatMap(([, n]) => n);
+      for (const name of names) expect(screen.getByText(name), name).toBeVisible();
+      for (const name of others) expect(screen.queryByText(name), name).not.toBeInTheDocument();
+      unmount();
     }
   });
 
   it("does not wrap switch controls in a second implicit label", () => {
-    render(<ThemeAppearanceEditor controller={controller()} />);
+    render(<ThemeAppearanceEditor part="look" controller={controller()} />);
 
     const switches = screen.getAllByRole("switch");
     expect(switches.length).toBeGreaterThanOrEqual(3);
@@ -128,30 +151,33 @@ describe("ThemeAppearanceEditor", () => {
   });
 
   it("leaves typography open and keeps theme transfer behind a disclosure", () => {
-    render(<ThemeAppearanceEditor controller={controller()} />);
-
     // The interface font and its size are among the most-changed settings in
     // the app, so they cost no click. Import and export is rare, and stays
     // collapsed.
+    const text = render(<ThemeAppearanceEditor part="text" controller={controller()} />);
     expect(screen.getByText("Typography").closest("details")).toBeNull();
     expect(screen.getByText("Interface font")).toBeVisible();
+    text.unmount();
+    render(<ThemeAppearanceEditor part="look" controller={controller()} />);
     expect(screen.getByText("Import or export theme").closest("details")).not.toHaveAttribute(
       "open",
     );
   });
 
-  it("keeps every Appearance section open, the JSON transfer disclosure included", () => {
-    render(<ThemeAppearanceEditor controller={controller()} />);
-
-    for (const name of ["Colour scheme", "Typography", "Accessibility", "Import or export theme"]) {
-      expect(screen.getByText(name).closest(".settings-card-section")).toHaveClass(
-        "settings-card-section--open",
-      );
+  it("keeps every Appearance and Text section open, the JSON transfer disclosure included", () => {
+    for (const [part, names] of BLOCKS_BY_PART) {
+      const { unmount } = render(<ThemeAppearanceEditor part={part} controller={controller()} />);
+      for (const name of names) {
+        expect(screen.getByText(name).closest(".settings-card-section")).toHaveClass(
+          "settings-card-section--open",
+        );
+      }
+      unmount();
     }
   });
 
   it("accessibility switches render as setting rows", () => {
-    render(<ThemeAppearanceEditor controller={controller()} />);
+    render(<ThemeAppearanceEditor part="look" controller={controller()} />);
 
     const settingIds = screen
       .getAllByTestId("setting-row")
@@ -184,7 +210,10 @@ describe("ThemeAppearanceEditor", () => {
       },
     };
     render(
-      <ThemeAppearanceEditor controller={{ ...controller(), settings: saved, draft: saved }} />,
+      <ThemeAppearanceEditor
+        part="text"
+        controller={{ ...controller(), settings: saved, draft: saved }}
+      />,
     );
 
     expect(screen.getByLabelText("Interface font")).toHaveValue("System interface");
@@ -192,7 +221,7 @@ describe("ThemeAppearanceEditor", () => {
 
   it("searches friendly font names and keeps raw stacks behind an advanced disclosure", async () => {
     const applyPatch = vi.fn(async () => true);
-    render(<ThemeAppearanceEditor controller={{ ...controller(), applyPatch }} />);
+    render(<ThemeAppearanceEditor part="text" controller={{ ...controller(), applyPatch }} />);
 
     const user = userEvent.setup();
     const picker = screen.getByRole("combobox", { name: "Interface font" });
@@ -220,7 +249,7 @@ describe("ThemeAppearanceEditor", () => {
 
   it("offers the Octant appearance pack while that plugin is effective", async () => {
     const user = userEvent.setup();
-    render(<ThemeAppearanceEditor controller={controller()} />);
+    render(<ThemeAppearanceEditor part="look" controller={controller()} />);
     const light = screen.getByLabelText("Light preset");
     expect(light).toHaveTextContent("System");
     await user.click(light);
@@ -233,6 +262,7 @@ describe("ThemeAppearanceEditor", () => {
     const user = userEvent.setup();
     render(
       <ThemeAppearanceEditor
+        part="look"
         controller={controller()}
         effectivePlugins={new Map([["appearance-pack", false]])}
       />,
@@ -257,7 +287,7 @@ describe("themes plugins contribute", () => {
     const user = userEvent.setup();
     render(
       <PluginThemesContext.Provider value={[harborNight]}>
-        <ThemeAppearanceEditor controller={controller()} />
+        <ThemeAppearanceEditor part="look" controller={controller()} />
       </PluginThemesContext.Provider>,
     );
     await user.click(screen.getByLabelText("Dark preset"));
@@ -271,13 +301,19 @@ describe("themes plugins contribute", () => {
     const chosen = { ...DEFAULT_THEME_SETTINGS, darkPresetId: harborNight.id };
     const { rerender } = render(
       <PluginThemesContext.Provider value={[harborNight]}>
-        <ThemeAppearanceEditor controller={{ ...controller(), settings: chosen, draft: chosen }} />
+        <ThemeAppearanceEditor
+          part="look"
+          controller={{ ...controller(), settings: chosen, draft: chosen }}
+        />
       </PluginThemesContext.Provider>,
     );
     expect(screen.getByLabelText("Dark preset")).toHaveTextContent("Harbor night");
     rerender(
       <PluginThemesContext.Provider value={[]}>
-        <ThemeAppearanceEditor controller={{ ...controller(), settings: chosen, draft: chosen }} />
+        <ThemeAppearanceEditor
+          part="look"
+          controller={{ ...controller(), settings: chosen, draft: chosen }}
+        />
       </PluginThemesContext.Provider>,
     );
     expect(screen.getByLabelText("Dark preset")).toHaveTextContent("System");
@@ -301,6 +337,7 @@ describe("importing a theme file whose photo is not on this computer", () => {
     }));
     render(
       <ThemeAppearanceEditor
+        part="look"
         controller={{ ...controller(), importJson }}
         photoLibrary={photoLibrary([])}
       />,
@@ -332,7 +369,11 @@ describe("importing a theme file whose photo is not on this computer", () => {
       fetch: vi.fn(),
     } as never;
     render(
-      <ThemeAppearanceEditor controller={{ ...controller(), importJson }} photoLibrary={slow} />,
+      <ThemeAppearanceEditor
+        part="look"
+        controller={{ ...controller(), importJson }}
+        photoLibrary={slow}
+      />,
     );
     const box = screen.getByRole("textbox", { name: "Theme JSON" });
     const button = screen.getByRole("button", { name: "Import theme JSON" });
@@ -364,6 +405,7 @@ describe("importing a theme file whose photo is not on this computer", () => {
     } as never;
     const { rerender } = render(
       <ThemeAppearanceEditor
+        part="look"
         controller={{ ...controller(), importJson }}
         photoLibrary={photoLibrary([PHOTO])}
       />,
@@ -373,7 +415,11 @@ describe("importing a theme file whose photo is not on this computer", () => {
     expect(importJson).toHaveBeenLastCalledWith("", { photoIds: new Set([PHOTO]) });
     expect(screen.getByRole("status")).toBeEmptyDOMElement();
     rerender(
-      <ThemeAppearanceEditor controller={{ ...controller(), importJson }} photoLibrary={failing} />,
+      <ThemeAppearanceEditor
+        part="look"
+        controller={{ ...controller(), importJson }}
+        photoLibrary={failing}
+      />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Import theme JSON" }));
     await waitFor(() => expect(importJson).toHaveBeenCalledTimes(2));
@@ -391,7 +437,9 @@ describe("handing the theme to a project outside Octant", () => {
       content: ":root { --octant-workspace: #1e1e1e; }",
       droppedOverrides: [{ role: "not-a-role", reason: "unknown-role" as const }],
     }));
-    render(<ThemeAppearanceEditor controller={{ ...controller(), exportTokens } as never} />);
+    render(
+      <ThemeAppearanceEditor part="look" controller={{ ...controller(), exportTokens } as never} />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Export design tokens (CSS)" }));
 

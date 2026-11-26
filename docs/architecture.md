@@ -975,7 +975,7 @@ after five seconds, and does not poll in the background.
 
 ### Local work resource limits
 
-Settings > General > Computer resources controls admission of new local work
+Settings > Host > Computer resources controls admission of new local work
 on this host. It is separate from the host-process Memory limits relief setting.
 Automatic is the default; Manual uses the person's ceilings without load-based
 adjustment; Pause holds new managed commands and helper agents. Running processes
@@ -1060,7 +1060,7 @@ sleep, and the renderer holds no assertion of its own (maintainer decision,
   switches to battery power under While on power.
 - **Setting and authority:** The choice (`While on power` default, `Always`,
   `Never`) lives in the host resource policy inside the journaled
-  `agent-run-settings` aggregate (`Settings > General > Computer resources >
+  `agent-run-settings` aggregate (`Settings > Host > Computer resources >
 Keep the computer awake while agents work`). Changes are journaled with who,
   when, and the old and new values, and are admitted only from a local window or
   a device the host's own person paired (`actsAsHostPerson`); a hub-introduced
@@ -1115,7 +1115,7 @@ Leaving the demo discards its sample state and returns to the explicit connectio
 choice. This is review preparation, not evidence of native or store acceptance.
 
 Its background shares the desktop's three Gradient pictures and
-Pixelate/Dither/ASCII print effect (Appearance › Background), drawn once
+Pixelate/Dither/ASCII print effect (Settings › Background), drawn once
 through a GL shader that uses the same ordered threshold and the same glyph
 table. The phone keeps its own effect choice on the device; it never follows
 the desktop's.
@@ -2022,7 +2022,7 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   thread has, on the network its level resolves, under the same harness
   authority.
 - **Host:** a Work thread takes Auto, Ask first, Accept edits, or Full access
-  from Settings › Work when it is created and switches from its composer
+  from Settings › Chat & Work when it is created and switches from its composer
   (`change-work-thread-access`, journaled on the thread); raising a thread or
   the Settings default to Full access is open to a local window and to a device the host's own person paired, as in Code (maintainer decision, 2026-11-12). A caller with narrower authority than the thread (a goal-loop round,
   a routine, a delegated turn) runs the turn at the thread's level clamped to
@@ -4522,7 +4522,7 @@ CI or reviewers should be woken, not left polling; maintainer request,
 - **Auto-fix limits.** A failure is a check name, a review thread id, or the
   base conflict. Each started wake spends one attempt on every failure it
   carried; at most three attempts per failure, or the number in Settings ›
-  Permissions ([Octant's own limits become settings](#security-and-authority); built), after which Auto-fix stops
+  Limits ([Octant's own limits become settings](#security-and-authority); built), after which Auto-fix stops
   (`attempt-limit`) and opens the thread's follow-up marker. The same failures
   on the same head never start a second turn; a wake that started none (the
   thread refused it, or the outside-content mark was refused) is tried again
@@ -4578,7 +4578,7 @@ CI or reviewers should be woken, not left polling; maintainer request,
   the thread is archived, completed, or gone, when the Project no longer
   connects the repository (`authority-lost`), when the agent calls `unwatch`,
   after ten started wakes (`wake-limit`), or three days after it began
-  (`expired`), both settings in Settings › Permissions with those defaults
+  (`expired`), both settings in Settings › Limits with those defaults
   ([Octant's own limits become settings](#security-and-authority); built), checked even while nothing vouches for it; the last two open the
   thread's follow-up marker. Three days covers a review round across a weekend
   without leaving a forgotten watch running. Asking again turns nothing new
@@ -5103,7 +5103,7 @@ Chat still take no app-managed tools.
   access included. A Code run's thread is created at that mode (the Project's
   own, else Settings › Code › Access), and a Work run's turn is not narrowed
   below its thread's level, which a routine thread takes from Settings ›
-  Work. Only the host's own person sets the opt-in, at a local window or on a
+  Chat & Work. Only the host's own person sets the opt-in, at a local window or on a
   device they paired (maintainer decision, 2026-11-12): every other device
   session is refused at the
   route, and a routine an agent proposes never has it. A person may instead
@@ -5360,7 +5360,7 @@ Chat still take no app-managed tools.
   is not left paused, because the once trigger then ends it.
 - **Follow-up missed window.** A follow-up missed while the host was asleep or
   off runs once on return if it is at most the person's lateness limit late:
-  24 hours by default, a host setting in Settings › Permissions
+  24 hours by default, a host setting in Settings › Limits
   (`followUpLatenessLimitHours`, 1 to 720; maintainer decision, 2026-11-21).
   Past that it fails as `follow-up-missed` and sends nothing: a check made
   that late is stale. The same limit ends a follow-up still waiting on a busy
@@ -5621,13 +5621,13 @@ the thread's own level, the way a message wake starts one; a thread whose
 turn is running or waiting on the person holds it until that turn ends. A
 wake-up the host could not fire on time, because the host was down or asleep
 at its due time or its timer ran more than two minutes late, runs once when the host is back, since **Run missed wake-ups on return** in
-Settings › Permissions is on by default (maintainer decision, 2026-11-25: a
+Settings › Limits is on by default (maintainer decision, 2026-11-25: a
 wake-up the host slept through otherwise never ran). With the switch off it
 is journaled as **missed** and never fired later on its own: the thread shows
 it as missed with **Run now** and Cancel, and only the person's Run now
 starts its turn.
 Bounds: at most 8 waiting wake-ups a thread, or the number in Settings ›
-Permissions, a first fire at least a minute away (a delayed one held to one
+Limits, a first fire at least a minute away (a delayed one held to one
 minute to one hour, the runtime's own range), a recurring one as often as
 every minute, as cron does ([Octant's own limits become settings](#security-and-authority); built), refused
 when its first fire is past it, and ending on its own after 7 days, before
@@ -5775,7 +5775,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     after ten rounds and continue only when a person runs a turn. Both numbers
     are settings, per coordinator for a coordinator and its workers
     (maintainer request, 2026-11-12); any other thread takes the bounds in
-    Settings › Permissions, 30 and 10 unless the person changed them
+    Settings › Limits, 30 and 10 unless the person changed them
     ([Octant's own limits become settings](#security-and-authority); built).
     The host
     records wake turns and each thread's latest host turn with its hop in its
@@ -6216,7 +6216,7 @@ truncated flag when it called more; the calls past the limit still run and
 have no row.
 
 - **The tool-step limit is a setting** (maintainer decision, 2026-11-13).
-  Settings › Permissions › Tool steps holds two numbers (and, beside them, the count of turns a runtime may start by itself inside a held turn; [Provider runtimes](design/provider-runtimes.md)): **Tool steps kept
+  Settings › Limits › Tool steps holds two numbers (and, beside them, the count of turns a runtime may start by itself inside a held turn; [Provider runtimes](design/provider-runtimes.md)): **Tool steps kept
   per turn** (`toolStepsPerTurn`, 1 to 4,096, default 64) for a turn below
   Full access, and **Tool steps kept per turn at Full access**
   (`fullAccessToolStepsPerTurn`, 0 to 4,096, default 0). At Full access 0 is
@@ -7373,7 +7373,7 @@ ls-remote` against the thread's remote and the GitHub reads they already
   harness session continues when the session decision allows it, and a
   host-owned conversation is rebuilt from the transcript, which keeps the
   interrupted reply. The thread waits for its person, with the reason in the
-  restart notice, when Settings › Chat or Settings › Work › Continue after
+  restart notice, when Settings › Chat & Work › Continue after
   restart is off; the thread's own switch is off (`restartContinuationOff` on
   the Chat or Work thread, set only at a local window); its own continuations
   were cut off twice (the same per-thread crash-loop store as Code, keyed by
@@ -14520,7 +14520,7 @@ person reads the exact command first**, as the shell-quoted command line with
 the account's folder variable and a `<secret>` placeholder, plus a plain
 sentence on what it adds, and chooses Run this command once; `plan` returns a
 plan id and a random confirmation token, `apply` runs only that plan with its token, once,
-within the time set in Settings › Permissions (`toolingCommandConfirmMinutes`,
+within the time set in Settings › Limits (`toolingCommandConfirmMinutes`,
 ten minutes by default, up to a day; maintainer decision, 2026-11-21), in the
 window that asked, and refuses when the account or
 its folder changed since (`changed-plan`), comparing the command written out as text when its turn comes, not a hash. **The person only**: every step
@@ -15526,7 +15526,7 @@ desktop runtime, never a system Node, and each launch receives only an
 allowlisted environment, never provider keys, tokens, broker credentials, or
 other `OCTANT_*` values. They run unconfined under Octant's signed identity.
 Automatic updates check the npm registry only when the person turns them on in
-Settings › Device tools (off by default), and never run an upstream installer
+Settings › Computer use › Device tool updates (off by default), and never run an upstream installer
 or lifecycle script. OpenCode's managed copy rides the same channel. Packaging,
 signing, staging, resolution, and the streaming attach and fallbacks are
 specified in [Device workbench](design/device-workbench.md#managed-device-tools).
@@ -16356,7 +16356,7 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     model), that thread falls back to Ask first and the picker says why.
     There is no separate switch below Full access. The answer becomes the
     default for every new thread, Work and
-    Code; Settings › Work and Settings › Code change it, a Project, Work or Code, may override
+    Code; Settings › Chat & Work and Settings › Code change it, a Project, Work or Code, may override
     it, and any thread can switch mode at any time from the composer in one
     click (maintainer decision, 2026-10-31). A Plan answer starts new Work
     threads in Plan too (maintainer decision, 2026-11-21; before, it left
@@ -16517,7 +16517,7 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   per thread from the composer, per Project, or in Settings › Code › Access;
   Plan mode is read-only; auto-accept-edits waives only project file writes;
   a Work thread takes its level from its Project's override, else from
-  Settings › Work or the first-run answer, when it is created (Auto, Ask
+  Settings › Chat & Work or the first-run answer, when it is created (Auto, Ask
   first, the default, Accept edits, or Full access) and changes it
   from its composer; the host sets it, not the renderer, and a goal-loop round
   runs at it only up to the loop's own ceiling, which today allows at most
@@ -16810,12 +16810,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     list trusts.
   - **Default level.** A new thread still starts asking, as the providers'
     CLIs do, and a person may choose Full access as their default level in
-    Settings (built: Settings › Code's Default mode and Settings › Work's
-    default access, behind the one-time warning).
+    Settings (built: Settings › Code's Default mode and Work's default access on Settings › Chat & Work, behind the one-time warning).
   - **Plan in Work.** Work threads get the Plan level, so the provider's
     own plan mode, `EnterPlanMode` and `ExitPlanMode` work there as in Code.
     Built: Plan is a Work thread's level (`access: "plan"`, and since
-    2026-11-21 also a Settings › Work default and a Work Project's start
+    2026-11-21 also a Settings › Chat & Work default and a Work Project's start
     mode, `WorkDefaultAccess` and `WorkProjectPermissionMode`), journaled through `change-work-thread-access` like
     any level change and offered by the web and phone mode pickers, the
     owner posture card and `octant agent --access plan`. In Plan, Work is
@@ -16954,7 +16953,7 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
 
   **Octant's own limits become settings** (maintainer decision, 2026-11-16;
   built: each limit below but the routine window is a host setting in
-  Settings › Permissions, journaled with the host's other settings, changed
+  Settings › Limits, journaled with the host's other settings, changed
   at a local window or a device the host's own person paired, and read by the
   server where it applies; the routine window is set per routine and
   journaled with it). Under the
@@ -17398,7 +17397,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   threads start at, Code unless `--work`, through `update-code-settings` /
   `update-work-settings`. A Work thread
   takes the same levels, Plan included, as a default too
-  (`octant settings access plan --work`): Settings › Work sets the one a new
+  (`octant settings access plan --work`): Settings › Chat & Work sets the one a new
   thread starts at and its composer
   changes it
   ([Modes](#modes-chat-work-and-code)).
@@ -21992,7 +21991,7 @@ thread is tainted, Shield cannot allow irreversible, publish, or new-egress
 classes; those go to the person, as taint already withdraws the provider's
 own reviewer. After a number of denials in a row (3 by default), or in one
 thread (20 by default), Shield pauses and the next call goes to the person;
-both counts are host settings in Settings › Permissions, read at each review
+both counts are host settings in Settings › Limits, read at each review
 ([Octant's own limits become settings](#security-and-authority); maintainer
 decision, 2026-11-21).
 
@@ -22973,7 +22972,7 @@ deliverable and keeps every gate above:
      catalog lease, OpenCode's and an ACP agent's readiness check) runs
      unconfined only while
      the host's new threads run with no Octant sandbox: neither Settings ›
-     Code's nor Settings › Work's default is Strict, or either default is
+     Code's default nor Work's on Settings › Chat & Work is Strict, or either default is
      Full access with the sandbox off (`hostReadsProviderCatalogUnconfined`),
      and is refused otherwise. A version read keeps a Windows host's `Path`,
      `SystemRoot` and profile names whatever their case, and its tree is

@@ -36,7 +36,7 @@ describe("work thread contracts", () => {
     expect(() => decodeWorkThreadId("not-a-uuid")).toThrow();
   });
 
-  it("accepts Plan as the level Settings › Work starts new threads at", () => {
+  it("accepts Plan as the level Settings › Chat & Work starts new threads at", () => {
     expect(
       decodeWorkThreadCommand({
         kind: "update-work-settings",

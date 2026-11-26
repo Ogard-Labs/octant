@@ -674,7 +674,7 @@ export interface ChatRestartContinuationDependencies {
   /** The previous host stopped because a person quit it (personQuit.ts). */
   readonly quitByPerson: boolean;
   readonly chat: Pick<ChatService, "read" | "execute" | "restartContinuationReadiness">;
-  /** Settings › Chat › Continue after restart. */
+  /** Settings › Chat & Work › Continue after restart. */
   readonly enabled: () => boolean;
   /** The store the crash-loop guard counts in. */
   readonly connection: SqliteConnection;
@@ -759,7 +759,7 @@ export interface WorkRestartContinuationDependencies {
     | "holdAfterRestart"
   >;
   readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
-  /** Settings › Work › Continue after restart. */
+  /** Settings › Chat & Work › Continue after restart. */
   readonly enabled: () => boolean;
   /** Whether Work is on at all; the Work turn path does not read the mode switch. */
   readonly modeEnabled: () => boolean;

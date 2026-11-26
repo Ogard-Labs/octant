@@ -214,7 +214,7 @@ boundary and a compact tab row without a second horizontal divider.
 ## Reply detail
 
 **Reply detail** chooses how much of a turn's work the transcript shows open.
-Settings › Appearance › Reading › Reply detail (`replyDetail`) is the default
+Settings › Text › Reading › Reply detail (`replyDetail`) is the default
 every thread starts at: one `OctantToggleGroup` of three levels whose
 description reads "Where every thread starts unless it sets its own." followed
 by the chosen level's sentence. A thread may set its own level, which then
@@ -242,7 +242,7 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
   Thinking, the fold and every row start open on the summary the transcript
   already holds, still clipped behind Show all past 1,200 characters. While a
   reply streams, its thinking is open and grows as it arrives, and a running
-  turn's tool rows are open; Settings › Chat › Stream replies still alone
+  turn's tool rows are open; Settings › Chat & Work › Stream replies still alone
   decides whether the partial answer shows, at every level.
 
 ### Turn activity rows

@@ -113,7 +113,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
 
   const effectNote =
     background.kind === "theme"
-      ? "The app background has its own dither in Settings › Appearance › Background."
+      ? "The app background has its own dither in Settings › Background."
       : picture
         ? null
         : "Effects print pictures. Choose one below.";

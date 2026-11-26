@@ -750,7 +750,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 /* The load readings are three lines once read; the room is held from the
    first frame so the rows under them do not step down when they arrive. */
 .host-resources__readings {
+  display: block;
   min-height: 3lh;
+}
+
+.host-resources__readings > span {
+  display: block;
 }
 
 .host-resources__keep-awake-status {
@@ -1100,12 +1105,14 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    shrinks below zero, so the stack's gap still opened a blank row above the
    first section. Taken out of flow, the slot occupies no track at all. */
 .settings-theme-editor,
+.settings-background-page,
 .host-settings,
 .settings-view .provider-settings {
   position: relative;
 }
 
 .settings-theme-editor > .settings-feedback-slot:first-child,
+.settings-background-page > .settings-feedback-slot:first-child,
 .host-settings > .settings-feedback-slot:first-child,
 .settings-view .provider-settings > .provider-settings__message-slot:first-child {
   position: absolute;
@@ -1121,6 +1128,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    over the page's tab row, so enabling a provider failed with no reason. A
    status line still fits the strip and keeps the reserved geometry. */
 .settings-theme-editor > .settings-feedback-slot:first-child:has(.callout),
+.settings-background-page > .settings-feedback-slot:first-child:has(.callout),
 .host-settings > .settings-feedback-slot:first-child:has(.callout),
 .settings-view .provider-settings > .provider-settings__message-slot:first-child:has(.callout) {
   position: static;
@@ -2258,7 +2266,7 @@ html[data-octant-increased-contrast="true"]
   font-size: var(--oct-text-xs);
 }
 
-/* Settings > GitHub: open sections for account, capabilities, and
+/* Settings > Integrations, GitHub: open sections for account, capabilities, and
    connection; no animation is used, so Reduced Motion needs no override. */
 .github-settings,
 .linear-settings {
@@ -3504,7 +3512,7 @@ html[data-octant-increased-contrast="true"]
   display: none;
 }
 
-/* A fieldset inside a row list (Appearance's typography) holds rows of its
+/* A fieldset inside a row list (Text's typography) holds rows of its
    own; they are divided the same way, and its hidden legend is not a row. */
 .settings-view .settings-card-section--open > .setgroup > .settings-view__theme-group {
   padding: 0;

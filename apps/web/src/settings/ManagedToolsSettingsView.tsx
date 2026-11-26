@@ -34,7 +34,10 @@ function toolDescription(tool: ManagedToolStatus): string {
   return `${label}, from the ${tool.packageName} package — ${source}.`;
 }
 
-export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedToolsBridge }) {
+export function ManagedToolsSettingsView(props: {
+  readonly bridge?: ManagedToolsBridge;
+  readonly focusedSetting?: string | undefined;
+}) {
   const bridge = props.bridge ?? getInjectedHostBridge();
   const [status, setStatus] = useState<ManagedToolsStatus>();
   const [error, setError] = useState<string>();
@@ -104,14 +107,14 @@ export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedTools
       id="settings-device-tools"
     >
       <SettingsSection
-        title="Bundled tools"
+        title="Device tools"
         description="Octant ships a verified copy of each tool and can replace it when a newer release is out."
       >
         <div className="setgroup">
           {tools.length === 0 ? (
             <SettingRow
               settingId="managed-tools-empty"
-              label="Device tools"
+              label="Bundled tools"
               description="No managed tools are available on this host."
               scope="host"
             >
@@ -135,13 +138,14 @@ export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedTools
         </div>
       </SettingsSection>
       <SettingsSection
-        title="Updates"
+        title="Device tool updates"
         description="Which tool versions Octant runs, and when it checks for updates."
       >
         <div className="setgroup">
           <SettingRow
+            focused={props.focusedSetting === "managed-tools-automatic-updates"}
             settingId="managed-tools-automatic-updates"
-            label="Automatic updates"
+            label="Update device tools automatically"
             description="Check daily and upgrade each tool while it is idle."
             scope="host"
           >
@@ -157,8 +161,9 @@ export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedTools
             />
           </SettingRow>
           <SettingRow
+            focused={props.focusedSetting === "managed-tools-update-check"}
             settingId="managed-tools-update-check"
-            label="Update check"
+            label="Check device tools for updates"
             description="Checks again without waiting for the daily routine."
             scope="host"
           >

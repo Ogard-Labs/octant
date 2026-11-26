@@ -1,9 +1,14 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { octantSettingsCommandPages } from "./octantSettingsNavigation";
+import { settingsCommandPages } from "./octantSettingsNavigation";
 import { octantSettingsRegistry } from "./octantSettingsRegistry";
-import { listAvailableSections, resolveDeepLink, searchSettings } from "./registry";
+import {
+  listAvailableSections,
+  resolveDeepLink,
+  searchSettings,
+  withoutAbsentContributions,
+} from "./registry";
 
 const capabilities = { nativeBoundsAvailable: true, sidebarVibrancySupported: true };
 
@@ -130,46 +135,143 @@ describe("octantSettingsRegistry", () => {
     expect(octantSettingsRegistry.sections.map((s) => s.id)).toEqual([
       "general",
       "appearance",
+      "background",
+      "text",
       "sidebar",
       "keybindings",
-      "chat",
-      "work",
+      "chat-work",
       "code",
       "providers",
       "harness",
       "voice",
       "skills",
-      "web-search",
       "computer-use",
-      "device-tools",
-      "github",
-      "linear",
+      "integrations",
       "permissions",
+      "limits",
       "memory",
       "secret-stores",
       "data",
-      "todos",
       "sync",
       "remote-access",
       "host",
       "usage",
     ]);
-    expect(octantSettingsCommandPages.map(({ id, label }) => ({ id, label }))).toEqual(
+    expect(settingsCommandPages(() => true).map(({ id, label }) => ({ id, label }))).toEqual(
       octantSettingsRegistry.sections.map(({ id, label }) => ({ id, label })),
     );
   });
 
-  it("registers the GitHub section as a host-scoped connection destination", () => {
-    const github = octantSettingsRegistry.sections.find((s) => s.id === "github");
-    expect(github?.label).toBe("GitHub");
-    expect(github?.scope).toBe("host");
-    expect(github?.settings.map((setting) => setting.id)).toEqual([
-      "github-connection",
-      "github-logout",
+  it("offers the palette the pages Settings itself would list for the plugins that are on", () => {
+    const sections = listAvailableSections(octantSettingsRegistry, capabilities);
+    for (const off of [[], ["github"], ["linear"], ["github", "linear"]]) {
+      const present = (section: string) => !off.includes(section);
+      expect(
+        settingsCommandPages(present).map((page) => page.id),
+        `with ${off.join(" and ") || "nothing"} off`,
+      ).toEqual(withoutAbsentContributions(sections, present).map((section) => section.id));
+    }
+    const names = (...off: ReadonlyArray<string>) =>
+      settingsCommandPages((section) => !off.includes(section)).find(
+        (page) => page.id === "integrations",
+      )?.alsoFoundAs;
+    expect(names()).toEqual(["Web search", "GitHub", "Linear"]);
+    expect(names("github")).toEqual(["Web search", "Linear"]);
+    // Web search is the host's own, so the page outlives both plugins.
+    expect(names("github", "linear")).toEqual(["Web search"]);
+  });
+
+  // Permissions had grown to fifty settings, Appearance to forty and General
+  // to thirty-eight, while GitHub, Linear, Web search, Device tools and To-dos
+  // held one to three each (counted 2026-11-25).
+  it("keeps a page between four and thirty settings, but for the pages that are one tool", () => {
+    const ONE_TOOL = new Set(["keybindings", "usage"]);
+    const outside = octantSettingsRegistry.sections
+      .filter((section) => !ONE_TOOL.has(section.id))
+      .filter((section) => section.settings.length < 4 || section.settings.length > 30)
+      .map((section) => `${section.label}: ${section.settings.length}`);
+    expect(outside).toEqual([]);
+  });
+
+  it("splits what Appearance held into the look, what is drawn behind it, and how text is set", () => {
+    const ids = (id: string) =>
+      octantSettingsRegistry.sections.find((s) => s.id === id)?.settings.map((s) => String(s.id));
+    expect(ids("appearance")).toEqual([
+      "sidebar-material",
+      "glass-tint",
+      "appearance.scheme.light-preset",
+      "appearance.scheme.dark-preset",
+      "appearance.custom",
+      "appearance.density",
+      "appearance.scheme.style",
+      "appearance.accessibility.increased-contrast",
+      "appearance.theme-import-export",
+      "reset-appearance",
+      "appearance.scheme.accent",
+      "appearance.accessibility.reduced-motion",
+      "appearance.accessibility.reduced-transparency",
     ]);
-    expect(github?.keywords).toMatch(/authentication/);
-    expect(github?.keywords).toMatch(/revoke/);
-    expect(github?.keywords).toMatch(/repositories/);
+    expect(ids("background")?.every((id) => id.startsWith("app-background"))).toBe(true);
+    expect(ids("background")).toHaveLength(13);
+    expect(ids("text")?.filter((id) => !id.startsWith("appearance.typography."))).toEqual([
+      "transcript-text-size",
+      "transcript-width",
+      "reply-detail",
+    ]);
+    expect(ids("text")).toHaveLength(14);
+  });
+
+  it("registers Integrations as a host-scoped page of web search and the rows each plugin contributes", () => {
+    const integrations = octantSettingsRegistry.sections.find((s) => s.id === "integrations");
+    expect(integrations?.label).toBe("Integrations");
+    expect(integrations?.scope).toBe("host");
+    expect(
+      integrations?.settings.map((setting) => [setting.id, setting.contributedSection]),
+    ).toEqual([
+      ["web-search-policy", undefined],
+      ["web-search-provider-search", undefined],
+      ["web-search-add", undefined],
+      ["github-connection", "github"],
+      ["github-logout", "github"],
+      ["linear-connection", "linear"],
+      ["linear-projects", "linear"],
+      ["linear-disconnect", "linear"],
+    ]);
+  });
+
+  it("offers no row of a plugin that is switched off, and keeps web search when both are", () => {
+    const sections = listAvailableSections(octantSettingsRegistry, capabilities);
+    const rowsWithout = (...off: ReadonlyArray<string>) =>
+      withoutAbsentContributions(sections, (section) => !off.includes(section))
+        .find((section) => section.id === "integrations")
+        ?.settings.map((setting) => setting.id);
+    const webSearch = ["web-search-policy", "web-search-provider-search", "web-search-add"];
+    expect(rowsWithout("github")).toEqual([
+      ...webSearch,
+      "linear-connection",
+      "linear-projects",
+      "linear-disconnect",
+    ]);
+    expect(rowsWithout("linear")).toEqual([...webSearch, "github-connection", "github-logout"]);
+    expect(rowsWithout("github", "linear")).toEqual(webSearch);
+    const found = (query: string, ...off: ReadonlyArray<string>) =>
+      searchSettings(
+        withoutAbsentContributions(sections, (section) => !off.includes(section)),
+        capabilities,
+        query,
+      ).map((result) => (result.kind === "setting" ? result.settingId : result.sectionId));
+    expect(found("github")).toContain("github-connection");
+    expect(found("github", "github")).not.toContain("github-connection");
+    expect(found("log out github", "github")).not.toContain("github-logout");
+    // The words a person searched the two old pages by still find their rows.
+    expect(found("oauth")).toContain("linear-connection");
+    expect(found("revoke authorization")).toContain("github-connection");
+    // Every other page is the page it was.
+    expect(
+      withoutAbsentContributions(sections, () => false).filter(
+        (section) => section.id !== "integrations",
+      ),
+    ).toEqual(sections.filter((section) => section.id !== "integrations"));
   });
 
   it("keeps the running host on Host, what was allowed on Permissions, and stored data on Data & storage", () => {
@@ -177,6 +279,16 @@ describe("octantSettingsRegistry", () => {
     const ids = (id: string) => section(id)?.settings.map((setting) => setting.id);
     expect(section("host")?.scope).toBe("host");
     expect(ids("host")).toEqual([
+      "resource-limits",
+      "resource-maxCommands",
+      "resource-maxWorkers",
+      "resource-maxAgents",
+      "resource-cpuTargetPercent",
+      "resource-memoryReservePercent",
+      "resource-save",
+      "resource-pause",
+      "resource-keepAwake",
+      "resource-refresh",
       "reset-layout",
       "reset-window-bounds",
       "save-diagnostics",
@@ -218,12 +330,22 @@ describe("octantSettingsRegistry", () => {
       "browser-agent-downloads",
       "browser-captures-per-thread",
       "tool-call-records",
-      "tool-steps-per-turn",
-      "tool-steps-per-turn-full-access",
-      "runtime-turns-per-turn",
       "browser-transfer-file-limit",
       "browser-held-download-limit",
       "browser-upload-file-count-limit",
+      "tool-approvals",
+      "network-limits",
+      "safe-networks",
+      "shield-servers-list",
+      "shield-servers-add",
+      "server-projects",
+    ]);
+    expect(section("limits")?.label).toBe("Limits");
+    expect(section("limits")?.scope).toBe("host");
+    expect(ids("limits")).toEqual([
+      "tool-steps-per-turn",
+      "tool-steps-per-turn-full-access",
+      "runtime-turns-per-turn",
       "thread-wakeups-waiting",
       "thread-wakeups-run-missed",
       "message-wakes-per-hour",
@@ -242,12 +364,6 @@ describe("octantSettingsRegistry", () => {
       "follow-up-lateness-limit",
       "tooling-command-confirm",
       "agent-routines-start-active",
-      "tool-approvals",
-      "network-limits",
-      "safe-networks",
-      "shield-servers-list",
-      "shield-servers-add",
-      "server-projects",
     ]);
     expect(section("secret-stores")?.label).toBe("Secret stores");
     expect(section("secret-stores")?.scope).toBe("host");
@@ -278,20 +394,55 @@ describe("octantSettingsRegistry", () => {
       "browser-flows",
       "browser-extensions",
       "thread-retention",
+      "todo-list-host",
     ]);
     expect(section("data")?.keywords).toMatch(/backup/);
     expect(section("data")?.keywords).toMatch(/retention/);
   });
 
-  it("registers Work with the two defaults a new Work thread starts with", () => {
-    const work = octantSettingsRegistry.sections.find((s) => s.id === "work");
-    expect(work?.scope).toBe("host");
-    expect(work?.settings.map((setting) => setting.id)).toEqual([
-      "work-default-model",
-      "work-default-access",
-      "work-strict",
-      "work-restart-continuation",
+  it("registers Chat & Work with what a new Chat thread and a new Work thread start with", () => {
+    const page = octantSettingsRegistry.sections.find((s) => s.id === "chat-work");
+    expect(page?.label).toBe("Chat & Work");
+    expect(page?.settings.map((setting) => [setting.id, setting.scope])).toEqual([
+      ["stream-replies", "app"],
+      ["chat-default-model", "app"],
+      ["chat-fallback-model", "app"],
+      ["chat-personality", "app"],
+      ["chat-research-enabled", "app"],
+      ["chat-research-backend", "app"],
+      ["chat-restart-continuation", "mode"],
+      ["work-default-model", "host"],
+      ["work-default-access", "host"],
+      ["work-strict", "host"],
+      ["work-restart-continuation", "mode"],
     ]);
+  });
+
+  it("names two rows that share a page apart in search", () => {
+    for (const section of octantSettingsRegistry.sections) {
+      const labels = section.settings.map((setting) => setting.label);
+      const repeated = labels.filter((label, index) => labels.indexOf(label) !== index);
+      expect(repeated, section.label).toEqual([]);
+    }
+  });
+
+  it("keeps Device tools' two rows on Computer use, found by the tools' own words", () => {
+    const computerUse = octantSettingsRegistry.sections.find((s) => s.id === "computer-use");
+    expect(computerUse?.settings.slice(-2).map((setting) => setting.id)).toEqual([
+      "managed-tools-automatic-updates",
+      "managed-tools-update-check",
+    ]);
+    const results = searchSettings(
+      listAvailableSections(octantSettingsRegistry, capabilities),
+      capabilities,
+      "simulator",
+    );
+    expect(results).toContainEqual(
+      expect.objectContaining({
+        sectionId: "computer-use",
+        settingId: "managed-tools-automatic-updates",
+      }),
+    );
   });
 
   it("registers marketplace fetches with the Skills & Extensions it governs", () => {
@@ -349,7 +500,7 @@ describe("octantSettingsRegistry", () => {
     expect(material?.nativeRequired).toBeUndefined();
   });
 
-  it("registers only the spend ceiling switch in Usage, and the Chat and Code setup destinations", () => {
+  it("registers only the spend ceiling switch in Usage, and the provider and Code setup destinations", () => {
     const usage = octantSettingsRegistry.sections.find((s) => s.id === "usage");
     expect(usage?.settings.map((setting) => setting.id)).toEqual(["spend-ceiling-shown"]);
     const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
@@ -411,16 +562,6 @@ describe("octantSettingsRegistry", () => {
       "host-worktrees",
       "xcode-build-data",
       "open-in-applications",
-    ]);
-    const chat = octantSettingsRegistry.sections.find((section) => section.id === "chat");
-    expect(chat?.settings.map((setting) => setting.id)).toEqual([
-      "stream-replies",
-      "chat-default-model",
-      "chat-fallback-model",
-      "chat-personality",
-      "chat-research-enabled",
-      "chat-research-backend",
-      "chat-restart-continuation",
     ]);
   });
 
@@ -556,7 +697,8 @@ describe("octantSettingsRegistry", () => {
         .slice(0, 4)
         .map((result) => result.sectionId),
     ).toContain("skills");
-    expect(first("sign out github")).toBe("github/github-logout");
+    expect(first("sign out github")).toBe("integrations/github-logout");
+    expect(first("to-do")).toBe("data/todo-list-host");
     expect(first("notif")).toBeDefined();
     expect(first("display name")).toBe("providers/provider-display-name");
   });

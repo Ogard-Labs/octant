@@ -389,7 +389,7 @@ export function hostReadsProviderCatalogUnconfined(input: {
 
 /**
  * Whether this host starts new threads at Full access with the sandbox off:
- * Settings › Code's default mode, or Settings › Work's default access, with
+ * Settings › Code's default mode, or Work's default access on Settings › Chat & Work, with
  * the sandbox not kept. Choosing either shows the one-time Full access
  * warning. A Windows host reads a provider's model catalog unconfined only
  * then, because that catalog serves turns that run unconfined.
@@ -495,7 +495,7 @@ export function clampWorkAccess(thread: WorkAccess, ceiling: WorkAccess): WorkAc
 }
 
 /**
- * The Work default (Settings › Work, a Work Project's start mode) a Code mode
+ * The Work default (Settings › Chat & Work, a Work Project's start mode) a Code mode
  * picker choice stands for, Plan included.
  */
 export function workAccessOfPermissionMode(mode: PermissionMode): WorkDefaultAccess {

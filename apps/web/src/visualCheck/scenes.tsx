@@ -330,7 +330,7 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
     id: "settings-background-custom",
     render: () => (
       <SettingsView
-        initialDeepLink={{ section: "appearance", setting: "app-background" }}
+        initialDeepLink={{ section: "background", setting: "app-background" }}
         nativeBoundsAvailable
         onResetLayout={noop}
         onResetNativeBounds={noop}
