@@ -24,6 +24,25 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
+import { MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS } from "@octant/contracts/thread-message-queue";
+import { lazyOr } from "../lib/lazyOr";
+import type { ComposerQuotePlace } from "./composerQuote";
+import {
+  COMPOSER_QUOTE_CLIPBOARD_TYPE,
+  loadComposerQuoteTools,
+  loadedComposerQuoteTools,
+  QUOTE_HEADER_TAIL,
+} from "./composerQuoteMark";
+import type { ComposerQuoteChipProps } from "./ComposerQuoteChip";
+
+const LazyQuoteChip = lazyOr<ComposerQuoteChipProps>(
+  async () => (await import("./ComposerQuoteChip")).ComposerQuoteChip,
+  ({ quote }) => (
+    <span className="composer-chip__label">
+      {`Quote · ${quote.text.slice(0, 40)}${quote.comment === "" ? "" : ` · Note: ${quote.comment.slice(0, 40)}`}`}
+    </span>
+  ),
+);
 
 /**
  * The composer prompt as its callers see it: the element, plus the text-field
@@ -113,6 +132,22 @@ export interface ComposerInputProps extends ForwardedAttributes {
    * whose typing a send may claim. Without one, the prompt is its own draft.
    */
   readonly typedScope?: string | undefined;
+  /**
+   * The prompts already sent in this thread, newest first. In an empty prompt
+   * ArrowUp brings them back one by one and ArrowDown walks forward again,
+   * for as long as the recalled text is unedited. A caller with attachments
+   * or other context beside the prompt passes none.
+   */
+  readonly recall?: ReadonlyArray<string> | undefined;
+  /**
+   * Takes a paste too large for the prompt as a text file instead: 32 KiB or
+   * more, or enough to push the prompt past what a message may hold. ⌘⇧V
+   * (Ctrl+Shift+V) pastes it inline anyway. Without it every paste is text.
+   * It answers the reason the file was not taken, or undefined once it was.
+   */
+  readonly onPasteAsFile?:
+    | ((file: File) => string | undefined | Promise<string | undefined>)
+    | undefined;
 }
 
 const TAG_NAME = "octant-composer-input";
@@ -122,6 +157,10 @@ const FILLER_ATTRIBUTE = "data-composer-filler";
 /** Keystrokes closer together than this undo as one step, as a text field's do. */
 const TYPING_COALESCE_MS = 800;
 const MAX_HISTORY = 200;
+/** A paste this large reads better as a file than as a wall of text in the prompt. */
+const PASTE_AS_FILE_BYTES = 32 * 1024;
+/** How soon after ⌘⇧V its paste arrives, if the browser sends one at all. */
+const PLAIN_PASTE_WINDOW_MS = 500;
 
 type Chip =
   | {
@@ -132,6 +171,14 @@ type Chip =
       readonly id: string;
       readonly match: SubagentModelTagMatch;
     }
+  | {
+      readonly kind: "quote";
+      readonly start: number;
+      readonly end: number;
+      readonly text: string;
+      readonly id: string;
+      readonly quote: ComposerQuotePlace;
+    }
   | ({ readonly kind: "inline" } & ComposerInlineChipPlace);
 
 type Segment =
@@ -140,11 +187,38 @@ type Segment =
 
 type FindInlineChips = ComposerInlineChips["find"] | undefined;
 
-/** Every chip in the prompt, in order; a tag inside a caller's chip is that chip's text. */
+function overlaps(
+  range: { readonly start: number; readonly end: number },
+  chips: ReadonlyArray<Chip>,
+): boolean {
+  return chips.some((chip) => range.start < chip.end && chip.start < range.end);
+}
+
+/**
+ * Every chip in the prompt, in order. A quote's words are the quote's own, so
+ * a tag inside a quote is quoted text, and a tag inside a caller's chip is that
+ * chip's text.
+ */
 function chipsOf(value: string, findInline: FindInlineChips): ReadonlyArray<Chip> {
-  const inline = (findInline?.(value) ?? []).map((place): Chip => ({ ...place, kind: "inline" }));
+  // Until the quote code loads no quote Octant wrote can exist, so none is found.
+  const quotes = (loadedComposerQuoteTools()?.findComposerQuotes(value) ?? []).map(
+    (quote, index): Chip => ({
+      kind: "quote",
+      start: quote.start,
+      end: quote.end,
+      text: quote.chipText,
+      id: `quote:${String(index)}`,
+      quote,
+    }),
+  );
+  const inline = [
+    ...quotes,
+    ...(findInline?.(value) ?? [])
+      .filter((place) => !overlaps(place, quotes))
+      .map((place): Chip => ({ ...place, kind: "inline" })),
+  ];
   const models = findSubagentModelTags(value)
-    .filter((match) => !inline.some((chip) => match.start < chip.end && chip.start < match.end))
+    .filter((match) => !overlaps(match, inline))
     .map(
       (match): Chip => ({
         kind: "model",
@@ -313,6 +387,27 @@ function isCanonical(root: HTMLElement, value: string, findInline: FindInlineChi
   return true;
 }
 
+/** Writes a copy's text, and beside it, under Octant's own type, the quotes Octant wrote in it. */
+function copyText(clipboard: DataTransfer, text: string): void {
+  clipboard.setData("text/plain", text);
+  const quotes = loadedComposerQuoteTools()?.composerQuoteTextsIn(text) ?? [];
+  if (quotes.length > 0) clipboard.setData(COMPOSER_QUOTE_CLIPBOARD_TYPE, JSON.stringify(quotes));
+}
+
+/** The quotes a paste's clipboard says a composer copied, each still whole in the pasted text. */
+function copiedQuotes(clipboard: DataTransfer, text: string): ReadonlyArray<string> {
+  const marked = clipboard.getData(COMPOSER_QUOTE_CLIPBOARD_TYPE);
+  if (marked === "") return [];
+  try {
+    const quotes: unknown = JSON.parse(marked);
+    return Array.isArray(quotes)
+      ? quotes.filter((quote): quote is string => typeof quote === "string" && text.includes(quote))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 interface ChipHost {
   readonly key: string;
   readonly node: HTMLElement;
@@ -405,6 +500,8 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       renderModelChip,
       inlineChips,
       typedScope,
+      recall,
+      onPasteAsFile,
       ...attributes
     } = props;
     const ownScope = `composer:${useId()}`;
@@ -454,9 +551,16 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     const report = (root: ComposerInputElement, typed = true) => {
       // Only the person's own edits come through here: typing, paste, cut, undo,
       // and dictation. A value a caller writes does not, and undoing back to one
-      // is not typing it.
-      if (typed) noteTypedComposerText(scopeRef.current, modelRef.current);
-      else composerTextReplaced(scopeRef.current, modelRef.current);
+      // is not typing it. A quote's words are not the person's, so a draft that
+      // carries one is never counted as typed, whatever is typed around it.
+      if (
+        typed &&
+        (loadedComposerQuoteTools()?.findComposerQuotes(modelRef.current).length ?? 0) === 0
+      ) {
+        noteTypedComposerText(scopeRef.current, modelRef.current);
+      } else {
+        composerTextReplaced(scopeRef.current, modelRef.current);
+      }
       flushSync(() => onChangeRef.current?.({ target: root, currentTarget: root }));
     };
 
@@ -528,9 +632,29 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       historyRef.current = { entries, index: entries.length - 1, at: now, typing };
     };
 
-    const emit = (next: string, caret: number, options: { readonly typing: boolean }) => {
+    const emit = (
+      typed: string,
+      typedCaret: number,
+      options: { readonly typing: boolean; readonly pastedQuotes?: ReadonlyArray<string> },
+    ) => {
       const root = rootRef.current;
       if (root === null) return;
+      const tools = loadedComposerQuoteTools();
+      const { value: next, caret } =
+        tools === undefined
+          ? { value: typed, caret: typedCaret }
+          : tools.separateComposerQuotes(
+              typed,
+              typedCaret,
+              // The quotes it held before the edit, any the edit brought in, and
+              // any it pasted: a pasted quote glued to the text after it is not
+              // found by its shape, only by its exact text.
+              [
+                ...tools.composerQuoteTextsIn(modelRef.current),
+                ...tools.composerQuoteTextsIn(typed),
+                ...(options.pastedQuotes ?? []),
+              ],
+            );
       modelRef.current = next;
       pendingRef.current = { start: caret, end: caret };
       lastSelectionRef.current = { start: caret, end: caret };
@@ -540,12 +664,105 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       tick();
     };
 
-    const replaceSelection = (root: HTMLElement, text: string) => {
+    const replaceSelection = (
+      root: HTMLElement,
+      text: string,
+      pastedQuotes?: ReadonlyArray<string>,
+    ) => {
       const { start, end } = currentSelection(root);
       const current = modelRef.current;
       emit(`${current.slice(0, start)}${text}${current.slice(end)}`, start + text.length, {
         typing: false,
+        ...(pastedQuotes === undefined ? {} : { pastedQuotes }),
       });
+    };
+
+    // A change made from a chip of the prompt's own (a quote's note, or the
+    // quote taken out): one undo step, and not the person's typing.
+    const replaceRange = (start: number, end: number, text: string, caretAt?: number) => {
+      const root = rootRef.current;
+      if (root === null) return;
+      const current = modelRef.current;
+      const next = `${current.slice(0, start)}${text}${current.slice(end)}`;
+      const caret = caretAt ?? start + text.length;
+      modelRef.current = next;
+      pendingRef.current = { start: caret, end: caret };
+      lastSelectionRef.current = { start: caret, end: caret };
+      remember({ value: next, caret, typed: false }, false);
+      reportedRef.current = next;
+      report(root, false);
+      tick();
+    };
+
+    // Which sent prompt the prompt shows, and its text as recalled: an edit
+    // makes the text the person's draft, and the arrows move the caret again.
+    const recalledRef = useRef<{ readonly index: number; readonly text: string }>({
+      index: -1,
+      text: "",
+    });
+
+    const plainPasteRef = useRef(0);
+    const pastedFilesRef = useRef(0);
+
+    const pasteText = (
+      root: HTMLElement,
+      text: string,
+      plain: boolean,
+      pastedQuotes?: ReadonlyArray<string>,
+    ) => {
+      const { start, end } = currentSelection(root);
+      const current = modelRef.current;
+      const tooLarge =
+        new TextEncoder().encode(text).length >= PASTE_AS_FILE_BYTES ||
+        current.length - (end - start) + text.length > MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS;
+      if (!plain && tooLarge && onPasteAsFile !== undefined) {
+        pastedFilesRef.current += 1;
+        const name = `pasted-text-${String(pastedFilesRef.current)}.txt`;
+        // Every composer sends only a prompt with words in it, so a paste that
+        // would be the whole prompt leaves an editable line that points at its
+        // file; otherwise the file waits beside an empty prompt that cannot send.
+        // Only a file the composer took gets the line: a refused one (past the
+        // attachment limit, say) would leave a prompt naming a file not sent.
+        const wholePrompt = `${current.slice(0, start)}${current.slice(end)}`.trim() === "";
+        const pointAtFile = (refusal: string | undefined) => {
+          if (refusal !== undefined || !wholePrompt) return;
+          // An answer that comes later finds the prompt as the person left it.
+          if (modelRef.current.trim() !== "" && modelRef.current !== current) return;
+          replaceSelection(root, `See the attached ${name}.`);
+        };
+        const answer = onPasteAsFile(new File([text], name, { type: "text/plain" }));
+        if (answer instanceof Promise) {
+          void answer.then(pointAtFile).catch(() => undefined);
+        } else {
+          pointAtFile(answer);
+        }
+        return;
+      }
+      replaceSelection(root, text, pastedQuotes);
+    };
+
+    const recallStep = (root: HTMLElement, direction: "older" | "newer"): boolean => {
+      const sent = recall ?? [];
+      const current = modelRef.current;
+      const recalled = recalledRef.current;
+      const showing = current !== "" && recalled.index >= 0 && current === recalled.text;
+      if (current !== "" && !showing) return false;
+      const { start, end } = currentSelection(root);
+      if (start !== end) return false;
+      const index = showing ? recalled.index : -1;
+      if (direction === "older") {
+        if (current.slice(0, start).includes("\n")) return false;
+        const next = sent[index + 1];
+        if (next === undefined) return showing;
+        recalledRef.current = { index: index + 1, text: next };
+        replaceRange(0, current.length, next, 0);
+        return true;
+      }
+      if (!showing || current.slice(end).includes("\n")) return false;
+      const next = index > 0 ? (sent[index - 1] ?? "") : "";
+      recalledRef.current = { index: index - 1, text: next };
+      replaceRange(0, current.length, next);
+      return true;
     };
 
     const restore = (root: ComposerInputElement, direction: -1 | 1) => {
@@ -797,6 +1014,16 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       return () => label.removeEventListener("click", onLabelClick);
     }, []);
 
+    // A prompt that holds a quote's mark (a restored draft, say) loads the quote
+    // code, which then says which of them Octant wrote.
+    const marked = value.includes(QUOTE_HEADER_TAIL);
+    useEffect(() => {
+      if (!marked || loadedComposerQuoteTools() !== undefined) return;
+      void loadComposerQuoteTools()
+        .then(() => tick())
+        .catch(() => undefined);
+    }, [marked]);
+
     useEffect(() => {
       if (autoFocus === true) rootRef.current?.focus();
     }, []);
@@ -836,6 +1063,37 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           replaceSelection(root, "\n");
           return;
         }
+        if (
+          (event.metaKey || event.ctrlKey) &&
+          event.shiftKey &&
+          !event.altKey &&
+          event.key.toLowerCase() === "v"
+        ) {
+          // Some shells never turn ⌘⇧V into a paste, so the clipboard is read
+          // here when no paste follows the key.
+          plainPasteRef.current = Date.now() + PLAIN_PASTE_WINDOW_MS;
+          window.setTimeout(() => {
+            if (plainPasteRef.current === 0) return;
+            void navigator.clipboard
+              ?.readText()
+              .then((text) => {
+                if (plainPasteRef.current === 0 || text === "") return;
+                plainPasteRef.current = 0;
+                pasteText(root, text.replace(/\r\n?/g, "\n"), true);
+              })
+              .catch(() => undefined);
+          }, 50);
+          return;
+        }
+        const plainArrow = !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey;
+        if (
+          plainArrow &&
+          (event.key === "ArrowUp" || event.key === "ArrowDown") &&
+          recallStep(root, event.key === "ArrowUp" ? "older" : "newer")
+        ) {
+          event.preventDefault();
+          return;
+        }
         const modifier = event.metaKey || event.ctrlKey;
         if (modifier && !event.altKey && event.key.toLowerCase() === "z") {
           event.preventDefault();
@@ -852,6 +1110,10 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       onFocus,
       onBlur,
       onPaste: (event: ClipboardEvent<ComposerInputElement>) => {
+        // Any paste answers a ⌘⇧V, even one a caller takes, so the clipboard
+        // read that stands in for a shell's missing paste never pastes twice.
+        const plain = Date.now() < plainPasteRef.current;
+        plainPasteRef.current = 0;
         onPaste?.(event);
         if (event.defaultPrevented || !editable) return;
         const root = rootRef.current;
@@ -860,7 +1122,27 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const text = event.clipboardData.getData("text/plain");
         // A paste with no text (an image the caller did not take) changes nothing.
         if (text === "") return;
-        replaceSelection(root, text.replace(/\r\n?/g, "\n"));
+        const copied = copiedQuotes(event.clipboardData, text);
+        const tools = loadedComposerQuoteTools();
+        if (copied.length > 0 && tools === undefined) {
+          // Quotes copied in another window: the quote code loads, takes them
+          // as Octant's own, puts each back on lines of its own (the paste
+          // landed before it could), and the prompt draws them as chips.
+          void loadComposerQuoteTools()
+            .then((loaded) => {
+              const trusted = loaded.trustComposerQuotes(copied);
+              const current = modelRef.current;
+              const at = lastSelectionRef.current.end;
+              const separated = loaded.separateComposerQuotes(current, at, trusted);
+              if (separated.value === current) tick();
+              else replaceRange(0, current.length, separated.value, separated.caret);
+            })
+            .catch(() => undefined);
+        }
+        // Only whole quotes are kept apart from the text around them; other
+        // data under Octant's type is ordinary pasted text.
+        const trusted = tools?.trustComposerQuotes(copied) ?? [];
+        pasteText(root, text.replace(/\r\n?/g, "\n"), plain, trusted);
       },
       onCopy: (event: ClipboardEvent<ComposerInputElement>) => {
         const root = rootRef.current;
@@ -868,7 +1150,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const { start, end } = currentSelection(root);
         if (start === end) return;
         event.preventDefault();
-        event.clipboardData.setData("text/plain", modelRef.current.slice(start, end));
+        copyText(event.clipboardData, modelRef.current.slice(start, end));
       },
       onCut: (event: ClipboardEvent<ComposerInputElement>) => {
         const root = rootRef.current;
@@ -876,7 +1158,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const { start, end } = currentSelection(root);
         if (start === end) return;
         event.preventDefault();
-        event.clipboardData.setData("text/plain", modelRef.current.slice(start, end));
+        copyText(event.clipboardData, modelRef.current.slice(start, end));
         if (editable) replaceSelection(root, "");
       },
       // Through React's own `onInput`, so the caller's state update lands
@@ -913,9 +1195,27 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
             return { start, end: start + chip.text.length };
           };
           const drawn =
-            chip.kind === "model"
-              ? renderModelChip?.(chip.match, locate)
-              : inlineChips?.render(chip.id, locate);
+            chip.kind === "model" ? (
+              renderModelChip?.(chip.match, locate)
+            ) : chip.kind === "quote" ? (
+              <LazyQuoteChip
+                editable={editable}
+                onChange={(next) => {
+                  const { start, end } = locate();
+                  const tools = loadedComposerQuoteTools();
+                  if (tools !== undefined) replaceRange(start, end, tools.composerQuoteText(next));
+                }}
+                onRemove={() => {
+                  const { start, end } = locate();
+                  // The line the quote stood on goes with it.
+                  const lineAfter = modelRef.current[end] === "\n" ? 1 : 0;
+                  replaceRange(start, end + lineAfter, "");
+                }}
+                quote={chip.quote}
+              />
+            ) : (
+              inlineChips?.render(chip.id, locate)
+            );
           return createPortal(
             drawn ?? <span className="composer-chip__label">{chip.text}</span>,
             node,

@@ -204,6 +204,8 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
+import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
@@ -2913,7 +2915,27 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           ) : null}
         </OctantDialogPresence>
 
-        <SelectionThreadScope mode="work" projectId={thread?.projectId ?? projectId}>
+        <SelectionThreadScope
+          mode="work"
+          {...(readOnly
+            ? {}
+            : {
+                onAddToChat: (text: string) => {
+                  void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
+                    // The prompt as it stands once the quote code has loaded.
+                    const current = textareaRef.current?.value ?? composerDraft.text;
+                    const next = appendComposerQuote(current, {
+                      source: REPLY_QUOTE_SOURCE,
+                      text,
+                      comment: "",
+                    });
+                    composerDraft.setDraft(next, next.length);
+                    textareaRef.current?.focus();
+                  });
+                },
+              })}
+          projectId={thread?.projectId ?? projectId}
+        >
           <TranscriptWindow
             ariaLabel="Work transcript"
             className="work-thread-workspace__conversation transcript-scroll"
@@ -3646,6 +3668,28 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           input={
             <ComposerInput
               typedScope={typedScope}
+              recall={promptsToRecall(
+                {
+                  images: images.staged.length,
+                  receipts: extensionDraft.receipts.length,
+                  files: fileMentions.selectedPaths.length,
+                },
+                () =>
+                  sentPromptsNewestFirst(
+                    turns.flatMap((turn) =>
+                      turn.delivery === undefined
+                        ? turn.transcript.filter((entry) => entry.role === "user")
+                        : [],
+                    ),
+                    (entry) =>
+                      parseAutomationFollowUpTurnPrompt(entry.text) === undefined
+                        ? entry.text
+                        : undefined,
+                  ),
+              )}
+              {...(readOnly || completionLocked
+                ? {}
+                : { onPasteAsFile: (file: File) => images.attach([file]) })}
               inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"

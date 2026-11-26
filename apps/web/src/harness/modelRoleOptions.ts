@@ -5,7 +5,7 @@ import {
   type RoleSuggestionModel,
 } from "@octant/domain";
 import type { ProviderReadiness } from "@octant/contracts";
-import { isComposerReasoningOption } from "../providers/ComposerModelPicker";
+import { isComposerReasoningOption } from "../providers/composerReasoningOption";
 import type { ProviderController } from "../providers/useProviderController";
 import type { NativeHarnessProviderOption } from "./NativeHarnessRoutingPanel";
 

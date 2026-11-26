@@ -5,7 +5,12 @@ import {
   type ComposerStashLocation,
   type ComposerStashTarget,
 } from "./composerStashDraft";
-import { planComposerStashRecovery, planComposerStashRestore } from "./composerStashRestore";
+import { appendComposerQuote, findComposerQuotes, REPLY_QUOTE_SOURCE } from "./composerQuote";
+import {
+  planComposerStashRecovery,
+  planComposerStashRestore,
+  withStashedQuotesInText,
+} from "./composerStashRestore";
 
 const chat: ComposerStashLocation = {
   host: "host",
@@ -158,7 +163,7 @@ describe("restoring a saved composer draft", () => {
     expect(restore.draft.files[0]?.name).toBe("notes.md");
   });
 
-  it("restores quotes with their source and appends without replacing the live prompt", () => {
+  it("writes a quote stashed before quotes lived in the text into the prompt as a chip", async () => {
     const quote = {
       kind: "quote" as const,
       value: { id: "quote", turnId: "turn", text: "Exact excerpt" },
@@ -169,17 +174,29 @@ describe("restoring a saved composer draft", () => {
       caret: 5,
       context: [quote],
     };
-    expect(
-      planComposerStashRestore(
-        chat,
-        target,
-        { ...emptyComposerStashDraft(), text: "New text" },
-        saved,
-      ),
-    ).toEqual({
+    const plan = planComposerStashRestore(
+      chat,
+      target,
+      { ...emptyComposerStashDraft(), text: "New text" },
+      saved,
+    );
+    expect(plan).toEqual({
       kind: "ready",
       draft: { ...saved, text: "New text\n\nSaved follow-up", caret: 15 },
     });
+    if (plan.kind !== "ready") return;
+    const chip = appendComposerQuote("", {
+      source: REPLY_QUOTE_SOURCE,
+      text: "Exact excerpt",
+      comment: "",
+    });
+    await expect(withStashedQuotesInText(plan.draft)).resolves.toEqual({
+      ...saved,
+      context: [],
+      text: `${chip}New text\n\nSaved follow-up`,
+      caret: chip.length + 15,
+    });
+    expect(findComposerQuotes(chip)).toHaveLength(1);
   });
 
   it("refuses to relabel a quote as a reply from a different conversation", () => {
@@ -229,6 +246,43 @@ describe("restoring a saved composer draft", () => {
       kind: "refused",
       reason: "Remove a file mention before restoring this draft. This composer can hold 8.",
     });
+  });
+
+  it("refuses to move a quote of this thread's reply into another thread's composer", () => {
+    const saved = {
+      ...emptyComposerStashDraft(),
+      text: appendComposerQuote("Why? ", {
+        source: REPLY_QUOTE_SOURCE,
+        text: "Exact excerpt",
+        comment: "",
+      }),
+    };
+    expect(
+      planComposerStashRestore(
+        chat,
+        { ...target, location: { ...chat, composerId: "other-thread", threadId: "other-thread" } },
+        emptyComposerStashDraft(),
+        saved,
+      ),
+    ).toEqual({ kind: "refused", reason: "A quoted reply needs its original composer." });
+    expect(planComposerStashRestore(chat, target, emptyComposerStashDraft(), saved).kind).toBe(
+      "ready",
+    );
+  });
+
+  it("restores a reply quote into its own thread after the thread moves to a Project", () => {
+    const saved = {
+      ...emptyComposerStashDraft(),
+      text: appendComposerQuote("", { source: REPLY_QUOTE_SOURCE, text: "Excerpt", comment: "" }),
+    };
+    expect(
+      planComposerStashRestore(
+        chat,
+        { ...target, location: { ...chat, projectId: "filed-project" } },
+        emptyComposerStashDraft(),
+        saved,
+      ).kind,
+    ).toBe("ready");
   });
 
   it("keeps a draft within the host that owns its source scope", () => {

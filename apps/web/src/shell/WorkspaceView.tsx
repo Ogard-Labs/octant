@@ -88,7 +88,7 @@ import { SplitWorkspace, type PaneFacts, type SplitWorkspaceProps } from "./Spli
 import type { ExtraFolderChange, ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 
-import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
+import { pickerHasReadyInstance } from "../providers/pickerReadiness";
 import { EnvironmentFoldScope } from "../environment/environmentSections";
 import { hubAdministrationOf, ownerUnlockOf, type OctantHostBridge } from "./hostBridge";
 import type { ThreadMoveEnvironment } from "../environment/threadMove/ThreadMoveComputerCard";

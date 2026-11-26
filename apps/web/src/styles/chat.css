@@ -1195,6 +1195,7 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 .transcript-selection-thread__offer {
   display: flex;
   justify-content: flex-end;
+  gap: var(--oct-space-2);
   margin-top: var(--oct-space-2);
 }
 

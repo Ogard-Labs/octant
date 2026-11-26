@@ -210,6 +210,8 @@ import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
+import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
 import {
@@ -2152,7 +2154,28 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             </div>
           </div>
         ) : (
-          <SelectionThreadScope mode="code" projectId={view?.thread.projectId}>
+          <SelectionThreadScope
+            mode="code"
+            {...(readOnly
+              ? {}
+              : {
+                  onAddToChat: (text: string) => {
+                    void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
+                      // The prompt as it stands once the quote code has loaded.
+                      const next = appendComposerQuote(textareaRef.current?.value ?? draft, {
+                        source: REPLY_QUOTE_SOURCE,
+                        text,
+                        comment: "",
+                      });
+                      draftRevisionRef.current += 1;
+                      setDraft(next);
+                      props.controller.setPendingDraft?.(next, next.length);
+                      textareaRef.current?.focus();
+                    });
+                  },
+                })}
+            projectId={view?.thread.projectId}
+          >
             <TranscriptWindow
               trail={
                 <>
@@ -3227,6 +3250,28 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           input={
             <ComposerInput
               typedScope={typedScope}
+              recall={promptsToRecall(
+                {
+                  attachments: attachments.staged.length,
+                  // An upload in progress joins the prompt once it lands.
+                  uploads: attachments.busy ? 1 : 0,
+                  receipts: extensionDraft.receipts.length,
+                },
+                () =>
+                  sentPromptsNewestFirst(messages, (message) =>
+                    message.role === "user" &&
+                    message.delivery === undefined &&
+                    (message.sourceThreadId === undefined ||
+                      String(message.sourceThreadId) === String(thread.id)) &&
+                    // A routine's scheduled follow-up is the host's, not the person's.
+                    parseAutomationFollowUpTurnPrompt(message.text) === undefined
+                      ? message.text
+                      : undefined,
+                  ),
+              )}
+              {...(props.attachmentClient === undefined || readOnly
+                ? {}
+                : { onPasteAsFile: (file: File) => attachFiles([file]) })}
               inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-activedescendant={

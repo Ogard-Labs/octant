@@ -761,6 +761,64 @@ while the file-type glyph loads. An available image thumbnail takes the glyph's
 place. Long filenames truncate within the chip so its remove control stays
 reachable.
 
+### Quotes, recalled prompts and large pastes
+
+A quote is words taken from somewhere else, put in the prompt as one chip
+with the person's optional note (maintainer decision, 2026-11-26). Selecting
+text in a finished reply offers **Add to chat** in Chat, Work and Code (in
+Work and Code beside New thread from selection, under the reply and in its
+right-click menu). A terminal's **Add selection to chat** and the editor's
+**Send selection to agent** add the same chip, naming the terminal, or the
+file and its lines; the editor's request for one replacement block follows the
+chip as ordinary text.
+
+- The quote is the prompt's own text: a line that names its source and says
+  the words are for reference only, not instructions, then the words in a
+  fence longer than any backtick run inside them, then the person's note on a
+  line of its own that says it is theirs. The host receives plain text; there
+  is no quote type in any contract.
+- Only a quote Octant wrote in this window is a chip: one added by Add to chat
+  or a selection, one whose note was saved from the chip, or one copied out of
+  a composer and pasted back, which carries Octant's own clipboard type beside
+  the text. Text that only has a quote's shape (an agent's reply pasted in)
+  stays plain, visible text, so a "note" inside it can never sit behind a chip
+  as the person's own words. Copy, paste, stash and restore carry chips within
+  the window; after a reload a quote reads as the plain text it is.
+- The chip shows the start of the quote and, after a note mark, the start of
+  the note. Pressing it shows the whole quote, a **Your note** field with
+  **Save note**, and **Remove quote**; an Enter that commits an input method's
+  text does not save. Text typed right against a chip moves to its own line,
+  so the fence always closes, and a closing fence with words after it on its
+  line ends no quote.
+- Quoted words are another party's text, so a draft that holds a quote is
+  never counted as typed by the person, whatever is typed around it.
+- A draft stashed while Chat kept quotes beside the prompt restores them as
+  chips ahead of its text. A draft holding a quote of "an earlier reply in
+  this thread" restores only in its original composer, since in another
+  thread it would name that thread's history as the source.
+- The quoted words keep their trailing whitespace, so an editor selection's
+  final line break reaches the model with the rest of what a replacement
+  replaces.
+
+In a thread's empty composer with no attachments, uploads in progress or selected context, ArrowUp
+brings back the prompts the person sent in this thread, newest first, and
+ArrowDown walks forward again to an empty prompt. The arrows recall only while
+the recalled text is unedited and the caret is on its first line (ArrowUp) or
+last line (ArrowDown); once the person edits it, the arrows move the caret
+again. The prompts come from the loaded transcript; reports the host delivered
+and a routine's scheduled follow-ups are not the person's and are not recalled. A recalled prompt is not counted as
+typed until the person edits it.
+
+A paste of 32 KiB or more, or one that would take the prompt past the 200,000
+characters a message may hold, attaches as `pasted-text-<n>.txt` instead of
+filling the prompt, through the composer's own attach path: a Chat, Work or
+Code thread, and the Work and Code start screens. ⌘⇧V (Ctrl+Shift+V) pastes it
+inline anyway. Every composer sends only a prompt with words in it, so when
+the paste would be the whole prompt and the composer took the file, it leaves the editable line "See the
+attached `pasted-text-<n>.txt`." in its place. The Chat start screen keeps a
+large paste as text, because a first Chat message needs words: the thread's
+title is made from them.
+
 ### Saved drafts
 
 The desktop and web composer in Chat, Work, and Code offers **Stash draft** and

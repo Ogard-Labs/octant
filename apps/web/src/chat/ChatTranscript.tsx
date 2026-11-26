@@ -125,7 +125,7 @@ export interface ChatTranscriptProps {
   }) => void;
   /**
    * Quotes a finished assistant excerpt into the same thread's composer as a
-   * structured chip. Absent when the surface cannot accept quotes.
+   * quote chip. Absent when the surface cannot accept quotes.
    */
   readonly onQuoteSelection?: (input: {
     readonly turnId: ChatTurnId;

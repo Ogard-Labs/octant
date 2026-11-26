@@ -287,6 +287,8 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             input={
               <ComposerInput
                 typedScope={typedScope}
+                // No onPasteAsFile: a first Chat message needs words, since its
+                // title is made from them, so a large paste stays text here.
                 renderModelChip={atMenu.renderModelChip}
                 aria-activedescendant={
                   atMenu.active !== undefined
