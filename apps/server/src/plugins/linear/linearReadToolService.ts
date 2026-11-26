@@ -177,6 +177,20 @@ export class LinearReadToolService {
         const update =
           context.issueUpdates === undefined ? undefined : parseLinearUpdateInput(inputJson);
         if (update !== undefined && context.issueUpdates !== undefined) {
+          // A write is authorized on every call as a read is: the thread must
+          // be live and the Project still bound to an effective Linear.
+          const writeDecision = decideLinearAgentRead({
+            mode: "code",
+            threadLifecycle: current?.lifecycle ?? "missing",
+            threadAuthority: threadAuthority(context.thread, current),
+            projectLinearTarget: context.readProjectLinearTarget(),
+            snapshot: await this.#reader.snapshot(signal ?? new AbortController().signal),
+            snapshotFreshness: "fresh",
+            providerToolPolicy: "allowed",
+          });
+          if (writeDecision.decision === "deny") {
+            return failure(writeDecision.code, writeDecision.remediation);
+          }
           const issue = context.issueUpdates
             .linked()
             .find((linked) => linked.forge === "linear" && linked.identifier === update.identifier);

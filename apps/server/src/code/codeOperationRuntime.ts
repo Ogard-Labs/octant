@@ -519,6 +519,8 @@ export interface CodeOperationRuntimeOptions {
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
   /** The issues a thread is linked to; a pull request it opens names them as fixed. */
   readonly linkedIssues?: (threadId: CodeThreadId) => ReadonlyArray<LinkedIssueRef>;
+  /** A thread's agent opened its pull request through the pull-request tool. */
+  readonly onPullRequestCreated?: (threadId: CodeThreadId) => void;
   /** The Project's stored choices for comments and default-branch pushes; absent reads neither. */
   readonly projectForgeChoices?: (thread: CodeThread) => ProjectForgeChoices;
   /**
@@ -6553,6 +6555,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.linkedIssues === undefined
             ? {}
             : { linkedIssues: () => this.#options.linkedIssues?.(active.thread.id) ?? [] }),
+          onPullRequestCreated: () => this.#options.onPullRequestCreated?.(active.thread.id),
           // Under Strict only, as for the operation service above.
           threadReadOutsideContent: () =>
             this.#options.readThreadExternalContentTaint?.(active.thread.id)

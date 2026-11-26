@@ -4819,11 +4819,13 @@ take is refused rather than ignored.
   `comment` and `close` (as completed) for a linked issue of the delivery
   repository, and `octant_linear` adds `set-state` and `comment` for a linked
   Linear issue. Reach is the thread's linked issues only. The server decides
-  before any call: Plan refuses, Full access writes, and below it the person
-  is asked with the whole text unless the Project's Agents may update linked
+  before any call, after the same per-call authorization a read gets: Plan
+  refuses, Full access writes, and below it the person is asked with the
+  whole text unless the Project's Agents may update linked
   issues is on and the thread has read no outside content under Strict
   (`decideAgentIssueUpdate`, the pull-request comment rule). A GitHub write
-  first proves `issues-write` (triage or push permission) on the repository;
+  needs the GitHub integration effective and first proves triage or push
+  permission on the repository;
   a Linear write needs the `write` scope. Each attempt is journaled as
   `tracker.issue-write-recorded@1`, a comment by digest only. When the
   Project's Keep linked issues up to date is on, the host makes the same

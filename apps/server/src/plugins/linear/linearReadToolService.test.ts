@@ -293,8 +293,11 @@ describe("LinearReadToolService issue updates", () => {
   function updateHarness(input: {
     readonly executionPolicy: CodeThread["executionPolicy"];
     readonly projectAllowsUpdates?: boolean;
+    readonly lifecycle?: CodeThread["lifecycle"];
   }) {
     const thread = makeThread({ executionPolicy: input.executionPolicy });
+    const current =
+      input.lifecycle === undefined ? thread : { ...thread, lifecycle: input.lifecycle };
     const ask = vi.fn(async () => "approved" as const);
     const writes = {
       agentSetState: vi.fn(async () => ({ status: "applied" as const })),
@@ -306,7 +309,7 @@ describe("LinearReadToolService issue updates", () => {
     }).createToolSet({
       windowId: WINDOW_ID,
       thread,
-      readThread: () => thread,
+      readThread: () => current,
       readProjectLinearTarget: () => TARGET,
       issueUpdates: {
         linked: () => [linked],
@@ -372,5 +375,27 @@ describe("LinearReadToolService issue updates", () => {
     await allowed.run({ operation: "comment", identifier: "OCT-42", body: "Started." });
     expect(allowed.ask).not.toHaveBeenCalled();
     expect(allowed.writes.agentComment).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a comment too long to show whole in the approval before asking", async () => {
+    const gated = updateHarness({ executionPolicy: "approval-gated" });
+    expect(
+      await gated.run({ operation: "comment", identifier: "OCT-42", body: "x".repeat(3_000) }),
+    ).toMatchObject({ result: { error: "comment-too-long-to-approve" }, isError: true });
+    expect(gated.ask).not.toHaveBeenCalled();
+    expect(gated.writes.agentComment).not.toHaveBeenCalled();
+
+    // Without an ask, the full 4 KB is allowed.
+    const full = updateHarness({ executionPolicy: "full-access" });
+    await full.run({ operation: "comment", identifier: "OCT-42", body: "x".repeat(3_000) });
+    expect(full.writes.agentComment).toHaveBeenCalledOnce();
+  });
+
+  it("an archived thread's agent cannot update its linked issue", async () => {
+    const archived = updateHarness({ executionPolicy: "full-access", lifecycle: "archived" });
+    expect(
+      await archived.run({ operation: "set-state", identifier: "OCT-42", state: "Done" }),
+    ).toMatchObject({ isError: true });
+    expect(archived.writes.agentSetState).not.toHaveBeenCalled();
   });
 });

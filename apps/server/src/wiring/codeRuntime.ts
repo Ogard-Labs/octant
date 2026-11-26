@@ -666,6 +666,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     // The linked-issue write-back is built after the turn runtime it listens
     // to; a turn requested before then has nothing to move.
     const linkedIssueTurnStarts: { current?: (threadId: string) => void } = {};
+    const linkedIssuePullRequestsCreated: { current?: (threadId: string) => void } = {};
     // What a turn's Linear and GitHub tools need to update the thread's linked
     // issues; the Project's choice and the links are read again at each write.
     const agentIssueUpdates = (input: CodeTrackerToolInput): AgentIssueUpdates => ({
@@ -2126,6 +2127,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
         linkedIssues: (threadId) =>
           linkedIssues.store.list(String(threadId)).map((entry) => entry.issue),
+        onPullRequestCreated: (threadId) =>
+          linkedIssuePullRequestsCreated.current?.(String(threadId)),
         githubReadTools: (input) =>
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             githubReadToolService.createToolSet({
@@ -2604,36 +2607,45 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                     baseRepository: merged.baseRepository,
                   };
             },
-            tell: async (threadId, key, line) => {
-              const id = decodeCodeThreadId(threadId);
-              const previous = codeFollowUpService.read(id).followUp;
-              // Said once is enough, even after the person dismissed it.
-              if (previous?.reason.split("\n").includes(line) === true) return;
-              const reason = withPullRequestHandoffLine(
+            offer: async (threadId, ref, line) => {
+              const previous = codeFollowUpService.read(decodeCodeThreadId(threadId)).followUp;
+              const lines =
                 previous?.state === "open" && previous.origin === "automatic"
-                  ? previous.reason
-                  : undefined,
-                key,
-                line,
-              );
-              if (reason === undefined) return;
-              await codeFollowUpService.observeTrigger({
-                threadId: id,
-                sourceEventId: randomUUID(),
-                sourceSequence:
-                  Math.max(
-                    previous?.triggerSequence ?? 0,
-                    previous?.acknowledgedThroughSequence ?? 0,
-                  ) + 1,
-                reason,
-                origin: "automatic",
-                triggeredAt: new Date().toISOString(),
-              });
+                  ? previous.reason.split("\n")
+                  : [];
+              // An Auto-fix notice for this pull request already says more.
+              if (lines.some((entry) => entry.toLowerCase().startsWith(`${ref.toLowerCase()} `)))
+                return;
+              await tellLinkedThread(threadId, ref, line);
             },
+            tell: (threadId, key, line) => tellLinkedThread(threadId, key, line),
           });
+    async function tellLinkedThread(threadId: string, key: string, line: string): Promise<void> {
+      const id = decodeCodeThreadId(threadId);
+      const previous = codeFollowUpService.read(id).followUp;
+      // Said once is enough, even after the person dismissed it.
+      if (previous?.reason.split("\n").includes(line) === true) return;
+      const reason = withPullRequestHandoffLine(
+        previous?.state === "open" && previous.origin === "automatic" ? previous.reason : undefined,
+        key,
+        line,
+      );
+      if (reason === undefined) return;
+      await codeFollowUpService.observeTrigger({
+        threadId: id,
+        sourceEventId: randomUUID(),
+        sourceSequence:
+          Math.max(previous?.triggerSequence ?? 0, previous?.acknowledgedThroughSequence ?? 0) + 1,
+        reason,
+        origin: "automatic",
+        triggeredAt: new Date().toISOString(),
+      });
+    }
     if (linkedIssueWriteBack !== undefined) {
       linkedIssueTurnStarts.current = (threadId) =>
         void linkedIssueWriteBack.onTurnStarted(threadId).catch(() => undefined);
+      linkedIssuePullRequestsCreated.current = (threadId) =>
+        void linkedIssueWriteBack.onPullRequestCreated(threadId).catch(() => undefined);
     }
     // The Project planner: one designated Code thread per Code Project that
     // may read the Project's board and propose work. A confirmed proposal

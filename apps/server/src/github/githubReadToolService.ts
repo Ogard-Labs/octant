@@ -176,8 +176,22 @@ export class GithubReadToolService {
         const update =
           context.issueUpdates === undefined ? undefined : parseGithubUpdateInput(inputJson);
         if (update !== undefined && context.issueUpdates !== undefined) {
-          const repository = boundRepository(current ?? context.thread);
-          if (repository === undefined) return failure("repository-unavailable");
+          // A write is authorized on every call as a read of the same issue
+          // is: the thread must be live and the integration effective.
+          const writeDecision = decideGithubAgentRead({
+            operation: "issues-read",
+            mode: "code",
+            threadLifecycle: current?.lifecycle ?? "missing",
+            threadAuthority: threadAuthority(context.thread, current),
+            projectRepository: boundRepository(current ?? context.thread),
+            snapshot: await this.#snapshot(signal ?? new AbortController().signal),
+            snapshotFreshness: "fresh",
+            providerToolPolicy: "allowed",
+          });
+          if (writeDecision.decision === "deny") {
+            return failure(writeDecision.code, writeDecision.remediation);
+          }
+          const repository = writeDecision.repository;
           return runAgentIssueUpdate({
             turnThread: context.thread,
             current,

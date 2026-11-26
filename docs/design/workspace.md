@@ -2601,28 +2601,45 @@ Each Code Project's Pull requests settings menu has two switches, both off by
 default and set only by the host's own person:
 
 - **Keep linked issues up to date.** The host moves each linked issue forward:
-  In Progress when a person asks the thread for a turn, In Review once the
-  thread's pull request is open, and Done with the comment "Merged in
-  `<url>`." once its merge is observed. Linear states are chosen from the
+  In Progress when a person asks the thread for a turn, In Review when the
+  thread's agent opens its pull request (or when the host first sees it
+  open), and Done with the comment "Merged in `<url>`." once its merge is
+  observed. Linear states are chosen from the
   team's own states (the `started` state named In Progress, else the first by
   position; a `started` state whose name says review, else the move is
   skipped; the `completed` state named Done, else the first). GitHub has only
   open and closed, so In Progress and In Review are skipped and Done closes the
-  issue as completed. The host never moves an issue backwards, and writes each
-  moment once per thread and issue. Every attempt is journaled as
+  issue as completed; an issue already closed counts as Done. The host never
+  moves an issue backwards, writes each moment once per thread and issue, and
+  writes one thread's moments one at a time. A refused or failed moment is
+  tried again only at the thread's next trigger (a turn the person asks for,
+  or a pull request the thread opens), never on every pass. Done is written
+  only for an issue the host already updated while the switch was on, so
+  turning the switch on does not close the issues of threads that merged
+  before, which a person may have reopened. Every attempt is journaled as
   `tracker.issue-write-recorded@1`, with a comment's SHA-256 digest, never its
   text. A refused write (a Linear connection that may only read, a GitHub
   login without triage access) adds one line naming the remedy to the thread's
-  Pull request updates follow-up.
+  Pull request updates follow-up. GitHub writes need Octant's GitHub
+  integration on as well as the `gh` login.
+  Not built: per-moment Linear state overrides in Project settings (the
+  team's own states are always used), and a **Reconnect** button beside the
+  switch when the Linear connection may only read (the refused write's
+  follow-up line names the remedy instead).
 - **Agents may update linked issues.** The agent's `set-state` and `comment`
   operations ([agent tools](agent-tools.md)) skip the ask below Full access on
   a thread that has read no outside content, as Agents may comment on pull
-  requests does for pull requests.
+  requests does for pull requests. A comment that still asks must fit the
+  approval, which shows it whole (about 1.9 KB); otherwise it is refused
+  before the ask with `comment-too-long-to-approve`. Without an ask a comment
+  may be 4 KB.
 
 A pull request a linked thread opens through its tool carries `Fixes #N`
 (or `Fixes owner/repo#N`, or `Fixes ENG-12`) for each linked issue its body
 does not already name. Once it is open, the thread's Pull request updates
-follow-up offers **Merge when ready…**, which the person confirms; the host
+follow-up offers **Merge when ready…** once per pull request while the host
+runs, never in place of an Auto-fix line for the same pull request, which the
+person confirms; the host
 reads the head at that moment and turns on GitHub's own auto-merge. Nothing
 here merges, and Merge when ready stays the person's act.
 

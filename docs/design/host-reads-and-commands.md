@@ -363,8 +363,9 @@ from a Linear issue frames redacted issue text through the same
 Work and Code Projects may bind a Linear team (and optional Linear project) via
 the host-person `change-project-linear-target` command, journaled as
 `project.linear-target-changed@1`. For a Code Project with a binding and an
-effective Linear integration, Code agents are offered read-only `octant_linear`
-(`list`, `get`, `search`, `help`) pinned server-side to that team and optional
+effective Linear integration, Code agents are offered `octant_linear`
+(`list`, `get`, `search`, `help`, and on linked issues `set-state` and
+`comment`) pinned server-side to that team and optional
 Linear project. Every call rechecks thread authority, profile allowlists, and
 live Linear readiness, withholds issues outside the bound scope identically to
 missing issues, redacts secret shapes before returning text, and records
@@ -401,9 +402,16 @@ Tracker writes go only through the integration seams:
   Integrations to allow updates." (`missing-scope`) before any call.
 - GitHub `GhIssueWritePort`: `gh issue comment --body-file -` (the body on
   stdin) and `gh issue close --reason completed`, through the host's `gh`
-  login. Each write first proves `issues-write` on the repository from its
-  permissions (triage or push); without it the write fails closed as
-  `missing-capability`. Nothing reopens, relabels or reassigns.
+  login, and only while Octant's GitHub integration is effective (otherwise
+  `not-connected`). Each write first proves triage or push permission on the
+  repository (`gh api repos/{owner}/{repo}`, its `permissions`); without it
+  the write fails closed as `missing-capability`. This is a probe in the port,
+  not an `issues-write` kind in the GitHub capability snapshot. Nothing
+  reopens, relabels or reassigns.
+
+An agent's write is authorized on every call as a read of the same tracker
+is (the thread live and current, the integration effective, the Project's
+binding), and only then decided by `decideAgentIssueUpdate`.
 
 Every attempt, by the host or the agent, appends
 `tracker.issue-write-recorded@1 { threadId, issue, action, target?, stateId?,
@@ -414,9 +422,12 @@ A thread purge takes both aggregates with the thread.
 Project settings `keepLinkedIssuesCurrent` and `agentsMayUpdateIssues` change
 through `change-code-project-issue-updates`, journaled as
 `project.code-issue-updates-changed@1`; the route accepts it only from the
-host's own person. The write-back runs on a turn request and on a two-minute
-pass over the cached pull-request evidence the board shows; it never reads
-GitHub for the pass itself.
+host's own person. The write-back runs on a turn request, on a pull request
+the thread's tool creates, and on a two-minute pass over the pull-request
+evidence the board shows. The pass makes only a moment's first attempt; a
+refused or failed moment is retried after the thread's next turn request or
+created pull request. The links are folded from each thread's aggregate on
+read; there is no `threadLinkedIssues` projection table.
 
 ### Admitted original input details
 

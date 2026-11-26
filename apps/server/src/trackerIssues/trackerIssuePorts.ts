@@ -20,15 +20,18 @@ export type LinearOperationRunner = (
 
 /**
  * The tracker port from the two integration seams: Linear's plugin
- * operations and the host's `gh` issue port. A host without `gh` answers
- * every GitHub write `not-connected`.
+ * operations and the host's `gh` issue port. A host without `gh`, or with
+ * Octant's GitHub integration turned off, answers every GitHub write
+ * `not-connected`: the `gh` login alone never authorizes a write.
  */
 export function createTrackerIssuePort(input: {
   readonly linear: LinearOperationRunner;
   readonly github: GhIssueWritePort | undefined;
+  readonly githubIsEffective: () => boolean;
 }): TrackerIssuePort {
   const signalOf = (signal?: AbortSignal) => signal ?? new AbortController().signal;
-  const github = input.github;
+  const reachableGithub = input.github;
+  const githubOf = () => (input.githubIsEffective() ? reachableGithub : undefined);
   const noGithub = { status: "refused", reason: "not-connected" } as const;
   return {
     linearWorkflow: async (issueId, signal) => {
@@ -57,18 +60,23 @@ export function createTrackerIssuePort(input: {
         await input.linear(LINEAR_ISSUE_COMMENT_OPERATION, { id: issueId, body }, signalOf(signal)),
       ),
     githubOpen: async (issue, signal) => {
+      const github = githubOf();
       if (github === undefined) return noGithub;
       const result = await github.readState(issue, signal);
       return result.status === "read"
         ? { status: "read", value: result.open }
         : githubFailure(result);
     },
-    githubComment: async (issue, body, signal) =>
-      github === undefined
+    githubComment: async (issue, body, signal) => {
+      const github = githubOf();
+      return github === undefined
         ? noGithub
-        : githubResult(await github.comment({ ...issue, body }, signal)),
-    githubClose: async (issue, signal) =>
-      github === undefined ? noGithub : githubResult(await github.close(issue, signal)),
+        : githubResult(await github.comment({ ...issue, body }, signal));
+    },
+    githubClose: async (issue, signal) => {
+      const github = githubOf();
+      return github === undefined ? noGithub : githubResult(await github.close(issue, signal));
+    },
   };
 }
 

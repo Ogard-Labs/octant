@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GhCommandPort } from "../code/ghPullRequestPort";
+import { createTrackerIssuePort } from "../trackerIssues/trackerIssuePorts";
 import { GhIssueWritePort } from "./ghIssueWritePort";
 
 const issue = { owner: "acme", repository: "app", number: 12 };
@@ -64,5 +65,29 @@ describe("GhIssueWritePort", () => {
       "issue view": { exitCode: 0, stdout: JSON.stringify({ state: "CLOSED" }) },
     });
     expect(await port.readState(issue)).toEqual({ status: "read", open: false });
+  });
+});
+
+describe("createTrackerIssuePort", () => {
+  it("writes nothing to GitHub while Octant's GitHub integration is off, even with a gh login", async () => {
+    const { port: github, run } = fakeGh({
+      "api repos/acme/app": { exitCode: 0, stdout: JSON.stringify({ triage: true }) },
+      "issue close": { exitCode: 0, stdout: "" },
+    });
+    let effective = false;
+    const port = createTrackerIssuePort({
+      linear: vi.fn(),
+      github,
+      githubIsEffective: () => effective,
+    });
+    const linked = { forge: "github" as const, ...issue };
+    expect(await port.githubClose(linked)).toEqual({ status: "refused", reason: "not-connected" });
+    expect(await port.githubComment(linked, "Merged.")).toEqual({
+      status: "refused",
+      reason: "not-connected",
+    });
+    expect(run).not.toHaveBeenCalled();
+    effective = true;
+    expect(await port.githubClose(linked)).toEqual({ status: "applied" });
   });
 });

@@ -510,6 +510,8 @@ export interface CodeAppManagedToolsOptions {
   readonly projectAllowsComments?: () => boolean;
   /** The issues linked to this thread, which a pull request it opens names as fixed. */
   readonly linkedIssues?: () => ReadonlyArray<LinkedIssueRef>;
+  /** The thread opened its pull request: the host moves its linked issues to In Review. */
+  readonly onPullRequestCreated?: () => void;
   /**
    * Whether this thread has read outside content under Strict. Such a thread
    * asks before each post below Full access whatever the Project chose;
@@ -1045,6 +1047,7 @@ async function pullRequestTool(
       pullRequestRefusal(result.failureCode),
     );
   }
+  if (input.operation === "create" && result.state === "created") options.onPullRequestCreated?.();
   return {
     result: {
       status:

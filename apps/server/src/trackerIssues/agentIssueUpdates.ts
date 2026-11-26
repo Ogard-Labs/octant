@@ -1,5 +1,6 @@
 import {
   LINEAR_MISSING_WRITE_SCOPE,
+  MAX_CODE_OPERATION_SUMMARY_BYTES,
   MAX_TRACKER_COMMENT_BYTES,
   linkedIssueLabel,
   type CodeThread,
@@ -83,6 +84,15 @@ export async function runAgentIssueUpdate(input: {
         : input.issue.forge === "github"
           ? `Close ${label} as completed?`
           : `Move ${label} to ${action.state}?`;
+    // An approval shows the whole comment, and an approval's text is capped
+    // in the journal; a longer comment would come back "not approved" with
+    // nothing the agent could act on.
+    if (Buffer.byteLength(summary.trim()) > MAX_CODE_OPERATION_SUMMARY_BYTES) {
+      return failure(
+        "comment-too-long-to-approve",
+        "This comment needs the person's approval, and an approval shows the whole text: shorten it to about 1.9 KB and ask again. Nothing reached the tracker.",
+      );
+    }
     const answer = await input.updates.ask(summary, input.signal);
     if (answer !== "approved") {
       return failure(

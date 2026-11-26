@@ -1,7 +1,7 @@
 import type { CodeThread, ThreadLinkedIssue } from "@octant/contracts";
 import { linkedIssueLabel } from "@octant/contracts";
 import { MERGE_WHEN_READY_OFFER } from "@octant/domain/code-pull-request-switch-policy";
-import type { TrackerIssueWrites } from "./trackerIssueWrites";
+import type { TrackerAdvanceOptions, TrackerIssueWrites } from "./trackerIssueWrites";
 
 /** As often as the merged-thread pass: the pull-request evidence it reads is cached. */
 export const LINKED_ISSUE_WRITE_BACK_INTERVAL_MS = 2 * 60 * 1_000;
@@ -25,6 +25,12 @@ export interface LinkedIssueWriteBackOptions {
   readonly pullRequest: (thread: CodeThread) => Promise<LinkedThreadPullRequest | undefined>;
   /** Adds one keyed line to the thread's "Pull request updates" follow-up. */
   readonly tell: (threadId: string, key: string, line: string) => Promise<void>;
+  /**
+   * Adds the Merge when ready offer unless the follow-up already has a line
+   * for that pull request: an Auto-fix notice (its own Merge action among
+   * them) is never replaced by the offer.
+   */
+  readonly offer: (threadId: string, ref: string, line: string) => Promise<void>;
   readonly intervalMs?: number;
 }
 
@@ -42,6 +48,10 @@ export class LinkedIssueWriteBack {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #running = false;
   #stopped = false;
+  /** Pull requests offered Merge when ready since start, so a dismissed offer stays dismissed. */
+  readonly #offered = new Set<string>();
+  /** Threads with a new trigger since the last pass: their refused or failed moments are retried. */
+  readonly #retryRequested = new Set<string>();
 
   constructor(options: LinkedIssueWriteBackOptions) {
     this.#options = options;
@@ -61,10 +71,21 @@ export class LinkedIssueWriteBack {
 
   /** A person asked the thread for a turn: its linked issues are In Progress. */
   async onTurnStarted(threadId: string): Promise<void> {
+    if (!this.#keepsCurrent(threadId)) return;
+    this.#retryRequested.add(threadId);
+    await this.#advance(threadId, "in-progress", { retry: true });
+  }
+
+  /** The thread's agent opened its pull request: its linked issues are In Review now, not at the next pass. */
+  async onPullRequestCreated(threadId: string): Promise<void> {
+    if (!this.#keepsCurrent(threadId)) return;
+    await this.#advance(threadId, "in-review", { retry: true });
+  }
+
+  #keepsCurrent(threadId: string): boolean {
     const thread = this.#options.readThread(threadId);
-    if (thread === undefined || !this.#options.keepCurrent(thread.projectId)) return;
-    if (this.#options.linked(threadId).length === 0) return;
-    await this.#advance(threadId, "in-progress");
+    if (thread === undefined || !this.#options.keepCurrent(thread.projectId)) return false;
+    return this.#options.linked(threadId).length > 0;
   }
 
   /** One pass over every thread with linked issues. Exposed so a test can drive it. */
@@ -78,12 +99,21 @@ export class LinkedIssueWriteBack {
         const pullRequest = await this.#options.pullRequest(thread);
         if (pullRequest === undefined || pullRequest.state === "closed") continue;
         const ref = `${pullRequest.baseRepository}#${String(pullRequest.number)}`;
-        if (pullRequest.state === "open") {
-          await this.#options.tell(threadId, ref, `${ref} ${MERGE_WHEN_READY_OFFER}`);
+        const offerKey = `${threadId} ${ref}`;
+        if (pullRequest.state === "open" && !this.#offered.has(offerKey)) {
+          await this.#options.offer(threadId, ref, `${ref} ${MERGE_WHEN_READY_OFFER}`);
+          this.#offered.add(offerKey);
         }
         if (!this.#options.keepCurrent(thread.projectId)) continue;
-        if (pullRequest.state === "open") await this.#advance(threadId, "in-review");
-        else await this.#advance(threadId, "done", pullRequest.url);
+        const retry = this.#retryRequested.delete(threadId);
+        if (pullRequest.state === "open") await this.#advance(threadId, "in-review", { retry });
+        else
+          await this.#advance(
+            threadId,
+            "done",
+            { retry, requireEarlierWrite: true },
+            pullRequest.url,
+          );
       } catch {
         // This thread's alone; the next pass decides it again.
       }
@@ -93,9 +123,10 @@ export class LinkedIssueWriteBack {
   async #advance(
     threadId: string,
     moment: "in-progress" | "in-review" | "done",
+    options: TrackerAdvanceOptions,
     url?: string,
   ): Promise<void> {
-    const notices = await this.#options.writes.advance(threadId, moment, url);
+    const notices = await this.#options.writes.advance(threadId, moment, url, options);
     for (const notice of notices) {
       await this.#options.tell(threadId, linkedIssueLabel(notice.issue), notice.message);
     }

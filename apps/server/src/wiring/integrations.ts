@@ -515,6 +515,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
               : new GhIssueWritePort({
                   command: createGhCommandPort({ ghPath: options.ghExecutable }),
                 }),
+          githubIsEffective: githubIntegrationIsEffective,
         }),
       }),
       resolveLinear: (identifier: string, signal: AbortSignal) =>

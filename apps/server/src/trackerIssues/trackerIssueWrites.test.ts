@@ -86,6 +86,9 @@ function fakePort(initial: { linearState?: string; githubOpen?: boolean } = {}) 
 const linear: LinkedIssueRef = { forge: "linear", identifier: "ENG-7", issueId: "lin-1" };
 const github: LinkedIssueRef = { forge: "github", owner: "acme", repository: "app", number: 12 };
 const prUrl = "https://github.com/acme/app/pull/9";
+/** A real trigger (a turn, an opened pull request); the periodic pass passes `retry: false`. */
+const trigger = { retry: true } as const;
+const pass = { retry: false } as const;
 
 describe("TrackerIssueWrites", () => {
   it("with the switch on, a linked Linear issue moves to In Progress, In Review and Done with a comment", async () => {
@@ -94,16 +97,20 @@ describe("TrackerIssueWrites", () => {
     const fake = fakePort();
     const writes = new TrackerIssueWrites({ store, port: fake.port });
 
-    await writes.advance(threadId, "in-progress");
+    await writes.advance(threadId, "in-progress", undefined, trigger);
     expect(fake.linearState()).toBe("s-progress");
-    await writes.advance(threadId, "in-review");
+    await writes.advance(threadId, "in-review", undefined, trigger);
     expect(fake.linearState()).toBe("s-review");
-    await writes.advance(threadId, "done", prUrl);
+    await writes.advance(threadId, "done", prUrl, trigger);
     expect(fake.linearState()).toBe("s-done");
-    expect(fake.port.linearComment).toHaveBeenCalledWith("lin-1", `Merged in ${prUrl}.`, undefined);
+    expect(fake.port.linearComment).toHaveBeenCalledWith(
+      "lin-1",
+      `Merged in \`${prUrl}\`.`,
+      undefined,
+    );
 
     // Each moment is written once, and the comment is journaled as a digest only.
-    await writes.advance(threadId, "done", prUrl);
+    await writes.advance(threadId, "done", prUrl, trigger);
     expect(fake.port.linearSetState).toHaveBeenCalledTimes(3);
     expect(fake.port.linearComment).toHaveBeenCalledTimes(1);
     const records = store.writes(threadId);
@@ -122,7 +129,7 @@ describe("TrackerIssueWrites", () => {
     store.link(threadId, linear, "created-from");
     const fake = fakePort({ linearState: "s-review" });
     const writes = new TrackerIssueWrites({ store, port: fake.port });
-    await writes.advance(threadId, "in-progress");
+    await writes.advance(threadId, "in-progress", undefined, trigger);
     expect(fake.port.linearSetState).not.toHaveBeenCalled();
     expect(store.writes(threadId)).toMatchObject([
       { action: "set-state", target: "in-progress", outcome: "skipped", reason: "already-there" },
@@ -134,12 +141,16 @@ describe("TrackerIssueWrites", () => {
     store.link(threadId, github, "created-from");
     const fake = fakePort();
     const writes = new TrackerIssueWrites({ store, port: fake.port });
-    await writes.advance(threadId, "in-progress");
-    await writes.advance(threadId, "in-review");
+    await writes.advance(threadId, "in-progress", undefined, trigger);
+    await writes.advance(threadId, "in-review", undefined, trigger);
     expect(fake.port.githubClose).not.toHaveBeenCalled();
-    await writes.advance(threadId, "done", prUrl);
+    await writes.advance(threadId, "done", prUrl, trigger);
     expect(fake.port.githubClose).toHaveBeenCalledOnce();
-    expect(fake.port.githubComment).toHaveBeenCalledWith(github, `Merged in ${prUrl}.`, undefined);
+    expect(fake.port.githubComment).toHaveBeenCalledWith(
+      github,
+      `Merged in \`${prUrl}\`.`,
+      undefined,
+    );
     expect(store.writes(threadId).map((record) => [record.action, record.outcome])).toEqual([
       ["close", "skipped"],
       ["close", "skipped"],
@@ -157,22 +168,80 @@ describe("TrackerIssueWrites", () => {
       reason: "missing-scope",
     } as never);
     const writes = new TrackerIssueWrites({ store, port: fake.port });
-    const first = await writes.advance(threadId, "in-progress");
+    const first = await writes.advance(threadId, "in-progress", undefined, trigger);
     expect(first).toEqual([
       {
         issue: linear,
         message: expect.stringContaining("Reconnect Linear in Settings › Integrations"),
       },
     ]);
-    expect(await writes.advance(threadId, "in-progress")).toEqual([]);
+    expect(await writes.advance(threadId, "in-progress", undefined, trigger)).toEqual([]);
     expect(fake.port.linearSetState).toHaveBeenCalledTimes(2);
+    expect(store.writes(threadId)).toHaveLength(1);
+  });
+
+  it("the periodic pass does not repeat a refused write; the next trigger does", async () => {
+    const store = openStore();
+    store.link(threadId, linear, "created-from");
+    const fake = fakePort();
+    fake.port.linearSetState.mockResolvedValue({
+      status: "failed",
+      reason: "unavailable",
+    } as never);
+    const writes = new TrackerIssueWrites({ store, port: fake.port });
+    await writes.advance(threadId, "in-review", undefined, pass);
+    await writes.advance(threadId, "in-review", undefined, pass);
+    await writes.advance(threadId, "in-review", undefined, pass);
+    expect(fake.port.linearSetState).toHaveBeenCalledTimes(1);
+    await writes.advance(threadId, "in-review", undefined, trigger);
+    expect(fake.port.linearSetState).toHaveBeenCalledTimes(2);
+  });
+
+  it("turning the switch on does not close the issue of a thread that merged before it", async () => {
+    const store = openStore();
+    store.link(threadId, github, "created-from");
+    const fake = fakePort();
+    const writes = new TrackerIssueWrites({ store, port: fake.port });
+    await writes.advance(threadId, "done", prUrl, { retry: false, requireEarlierWrite: true });
+    expect(fake.port.githubClose).not.toHaveBeenCalled();
+    expect(store.writes(threadId)).toEqual([]);
+  });
+
+  it("an already closed GitHub issue counts as Done applied", async () => {
+    const store = openStore();
+    store.link(threadId, github, "created-from");
+    const fake = fakePort({ githubOpen: false });
+    const writes = new TrackerIssueWrites({ store, port: fake.port });
+    await writes.advance(threadId, "done", prUrl, trigger);
+    expect(fake.port.githubClose).not.toHaveBeenCalled();
+    expect(store.writes(threadId).map((record) => [record.action, record.outcome])).toEqual([
+      ["close", "applied"],
+      ["comment", "applied"],
+    ]);
+  });
+
+  it("two turns started together move the issue once", async () => {
+    const store = openStore();
+    store.link(threadId, linear, "created-from");
+    const fake = fakePort();
+    const writes = new TrackerIssueWrites({ store, port: fake.port });
+    await Promise.all([
+      writes.advance(threadId, "in-progress", undefined, trigger),
+      writes.advance(threadId, "in-progress", undefined, trigger),
+    ]);
+    expect(fake.port.linearSetState).toHaveBeenCalledOnce();
     expect(store.writes(threadId)).toHaveLength(1);
   });
 
   it("writes nothing for a thread with no linked issue", async () => {
     const store = openStore();
     const fake = fakePort();
-    await new TrackerIssueWrites({ store, port: fake.port }).advance(threadId, "done", prUrl);
+    await new TrackerIssueWrites({ store, port: fake.port }).advance(
+      threadId,
+      "done",
+      prUrl,
+      trigger,
+    );
     expect(Object.values(fake.port).every((call) => call.mock.calls.length === 0)).toBe(true);
   });
 });

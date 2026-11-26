@@ -75,16 +75,35 @@ const REFUSAL_COPY: Readonly<Partial<Record<TrackerIssueWriteReason, string>>> =
   "not-connected": "Connect the tracker in Settings › Integrations to update this issue.",
 };
 
+/** How the caller reached a moment, which decides what it may try again. */
+export interface TrackerAdvanceOptions {
+  /**
+   * A new trigger for the thread (a turn the person asked for, a pull request
+   * the thread opened) retries a refused or failed moment. The periodic pass
+   * is not a trigger: it makes only a moment's first attempt, so a refusal
+   * is not repeated every pass.
+   */
+  readonly retry: boolean;
+  /**
+   * Done only for an issue the host already updated while the switch was on.
+   * Turning the switch on must not close issues of threads that merged
+   * before it, which a person may have reopened since.
+   */
+  readonly requireEarlierWrite?: boolean;
+}
+
 /**
  * Writes to the issues linked to a thread, and journals every attempt as
  * `tracker.issue-write-recorded@1`. The host's moments move an issue forward
  * only, once per (thread, issue, moment): an applied or skipped moment is
  * not tried again, while a refused or failed one is retried at its next
- * trigger. A comment's text is never journaled, only its digest.
+ * trigger only. One thread's moments run one at a time, so two turns started
+ * together write once. A comment's text is never journaled, only its digest.
  */
 export class TrackerIssueWrites {
   readonly #store: Pick<ThreadLinkedIssueStore, "list" | "writes" | "recordWrite">;
   readonly #port: TrackerIssuePort;
+  readonly #threadQueues = new Map<string, Promise<unknown>>();
 
   constructor(options: {
     readonly store: Pick<ThreadLinkedIssueStore, "list" | "writes" | "recordWrite">;
@@ -99,17 +118,40 @@ export class TrackerIssueWrites {
    * comment on Done. Answers what the person should hear about: writes that
    * were refused, the first time each is.
    */
-  async advance(
+  advance(
     threadId: string,
     moment: LinkedIssueMoment,
-    mergedPullRequestUrl?: string,
+    mergedPullRequestUrl: string | undefined,
+    options: TrackerAdvanceOptions,
+    signal?: AbortSignal,
+  ): Promise<ReadonlyArray<TrackerWriteNotice>> {
+    const previous = this.#threadQueues.get(threadId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => this.#advance(threadId, moment, mergedPullRequestUrl, options, signal));
+    const settledRun = run.catch(() => undefined);
+    this.#threadQueues.set(threadId, settledRun);
+    void settledRun.then(() => {
+      if (this.#threadQueues.get(threadId) === settledRun) this.#threadQueues.delete(threadId);
+    });
+    return run;
+  }
+
+  async #advance(
+    threadId: string,
+    moment: LinkedIssueMoment,
+    mergedPullRequestUrl: string | undefined,
+    options: TrackerAdvanceOptions,
     signal?: AbortSignal,
   ): Promise<ReadonlyArray<TrackerWriteNotice>> {
     const notices: TrackerWriteNotice[] = [];
     for (const { issue } of this.#store.list(threadId)) {
-      const records = this.#store
+      const issueRecords = this.#store
         .writes(threadId)
-        .filter((record) => sameLinkedIssue(record.issue, issue) && record.target === moment);
+        .filter((record) => sameLinkedIssue(record.issue, issue) && record.actor === "host");
+      if (options.requireEarlierWrite === true && issueRecords.length === 0) continue;
+      const records = issueRecords.filter((record) => record.target === moment);
+      if (!options.retry && records.length > 0) continue;
       const settled = (action: TrackerIssueWriteAction) =>
         records.some(
           (record) =>
@@ -149,7 +191,7 @@ export class TrackerIssueWrites {
         );
       }
       if (moment === "done" && mergedPullRequestUrl !== undefined && !settled("comment")) {
-        const body = `Merged in ${mergedPullRequestUrl}.`;
+        const body = `Merged in \`${mergedPullRequestUrl}\`.`;
         const result =
           issue.forge === "linear"
             ? await this.#port.linearComment(issue.issueId, body, signal)
@@ -179,8 +221,8 @@ export class TrackerIssueWrites {
       const open = await this.#port.githubOpen(issue, signal);
       if (open.status !== "read") return record(open);
       const decision = decideGithubIssueMoment({ moment, open: open.value });
-      if (decision.kind === "already-closed")
-        return record({ status: "skipped", reason: "already-there" });
+      // An issue already closed is where Done would put it.
+      if (decision.kind === "already-closed") return record({ status: "applied" });
       if (decision.kind === "skip") return record({ status: "skipped", reason: decision.reason });
       record(await this.#port.githubClose(issue, signal));
       return;
