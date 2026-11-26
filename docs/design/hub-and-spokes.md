@@ -3020,7 +3020,12 @@ person's work without any service Octant runs (maintainer decision,
 - **Every member forwards to the acting hub.** A member whose own entrance is
   on and that is not the acting hub forwards each request unchanged to the
   acting hub over the pinned private transport; only the acting hub serves
-  (decision H30). A front with connectors on the hub and the standby (a
+  (decision H30). A visitor's open, stream, and comments are the exception:
+  a member's entrance answers them 501 itself rather than forward them
+  ([Visitor links](#visitor-links)), so a front that sends a visitor to a
+  member's connector shows the viewer's "ask for the hub's address" page
+  instead of the thread, and a front for visitor links points at the acting
+  hub's entrance alone. A front with connectors on the hub and the standby (a
   Cloudflare Tunnel, or Caddy with both as upstreams) therefore keeps one
   stable address across failover. With Funnel alone, a URL names one machine
   ([The public entrance during failover](#the-public-entrance-during-failover)).
@@ -3054,7 +3059,13 @@ card, and the standby's copy (slice 26) are not built yet.
   cannot export, keeps it in that origin's storage, and signs every request
   with it (`octant-visitor-proof`: time, nonce, signature over method and
   path, 60 seconds of skew, each nonce once); the spoke binds the link to the
-  first key that opens it with the secret and refuses every other key.
+  first key that opens it with the secret and refuses every other key. A
+  first open that meets a busy hub, a rate limit, or no answer tries again
+  on its own, waiting 3 seconds and doubling to a minute as the stream does.
+  The secret leaves the address bar only once the link opens, has ended, or
+  is open in another browser; after a 401 (a skewed clock) or a 404 (a grant
+  that has not reached the hub yet) it stays, so a reload can still open
+  the link.
 - **What a visitor sees.** A projection the spoke builds and redacts: the
   messages and the titles and states of steps, live. Never tool inputs or
   outputs, diffs, files, attachments, Canvases, paths, or approval contents;

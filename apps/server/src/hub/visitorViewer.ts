@@ -140,23 +140,40 @@ const SCRIPT = String.raw`
     }
   };
 
-  const run = async () => {
-    if (secret !== null) {
-      const path = "/v/" + linkId + "/open";
+  // The first open waits out a busy hub or a spoke still waking up the same
+  // way the stream does, and hands back the answer that settled it.
+  const open = async () => {
+    const path = "/v/" + linkId + "/open";
+    let wait = 3000;
+    for (;;) {
       const response = await fetch(path, {
         method: "POST",
         headers: { ...(await signed("POST", path)), "content-type": "application/json" },
         body: JSON.stringify({ secret }),
-      });
-      const final = response.ok ? undefined : await ended(response);
-      // The secret leaves the address bar once the link is opened or has
-      // ended; after a passing failure it stays, so a reload can try again.
-      // A member's address that cannot show the thread keeps it too, so the
-      // visitor can carry the whole link to the hub's address.
-      if (response.ok || (final !== undefined && response.status !== 501)) {
+      }).catch(() => undefined);
+      if (response !== undefined) {
+        const final = response.ok ? undefined : await ended(response);
+        if (response.ok || final !== undefined) return { response, final };
+      }
+      say("This link could not be opened yet. Trying again…");
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      wait = Math.min(wait * 2, 60000);
+    }
+  };
+
+  const run = async () => {
+    if (secret !== null) {
+      const { response, final } = await open();
+      // The secret leaves the address bar only once the link is opened, has
+      // ended, or is held by another browser. After a 401 (a skewed clock) or
+      // a 404 (a grant that has not reached the hub yet) it stays, so a reload
+      // can still open the link; a member's address that cannot show the
+      // thread keeps it too, so the visitor can carry the whole link to the
+      // hub's address.
+      if (response.ok || response.status === 410 || response.status === 403) {
         history.replaceState(null, "", location.pathname);
       }
-      if (!response.ok) return say(final || "This link could not be opened. Reload to try again.");
+      if (!response.ok) return say(final);
       const opened = await response.json();
       await remember("scope:" + linkId, opened.scope);
     }
