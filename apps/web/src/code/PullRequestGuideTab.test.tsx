@@ -160,6 +160,8 @@ describe("the pull request Guide tab", () => {
     expect(
       await screen.findByText("Guides are written while a pull request is open."),
     ).toBeTruthy();
+    // Its anchors still open the current push, so the older-push note stays.
+    expect(screen.getByText("Written for an older push.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Rewrite" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Write guide" })).toBeNull();
   });

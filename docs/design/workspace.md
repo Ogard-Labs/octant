@@ -1594,7 +1594,7 @@ with Rewrite; with no guide yet the tab offers Write guide, and with no guide
 model picked it says where to pick one (Project settings, Pull request reviews,
 Guide model) and runs nothing. A closed or merged pull request keeps its guide
 to read and offers neither Write guide nor Rewrite: "Guides are written while
-a pull request is open." While a run is going it says "Writing a guide for
+a pull request is open." A guide for an older push still says so there. While a run is going it says "Writing a guide for
 this push…" and looks again every few seconds. The Guide tab and the Viewed
 checkboxes load with their own module the first time they are shown. Timeline lists the reviews and comments, newest last, then
 the labels, review-thread replies, the comment form and the review form

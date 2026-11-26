@@ -148,18 +148,22 @@ export default function PullRequestGuideTab(props: PullRequestGuideTabProps) {
           Pick a model to write guides: Project settings › Pull request reviews › Guide model.
         </p>
       ) : null}
-      {view.stale && writable ? (
+      {view.stale ? (
         <OctantAlert
-          action={
-            <OctantButton
-              disabled={pending || running || !view.modelPicked}
-              onClick={() => void write()}
-              size="sm"
-              variant="outline"
-            >
-              Rewrite
-            </OctantButton>
-          }
+          {...(writable
+            ? {
+                action: (
+                  <OctantButton
+                    disabled={pending || running || !view.modelPicked}
+                    onClick={() => void write()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Rewrite
+                  </OctantButton>
+                ),
+              }
+            : {})}
           layout="row"
           tone="warning"
         >
