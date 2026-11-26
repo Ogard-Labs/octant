@@ -3909,8 +3909,11 @@ start: `createInMemoryCapacityPort` counts reservations per thread and per
 host, reads the limits on every reservation, and reports which limit is full;
 the capacity queue skips a waiter whose own thread is full so another thread's
 waiter can take a freed slot, and one whose parent's harness session is paused
-or `recovery-required` until that session is resumed; a person's resume of such
-a waiter is refused meanwhile, as for a run parked on dependencies. A run waiting on dependencies or a slot holds no
+until that session is resumed; a person's resume of such a waiter is refused
+meanwhile, as for a run parked on dependencies. A parent session is
+`recovery-required` only after a restart, and restart reconciliation has already
+interrupted every capacity and provider-slot waiter, so resuming that session
+restarts none of them; only a run parked on dependencies is still held then. A run waiting on dependencies or a slot holds no
 slot, and neither does one waiting for the provider to take another request
 ([Provider capacity](#context-and-usage-accounting)). Admission separately caps unfinished children (any active status,
 waiting included) at 16 per parent and 32 per host as the runaway guard.
