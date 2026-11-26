@@ -77,6 +77,7 @@ import {
   type CodeCheckpoint,
   type CodeCheckoutIdentity,
   type CodeConversationTurn,
+  type CodeRewindFilesUnavailableDetail,
   type CodeRewindFilesUnavailableReason,
   type CodeEvidenceReference,
   type CodeEvidenceContentId,
@@ -238,6 +239,10 @@ const SERVER_TEST_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Se
 ]);
 const REWIND_WHILE_TURN_RUNS =
   "A turn is running in this thread. Wait for it to finish or stop it, then rewind.";
+const RESTORE_POINT_FROM_ANOTHER_CHECKOUT =
+  "That restore point was recorded in another checkout, so it cannot be restored here. Nothing changed.";
+const RESTORE_POINTS_UNREADABLE =
+  "This thread's restore points could not be read, so nothing was restored. Try again.";
 /** Why a rewind's files cannot be put back, in the words the person reads. */
 const REWIND_FILES_UNAVAILABLE: Readonly<Record<CodeRewindFilesUnavailableReason, string>> = {
   "server-project":
@@ -247,6 +252,8 @@ const REWIND_FILES_UNAVAILABLE: Readonly<Record<CodeRewindFilesUnavailableReason
     "A turn after this point changed files without a recorded checkpoint, so the files cannot be put back. Rewind the conversation only.",
   unreadable: "The checkout could not be read, so the files cannot be put back. Try again.",
 };
+const REWIND_FILES_FROM_OTHER_CHECKOUT =
+  "This point was recorded in another checkout, so its files cannot be put back here. Rewind the conversation only.";
 /**
  * Pull request operations, which a server thread runs with this host's `gh`
  * by repository and branch name alone. Only the GitHub remote check reads
@@ -1606,6 +1613,19 @@ export interface CodeOperationServiceOptions {
     readonly images: ReadonlyArray<TurnImage>;
     readonly signal?: AbortSignal;
   }) => Promise<TurnImagesDescription>;
+  /**
+   * Whether the thread recorded `checkpoint` on `checkoutId`, from one of its
+   * turns there or a restore that ran there; `unreadable` when its journal
+   * could not be read. An in-place restore writes back only such a point:
+   * worktrees of one repository share Git objects, so another checkout's
+   * point would apply and overwrite work it never saw. Absent on a host that
+   * cannot read the journal, which refuses every in-place restore.
+   */
+  readonly restorePointRecorded?: (input: {
+    readonly threadId: CodeThreadId;
+    readonly checkoutId: CodeCheckoutIdentity["id"];
+    readonly checkpoint: CodeCheckpoint;
+  }) => "recorded" | "unrecorded" | "unreadable";
   /**
    * Every turn of a thread, oldest first, or undefined when it cannot all be
    * read. `includeRewound` keeps the turns a rewind removed, in the order they
@@ -4864,6 +4884,16 @@ export class CodeOperationService {
         );
       }
       case "restore-git-checkpoint": {
+        const recorded =
+          this.#options.restorePointRecorded?.({
+            threadId: thread.id,
+            checkoutId: checkout.id,
+            checkpoint: command.checkpoint,
+          }) ?? "unreadable";
+        if (recorded === "unrecorded")
+          return this.#failed(command.operationId, "conflict", RESTORE_POINT_FROM_ANOTHER_CHECKOUT);
+        if (recorded === "unreadable")
+          return this.#failed(command.operationId, "unavailable", RESTORE_POINTS_UNREADABLE);
         const refusal = this.#checkoutOverwriteRefusal(thread, root.checkoutRoot);
         if (refusal !== undefined) return this.#failed(command.operationId, ...refusal);
         return this.#gitMutation(
@@ -4871,6 +4901,7 @@ export class CodeOperationService {
           command.gitOperationId,
           "restore-checkpoint",
           await this.#restoreInPlace(thread, checkout, root.checkoutRoot, command.checkpoint),
+          checkout.id,
         );
       }
       case "switch-git-branch": {
@@ -6068,6 +6099,8 @@ export class CodeOperationService {
       | "restore-checkpoint"
       | "merge-run",
     result: GitMutationOutcome & { readonly undo?: CodeCheckpoint },
+    /** The checkout a restore ran on, which is where its way back belongs. */
+    ranOn?: CodeCheckoutIdentity["id"],
   ): CodeOperationResult {
     if (result.status === "unavailable")
       return this.#failed(operationId, "unavailable", "Git mutation is unavailable.");
@@ -6101,6 +6134,7 @@ export class CodeOperationService {
       // A failed restore may have moved files before it stopped, so its undo
       // point travels with it too; only a rejection is certainly untouched.
       ...(result.status !== "rejected" && result.undo !== undefined ? { undo: result.undo } : {}),
+      ...(ranOn === undefined ? {} : { checkoutId: ranOn }),
     });
   }
 
@@ -6269,11 +6303,27 @@ export class CodeOperationService {
   ):
     | { readonly kind: "checkpoint"; readonly checkpoint: CodeCheckpoint }
     | { readonly kind: "unchanged" }
-    | { readonly kind: "unavailable"; readonly reason: CodeRewindFilesUnavailableReason } {
+    | {
+        readonly kind: "unavailable";
+        readonly reason: CodeRewindFilesUnavailableReason;
+        readonly detail?: CodeRewindFilesUnavailableDetail;
+      } {
     if (checkout.kind === "remote-root") return { kind: "unavailable", reason: "server-project" };
     if (thread.executionPolicy === "plan") return { kind: "unavailable", reason: "plan" };
     const point = chooseCodeRewindFilePoint(all, String(fromOperationId));
     if (point.kind === "refused") return { kind: "unavailable", reason: "unrecorded" };
+    if (point.kind !== "checkpoint") return point;
+    // The files part is an in-place restore, so it writes back only a point
+    // recorded on this checkout, by the same rule as Restore files.
+    const recorded =
+      this.#options.restorePointRecorded?.({
+        threadId: thread.id,
+        checkoutId: checkout.id,
+        checkpoint: point.checkpoint,
+      }) ?? "unreadable";
+    if (recorded === "unrecorded")
+      return { kind: "unavailable", reason: "unreadable", detail: "other-checkout" };
+    if (recorded === "unreadable") return { kind: "unavailable", reason: "unreadable" };
     return point;
   }
 
@@ -6347,7 +6397,9 @@ export class CodeOperationService {
         return this.#failed(
           command.operationId,
           "unavailable",
-          REWIND_FILES_UNAVAILABLE[point.reason],
+          point.detail === "other-checkout"
+            ? REWIND_FILES_FROM_OTHER_CHECKOUT
+            : REWIND_FILES_UNAVAILABLE[point.reason],
         );
       if (point.kind === "unchanged") files = "unchanged";
       else {
@@ -6367,6 +6419,7 @@ export class CodeOperationService {
             command.gitOperationId,
             "restore-checkpoint",
             await this.#restoreInPlace(thread, checkout, checkoutRoot, point.checkpoint),
+            checkout.id,
           );
           // Journaled as a restore of its own, so Undo restore offers the way
           // back from it exactly as it does after Restore files to this point.

@@ -18,6 +18,8 @@ import {
   decodeCodeOperationId,
   decodeCodeThreadId,
   type CodeAttachmentReference,
+  type CodeCheckoutId,
+  type CodeCheckpoint,
   type CodeOperationEvent,
   type EventEnvelope,
   type CodeConversationPage,
@@ -50,6 +52,12 @@ import {
 import { foldCodeTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import {
+  restorePointBelongsTo,
+  sameCheckpoint,
+  threadOnlyRanOn,
+  type RecordedRestorePoint,
+} from "./codeRestorePoint";
 
 export const CODE_OPERATION_EVENT_RECORDED = "code.operation-event-recorded@1";
 export const MAX_CODE_OPERATION_REPLAY_LIMIT = 256;
@@ -180,6 +188,13 @@ export interface ReadCodeConversationInput {
    */
   readonly providerInstanceId?: ProviderInstanceId;
   /**
+   * The checkout the thread is bound to now, supplied as the provider is. Only
+   * a restore that ran on it offers its way back; without it the newest
+   * restore's is reported wherever it ran, which is all a replay-only caller
+   * can know, and none of them offers Undo restore.
+   */
+  readonly checkoutId?: CodeCheckoutId;
+  /**
    * Keep turns a rewind removed. Only readers that place files or a copied
    * provider session by the order turns really ran in ask for them; the
    * thread's conversation, and everything that reaches a model, leaves them
@@ -195,6 +210,8 @@ export interface ReadCodeConversationWindowInput {
   readonly through?: CodeOperationId;
   /** As on the forward page: the provider the thread is bound to now. */
   readonly providerInstanceId?: ProviderInstanceId;
+  /** As on the forward page: the checkout the thread is bound to now. */
+  readonly checkoutId?: CodeCheckoutId;
 }
 
 /** A window, or the refusal of an anchor that is not a turn of this thread. */
@@ -1514,10 +1531,13 @@ export class CodeOperationEventStore {
     let afterSequence = 0;
     let scannedEvents = 0;
     let hasMore = false;
-    // The way back from this thread's last restore. A restore is its own
-    // operation with no conversation turn of its own, so it is read straight
-    // from the journal rather than folded into a turn.
-    let restoreUndo: CodeConversationPage["restoreUndo"];
+    // The thread's last restore that ran. A restore is its own operation with
+    // no conversation turn of its own, so it is read straight from the journal
+    // rather than folded into a turn.
+    let lastRestore: { readonly checkoutId?: CodeCheckoutId; readonly undo?: CodeCheckpoint } = {};
+    // Where every turn ran, rewound and earlier ones included: a restore that
+    // recorded no checkout is trusted only when they all name the current one.
+    const turnCheckouts: Array<CodeCheckoutId | undefined> = [];
 
     for (;;) {
       // The page folds only turn operations and restores, so SQL hands back
@@ -1561,6 +1581,8 @@ export class CodeOperationEventStore {
           continue;
         }
         const key = String(frame.operationId);
+        if (frame.threadId === threadId && frame.event.kind === "conversation-turn-started")
+          turnCheckouts.push(frame.event.checkoutId);
         if (
           frame.threadId === threadId &&
           frame.event.kind === "conversation-turn-started" &&
@@ -1595,7 +1617,11 @@ export class CodeOperationEventStore {
           // that ran replaces it — completed, or failed after it may already
           // have moved files.
           if (frame.event.result.state !== "rejected") {
-            restoreUndo = frame.event.result.undo;
+            const { checkoutId, undo } = frame.event.result;
+            lastRestore = {
+              ...(checkoutId === undefined ? {} : { checkoutId }),
+              ...(undo === undefined ? {} : { undo }),
+            };
           }
         }
         const builder = byOperation.get(key);
@@ -1624,6 +1650,18 @@ export class CodeOperationEventStore {
     const currentLimits = [...limits.values()]
       .filter((entry) => entry.providerInstanceId === currentProviderInstanceId)
       .map((entry) => entry.limit);
+
+    // Two worktrees share Git objects, so a way back from the checkout the
+    // thread moved off would apply here and overwrite work it never saw.
+    const restoreUndo =
+      input.checkoutId === undefined ||
+      restorePointBelongsTo(
+        lastRestore,
+        input.checkoutId,
+        threadOnlyRanOn(turnCheckouts, input.checkoutId),
+      )
+        ? lastRestore.undo
+        : undefined;
 
     const steered = turns.length === 0 ? [] : readAgentResultsSteered(this.#journal, threadId);
     const messages = turns.length === 0 ? [] : readThreadMessagesSteered(this.#journal, threadId);
@@ -1769,17 +1807,7 @@ export class CodeOperationEventStore {
     } catch {
       throw new CodeOperationEventStoreError("invalid", "Code conversation request is invalid.");
     }
-    const budget = { decoded: 0 };
-    const decode = (envelope: EventEnvelope) => {
-      budget.decoded += 1;
-      if (budget.decoded > MAX_STREAM_SCAN_EVENTS) {
-        throw new CodeOperationEventStoreError(
-          "invalid",
-          "Code conversation exceeds the bounded replay window.",
-        );
-      }
-      return ownFrame(envelope, threadId);
-    };
+    const decode = this.#boundedDecode(threadId);
 
     const rewound = this.#rewoundTurns(threadId);
     const anchorId = request.before ?? request.through;
@@ -1879,7 +1907,7 @@ export class CodeOperationEventStore {
       // are current; without it, the newest turn's provider.
       const current = String(input.providerInstanceId ?? turns.at(-1)?.providerInstanceId ?? "");
       limits = this.#currentLimits(threadId, current, starts, decode);
-      restoreUndo = this.#newestRestoreUndo(threadId, decode);
+      restoreUndo = this.#newestRestoreUndo(threadId, decode, input.checkoutId);
     }
 
     return {
@@ -2027,11 +2055,14 @@ export class CodeOperationEventStore {
    * restore never touched the checkout, so the read walks past it to the one
    * before; a restore that ran and carried no way back retracts the offer.
    * Only restore results are read, so a thread full of commits and pushes and
-   * no restore costs an index walk, not a decode of each of them.
+   * no restore costs an index walk, not a decode of each of them. Given the
+   * thread's checkout, a restore that ran elsewhere offers nothing, as on the
+   * forward page.
    */
   #newestRestoreUndo(
     threadId: CodeThreadId,
     decode: (envelope: EventEnvelope) => typeof CodeOperationEventFrame.Type | undefined,
+    checkoutId: CodeCheckoutId | undefined,
   ): CodeConversationPage["restoreUndo"] {
     let beforeSequence: number | undefined;
     for (;;) {
@@ -2052,10 +2083,129 @@ export class CodeOperationEventStore {
           frame.event.result.mutation === "restore-checkpoint" &&
           frame.event.result.state !== "rejected"
         ) {
-          return frame.event.result.undo;
+          const restore = frame.event.result;
+          if (checkoutId === undefined) return restore.undo;
+          const onlyRanOn =
+            restore.checkoutId === undefined &&
+            threadOnlyRanOn(this.#turnCheckouts(threadId, decode), checkoutId);
+          return restorePointBelongsTo(restore, checkoutId, onlyRanOn) ? restore.undo : undefined;
         }
       }
       if (batch.length < MAX_RESTORE_RESULTS_PER_READ) return undefined;
+    }
+  }
+
+  /**
+   * Whether the thread recorded `checkpoint` on `checkoutId`: as the checkout
+   * stood before one of its turns there, or as one of its restores that ran
+   * there replaced it. This is what an in-place restore may write back; a point
+   * from another checkout is refused before anything is touched. Rewound turns
+   * count, since their checkpoints are still where they ran.
+   */
+  restorePointRecorded(
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+    checkpoint: CodeCheckpoint,
+  ): boolean {
+    const decode = this.#boundedDecode(threadId);
+    const points: Array<RecordedRestorePoint> = [];
+    const turnCheckouts: Array<CodeCheckoutId | undefined> = [];
+    let beforeSequence: number | undefined;
+    for (;;) {
+      const batch = this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "conversation-turn-started",
+        limit: JOURNAL_REPLAY_BATCH_SIZE,
+        ...(beforeSequence === undefined ? {} : { beforeSequence }),
+      });
+      for (const envelope of batch) {
+        beforeSequence = envelope.globalSequence;
+        const frame = decode(envelope);
+        if (frame?.event.kind !== "conversation-turn-started") continue;
+        const turn = frame.event;
+        turnCheckouts.push(turn.checkoutId);
+        if (turn.checkpoint !== undefined)
+          points.push({
+            checkpoint: turn.checkpoint,
+            ...(turn.checkoutId === undefined ? {} : { checkoutId: turn.checkoutId }),
+          });
+      }
+      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
+    }
+    beforeSequence = undefined;
+    for (;;) {
+      const batch = this.#journal.latestThreadResults({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        resultKind: "git-mutation-state",
+        mutation: "restore-checkpoint",
+        limit: JOURNAL_REPLAY_BATCH_SIZE,
+        ...(beforeSequence === undefined ? {} : { beforeSequence }),
+      });
+      for (const envelope of batch) {
+        beforeSequence = envelope.globalSequence;
+        const frame = decode(envelope);
+        if (
+          frame?.event.kind !== "operation-result" ||
+          frame.event.result.kind !== "git-mutation-state" ||
+          frame.event.result.mutation !== "restore-checkpoint" ||
+          frame.event.result.state === "rejected" ||
+          frame.event.result.undo === undefined
+        )
+          continue;
+        const { checkoutId: ranOn, undo } = frame.event.result;
+        points.push({ checkpoint: undo, ...(ranOn === undefined ? {} : { checkoutId: ranOn }) });
+      }
+      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
+    }
+    const onlyRanOn = threadOnlyRanOn(turnCheckouts, checkoutId);
+    return points.some(
+      (point) =>
+        sameCheckpoint(point.checkpoint, checkpoint) &&
+        restorePointBelongsTo(point, checkoutId, onlyRanOn),
+    );
+  }
+
+  /** A decoder of the thread's own frames that refuses past the scan bound. */
+  #boundedDecode(
+    threadId: CodeThreadId,
+  ): (envelope: EventEnvelope) => typeof CodeOperationEventFrame.Type | undefined {
+    let decoded = 0;
+    return (envelope) => {
+      decoded += 1;
+      if (decoded > MAX_STREAM_SCAN_EVENTS) {
+        throw new CodeOperationEventStoreError(
+          "invalid",
+          "Code conversation exceeds the bounded replay window.",
+        );
+      }
+      return ownFrame(envelope, threadId);
+    };
+  }
+
+  /** Where each of the thread's turns ran, rewound ones included, newest first. */
+  #turnCheckouts(
+    threadId: CodeThreadId,
+    decode: (envelope: EventEnvelope) => typeof CodeOperationEventFrame.Type | undefined,
+  ): ReadonlyArray<CodeCheckoutId | undefined> {
+    const checkouts: Array<CodeCheckoutId | undefined> = [];
+    let beforeSequence: number | undefined;
+    for (;;) {
+      const batch = this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "conversation-turn-started",
+        limit: JOURNAL_REPLAY_BATCH_SIZE,
+        ...(beforeSequence === undefined ? {} : { beforeSequence }),
+      });
+      for (const envelope of batch) {
+        beforeSequence = envelope.globalSequence;
+        const frame = decode(envelope);
+        if (frame?.event.kind === "conversation-turn-started")
+          checkouts.push(frame.event.checkoutId);
+      }
+      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) return checkouts;
     }
   }
 }

@@ -1423,6 +1423,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.operationClient !== undefined &&
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
+  // A message's restore point is offered only on the checkout it was taken
+  // in, which the host checks again before it touches a file. One that
+  // recorded no checkout, from before messages named theirs, is not offered:
+  // the host trusts it only on a thread whose every turn names this checkout.
+  const restoresHere = (message: CodeConversationMessage) =>
+    message.checkoutId !== undefined &&
+    view !== undefined &&
+    String(message.checkoutId) === String(view.checkout.id);
   const stash: ComposerStashBinding = {
     typedScope,
     submission: stashSubmission,
@@ -1710,6 +1718,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         (await props.requestApproval?.(command)) === undefined
       ) {
         setRestoreMessage("The files were not restored. Nothing changed.");
+        // Nothing ran, so the way back from the last restore still holds.
+        setRestoreUndo(previousUndo, command);
         return;
       }
       const result = await client.executeOperation(command);
@@ -1848,7 +1858,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 }
               : preview.files.kind === "unchanged"
                 ? { kind: "unchanged" }
-                : { kind: "unavailable", reason: REWIND_FILES_UNAVAILABLE[preview.files.reason] },
+                : {
+                    kind: "unavailable",
+                    reason:
+                      preview.files.detail === "other-checkout"
+                        ? REWIND_FILES_FROM_OTHER_CHECKOUT
+                        : REWIND_FILES_UNAVAILABLE[preview.files.reason],
+                  },
         };
       });
     } catch {
@@ -2489,6 +2505,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                   message.sourceThreadId === undefined &&
                                   message.role === "user" &&
                                   message.checkpoint !== undefined &&
+                                  restoresHere(message) &&
                                   mayRestore,
                                 checkpointBusy: checkpoints.busy,
                                 forking,
@@ -2798,6 +2815,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         ) : null}
                         {message.role === "user" &&
                         message.checkpoint !== undefined &&
+                        restoresHere(message) &&
                         mayRestore &&
                         !readOnly &&
                         confirmingRestore === message.id ? (
@@ -3874,6 +3892,8 @@ const REWIND_FILES_UNAVAILABLE: Readonly<
     "A turn after this point changed files without a recorded checkpoint, so only the conversation can be rewound.",
   unreadable: "The checkout could not be read, so only the conversation can be rewound.",
 };
+const REWIND_FILES_FROM_OTHER_CHECKOUT =
+  "This point was recorded in another checkout, so only the conversation can be rewound.";
 
 function previousAssistantMessage(
   messages: ReadonlyArray<CodeController["conversation"][number]>,

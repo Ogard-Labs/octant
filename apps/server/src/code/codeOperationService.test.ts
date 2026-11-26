@@ -1572,7 +1572,15 @@ describe("CodeOperationService", () => {
         }> => ({ state: "failed" }),
       );
       const append = vi.fn();
+      const restorePointRecorded = vi.fn(
+        (_input: {
+          readonly threadId: CodeThread["id"];
+          readonly checkoutId: typeof ids.checkout;
+          readonly checkpoint: typeof restoredCheckpoint;
+        }): "recorded" | "unrecorded" | "unreadable" => "recorded",
+      );
       const service = new CodeOperationService({
+        restorePointRecorded,
         authority: {
           readThread: vi.fn(
             (id: CodeThread["id"]) =>
@@ -1629,8 +1637,57 @@ describe("CodeOperationService", () => {
           append,
         } as never,
       });
-      return { service, restoreCheckpoint, checkpoint, start, cancel, append, discard, validate };
+      return {
+        service,
+        restoreCheckpoint,
+        checkpoint,
+        start,
+        cancel,
+        append,
+        discard,
+        validate,
+        restorePointRecorded,
+      };
     }
+
+    it("refuses a restore point the thread recorded in another checkout and leaves the files alone", async () => {
+      const { service, restoreCheckpoint, restorePointRecorded } = restoreFixture([]);
+      restorePointRecorded.mockReturnValueOnce("unrecorded");
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message:
+            "That restore point was recorded in another checkout, so it cannot be restored here. Nothing changed.",
+        },
+      });
+      expect(restorePointRecorded).toHaveBeenCalledWith({
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        checkpoint: restoredCheckpoint,
+      });
+      expect(restoreCheckpoint).not.toHaveBeenCalled();
+    });
+
+    it("refuses a restore whose restore points cannot be read and leaves the files alone", async () => {
+      const { service, restoreCheckpoint, restorePointRecorded } = restoreFixture([]);
+      restorePointRecorded.mockReturnValueOnce("unreadable");
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "unavailable" },
+      });
+      expect(restoreCheckpoint).not.toHaveBeenCalled();
+    });
+
+    it("records which checkout a restore ran on", async () => {
+      const { service } = restoreFixture([]);
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        mutation: "restore-checkpoint",
+        state: "completed",
+        checkoutId: ids.checkout,
+      });
+    });
 
     it.each(["stale-state", "unlisted-path", "untracked-path"] as const)(
       "returns the tracked discard refusal %s instead of failing to decode its result",

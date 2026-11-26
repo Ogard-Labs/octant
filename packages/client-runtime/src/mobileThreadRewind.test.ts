@@ -1,6 +1,14 @@
+import {
+  CodeOperationId,
+  CodeRewindFilesUnavailableReason,
+  CodeTurnChangedFiles,
+  decodeHostAnswer,
+} from "@octant/contracts";
+import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
   MOBILE_REWIND_FILES_NEED_COMPUTER,
+  MOBILE_REWIND_FILES_UNAVAILABLE,
   composerAfterRewind,
   forkMobileChatThread,
   forkMobileCodeThread,
@@ -325,6 +333,78 @@ describe("mobile fork and rewind", () => {
     expect(JSON.parse(String(authenticatedFetch.mock.calls[0]?.[0].body)).kind).toBe(
       "preview-code-rewind",
     );
+  });
+
+  it("says a Code rewind's files stay put when their point was saved in another checkout", async () => {
+    const { transport, authenticatedFetch } = transportReturning({});
+    authenticatedFetch.mockImplementationOnce(async (input) => {
+      const command = JSON.parse(String(input.body));
+      return new Response(
+        JSON.stringify({
+          kind: "rewind-preview",
+          operationId: command.operationId,
+          fromOperationId: uuid(5),
+          removedTurns: 1,
+          rollback: "handoff",
+          files: { kind: "unavailable", reason: "unreadable", detail: "other-checkout" },
+        }),
+        { status: 200 },
+      );
+    });
+    const preview = await previewMobileCodeRewind(transport, {
+      threadId: uuid(700) as never,
+      checkoutId: uuid(701) as never,
+      fromOperationId: uuid(5),
+    });
+    expect(preview.files).toEqual({
+      kind: "unavailable",
+      reason: "This point was saved in another checkout, so only the conversation can go back.",
+    });
+  });
+
+  it("still lets a phone built before the detail decode the preview and rewind the conversation", () => {
+    // The rewind preview exactly as phones built before the detail decode
+    // it: strict structs, and an unavailable files part with no `detail`.
+    const strict = { parseOptions: { onExcessProperty: "error" as const } };
+    const OlderPhoneRewindPreview = Schema.Struct({
+      kind: Schema.Literal("rewind-preview"),
+      operationId: CodeOperationId,
+      fromOperationId: CodeOperationId,
+      removedTurns: Schema.Int.pipe(Schema.positive()),
+      files: Schema.Union(
+        Schema.Struct({
+          kind: Schema.Literal("changes"),
+          changes: CodeTurnChangedFiles,
+        }).annotations(strict),
+        Schema.Struct({ kind: Schema.Literal("unchanged") }).annotations(strict),
+        Schema.Struct({
+          kind: Schema.Literal("unavailable"),
+          reason: CodeRewindFilesUnavailableReason,
+        }).annotations(strict),
+      ),
+      rollback: Schema.Literal("native", "handoff"),
+    }).annotations(strict);
+    const answer = {
+      kind: "rewind-preview",
+      operationId: uuid(810),
+      fromOperationId: uuid(5),
+      removedTurns: 1,
+      rollback: "handoff",
+      files: { kind: "unavailable", reason: "unreadable", detail: "other-checkout" },
+    };
+
+    // Read strictly, the unknown field would refuse the whole preview; a host
+    // answer drops it, which is what keeps that phone able to rewind.
+    expect(() => Schema.decodeUnknownSync(OlderPhoneRewindPreview)(answer)).toThrow();
+    const decoded = decodeHostAnswer(OlderPhoneRewindPreview)(answer);
+    expect(decoded.files).toEqual({ kind: "unavailable", reason: "unreadable" });
+    if (decoded.files.kind !== "unavailable") throw new Error("files");
+    const files = {
+      kind: "unavailable" as const,
+      reason: MOBILE_REWIND_FILES_UNAVAILABLE[decoded.files.reason],
+    };
+    expect(files.reason).toBe("The files could not be compared with this point.");
+    expect(mobileRewindScopes(files)).toEqual(["conversation"]);
   });
 
   it("shows the host's own sentence when a Code rewind is refused", async () => {

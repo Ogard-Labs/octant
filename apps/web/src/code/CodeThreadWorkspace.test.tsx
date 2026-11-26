@@ -2054,7 +2054,13 @@ describe("CodeThreadWorkspace", () => {
     }));
     const requestApproval = vi.fn(async () => undefined);
     const conversation = [
-      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+      {
+        id: "turn-1:user",
+        role: "user" as const,
+        text: "rewrite the parser",
+        checkpoint,
+        checkoutId: viewCheckoutId,
+      },
       { id: "turn-1:assistant", role: "assistant" as const, text: "done" },
     ];
     const { rerender } = render(
@@ -2192,6 +2198,50 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
+  it("says a rewind's files cannot come back when the point was recorded in another checkout", async () => {
+    const user = userEvent.setup();
+    const executeOperation = vi.fn(async () => ({
+      kind: "rewind-preview" as const,
+      operationId: "30000000-0000-4000-8000-000000000001",
+      fromOperationId: "20000000-0000-4000-8000-000000000001",
+      removedTurns: 1,
+      files: {
+        kind: "unavailable" as const,
+        reason: "unreadable" as const,
+        detail: "other-checkout" as const,
+      },
+      rollback: "handoff" as const,
+    }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:user",
+              role: "user" as const,
+              text: "before the move",
+              operationId: "20000000-0000-4000-8000-000000000001",
+            },
+          ],
+          refreshConversation: vi.fn(() => true),
+        } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    await chooseTurnAction(user, "Rewind to here…", "before the move");
+    const dialog = await screen.findByRole("dialog", { name: "Rewind to here" });
+    expect(
+      await within(dialog).findByText(
+        "This point was recorded in another checkout, so only the conversation can be rewound.",
+      ),
+    ).toBeVisible();
+    expect(within(dialog).queryByRole("button", { name: "Files only" })).not.toBeInTheDocument();
+  });
+
   it("rewinds only the conversation without asking for an approval", async () => {
     const user = userEvent.setup();
     const executeOperation = vi.fn(async (command: { readonly kind: string }) =>
@@ -2275,7 +2325,13 @@ describe("CodeThreadWorkspace", () => {
       <CodeThreadWorkspace
         controller={controller({
           conversation: [
-            { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+            {
+              id: "turn-1:user",
+              role: "user" as const,
+              text: "rewrite the parser",
+              checkpoint,
+              checkoutId: viewCheckoutId,
+            },
             { id: "turn-1:assistant", role: "assistant" as const, text: "done" },
           ],
         } as never)}
@@ -2310,7 +2366,13 @@ describe("CodeThreadWorkspace", () => {
       undo,
     }));
     const conversation = [
-      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+      {
+        id: "turn-1:user",
+        role: "user" as const,
+        text: "rewrite the parser",
+        checkpoint,
+        checkoutId: viewCheckoutId,
+      },
     ];
     // The undo point belongs to the controller, which outlives this surface;
     // opening another tab unmounts the surface exactly like this.
@@ -2396,6 +2458,81 @@ describe("CodeThreadWorkspace", () => {
     expect(executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "restore-git-checkpoint", checkpoint: undo }),
     );
+    expect(screen.getByRole("button", { name: "Undo restore" })).toBeVisible();
+  });
+
+  it("offers no Restore files to this point on a message from another checkout", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:user",
+              role: "user" as const,
+              text: "before the move",
+              checkpoint,
+              checkoutId: "20000000-0000-4000-8000-0000000000aa",
+            },
+            // Recorded before turns named their checkout: it could be from anywhere.
+            { id: "turn-2:user", role: "user" as const, text: "long ago", checkpoint },
+            {
+              id: "turn-3:user",
+              role: "user" as const,
+              text: "after the move",
+              checkpoint,
+              checkoutId: viewCheckoutId,
+            },
+          ],
+        } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation: vi.fn() } as never}
+        requestApproval={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    for (const text of ["before the move", "long ago"]) {
+      await user.click(within(turnArticle(text)).getByRole("button", { name: "More actions" }));
+      // The menu is open, and the restore is not in it.
+      expect(await screen.findByRole("menuitem", { name: "Copy message" })).toBeVisible();
+      expect(
+        screen.queryByRole("menuitem", { name: "Restore files to this point" }),
+      ).not.toBeInTheDocument();
+      await user.keyboard("{Escape}");
+    }
+    await user.click(
+      within(turnArticle("after the move")).getByRole("button", { name: "More actions" }),
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "Restore files to this point" }),
+    ).toBeVisible();
+  });
+
+  it("keeps the earlier Undo restore when a restore's approval is declined", async () => {
+    const user = userEvent.setup();
+    const undo = { worktree: "e".repeat(40), index: "f".repeat(40) };
+    const executeOperation = vi.fn();
+    function Harness() {
+      const [restoreUndo, noteRestoreUndo] = useState<unknown>(undo);
+      return (
+        <CodeThreadWorkspace
+          controller={controller({ conversation: [], restoreUndo, noteRestoreUndo } as never)}
+          nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+          operationClient={{ executeOperation } as never}
+          requestApproval={vi.fn(async () => undefined)}
+          threadId={threadId}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(await screen.findByRole("button", { name: "Undo restore" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("The files were not restored. Nothing changed.")).toBeVisible(),
+    );
+    expect(executeOperation).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Undo restore" })).toBeVisible();
   });
 
@@ -2580,7 +2717,13 @@ describe("CodeThreadWorkspace", () => {
 
   it("keeps the restore control off a thread that cannot change the checkout", async () => {
     const conversation = [
-      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+      {
+        id: "turn-1:user",
+        role: "user" as const,
+        text: "rewrite the parser",
+        checkpoint,
+        checkoutId: viewCheckoutId,
+      },
     ];
     const plan = controller({ conversation } as never);
     render(
@@ -2615,7 +2758,13 @@ describe("CodeThreadWorkspace", () => {
       <CodeThreadWorkspace
         controller={controller({
           conversation: [
-            { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+            {
+              id: "turn-1:user",
+              role: "user" as const,
+              text: "rewrite the parser",
+              checkpoint,
+              checkoutId: viewCheckoutId,
+            },
           ],
         } as never)}
         nextUuid={() => "30000000-0000-4000-8000-000000000001"}
@@ -4830,6 +4979,8 @@ function alternateProviderGroup(): PickerGroup {
 }
 
 const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) } as never;
+/** The checkout the test controller's view is on. */
+const viewCheckoutId = "20000000-0000-4000-8000-000000000002";
 
 function workspaceWithWorktreeLaunch(overrides: Partial<CodeController>, blocked = false) {
   const checkoutId = decodeCodeCheckoutId("20000000-0000-4000-8000-000000000002");

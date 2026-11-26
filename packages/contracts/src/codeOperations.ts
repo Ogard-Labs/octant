@@ -1506,6 +1506,12 @@ const GitMutationResult = Schema.Struct({
    * failed one, which may have moved files before it stopped.
    */
   undo: Schema.optional(CodeCheckpoint),
+  /**
+   * The checkout a restore ran on, so its way back is offered and accepted
+   * only there. Absent on every other mutation, and on restores journaled
+   * before the host recorded it.
+   */
+  checkoutId: Schema.optional(CodeCheckoutId),
 }).annotations(strict);
 const PullRequestUrl = Schema.String.pipe(
   Schema.maxLength(2_048),
@@ -1799,6 +1805,17 @@ export const CodeRewindFilesUnavailableReason = Schema.Literal(
 );
 export type CodeRewindFilesUnavailableReason = typeof CodeRewindFilesUnavailableReason.Type;
 /**
+ * A finer reason beside `reason`: `other-checkout` says the point was recorded
+ * in another checkout than the one the thread is on now, sent with the reason
+ * `unreadable`. It is a field of its own rather than a reason because a phone
+ * built before it decodes only the reasons it knows and would refuse the whole
+ * preview, so it could not rewind at all; a host answer drops a field it does
+ * not know, so that phone still decodes the preview, shows its own sentence
+ * for `unreadable`, and rewinds the conversation only.
+ */
+export const CodeRewindFilesUnavailableDetail = Schema.Literal("other-checkout");
+export type CodeRewindFilesUnavailableDetail = typeof CodeRewindFilesUnavailableDetail.Type;
+/**
  * What a rewind would change. `rollback` says how the conversation continues
  * after it: `native` when the provider can cut its own session back to the
  * last kept turn, `handoff` when the next turn starts a fresh session with a
@@ -1818,6 +1835,7 @@ const RewindPreviewResult = Schema.Struct({
     Schema.Struct({
       kind: Schema.Literal("unavailable"),
       reason: CodeRewindFilesUnavailableReason,
+      detail: Schema.optional(CodeRewindFilesUnavailableDetail),
     }).annotations(strict),
   ),
   rollback: Schema.Literal("native", "handoff"),

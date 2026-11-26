@@ -1047,6 +1047,7 @@ A fork is a managed-worktree creation the host resolves from a finished turn; a 
 - The phone rewinds files only at Full access; otherwise it rewinds the conversation only.
 - Fork and rewind use the provider's own session copy where its runtime offers one, else a disclosed text handoff (maintainer principle, 2026-11-14).
 - An in-place Git restore or discard is refused while another thread writes on the checkout root.
+- A restore, Undo restore or rewind writes files back only from a point the same thread recorded, and only into the checkout that point was recorded on; a point that recorded none is trusted only while every recorded turn names that checkout (maintainer decision, 2026-11-26).
 - A thread on its Project's shared checkout may move onto a managed worktree of its own, keeping its id and history and copying its uncommitted changes, which the source keeps (maintainer decision, 2026-11-26). The move revokes grants as a rebind does, refuses work a copy would leave behind, and an agent's request always asks the person from a local window; the next turn continues by a disclosed text handoff, and a one-click Discard of the copy in the source is not offered.
 
 Status: Built. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
