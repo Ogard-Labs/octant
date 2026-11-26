@@ -144,7 +144,13 @@ export function childTerminalTools(
   input: ChildCodeToolInput & {
     readonly terminals: Pick<
       TerminalService,
-      "launch" | "attach" | "write" | "terminate" | "agentCommand" | "noteAgentCommand"
+      | "launch"
+      | "attach"
+      | "write"
+      | "terminate"
+      | "agentCommand"
+      | "noteAgentCommand"
+      | "noteAgentInterrupt"
     >;
     /** The shell and confinement a Code thread's own terminal gets at this level. */
     readonly launchFor: (child: {

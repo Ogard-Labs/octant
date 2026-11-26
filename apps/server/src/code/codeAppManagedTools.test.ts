@@ -110,7 +110,7 @@ describe("Code app-managed tools", () => {
       expect.objectContaining({
         kind: "write-terminal",
         terminalId: threadId,
-        data: expect.stringMatching(/^\{ pwd\r\}; printf .*octant=.*exit=/),
+        data: expect.stringMatching(/^\{\rpwd\r\}; printf .*octant=.*exit=/),
       }),
     );
     expect(result).toEqual({
@@ -382,8 +382,12 @@ describe("Code app-managed tools", () => {
   describe("a command still running past run's wait", () => {
     // One terminal across turns: its transcript, and what the host keeps with it.
     function sharedTerminal(shell?: string) {
-      const kept: { shell?: string; pending?: string; shellAtPrompt?: boolean } =
-        shell === undefined ? {} : { shell };
+      const kept: {
+        shell?: string;
+        pending?: string;
+        interrupted?: boolean;
+        shellAtPrompt?: boolean;
+      } = shell === undefined ? {} : { shell };
       let output = "$ ";
       const written: string[] = [];
       let now = 0;
@@ -413,8 +417,12 @@ describe("Code app-managed tools", () => {
             terminate: vi.fn(),
             readAgentCommand: async () => ({ ...kept }),
             noteAgentCommand: async (_window: unknown, _scope: unknown, pending?: string) => {
+              delete kept.interrupted;
               if (pending === undefined) delete kept.pending;
               else kept.pending = pending;
+            },
+            noteAgentInterrupt: async () => {
+              if (kept.pending !== undefined) kept.interrupted = true;
             },
           } as never,
           wait: async () => {
@@ -431,11 +439,17 @@ describe("Code app-managed tools", () => {
           name: CODE_TERMINAL_TOOL_NAME,
           inputJson: JSON.stringify({ operation: "read" }),
         });
+      const write = (text: string) =>
+        tools().execute({
+          name: CODE_TERMINAL_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "write", command: text }),
+        });
       return {
         kept,
         written,
         run,
         read,
+        write,
         print: (text: string) => {
           output += text;
         },
@@ -459,11 +473,25 @@ describe("Code app-managed tools", () => {
       }
     });
 
-    it("is let go, exit code unknown, once the shell is back at its prompt without its completion", async () => {
+    it("stays busy while the shell holds the foreground but was never interrupted, as in its own read", async () => {
+      const terminal = sharedTerminal();
+      try {
+        await terminal.run("read answer");
+        terminal.kept.shellAtPrompt = true;
+        expect(await terminal.read()).toMatchObject({ result: { commandCompleted: false } });
+        expect(terminal.kept.pending).toBeDefined();
+        expect(await terminal.run("pwd")).toMatchObject({ result: { error: "terminal-busy" } });
+      } finally {
+        terminal.restore();
+      }
+    });
+
+    it("is let go, exit code unknown, once the agent interrupted it and the shell is back without its completion", async () => {
       const terminal = sharedTerminal();
       try {
         await terminal.run("sleep 60");
-        // Ctrl-C at the shell: it returns to its prompt, and no completion is printed.
+        // Ctrl-C sent by the agent: the shell returns to its prompt, and zsh prints no completion.
+        await terminal.write("\u0003");
         terminal.print("^C\n$ ");
         terminal.kept.shellAtPrompt = true;
         expect(await terminal.read()).toMatchObject({
@@ -472,7 +500,7 @@ describe("Code app-managed tools", () => {
         });
         expect(terminal.kept.pending).toBeUndefined();
         expect(await terminal.run("pwd")).not.toMatchObject({ result: { error: "terminal-busy" } });
-        expect(terminal.written).toHaveLength(2);
+        expect(terminal.written).toHaveLength(3);
       } finally {
         terminal.restore();
       }
@@ -530,6 +558,7 @@ describe("Code app-managed tools", () => {
         terminate: vi.fn(),
         readAgentCommand: async () => ({ shell: "C:\\Windows\\System32\\cmd.exe" }),
         noteAgentCommand: async () => undefined,
+        noteAgentInterrupt: async () => undefined,
       } as never,
       wait: async () => undefined,
     });

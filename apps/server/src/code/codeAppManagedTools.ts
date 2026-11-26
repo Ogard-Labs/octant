@@ -614,6 +614,7 @@ export interface CodeAppManagedToolsOptions {
     ) => Promise<{
       readonly shell?: string;
       readonly pending?: string;
+      readonly interrupted?: boolean;
       readonly shellAtPrompt?: boolean;
     }>;
     readonly noteAgentCommand?: (
@@ -624,6 +625,14 @@ export interface CodeAppManagedToolsOptions {
         readonly terminalId: CodeTerminalId;
       },
       pending: string | undefined,
+    ) => Promise<void>;
+    readonly noteAgentInterrupt?: (
+      windowId: WindowId,
+      input: {
+        readonly threadId: CodeThread["id"];
+        readonly checkoutId: CodeThread["checkoutId"];
+        readonly terminalId: CodeTerminalId;
+      },
     ) => Promise<void>;
     readonly terminate?: (
       windowId: WindowId,
@@ -1565,9 +1574,12 @@ export interface AgentTerminalPort {
     readonly read: () => Promise<{
       readonly shell?: string;
       readonly pending?: string;
+      readonly interrupted?: boolean;
       readonly shellAtPrompt?: boolean;
     }>;
     readonly note: (pending: string | undefined) => Promise<void>;
+    /** The agent sent Ctrl-C to that command. */
+    readonly interrupted: () => Promise<void>;
   };
 }
 
@@ -1631,7 +1643,8 @@ function codeTerminalOptions(options: CodeAppManagedToolsOptions): AgentTerminal
   });
   // An approval that starts the terminal is minted for exactly this command.
   let approvedStart: CodeOperationCommand | undefined;
-  const { interrupt, terminate, readAgentCommand, noteAgentCommand } = options.terminal;
+  const { interrupt, terminate, readAgentCommand, noteAgentCommand, noteAgentInterrupt } =
+    options.terminal;
   const { terminalApproval } = options;
   return {
     terminal: {
@@ -1667,13 +1680,16 @@ function codeTerminalOptions(options: CodeAppManagedToolsOptions): AgentTerminal
         ),
       ...(interrupt === undefined ? {} : { interrupt: () => interrupt(options.windowId, scope) }),
       ...(terminate === undefined ? {} : { terminate: () => terminate(options.windowId, scope) }),
-      ...(readAgentCommand === undefined || noteAgentCommand === undefined
+      ...(readAgentCommand === undefined ||
+      noteAgentCommand === undefined ||
+      noteAgentInterrupt === undefined
         ? {}
         : {
             agentCommand: {
               read: () => readAgentCommand(options.windowId, scope),
               note: (pending: string | undefined) =>
                 noteAgentCommand(options.windowId, scope, pending),
+              interrupted: () => noteAgentInterrupt(options.windowId, scope),
             },
           }),
     },
@@ -1725,12 +1741,17 @@ async function terminalTool(
             terminalCompletion(earlier.shell ?? "/bin/sh", earlier.pending).pattern,
           )
         : undefined;
-    // A command that printed no completion but left its shell at the prompt
-    // ended without saying how (an interrupt, or a program that took the
-    // completion as input): it no longer holds the terminal, and its exit code
-    // is unknown. Without this the terminal stayed busy until it was stopped.
+    // A command the agent interrupted that printed no completion (zsh drops
+    // the rest of the line on Ctrl-C) but left its shell in the foreground no
+    // longer holds the terminal, and its exit code is unknown. The foreground
+    // alone cannot say the shell is at its prompt rather than in its own
+    // `read`, so a command never interrupted stays busy until it ends or is
+    // stopped.
     const abandoned =
-      finished === undefined && snapshot.status === "running" && earlier.shellAtPrompt === true;
+      finished === undefined &&
+      snapshot.status === "running" &&
+      earlier.interrupted === true &&
+      earlier.shellAtPrompt === true;
     if (finished !== undefined || abandoned || snapshot.status !== "running")
       await terminal.agentCommand?.note(undefined).catch(() => undefined);
     if (abandoned && input.operation === "read")
@@ -1792,6 +1813,8 @@ async function terminalTool(
       await terminal.agentCommand?.note(undefined).catch(() => undefined);
       return refused;
     }
+    if (marker === undefined && earlier.pending !== undefined && command.includes("\u0003"))
+      await terminal.agentCommand?.interrupted().catch(() => undefined);
     if (completion !== undefined) {
       try {
         return await waitForTerminalCommand(options, completion.pattern, signal);

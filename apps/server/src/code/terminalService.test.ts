@@ -30,6 +30,11 @@ describe("TerminalService", () => {
       shell: request.shell,
       pending: "oo1234",
     });
+    service.noteAgentInterrupt("agent-terminal");
+    expect(service.agentCommand("agent-terminal")).toMatchObject({ interrupted: true });
+    // A new run's command starts uninterrupted.
+    service.noteAgentCommand("agent-terminal", "oo5678");
+    expect(service.agentCommand("agent-terminal")).not.toHaveProperty("interrupted");
     first.emitExit({ exitCode: 0 });
     await service.launch({ ...request, shell: "/bin/zsh" });
     expect(service.agentCommand("agent-terminal")).toEqual({ shell: "/bin/zsh" });

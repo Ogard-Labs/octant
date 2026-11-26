@@ -17,7 +17,13 @@ export type AgentTerminalLaunch = Omit<
 export function createAgentTerminal(options: {
   readonly terminals: Pick<
     TerminalService,
-    "launch" | "attach" | "write" | "terminate" | "agentCommand" | "noteAgentCommand"
+    | "launch"
+    | "attach"
+    | "write"
+    | "terminate"
+    | "agentCommand"
+    | "noteAgentCommand"
+    | "noteAgentInterrupt"
   >;
   readonly terminalId: string;
   /** The launch as it may start now, or why it may not. */
@@ -105,6 +111,7 @@ export function createAgentTerminal(options: {
       agentCommand: {
         read: async () => terminals.agentCommand(terminalId),
         note: async (pending) => terminals.noteAgentCommand(terminalId, pending),
+        interrupted: async () => terminals.noteAgentInterrupt(terminalId),
       },
     },
     close: async () => {

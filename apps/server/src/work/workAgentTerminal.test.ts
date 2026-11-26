@@ -29,7 +29,12 @@ function terminals() {
     status: running ? ("running" as const) : ("interrupted" as const),
     canRerun: true,
     transcript: {
-      chunks: [marker === "" ? "" : `ok\u001b]777;octant=${marker};exit=0\u0007`],
+      // Both shells' markers: POSIX framed, PowerShell and Command Prompt plain text.
+      chunks: [
+        marker === ""
+          ? ""
+          : `ok\u001b]777;octant=${marker};exit=0\u0007octant=${marker};exit=0\r\n`,
+      ],
       byteLength: 2,
       truncated: false,
       characters: 2,
@@ -49,6 +54,7 @@ function terminals() {
     noteAgentCommand: vi.fn((_id: string, next: string | undefined) => {
       pending = next;
     }),
+    noteAgentInterrupt: vi.fn(),
     attach: vi.fn(() => {
       if (!running) throw new Error("No terminal.");
       return snapshot();
@@ -387,5 +393,38 @@ describe("a Work thread's terminal", () => {
     for (const listener of listeners) listener();
     await vi.waitFor(() => expect(terminate).toHaveBeenCalledWith("thread"));
     expect(started.size).toBe(0);
+  });
+
+  it("on Windows below Full access outside Strict, runs unconfined and asks for every run and write", async () => {
+    const service = terminals();
+    const ask = vi.fn(async (_summary: string, _command: string) => "approved" as const);
+    const set = createWorkTerminalTools({
+      threadId: WORK_THREAD,
+      projectId: "77777777-7777-4777-8777-777777777777",
+      terminals: service as never,
+      folder: async () => "C:\\work",
+      posture: () => "approval-gated",
+      ceiling: () => ({ strict: false, executionPolicy: "approval-gated" }),
+      current: () => true,
+      ask,
+      protections: async () => ({ launch: { strict: false }, end: async () => undefined }),
+      platform: "win32",
+      strict: () => false,
+      shell: () => "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }) as never,
+      uuid: () => crypto.randomUUID(),
+      startedIn: { get: () => undefined, set: () => undefined },
+    });
+    await set.execute(call({ operation: "run", command: "Get-Location" }));
+    await set.execute(call({ operation: "run", command: "Get-Location" }));
+    await set.execute(call({ operation: "write", command: "y" }));
+    // No Octant sandbox on Windows: the shell starts unconfined (maintainer decision, 2026-11-26)...
+    expect(service.launch.mock.calls[0]?.[0]).toMatchObject({ strict: false });
+    // ...so each command, and each input to a running program, asks first.
+    expect(ask.mock.calls.map(([, command]) => command)).toEqual([
+      "Get-Location",
+      "Get-Location",
+      "y",
+    ]);
   });
 });

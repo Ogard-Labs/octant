@@ -491,9 +491,11 @@ export interface CodeOperationTerminalPort {
   readonly agentCommand?: (terminalId: string) => {
     readonly shell?: string;
     readonly pending?: string;
+    readonly interrupted?: boolean;
     readonly shellAtPrompt?: boolean;
   };
   readonly noteAgentCommand?: (terminalId: string, pending: string | undefined) => void;
+  readonly noteAgentInterrupt?: (terminalId: string) => void;
   readonly observe?: (
     terminalId: string,
     listener: (emission: TerminalOutputEmission) => void,
@@ -2827,6 +2829,7 @@ export class CodeOperationService {
   ): Promise<{
     readonly shell?: string;
     readonly pending?: string;
+    readonly interrupted?: boolean;
     readonly shellAtPrompt?: boolean;
   }> {
     await this.#requireOwnedTerminal(windowId, input, true);
@@ -2844,6 +2847,18 @@ export class CodeOperationService {
   ): Promise<void> {
     await this.#requireOwnedTerminal(windowId, input, true);
     this.#options.terminals.noteAgentCommand?.(input.terminalId, pending);
+  }
+
+  async noteAgentInterrupt(
+    windowId: WindowId,
+    input: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutIdentity["id"];
+      readonly terminalId: CodeTerminalId;
+    },
+  ): Promise<void> {
+    await this.#requireOwnedTerminal(windowId, input, true);
+    this.#options.terminals.noteAgentInterrupt?.(input.terminalId);
   }
 
   async interruptTerminal(

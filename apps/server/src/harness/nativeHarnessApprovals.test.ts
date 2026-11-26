@@ -56,4 +56,41 @@ describe("an approval that names what it approves", () => {
     void ask({ summary: `Run this in the task's terminal?\n${command}`, detail: command });
     expect(asked[0]?.detail).toBe(command);
   });
+
+  it("asks for every terminal command even after the person said always for that class", async () => {
+    const asked: NativeHarnessApproval[] = [];
+    const approvals = new NativeHarnessApprovalStore({
+      sessions: {
+        ensure: () => undefined as never,
+        askApproval: (_threadId: string, approval: NativeHarnessApproval) => {
+          asked.push(approval);
+          return undefined as never;
+        },
+        settleApproval: () => undefined as never,
+      },
+      uuid: () => crypto.randomUUID(),
+      clock: () => "2026-11-26T12:00:00.000Z",
+    });
+    const threadId = "33333333-3333-4333-8333-333333333333";
+    const ask = (singleUse: boolean) =>
+      approvals.ask({
+        threadId,
+        mode: "work",
+        lead: { hostId: "local", providerInstanceId: "claude", modelId: "model" } as never,
+        toolName: "provider-action",
+        summary: "Run this in the task's terminal?\nls",
+        approvalClass: "terminal",
+        ...(singleUse ? { singleUse: true } : {}),
+      });
+    // A class the person once allowed always...
+    const remembered = ask(false);
+    expect(approvals.decide(threadId, String(asked[0]?.id), "approve-always")).toBe("decided");
+    expect(await remembered).toBe("approved");
+    expect(approvals.remembers(threadId, "terminal", false)).toBe(true);
+    // ...still asks for each terminal command, which is single-use.
+    expect(approvals.remembers(threadId, "terminal", true)).toBe(false);
+    void ask(true);
+    expect(asked).toHaveLength(2);
+    expect(asked[1]?.status).toBe("pending");
+  });
 });

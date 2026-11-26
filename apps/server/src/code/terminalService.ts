@@ -161,9 +161,10 @@ interface TerminalRecord {
    * The completion marker of an agent's command still running in it: one a
    * run's wait gave up on, such as a dev server. Kept with the terminal so a
    * later turn's run refuses rather than typing into that command, and a
-   * later read reports its exit code.
+   * later read reports its exit code. `interrupted` says the agent has since
+   * sent it Ctrl-C.
    */
-  agentCommand?: string;
+  agentCommand?: { readonly marker: string; interrupted: boolean };
   readonly transcript: TranscriptBuffer;
   readonly process?: TerminalProcessHandle;
   readonly secrets: readonly string[];
@@ -366,13 +367,19 @@ export class TerminalService {
   agentCommand(terminalId: string): {
     readonly shell?: string;
     readonly pending?: string;
+    readonly interrupted?: boolean;
     readonly shellAtPrompt?: boolean;
   } {
     const record = this.#require(terminalId);
     const foreground = record.status === "running" ? record.process?.foreground?.() : undefined;
     return {
       ...(record.shell === undefined ? {} : { shell: record.shell }),
-      ...(record.agentCommand === undefined ? {} : { pending: record.agentCommand }),
+      ...(record.agentCommand === undefined
+        ? {}
+        : {
+            pending: record.agentCommand.marker,
+            ...(record.agentCommand.interrupted ? { interrupted: true } : {}),
+          }),
       ...(foreground === undefined || record.shell === undefined
         ? {}
         : { shellAtPrompt: foreground === win32.basename(record.shell) }),
@@ -382,7 +389,13 @@ export class TerminalService {
   noteAgentCommand(terminalId: string, pending: string | undefined): void {
     const record = this.#require(terminalId);
     if (pending === undefined) delete record.agentCommand;
-    else record.agentCommand = pending;
+    else record.agentCommand = { marker: pending, interrupted: false };
+  }
+
+  /** The agent sent Ctrl-C to the command still running in the terminal. */
+  noteAgentInterrupt(terminalId: string): void {
+    const command = this.#require(terminalId).agentCommand;
+    if (command !== undefined) command.interrupted = true;
   }
 
   attach(terminalId: string): TerminalSnapshot {

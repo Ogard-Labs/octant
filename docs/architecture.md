@@ -1881,15 +1881,21 @@ helper's terminal alike (maintainer decision, 2026-11-26). While that command
 still owns the terminal, a new `run` is refused as busy rather than typed into
 it, and `read`, `write` and `stop` still work; the next `read` after it ends
 reports its exit code. One that returned to its shell's prompt without
-saying how it ended (an interrupt) no longer holds the terminal, and `read`
-says it ended with its exit code unknown. The completion is typed in the same
+saying how it ended, after the agent interrupted it, no longer holds the
+terminal, and `read` says it ended with its exit code unknown; one never
+interrupted stays busy until it ends or is stopped, since a shell in the
+foreground may be in its own `read` rather than at its prompt. The completion is typed in the same
 input the shell parses with the command, so a program reading its input
 cannot take it, and it follows the shell the terminal started in, which the
 terminal keeps, with that command, across turns. In Work it is one shell per
 thread in the thread's folder, at the thread's level and confined as its own
 commands are; on macOS and Linux it is confined at that level below Full
 access even outside Strict, and runs natively only at Full access outside
-Strict. A routine's run is offered none. It outlives the turn that started
+Strict. Windows has no Octant sandbox, so there it runs unconfined outside
+Strict at every level, and below Full access every command and every input
+typed into a running program asks, with no answer remembered (maintainer
+decision, 2026-11-26); under Strict it is refused. A routine's run is offered
+none. It outlives the turn that started
 it, under Strict too, and ends when the agent stops it or as soon as the
 thread is archived or deleted, its Project unbound, its folder changed, or
 its ceiling narrowed: Plan, a narrower level, Strict turned on, or its

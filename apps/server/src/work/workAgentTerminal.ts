@@ -64,16 +64,25 @@ export function workAgentTerminalId(threadId: string): string {
  * `octant_terminal` for a Work thread: one shell in the thread's own folder,
  * at the thread's level and confined as its own commands are, never the wider
  * shell a person's own terminal outside Strict gets. Plan refuses it; below
- * Full access each command asks the person, as a Code thread's terminal does,
- * and where nobody can be asked it runs only at Full access. It carries no
- * credentials and lives until the agent stops it or the thread is archived.
+ * Full access each command, and each input to a running program, asks the
+ * person, as a Code thread's terminal does, and where nobody can be asked it
+ * runs only at Full access. Windows has no Octant sandbox, so there it runs
+ * unconfined outside Strict and rests on those asks alone (maintainer
+ * decision, 2026-11-26). It carries no credentials and lives until the agent
+ * stops it, the thread is archived or moves, or its ceiling narrows.
  */
 export function createWorkTerminalTools(input: {
   readonly threadId: string;
   readonly projectId: string;
   readonly terminals: Pick<
     TerminalService,
-    "launch" | "attach" | "write" | "terminate" | "agentCommand" | "noteAgentCommand"
+    | "launch"
+    | "attach"
+    | "write"
+    | "terminate"
+    | "agentCommand"
+    | "noteAgentCommand"
+    | "noteAgentInterrupt"
   >;
   /** The thread's folder now, proven as its turn's is; undefined refuses a start. */
   readonly folder: () => Promise<string | undefined>;
