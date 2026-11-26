@@ -70,22 +70,50 @@ describe("window glass", () => {
     expect(Number(alpha)).toBeGreaterThanOrEqual(92);
   });
 
-  it("leaves the window behind Settings untouched, draws the sheet solid, and blurs the window only behind a dialog in the desktop app", () => {
+  it("dims and softens the window behind Settings in every window and behind a dialog in the desktop app, and draws the sheet solid", () => {
     const css = read("styles/components.css");
-    const dialogFade =
-      /html\[data-octant-native-host="true"\]:not\([\s\S]*?\):has\(\.octant-dialog__popup\[data-open\]\)\s*\.shell-frame\s*>\s*:is\(([^)]*)\)\s*\{([^}]*)\}/.exec(
-        css,
-      );
-    // Behind a dialog the content layers blur past reading; the ground and frame stay.
+    // One rule softens the window for both: Settings in every window that
+    // shows it as a sheet (the Mac window's mark is absent in full screen, on
+    // Windows and Linux and in a browser), a dialog where the mark is set.
+    const softened = String.raw`html:not\(([^)]*)\):is\(\s*:has\(\.octant-sheet__popup\[data-open\]\),\s*\[data-octant-native-host="true"\]:has\(\.octant-dialog__popup\[data-open\]\)\s*\)\s*\.shell-frame\s*>\s*:is\(([^)]*)\)\s*\{([^}]*)\}`;
+    const modalFade = new RegExp(String.raw`\n${softened}`).exec(css);
+    // The content layers blur past reading; the ground and frame stay.
     for (const layer of [".sidebar-rail", ".sidebar", ".window-chrome", ".workspace-layer"]) {
-      expect(dialogFade?.[1]).toContain(layer);
+      expect(modalFade?.[2]).toContain(layer);
     }
-    expect(Number(/blur\((\d+)px\)/.exec(dialogFade?.[2] ?? "")?.[1])).toBeGreaterThanOrEqual(4);
-    expect(dialogFade?.[2]).not.toMatch(/visibility|display|pointer-events/);
-    // Settings is a sheet a person watches the window through: no rule blurs or
-    // dims the content layers for it, and the sheet itself is solid: under Glass
-    // the apps behind the window show through, and no blur in the page reaches them.
-    expect(css).not.toMatch(/:has\([^)]*\.octant-sheet__popup\[data-open\][^)]*\)\s*\.shell-frame/);
+    expect(Number(/blur\((\d+)px\)/.exec(modalFade?.[3] ?? "")?.[1])).toBeGreaterThanOrEqual(4);
+    // Barely dimmed as well as blurred: the scrim is a separate layer.
+    expect(modalFade?.[3]).toContain("opacity: 0.92;");
+    expect(modalFade?.[3]).not.toMatch(/visibility|display|pointer-events/);
+    // The app's reduced transparency and increased contrast draw no blur, and
+    // neither does the system's reduced transparency, which sets no mark.
+    expect(modalFade?.[1]).toContain('[data-octant-reduced-transparency="true"]');
+    expect(modalFade?.[1]).toContain('[data-octant-increased-contrast="true"]');
+    const systemReduced =
+      new RegExp(String.raw`@media \(prefers-reduced-transparency: reduce\) \{\s*${softened}`).exec(
+        css,
+      )?.[3] ?? "";
+    expect(systemReduced).toContain("filter: none;");
+    expect(systemReduced).toContain("opacity: 1;");
+    // The window is softened the same whichever Settings page is open: the
+    // rule and its system override are the only two that name the open sheet,
+    // and neither names a page or a mark on the sheet.
+    expect(css.match(/\.octant-sheet__popup\[data-open\]/g) ?? []).toHaveLength(2);
+    // The scrim behind Settings is the sheet's own, the one a browser draws:
+    // the desktop app no longer thins it to a shade too faint to set Settings
+    // apart from the thread behind it.
+    expect(css).not.toMatch(/\.octant-sheet__backdrop\s*\{[^}]*background/);
+    const dock = read("styles/dock.css");
+    expect(/\n\.octant-sheet__backdrop \{([^}]*)\}/.exec(dock)?.[1]).toContain(
+      "background: color-mix(in srgb, var(--octant-scrim) 34%, transparent);",
+    );
+    expect(
+      /:root\[data-octant-theme-mode="light"\] \.octant-sheet__backdrop \{([^}]*)\}/.exec(
+        dock,
+      )?.[1],
+    ).toContain("background: color-mix(in srgb, var(--octant-scrim) 20%, transparent);");
+    // The sheet itself is solid: under Glass the apps behind the window show
+    // through, and no blur in the page reaches them.
     const sheet = /\.octant-sheet__popup\.octant-sheet__popup \{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(sheet).toContain("background: var(--octant-float);");
     expect(sheet).toContain("backdrop-filter: none;");
