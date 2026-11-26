@@ -66,6 +66,11 @@ describe("Run a key provider as itself", () => {
     const toggle = screen.getByRole("switch", { name: "Run Codex work as itself" });
     expect(toggle).toBeChecked();
     expect(rowOf(toggle)).toHaveTextContent(/its own\s+subagents, web search and fetch, skills/i);
+    // The sentence stays short; what the setup covers waits behind More, closed.
+    expect(rowOf(toggle)?.querySelector(".setrow-hint")).not.toHaveTextContent(/web search/);
+    expect(rowOf(toggle)?.querySelector(".setrow-more:not([open])")).toHaveTextContent(
+      /web search and fetch, skills/,
+    );
     expect(rowOf(toggle)).toHaveTextContent(/On by default/);
     expect(rowOf(toggle)).toHaveTextContent(/Plan stays read-only/);
     expect(rowOf(toggle)).toHaveTextContent(

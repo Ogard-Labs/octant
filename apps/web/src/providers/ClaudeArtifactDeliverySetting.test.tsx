@@ -127,7 +127,15 @@ describe("Enable Claude artifacts", () => {
       />,
     );
     const umbrella = screen.getByRole("switch", { name: label });
-    expect(rowOf(umbrella)).toHaveTextContent(/CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC/);
+    // The reason is the row's one sentence; which variables count waits
+    // behind More, closed until opened.
+    const row = rowOf(umbrella);
+    expect(row?.querySelector(".setrow-hint")).toHaveTextContent(
+      /^This computer’s own telemetry opt-out keeps Claude Code’s telemetry and Claude artifacts off\./,
+    );
+    expect(row?.querySelector(".setrow-more:not([open])")).toHaveTextContent(
+      /CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, DISABLE_TELEMETRY or DO_NOT_TRACK/,
+    );
     await userEvent.click(umbrella);
     expect(onChange).not.toHaveBeenCalled();
   });
