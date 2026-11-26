@@ -154,9 +154,13 @@ async function main(): Promise<void> {
           return;
         }
         const id = nextId++;
-        waiting.set(id, resolve);
+        waiting.set(id, (reply) => {
+          const answer = reply as { readonly kind?: unknown; readonly reason?: unknown } | null;
+          emit("native-reply", { operation, id, kind: answer?.kind, reason: answer?.reason });
+          resolve(reply);
+        });
         socket.write(`${JSON.stringify({ id, operation, handle, generation })}\n`);
-        emit("native", { operation });
+        emit("native", { operation, id });
       });
 
   const harnessNative = {

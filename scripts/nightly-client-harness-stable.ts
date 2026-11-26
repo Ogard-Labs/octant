@@ -250,6 +250,8 @@ async function main(): Promise<void> {
     replyWindow: (requestId: number, reply: NativeWindowReply) => {
       const target = pending.get(requestId);
       pending.delete(requestId);
+      const answer = reply as { readonly kind?: unknown; readonly reason?: unknown };
+      emit("native-reply", { id: target?.id, kind: answer.kind, reason: answer.reason });
       if (target === undefined || target.socket.destroyed) return false;
       target.socket.write(`${JSON.stringify({ id: target.id, reply })}\n`);
       return true;
@@ -324,7 +326,7 @@ async function main(): Promise<void> {
         else if (command === "drop-peers") {
           // What Stable's native binding reports when a peer's audit incarnation exits.
           for (const peer of peers.values()) listener?.({ kind: "peer-exited", peer });
-          emit("peers-dropped");
+          emit("peers-dropped", { peers: peers.size });
         } else if (command === "restart-host") {
           const finish = lifetime.beginHostRestart();
           await stopHost();
