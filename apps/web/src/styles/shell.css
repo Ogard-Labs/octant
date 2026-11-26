@@ -3831,6 +3831,21 @@ form > .work-composer-adapter__attachments {
   color: var(--oct-muted);
 }
 
+/* An issue key can be long (a team prefix and five digits), so it is the one
+   mark that gives way in a narrow sidebar: it truncates, and the counts after
+   it stay whole. Its tooltip and name keep the full key. */
+.sidebar-navigation__thread-count[data-count="issue-key"] {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.sidebar-navigation__thread-count[data-count="issue-key"] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* PR state carries the same meaning in navigation, boards, and pane headers. */
 :is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="open"] {
   color: var(--oct-pr-open);

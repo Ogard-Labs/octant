@@ -3113,7 +3113,9 @@ has its own tooltip and name:
 
 The marks come from the navigation entry the host already sends; drawing a row
 asks no forge or tracker anything. The row's **Pull request** property shows or
-hides all four, and the details card below keeps the full lists.
+hides all four, and the details card below keeps the full lists. In a narrow
+sidebar the issue key truncates first, so the counts after it stay whole; its
+tooltip and name keep the whole key.
 
 Pointing at a row, or focusing it, opens its details card after a short delay,
 beside the sidebar: the title and age, the states in words, then, while the
