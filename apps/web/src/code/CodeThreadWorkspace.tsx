@@ -205,6 +205,7 @@ import { FinishedReceiptInline } from "../finishedReceipts/FinishedReceiptCard";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
+import { McpSignInNotice } from "../transcript/McpSignInNotice";
 import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
@@ -2940,6 +2941,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadTitle={thread.title}
           />
         )}
+        <McpSignInNotice
+          className="thread-column"
+          client={readOnly || serverCheckout ? undefined : props.extensionClient}
+          mode="code"
+          onResolveReference={extensionDraft.resolveReference}
+          receipts={extensionDraft.receipts}
+          queued={messageQueue.snapshot?.items}
+          selections={[]}
+          threadId={String(props.threadId)}
+          turnActive={busy}
+        />
         <ExtensionToolApprovalPrompt
           className="thread-column"
           client={readOnly ? undefined : props.extensionClient}

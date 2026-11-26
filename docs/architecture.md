@@ -14863,7 +14863,8 @@ successful connect (kept after an idle close), and the installed `mcp.json`
 read from disk for the transport. Reading it never connects, signs in,
 discovers endpoints or lists tools, so a server no task has used yet reads
 Ready rather than Connected. States, most decisive first: Off (package or
-server switched off), Needs sign-in (sign-in-again, consent pending, client
+server switched off), Needs sign-in (sign-in-again, consent pending, an attempt
+whose status or cancellation is not confirmed, client
 setup required for a registered-client connector, or a
 catalog connector that signs in and has no sign-in while not connected;
 signed out alone is only an offer, since a hosted server that takes a key or
@@ -14882,6 +14883,23 @@ connects again on its next turn. Reconnect connects nothing itself and never
 replays a failed call; it is the person's act, at a local window or a device the host's own person paired (maintainer decision, 2026-11-12; any other device session may read the listing only). Rationale: connecting from
 Settings would discover tools outside a task's authority, so the person's
 action only clears what blocks the next authorized connect.
+
+A thread says so itself when its next turn would get a server that reads Needs
+sign-in, and carries the same sign-in control
+([Thread view](design/thread-view.md#server-sign-in)). The host decides which
+servers those are (`/api/extensions/connections`, `thread-sign-in`) from the
+thread's mode and id, the selections the next turn would carry, and the `@` names
+its draft could not select: the Project's pins (Work and Code), those selections
+and those names, each put through the checks the turn itself makes against the
+thread's own activation. It does not ask the sessions, because a turn drops a
+server whose connection failed, the composer refuses it, and a missing sign-in is
+what makes it fail. A thread whose turns carry no extension tools (a Project on
+a server, Strict on Windows, or in Work and Code a model known not to carry
+Octant's tools) names none. The answer is told only to a principal the sign-in routes admit, a local
+window or a device the host's own person paired; every other device session is
+refused, so it is never shown a sign-in it cannot do. The read writes nothing,
+and no address, code or token passes through it: the sign-in and its one-time
+relay are the routes below, unchanged.
 
 For an existing host-owned HTTP OAuth session, an approved explicit invocation
 checks the exact retained grant owner again before dispatch. Credential access

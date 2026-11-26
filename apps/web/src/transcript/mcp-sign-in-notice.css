@@ -1,0 +1,19 @@
+/* A sign-in a server of this thread is waiting for. The card is the system's
+   `.callout`; this stacks the cards and keeps the icon and Dismiss at the top
+   of one whose sign-in control makes it several lines tall. */
+.mcp-sign-in-notices {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.mcp-sign-in-notices > .callout {
+  align-items: start;
+}
+
+.mcp-sign-in-notices > .callout > .callout__body {
+  flex: 1 1 16ch;
+}
+
+.mcp-sign-in-notices .mcp-sign-in {
+  margin-top: var(--oct-space-2);
+}
