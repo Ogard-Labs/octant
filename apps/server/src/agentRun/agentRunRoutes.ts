@@ -56,6 +56,7 @@ import {
 } from "@octant/domain/agent-run-control-policy";
 import { resolveAgentRunConversationDisclosure } from "@octant/domain/agent-run-conversation-policy";
 import {
+  AGENT_RUN_CAPACITY_WAITING_REASON,
   AGENT_RUN_DEPENDENCY_WAITING_REASON,
   agentRunForestCanvasTitle,
   buildAgentRunForest,
@@ -274,10 +275,23 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
           parentThreadId,
           entries: serializeEntries(entries).map((entry) => {
             const results = dependencies.persistence.resultPackets(entry.runId);
+            const run = dependencies.persistence.getById(entry.runId);
             return {
               ...entry,
               resultPackets: results.packets,
               resultsTruncated: results.truncated,
+              // The host's own verdict that the run has not started: it waits
+              // for another run, for room under the subagent limit, or for a
+              // provider slot. Its tab takes no message until it runs, since a
+              // Resume there only releases the hold. The provider-slot wait is
+              // read from the host's record, never from the reason text.
+              ...(run !== undefined &&
+              run.lifecycleStatus === "waiting" &&
+              (run.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON ||
+                run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON ||
+                dependencies.orchestration.waitsForProviderSlot(run))
+                ? { heldBeforeStart: true as const }
+                : {}),
             };
           }),
           observations: observations.slice(0, 64),

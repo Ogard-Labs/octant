@@ -15,10 +15,6 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
-import {
-  AGENT_RUN_CAPACITY_WAITING_REASON,
-  AGENT_RUN_DEPENDENCY_WAITING_REASON,
-} from "@octant/domain";
 import { AgentRunResults } from "./AgentRunResults";
 import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
 import { SubagentStatusIcon, subagentRoleWord, subagentStatusWord } from "./subagentStatus";
@@ -185,8 +181,7 @@ export function SubagentThread(props: {
   // message would never reach it, so the composer waits until it runs.
   const heldBeforeStart =
     lifecycle === "waiting" &&
-    (row.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON ||
-      row.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON);
+    entries.some((entry) => String(entry.runId) === row.runId && entry.heldBeforeStart === true);
   const canResume =
     managed &&
     (lifecycle === "completed" ||

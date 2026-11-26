@@ -121,6 +121,11 @@ export interface AgentRunParentSummaryClientEntry {
     readonly truncated: boolean;
   };
   readonly recoveryReason?: string;
+  /**
+   * The host holds the run before it starts (for another run, the subagent
+   * limit, or a provider slot), so it has no session a message could reach.
+   */
+  readonly heldBeforeStart?: true;
   /** How the host settled delivering this result to the parent; absent while owed. */
   readonly resultDeliveryOutcome?: "delivered" | "consumed" | "invalidated" | "failed";
   /** The normalized limit fact the host journaled when the run last waited. */

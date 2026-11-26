@@ -389,7 +389,11 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
               onAgentReviewBack: () => {
                 // A saved review returns where it was opened: the Agents page,
                 // or, from a subagent's own tab, that tab, still open beside it.
-                if (requestedAgentReview.fromSubagentTab !== true) {
+                if (requestedAgentReview.fromSubagentTab === true) {
+                  // The tab is in the workspace, under the dock on a narrow
+                  // window: closing the dock is what returns to it.
+                  actions.closeDock();
+                } else {
                   actions.openSubagentInAgents(String(requestedAgentReview.request.packet.runId));
                 }
                 actions.setRequestedAgentReview(undefined);

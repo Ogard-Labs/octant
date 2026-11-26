@@ -204,7 +204,10 @@ describe("SubagentThread", () => {
       parentThreadId,
       entries: first.entries.map((entry) => ({
         ...entry,
-        recoveryReason: "waiting-on-dependencies",
+        // The host's own verdict, which also covers a provider-slot wait whose
+        // reason text alone says nothing reliable.
+        recoveryReason: "Waiting for a free request slot",
+        heldBeforeStart: true,
       })),
     }));
     view(runs);
