@@ -67,6 +67,7 @@ import {
   handBackPublicQueue,
   servesOwnPublicEndpoints,
   servesPublicEntrance,
+  servingRosterMemberIds,
   servingRosterMembers,
 } from "./publicStandIn";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
@@ -847,6 +848,7 @@ export async function startHubTestHost(input: {
   const relayHub = new HubRelayService({
     state,
     serving: () => hub.status().enabled,
+    members: () => servingRosterMemberIds(state.load()),
     hubMemberId: () => hub.hubMemberId(),
     openTunnel: (targetMemberId, fingerprint) =>
       openRelayTunnel(

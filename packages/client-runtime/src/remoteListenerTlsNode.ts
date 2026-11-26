@@ -431,6 +431,9 @@ export interface ListenerRelayRoute {
  * inside it passed the origin's stored trust, so the hub carries only
  * ciphertext.
  */
+/** The most a relay's unread answer may hold in this client before the tunnel ends. */
+const RELAY_RECEIVE_BUFFER_MAX_BYTES = 16 * 1024 * 1024;
+
 async function openRelayStream(route: ListenerRelayRoute): Promise<Duplex | undefined> {
   const socket = new WebSocket(route.url);
   socket.binaryType = "arraybuffer";
@@ -470,7 +473,15 @@ async function openRelayStream(route: ListenerRelayRoute): Promise<Duplex | unde
     socket.addEventListener("message", (event: MessageEvent) => {
       const data: unknown = event.data;
       if (stage === "carrying") {
-        if (data instanceof ArrayBuffer) stream.push(Buffer.from(data));
+        if (!(data instanceof ArrayBuffer)) return;
+        // This WebSocket cannot be paused, so a reader that falls behind would
+        // let the stream's buffer grow without end; past a bound the tunnel
+        // ends instead, and the caller sees a failed request.
+        if (stream.readableLength + data.byteLength > RELAY_RECEIVE_BUFFER_MAX_BYTES) {
+          stream.destroy(new Error("The relay sent more than this client could hold."));
+          return;
+        }
+        stream.push(Buffer.from(data));
         return;
       }
       if (typeof data !== "string") return fail();

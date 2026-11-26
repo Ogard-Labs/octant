@@ -3199,7 +3199,12 @@ desktop apps do not use the client yet (below).
   challenge with that key. A host serves relayed connections only for the
   routes a paired device already reaches, and refuses pairing and listener
   administration on them: pairing still happens on the private network or by
-  QR.
+  QR. A session inside a relay must be the session of the device whose key
+  admitted it, so a second credential the caller holds cannot ride that
+  device's tunnel. A host the hub's roster no longer lists keeps no relay:
+  the hub forgets its device keys and ends its open tunnels, and a spoke the
+  hub removed ends the relayed tunnels it still holds. A spoke that follows
+  a promoted hub sends that hub its device keys again.
 - **Off by default.** The hub's Device relay switch, each host's Relay
   hub-grant item, and each device's own per-host choice. A browser cannot
   check a pin, so the relay serves only the phone and desktop apps. Until a

@@ -2099,6 +2099,8 @@ export interface RemoteRouteFacts {
   readonly agentAccessPauseSignal?: AbortSignal;
   /** Set only on a request a paired device sent through its hub's device relay. */
   readonly relayed?: true;
+  /** The relayed device's key fingerprint; a session there must be that device's. */
+  readonly relayedDeviceFingerprint?: string;
 }
 
 /**

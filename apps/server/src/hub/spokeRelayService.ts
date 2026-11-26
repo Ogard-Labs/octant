@@ -131,12 +131,23 @@ export class SpokeRelayService {
       .sort();
   }
 
+  /**
+   * What was last sent, and to which hub: a spoke that follows a promoted hub
+   * keeps its devices, but the new hub has never heard of them.
+   */
+  #sendKey(fingerprints: ReadonlyArray<string>): string {
+    const link = this.#options.state.load().link;
+    const hub = link === undefined ? "" : `${String(link.hubMemberId)}@${link.hubOrigin}`;
+    return `${hub}#${fingerprints.join(",")}`;
+  }
+
   async publish(): Promise<void> {
     const fingerprints = this.#fingerprints();
+    const key = this.#sendKey(fingerprints);
     const sent = await this.#options.hub.sendDevices({ fingerprints });
     const held = this.#load();
     if (sent) {
-      this.#lastSent = fingerprints.join(",");
+      this.#lastSent = key;
       if (held.unpublished === true) this.#save({ deviceIds: held.deviceIds });
     } else if (held.unpublished !== true) {
       this.#save({ ...held, unpublished: true });
@@ -147,8 +158,8 @@ export class SpokeRelayService {
   async look(): Promise<void> {
     this.sweep();
     const held = this.#load();
-    const current = this.#fingerprints().join(",");
-    if (held.unpublished !== true && current === (this.#lastSent ?? "")) return;
+    const current = this.#sendKey(this.#fingerprints());
+    if (held.unpublished !== true && current === this.#lastSent) return;
     await this.publish();
   }
 
@@ -185,6 +196,7 @@ export class SpokeRelayService {
       sourceClass,
       sourceKey: createHash("sha256").update(`relay|${input.deviceFingerprint}`).digest("hex"),
       relayed: true,
+      relayedDeviceFingerprint: input.deviceFingerprint,
     };
     const serve = this.#options.serve;
     return {

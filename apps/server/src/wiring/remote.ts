@@ -1487,6 +1487,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const hubRelay = new HubRelayService({
     state: hubStateStore,
     serving: () => hubService.status().enabled,
+    members: () => servingRosterMemberIds(hubStateStore.load()),
     hubMemberId: () => hubService.hubMemberId(),
     openTunnel: (targetMemberId, fingerprint) =>
       openRelayTunnel(
@@ -1504,7 +1505,11 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   const spokeRelay = new SpokeRelayService({
     state: hubStateStore,
-    relayGranted: () => spokeLinkService.hubMayUse("relay").status === "allowed",
+    // A spoke the hub removed keeps its grant on disk, but nothing relays to it
+    // any more, so its own sweep ends the tunnels it still holds.
+    relayGranted: () =>
+      hubStateStore.load().link?.removed !== true &&
+      spokeLinkService.hubMayUse("relay").status === "allowed",
     hub: spokeRelayHubPort({
       state: hubStateStore,
       identity: resolveHubIdentity,

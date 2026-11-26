@@ -48,6 +48,12 @@ export interface HubRelayServiceOptions {
   /** Whether this host serves the entrance as the acting hub. */
   readonly serving: () => boolean;
   readonly hubMemberId: () => string;
+  /**
+   * The member ids of the roster this host serves from. A host the roster no
+   * longer lists keeps no relay: its device keys are forgotten and its open
+   * tunnels end, since it can no longer withdraw them itself.
+   */
+  readonly members?: () => ReadonlyArray<string> | undefined;
   /** Opens the tunnel on the host; undefined when it cannot be reached or refused it. */
   readonly openTunnel: (
     targetMemberId: string,
@@ -118,6 +124,13 @@ export class HubRelayService {
       this.closeAll();
       return;
     }
+    const listed = this.#options.members?.();
+    if (listed !== undefined) {
+      const members = new Set(listed);
+      const held = this.#load();
+      const kept = held.hosts.filter((host) => members.has(String(host.memberId)));
+      if (kept.length !== held.hosts.length) this.#save({ ...held, hosts: kept });
+    }
     for (const open of this.#open.values()) {
       if (
         open.carries !== undefined &&
@@ -158,6 +171,8 @@ export class HubRelayService {
   }
 
   #listed(targetMemberId: string, fingerprint: string): boolean {
+    const members = this.#options.members?.();
+    if (members !== undefined && !members.includes(targetMemberId)) return false;
     return this.#load().hosts.some(
       (host) => String(host.memberId) === targetMemberId && host.fingerprints.includes(fingerprint),
     );

@@ -31,11 +31,12 @@ function deviceKey() {
   };
 }
 
-async function relay(maxTunnels: number) {
+async function relay(maxTunnels: number, members?: () => ReadonlyArray<string>) {
   const pending: Array<(end: RelayTunnelEnd | undefined) => void> = [];
   const service = new HubRelayService({
     state: memoryState(),
     serving: () => true,
+    ...(members === undefined ? {} : { members }),
     hubMemberId: () => HUB,
     openTunnel: () => new Promise((resolve) => pending.push(resolve)),
     record: () => undefined,
@@ -140,6 +141,23 @@ describe("the hub's device relay", () => {
     service.receiveDevices(HOST, { fingerprints: [] });
     expect(await closed).toBe(1001);
     expect(service.status().tunnels).toBe(0);
+  });
+
+  it("a host the roster no longer lists keeps no relay, open or new", async () => {
+    let members: ReadonlyArray<string> = [HUB, HOST];
+    const { service, url } = await relay(32, () => members);
+    const key = deviceKey();
+    service.receiveDevices(HOST, { fingerprints: [key.fingerprint] });
+    const open = await connect(url, key);
+    expect(open.closeCode).toBeUndefined();
+    const closed = new Promise<number>((resolve) =>
+      open.socket.addEventListener("close", (event) => resolve(event.code)),
+    );
+    members = [HUB];
+    service.sweep();
+    expect(await closed).toBe(1001);
+    expect(service.status().hosts).toBe(0);
+    expect((await connect(url, key)).closeCode).not.toBeUndefined();
   });
 
   it("closes every relay when its switch goes off", async () => {
