@@ -1218,10 +1218,12 @@ export class VideoJobService {
           safetyRefusal: answer.safetyRefusal,
           ...(answer.billed === true || reportedCharge !== undefined
             ? {
+                // A reported charge goes through the same settlement as every
+                // other answer, so a broken amount settles at the estimate.
                 settledCostUsdMicros:
                   reportedCharge === undefined
                     ? estimateOrZero(current)
-                    : Math.max(0, Math.round(reportedCharge)),
+                    : this.#settled(current, answer.usage),
                 billed: true,
                 ...(answer.usage === undefined ? {} : { usage: answer.usage }),
               }
@@ -1231,12 +1233,17 @@ export class VideoJobService {
       }
       case "failed": {
         // Usage an earlier status check reported means the provider already
-        // billed the clip: a later check that fails (Gemini answers 404 or 400
+        // billed the clip: a later check that answers 404 or 400 (Gemini does
         // once the interaction is gone) settles at that usage, never at zero.
-        const usage = answer.usage ?? reported;
+        const keepsReportedCharge =
+          answer.billed !== true &&
+          reported !== undefined &&
+          (answer.providerFailure.category === "unsupported" ||
+            answer.providerFailure.category === "provider-failed");
+        const usage = keepsReportedCharge ? reported : answer.usage;
         this.#finish(current, stopped ? "cancelled" : "failed", {
           ...(stopped ? {} : { failure: answer.providerFailure }),
-          ...(answer.billed === true || reported !== undefined
+          ...(answer.billed === true || keepsReportedCharge
             ? {
                 billed: true,
                 settledCostUsdMicros: this.#settled(current, usage),

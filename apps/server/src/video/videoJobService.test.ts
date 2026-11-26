@@ -1063,6 +1063,24 @@ describe("video jobs", () => {
     },
   );
 
+  it("settles a safety refusal at its estimate when the reported cost is not a finite amount", async () => {
+    const { service, spend } = harness({
+      polls: [
+        {
+          status: "refused",
+          safetyRefusal: "Blocked by the provider's filters.",
+          usage: { costUsdMicros: Number.POSITIVE_INFINITY },
+        },
+      ],
+    });
+    const job = await enqueue(service);
+    expect(await service.whenTerminal(job.id)).toMatchObject({
+      status: "failed",
+      settledCostUsdMicros: job.estimatedCostUsdMicros,
+    });
+    expect(spend.settle).toHaveBeenCalledOnce();
+  });
+
   it("keeps an owed removal through a failure and clears it on a later try", async () => {
     let refuse = true;
     const { service } = harness({ forget: async () => (refuse ? "failed" : "removed") });
