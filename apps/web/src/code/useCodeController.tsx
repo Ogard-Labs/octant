@@ -1658,10 +1658,6 @@ export function useCodeController(options: CodeControllerOptions) {
         // The page read just aborted with the stream it belonged to.
         setEarlierConversation((value) => ({ ...value, loading: "idle" }));
       }
-      // The restore point belongs to the thread being left, for the same
-      // reason: hydration may fail, and offering one thread's way back on
-      // another thread's checkout would overwrite files nobody asked about.
-      setRestoreUndo(undefined);
       // A thread read again in place (a rename, a retry) shows the transcript
       // this activation's earlier read loaded, not one kept from a visit.
       const reloadsShown =
@@ -2444,7 +2440,11 @@ export function useCodeController(options: CodeControllerOptions) {
         : firstTurnFailures.current.get(String(options.activeThreadId));
     setTurnError(firstTurnFailure?.message);
     // Activation rehydrates the journal's own fact; nothing carried over from
-    // the thread being left is allowed to speak for this one.
+    // the thread being left is allowed to speak for this one. Above all its
+    // restore point: offered on another thread's checkout, it would overwrite
+    // files nobody asked about. Reading the open thread again keeps its own
+    // until a read replaces it, so a read that fails leaves Undo restore.
+    setRestoreUndo(undefined);
     setTurnUsageLimit(undefined);
     setLatestProviderTurnOperationId(undefined);
     if (firstTurnFailure !== undefined) {

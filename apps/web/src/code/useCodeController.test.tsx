@@ -2938,14 +2938,16 @@ describe("useCodeController", () => {
     unmount();
   });
 
-  it("keeps the thread's usage when a later page of reading it again fails on a host read whole", async () => {
+  it("keeps the thread's usage and restore point when a later page of reading it again fails on a host read whole", async () => {
     const [older, newer] = turnsOf("own", 2);
+    const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) };
     const page = (cursor: number) => ({
       version: 3 as const,
       threadId: ids.thread,
       turns: [cursor === 0 ? older : newer],
       nextCursor: cursor + 1,
       hasMore: cursor === 0,
+      restoreUndo: checkpoint,
     });
     const client = fakeClient({
       conversation: vi.fn(async (_threadId, cursor: number) => page(cursor)) as never,
@@ -2954,10 +2956,13 @@ describe("useCodeController", () => {
         items: request.items.map((item: object) => ({ ...item, text: "text" })),
       })) as never,
     } as never);
-    const { result, unmount } = renderHook(() =>
-      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    const { result, rerender, unmount } = renderHook(
+      ({ threadId }: { threadId: CodeThreadId }) =>
+        useCodeController({ activeThreadId: threadId, client, reconnectDelayMs: 60_000 }),
+      { initialProps: { threadId: ids.thread } },
     );
     await waitFor(() => expect(result.current.threadUsage.outputTokens).toBe(21));
+    expect(result.current.restoreUndo).toEqual(checkpoint);
 
     vi.mocked(client.conversation)
       .mockImplementationOnce(async () => page(0) as never)
@@ -2969,6 +2974,12 @@ describe("useCodeController", () => {
       expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
     );
     expect(result.current.threadUsage.outputTokens).toBe(21);
+    expect(result.current.restoreUndo).toEqual(checkpoint);
+
+    // A restore point is never offered on another thread's checkout.
+    vi.mocked(client.conversation).mockImplementation(() => new Promise(() => undefined));
+    rerender({ threadId: "10000000-0000-4000-8000-000000000002" as CodeThreadId });
+    expect(result.current.restoreUndo).toBeUndefined();
     unmount();
   });
 
