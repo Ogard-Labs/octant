@@ -1626,7 +1626,8 @@ alert line under the section, and, until a paired device uses the same controls
 **The Pull requests reading pane.** The destination reads a pull request beside
 its list; the dock's Review tool keeps the one-column arrangement above with
 the same actions and refusals. The pane has three regions. A tab row (Summary,
-Changes with "+added −removed" in success and danger ink, Timeline) carries, at
+Changes with "+added −removed" in success and danger ink, Timeline, and Guide
+where the host offers guides) carries, at
 its trailing edge, icon buttons (Open on GitHub, Copy link, Refresh), a quiet
 Open chat button, a **Merge** split button (primary; the chevron's menu picks
 Squash and merge, Merge commit or Rebase and merge, squash by default; Merge
@@ -1636,7 +1637,26 @@ menu holding Close or Reopen pull request. Under it, the state pill with
 line (author, age, head → base) and, on Summary, the description as markdown at
 13px with a 720px measure; Summary holds no form. Changes lists commits, changed
 files and the diff (with clickable line numbers and window-local line notes sent
-to a linked Code thread). Timeline lists the reviews and comments, newest last, then
+to a linked Code thread). In a local window each changed file has a Viewed
+checkbox that reads and writes GitHub's own viewed state for the person, a file
+GitHub reset after a new push shows "Changed" in warning ink, and the list opens
+with "n of m viewed"; on a paired device the list stays plain. A mark made
+after a push moved the head is refused and asks the person to refresh and
+look again. Guide lists the
+review guide written for this push: numbered stops, each a bordered row with its
+title, a "Needs your decision" warning badge where it applies, why it matters,
+and its anchors as quiet `path:start–end` buttons that open Changes at that
+file; a stop with no anchor in the diff says "Not anchored to the diff." J and K
+step between stops and mark the current one with the accent border. A meta line
+names the stop count, the model and the head, with Rewrite at its end. A guide
+written for an older push sits under a warning row, "Written for an older push.",
+with Rewrite; with no guide yet the tab offers Write guide, and with no guide
+model picked it says where to pick one (Project settings, Pull request reviews,
+Guide model) and runs nothing. A closed or merged pull request keeps its guide
+to read and offers neither Write guide nor Rewrite: "Guides are written while
+a pull request is open." A guide for an older push still says so there. While a run is going it says "Writing a guide for
+this push…" and looks again every few seconds. The Guide tab and the Viewed
+checkboxes load with their own module the first time they are shown. Timeline lists the reviews and comments, newest last, then
 the labels, review-thread replies, the comment form and the review form
 (Approve, Request changes with a note) at the end. The status column (260px,
 sticky) has small captions in the navigation-group role: Merge status (one
@@ -2352,7 +2372,7 @@ some computers, it reads, lists and names only those (maintainer decision,
   asking window or device already lists there
   ([Architecture: Active work read](../architecture.md#security-and-authority)). A
   subagent's task shows only where the Agents page's own rule lets the window
-  read that run; elsewhere the row reads "Subagent" under its thread. A subagent the host will start by itself is In progress, like a queued one: one waiting for room under the subagent limit, for a free request slot, or for siblings that are themselves on their way. One that needs a person is Waiting: a slot or sibling wait under a paused parent, one held since a restart until it is resumed, one whose sibling must be retried, one whose pool named no eligible model (it must be requested again), and any other wait.
+  read that run; elsewhere the row reads "Subagent" under its thread. A subagent the host will start by itself is In progress, like a queued one: one waiting for room under the subagent limit, for a free request slot, or for siblings that are themselves on their way. One that needs a person is Waiting: a wait for room, a slot or siblings under a paused parent, one held since a restart until it is resumed, one whose sibling must be retried, one whose pool named no eligible model (it must be requested again), and any other wait.
 - **Opening** a row makes the choice the sidebar makes. A Code thread on a
   paired computer opens in that computer's Code start screen, as under "On your
   other computers"; a Work or Chat thread there cannot be shown by that screen,
@@ -3153,14 +3173,32 @@ line names where the thread lives, in a fixed order (the Project's mark and name
 then the branch in the mono face) and ends with the thread's state in words
 (Working 14m, Needs you) or, with none to report, how long ago it moved. The
 title is the strongest text on a line of its own. A third line appears only for
-the pull request and its state, who started the thread or a worker's
-coordinator, and the provider's mark ends the last line. The Project tree's top
+who started the thread, a worker's coordinator, or the thread's counted marks,
+and the provider's mark ends the last line. The Project tree's top
 line is the branch alone, because the Project is its heading. A row with no place
 to name carries its state or time at the end of the title line. The row is one
-button whose accessible name reads title, Project, branch, pull request, then
-state or time; a state is never colour alone. A thread with more than one pull
-request names the first in the order below and counts the rest after it in the
-meta ink (#327 open +15); its name says "and 15 more pull requests".
+button whose accessible name reads title, Project, branch, the counted marks,
+then state or time; a state is never colour alone.
+
+The counted marks let a person scan the list for how much each thread carries
+(maintainer decision, 2026-11-26). Each is a 12px glyph and a number, and each
+has its own tooltip and name:
+
+- **Pull requests:** the first pull request in the order below, by its state
+  glyph and number, in that state's colour, with the rest counted after it
+  (#327 +15). Its name says "pull request #327 open and 15 more pull requests".
+- **Stack:** when one of those pull requests stands in a stack, a layers glyph
+  and the stack's size (its tooltip says "Layer 2 of 4 of a stack, on #326").
+- **Issue:** the key of the issue the thread belongs to (its Linear key, or #3
+  for GitHub). A thread belongs to an issue when it is linked to exactly one, or,
+  linked to none, when its tool calls wrote to exactly one.
+- **Issues:** how many other issues its tool calls wrote to.
+
+The marks come from the navigation entry the host already sends; drawing a row
+asks no forge or tracker anything. The row's **Pull request** property shows or
+hides all four, and the details card below keeps the full lists. In a narrow
+sidebar the issue key truncates first, so the counts after it stay whole; its
+tooltip and name keep the whole key.
 
 Pointing at a row, or focusing it, opens its details card after a short delay,
 beside the sidebar: the title and age, the states in words, then, while the

@@ -5799,6 +5799,7 @@ function LaunchedShell(
               ? {}
               : { pullRequests: thread.pullRequestSummaries }),
             ...(thread.touchedIssues === undefined ? {} : { touchedIssues: thread.touchedIssues }),
+            ...(thread.linkedIssues === undefined ? {} : { linkedIssues: thread.linkedIssues }),
             ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
             ...(thread.unread === undefined ? {} : { unread: thread.unread }),
             ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),

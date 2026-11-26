@@ -17,3 +17,4 @@ export * from "./canvasExportPackage";
 export * from "./codeTools";
 export * from "./mediaTools";
 export * from "./pullRequestReviewer";
+export * from "./pullRequestGuideWriter";

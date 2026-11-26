@@ -670,8 +670,8 @@ export class AgentRunOrchestrationService {
   /**
    * Whether the host will start this waiting run with no one doing anything,
    * read from the same holds its start paths read:
-   * - room under the subagent limit: the capacity queue starts it whatever its
-   *   parent's session is doing;
+   * - room under the subagent limit: the capacity queue starts it, unless the
+   *   parent's session is held;
    * - a free request slot: retried until a slot frees, unless the parent's
    *   session is held;
    * - siblings: started once they all complete, unless held since the restart
@@ -716,8 +716,8 @@ export class AgentRunOrchestrationService {
     };
     const decide = (run: AgentRun): boolean => {
       if (run.lifecycleStatus !== "waiting") return false;
-      if (run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON) return true;
       if (parentHeld(run)) return false;
+      if (run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON) return true;
       if (run.recoveryReason !== AGENT_RUN_DEPENDENCY_WAITING_REASON) {
         return this.waitsForProviderSlot(run);
       }
@@ -942,10 +942,13 @@ export class AgentRunOrchestrationService {
       waitingOnDependencies || waitingOnSlot
         ? undefined
         : await this.#processes?.checkResume?.(current);
-    // Resume cannot release a dependency hold while its parent is paused,
-    // including a pause that arrived during the asynchronous preflight.
+    // Resume cannot release a dependency or run-slot hold while its parent is
+    // paused, including a pause that arrived during the asynchronous preflight.
+    // The parent's own hold is read, not #startHeld: a person's resume is the
+    // release a restart hold on the run itself waits for.
     if (
-      current.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON &&
+      (current.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON ||
+        current.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON) &&
       this.#parentSessions?.isHeld(current.parentThreadId) === true
     ) {
       return {
@@ -1418,13 +1421,14 @@ export class AgentRunOrchestrationService {
       });
       return;
     }
-    if (decision.kind !== "ready" || this.#dependencyStartHeld(run)) return;
+    if (decision.kind !== "ready" || this.#startHeld(run)) return;
     this.#startReserved(run);
   }
 
   /**
    * A person resumed the parent thread's harness session: lift the restart
-   * hold on its children and settle each one still parked on dependencies.
+   * hold on its children, settle each one still parked on dependencies, and
+   * offer free run slots to the children that waited for room meanwhile.
    */
   releaseAfterParentResumed(parentThreadId: AgentRunParentThreadId): void {
     const parked: AgentRunId[] = [];
@@ -1434,9 +1438,11 @@ export class AgentRunOrchestrationService {
       if (run.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON) parked.push(run.id);
     }
     for (const runId of parked) this.releaseDependencyWait(runId);
+    this.#dequeueCapacityWaiter(undefined, true);
   }
 
-  #dependencyStartHeld(run: AgentRun): boolean {
+  /** Whether this run may not start by itself: held since the restart, or under a held parent session. */
+  #startHeld(run: AgentRun): boolean {
     return (
       this.#heldSinceRestart.has(run.id) ||
       this.#parentSessions?.isHeld(run.parentThreadId) === true
@@ -1509,11 +1515,13 @@ export class AgentRunOrchestrationService {
     for (const run of this.#persistence.snapshot().values()) {
       if (excludedRunId !== undefined && String(run.id) === String(excludedRunId)) continue;
       // A run parked on dependencies that all completed is waiting only for a
-      // slot now, exactly like a capacity waiter — unless it is held.
+      // slot now, exactly like a capacity waiter. Neither starts while held: a
+      // paused parent starts no child until it is resumed.
       const waitsForSlot =
-        run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON ||
-        (decideAgentRunDependencies(run, (id) => this.#persistence.getById(id)).kind === "ready" &&
-          !this.#dependencyStartHeld(run));
+        (run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON ||
+          decideAgentRunDependencies(run, (id) => this.#persistence.getById(id)).kind ===
+            "ready") &&
+        !this.#startHeld(run);
       if (
         run.lifecycleStatus !== "waiting" ||
         !waitsForSlot ||

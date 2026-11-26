@@ -10,6 +10,7 @@ import {
   decodeProjectId,
   decodeProviderInstance,
   decodeProviderUsageLimitsSnapshot,
+  decodeUtcTimestamp,
   decodeWorkspaceTab,
   decodeWorkspaceTabId,
   type AgentRunCenterSummary,
@@ -509,6 +510,47 @@ export const SIDEBAR_THREADS = [
     title: `Tidy the release notes, part ${String(index + 1)}`,
     updatedAt: new Date(Date.parse(VISUAL_NOW) - (index + 2) * 3_600_000).toISOString(),
   })),
+  {
+    // A thread carrying every counted mark, with a long issue key, so the
+    // check shows the row's third line at the sidebar's widths.
+    projectId: String(CODE_PROJECT.id),
+    threadId: "sidebar-counted",
+    title: "Move the phone app to the new SDK",
+    updatedAt: "2026-08-18T08:40:00.000Z",
+    pullRequests: {
+      items: [1205, 1204, 1203].map((number, index) => ({
+        identity: {
+          projectId: CODE_PROJECT.id,
+          repositoryOwner: "octant",
+          repositoryName: "octant",
+          number,
+        },
+        title: `Phone app layer ${String(3 - index)}`,
+        state: "open" as const,
+        checks: "passing" as const,
+        review: "approved" as const,
+        mergeability: "mergeable" as const,
+        freshness: "fresh" as const,
+        readyToMerge: false,
+        stack: { position: 3 - index, size: 3, ...(index === 2 ? {} : { parent: number - 1 }) },
+      })),
+      hiddenCount: 0,
+    },
+    touchedIssues: {
+      items: [
+        { forge: "linear" as const, identifier: "PLATFORM-12345", observedAt: VISUAL_NOW },
+        { forge: "linear" as const, identifier: "PLATFORM-12346", observedAt: VISUAL_NOW },
+      ],
+      hiddenCount: 0,
+    },
+    linkedIssues: [
+      {
+        issue: { forge: "linear" as const, identifier: "PLATFORM-12345", issueId: "visual-issue" },
+        source: "created-from" as const,
+        linkedAt: decodeUtcTimestamp(VISUAL_NOW),
+      },
+    ],
+  },
   {
     projectId: String(CODE_PROJECT.id),
     threadId: "sidebar-working",

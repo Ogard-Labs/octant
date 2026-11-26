@@ -4030,7 +4030,13 @@ operation),
 and a restart never starts one on its own: every run already parked when the
 host boots stays parked, even once its dependencies complete, until a person
 resumes it or resumes the parent's session; a person's resume of the run
-itself is refused while the parent's session is held. The hold lives in the
+itself is refused while the parent's session is held. The same hold keeps a
+child queued for room under the subagent limit or for a free request slot from
+starting while the parent's session is paused; a restart has already
+interrupted such a child, so resuming the session does not restart it.
+Resuming the session lets each held child start, and meanwhile a person's
+Resume of a child waiting on siblings or for room is refused with "resume the
+parent first". The hold lives in the
 orchestration service and is rebuilt the same way at every boot. A dependency that failed or was cancelled fails
 the dependent without running it (`dependency-failed: <id>`); an interrupted
 dependency does not, because a retry can still complete it. A run cannot be
@@ -4044,7 +4050,14 @@ and 8, each at most `MAX_AGENT_RUN_CONCURRENCY` = 16), further bounded by
 start: `createInMemoryCapacityPort` counts reservations per thread and per
 host, reads the limits on every reservation, and reports which limit is full;
 the capacity queue skips a waiter whose own thread is full so another thread's
-waiter can take a freed slot. A run waiting on dependencies or a slot holds no
+waiter can take a freed slot, and one whose parent's harness session is paused
+until that session is resumed; a person's resume of such a waiter is refused
+meanwhile, as for a run parked on dependencies. A parent session is
+`recovery-required` only after a restart, and restart reconciliation has already
+interrupted every capacity and provider-slot waiter, so resuming that session
+restarts none of them; only a run parked on dependencies is still held then,
+including one whose dependencies had finished but which found no free slot, since
+it stays parked on its dependencies until a slot frees. A run waiting on dependencies or a slot holds no
 slot, and neither does one waiting for the provider to take another request
 ([Provider capacity](#context-and-usage-accounting)). Admission separately caps unfinished children (any active status,
 waiting included) at 16 per parent and 32 per host as the runaway guard.
@@ -4171,8 +4184,9 @@ hold for every action in it:
   person asked for (the forge's own protection still applies); a stacked pull
   request may only target
   the branch of the thread or linked thread it stacks on.
-- **Refusals.** Plan mode refuses every action except `unwatch`, and revoked
-  forge access refuses every action that reaches the forge. `unwatch` stops the thread's own watch,
+- **Refusals.** Plan mode refuses every action except `unwatch` and `guide`, and revoked
+  forge access refuses every action that reaches the forge. `guide` only reads
+  a review guide the host already holds, so Plan allows it. `unwatch` stops the thread's own watch,
   which only takes reach away, so Plan allows it and it never asks (see
   Watching its own pull request below). The tool's `help` operation is not an
   action: it returns the tool's own usage text in any posture, asks nothing,
@@ -4848,6 +4862,71 @@ third-party reviewer plugin could not take.
   run (`no-route-configured`, `no-account`, `route-refused`, `capacity`,
   `spend-ceiling`, `not-effective`), the host records and the Review pane shows
   the explicit reason and never falls back silently to another model.
+
+**Review guides and Viewed files.** A pull request's reading pane carries a
+Guide tab and Viewed checkboxes (maintainer decision, 2026-11-26).
+
+- **Writer seam.** A guide is written by a `pull-request-guide-writer`
+  contribution (`@octant/plugin-api/pull-request-guide-writer`). Like a
+  reviewer, it gets a port with two calls: read the host-verified diff at the
+  head, and run one read-only turn at Plan's gate with zero tools in a scratch
+  folder outside the Project. It has no checkout, shell, credential or forge
+  token. It only proposes stops; the host owns the limits and the journal.
+  Octant bundles one writer. The run uses the reviewer's host runtime: the same
+  diff capture, route inspection, read-only turn, usage record and spend
+  ceiling. GitHub stays a separable integration: the guide service reaches the
+  thread's own pull request through the pull-request switch service's resolver,
+  and Viewed through its own `gh` port.
+- **Model and budget.** The guide model is `guideRoute` on the Project's
+  pull-request review settings (`pull-request-review.project-settings-updated@1`
+  gains the optional field; older events replay unchanged). There is no
+  default, and with none picked every start is refused (`no-model`). Each run
+  reserves through `spendCeiling.admit` under a linked thread (the agent's own,
+  or for the person the first active linked thread; a pull request with none is
+  refused), settles at input plus output tokens, and records usage even when the
+  provider reports none. One run per link at a time. The diff is cut to the
+  review prompt limit with the cut stated in the prompt.
+- **Journal and projection.** One `pull-request-guide` aggregate per
+  pull-request link: `pull-request-guide.run-started@1` (guide id, link id,
+  head, provider and model, who asked, reservation id),
+  `pull-request-guide.recorded@1` (guide id, head, stops, usage) and
+  `pull-request-guide.run-failed@1` (`no-model`, `spend-ceiling`, `head-stale`,
+  `invalid-output`, `cancelled`, `unavailable`). The projection keeps the latest
+  guide per link, rebuilt by replay; stale is the guide's head against the head
+  the reader shows (the agent's read uses the forge's current head). A guide
+  holds at most 30 stops, 8 anchors a stop, a 120-character title and a 1 KB
+  "why"; model output over 16 KB is `invalid-output`. Every anchor must name a
+  file the diff changes at that head (not a deleted one) and a line range that
+  meets a hunk on the head side; others are dropped, and a stop left with none
+  stays as unanchored. A push between the start and the record is `head-stale`;
+  a head GitHub does not answer for is `unavailable`. A run gives its spend
+  reservation back however it ends, a writer that throws included, and
+  stopping the agent's turn cancels the run its `guide-write` started. A
+  failure shows only for the head it was for. A run cut off by a restart is
+  not repeated. A run that leaves no stop (every proposed stop malformed, or
+  a diff GitHub did not give) is `invalid-output` and keeps the saved guide.
+  The bundled writer reads the bare reply first, then one fence around all
+  of it, so a stop that quotes a fenced snippet still parses.
+- **Who starts a run.** The person, from a local window
+  (`POST /api/code/pull-request-guides/write`). The agent, through the
+  pull-request tool's `guide-write` on its own linked pull request: Plan refuses
+  it, and below Full access the person is asked first because the run is
+  billed. A paired device reads guides (`/query`, catalogued as a read) and is
+  refused 403 on everything else. The agent's `guide` never asks, and its
+  result marks the thread as having read outside content.
+- **Viewed.** GitHub's `viewerViewedState` for the person, read with
+  `files(first:100)` paging (at most 3,000 files) and written with
+  `markFileAsViewed` or `unmarkFileAsViewed` on the pull request's node id,
+  through the host's `gh api graphql`, from a local window only
+  (`/viewed/query`, `/viewed`), after the same pull-request authorization the
+  review uses. `DISMISSED` reads as `changed`. Octant stores and journals
+  nothing for it: GitHub holds the state, and a write acts under the person's
+  GitHub login. Every call names `--hostname github.com`, whatever `GH_HOST`
+  says. A mark carries the head the person reviewed and is refused (409,
+  `head-moved`) once a push moved it, since GitHub would mark the newer
+  file; an unmark is not. A path the host cannot carry (one not in NFC)
+  drops that file alone from the list. The Changes panel asks for Viewed
+  only once it is open.
 
 **The GitHub plugin switch.** GitHub is a bundled first-party plugin
 (component `github-integration`) a person can switch off; it is on by default,
@@ -18037,7 +18116,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   another folder, whose repository it never borrows from the old one. Linked pull requests and issues are identities only, because a title
   on a forge is text an outsider may have written. A coordinator is derived
   without delivery evidence; a Chat thread is a row only while it runs or waits;
-  a subagent is a row only under a thread already listed, In progress while queued, starting, running, or waiting on what the host ends by itself, as the orchestration service decides from its own holds, judging each run and reading each parent session once per read (room under the subagent limit, which the capacity queue fills whatever the parent session does; a free request slot or siblings on their way, unless the parent session or a restart holds the run); Waiting for a pool with no eligible model, a sibling a person must retry, and any other wait, and
+  a subagent is a row only under a thread already listed, In progress while queued, starting, running, or waiting on what the host ends by itself, as the orchestration service decides from its own holds, judging each run and reading each parent session once per read (room under the subagent limit or a free request slot, unless the parent session holds the run; siblings on their way, unless the parent session or a restart holds it); Waiting for a pool with no eligible model, a sibling a person must retry, and any other wait, and
   its task is named only to a local window the
   AgentRun authorization admits, the same one the Agents center applies. A Chat
   thread's subagents are listed to such a window alone. The read takes a local

@@ -908,11 +908,15 @@ request, status or time"):
 - **Title** (13px, 500, primary ink): one line with an ellipsis, the strongest
   text in the row. A row with nothing to name on a top line carries the state or
   the time at the end of this line.
-- **Detail line** (12px, muted ink), only when there is something for it: the
-  pull request with its state in words (#1205 open, merged, closed, draft), who
-  started the thread, a worker's coordinator. The provider's 12px mark ends the
-  last line the row has. Colour is spent on the state word and the Project's
-  mark only; the row's other facts keep the ink roles.
+- **Detail line** (12px, muted ink), only when there is something for it: who
+  started the thread, a worker's coordinator, and the thread's counted marks
+  (the pull requests by state glyph and number with the rest counted, #1205 +2;
+  the stack's size; the issue it belongs to; how many other issues it wrote
+  to), each with its words in a tooltip and the row's name
+  ([Workspace: Sidebar](docs/design/workspace.md#sidebar)). The provider's 12px
+  mark ends the last line the row has. Colour is spent on the pull request's
+  state and the Project's mark only; the row's other facts keep the ink roles.
+  In a narrow sidebar the issue key truncates first.
 
 A two-line row is 48px (6 + 16 + 20 + 6) and a three-line row 64px, the text
 block centred; Compact density takes the lines to 14 and 18, so a two-line row

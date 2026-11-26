@@ -3789,10 +3789,61 @@ form > .work-composer-adapter__attachments {
   color: var(--oct-meta);
 }
 
-/* The thread's other pull requests, counted after the first in the same quiet
-   ink, so a thread that worked through many is not read as having one. */
+/* The thread's other pull requests, counted after the first in the same
+   mark, so a thread that worked through many is not read as having one. */
 .sidebar-navigation__thread-pr-more {
+  color: inherit;
+}
+
+/* The pull-request mark is the one count that spends colour: its first pull
+   request's state, so a list of rows reads open, merged or closed at a glance.
+   The state is also in the mark's name and tooltip, never colour alone. */
+.sidebar-navigation__thread-pr-mark[data-pr-state="open"] {
+  color: var(--oct-pr-open);
+}
+
+.sidebar-navigation__thread-pr-mark[data-pr-state="merged"] {
+  color: var(--oct-pr-merged);
+}
+
+.sidebar-navigation__thread-pr-mark[data-pr-state="closed"] {
+  color: var(--oct-pr-closed);
+}
+
+.sidebar-navigation__thread-pr-mark:is([data-pr-state="draft"], [data-pr-state="unknown"]) {
+  color: var(--oct-pr-draft);
+}
+
+/* A stack's layers and a thread's issues: a muted glyph and a number in the
+   meta ink, the same size and rhythm as the pull-request mark beside them. */
+.sidebar-navigation__thread-count {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
   color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-navigation__thread-count > svg {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+/* An issue key can be long (a team prefix and five digits), so it is the one
+   mark that gives way in a narrow sidebar: it truncates, and the counts after
+   it stay whole. Its tooltip and name keep the full key. */
+.sidebar-navigation__thread-count[data-count="issue-key"] {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.sidebar-navigation__thread-count[data-count="issue-key"] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* PR state carries the same meaning in navigation, boards, and pane headers. */

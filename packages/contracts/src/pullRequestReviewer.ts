@@ -223,6 +223,8 @@ export const PullRequestReviewProjectSettings = Schema.Struct({
   reviewerId: Schema.optional(PullRequestReviewerId),
   route: Schema.optional(PullRequestReviewRoute),
   postSummaryComment: Schema.Boolean,
+  /** The model review guides run on. No default: absent, no guide runs. */
+  guideRoute: Schema.optional(PullRequestReviewRoute),
   version: AggregateVersion,
   updatedAt: Schema.optional(UtcTimestamp),
 }).annotations(strict);
@@ -301,6 +303,8 @@ export const PullRequestReviewProjectSettingsCommand = Schema.Struct({
   reviewerId: Schema.optional(PullRequestReviewerId),
   route: Schema.optional(Schema.NullOr(PullRequestReviewRoute)),
   postSummaryComment: Schema.Boolean,
+  /** Absent keeps the guide model; null clears it. */
+  guideRoute: Schema.optional(Schema.NullOr(PullRequestReviewRoute)),
 }).annotations(strict);
 export type PullRequestReviewProjectSettingsCommand =
   typeof PullRequestReviewProjectSettingsCommand.Type;
@@ -378,6 +382,7 @@ export const PullRequestReviewProjectSettingsEvent = Schema.Struct({
   reviewerId: Schema.optional(PullRequestReviewerId),
   route: Schema.optional(PullRequestReviewRoute),
   postSummaryComment: Schema.Boolean,
+  guideRoute: Schema.optional(PullRequestReviewRoute),
 }).annotations(strict);
 export type PullRequestReviewProjectSettingsEvent =
   typeof PullRequestReviewProjectSettingsEvent.Type;

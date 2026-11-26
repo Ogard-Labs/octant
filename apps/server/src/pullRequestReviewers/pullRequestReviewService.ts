@@ -437,7 +437,7 @@ function formatHandBackTurnText(input: {
   ].join("\n");
 }
 
-async function runDriverReadOnlyTurn(input: {
+export async function runDriverReadOnlyTurn(input: {
   readonly driver: ProviderDriver;
   readonly route: PullRequestReviewRoute;
   readonly modelOptionValues?: ProviderModelOptionValues;
@@ -723,6 +723,11 @@ export class PullRequestReviewService {
     });
   }
 
+  /** The model the person picked for this Project's review guides; there is no default. */
+  guideRoute(projectId: ProjectId): PullRequestReviewRoute | undefined {
+    return this.#projectSettingsFor(projectId).guideRoute;
+  }
+
   async queryProjectSettings(
     windowId: WindowId,
     projectId: ProjectId,
@@ -775,6 +780,8 @@ export class PullRequestReviewService {
       };
     }
     const reviewerId = command.reviewerId ?? existing.reviewerId ?? this.#defaultReviewerId;
+    const guideRoute =
+      command.guideRoute === null ? undefined : (command.guideRoute ?? existing.guideRoute);
     const occurredAt = decodeTimestamp(this.#clock());
     const nextVersion = decodeAggregateVersion(existing.version + 1);
     const payload = {
@@ -784,6 +791,7 @@ export class PullRequestReviewService {
       reviewerId,
       ...(route === undefined ? {} : { route }),
       postSummaryComment: command.postSummaryComment,
+      ...(guideRoute === undefined ? {} : { guideRoute }),
     };
     this.#journal.append({
       aggregate: {
@@ -809,6 +817,7 @@ export class PullRequestReviewService {
       reviewerId,
       ...(route === undefined ? {} : { route }),
       postSummaryComment: command.postSummaryComment,
+      ...(guideRoute === undefined ? {} : { guideRoute }),
       version: nextVersion,
       updatedAt: occurredAt,
     };
@@ -1999,6 +2008,7 @@ export class PullRequestReviewService {
           ...(payload.reviewerId === undefined ? {} : { reviewerId: payload.reviewerId }),
           ...(payload.route === undefined ? {} : { route: payload.route }),
           postSummaryComment: payload.postSummaryComment,
+          ...(payload.guideRoute === undefined ? {} : { guideRoute: payload.guideRoute }),
           version: decodeAggregateVersion((previous?.version ?? 0) + 1),
           updatedAt: decodeTimestamp(envelope.occurredAt),
         });

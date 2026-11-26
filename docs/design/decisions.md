@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Device transport](#device-transport)                                                 | 3         | 2       | 1            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 17        | 14      | 3            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 6         | 4       | 2            | 0                   |
-| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 7         | 4       | 3            | 0                   |
+| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 8         | 5       | 3            | 0                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 5         | 4       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 7       | 5            | 0                   |
@@ -73,7 +73,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 1       | 0            | 0                   |
-| **All areas**                                                                         | **320**   | **214** | **102**      | **4**               |
+| **All areas**                                                                         | **321**   | **215** | **102**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1133,6 +1133,7 @@ Status: Partly built. Since: 2026-11-16. Detail: [Architecture: Security and aut
 A child run starts only when the thread's agent delegates through `octant_agents`, the one child-run tool, and every child uses the same host admission, routing, workspace and lifecycle services.
 
 - Subagent creation is one setting; the parent-child hierarchy is the only subagent surface. Delegation is refused while subagents are off or the session is paused, and Plan refuses it.
+- While the parent's session is paused, no child starts by itself, whether it waits on siblings, for room or for a request slot; resuming the session releases them, and a person's Resume of a held child is refused until then.
 - Outside Strict reading outside content adds no ask ([Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on)). Under Strict below Full access a marked thread asks once per thread; at Auto the person answers, not the reviewer, and a routine run refuses (maintainer decisions, 2026-11-13 and 2026-11-15).
 - Under Strict a reply `wait` hands back marks the parent only when the child was marked; outside Strict, and for a delivered reply, it always marks (maintainer request, 2026-11-22).
 - The host prepares the workspace; no client supplies a path, and wider-than-parent grants are refused.
@@ -1287,6 +1288,18 @@ A bundled, switchable first-party plugin reviews pushed heads of linked Code thr
 - A live maintainer smoke against a real repository with two signed-in providers is owed.
 
 Status: Built. Since: 2026-11-20. Detail: [Architecture: Modes, Merge when ready and Auto-fix](../architecture.md#modes-chat-work-and-code).
+
+### Review guides and Viewed files
+
+A pull request's reading pane has a Guide tab, an ordered list of stops through the change written for one pushed head by a read-only model run, and the Changes tab marks files Viewed with GitHub's own state (maintainer decision, 2026-11-26).
+
+- A guide belongs to one head; after a push it reads as written for an older push and offers Rewrite. Anchors outside the diff at that head are dropped.
+- A run goes through the `pull-request-guide-writer` seam: one read-only turn at Plan's gate on the guide model the person picked, with no default, under the spend ceiling, one per link at a time. A closed or merged pull request offers no run.
+- A person starts a run from a local window; a paired phone only reads guides. The agent's `guide` reads without asking; `guide-write` asks below Full access and is refused in Plan. Guide text is outside content.
+- Viewed is read and written in GitHub under the person's own `gh` login, from a local window only, and refused once a push moved the reviewed head. Octant keeps no copy and journals nothing for it.
+- A live billed guide run against a real repository is a live check still owed.
+
+Status: Built. Since: 2026-11-26. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code) and [Workspace: Tool lifecycles](workspace.md#tool-lifecycles).
 
 ### Delivery to targets the person owns
 
@@ -3059,6 +3072,7 @@ Work and Code have server-authoritative boards. Chat has none, and an agent cann
 - The Pull requests and Issues pages share one list and reading pane (maintainer request, 2026-11-12; maintainer decision, 2026-11-21). The Auto-refresh and Agents may merge switches keep their server enforcement. Issues ask for no further GitHub access.
 - A thread lists every pull request it worked on (maintainer decisions, 2026-11-23). A pull request or issue a thread's tool calls wrote links the thread, by exact identity only; linking starts nothing (approved 2026-11-24).
 - An open pull request's next step is one action, and Merge confirms the method (maintainer decision, 2026-11-24).
+- A sidebar row's third line reads as counted marks, the first pull request, its stack's size, the thread's issue and how many other issues it wrote to, all from the navigation entry with no forge or tracker call (maintainer decision, 2026-11-26).
 - A person's journaled unlink wins over all linking evidence (maintainer decision, 2026-11-24). A routine and an agent grant may not unlink; a device may as [Paired devices act as the person](#paired-devices-act-as-the-person) allows (maintainer decision, 2026-11-25).
 - Stacks are derived from the cached snapshot and never ask the forge (maintainer decision, 2026-11-25).
 - Line notes are window-local and sent to a linked Code thread as one ordinary follow-up; nothing is posted to GitHub (maintainer decision, 2026-11-21). Notes on a pull request whose author is not the signed-in `gh` login, or is unreadable, mark the thread as having read outside content.

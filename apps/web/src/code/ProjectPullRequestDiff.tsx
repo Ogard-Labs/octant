@@ -24,6 +24,8 @@ export interface PullRequestDiffWithNotesProps {
   ) => Promise<CodeLineNotesSendResult>;
   readonly noticeClassName: string;
   readonly emptyClassName?: string;
+  /** A file to scroll to, such as a guide stop's anchor. */
+  readonly requestedFile?: { readonly path: string };
 }
 
 /**
@@ -71,6 +73,7 @@ export function PullRequestDiffWithNotes(props: PullRequestDiffWithNotesProps) {
         <div className="code-pr-review__diff">
           <UnifiedDiffList
             files={files}
+            {...(props.requestedFile === undefined ? {} : { requestedFile: props.requestedFile })}
             onSelectLine={(selection) =>
               setNoteAnchor({
                 path: selection.path,

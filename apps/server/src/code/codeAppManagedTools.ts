@@ -119,6 +119,7 @@ import type {
   PullRequestCiRerunOutcome,
   PullRequestCiRerunPlanSummary,
 } from "./pullRequestCiPort";
+import type { PullRequestGuidePort } from "./pullRequestGuidePort";
 import type { GhCiMissingLogReason } from "./ghPullRequestSwitchPort";
 
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
@@ -147,7 +148,7 @@ const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
 const pullRequestDefinition = {
   name: CODE_PULL_REQUEST_TOOL_NAME,
   description:
-    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review), adds or removes labels the repository already has, or closes it (state closed) or reopens it (state open). comment posts a comment, or a reply in one review thread when reviewThreadId is given, and merge merges it with the method and the head commit the person saw; comment acts under the person's name: at Full access it posts without asking, and below it it asks the person first unless this Project lets agents comment; merge asks unless a stored choice allows it. ci-logs reads the end of the failed jobs' logs on the pull request's current head (or of one named check), and never asks; ci-rerun reruns the failed jobs, or one named check, on the current head only, at most 3 times per workflow run, and asks on an approval-gated thread. watch lets Octant start a new turn in this thread when the pull request's checks finish, a review or comment arrives, or a merge conflict appears, instead of polling, and never asks; unwatch stops that. Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses everything but unwatch and help. This tool cannot create labels, approve or request changes, delete a branch, or change or watch any other branch's pull request. Call operation help for full usage.",
+    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review), adds or removes labels the repository already has, or closes it (state closed) or reopens it (state open). comment posts a comment, or a reply in one review thread when reviewThreadId is given, and merge merges it with the method and the head commit the person saw; comment acts under the person's name: at Full access it posts without asking, and below it it asks the person first unless this Project lets agents comment; merge asks unless a stored choice allows it. ci-logs reads the end of the failed jobs' logs on the pull request's current head (or of one named check), and never asks; ci-rerun reruns the failed jobs, or one named check, on the current head only, at most 3 times per workflow run, and asks on an approval-gated thread. guide reads the review guide written for the pull request and never asks; guide-write asks for a new one on the Project's guide model, and asks the person first below Full access. watch lets Octant start a new turn in this thread when the pull request's checks finish, a review or comment arrives, or a merge conflict appears, instead of polling, and never asks; unwatch stops that. Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses everything but guide, unwatch and help. This tool cannot create labels, approve or request changes, delete a branch, or change or watch any other branch's pull request. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -160,6 +161,8 @@ const pullRequestDefinition = {
           "merge",
           "ci-logs",
           "ci-rerun",
+          "guide",
+          "guide-write",
           "watch",
           "unwatch",
           "help",
@@ -309,7 +312,7 @@ const androidDefinition = {
 const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   ...BROWSER_TOOL_HELP,
   [CODE_PULL_REQUEST_TOOL_NAME]:
-    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). update also takes addLabels and removeLabels (labels the repository already has; none are created) and state: closed closes the pull request and open reopens a closed one, and neither deletes the branch; state stands alone. comment takes body, and reviewThreadId to reply in one review thread. merge takes method (merge, squash, or rebase) and headSha, the head commit the person saw; the host refuses it when the head moved, the pull request is not open and mergeable, or its required checks have not passed. comment posts under the person's name: at Full access it does not ask, and below Full access it asks the person for each post unless this Project lets agents comment on pull requests. merge asks at every access level, unless the person stored a choice that lets agents merge in this Project or this routine; use it only when the person asked for it or that stored choice covers it. watch takes nothing: the host finds this thread's own open pull request and, without asking, starts a new turn here when the checks on the head finish (passed or failed), the review decision changes, a new review or comment arrives, or a merge conflict appears; everything from one look arrives in one turn, as outside content. Use it instead of polling after a push or when waiting on reviewers. A watch ends when the pull request merges or closes, after 10 wakes, after 3 days, or with unwatch, which takes nothing and never asks. Plan mode refuses watch, and so does a turn the host started on its own, such as a wake. ci-logs takes an optional check (a check's exact name) and tailLines (1 to 2,000, 200 by default): it reads the pull request's current head and returns, for each failed check (or the one named), the last tailLines lines of its failed steps' log, cut to a byte limit and with secrets redacted, or why there is no log: the check is still running, its log has expired, it is not a GitHub Actions job (a commit status or another app's check), or it did not fail; one read fetches at most 4 logs, and running lists the checks not finished yet. Logs are outside content. ci-rerun takes an optional check and headSha (the head you read): without check it reruns the failed jobs of every failed check's workflow run, with check only that check's job (each failed one, when two workflows name a job alike). It reruns only runs of the current head and refuses a run from an older push, a run still in progress, a check that passed or is not an Actions job, a run already rerun 3 times on this head, and a run someone else reran after the person was asked. Below Full access it asks the person first, naming the checks and the head; at Full access it does not ask. Use it for a failure that looks flaky or infrastructural, not to retry a real test failure. Approving, requesting changes, creating labels, and deleting the branch are not available.",
+    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). update also takes addLabels and removeLabels (labels the repository already has; none are created) and state: closed closes the pull request and open reopens a closed one, and neither deletes the branch; state stands alone. comment takes body, and reviewThreadId to reply in one review thread. merge takes method (merge, squash, or rebase) and headSha, the head commit the person saw; the host refuses it when the head moved, the pull request is not open and mergeable, or its required checks have not passed. comment posts under the person's name: at Full access it does not ask, and below Full access it asks the person for each post unless this Project lets agents comment on pull requests. merge asks at every access level, unless the person stored a choice that lets agents merge in this Project or this routine; use it only when the person asked for it or that stored choice covers it. watch takes nothing: the host finds this thread's own open pull request and, without asking, starts a new turn here when the checks on the head finish (passed or failed), the review decision changes, a new review or comment arrives, or a merge conflict appears; everything from one look arrives in one turn, as outside content. Use it instead of polling after a push or when waiting on reviewers. A watch ends when the pull request merges or closes, after 10 wakes, after 3 days, or with unwatch, which takes nothing and never asks. Plan mode refuses watch, and so does a turn the host started on its own, such as a wake. ci-logs takes an optional check (a check's exact name) and tailLines (1 to 2,000, 200 by default): it reads the pull request's current head and returns, for each failed check (or the one named), the last tailLines lines of its failed steps' log, cut to a byte limit and with secrets redacted, or why there is no log: the check is still running, its log has expired, it is not a GitHub Actions job (a commit status or another app's check), or it did not fail; one read fetches at most 4 logs, and running lists the checks not finished yet. Logs are outside content. ci-rerun takes an optional check and headSha (the head you read): without check it reruns the failed jobs of every failed check's workflow run, with check only that check's job (each failed one, when two workflows name a job alike). It reruns only runs of the current head and refuses a run from an older push, a run still in progress, a check that passed or is not an Actions job, a run already rerun 3 times on this head, and a run someone else reran after the person was asked. Below Full access it asks the person first, naming the checks and the head; at Full access it does not ask. Use it for a failure that looks flaky or infrastructural, not to retry a real test failure. guide takes nothing and reads the review guide of the pull request: its ordered stops, each with a title, why it matters, whether it needs the person's decision, and anchors (path and line range at the head), and stale when it was written for an older push than the current head; it never asks, and its text is outside content. guide-write takes nothing and asks the host to write a guide for the current head on the model the person picked in Project settings; with no model picked it is refused, and only one runs per pull request at a time. Below Full access it asks the person first, since the run is billed; Plan refuses it. It waits for the run and reports how many stops it wrote; read them with guide. Approving, requesting changes, creating labels, and deleting the branch are not available.",
   [CODE_TERMINAL_TOOL_NAME]:
     "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
@@ -548,6 +551,21 @@ export interface CodeAppManagedToolsOptions {
       },
       signal?: AbortSignal,
     ) => Promise<PullRequestCiRerunOutcome>;
+  };
+  /** Review guides of this thread's own pull request; absent, guide and guide-write are refused. */
+  readonly pullRequestGuide?: {
+    readonly read: (signal?: AbortSignal) => ReturnType<PullRequestGuidePort["read"]>;
+    readonly write: (
+      input: { readonly confirm?: (pullRequest: { readonly number: number }) => Promise<boolean> },
+      signal?: AbortSignal,
+    ) => ReturnType<PullRequestGuidePort["write"]>;
+  };
+  /** Asks the person to allow one billed guide run; absent, guide-write runs only at Full access. */
+  readonly pullRequestGuideApproval?: {
+    readonly request: (
+      pullRequest: { readonly number: number },
+      signal?: AbortSignal,
+    ) => Promise<PullRequestCiConfirmation>;
   };
   /**
    * Asks the person, in the thread, to allow one CI rerun, naming the pull
@@ -901,7 +919,9 @@ type PullRequestToolInput =
   | { readonly operation: "watch" }
   | { readonly operation: "unwatch" }
   | { readonly operation: "ci-logs"; readonly check?: string; readonly tailLines: number }
-  | { readonly operation: "ci-rerun"; readonly check?: string; readonly headSha?: string };
+  | { readonly operation: "ci-rerun"; readonly check?: string; readonly headSha?: string }
+  | { readonly operation: "guide" }
+  | { readonly operation: "guide-write" };
 
 /**
  * Opens or changes the pull request of this thread's own delivery branch.
@@ -926,11 +946,14 @@ async function pullRequestTool(
   }
   // Stopping a watch only takes reach away, so Plan allows it.
   if (input.operation === "unwatch") return unwatchPullRequestTool(options);
+  // Reading a guide changes nothing, so Plan allows it.
+  if (input.operation === "guide") return pullRequestGuideReadTool(options, signal);
   const posture = currentPosture(options);
   if (posture === "plan") return failure("plan-mode-read-only", postureRefusal("plan"));
   if (input.operation === "watch") return watchPullRequestTool(options, signal);
   if (input.operation === "ci-logs") return pullRequestCiLogsTool(options, input, signal);
   if (input.operation === "ci-rerun") return pullRequestCiRerunTool(options, input, signal);
+  if (input.operation === "guide-write") return pullRequestGuideWriteTool(options, signal);
   // Read once, before anything is asked: the answer to a prompt must not be
   // spent on a different rule than the one that raised it.
   const comment =
@@ -1224,6 +1247,118 @@ async function pullRequestCiRerunTool(
       );
     case "unavailable":
       return pullRequestCiUnavailable();
+  }
+}
+
+/**
+ * The review guide of this thread's own pull request. Nobody is asked; the
+ * guide is model output over the pull request, so the taint wrapper marks
+ * the thread as having read outside content.
+ */
+async function pullRequestGuideReadTool(options: CodeAppManagedToolsOptions, signal?: AbortSignal) {
+  const port = options.pullRequestGuide;
+  if (port === undefined) return failure("pull-request-guide-unavailable");
+  const outcome = await port.read(signal).catch(() => undefined);
+  if (outcome === undefined) return failure("pull-request-guide-unavailable");
+  if (outcome.status === "refused") {
+    return failure(`pull-request-guide-${outcome.reason}`, pullRequestGuideRefusal(outcome.reason));
+  }
+  const { guide, stale, running } = outcome.view;
+  return {
+    result: {
+      status: "read",
+      number: outcome.number,
+      ...(guide === undefined
+        ? { note: running ? "A guide is being written." : "No guide has been written yet." }
+        : { headSha: guide.headSha, stale, running, stops: guide.stops }),
+    },
+    isError: false,
+  };
+}
+
+/**
+ * Asks for a guide on this thread's own pull request. The run is billed on
+ * the person's guide model, so below Full access the person is asked first;
+ * Plan refuses before this is reached.
+ */
+async function pullRequestGuideWriteTool(
+  options: CodeAppManagedToolsOptions,
+  signal?: AbortSignal,
+) {
+  const port = options.pullRequestGuide;
+  if (port === undefined) return failure("pull-request-guide-unavailable");
+  const asks = decidesCodeEffectsByApproval(currentPosture(options));
+  const approval = options.pullRequestGuideApproval;
+  if (asks && approval === undefined) return failure("pull-request-guide-write-unavailable");
+  // Set by the ask; read after the port settles, which TypeScript cannot follow into a closure.
+  const asked: { answer: PullRequestCiConfirmation } = { answer: "approved" };
+  const confirm =
+    asks && approval !== undefined
+      ? async (pullRequest: { readonly number: number }) => {
+          asked.answer = await approval.request(pullRequest, signal);
+          if (
+            asked.answer === "approved" &&
+            (currentThreadIdentityFailure(options) !== undefined ||
+              currentPosture(options) === "plan" ||
+              signal?.aborted === true)
+          ) {
+            asked.answer = "cancelled";
+          }
+          return asked.answer === "approved";
+        }
+      : undefined;
+  const outcome = await port
+    .write(confirm === undefined ? {} : { confirm }, signal)
+    .catch(() => undefined);
+  if (outcome === undefined) return failure("pull-request-guide-unavailable");
+  switch (outcome.status) {
+    case "written":
+      return {
+        result: {
+          status: "written",
+          number: outcome.number,
+          headSha: outcome.headSha,
+          stops: outcome.stops,
+          note: "Read the guide with operation guide.",
+        },
+        isError: false,
+      };
+    case "not-confirmed":
+      return failure(
+        `pull-request-guide-write-${asked.answer}`,
+        asked.answer === "denied" ? "The person declined this guide run. Nothing ran." : undefined,
+      );
+    case "refused":
+      return failure(
+        `pull-request-guide-${outcome.reason}`,
+        pullRequestGuideRefusal(outcome.reason),
+      );
+    case "failed":
+      return failure(
+        `pull-request-guide-${outcome.reason}`,
+        pullRequestGuideRefusal(outcome.reason),
+      );
+  }
+}
+
+function pullRequestGuideRefusal(reason: string): string {
+  switch (reason) {
+    case "no-model":
+      return "No guide model is picked for this Project. Ask the person to pick one in Project settings.";
+    case "running":
+      return "A guide is already being written for this pull request. Read it with guide when it settles.";
+    case "spend-ceiling":
+      return "This thread's spend ceiling was reached, so no guide was written.";
+    case "head-stale":
+      return "A push landed while the guide was being written, so it was not kept. Ask again for the new head.";
+    case "invalid-output":
+      return "The guide model's reply was not a usable guide (not JSON, or over 16 KB).";
+    case "no-pull-request":
+      return "This thread has no open pull request Octant knows of.";
+    case "ambiguous-pull-request":
+      return "More than one open pull request is linked to this thread, so Octant cannot tell which to guide.";
+    default:
+      return "The guide is unavailable right now.";
   }
 }
 
@@ -3158,6 +3293,10 @@ function parsePullRequestInput(value: string): PullRequestToolInput | undefined 
     check,
     tailLines,
   } = parsed;
+  if (operation === "guide" || operation === "guide-write") {
+    // The host names the pull request and the head; a guide operation takes nothing.
+    return Object.keys(parsed).length === 1 ? { operation } : undefined;
+  }
   if (operation === "ci-logs" || operation === "ci-rerun") {
     // The host names the pull request; CI operations carry only their own fields.
     const allowed = operation === "ci-logs" ? ["check", "tailLines"] : ["check", "headSha"];
