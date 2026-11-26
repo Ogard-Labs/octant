@@ -141,26 +141,34 @@ const SCRIPT = String.raw`
   };
 
   // The first open waits out a busy hub or a spoke still waking up the same
-  // way the stream does, and hands back the answer that settled it.
+  // way the stream does, and hands back the answer that settled it: its
+  // status, and the scope or the reason its body carried.
+  const settle = async (response) =>
+    response.ok
+      ? { status: response.status, scope: (await response.json()).scope }
+      : { status: response.status, final: await ended(response) };
   const open = async () => {
     const path = "/v/" + linkId + "/open";
     let wait = 3000;
     for (;;) {
-      // A front that holds the connection open without answering would stall
-      // the page; each try ends after 30 seconds, well past the hub's own wait
+      // A front that holds the connection open without answering, or sends
+      // headers and then stalls the body, would stall the page; each try,
+      // body included, ends after 30 seconds, well past the hub's own wait
       // for the spoke, and counts as no answer.
       const deadline = new AbortController();
       const timer = setTimeout(() => deadline.abort(), 30000);
-      const response = await fetch(path, {
+      const answer = await fetch(path, {
         method: "POST",
         headers: { ...(await signed("POST", path)), "content-type": "application/json" },
         body: JSON.stringify({ secret }),
         signal: deadline.signal,
-      }).catch(() => undefined);
+      })
+        .then(settle)
+        .catch(() => undefined);
       clearTimeout(timer);
-      if (response !== undefined) {
-        const final = response.ok ? undefined : await ended(response);
-        if (response.ok || final !== undefined) return { response, final };
+      // A reason read from a body the deadline cut short is not the answer.
+      if (answer !== undefined && !deadline.signal.aborted) {
+        if (answer.status === 200 || answer.final !== undefined) return answer;
       }
       say("This link could not be opened yet. Trying again…");
       await new Promise((resolve) => setTimeout(resolve, wait));
@@ -170,19 +178,18 @@ const SCRIPT = String.raw`
 
   const run = async () => {
     if (secret !== null) {
-      const { response, final } = await open();
+      const answer = await open();
       // The secret leaves the address bar only once the link is opened, has
       // ended, or is held by another browser. After a 401 (a skewed clock) or
       // a 404 (a grant that has not reached the hub yet) it stays, so a reload
       // can still open the link; a member's address that cannot show the
       // thread keeps it too, so the visitor can carry the whole link to the
       // hub's address.
-      if (response.ok || response.status === 410 || response.status === 403) {
+      if (answer.status === 200 || answer.status === 410 || answer.status === 403) {
         history.replaceState(null, "", location.pathname);
       }
-      if (!response.ok) return say(final);
-      const opened = await response.json();
-      await remember("scope:" + linkId, opened.scope);
+      if (answer.status !== 200) return say(answer.final);
+      await remember("scope:" + linkId, answer.scope);
     }
     if ((await recall("scope:" + linkId)) === "comment") form.hidden = false;
     let wait = 3000;

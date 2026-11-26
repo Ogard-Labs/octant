@@ -146,4 +146,23 @@ describe("the visitor viewer's first open", () => {
     await vi.waitFor(() => expect(viewer.status.textContent).toBe("This link has ended."));
     expect(viewer.calls.filter((path) => path === OPEN)).toHaveLength(2);
   });
+
+  it.each([200, 403])(
+    "gives up on a first open whose %i answer stalls after its headers, and tries again",
+    async (status) => {
+      const viewer = openViewer((path, call, signal) => {
+        if (path !== OPEN) return ended();
+        if (call > 1) return Response.json({ scope: "read" });
+        // Headers arrive at once; the body never does, until the page gives up.
+        const body = new ReadableStream({
+          start(controller) {
+            signal?.addEventListener("abort", () => controller.error(new Error("aborted")));
+          },
+        });
+        return new Response(body, { status, headers: { "content-type": "application/json" } });
+      });
+      await vi.waitFor(() => expect(viewer.status.textContent).toBe("This link has ended."));
+      expect(viewer.calls.filter((path) => path === OPEN)).toHaveLength(2);
+    },
+  );
 });
