@@ -1,5 +1,6 @@
 import { cleanedUpWorktreeSentence } from "@octant/domain";
 import { writeTurnSendPreference } from "../messageQueue/turnSendPreference";
+import { decodeThreadMessageQueueSnapshot } from "@octant/contracts";
 import { threadImageOfferKey, threadImageOffers } from "../composer/threadImageOffers";
 import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
@@ -496,6 +497,37 @@ describe("Code host queue", () => {
       await waitFor(() => expect(host.execute).toHaveBeenCalledTimes(2));
       expect(host.execute.mock.calls[0]?.[0]).toMatchObject({ timing: "next-turn" });
       expect(host.execute.mock.calls[1]?.[0]).not.toHaveProperty("timing");
+    } finally {
+      writeTurnSendPreference("steer");
+    }
+  });
+
+  it("queues a message on an idle thread with a paused queue without the running-turn choice", async () => {
+    writeTurnSendPreference("queue");
+    try {
+      const host = queueTestHost();
+      host.publish(
+        decodeThreadMessageQueueSnapshot({
+          scope: { mode: "code", threadId },
+          version: 1,
+          paused: true,
+          items: [],
+        }),
+      );
+      const user = userEvent.setup();
+      render(
+        <CodeThreadWorkspace
+          messageQueueClient={host}
+          controller={controller()}
+          threadId={threadId}
+        />,
+      );
+      const composer = screen.getByLabelText("Follow-up message");
+      await user.type(composer, "After Resume");
+      await user.click(await screen.findByRole("button", { name: "Queue message" }));
+      await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
+      expect(host.execute.mock.calls[0]?.[0]).toMatchObject({ kind: "enqueue" });
+      expect(host.execute.mock.calls[0]?.[0]).not.toHaveProperty("timing");
     } finally {
       writeTurnSendPreference("steer");
     }

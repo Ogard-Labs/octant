@@ -353,7 +353,8 @@ export function useThreadMessageQueue(options: {
         const command = receipt.command;
         setMessage(
           result?.status === "refused"
-            ? `The host refused this queue change: ${result.reason.replaceAll("-", " ")}.`
+            ? (result.message ??
+                `The host refused this queue change: ${result.reason.replaceAll("-", " ")}.`)
             : result?.status === "conflict"
               ? "The queue changed in another window. Review it and try again; your draft is kept."
               : result?.status === "applied" &&

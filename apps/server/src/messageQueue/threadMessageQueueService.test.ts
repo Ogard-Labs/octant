@@ -1052,6 +1052,42 @@ describe("durable ordinary thread queue", () => {
     );
     expect(f.p.admit).not.toHaveBeenCalled();
   });
+  it("Send now never moves a message ahead of one still offered to the running turn", async () => {
+    let answer: (value: "steered" | "refused") => void = () => undefined;
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(
+      () => new Promise<"steered" | "refused">((resolve) => (answer = resolve)),
+    );
+    const f = fixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const waiting = { ...enqueue(0), timing: "next-turn" as const };
+    const offered = enqueue(1);
+    const later = { ...enqueue(2), timing: "next-turn" as const };
+    await f.service.execute(windowId, waiting);
+    await f.service.execute(windowId, offered);
+    await f.service.tick();
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledOnce());
+    await f.service.execute(windowId, later);
+    const sent = await f.service.execute(
+      windowId,
+      command("send-now", (await snapshot(f.service)).version, { messageId: later.messageId }),
+    );
+    expect(sent.status).toBe("applied");
+    if (sent.status !== "applied") return;
+    expect(sent.snapshot.items.map((item) => item.messageId)).toEqual([
+      waiting.messageId,
+      offered.messageId,
+      later.messageId,
+    ]);
+    await f.service.tick();
+    expect(steer).toHaveBeenCalledOnce();
+    answer("steered");
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledTimes(2));
+    expect(steer.mock.calls[1]?.[0].messageId).toBe(later.messageId);
+  });
   it("keeps a waiting message waiting through an edit and a rebuild of the queue", async () => {
     const f = fixture();
     f.p.setInspection({ status: "busy", binding: "authorized-target" });

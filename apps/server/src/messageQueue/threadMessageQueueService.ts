@@ -399,11 +399,14 @@ export class ThreadMessageQueueService {
         const { waitsForNextTurn: _waits, ...rest } = item;
         const sent = { ...rest, revision: decodeAggregateVersion(item.revision + 1) };
         const others = state.items.filter((value) => value !== item);
-        // Messages already on their way, or offered to the turn, keep their place.
-        const fixed = others.findIndex(
-          (value) => value.status === "queued" && !this.#steering.has(value.messageId),
+        // Messages already on their way, or offered to the turn, keep their
+        // place and stay ahead of it. One offered to the turn can sit behind a
+        // message waiting for the next turn, so the message goes right after
+        // the last of them rather than before the first that can move.
+        const lastFixed = others.findLastIndex(
+          (value) => value.status !== "queued" || this.#steering.has(value.messageId),
         );
-        const at = fixed < 0 ? others.length : fixed;
+        const at = lastFixed + 1;
         const outcome = this.#store.write(
           { ...state, items: [...others.slice(0, at), sent, ...others.slice(at)] },
           { command, ...actor },

@@ -70,6 +70,18 @@ export function createThreadMessageQueueClient(options: {
       try {
         answer = await send(command);
       } catch (error) {
+        // A host that predates Send now rejects the command before it does
+        // anything, so this is a refusal the composer can show, not a lost
+        // request it must hold its receipt for and check again.
+        if (command.kind === "send-now" && refusedAsInvalid(error)) {
+          return {
+            status: "refused",
+            requestId: command.requestId,
+            reason: "invalid-payload",
+            message:
+              "This computer's Octant does not offer Send now yet. Update it to use Send now.",
+          };
+        }
         // A host that predates keeping a message for the next turn refuses
         // the unknown field before it does anything; the message goes once
         // more without it, as an older client sends it, and so may steer.

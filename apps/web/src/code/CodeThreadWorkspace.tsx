@@ -1564,7 +1564,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           },
           () => attachments.releaseQueueClaim(captured),
           { text: draft, revision: draftRevision },
-          messageTiming(turnSendPreference, opposite),
+          // The choice is for messages sent while a turn runs; one queued on
+          // an idle thread behind a paused or held queue keeps its default.
+          busy ? messageTiming(turnSendPreference, opposite) : undefined,
         );
       } catch {
         attachments.releaseQueueClaim(captured);

@@ -15,7 +15,12 @@ import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { WorkTurnClientFailure } from "@octant/client-runtime/work-turn-client";
 import { WorkRequestClientFailure } from "@octant/client-runtime/work-request-client";
-import { decodeProjectSummary, decodeWorkThread, decodeWorkThreadId } from "@octant/contracts";
+import {
+  decodeProjectSummary,
+  decodeThreadMessageQueueSnapshot,
+  decodeWorkThread,
+  decodeWorkThreadId,
+} from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -40,7 +45,7 @@ const modelId = "model-one" as never;
 const alternateProviderId = "80000000-0000-4000-8000-0000000000b2" as never;
 const alternateModelId = "model-two" as never;
 
-function queuedWorkClients() {
+function queuedWorkClients(status: "running" | "completed" = "running") {
   const threadClient: WorkThreadClient = {
     searchTranscript: vi.fn(),
     bootstrap: vi.fn(),
@@ -50,13 +55,13 @@ function queuedWorkClients() {
   };
   const turnClient: WorkTurnClient = {
     transcript: vi.fn(async () =>
-      decodeWorkThreadTranscript({ threadId, turns: [workTurn({ status: "running" })] }),
+      decodeWorkThreadTranscript({ threadId, turns: [workTurn({ status })] }),
     ),
     transcriptWindow: vi.fn(async () =>
       decodeWorkThreadTranscriptWindow({
         version: 1,
         threadId,
-        turns: [workTurn({ status: "running" })],
+        turns: [workTurn({ status })],
         liveCursor: 0,
         hasEarlier: false,
         hasLater: false,
@@ -168,6 +173,39 @@ describe("Work host queue", () => {
       await waitFor(() => expect(host.execute).toHaveBeenCalledTimes(2));
       expect(host.execute.mock.calls[0]?.[0]).toMatchObject({ timing: "next-turn" });
       expect(host.execute.mock.calls[1]?.[0]).not.toHaveProperty("timing");
+    } finally {
+      writeTurnSendPreference("steer");
+    }
+  });
+
+  it("queues a message on an idle thread with a paused queue without the running-turn choice", async () => {
+    writeTurnSendPreference("queue");
+    try {
+      const host = queueTestHost();
+      host.publish(
+        decodeThreadMessageQueueSnapshot({
+          scope: { mode: "work", threadId },
+          version: 1,
+          paused: true,
+          items: [],
+        }),
+      );
+      const user = userEvent.setup();
+      render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          messageQueueClient={host}
+          {...queuedWorkClients("completed")}
+          threadId={threadId}
+          title="Draft brief"
+        />,
+      );
+      const composer = await screen.findByLabelText("Work prompt");
+      await user.type(composer, "After Resume");
+      await user.click(await screen.findByRole("button", { name: "Queue message" }));
+      await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
+      expect(host.execute.mock.calls[0]?.[0]).toMatchObject({ kind: "enqueue" });
+      expect(host.execute.mock.calls[0]?.[0]).not.toHaveProperty("timing");
     } finally {
       writeTurnSendPreference("steer");
     }

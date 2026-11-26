@@ -10,12 +10,19 @@ export type TurnSendPreference = "steer" | "queue";
 
 const STORAGE_KEY = "octant.composer.while-turn-runs.v1";
 const listeners = new Set<() => void>();
+/** A choice the browser would not store: it lasts for this window only. */
+let unsaved: TurnSendPreference | undefined;
 
-export function readTurnSendPreference(
-  storage: Pick<Storage, "getItem"> | undefined = globalThis.localStorage,
-): TurnSendPreference {
+// A browser that blocks site data throws on reading `localStorage` itself, so
+// the store is looked up inside each `try`, never as a default argument.
+function localStore(): Storage | undefined {
+  return globalThis.localStorage;
+}
+
+export function readTurnSendPreference(storage?: Pick<Storage, "getItem">): TurnSendPreference {
+  if (unsaved !== undefined) return unsaved;
   try {
-    return storage?.getItem(STORAGE_KEY) === "queue" ? "queue" : "steer";
+    return (storage ?? localStore())?.getItem(STORAGE_KEY) === "queue" ? "queue" : "steer";
   } catch {
     return "steer";
   }
@@ -23,12 +30,13 @@ export function readTurnSendPreference(
 
 export function writeTurnSendPreference(
   preference: TurnSendPreference,
-  storage: Pick<Storage, "setItem"> | undefined = globalThis.localStorage,
+  storage?: Pick<Storage, "setItem">,
 ): void {
   try {
-    storage?.setItem(STORAGE_KEY, preference);
+    (storage ?? localStore())?.setItem(STORAGE_KEY, preference);
+    unsaved = undefined;
   } catch {
-    // A preference that cannot be kept lasts for this window only.
+    unsaved = preference;
   }
   for (const listener of listeners) listener();
 }

@@ -1105,14 +1105,20 @@ message it holds says only whether it waits ("Waits for the next turn" in the
 queue). A message sent to steer while an earlier one waits goes into the
 running turn ahead of it; the waiting ones keep their order for the next turn.
 Each waiting Work or Code message has **Send now**, which moves it to the
-front of the messages that can still move and lets it steer the running turn
+front of the messages that can still move, but never ahead of one already on
+its way or offered to the running turn, and lets it steer the running turn
 under the same checks as any message; a message its runtime refused before is
-asked again. On a paused or held queue the host refuses Send now with the
+asked again. A host from before Send now rejects the command, and the client
+shows that as a refusal asking to update the computer's Octant, never as a
+lost request that blocks the composer. On a paused or held queue the host refuses Send now with the
 pause or hold reason, so the person resumes first; Chat, which never steers,
 does not offer it. A host from before this choice refuses the unknown field,
 and the client then sends the message once more without it, so it may steer,
 and says so. The send button names Steer or Queue only while a turn runs; with
-no turn running and messages still queued it reads **Queue message**.
+no turn running and messages still queued, or the queue paused or held, it
+reads **Queue message**, and the message is queued without the setting, so it
+may steer the first turn after Resume. A browser that blocks storage reads the
+setting as Steer, and a choice made there lasts for the window only.
 
 In Work and Code a message sent while the turn runs is steered into that
 turn where its runtime steers (maintainer decision, 2026-11-21;

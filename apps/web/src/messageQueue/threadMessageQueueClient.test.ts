@@ -95,6 +95,25 @@ describe("the host message queue connection", () => {
     expect(sent.at(-1)).toMatchObject({ payload: { typedByPerson: true } });
   });
 
+  it("answers Send now with a refusal, not a lost request, when a host that predates it rejects it", async () => {
+    const scope = { mode: "work" as const, threadId };
+    const command = decodeThreadMessageQueueCommand({
+      kind: "send-now",
+      scope,
+      expectedVersion: 1,
+      requestId: crypto.randomUUID(),
+      messageId: crypto.randomUUID(),
+    });
+    const client = createThreadMessageQueueClient({
+      serverUrl: "http://localhost:4310",
+      windowCapability: "window-proof",
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response("Invalid", { status: 400 })),
+    });
+    const result = await client.execute(command);
+    expect(result).toMatchObject({ status: "refused", requestId: command.requestId });
+    expect(result.status === "refused" ? result.message : undefined).toMatch(/update/i);
+  });
+
   it("refuses a snapshot for another thread instead of exposing it in this composer", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       Response.json({

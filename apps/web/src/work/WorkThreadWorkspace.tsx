@@ -2530,7 +2530,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       if (queueFollowUp) {
         preparingQueue.current = true;
         try {
-          await sendWorkTurn(true, false, messageTiming(turnSendPreference, opposite));
+          // The choice is for messages sent while a turn runs; one queued on
+          // an idle thread behind a paused or held queue keeps its default.
+          await sendWorkTurn(
+            true,
+            false,
+            turnRunning ? messageTiming(turnSendPreference, opposite) : undefined,
+          );
         } finally {
           preparingQueue.current = false;
         }
