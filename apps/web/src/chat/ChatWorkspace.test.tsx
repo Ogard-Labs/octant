@@ -567,9 +567,11 @@ describe("Chat usage-limit strip", () => {
     );
     await waitFor(() => expect(document.querySelector(".usage-limit-strip")).not.toBeNull());
     expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
-    await user.click(screen.getByRole("button", { name: "Resume now" }));
-    await user.click(screen.getByRole("button", { name: "Resume at reset" }));
-    await user.click(screen.getByRole("button", { name: "Snooze until reset" }));
+    // The strip draws before its actions: under CI load "Resume now" was not
+    // there yet when the strip first appeared, so each action is awaited.
+    await user.click(await screen.findByRole("button", { name: "Resume now" }));
+    await user.click(await screen.findByRole("button", { name: "Resume at reset" }));
+    await user.click(await screen.findByRole("button", { name: "Snooze until reset" }));
     await waitFor(() =>
       expect(execute.mock.calls.map(([command]) => command.kind)).toEqual([
         "retry-chat-turn",
