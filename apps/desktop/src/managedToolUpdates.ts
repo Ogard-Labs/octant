@@ -39,7 +39,11 @@ export function createManagedToolUpdates<
   let generation = 0;
   let scheduled: (() => void) | undefined;
   let staged: Staged | undefined;
+  /** Whether `staged` came from the daily schedule rather than the person's own check. */
+  let stagedAutomatically = false;
   let checking: Promise<void> | undefined;
+  /** Who started the check in flight; a person joining it makes it theirs. */
+  let checkingOrigin: "automatic" | "manual" = "manual";
   let applying: Promise<void> | undefined;
   let abort = new AbortController();
   const schedule =
@@ -59,7 +63,7 @@ export function createManagedToolUpdates<
     if (!enabled || !automatic || closed) return;
     scheduled = schedule(delay, () => {
       if (!enabled || !automatic || closed) return;
-      void check();
+      void check("automatic");
     });
   };
 
@@ -95,9 +99,13 @@ export function createManagedToolUpdates<
     }
   }
 
-  async function check(): Promise<void> {
+  async function check(origin: "automatic" | "manual" = "manual"): Promise<void> {
     if (closed) return;
-    if (checking !== undefined) return checking;
+    if (checking !== undefined) {
+      if (origin === "manual") checkingOrigin = "manual";
+      return checking;
+    }
+    checkingOrigin = origin;
     const run = generation;
     const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(180_000)]);
     checking = (async () => {
@@ -125,6 +133,7 @@ export function createManagedToolUpdates<
         if (run !== generation || signal.aborted || closed) return;
         if (verified.version !== release.version) throw new Error("Verified tool version changed.");
         staged = verified;
+        stagedAutomatically = checkingOrigin === "automatic";
         publish({
           status: "staged",
           currentVersion: state.currentVersion,
@@ -170,6 +179,15 @@ export function createManagedToolUpdates<
         generation += 1;
         abort.abort();
         abort = new AbortController();
+        // Turning automatic updates off withdraws an update the schedule
+        // staged; one the person asked for with Check for updates still
+        // installs once work stops.
+        if (!automatic && stagedAutomatically && staged !== undefined) {
+          staged = undefined;
+          stagedAutomatically = false;
+          if (state.status === "staged")
+            publish({ status: "idle", currentVersion: state.currentVersion });
+        }
         if (state.status === "checking" || state.status === "downloading") {
           publish({
             status: staged === undefined ? "idle" : "staged",

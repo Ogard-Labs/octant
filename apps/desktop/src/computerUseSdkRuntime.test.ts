@@ -12,7 +12,7 @@ const native = vi.hoisted(() => ({
   currentPermissions: vi.fn(),
   openPermissionSettings: vi.fn(async () => {}),
   openExternal: vi.fn(async () => {}),
-  contractVersion: "0.8.0",
+  contractVersion: "0.9.0",
   driverVersion: "0.38.0",
 }));
 vi.mock("./computerUseDriverRelease", () => ({
@@ -53,7 +53,7 @@ import {
 let root: string;
 beforeEach(async () => {
   vi.clearAllMocks();
-  native.contractVersion = "0.8.0";
+  native.contractVersion = "0.9.0";
   root = await mkdtemp(join(tmpdir(), "octant-runtime-test-"));
 });
 afterEach(async () => {
@@ -77,12 +77,12 @@ function start() {
 }
 describe("Embedded computer runtime contract", () => {
   it("admits a driver whose contract differs only by patch", async () => {
-    native.contractVersion = "0.8.7";
+    native.contractVersion = "0.9.7";
     native.callTool.mockResolvedValue(health("pass"));
     const runtime = await start();
     await runtime.close();
   });
-  it.each(["0.9.0", "0.7.9", "1.8.0", "0.8"])(
+  it.each(["0.10.0", "0.8.0", "1.9.0", "0.9"])(
     "refuses a driver speaking contract %s and closes native resources",
     async (contract) => {
       native.contractVersion = contract;

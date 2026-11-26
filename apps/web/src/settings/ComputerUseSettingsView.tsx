@@ -131,7 +131,13 @@ export function ComputerUseSettingsView(props: {
               checked={props.settings.automaticUpdates}
               disabled={busy}
               onCheckedChange={(automaticUpdates) =>
-                props.onSettingsChange({ computerUse: { ...props.settings, automaticUpdates } })
+                props.onSettingsChange({
+                  computerUse: {
+                    ...props.settings,
+                    automaticUpdates,
+                    automaticUpdatesChosen: true,
+                  },
+                })
               }
             />
           </SettingRow>

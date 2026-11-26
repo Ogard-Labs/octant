@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile, rename, lstat, rm } from "node:fs/promises"
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
+  isCompatibleComputerDriverContract,
   isNewerComputerDriver,
   type ComputerDriverRelease,
   type StagedComputerDriver,
@@ -16,9 +17,9 @@ const VERSION = /^(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})$/;
 export const CUA_DRIVER_PUBLISHER_REQUIREMENT =
   'anchor apple generic and identifier "cua-driver" and certificate leaf[subject.OU] = "YCK386LBJ7"';
 export const BUNDLED_CUA_DRIVER: ComputerDriverRelease = {
-  version: "0.38.0",
-  url: "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.38.0/cua-driver-rs-0.38.0-darwin-universal-binary.tar.gz",
-  sha256: "2bb8dc4a7e69185ffd04c4a9c0eab590bd2c54b72c2c1be13ab675be4f487732",
+  version: "0.62.1",
+  url: "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.62.1/cua-driver-rs-0.62.1-darwin-universal-binary.tar.gz",
+  sha256: "05ed121a1c57c83c8af22914e93ea02b1795e5d971b6761deaf6d6edb951f5f8",
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -35,11 +36,9 @@ export function isComputerDriverRelease(value: ComputerDriverRelease): boolean {
   );
 }
 
-export function computerDriverReleaseFromResponse(
-  value: unknown,
-): ComputerDriverRelease | undefined {
-  if (!Array.isArray(value) || value.length > 100) return undefined;
-  let latest: ComputerDriverRelease | undefined;
+function computerDriverReleasesFromResponse(value: unknown): ReadonlyArray<ComputerDriverRelease> {
+  if (!Array.isArray(value) || value.length > 100) return [];
+  const found: Array<ComputerDriverRelease> = [];
   for (const release of value) {
     if (
       !record(release) ||
@@ -65,11 +64,9 @@ export function computerDriverReleaseFromResponse(
       url: asset.browser_download_url,
       sha256: asset.digest.replace(/^sha256:/, ""),
     };
-    if (!isComputerDriverRelease(candidate)) continue;
-    if (latest === undefined || isNewerComputerDriver(candidate.version, latest.version))
-      latest = candidate;
+    if (isComputerDriverRelease(candidate)) found.push(candidate);
   }
-  return latest;
+  return found;
 }
 
 async function boundedDownload(
@@ -125,10 +122,10 @@ async function boundedDownload(
   throw new Error("Driver download redirected too many times.");
 }
 
-export async function latestComputerDriverRelease(
+async function listComputerDriverReleases(
   signal: AbortSignal,
-): Promise<ComputerDriverRelease> {
-  let latest: ComputerDriverRelease | undefined;
+): Promise<ReadonlyArray<ComputerDriverRelease>> {
+  const found: Array<ComputerDriverRelease> = [];
   for (let page = 1; page <= 5; page += 1) {
     const bytes = await boundedDownload(
       `https://api.github.com/repos/trycua/cua/releases?per_page=20&page=${page}`,
@@ -138,16 +135,72 @@ export async function latestComputerDriverRelease(
     const releases: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (!Array.isArray(releases) || releases.length > 20)
       throw new Error("Driver release page is invalid.");
-    const candidate = computerDriverReleaseFromResponse(releases);
-    if (
-      candidate !== undefined &&
-      (latest === undefined || isNewerComputerDriver(candidate.version, latest.version))
-    )
-      latest = candidate;
+    found.push(...computerDriverReleasesFromResponse(releases));
     if (releases.length < 20) break;
   }
-  if (latest === undefined) throw new Error("No verifiable stable driver release was found.");
-  return latest;
+  return found;
+}
+
+/**
+ * The wire contract a driver release speaks, read from the manifest upstream
+ * publishes at the release's tag. The driver's startup handshake still
+ * decides; this only keeps Octant from downloading and restarting into a
+ * driver its SDK cannot speak (0.54.0 moved the contract to 0.9 while this
+ * build's predecessor spoke 0.8, and its updater kept retrying 0.62.1).
+ */
+async function computerDriverReleaseContract(version: string, signal: AbortSignal) {
+  if (!VERSION.test(version)) throw new Error("Driver release is invalid.");
+  const bytes = await boundedDownload(
+    `https://api.github.com/repos/trycua/cua/contents/libs/cua-driver/contract/manifest.json?ref=cua-driver-rs-v${version}`,
+    4 * 1024 * 1024,
+    signal,
+  );
+  const file: unknown = JSON.parse(new TextDecoder().decode(bytes));
+  if (!record(file) || file.encoding !== "base64" || typeof file.content !== "string")
+    throw new Error("Driver contract manifest is invalid.");
+  const manifest: unknown = JSON.parse(Buffer.from(file.content, "base64").toString("utf8"));
+  if (!record(manifest) || typeof manifest.contract_version !== "string")
+    throw new Error("Driver contract manifest is invalid.");
+  return manifest.contract_version;
+}
+
+/**
+ * The newest release after `currentVersion` that speaks this build's driver
+ * contract, and the newest release that needs a newer Octant, if any.
+ * Contracts only move forward with driver versions, so a binary search over
+ * the newer releases reads a handful of manifests rather than one per release.
+ */
+export async function latestCompatibleComputerDriverRelease(
+  currentVersion: string,
+  signal: AbortSignal,
+): Promise<{ readonly release?: ComputerDriverRelease; readonly needsNewerOctant?: string }> {
+  const newer = (await listComputerDriverReleases(signal))
+    .filter((release) => isNewerComputerDriver(release.version, currentVersion))
+    .toSorted((a, b) => (isNewerComputerDriver(a.version, b.version) ? -1 : 1));
+  const speaks = async (index: number) => {
+    const release = newer[index];
+    return (
+      release !== undefined &&
+      isCompatibleComputerDriverContract(
+        await computerDriverReleaseContract(release.version, signal),
+      )
+    );
+  };
+  const newest = newer[0];
+  if (newest === undefined || (await speaks(0)))
+    return newest === undefined ? {} : { release: newest };
+  // newer[0] needs a newer Octant; find the first index that this build speaks.
+  let low = 1;
+  let high = newer.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (await speaks(middle)) high = middle;
+    else low = middle + 1;
+  }
+  const release = newer[low];
+  return release === undefined
+    ? { needsNewerOctant: newest.version }
+    : { release, needsNewerOctant: newest.version };
 }
 
 /** Runs no candidate code until the publisher signature and architecture are verified. */

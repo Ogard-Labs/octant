@@ -44,7 +44,7 @@ export function isNewerComputerDriver(candidate: string, current: string): boole
  * A driver that reports another minor is refused at startup and before a
  * staged update activates, however correctly it is signed.
  */
-export const COMPUTER_DRIVER_CONTRACT = { major: 0, minor: 8 } as const;
+export const COMPUTER_DRIVER_CONTRACT = { major: 0, minor: 9 } as const;
 
 export function isCompatibleComputerDriverContract(contractVersion: string): boolean {
   const match = /^(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})$/.exec(contractVersion);

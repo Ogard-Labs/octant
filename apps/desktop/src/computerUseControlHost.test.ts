@@ -14,7 +14,11 @@ const owner = decodeComputerUseOwner({
   executionPolicy: "approval-gated",
 });
 
-function fixture(protectedField = false, additionalElements = 0, unresolved = false) {
+function fixture(
+  protectedField: boolean | "driver-marked" = false,
+  additionalElements = 0,
+  unresolved = false,
+) {
   let snapshot = 0;
   let clickFailure: string | undefined;
   const call = vi.fn(async (name: string) => {
@@ -47,12 +51,14 @@ function fixture(protectedField = false, additionalElements = 0, unresolved = fa
                   { element_index: 0, role: "AXWindow", label: "Fixture" },
                   {
                     element_index: 4,
-                    role: protectedField ? "AXTextField" : "AXButton",
-                    label: "Save",
+                    role: protectedField === false ? "AXButton" : "AXTextField",
+                    label: protectedField === "driver-marked" ? "Code" : "Save",
                     parent_index: 0,
-                    ...(protectedField
+                    ...(protectedField === true
                       ? { value_description: "contains secure text", value: "masked" }
-                      : {}),
+                      : protectedField === "driver-marked"
+                        ? { is_password: true, value: "masked" }
+                        : {}),
                     frame: { x: 1, y: 1, w: 30, h: 20 },
                   },
                   { element_index: 5, role: "AXMenuBar", label: "Menu" },
@@ -321,6 +327,36 @@ describe("Thread-owned computer control", () => {
         ),
       ).toMatchObject({ kind: "refused", reason: "window-owned" });
       expect(call.mock.calls.some(([name]) => name === "click")).toBe(false);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("refuses a field the driver marks as a password even when its role and label do not say so", async () => {
+    const { host, call } = fixture("driver-marked");
+    try {
+      const observed = await host.execute(
+        owner,
+        decodeComputerControlCommand({
+          operation: "observe",
+          appId: "com.example.Fixture",
+          windowId: 9,
+        }),
+      );
+      if (observed.kind !== "observation") throw new Error("Expected observation.");
+      expect(observed.elements.find((element) => element.index === 4)).toMatchObject({
+        protected: true,
+      });
+      expect(observed.elements.find((element) => element.index === 4)).not.toHaveProperty("value");
+      expect(
+        await host.execute(owner, {
+          operation: "type",
+          observationId: observed.observationId,
+          elementIndex: 4,
+          text: "never delivered",
+        }),
+      ).toMatchObject({ kind: "refused", reason: "protected-field" });
+      expect(call.mock.calls.some(([name]) => name === "type_text")).toBe(false);
     } finally {
       await host.close();
     }

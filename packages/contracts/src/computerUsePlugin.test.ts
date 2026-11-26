@@ -21,9 +21,26 @@ describe("Computer use plugin commands", () => {
     ).toThrow();
   });
 
-  it("leaves automatic driver updates off without granting application control", () => {
-    expect(decodeComputerUseSettings({})).toEqual({ enabled: true, automaticUpdates: false });
+  it("updates the driver automatically by default without granting application control", () => {
+    expect(decodeComputerUseSettings({})).toEqual({ enabled: true, automaticUpdates: true });
     expect(() => decodeComputerUseSettings({ approvedApps: ["*"] })).toThrow();
+  });
+
+  it("turns automatic driver updates on for a store that never recorded the person's choice", () => {
+    // Stores from before the choice was recorded hold `false` whether or not
+    // the person ever touched the switch, because the old default was written.
+    expect(decodeComputerUseSettings({ enabled: true, automaticUpdates: false })).toEqual({
+      enabled: true,
+      automaticUpdates: true,
+    });
+  });
+
+  it("keeps automatic driver updates off once the person turned them off", () => {
+    const off = { enabled: true, automaticUpdates: false, automaticUpdatesChosen: true };
+    expect(decodeComputerUseSettings(off)).toEqual(off);
+    expect(() =>
+      decodeComputerUseSettings({ automaticUpdates: false, automaticUpdatesChosen: false }),
+    ).toThrow();
   });
 
   it("preserves whitespace when typing or clearing an observed field", () => {
@@ -103,7 +120,7 @@ describe("Computer use plugin commands", () => {
 it("persists pending setup without treating it as a verified working driver", () => {
   expect(decodeComputerUseSettings({ enabled: true, setupPending: true })).toEqual({
     enabled: true,
-    automaticUpdates: false,
+    automaticUpdates: true,
     setupPending: true,
   });
   const status = {

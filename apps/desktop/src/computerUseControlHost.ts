@@ -475,6 +475,10 @@ export function createComputerUseControlHost(options: {
 
 function isProtected(element: Record<string, unknown>): boolean {
   return (
+    // The driver's own password flag (in its element schema by 0.62.1) wins
+    // where it is set; the role and label checks still cover elements where
+    // it is absent.
+    element.is_password === true ||
     /secure|password/i.test(
       `${String(element.role)} ${String(element.subrole)} ${String(element.value_description)}`,
     ) ||

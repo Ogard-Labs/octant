@@ -896,7 +896,7 @@ describe("createPhase1RuntimeRegistries", () => {
           rememberedDesktopFileTransfers: [],
           persistentBrowserOwner: false,
           pairedDeviceLifetime: "30-days",
-          computerUse: { enabled: false, automaticUpdates: false },
+          computerUse: { enabled: false, automaticUpdates: false, automaticUpdatesChosen: true },
           projectViewSwitcherPresentation: "dropdown",
           transcriptTextSize: "medium",
           transcriptWidth: "narrow",

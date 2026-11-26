@@ -15418,23 +15418,40 @@ and macOS allows Octant, the reported permissions are the running driver's own
 `check_permissions` answer, not Octant's: macOS can refuse the child while
 allowing Octant (measured with an ad-hoc signed build launched by
 LaunchServices), and an unreadable answer counts as refused. The app bundles a pinned,
-publisher-verified driver. The driver runs under Octant's macOS permissions,
-so it checks upstream daily only
-when the person turns automatic updates on in Settings › Computer use; it is
-off by default, a saved choice is kept, and a manual Check for updates still
-works. Verified updates stage privately, activate
-only while idle, and retain the previous version if startup fails. The SDK
-accepts a driver whose handshake reports its wire contract as the same
-`major.minor` as the one the SDK speaks (patch releases only, because the
-driver is pre-1.0), whatever the driver's own version; the check runs at every
-startup and when a staged update starts, before it becomes the active version,
-and an update that fails it is dropped and the previous driver restarts. Octant
+publisher-verified driver and keeps it current by itself: it checks upstream
+daily and after a manual Check for updates, unless the person turned automatic
+updates off in Settings › Computer use (maintainer decision, 2026-11-26,
+replacing the opt-in default). Only the person's own choice keeps updates off:
+a store saved while they were off by default reads as on. Verified updates
+stage privately, activate only while idle, and retain the previous version if
+startup fails; turning automatic updates off withdraws an update the daily
+check staged, while one the person asked for with Check for updates still
+installs. Octant's driver SDK is built into the app, so the app can
+follow upstream only within one wire contract. The SDK accepts a driver whose
+handshake reports the same contract `major.minor` as the one it speaks,
+whatever the driver's own version (a new contract minor can break the wire
+while the driver is pre-1.0); the check runs at every startup and when a staged
+update starts, before it becomes the active version, and an update that fails
+it is dropped and the previous driver restarts. Before downloading, the update
+check reads each candidate's contract from the manifest upstream publishes at
+its release tag and offers the newest release on this build's contract; when
+upstream's newest needs a newer contract, Settings says that driver needs a
+newer Octant instead of reporting a failed update. A driver an earlier Octant
+downloaded runs only while it is newer than the bundled one. A weekly job
+(`computer-use-driver` workflow) compares the pin with upstream's newest
+release, its contract and the published schemas of the tools Octant calls, and
+moves the pin on one draft pull request; a person runs the live Computer use
+check before it merges. In November 2026 the pin sat on 0.38.0 (contract 0.8)
+while upstream, and the driver Cua Spaces ships, moved to contract 0.9, and
+every in-app update was downloaded and then refused at the handshake. Octant
 addresses elements by the snapshot's `element_token` and requests the
 structured element list; the driver refuses any argument outside a tool's
 schema, so a new driver release is checked against the tools Octant calls
-before the bundled pin moves. The driver
-never uses a standalone CuaDriver installation. Plan refuses computer-use
-control.
+before the bundled pin moves. A field the driver marks `is_password` is
+protected like one whose role or label says so. The driver
+never uses a standalone CuaDriver installation; it runs beside one, such as
+the driver Cua Spaces ships, on its own socket and profile. Plan refuses
+computer-use control.
 
 A window lists, inspects, answers and stops the Computer use sessions its own
 turns started (`/api/computer-use/*`). A device the host's own person paired

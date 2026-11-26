@@ -17,7 +17,7 @@
     "@octant/contracts": "workspace:*",
     "@octant/domain": "workspace:*",
     "@octant/host-runtime": "workspace:*",
-    "@trycua/cua-driver": "0.38.0",
+    "@trycua/cua-driver": "0.62.1",
     "effect": "3.21.4"
   },
   "devDependencies": {
@@ -29,7 +29,7 @@
     "vitest": "catalog:"
   },
   "optionalDependencies": {
-    "@trycua/cua-driver-darwin-arm64": "0.38.0"
+    "@trycua/cua-driver-darwin-arm64": "0.62.1"
   },
   "bundleId": "app.octant.desktop",
   "productName": "Octant"

@@ -256,8 +256,8 @@ describe("shell settings policy", () => {
       imageGeneration: { customSources: [] },
       // Video names no profile for Full access, so the first ready one is used.
       videoGeneration: {},
-      // The Computer-use driver waits for a person before fetching an upstream release.
-      computerUse: { enabled: true, automaticUpdates: false },
+      // The Computer-use driver keeps itself current unless the person turns that off.
+      computerUse: { enabled: true, automaticUpdates: true },
       // The host has not been told who is using it, so the profile carries no
       // name and no address — only the accent the initials avatar falls back to.
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },

@@ -9,7 +9,7 @@ const fixture = vi.hoisted(() => ({
 vi.mock("./computerUseDriverRelease", () => ({
   BUNDLED_CUA_DRIVER: { version: "0.38.0" },
   commitComputerDriver: vi.fn(async () => {}),
-  latestComputerDriverRelease: vi.fn(async () => undefined),
+  latestCompatibleComputerDriverRelease: vi.fn(async () => ({})),
   readInstalledComputerDriver: vi.fn(async () => undefined),
   stageComputerDriver: vi.fn(),
   verifyComputerDriverBinary: vi.fn(async () => {}),
@@ -18,7 +18,7 @@ vi.mock("./computerUseSdkRuntime", async (actual) => ({
   ...(await actual<typeof import("./computerUseSdkRuntime")>()),
   computerUsePermissions: vi.fn(async () => fixture.host),
   openComputerUsePermissionSettings: vi.fn(async () => {}),
-  startComputerDriverRuntime: vi.fn(async () => {
+  startComputerDriverRuntime: vi.fn(async (_options: { readonly driver: unknown }) => {
     fixture.starts += 1;
     return {
       generation: "fixture",
@@ -33,7 +33,12 @@ vi.mock("./computerUseSdkRuntime", async (actual) => ({
     };
   }),
 }));
-import { computerUsePermissions } from "./computerUseSdkRuntime";
+import { decodeComputerUseStatus } from "@octant/contracts/computer-use-plugin";
+import {
+  latestCompatibleComputerDriverRelease,
+  readInstalledComputerDriver,
+} from "./computerUseDriverRelease";
+import { computerUsePermissions, startComputerDriverRuntime } from "./computerUseSdkRuntime";
 import * as updateModule from "./computerUseDriverUpdates";
 import * as controlModule from "./computerUseControlHost";
 import { createComputerUseDesktopService } from "./computerUseDesktopService";
@@ -165,6 +170,58 @@ describe("Computer use permission status", () => {
         accessibility: true,
         screenRecording: true,
       });
+    } finally {
+      await computer.close();
+    }
+  });
+
+  it("starts the bundled driver rather than an older one an earlier Octant downloaded", async () => {
+    // An install that updated itself to a contract-0.8 driver must not keep
+    // starting it after Octant moved its bundled driver to a newer contract.
+    vi.mocked(readInstalledComputerDriver).mockResolvedValueOnce({
+      version: "0.37.0",
+      path: "downloaded",
+    });
+    vi.mocked(startComputerDriverRuntime).mockClear();
+    const computer = service();
+    await computer.configure({ enabled: true, automaticUpdates: false });
+    try {
+      expect((await computer.status()).version).toBe("0.38.0");
+      expect(vi.mocked(startComputerDriverRuntime).mock.calls[0]?.[0].driver).toEqual({
+        version: "0.38.0",
+        path: "fixture",
+      });
+    } finally {
+      await computer.close();
+    }
+  });
+
+  it("says a newer driver needs a newer Octant instead of reporting a failed update", async () => {
+    vi.mocked(latestCompatibleComputerDriverRelease).mockResolvedValueOnce({
+      needsNewerOctant: "0.40.0",
+    });
+    const computer = service();
+    await computer.configure({ enabled: true, automaticUpdates: false });
+    try {
+      const status = await computer.checkUpdates();
+      expect(status.update).toBe("current");
+      expect(status.message).toBe(
+        "CuaDriver 0.40.0 needs a newer Octant. Update Octant to use it.",
+      );
+    } finally {
+      await computer.close();
+    }
+  });
+
+  it("reports a status the renderer accepts after the person chose an update setting", async () => {
+    const computer = service();
+    await computer.configure({
+      enabled: true,
+      automaticUpdates: false,
+      automaticUpdatesChosen: true,
+    });
+    try {
+      expect(decodeComputerUseStatus(await computer.status()).automaticUpdates).toBe(false);
     } finally {
       await computer.close();
     }
