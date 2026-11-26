@@ -30,6 +30,8 @@ export interface McpServerConnectionSources {
     packageState: ExtensionPackageState,
     componentId: string,
   ) => Promise<string>;
+  /** Limits the listing, and every read behind it, to these servers. */
+  readonly only?: (extensionId: string, componentId: string) => boolean;
 }
 
 type ComponentState = ExtensionPackageState["components"][number];
@@ -68,7 +70,8 @@ export function describeMcpServerConnection(input: {
   /**
    * Whether the server cannot work without a sign-in. Signed out means only
    * that a sign-in is offered: a hosted server that takes a key or nothing
-   * reports it too, so it counts only for a catalog connector that signs in.
+   * reports it too, so it counts only for a catalog connector that signs in,
+   * or for a server whose last refusal offered an OAuth sign-in.
    */
   readonly signInRequired: boolean;
   readonly observation?: McpConnectionObservation;
@@ -87,7 +90,11 @@ export function describeMcpServerConnection(input: {
       (effective.reason === "plugin-disabled" || effective.reason === "component-disabled"))
   )
     return { state: "off", reason: "Switched off." };
-  if (signIn.kind === "signed-out" && input.signInRequired && observation?.state !== "connected")
+  if (
+    signIn.kind === "signed-out" &&
+    (input.signInRequired || observation?.signInOffered === true) &&
+    observation?.state !== "connected"
+  )
     return { state: "needs-sign-in", reason: "Not signed in.", ...at };
   if (signIn.kind === "sign-in-again")
     return { state: "needs-sign-in", reason: SIGN_IN_AGAIN[signIn.reason], ...at };
@@ -187,6 +194,7 @@ export async function listMcpServerConnections(
       if (component.component.kind !== "mcp-server") continue;
       const extensionId = String(packageState.extensionId);
       const componentId = String(component.component.id);
+      if (sources.only !== undefined && !sources.only(extensionId, componentId)) continue;
       const [signIn, configuration] = await Promise.all([
         sources
           .signInStatus(extensionId, componentId)

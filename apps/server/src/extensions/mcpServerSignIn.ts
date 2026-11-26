@@ -36,6 +36,8 @@ import {
   isSlackMcpUserDescriptorBinding,
 } from "@octant/host-runtime";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
+import type { McpAuthenticationChange } from "./agentPluginMcpSessionManager";
+import { bearerResourceMetadata, readableMetadataAddress } from "./mcpAuthenticationChallenge";
 import type { GeneratedMcpSignInPolicy, LinkedSecretPointers } from "./userAddedMcpServers";
 import type { HostOAuthService } from "../providers/oauth/hostOAuthService";
 
@@ -121,7 +123,11 @@ export interface McpServerSignInOptions {
   readonly pointTimeoutMs?: number;
   readonly retirementTimeoutMs?: number;
   /** Fences cached task transports when this component's broker grant changes. */
-  readonly onAuthenticationChanged?: (extensionId: string, componentId: string) => Promise<void>;
+  readonly onAuthenticationChanged?: (
+    extensionId: string,
+    componentId: string,
+    change?: McpAuthenticationChange,
+  ) => Promise<void>;
   readonly beginTimeoutMs?: number;
   /** State replacement boundary; the default writes an owner-only file then atomically renames it. */
   readonly replaceState?: (path: string, contents: string) => Promise<void>;
@@ -1734,7 +1740,9 @@ export class McpServerSignIn {
     if (!(await this.#cancelPending(key, principalKind, actor))) return cancellationPending();
     const record = this.#signIns.get(key);
     if (record === undefined) {
-      await this.#options.onAuthenticationChanged?.(extensionId, componentId);
+      await this.#options.onAuthenticationChanged?.(extensionId, componentId, {
+        grant: "unchanged",
+      });
       return { kind: "signed-out" };
     }
     let pending: McpServerSignInRecord | undefined;
@@ -2294,8 +2302,7 @@ export class McpServerSignIn {
     }
     await probe.body?.cancel().catch(() => undefined);
     if (probe.status !== 401) return { kind: "no-sign-in-offered" };
-    const challenge = probe.headers.get("www-authenticate") ?? "";
-    const named = /resource_metadata="([^"]+)"/i.exec(challenge)?.[1];
+    const named = bearerResourceMetadata(probe.headers.get("www-authenticate"));
     const server = new URL(serverUrl);
     const candidates = [
       ...(named === undefined ? [] : [named]),
@@ -2567,7 +2574,7 @@ export class McpServerSignIn {
   }
 
   async #json(url: string): Promise<Record<string, unknown> | undefined> {
-    if (!isHttps(url) && !isLoopbackHttp(url)) return undefined;
+    if (!readableMetadataAddress(url)) return undefined;
     try {
       const response = await this.#request(url, { headers: { accept: "application/json" } });
       if (!response.ok) {
@@ -2893,18 +2900,6 @@ function isHttps(value: string): boolean {
   try {
     const url = new URL(value);
     return url.protocol === "https:" && !url.username && !url.password;
-  } catch {
-    return false;
-  }
-}
-
-function isLoopbackHttp(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === "http:" &&
-      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]")
-    );
   } catch {
     return false;
   }

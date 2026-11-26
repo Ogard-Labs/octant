@@ -192,6 +192,23 @@ describe("MCP servers added by hand", () => {
     ).toBeUndefined();
   });
 
+  it("counts only a server the person typed in as added by hand, never a catalog connector", async () => {
+    const { store: servers } = await store();
+    const connector = await servers.add({
+      name: "Demo",
+      connectorId: "linear",
+      server: { type: "streamable-http", url: "https://mcp.linear.app/mcp", headers: [] },
+    });
+    const handAdded = await servers.add({
+      name: "Notes",
+      server: { type: "streamable-http", url: "https://notes.example.test/mcp", headers: [] },
+    });
+    expect(servers.owns(connector.source.sourceRef)).toBe(true);
+    expect(servers.addedByHand(connector.source.sourceRef)).toBe(false);
+    expect(servers.addedByHand(handAdded.source.sourceRef)).toBe(true);
+    expect(servers.addedByHand("not-a-source")).toBe(false);
+  });
+
   it("adds Paper as a local HTTP package without running its CLI or requesting OAuth", async () => {
     const { store: servers, registry } = await store();
     const { source } = await servers.add({

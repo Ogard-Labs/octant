@@ -153,7 +153,11 @@ async function signIn(options: {
   readonly retirementTimeoutMs?: number;
   readonly beginTimeoutMs?: number;
   readonly replaceState?: (path: string, contents: string) => Promise<void>;
-  readonly onAuthenticationChanged?: (extensionId: string, componentId: string) => Promise<void>;
+  readonly onAuthenticationChanged?: (
+    extensionId: string,
+    componentId: string,
+    change?: { readonly grant: "unchanged" },
+  ) => Promise<void>;
 }) {
   const directory = await mkdtemp(join(tmpdir(), "octant-mcp-sign-in-"));
   directories.push(directory);
@@ -620,6 +624,50 @@ describe("signing in to a hosted MCP server", () => {
     expect(JSON.parse(await readFile(statePath, "utf8")).registrations[SERVER].clientId).toBe(
       publicSetup.clientId,
     );
+  });
+
+  it("follows only the resource metadata of the server's Bearer challenge", async () => {
+    const { oauth } = fakeOauth();
+    const issuer = issuerFetch().fetchImpl;
+    const named = `${new URL(SERVER).origin}/meta`;
+    const fallback = `${new URL(SERVER).origin}/.well-known/oauth-protected-resource/mcp`;
+    const fetched: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      fetched.push(String(input));
+      if (String(input) === SERVER)
+        return new Response(null, {
+          status: 401,
+          headers: {
+            "www-authenticate": `Basic resource_metadata="https://elsewhere.example.test/meta", Bearer realm="gateway", resource_metadata="metadata", Bearer resource_metadata = "${named}"`,
+          },
+        });
+      if (String(input) === named) return issuer(fallback, init);
+      if (String(input) === fallback) return new Response("not found", { status: 404 });
+      return issuer(input, init);
+    }) as typeof fetch;
+    const { service } = await signIn({ fetchImpl, oauth });
+    expect((await service.begin(EXTENSION, COMPONENT, "local-window")).kind).toBe(
+      "awaiting-consent",
+    );
+    expect(fetched).toContain(named);
+    expect(fetched).not.toContain(fallback);
+    expect(fetched).not.toContain("https://elsewhere.example.test/meta");
+  });
+
+  it("tells the sessions no grant changed when cancelling a first sign-in", async () => {
+    const { oauth } = fakeOauth();
+    const invalidate = vi.fn(async () => undefined);
+    const { service } = await signIn({
+      fetchImpl: issuerFetch().fetchImpl,
+      oauth,
+      onAuthenticationChanged: invalidate,
+    });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    expect(await service.signOut(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "signed-out",
+    });
+    expect(oauth.cancel).toHaveBeenCalledOnce();
+    expect(invalidate).toHaveBeenLastCalledWith(EXTENSION, COMPONENT, { grant: "unchanged" });
   });
 
   it("invalidates cached authentication on a proven revoked grant and refuses remote sign-out", async () => {

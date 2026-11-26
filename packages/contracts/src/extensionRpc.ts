@@ -498,6 +498,11 @@ export const McpServerConnection = Schema.Struct({
   reason: Schema.optional(boundedText(512)),
   /** When the host last saw a connection open or fail. */
   checkedAt: Schema.optional(UtcTimestamp),
+  /**
+   * In a `thread-sign-in` answer, the request's own `references` that name
+   * this server, so the composer resolves only those again once it is signed in.
+   */
+  references: Schema.optional(Schema.Array(boundedText(256)).pipe(Schema.maxItems(32))),
 }).annotations(strict);
 export type McpServerConnection = typeof McpServerConnection.Type;
 export const McpServerConnectionListing = Schema.Struct({
