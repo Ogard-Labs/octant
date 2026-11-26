@@ -1507,12 +1507,83 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("temporary rate limit");
-    expect(
-      screen.queryByRole("button", { name: "Resume when the limit resets" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("usage-limit-record")).toHaveTextContent("temporary rate limit");
+    expect(screen.queryByRole("button", { name: "Resume at reset" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
+  });
+
+  it("shows a waiting limited stop once in the transcript and once as the strip above the composer", async () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnUsageLimit: {
+            kind: "exhausted",
+            resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+          },
+          latestProviderTurnOperationId: "op-1",
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+
+    await waitFor(() => expect(document.querySelector(".usage-limit-strip")).not.toBeNull());
+    expect(screen.getAllByTestId("usage-limit-record")).toHaveLength(1);
+    expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Resume at reset" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Snooze until reset" })).toBeVisible();
+  });
+
+  it("sends the stopped turn's prompt again from the strip's Resume now", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnUsageLimit: { kind: "temporary" },
+          latestProviderTurnOperationId: "op-1",
+          conversation: [{ id: "m1", role: "user", text: "Fix the build", operationId: "op-1" }],
+          sendFollowUp,
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Resume now" }));
+    const call = sendFollowUp.mock.calls[0] as ReadonlyArray<unknown> | undefined;
+    expect(call?.[0]).toBe("Fix the build");
+    // Sent from outside the composer, so the person's draft is left alone.
+    expect(call?.[13]).toMatchObject({ onAccepted: expect.any(Function) });
+  });
+
+  it("withholds Resume now when the stopped prompt could not be read", async () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          // A reset ahead gives the strip actions to wait for, so the absence
+          // below is read after the lazily loaded buttons have rendered.
+          turnUsageLimit: {
+            kind: "temporary",
+            resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+          },
+          latestProviderTurnOperationId: "op-1",
+          conversation: [
+            {
+              id: "m1",
+              role: "user",
+              text: "Conversation prompt evidence is unavailable.",
+              promptUnavailable: true,
+              operationId: "op-1",
+            },
+          ],
+          sendFollowUp: vi.fn(async () => true),
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Resume at reset" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Resume now" })).toBeNull();
   });
 
   it("keeps the retry control off an ordinary turn error", () => {
@@ -1694,7 +1765,7 @@ describe("CodeThreadWorkspace", () => {
     ).toBeTruthy();
   });
 
-  it("sends the next message on the new account once a usage-limit hand-off released the parked turn", async () => {
+  it("sends the next message on the new account, with no usage-limit strip, once a hand-off released the parked turn", async () => {
     const user = userEvent.setup();
     const stopId = "30000000-0000-4000-8000-0000000000e1";
     const base = controller();
@@ -1703,11 +1774,16 @@ describe("CodeThreadWorkspace", () => {
       turnStatus: "waiting" as const,
       turnError: "The provider's usage window is spent.",
       turnErrorCategory: "failed",
+      turnUsageLimit: {
+        kind: "exhausted" as const,
+        resetsAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      },
       latestProviderTurnOperationId: stopId,
     };
     const { rerender } = render(
       <CodeThreadWorkspace controller={parked as never} threadId={threadId} />,
     );
+    expect(await screen.findByRole("button", { name: "Snooze until reset" })).toBeVisible();
     await user.type(screen.getByLabelText("Follow-up message"), "Carry on");
     expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
 
@@ -1738,6 +1814,8 @@ describe("CodeThreadWorkspace", () => {
     );
     expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    // Recovery would resend the stopped prompt on the account it moved to.
+    expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
   });
 
   it("leaves the model picker enabled on a turn parked by a refused resume", () => {

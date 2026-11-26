@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import type { UsageResumeThreadState, UtcTimestamp } from "@octant/contracts";
 import { UsageLimitNotice } from "./UsageLimitNotice";
 
@@ -8,7 +8,7 @@ const LIMIT = {
   resetsAt: "2099-07-19T13:00:00.000Z" as UtcTimestamp,
 };
 
-const armedResume = (status: UsageResumeThreadState["status"]): UsageResumeThreadState => ({
+const resume = (status: UsageResumeThreadState["status"]): UsageResumeThreadState => ({
   record: {
     threadId: "83000000-0000-4000-8000-000000000003",
     turnId: "83000000-0000-4000-8000-000000000004",
@@ -21,94 +21,32 @@ const armedResume = (status: UsageResumeThreadState["status"]): UsageResumeThrea
   status,
 });
 
-describe("the usage-limit notice", () => {
-  it("offers to hide the thread until the reset and dispatches that choice", () => {
-    const onSnoozeAtReset = vi.fn();
+describe("the transcript's usage-limit record", () => {
+  it("is one quiet line with the provider's sentence and its reset, and no recovery offers", () => {
+    render(<UsageLimitNotice limit={LIMIT} provider="Codex" />);
+    const record = screen.getByTestId("usage-limit-record");
+    expect(record).toHaveTextContent("Codex's usage allowance on this account is exhausted.");
+    expect(record).toHaveTextContent("It resets at");
+    expect(record.className).toContain("callout--row");
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("says an unknown reset is unknown", () => {
+    render(<UsageLimitNotice limit={{ kind: "temporary" }} provider="Codex" />);
+    expect(screen.getByTestId("usage-limit-record")).toHaveTextContent(
+      "The provider did not say when this clears.",
+    );
+  });
+
+  it("gives a billing stop no reset", () => {
     render(
-      <UsageLimitNotice
-        limit={LIMIT}
-        provider="Codex"
-        resumable={true}
-        onSnoozeAtReset={onSnoozeAtReset}
-      />,
+      <UsageLimitNotice limit={{ kind: "billing", resetsAt: LIMIT.resetsAt }} provider="Codex" />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Snooze until reset" }));
-    expect(onSnoozeAtReset).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("usage-limit-record")).not.toHaveTextContent("resets");
   });
 
-  it("offers the snooze alongside an armed resume as an independent choice", () => {
-    render(
-      <UsageLimitNotice
-        limit={LIMIT}
-        provider="Codex"
-        resumable={true}
-        usageResume={armedResume("scheduled")}
-        onSnoozeAtReset={() => undefined}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Snooze until reset" })).toBeDefined();
-  });
-
-  it("never offers the snooze once the recovery dispatch consumes the reset", () => {
-    render(
-      <UsageLimitNotice
-        limit={LIMIT}
-        provider="Codex"
-        resumable={true}
-        usageResume={armedResume("dispatched")}
-        onSnoozeAtReset={() => undefined}
-      />,
-    );
-    expect(screen.queryByRole("button", { name: "Snooze until reset" })).toBeNull();
-  });
-
-  it("describes a dispatched recovery as a past event after the resumed turn settles", () => {
-    const { rerender } = render(
-      <UsageLimitNotice
-        limit={LIMIT}
-        provider="Codex"
-        resumable={true}
-        usageResume={armedResume("dispatched")}
-      />,
-    );
-    rerender(
-      <UsageLimitNotice
-        limit={LIMIT}
-        provider="Codex"
-        resumable={false}
-        usageResume={armedResume("dispatched")}
-      />,
-    );
-    expect(screen.getByRole("alert")).toHaveTextContent("Resume started.");
-    expect(screen.getByRole("alert")).not.toHaveTextContent("Resuming…");
-  });
-
-  it("offers nothing when the stop discloses no reset to wait on", () => {
-    render(
-      <UsageLimitNotice
-        limit={{ kind: "exhausted" }}
-        provider="Codex"
-        resumable={true}
-        onSnoozeAtReset={() => undefined}
-      />,
-    );
-    expect(screen.queryByRole("button", { name: "Snooze until reset" })).toBeNull();
-  });
-
-  it("offers nothing for a billing stop, which no clock can clear", () => {
-    render(
-      <UsageLimitNotice
-        limit={{ kind: "billing", resetsAt: LIMIT.resetsAt }}
-        provider="Codex"
-        resumable={true}
-        onSnoozeAtReset={() => undefined}
-      />,
-    );
-    expect(screen.queryByRole("button", { name: "Snooze until reset" })).toBeNull();
-  });
-
-  it("leaves the snooze offer to the caller, who withholds it once the thread is snoozed", () => {
-    render(<UsageLimitNotice limit={LIMIT} provider="Codex" resumable={true} />);
-    expect(screen.queryByRole("button", { name: "Snooze until reset" })).toBeNull();
+  it("records a dispatched resume as having happened at the reset", () => {
+    render(<UsageLimitNotice limit={LIMIT} provider="Codex" usageResume={resume("dispatched")} />);
+    expect(screen.getByTestId("usage-limit-record")).toHaveTextContent("Resumed at the reset.");
   });
 });

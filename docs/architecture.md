@@ -5607,8 +5607,11 @@ new task in the Project, the composer left ready to send — keys on that
 stated category, never on the absence of a request or a limit, which a
 different parked wait could also satisfy.
 
-A stop that disclosed `resetsAt` additionally offers an explicit per-thread
-opt-in: Resume when the limit resets. A billing stop never offers it, and a
+While the stop is the thread's latest turn, the composer's
+[usage-limit strip](design/thread-view.md#usage-limit-strip) offers Resume
+now (the person's ordinary send of the stopped prompt), and a stop that
+disclosed `resetsAt` additionally offers an explicit per-thread
+opt-in: Resume at reset. A billing stop never offers it, and a
 stop that preserved no resumable provider state — the parked Chat attempt's or
 Work turn's `resumeCursor`, or the Code turn's journaled evidence — cannot
 take it. Accepting journals `usage-resume.scheduled@1` on the thread's own
@@ -5624,8 +5627,9 @@ bound all hold unchanged. The dispatch settles by appending
 `usage-resume.settled@1` plus the mode's `thread-updated` in one commit; the
 outcome it records (`dispatched`, `invalidated`, or `failed` with the refusal
 detail) stays on the thread until a newer thread event replaces it.
-The old stop's notice describes a dispatched recovery as started, rather than
-implying that the resumed turn is still running after it settles.
+The old stop's transcript line records a dispatched recovery as resumed at
+the reset, rather than implying that the resumed turn is still running after
+it settles.
 Cancellation, a manual retry, archival, a provider change, or any superseding
 turn transition settles a stale recovery as `invalidated` rather than letting
 it fire against newer state; a dispatch the admission path refuses settles as
@@ -5647,6 +5651,34 @@ beyond the host's own running process, and no billing automation. A host that wa
 rescans `status = scheduled` rows on return and dispatches the still-valid
 ones; a record that cannot be re-validated settles `invalidated` and never
 re-arms.
+
+The person may make either recovery their standing default (maintainer
+decision, 2026-11-26): the host settings **Resume at reset by default** and
+**Snooze until reset by default**, both off by default. A host service watches
+committed appends for a journaled usage-limit stop and, when a setting is on,
+runs the mode's ordinary `schedule-*-usage-resume` or
+`snooze-*-thread-at-usage-reset` command as the host, the resume record carrying
+`origin: "default"` and journaled as the `system` actor; a command that lost a
+version race to another write on the thread is tried once more. It arms each
+stopped turn (in Chat, each attempt) at most once, whatever reset it is
+journaled with later, so a default the person cancels stays cancelled, and
+only a stop that names a reset still ahead on a turn a person sent: the Chat,
+Work and Code routes record a turn when its sender is the person at a window
+or a device they paired (never an outside agent's grant or a device only the
+hub introduced), in the running host's memory, so a turn a routine, wake-up,
+agent, delivery or queued message started, or one sent before a restart, is
+never covered. A Chat retry continues the same turn, so Chat records the
+attempt the person's send or retry admitted: the scheduler's own retry is not
+one, and a default resume that stops again never arms another. The
+resume is never armed on a provider account whose sign-in refuses the host's
+continuations. Neither default arms on a stop the thread's usage-limit account
+handoff owns: a move already released the stop, or the handoff would move the
+thread for it now. A handoff its policy refuses (the account is off or gone, a
+model pool is on, the thread is already on that account) or one that already
+stopped on this stop moves nothing, so the defaults still apply. The handoff's provider change waits on the new account's validation, and
+a default written meanwhile took the thread's version, so the change was
+refused and the thread stayed on the limited account. Nothing else changes: the resume fires through the same
+scheduler, inspection and ordinary turn admission as a person's opt-in.
 
 **Wake-ups a thread's agent schedules.** A provider runtime that can wake
 its model later (Claude Code's `ScheduleWakeup` and `CronCreate`) keeps no

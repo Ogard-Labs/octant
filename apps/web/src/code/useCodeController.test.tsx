@@ -28,6 +28,7 @@ import {
 import { createCodeReadCursorStore, useCodeController } from "./useCodeController";
 import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { sendLineNotesAsFollowUp } from "../dockModules/ReviewModule";
+import { resumeStoppedPromptNow } from "./resumeStoppedPrompt";
 
 const now = "2026-07-21T12:00:00.000Z";
 const ids = {
@@ -1856,6 +1857,41 @@ describe("useCodeController", () => {
     expect(result.current.pendingDraft).toBe("newer draft");
     unmount();
   });
+
+  it.each(["accepted", "refused"] as const)(
+    "keeps an unsent draft when Resume now's send is %s",
+    async (outcome) => {
+      const executeOperation = vi.fn(async (command: { readonly operationId: string }) =>
+        outcome === "accepted"
+          ? { kind: "provider-turn-state", operationId: command.operationId, state: "running" }
+          : {
+              kind: "operation-failed",
+              operationId: command.operationId,
+              failure: { category: "unauthorized", message: "Refused." },
+            },
+      );
+      const client = fakeClient({ executeOperation: executeOperation as never });
+      const store = createComposerThreadDraftStore(memoryDraftStorage());
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client,
+          draftStore: store,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      act(() => result.current.setPendingDraft("half-written reply"));
+
+      await act(async () => {
+        await resumeStoppedPromptNow(result.current, "Fix the build");
+      });
+
+      expect(executeOperation).toHaveBeenCalledOnce();
+      expect(result.current.pendingDraft).toBe("half-written reply");
+      unmount();
+    },
+  );
 
   it("keeps the composer's own draft when a message sent from outside it is refused", async () => {
     const executeOperation = vi.fn(async (command: { readonly operationId: string }) => ({

@@ -790,6 +790,12 @@ export interface CodeServiceExecutionContext {
    * person at this host.
    */
   readonly actor?: EventActor;
+  /**
+   * Set only by the host's usage-limit defaults when the person's "Resume at
+   * reset by default" setting arms a resume: the record says so. No wire
+   * command carries it.
+   */
+  readonly usageResumeOrigin?: "default";
 }
 
 export interface CodeServiceOptions {
@@ -2935,6 +2941,9 @@ export class CodeService {
           usageLimit: stopped.failure.usageLimit,
           resetsAt: stopped.failure.usageLimit.resetsAt,
           scheduledAt: updatedAt,
+          ...(executionContext?.usageResumeOrigin === undefined
+            ? {}
+            : { origin: executionContext.usageResumeOrigin }),
         };
         const next = decodeCodeThread({
           ...current,

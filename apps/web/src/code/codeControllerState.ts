@@ -69,6 +69,11 @@ export interface CodeConversationMessage {
   readonly id: string;
   readonly role: "user" | "assistant";
   readonly text: string;
+  /**
+   * The prompt's evidence could not be read, so `text` is a stand-in sentence,
+   * not what the person sent: nothing may send it again as a prompt.
+   */
+  readonly promptUnavailable?: true;
   readonly operationId?: CodeOperationId;
   readonly sourceThreadId?: CodeThreadId;
   readonly checkoutId?: CodeConversationTurn["checkoutId"];
@@ -572,6 +577,7 @@ async function projectConversationTurns(
       id: `${turn.operationId}:user`,
       role: "user",
       text: prompt ?? "Conversation prompt evidence is unavailable.",
+      ...(prompt === undefined ? { promptUnavailable: true as const } : {}),
       operationId: turn.operationId,
       ...(turn.checkoutId === undefined ? {} : { checkoutId: turn.checkoutId }),
       ...(turn.reviewFindingReferences === undefined

@@ -33,6 +33,12 @@ export const UsageResumeRecord = Schema.Struct({
   /** The declared reset the opt-in waits for; never invented when absent. */
   resetsAt: UtcTimestamp,
   scheduledAt: UtcTimestamp,
+  /**
+   * `default`: the host armed it because the person's "Resume at reset by
+   * default" setting was on when the stop was journaled. Absent: the person
+   * chose it on this stop. Either way it fires through ordinary admission.
+   */
+  origin: Schema.optional(Schema.Literal("default")),
 }).annotations(strict);
 export type UsageResumeRecord = typeof UsageResumeRecord.Type;
 

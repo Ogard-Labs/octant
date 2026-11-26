@@ -535,6 +535,118 @@ describe("Chat Stop", () => {
   });
 });
 
+describe("Chat usage-limit strip", () => {
+  const limited = (resetsAt: string | undefined, thread: Record<string, unknown> = {}) => {
+    const waiting = viewWithAttempt("waiting");
+    return decodeChatThreadView({
+      ...waiting,
+      thread: { ...waiting.thread, ...thread },
+      turns: waiting.turns.map((turn) => ({
+        ...turn,
+        attempts: turn.attempts.map((attempt) => ({
+          ...attempt,
+          usageLimit:
+            resetsAt === undefined ? { kind: "exhausted" } : { kind: "exhausted", resetsAt },
+        })),
+      })),
+    });
+  };
+
+  it("sends Resume now, Resume at reset and Snooze until reset through the host's commands", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async (_command: ChatCommand) => undefined);
+    render(
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({
+          activeView: limited(new Date(Date.now() + 30 * 60_000).toISOString()),
+          execute,
+        })}
+      />,
+    );
+    await waitFor(() => expect(document.querySelector(".usage-limit-strip")).not.toBeNull());
+    expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Resume now" }));
+    await user.click(screen.getByRole("button", { name: "Resume at reset" }));
+    await user.click(screen.getByRole("button", { name: "Snooze until reset" }));
+    await waitFor(() =>
+      expect(execute.mock.calls.map(([command]) => command.kind)).toEqual([
+        "retry-chat-turn",
+        "schedule-chat-usage-resume",
+        "snooze-chat-thread-at-usage-reset",
+      ]),
+    );
+  });
+
+  it("offers Cancel once the stop carries a scheduled resume", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined);
+    const resetsAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    render(
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({
+          activeView: limited(resetsAt, {
+            usageResume: {
+              record: {
+                threadId,
+                turnId,
+                attemptId,
+                providerInstanceId: providerId,
+                usageLimit: { kind: "exhausted", resetsAt },
+                resetsAt,
+                scheduledAt: now,
+              },
+              status: "scheduled",
+            },
+          }),
+          execute,
+        })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Cancel resume" }));
+    expect(screen.queryByRole("button", { name: "Resume at reset" })).toBeNull();
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "cancel-chat-usage-resume" }),
+      ),
+    );
+  });
+
+  it("draws no strip once the attempt is released from the limit", () => {
+    render(
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ activeView: viewWithAttempt("completed") })}
+      />,
+    );
+    expect(document.querySelector(".usage-limit-strip")).toBeNull();
+  });
+
+  it("draws no strip once a move to another account released the waiting attempt", async () => {
+    const resetsAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const workspace = (thread: Record<string, unknown>) => (
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ activeView: limited(resetsAt, thread) })}
+      />
+    );
+    const parked = render(workspace({}));
+    expect(await screen.findByRole("button", { name: "Resume now" })).toBeVisible();
+    parked.unmount();
+
+    render(workspace({ releasedStopId: attemptId }));
+    // Resume now would resend the stopped attempt on the account it moved to.
+    expect(await screen.findByLabelText("Message")).toBeVisible();
+    expect(document.querySelector(".usage-limit-strip")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume now" })).toBeNull();
+  });
+});
+
 describe("Chat questions", () => {
   it("docks a reply's pending question directly above the composer, not inside the reply", async () => {
     const waiting = viewWithAttempt("waiting");

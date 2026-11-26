@@ -381,6 +381,60 @@ describe("Chat routes", () => {
     expect((await sent(post(send(false))))?.typedByPerson).toBeUndefined();
   });
 
+  it("records a sent turn for the usage-limit defaults only when the person sent it", async () => {
+    const execute = vi.fn(async (_command: unknown, _context?: unknown) => ({
+      kind: "thread-updated",
+      thread: threadFixture,
+    }));
+    const notePersonSentTurn = vi.fn();
+    const route = routeFixture({ execute }, undefined, { notePersonSentTurn });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000072";
+    const send = {
+      kind: "send-chat-turn",
+      threadId: threadFixture.id,
+      expectedVersion: 1,
+      prompt: "Draft the plan.",
+    };
+    const post = () =>
+      request("/api/chat/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(send),
+      });
+    const from = (admittedBy: "host-person" | "hub-roster", origin = "https://octant.invalid") => {
+      const remote = post();
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin,
+          protocolVersion: 1,
+          capabilityDigest: "c".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000073" as never,
+          admittedBy,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const hook = async (body: Request) => {
+      expect((await route(body))?.status).toBe(200);
+      return (
+        execute.mock.lastCall?.[1] as
+          | { readonly onPersonTurnAdmitted?: (turnId: string) => void }
+          | undefined
+      )?.onPersonTurnAdmitted;
+    };
+
+    expect(await hook(post())).toBe(notePersonSentTurn);
+    expect(await hook(from("host-person"))).toBe(notePersonSentTurn);
+    // A device only the hub introduced and an outside agent's grant never
+    // count as the person, so no default can arm on what they sent.
+    expect(await hook(from("hub-roster"))).toBeUndefined();
+    expect(await hook(from("host-person", AGENT_ACCESS_ORIGIN))).toBeUndefined();
+  });
+
   it("rejects an attachment whose media type is not a type/subtype", async () => {
     const upload = vi.fn();
     const route = routeFixture({ uploadAttachment: upload });

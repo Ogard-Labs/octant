@@ -3252,7 +3252,7 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.queryByRole("option", { name: /Browser/ })).not.toBeInTheDocument();
   });
 
-  it("offers a limited stop's recovery only while that stop is still waiting", async () => {
+  it("shows one line above the composer while a turn is parked on a limit, and none after it is released", async () => {
     const failure = {
       category: "rate-limited",
       message: "Rate limit reached.",
@@ -3293,19 +3293,70 @@ describe("WorkThreadWorkspace", () => {
     );
 
     const failed = render(renderTurn("failed"));
-    await screen.findByRole("alert");
-    expect(
-      screen.queryByRole("button", { name: "Resume when the limit resets" }),
-    ).not.toBeInTheDocument();
+    await screen.findByTestId("usage-limit-record");
+    expect(document.querySelector(".usage-limit-strip")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume at reset" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
     failed.unmount();
 
     render(renderTurn("waiting"));
-    await screen.findByRole("button", { name: "Resume when the limit resets" });
+    await screen.findByRole("button", { name: "Resume at reset" });
     expect(screen.getByRole("button", { name: "Snooze until reset" })).toBeVisible();
+    expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
+    expect(screen.getAllByTestId("usage-limit-record")).toHaveLength(1);
   });
 
-  it("stops treating a turn parked on a usage limit as running once a hand-off released it", async () => {
+  it("sends the stopped turn's own prompt again from the strip's Resume now", async () => {
+    const user = userEvent.setup();
+    const parked = workTurn({
+      status: "waiting",
+      failure: {
+        category: "rate-limited",
+        message: "Usage limit reached.",
+        usageLimit: {
+          kind: "exhausted",
+          resetsAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+        },
+      },
+      transcript: [
+        { role: "user", text: "Summarize the brief" },
+        { role: "assistant", text: "", status: "waiting" },
+      ],
+    });
+    const startFirstTurn = vi.fn(async () => ({
+      kind: "accepted" as const,
+      turn: workTurn({ requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", status: "accepted" }),
+    }));
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={
+          {
+            bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+            execute: vi.fn(),
+          } as unknown as WorkThreadClient
+        }
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={
+          {
+            transcript: vi.fn(async () => ({ threadId, turns: [parked] })),
+            startFirstTurn,
+            putAttachment: vi.fn(),
+            discardAttachment: vi.fn(async () => undefined),
+          } as never
+        }
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Resume now" }));
+    await waitFor(() =>
+      expect(startFirstTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "start-work-thread-turn", prompt: "Summarize the brief" }),
+      ),
+    );
+  });
+
+  it("stops treating a turn parked on a usage limit as running, and drops its strip, once a hand-off released it", async () => {
     const parked = workTurn({
       status: "waiting",
       failure: {
@@ -3336,6 +3387,7 @@ describe("WorkThreadWorkspace", () => {
 
     const waiting = render(renderThread(workThread()));
     expect(await screen.findByRole("button", { name: "Stop turn" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Resume now" })).toBeVisible();
     waiting.unmount();
 
     render(
@@ -3355,6 +3407,75 @@ describe("WorkThreadWorkspace", () => {
     );
     expect(await screen.findByText("Summarize the brief")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Stop turn" })).not.toBeInTheDocument();
+    // Recovery would resend the stopped prompt on the account it moved to.
+    expect(screen.queryByRole("button", { name: "Resume now" })).not.toBeInTheDocument();
+  });
+
+  it("keeps Cancel for a resume still scheduled on a stop a model change released", async () => {
+    const user = userEvent.setup();
+    const resetsAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const parked = workTurn({
+      status: "waiting",
+      failure: {
+        category: "rate-limited",
+        message: "Rate limit reached.",
+        usageLimit: { kind: "exhausted", resetsAt },
+      },
+      transcript: [
+        { role: "user", text: "Summarize the brief" },
+        { role: "assistant", text: "", status: "waiting" },
+      ],
+    });
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: workThread() }));
+    const thread = workThread({
+      version: 3,
+      providerHandoff: {
+        previousProviderInstanceId: providerId,
+        previousModelId: modelId,
+        nextProviderInstanceId: providerId,
+        nextModelId: "model-two" as never,
+        changedAt: "2026-08-01T20:05:00.000Z",
+        releasedStopId: parked.turnId,
+      },
+      usageResume: {
+        record: {
+          threadId: String(threadId),
+          turnId: String(parked.turnId),
+          providerInstanceId: providerId,
+          usageLimit: { kind: "exhausted", resetsAt },
+          resetsAt,
+          scheduledAt: "2026-08-01T20:00:00.000Z",
+        },
+        status: "scheduled",
+      },
+    } as never);
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        initialThread={thread}
+        threadClient={
+          {
+            bootstrap: vi.fn(async () => ({ threads: [thread] })),
+            execute,
+          } as unknown as WorkThreadClient
+        }
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript: vi.fn(async () => ({ threadId, turns: [parked] })) } as never}
+      />,
+    );
+
+    // The model-only change leaves the resume armed, so the strip still offers
+    // to cancel it, and nothing that would send on the new model.
+    const cancel = await screen.findByRole("button", { name: "Cancel resume" });
+    expect(screen.queryByRole("button", { name: "Resume now" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
+    await user.click(cancel);
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "cancel-work-usage-resume" }),
+      ),
+    );
   });
 
   it("does not duplicate a turn that settles before the start response arrives", async () => {

@@ -1,3 +1,6 @@
+import { UsageLimitDefaults } from "../usage/usageLimitDefaults";
+import { stopLeftToUsageLimitHandoff } from "@octant/domain";
+import { usageLimitDefaultCommands } from "../usage/usageLimitDefaultCommands";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -3541,6 +3544,57 @@ describe("scheduling a Work thread's usage-limit resume", () => {
     );
   });
 
+  it("arms the default resume at reset and the default snooze as the host, through the ordinary commands", async () => {
+    const turn = usageLimitTurn({ kind: "exhausted", resetsAt: "2099-07-19T13:00:00.000Z" });
+    const fixture = serviceFixture({ threads: [thread()], turns: [turn] });
+    const defaults = new UsageLimitDefaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: true }),
+      personSent: () => true,
+      providerInstanceOf: () => String(ids.provider),
+      refusesHostContinuations: () => false,
+      leftToAccountHandoff: () => false,
+      clock: () => new Date(now),
+      ...usageLimitDefaultCommands({
+        hostScope: ROUTINE_HOST_SCOPE_ID,
+        readVersion: (_aggregateType, threadId) =>
+          fixture.projection.read(threadId as never)?.version ?? 0,
+        chat: { execute: async () => undefined },
+        work: {
+          execute: (windowId, input, context) => fixture.service.execute(windowId, input, context),
+        },
+        code: { execute: async () => undefined },
+      }),
+    });
+
+    const armed = await defaults.arm({
+      mode: "work",
+      threadId: String(ids.thread),
+      turnId: String(turn.turnId),
+      usageLimit: { kind: "exhausted", resetsAt: "2099-07-19T13:00:00.000Z" as never },
+    });
+
+    expect(armed).toEqual({ resumed: true, snoozed: true });
+    const armedThread = fixture.projection.read(ids.thread);
+    expect(armedThread?.usageResume).toMatchObject({
+      status: "scheduled",
+      record: { turnId: String(turn.turnId), origin: "default" },
+    });
+    expect(armedThread?.snooze).toMatchObject({
+      until: "2099-07-19T13:00:00.000Z",
+      origin: "usage-limit",
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: expect.arrayContaining([
+          expect.objectContaining({
+            eventName: "usage-resume.scheduled@1",
+            actor: expect.objectContaining({ kind: "system" }),
+          }),
+        ]),
+      }),
+    );
+  });
+
   it("refuses to schedule a resume on a thread a person marked Done until it is back in play", async () => {
     const turn = usageLimitTurn();
     const fixture = serviceFixture({
@@ -4258,6 +4312,78 @@ describe("moving a Work thread to another account", () => {
         events: [expect.objectContaining({ actor: expect.objectContaining({ kind: "system" }) })],
       }),
     );
+  });
+
+  it("leaves a stop to the account handoff instead of arming the person's defaults on it", async () => {
+    const parked = limitedTurn();
+    const resetsAt = "2099-07-19T13:00:00.000Z";
+    const stopped = decodeWorkTurnState({
+      ...parked,
+      failure: { ...parked.failure, usageLimit: { kind: "exhausted", resetsAt } },
+    });
+    const fixture = withAccounts(
+      serviceFixture({
+        threads: [thread({ usageLimitHandoff: { providerInstanceId: personal as never } })],
+        turns: [stopped],
+      }),
+    );
+    const defaults = new UsageLimitDefaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: true }),
+      personSent: () => true,
+      providerInstanceOf: () => String(ids.provider),
+      refusesHostContinuations: () => false,
+      leftToAccountHandoff: (stop) => {
+        const current = fixture.projection.read(stop.threadId as never);
+        const target = current?.usageLimitHandoff?.providerInstanceId;
+        const account = fixture.persistence.readProviderInstance as (
+          id: string,
+        ) => ReturnType<typeof fixture.persistence.readProviderInstance>;
+        return (
+          current !== undefined &&
+          stopLeftToUsageLimitHandoff({
+            thread: current,
+            stopId: stop.turnId,
+            modelPoolOn: false,
+            from: account(current.providerInstanceId),
+            to: target === undefined ? undefined : account(target),
+          })
+        );
+      },
+      clock: () => new Date(now),
+      ...usageLimitDefaultCommands({
+        hostScope: ROUTINE_HOST_SCOPE_ID,
+        readVersion: (_aggregateType, threadId) =>
+          fixture.projection.read(threadId as never)?.version ?? 0,
+        chat: { execute: async () => undefined },
+        work: {
+          execute: (windowId, input, context) => fixture.service.execute(windowId, input, context),
+        },
+        code: { execute: async () => undefined },
+      }),
+    });
+    const stop = {
+      mode: "work" as const,
+      threadId: String(ids.thread),
+      turnId: String(stopped.turnId),
+      usageLimit: { kind: "exhausted" as const, resetsAt: resetsAt as never },
+    };
+
+    // The default arms while the handoff's provider change is still on its way.
+    const handingOff = fixture.service.handOffAfterUsageLimit(ids.thread);
+    const armed = await defaults.arm(stop);
+    await handingOff;
+
+    expect(fixture.projection.read(ids.thread)).toMatchObject({
+      providerInstanceId: personal,
+      usageLimitHandoff: { last: { kind: "handed-off", stopId: String(stopped.turnId) } },
+    });
+    expect(armed).toEqual({ resumed: false, snoozed: false });
+    expect(fixture.projection.read(ids.thread)?.snooze).toBeUndefined();
+    // After the move the stop is released, so a late default still arms nothing.
+    expect(await defaults.arm(stop)).toEqual({
+      resumed: false,
+      snoozed: false,
+    });
   });
 
   it("does not move a thread on a usage limit without the person's opt-in", async () => {

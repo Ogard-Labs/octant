@@ -500,9 +500,13 @@ describe("octantSettingsRegistry", () => {
     expect(material?.nativeRequired).toBeUndefined();
   });
 
-  it("registers only the spend ceiling switch in Usage, and the provider and Code setup destinations", () => {
+  it("registers the spend ceiling switch and the two usage-limit defaults in Usage, and the provider and Code setup destinations", () => {
     const usage = octantSettingsRegistry.sections.find((s) => s.id === "usage");
-    expect(usage?.settings.map((setting) => setting.id)).toEqual(["spend-ceiling-shown"]);
+    expect(usage?.settings.map((setting) => setting.id)).toEqual([
+      "spend-ceiling-shown",
+      "usage-limit-resume-by-default",
+      "usage-limit-snooze-by-default",
+    ]);
     const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
       "automatic-model-thread-title",

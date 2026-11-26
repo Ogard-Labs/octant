@@ -1,3 +1,4 @@
+import { PersonSentTurns, UsageLimitDefaults } from "../usage/usageLimitDefaults";
 import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
 import { videoOfferDecisionRules } from "../video/videoOfferDecisionRules";
 import { decodeChatThreadId, decodeEventActor, decodeSideTaskReportOwed } from "@octant/contracts";
@@ -6754,6 +6755,125 @@ describe("ChatService", () => {
     expect(view.thread.usageResume?.record.resetsAt).toBe("2026-07-19T13:00:00.000Z");
   });
 
+  async function defaultArmingFixture() {
+    const { service, persistence } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "limited",
+      usageLimitResetsAt: "2099-07-19T13:00:00.000Z",
+    });
+    const people = new PersonSentTurns();
+    const armed: string[] = [];
+    const defaults = new UsageLimitDefaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: false }),
+      personSent: (mode, key) => people.sent(mode, key),
+      providerInstanceOf: (_mode, threadId) =>
+        String(persistence.readChatThread(threadId as never)?.providerInstanceId),
+      refusesHostContinuations: () => false,
+      leftToAccountHandoff: () => false,
+      clock: () => new Date(),
+      scheduleResume: async (stop) => {
+        armed.push(String(stop.attemptId));
+        await service.execute(
+          {
+            kind: "schedule-chat-usage-resume",
+            threadId: stop.threadId,
+            expectedVersion: service.read(stop.threadId as never).thread.version,
+            turnId: stop.turnId,
+            attemptId: stop.attemptId,
+          },
+          { usageResumeOrigin: "default" },
+        );
+      },
+      snoozeAtReset: async () => undefined,
+    });
+    const unsubscribe = persistence.journal.subscribeCommitted((append) =>
+      defaults.onCommittedAppend(append),
+    );
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    const person = {
+      onPersonTurnAdmitted: (turnId: string, attemptId: string) =>
+        people.note("chat", `${turnId}:${attemptId}`),
+    };
+    const parked = (attempts: number) =>
+      until(
+        () =>
+          service.read(created.thread.id).turns[0]?.attempts.length === attempts &&
+          service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+        { timeoutMs: 10_000 },
+      );
+    return { service, created, person, armed, parked, unsubscribe };
+  }
+
+  it("arms the default resume at reset only for a stop on a turn the person sent", async () => {
+    const run = async (personSends: boolean) => {
+      const { service, created, person, parked, unsubscribe } = await defaultArmingFixture();
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Spend it",
+        },
+        personSends ? person : {},
+      );
+      await parked(1);
+      if (personSends) {
+        await until(() => service.read(created.thread.id).thread.usageResume !== undefined, {
+          timeoutMs: 10_000,
+        });
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      unsubscribe();
+      return service.read(created.thread.id).thread.usageResume;
+    };
+
+    const armed = await run(true);
+    expect(armed?.status).toBe("scheduled");
+    expect(armed?.record.origin).toBe("default");
+    // A turn the host sent (a routine, a wake-up, a delivery) is never covered.
+    expect(await run(false)).toBeUndefined();
+  });
+
+  it("a host retry that hits the limit again does not arm the default", async () => {
+    const { service, created, person, armed, parked, unsubscribe } = await defaultArmingFixture();
+    await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Spend it",
+      },
+      person,
+    );
+    await parked(1);
+    await until(() => armed.length === 1, { timeoutMs: 10_000 });
+    const first = service.read(created.thread.id);
+    const turn = first.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) throw new Error("Expected the stop.");
+    // The scheduler's own retry at the reset, which carries no person.
+    await service.execute(
+      {
+        kind: "retry-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: first.thread.version,
+        turnId: turn.id,
+        attemptId: attempt.id,
+      },
+      { limitRecovery: true },
+    );
+    await parked(2);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    unsubscribe();
+    expect(armed).toEqual([String(attempt.id)]);
+  });
+
   it("withdraws the scheduled resume when the person cancels it", async () => {
     const { service } = openFixture({
       nativeConversation: true,
@@ -6876,6 +6996,44 @@ describe("ChatService", () => {
     // Hiding the row is the whole action — nothing asked the provider for
     // another turn.
     expect(fakeDriver.sentTurns).toHaveLength(1);
+  });
+
+  it("journals a snooze the person's default armed as the host, not as the person", async () => {
+    const { service, persistence } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "limited",
+      usageLimitResetsAt: "2099-01-02T09:00:00.000Z",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const actors: string[] = [];
+    const unsubscribe = persistence.journal.subscribeCommitted((append) => {
+      for (const event of append.events) actors.push(event.actor.kind);
+    });
+    await service.execute(
+      {
+        kind: "snooze-chat-thread-at-usage-reset",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+      },
+      { actor: Schema.decodeUnknownSync(EventActor)({ kind: "system", actorId: ids.actor }) },
+    );
+    unsubscribe();
+    expect(actors).toEqual(["system"]);
   });
 
   it("keeps an armed resume when the thread hides until the reset, and keeps the snooze when the resume is withdrawn", async () => {

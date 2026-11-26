@@ -2359,6 +2359,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "usage spend ceiling limit budget tokens turns money row thread project hide show",
         },
+        {
+          id: settingId("usage-limit-resume-by-default"),
+          label: "Resume at reset by default",
+          scope: "host",
+          keywords:
+            "usage limit rate limit resume reset default automatic continue quota out of usage",
+        },
+        {
+          id: settingId("usage-limit-snooze-by-default"),
+          label: "Snooze until reset by default",
+          scope: "host",
+          keywords: "usage limit rate limit snooze hide reset default quota out of usage",
+        },
       ],
     },
   ],

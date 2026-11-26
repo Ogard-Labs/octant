@@ -214,7 +214,11 @@ import {
   resolveLocalWindowPrincipal,
   WINDOW_CAPABILITY_HEADER,
 } from "./clientPrincipal";
-import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
+import {
+  authenticateRoutePrincipal,
+  boundPrincipalIsThePerson,
+  retainRouteAdmissionCurrent,
+} from "./principalRouteContext";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -630,6 +634,12 @@ export interface CodeRouteService {
 
 export interface CodeRouteDependencies {
   readonly service: CodeRouteService;
+  /**
+   * Records a turn the person sent (a window on this host or a device they
+   * paired; never an outside agent's grant or a device only the hub
+   * introduced), which alone the usage-limit defaults may arm for.
+   */
+  readonly notePersonSentTurn?: (turnId: string) => void;
   /**
    * The owner unlock a paired client's merge may need. Absent, or with its
    * switch off, a paired client's merge keeps its confirmation and checks gate.
@@ -1205,6 +1215,14 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               403,
               origin,
             );
+          }
+          if (
+            operation.kind === "start-provider-turn" &&
+            !agentGrantSession &&
+            !hubIntroduced &&
+            boundPrincipalIsThePerson(request)
+          ) {
+            dependencies.notePersonSentTurn?.(String(operation.operationId));
           }
           const operationResult = decodeCodeOperationResult(
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {

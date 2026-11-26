@@ -180,6 +180,8 @@ import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { PendingRequests } from "../transcript/PendingRequests";
 import { providerModelLabel } from "../providers/providerModelLabel";
+import { providerInstanceLabel, usageLimitStripNotice } from "../transcript/usageLimitStrip";
+import { resumeStoppedPromptNow, stoppedPromptOf } from "./resumeStoppedPrompt";
 import {
   TranscriptHandoff,
   resolveTranscriptHandoff,
@@ -1151,6 +1153,51 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadId: thread.id,
             expectedVersion: thread.version,
           });
+  // Resume now sends the stopped turn's own prompt again as the person's next
+  // turn, the continuation the host would send at the reset, through the
+  // ordinary turn admission.
+  const stoppedPrompt = stoppedPromptOf(
+    props.controller.conversation,
+    providerTurnOperationId === undefined ? undefined : String(providerTurnOperationId),
+  );
+  // A move to another account or model releases the stop, and Resume now
+  // would resend the prompt there, so a released stop keeps the strip only
+  // while a resume is still scheduled for it, offering Cancel alone: a
+  // model-only change leaves that resume armed.
+  const stoppedResume =
+    thread.usageResume === undefined ||
+    String(thread.usageResume.record.turnId) !== String(providerTurnOperationId)
+      ? undefined
+      : thread.usageResume;
+  const usageLimitNotice =
+    props.controller.turnStatus !== "waiting" ||
+    props.controller.turnUsageLimit === undefined ||
+    (releasedStop && stoppedResume?.status !== "scheduled")
+      ? undefined
+      : usageLimitStripNotice({
+          limit: props.controller.turnUsageLimit,
+          provider: providerInstanceLabel(props.providerGroups ?? [], thread.providerInstanceId),
+          usageResume: stoppedResume,
+          ...(readOnly
+            ? {}
+            : releasedStop
+              ? { onCancelResume: cancelUsageResume }
+              : {
+                  ...(stoppedPrompt === undefined
+                    ? {}
+                    : {
+                        onResumeNow: () =>
+                          void resumeStoppedPromptNow(
+                            props.controller,
+                            stoppedPrompt,
+                            thread.executionPolicy,
+                          ),
+                      }),
+                  onScheduleResume: scheduleUsageResume,
+                  onCancelResume: cancelUsageResume,
+                  onSnoozeAtReset: snoozeAtUsageReset,
+                }),
+        });
   // The host owns follow-ups while a turn or queue is active, and refuses a
   // turn while the session compacts. Draft editing remains available while
   // the queue's acknowledgment is pending.
@@ -2026,25 +2073,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 </OctantButton>
               ) : null}
             </div>
-          ) : (
-            // A parked turn whose stop the provider's own signal called a usage
-            // limit says so — the generic waiting row has nothing honest to add.
-            <div className="thread-column">
-              <UsageLimitNotice
-                limit={props.controller.turnUsageLimit}
-                provider={providerModelLabel(providerGroups, thread)}
-                resumable={!readOnly && providerTurnOperationId !== undefined}
-                {...(thread.usageResume === undefined ? {} : { usageResume: thread.usageResume })}
-                {...(readOnly || scheduleUsageResume === undefined
-                  ? {}
-                  : { onScheduleResume: scheduleUsageResume })}
-                {...(readOnly ? {} : { onCancelResume: cancelUsageResume })}
-                {...(readOnly || snoozeAtUsageReset === undefined
-                  ? {}
-                  : { onSnoozeAtReset: snoozeAtUsageReset })}
-              />
-            </div>
-          )
+          ) : // A parked turn whose stop the provider's own signal called a usage
+          // limit is told once, by the record below and the strip above the
+          // composer; the generic waiting row has nothing honest to add.
+          null
         ) : !turnErrorCallout ? null : (
           <OctantAlert
             action={
@@ -2074,30 +2106,21 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         ) : null}
 
         {/* The transcript row repeats the failure's own sentence; only this
-          notice carries what the provider reported about the limit itself —
-          its kind and any reset time. Waiting turns already show it in place
-          of the generic waiting row above. */}
-        {props.controller.turnStatus !== "waiting" &&
-        props.controller.turnUsageLimit !== undefined ? (
+          one-line record carries what the provider reported about the limit
+          itself — its kind and any reset time. The ways on live in the strip
+          above the composer while the stop is current. */}
+        {props.controller.turnUsageLimit === undefined ? null : (
           <div className="thread-column">
             <UsageLimitNotice
               limit={props.controller.turnUsageLimit}
               provider={providerModelLabel(providerGroups, thread)}
-              // A stopped turn keeps the limit fact as its honest record, but a
-              // resume or snooze binds to a stop that is still waiting — offering
-              // either here could only be refused.
-              resumable={false}
-              {...(thread.usageResume === undefined ? {} : { usageResume: thread.usageResume })}
-              {...(readOnly || scheduleUsageResume === undefined
+              {...(thread.usageResume === undefined ||
+              String(thread.usageResume.record.turnId) !== String(providerTurnOperationId)
                 ? {}
-                : { onScheduleResume: scheduleUsageResume })}
-              {...(readOnly ? {} : { onCancelResume: cancelUsageResume })}
-              {...(readOnly || snoozeAtUsageReset === undefined
-                ? {}
-                : { onSnoozeAtReset: snoozeAtUsageReset })}
+                : { usageResume: thread.usageResume })}
             />
           </div>
-        ) : null}
+        )}
 
         {thread.lifecycle === "waiting" || thread.lifecycle === "interrupted" ? (
           <OctantAlert className="thread-column code-thread-workspace__callout" tone="warning">
@@ -3518,6 +3541,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             providerChanging ? { text: "Checking the selected provider…" } : undefined
           }
           notices={[
+            ...(usageLimitNotice === undefined ? [] : [usageLimitNotice]),
             ...[
               settledThreadNotice({
                 settledAt: view?.thread.completedAt,
