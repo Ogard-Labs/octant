@@ -3592,6 +3592,87 @@ describe("useCodeController", () => {
       unmount();
     });
 
+    it("shows the reasoning of a turn this window sent once when a reload reads it before the stream shows it", async () => {
+      const { client, emit, host } = runningThread();
+      host.threads[String(ids.thread)]?.turns.splice(0, 1);
+      const reasoningId = "60000000-0000-4000-8000-000000000077";
+      const reasoning = evidenceText(reasoningId);
+      let renamed = () => {};
+      const rename = new Promise<void>((resolve) => {
+        renamed = resolve;
+      });
+      async function* threadEvents(signal: AbortSignal) {
+        await rename;
+        yield {
+          threadId: ids.thread,
+          sequence: 2,
+          event: { kind: "thread-updated", thread: thread(2) },
+        } as never;
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      }
+      const sentTurns: string[] = [];
+      const sent = fakeClient({
+        ...client,
+        subscribe: vi.fn((_threadId, _cursor, signal) => threadEvents(signal)) as never,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => {
+          sentTurns.push(String(command.operationId));
+          host.threads[String(ids.thread)]?.turns.push({
+            ...conversationTurn(command.operationId, "60000000-0000-4000-8000-000000000002"),
+            status: "incomplete",
+          } as never);
+          return {
+            kind: "provider-turn-state",
+            operationId: command.operationId,
+            state: "running",
+          };
+        }) as never,
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client: sent,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      const sentTurn = sentTurns[0] ?? "";
+      // The host saves the turn's first reasoning, and another window renames
+      // the thread, before this window's stream shows that reasoning.
+      const stored = host.threads[String(ids.thread)]?.turns;
+      stored?.splice(-1, 1, {
+        ...stored.at(-1),
+        steps: [
+          {
+            kind: "reasoning",
+            content: { contentId: reasoningId, digest: "c".repeat(64), byteLength: 15 },
+          },
+        ],
+      } as never);
+      vi.mocked(client.operationContent).mockImplementation(
+        async () => new TextEncoder().encode(reasoning) as never,
+      );
+      act(() => {
+        emit(1, {
+          kind: "provider-content",
+          channel: "reasoning",
+          content: { contentId: reasoningId, digest: "c".repeat(64), byteLength: 15 },
+        });
+        renamed();
+      });
+      await waitFor(() =>
+        expect(result.current.turnActivity.get(sentTurn)?.reasoning).toBe(reasoning),
+      );
+      // Past the stream's next commit of what it holds.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+      expect(result.current.turnActivity.get(sentTurn)?.reasoning).toBe(reasoning);
+      unmount();
+    });
+
     it("shows in a turn this window sent, which no conversation read follows", async () => {
       const { client, hold, host, say } = runningThread();
       host.threads[String(ids.thread)]?.turns.splice(0, 1);

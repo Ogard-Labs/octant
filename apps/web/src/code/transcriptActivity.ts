@@ -246,3 +246,14 @@ export function appendReasoning(activity: TurnActivity, chunk: string): TurnActi
   if (chunk === "") return activity;
   return { ...activity, reasoning: `${activity.reasoning}${chunk}` };
 }
+
+/**
+ * A turn's reasoning as its stream has shown it from the turn's start. A read
+ * of the thread can land before the stream commits a chunk it holds, and
+ * already carry that chunk; set rather than appended, the chunk shows once. A
+ * read that holds this text and more is the newer, so it stays.
+ */
+export function withStreamedReasoning(activity: TurnActivity, streamed: string): TurnActivity {
+  if (activity.reasoning.startsWith(streamed)) return activity;
+  return { ...activity, reasoning: streamed };
+}

@@ -81,7 +81,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useRetainedRecord } from "../polling/useRetainedRecord";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
-import { appendReasoning, applyActivityEvent, forgetWrittenPath } from "./transcriptActivity";
+import { applyActivityEvent, forgetWrittenPath, withStreamedReasoning } from "./transcriptActivity";
 import { EMPTY_TURN_ACTIVITY, type TurnActivity } from "../transcript/turnActivity";
 import { samePollingData } from "../polling/samePollingData";
 import {
@@ -870,11 +870,11 @@ export function useCodeController(options: CodeControllerOptions) {
       return updated;
     });
   }, []);
-  const noteReasoning = useCallback((operationId: CodeOperationId, chunk: string) => {
+  const noteReasoning = useCallback((operationId: CodeOperationId, streamed: string) => {
     setTurnActivity((current) => {
       const key = String(operationId);
       const existing = current.get(key) ?? EMPTY_TURN_ACTIVITY;
-      const next = appendReasoning(existing, chunk);
+      const next = withStreamedReasoning(existing, streamed);
       if (next === existing) return current;
       const updated = new Map(current);
       updated.set(key, next);
@@ -1739,7 +1739,7 @@ export function useCodeController(options: CodeControllerOptions) {
           operationStream = (async () => {
             let operationCursor = 0;
             let assistantText = "";
-            let reasoningTail = "";
+            let reasoningText = "";
             const replyBeat = createReplyBeat(() => {
               if (assistantText.length > 0) {
                 const nextText = assistantText;
@@ -1751,11 +1751,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   ),
                 );
               }
-              if (reasoningTail.length > 0) {
-                const chunk = reasoningTail;
-                reasoningTail = "";
-                noteReasoning(operationId, chunk);
-              }
+              if (reasoningText.length > 0) noteReasoning(operationId, reasoningText);
             });
             let snapshotRequired = false;
             try {
@@ -1780,7 +1776,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   if (hydrated.incomplete !== true) return;
                   operationCursor = 0;
                   assistantText = "";
-                  reasoningTail = "";
+                  reasoningText = "";
                   // The operation replays from its beginning on a fresh base,
                   // so its deltas commit on beats again.
                   replyBeat.reset();
@@ -1833,7 +1829,7 @@ export function useCodeController(options: CodeControllerOptions) {
                           controller.signal,
                         ));
                       if (chunk !== undefined) {
-                        reasoningTail += chunk;
+                        reasoningText += chunk;
                         replyBeat.schedule();
                       }
                     }
@@ -3639,7 +3635,7 @@ export function useCodeController(options: CodeControllerOptions) {
         let cursor = 0;
         let assistantAt: string | undefined;
         let assistantText = "";
-        let reasoningTail = "";
+        let reasoningText = "";
         const replyBeat = createReplyBeat(() => {
           if (assistantText.length > 0) {
             const nextText = assistantText;
@@ -3649,11 +3645,7 @@ export function useCodeController(options: CodeControllerOptions) {
               ),
             );
           }
-          if (reasoningTail.length > 0) {
-            const chunk = reasoningTail;
-            reasoningTail = "";
-            noteReasoning(operationId, chunk);
-          }
+          if (reasoningText.length > 0) noteReasoning(operationId, reasoningText);
         });
         let terminal = false;
         // No conversation read follows a turn this window sent, so its end
@@ -3770,7 +3762,7 @@ export function useCodeController(options: CodeControllerOptions) {
                     controller.signal,
                   ));
                 if (chunk !== undefined) {
-                  reasoningTail += chunk;
+                  reasoningText += chunk;
                   replyBeat.schedule();
                 }
               }
