@@ -406,14 +406,21 @@ export class ThreadMessageQueueService {
         // turn still starts with it (a paired phone's Send now never steers).
         const onTheirWay = (value: (typeof others)[number]) =>
           value.status !== "queued" || this.#steering.has(value.messageId);
+        // A restricted device may move only its own message: everyone else's
+        // keep their order, so it goes just behind the last one on its way.
+        // Moving an offered message ahead of a waiting one would let it start
+        // the next turn first if the runtime declines it.
+        const lastOnTheirWay = others.findLastIndex(onTheirWay);
         const outcome = this.#store.write(
           {
             ...state,
-            items: [
-              ...others.filter(onTheirWay),
-              sent,
-              ...others.filter((value) => !onTheirWay(value)),
-            ],
+            items: this.#isRestrictedDevice(windowId)
+              ? [...others.slice(0, lastOnTheirWay + 1), sent, ...others.slice(lastOnTheirWay + 1)]
+              : [
+                  ...others.filter(onTheirWay),
+                  sent,
+                  ...others.filter((value) => !onTheirWay(value)),
+                ],
           },
           { command, ...actor },
         );

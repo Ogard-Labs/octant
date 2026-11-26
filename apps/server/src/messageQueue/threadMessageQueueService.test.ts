@@ -1952,8 +1952,9 @@ describe("queue after a failure or a restart", () => {
 describe("a paired device at the queue", () => {
   const deviceId = Schema.decodeUnknownSync(WindowId)(randomUUID());
   const personDeviceId = Schema.decodeUnknownSync(WindowId)(randomUUID());
-  function deviceFixture() {
-    const p = port();
+  function deviceFixture(
+    p: ReturnType<typeof port> & Pick<ThreadMessageQueueModePort, "steer"> = port(),
+  ) {
     const directory = mkdtempSync(join(tmpdir(), "octant-thread-queue-"));
     dirs.push(directory);
     const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -2033,6 +2034,48 @@ describe("a paired device at the queue", () => {
       expect(await f.service.execute(deviceId, attempt)).toMatchObject(refused);
     expect(await snapshot(f.service)).toMatchObject({ version, paused: false });
     expect((await snapshot(f.service)).items[0]?.payload?.prompt).toBe("private prompt");
+  });
+
+  it("keeps everyone else's messages in their order when a device sends its own now, one offered to the running turn included", async () => {
+    let answer: (value: "steered" | "refused") => void = () => undefined;
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(
+      () => new Promise<"steered" | "refused">((resolve) => (answer = resolve)),
+    );
+    const f = deviceFixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const waiting = { ...enqueue(0), timing: "next-turn" as const };
+    await f.service.execute(windowId, waiting);
+    const offered = enqueue((await snapshot(f.service)).version);
+    await f.service.execute(windowId, offered);
+    await f.service.tick();
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledOnce());
+    const own = enqueue((await snapshot(f.service)).version);
+    await f.service.execute(deviceId, own);
+    const sent = await f.service.execute(
+      deviceId,
+      command("send-now", (await snapshot(f.service)).version, { messageId: own.messageId }),
+    );
+    expect(sent.status).toBe("applied");
+    if (sent.status !== "applied") return;
+    // The message offered to the turn stays behind the one it followed, so a
+    // runtime that declines it cannot start it ahead of that message.
+    expect(sent.snapshot.items.map((item) => item.messageId)).toEqual([
+      waiting.messageId,
+      offered.messageId,
+      own.messageId,
+    ]);
+    answer("refused");
+    await vi.waitFor(async () =>
+      expect((await snapshot(f.service)).items.map((item) => item.messageId)).toEqual([
+        waiting.messageId,
+        offered.messageId,
+        own.messageId,
+      ]),
+    );
   });
 
   it("lets a device the host's own person paired pause, resume and reorder the queue and edit, remove or send now another's message, journaled as the device", async () => {

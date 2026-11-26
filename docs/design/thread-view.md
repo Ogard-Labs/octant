@@ -1148,7 +1148,10 @@ that turn to end, since the host never steers a paired device's message. The
 queue shows above the phone's composer, and each message the host still holds
 unsent can be edited, removed or sent now there. A paired device's message
 still never steers, so on the phone Send now moves it to the front for the
-next turn, and the phone has no Steer or Queue choice.
+next turn, and the phone has no Steer or Queue choice. A device paired by
+someone other than the host's own person may move only its own message: Send
+now there leaves everyone else's messages in their order and puts it just
+behind the last one already on its way or offered to the running turn.
 
 ## Scheduled wake-ups
 
