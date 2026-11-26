@@ -2595,16 +2595,23 @@ repository, `owner/repo#12`, or a Linear identifier such as `ENG-12`, which
 the host resolves through the Linear plugin). The row opens a lazily loaded
 dialog that lists the links with **Unlink**. Links are journaled as
 `thread.issue-linked@1` and `thread.issue-unlinked@1` on their own
-`thread-linked-issues` aggregate; only a person may change them.
+`thread-linked-issues` aggregate; only a person may change them, at a window
+on the host or on a device they paired (a device only the hub introduced is
+refused, since a link decides what the host's tracker accounts may write).
+A change refreshes the Code navigation, so an open dialog shows it at once.
 
 Each Code Project's Pull requests settings menu has two switches, both off by
-default and set only by the host's own person:
+default and set only by the host's own person. Project Overview shows them
+too, for a Project the Pull requests menu does not list (one working on
+Linear issues with no GitHub repository):
 
 - **Keep linked issues up to date.** The host moves each linked issue forward:
-  In Progress when a person asks the thread for a turn, In Review when the
-  thread's agent opens its pull request (or when the host first sees it
-  open), and Done with the comment "Merged in `<url>`." once its merge is
-  observed. Linear states are chosen from the
+  In Progress when a person asks the thread for a turn (a wake, a routine or
+  an approved plan's continuation is the host's own and moves nothing), In
+  Review when the thread's agent opens its pull request (or when the host
+  first sees it open), and Done with the comment "Merged in `<url>`." once
+  its merge is observed, in the journal or in the pull-request refresh cache,
+  which sees a merge made outside Octant first. Linear states are chosen from the
   team's own states (the `started` state named In Progress, else the first by
   position; a `started` state whose name says review, else the move is
   skipped; the `completed` state named Done, else the first). GitHub has only
@@ -2614,9 +2621,10 @@ default and set only by the host's own person:
   writes one thread's moments one at a time. A refused or failed moment is
   tried again only at the thread's next trigger (a turn the person asks for,
   or a pull request the thread opens), never on every pass. Done is written
-  only for an issue the host already updated while the switch was on, so
-  turning the switch on does not close the issues of threads that merged
-  before, which a person may have reopened. Every attempt is journaled as
+  only for an issue whose In Review the host recorded, that is, the switch
+  was on while the pull request was open, so turning the switch on does not
+  close the issues of threads that merged before, which a person may have
+  reopened, even after a follow-up turn records In Progress. Every attempt is journaled as
   `tracker.issue-write-recorded@1`, with a comment's SHA-256 digest, never its
   text. A refused write (a Linear connection that may only read, a GitHub
   login without triage access) adds one line naming the remedy to the thread's
@@ -2632,15 +2640,23 @@ default and set only by the host's own person:
   requests does for pull requests. A comment that still asks must fit the
   approval, which shows it whole (about 1.9 KB); otherwise it is refused
   before the ask with `comment-too-long-to-approve`. Without an ask a comment
-  may be 4 KB.
+  may be 4 KB: it posts under the person's name with nobody reading it first,
+  so it is bounded as the tool's own input is, and a longer report belongs in
+  the pull request. Only a window on the host or a device the person paired
+  may allow an ask, and an allowed write is refused if the person unlinked
+  the issue while the ask waited. The Linear plugin's two write operations
+  are the host's alone: the integration route refuses them from every
+  client, so no window or device reaches an issue past these checks.
 
 A pull request a linked thread opens through its tool carries `Fixes #N`
 (or `Fixes owner/repo#N`, or `Fixes ENG-12`) for each linked issue its body
 does not already name. Once it is open, the thread's Pull request updates
 follow-up offers **Merge when ready…** once per pull request while the host
-runs, never in place of an Auto-fix line for the same pull request, which the
-person confirms; the host
-reads the head at that moment and turns on GitHub's own auto-merge. Nothing
+runs, never in place of an Auto-fix line for the same pull request, and never
+over a follow-up the person set by hand (the offer waits until they finish
+it), which the person confirms; the host
+reads the head at that moment (from GitHub when no detail is cached yet) and
+turns on GitHub's own auto-merge. Nothing
 here merges, and Merge when ready stays the person's act.
 
 Composer `Create from…` also has a Terminal tab in a Work or Code draft with a

@@ -1,5 +1,5 @@
 import type { CodeThread, ThreadLinkedIssue } from "@octant/contracts";
-import { linkedIssueLabel } from "@octant/contracts";
+import { linkedIssueLabel } from "@octant/domain/tracker-issue-write-policy";
 import { MERGE_WHEN_READY_OFFER } from "@octant/domain/code-pull-request-switch-policy";
 import type { TrackerAdvanceOptions, TrackerIssueWrites } from "./trackerIssueWrites";
 
@@ -22,15 +22,23 @@ export interface LinkedIssueWriteBackOptions {
   readonly readThread: (threadId: string) => CodeThread | undefined;
   /** The Project's "Keep linked issues up to date"; off writes nothing. */
   readonly keepCurrent: (projectId: CodeThread["projectId"]) => boolean;
+  /** The thread's pull request as the journal records it. */
   readonly pullRequest: (thread: CodeThread) => Promise<LinkedThreadPullRequest | undefined>;
+  /**
+   * The thread's pull request the refresh cache saw merged. A merge made
+   * outside Octant reaches the cache before the journal, which still says
+   * open, so this one wins.
+   */
+  readonly mergedPullRequest: (thread: CodeThread) => Promise<LinkedThreadPullRequest | undefined>;
   /** Adds one keyed line to the thread's "Pull request updates" follow-up. */
   readonly tell: (threadId: string, key: string, line: string) => Promise<void>;
   /**
    * Adds the Merge when ready offer unless the follow-up already has a line
    * for that pull request: an Auto-fix notice (its own Merge action among
-   * them) is never replaced by the offer.
+   * them) is never replaced by the offer. Answers false when it held the
+   * offer back for now, as for a follow-up the person set by hand.
    */
-  readonly offer: (threadId: string, ref: string, line: string) => Promise<void>;
+  readonly offer: (threadId: string, ref: string, line: string) => Promise<boolean>;
   readonly intervalMs?: number;
 }
 
@@ -96,13 +104,18 @@ export class LinkedIssueWriteBack {
       try {
         const linked = this.#options.linked(threadId);
         if (linked.length === 0) continue;
-        const pullRequest = await this.#options.pullRequest(thread);
+        const recorded = await this.#options.pullRequest(thread);
+        const pullRequest =
+          recorded?.state === "merged"
+            ? recorded
+            : ((await this.#options.mergedPullRequest(thread)) ?? recorded);
         if (pullRequest === undefined || pullRequest.state === "closed") continue;
         const ref = `${pullRequest.baseRepository}#${String(pullRequest.number)}`;
         const offerKey = `${threadId} ${ref}`;
         if (pullRequest.state === "open" && !this.#offered.has(offerKey)) {
-          await this.#options.offer(threadId, ref, `${ref} ${MERGE_WHEN_READY_OFFER}`);
-          this.#offered.add(offerKey);
+          if (await this.#options.offer(threadId, ref, `${ref} ${MERGE_WHEN_READY_OFFER}`)) {
+            this.#offered.add(offerKey);
+          }
         }
         if (!this.#options.keepCurrent(thread.projectId)) continue;
         const retry = this.#retryRequested.delete(threadId);

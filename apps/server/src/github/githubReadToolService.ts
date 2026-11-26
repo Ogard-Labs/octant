@@ -4,6 +4,7 @@ import type {
   GithubAuthenticationSnapshot,
   GithubCatalogueReadRequest,
   GithubCatalogueReadResponse,
+  LinkedIssueRef,
   WindowId,
 } from "@octant/contracts";
 import {
@@ -17,11 +18,6 @@ import type {
   ExternalContentIngestionStore,
 } from "../context/externalContentIngestionStore";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
-import {
-  runAgentIssueUpdate,
-  type AgentIssueAction,
-  type AgentIssueUpdates,
-} from "../trackerIssues/agentIssueUpdates";
 
 const MAX_TOOL_INPUT_BYTES = 4 * 1024;
 /** Agent pages stay small; providers iterate with cursors instead. */
@@ -109,12 +105,32 @@ interface CatalogueReadPort {
   ): Promise<GithubCatalogueReadResponse>;
 }
 
+/**
+ * The host's port for an agent's write to one of its thread's linked issues:
+ * the links, and one call that decides, asks and writes. Present on a turn
+ * whose agent may update them.
+ */
+export interface GithubIssueUpdatePort {
+  readonly linked: () => ReadonlyArray<LinkedIssueRef>;
+  readonly update: (input: {
+    readonly turnThread: CodeThread;
+    readonly current: CodeThread | undefined;
+    readonly issue: LinkedIssueRef;
+    readonly action:
+      | { readonly kind: "set-state"; readonly state: string }
+      | { readonly kind: "comment"; readonly body: string };
+    readonly signal?: AbortSignal;
+  }) => Promise<{ readonly result: unknown; readonly isError: boolean }>;
+}
+
+type IssueUpdateAction = Parameters<GithubIssueUpdatePort["update"]>[0]["action"];
+
 export interface GithubReadToolContext {
   readonly windowId: WindowId;
   readonly thread: CodeThread;
   readonly readThread: (windowId: WindowId, threadId: CodeThread["id"]) => CodeThread | undefined;
   /** Present on a turn whose agent may update its thread's linked issues. */
-  readonly issueUpdates?: AgentIssueUpdates;
+  readonly issueUpdates?: GithubIssueUpdatePort;
 }
 
 /**
@@ -192,7 +208,7 @@ export class GithubReadToolService {
             return failure(writeDecision.code, writeDecision.remediation);
           }
           const repository = writeDecision.repository;
-          return runAgentIssueUpdate({
+          return context.issueUpdates.update({
             turnThread: context.thread,
             current,
             issue: {
@@ -202,7 +218,6 @@ export class GithubReadToolService {
               number: update.number,
             },
             action: update.action,
-            updates: context.issueUpdates,
             ...(signal === undefined ? {} : { signal }),
           });
         }
@@ -457,7 +472,7 @@ function threadAuthority(
 
 function parseGithubUpdateInput(
   value: string,
-): { readonly number: number; readonly action: AgentIssueAction } | undefined {
+): { readonly number: number; readonly action: IssueUpdateAction } | undefined {
   if (Buffer.byteLength(value, "utf8") > 2 * MAX_TOOL_INPUT_BYTES) return undefined;
   let parsed: unknown;
   try {

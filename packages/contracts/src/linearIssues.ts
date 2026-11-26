@@ -215,6 +215,14 @@ export const decodeLinearIssueFilterOptions = Schema.decodeUnknownSync(LinearIss
 export const LINEAR_ISSUE_WORKFLOW_OPERATION = "read-issue-workflow";
 export const LINEAR_ISSUE_SET_STATE_OPERATION = "set-issue-state";
 export const LINEAR_ISSUE_COMMENT_OPERATION = "comment-issue";
+/**
+ * The writes the host alone makes, for a thread's linked issues and with
+ * its checks. The integration route refuses them from every client.
+ */
+export const LINEAR_HOST_ONLY_OPERATIONS: ReadonlyArray<string> = [
+  LINEAR_ISSUE_SET_STATE_OPERATION,
+  LINEAR_ISSUE_COMMENT_OPERATION,
+];
 
 /** The refusal a write answers when the stored Linear token may only read. */
 export const LINEAR_MISSING_WRITE_SCOPE =

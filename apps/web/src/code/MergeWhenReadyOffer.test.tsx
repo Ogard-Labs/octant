@@ -18,6 +18,7 @@ describe("MergeWhenReadyOffer", () => {
       queryProjectPullRequestDetail: vi.fn(
         async () => ({ detail: { state: "observed", headSha: "abc123" } }) as never,
       ),
+      refreshProjectPullRequestDetail: vi.fn(),
       setProjectPullRequestMergeWhenReady,
     } satisfies MergeWhenReadyOfferClient;
     render(<MergeWhenReadyOffer client={client} target={target} />);
@@ -35,6 +36,29 @@ describe("MergeWhenReadyOffer", () => {
     );
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Merge when ready is on for acme/app#9.",
+    );
+  });
+
+  it("reads the head from GitHub when no detail is cached for a newly opened pull request", async () => {
+    const setProjectPullRequestMergeWhenReady = vi.fn(async () => ({ status: "applied" }) as never);
+    const client = {
+      queryProjectPullRequestDetail: vi.fn(async () => ({ detail: { state: "missing" } }) as never),
+      refreshProjectPullRequestDetail: vi.fn(
+        async () => ({ detail: { state: "observed", headSha: "def456" } }) as never,
+      ),
+      setProjectPullRequestMergeWhenReady,
+    } satisfies MergeWhenReadyOfferClient;
+    render(<MergeWhenReadyOffer client={client} target={target} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Merge acme/app#9 when ready" }));
+    await userEvent.click(screen.getByRole("button", { name: "Turn on" }));
+
+    await waitFor(() =>
+      expect(setProjectPullRequestMergeWhenReady).toHaveBeenCalledWith({
+        kind: "enable",
+        target,
+        headSha: "def456",
+      }),
     );
   });
 });

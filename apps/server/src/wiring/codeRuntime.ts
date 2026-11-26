@@ -4,7 +4,10 @@ import { ownPullRequestsFromHistory } from "../code/codeThreadMetadataService";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
 import { MergedThreadPutAway, threadDeliversPullRequest } from "../code/mergedThreadPutAway";
 import { LinkedIssueWriteBack } from "../trackerIssues/linkedIssueWriteBack";
-import type { AgentIssueUpdates } from "../trackerIssues/agentIssueUpdates";
+import {
+  linkedIssueUpdatePort,
+  type LinkedIssueUpdatePort,
+} from "../trackerIssues/agentIssueUpdates";
 import { withPullRequestHandoffLine } from "@octant/domain/code-pull-request-switch-policy";
 import {
   FinishedReportSettle,
@@ -669,16 +672,27 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const linkedIssuePullRequestsCreated: { current?: (threadId: string) => void } = {};
     // What a turn's Linear and GitHub tools need to update the thread's linked
     // issues; the Project's choice and the links are read again at each write.
-    const agentIssueUpdates = (input: CodeTrackerToolInput): AgentIssueUpdates => ({
-      linked: () => linkedIssues.store.list(String(input.thread.id)).map((entry) => entry.issue),
-      projectAllowsUpdates: () => {
-        const project = persistence.readProject(input.thread.projectId);
-        return project?.type === "code" && project.agentsMayUpdateIssues === true;
-      },
-      readOutsideContent: input.readOutsideContent,
-      ask: input.ask,
-      writes: linkedIssues.writes,
-    });
+    // Offered only to a turn whose thread has a linked issue: on any other
+    // every write would be refused, so the tools stay read-only there.
+    const agentIssueUpdates = (
+      input: CodeTrackerToolInput,
+    ): { readonly issueUpdates?: LinkedIssueUpdatePort } => {
+      const linked = () =>
+        linkedIssues.store.list(String(input.thread.id)).map((entry) => entry.issue);
+      if (linked().length === 0) return {};
+      return {
+        issueUpdates: linkedIssueUpdatePort({
+          linked,
+          projectAllowsUpdates: () => {
+            const project = persistence.readProject(input.thread.projectId);
+            return project?.type === "code" && project.agentsMayUpdateIssues === true;
+          },
+          readOutsideContent: input.readOutsideContent,
+          ask: input.ask,
+          writes: linkedIssues.writes,
+        }),
+      };
+    };
     const continueWorkerOnFallback: {
       current?: (
         threadId: CodeThreadId,
@@ -1594,8 +1608,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
-          linkedIssueTurnStarts.current?.(String(threadId));
         },
+        // A wake or a routine is not a person asking: linked issues stay put.
+        onPersonTurnRequested: (threadId) => linkedIssueTurnStarts.current?.(String(threadId)),
         onSideTaskReportAdmitted: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteReportAdmitted(threadId);
         },
@@ -2135,7 +2150,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               windowId: input.windowId,
               thread: input.thread,
               readThread: input.readThread,
-              issueUpdates: agentIssueUpdates(input),
+              ...agentIssueUpdates(input),
             }),
           ),
         linearReadTools: (input) =>
@@ -2144,7 +2159,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               windowId: input.windowId,
               thread: input.thread,
               readThread: input.readThread,
-              issueUpdates: agentIssueUpdates(input),
+              ...agentIssueUpdates(input),
               readProjectLinearTarget: () => {
                 const project = persistence.readProject(input.thread.projectId);
                 return project?.type === "code" ? project.linearTarget : undefined;
@@ -2575,15 +2590,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 },
               ]);
               const linked = view.threads[0]?.linkedPullRequest;
-              if (linked?.kind === "linked" && linked.matchesDeliveryBranch) {
-                return {
-                  state: linked.state,
-                  url: linked.url,
-                  number: linked.number,
-                  baseRepository: linked.baseRepository,
-                };
-              }
-              // A merge made outside Octant reaches the refresh cache first.
+              return linked?.kind === "linked" && linked.matchesDeliveryBranch
+                ? {
+                    state: linked.state,
+                    url: linked.url,
+                    number: linked.number,
+                    baseRepository: linked.baseRepository,
+                  }
+                : undefined;
+            },
+            mergedPullRequest: async (thread) => {
               const own = ownPullRequestsFromHistory(
                 codeBoardEventStore.summaryForThread(thread.id),
               );
@@ -2615,22 +2631,30 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                   : [];
               // An Auto-fix notice for this pull request already says more.
               if (lines.some((entry) => entry.toLowerCase().startsWith(`${ref.toLowerCase()} `)))
-                return;
-              await tellLinkedThread(threadId, ref, line);
+                return true;
+              return await tellLinkedThread(threadId, ref, line);
             },
-            tell: (threadId, key, line) => tellLinkedThread(threadId, key, line),
+            tell: async (threadId, key, line) => {
+              await tellLinkedThread(threadId, key, line);
+            },
           });
-    async function tellLinkedThread(threadId: string, key: string, line: string): Promise<void> {
+    /**
+     * Adds one keyed line to the thread's Pull request updates follow-up.
+     * Answers false, writing nothing, while the person's own follow-up is
+     * open: replacing it would drop the reminder they set before they did it.
+     */
+    async function tellLinkedThread(threadId: string, key: string, line: string): Promise<boolean> {
       const id = decodeCodeThreadId(threadId);
       const previous = codeFollowUpService.read(id).followUp;
       // Said once is enough, even after the person dismissed it.
-      if (previous?.reason.split("\n").includes(line) === true) return;
+      if (previous?.reason.split("\n").includes(line) === true) return true;
+      if (previous?.state === "open" && previous.origin !== "automatic") return false;
       const reason = withPullRequestHandoffLine(
         previous?.state === "open" && previous.origin === "automatic" ? previous.reason : undefined,
         key,
         line,
       );
-      if (reason === undefined) return;
+      if (reason === undefined) return true;
       await codeFollowUpService.observeTrigger({
         threadId: id,
         sourceEventId: randomUUID(),
@@ -2640,6 +2664,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         origin: "automatic",
         triggeredAt: new Date().toISOString(),
       });
+      return true;
     }
     if (linkedIssueWriteBack !== undefined) {
       linkedIssueTurnStarts.current = (threadId) =>

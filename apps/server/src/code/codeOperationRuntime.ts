@@ -562,6 +562,12 @@ export interface CodeOperationRuntimeOptions {
    * not bring back.
    */
   readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
+  /**
+   * The same turn request, when a person made it: the host's own turns (a
+   * wake, an approved plan's continuation, a routine) start through its
+   * routine scope and are left out, as linked issues move only for a person.
+   */
+  readonly onPersonTurnRequested?: (threadId: CodeThreadId) => void;
   /** A side task's report was admitted; its turn is about to be journaled. */
   readonly onSideTaskReportAdmitted?: CodeOperationServiceOptions["onSideTaskReportAdmitted"];
   /**
@@ -1720,7 +1726,7 @@ export function createCodeOperationRuntime(
     ...(options.onSideTaskReportAdmitted === undefined
       ? {}
       : { onSideTaskReportAdmitted: options.onSideTaskReportAdmitted }),
-    onScopedOperation: ({ command, executeOptions }) => {
+    onScopedOperation: ({ windowId, command, executeOptions }) => {
       // The service invokes this only after its authoritative scope check and
       // replay lookup, but before approval or the operation side effect. That
       // keeps inaccessible commands out of the durable runtime-work journal
@@ -1737,8 +1743,10 @@ export function createCodeOperationRuntime(
         command.kind === "start-provider-turn" &&
         executeOptions?.limitRecovery !== true &&
         command.delivery?.kind !== "side-task-report"
-      )
+      ) {
         options.onProviderTurnRequested?.(command.threadId);
+        if (!isRoutineHostScope(windowId)) options.onPersonTurnRequested?.(command.threadId);
+      }
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)
         observeRuntimeWorkOutcome(
@@ -5682,10 +5690,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
       ask: (summary, signal) => {
         const bounded = boundProviderSummary(summary);
-        // An approval never covers text the person cannot read whole.
+        // An approval never covers text the person cannot read whole, and a
+        // device the hub introduced cannot allow a write under the host's
+        // tracker account: the ask stays open for the person.
         return bounded === undefined || bounded !== summary.trim()
           ? Promise.resolve("unavailable")
-          : this.#askToolApproval(active, bounded, undefined, signal);
+          : this.#askToolApproval(active, bounded, undefined, signal, true);
       },
       // Under Strict only, as for a pull-request comment.
       readOutsideContent: () =>

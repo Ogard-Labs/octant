@@ -1,6 +1,4 @@
 import {
-  linkedIssueLabel,
-  sameLinkedIssue,
   type LinearIssueWorkflow,
   type LinkedIssueMoment,
   type LinkedIssueRef,
@@ -11,6 +9,8 @@ import {
 import {
   chooseLinearIssueState,
   decideGithubIssueMoment,
+  linkedIssueLabel,
+  sameLinkedIssue,
 } from "@octant/domain/tracker-issue-write-policy";
 import { commentDigest, type ThreadLinkedIssueStore } from "./threadLinkedIssueStore";
 
@@ -85,9 +85,11 @@ export interface TrackerAdvanceOptions {
    */
   readonly retry: boolean;
   /**
-   * Done only for an issue the host already updated while the switch was on.
-   * Turning the switch on must not close issues of threads that merged
-   * before it, which a person may have reopened since.
+   * Done only for an issue whose In Review the host recorded: the switch was
+   * on while the pull request was open. Turning the switch on must not close
+   * issues of threads that merged before it, which a person may have
+   * reopened since, and a follow-up turn's In Progress after that merge does
+   * not count.
    */
   readonly requireEarlierWrite?: boolean;
 }
@@ -149,7 +151,11 @@ export class TrackerIssueWrites {
       const issueRecords = this.#store
         .writes(threadId)
         .filter((record) => sameLinkedIssue(record.issue, issue) && record.actor === "host");
-      if (options.requireEarlierWrite === true && issueRecords.length === 0) continue;
+      if (
+        options.requireEarlierWrite === true &&
+        !issueRecords.some((record) => record.target === "in-review")
+      )
+        continue;
       const records = issueRecords.filter((record) => record.target === moment);
       if (!options.retry && records.length > 0) continue;
       const settled = (action: TrackerIssueWriteAction) =>

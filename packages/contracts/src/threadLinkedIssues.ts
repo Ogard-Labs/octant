@@ -125,23 +125,3 @@ export const decodeLinkedIssueRef = Schema.decodeUnknownSync(LinkedIssueRef);
 export const decodeThreadIssueLinked = Schema.decodeUnknownSync(ThreadIssueLinked);
 export const decodeThreadIssueUnlinked = Schema.decodeUnknownSync(ThreadIssueUnlinked);
 export const decodeTrackerIssueWriteRecorded = Schema.decodeUnknownSync(TrackerIssueWriteRecorded);
-
-/** Whether two references name the same issue. Repository names compare without case, as GitHub does. */
-export function sameLinkedIssue(left: LinkedIssueRef, right: LinkedIssueRef): boolean {
-  if (left.forge === "github" && right.forge === "github") {
-    return (
-      left.number === right.number &&
-      left.owner.toLowerCase() === right.owner.toLowerCase() &&
-      left.repository.toLowerCase() === right.repository.toLowerCase()
-    );
-  }
-  if (left.forge === "linear" && right.forge === "linear") return left.issueId === right.issueId;
-  return false;
-}
-
-/** How a person reads the reference: `owner/repo#12` or `ENG-12`. */
-export function linkedIssueLabel(issue: LinkedIssueRef): string {
-  return issue.forge === "github"
-    ? `${issue.owner}/${issue.repository}#${String(issue.number)}`
-    : issue.identifier;
-}

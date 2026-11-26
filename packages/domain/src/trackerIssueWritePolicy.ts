@@ -98,7 +98,7 @@ export function decideAgentIssueUpdate(input: {
   readonly readOutsideContent: boolean;
 }): AgentIssueUpdateDecision {
   if (input.posture === "plan") return { decision: "refuse", reason: "plan" };
-  if (!input.linked.some((linked) => sameIssue(linked, input.issue))) {
+  if (!input.linked.some((linked) => sameLinkedIssue(linked, input.issue))) {
     return { decision: "refuse", reason: "not-linked" };
   }
   const comment = decidePullRequestComment({
@@ -112,7 +112,12 @@ export function decideAgentIssueUpdate(input: {
     : { decision: "ask" };
 }
 
-function sameIssue(left: LinkedIssueRef, right: LinkedIssueRef): boolean {
+/**
+ * Whether two references name the same issue: the one identity the link
+ * store, the host's writes and the agent's reach all compare by. Repository
+ * names compare without case, as GitHub does.
+ */
+export function sameLinkedIssue(left: LinkedIssueRef, right: LinkedIssueRef): boolean {
   if (left.forge === "github" && right.forge === "github") {
     return (
       left.number === right.number &&
@@ -121,6 +126,13 @@ function sameIssue(left: LinkedIssueRef, right: LinkedIssueRef): boolean {
     );
   }
   return left.forge === "linear" && right.forge === "linear" && left.issueId === right.issueId;
+}
+
+/** How a person reads the reference: `owner/repo#12` or `ENG-12`. */
+export function linkedIssueLabel(issue: LinkedIssueRef): string {
+  return issue.forge === "github"
+    ? `${issue.owner}/${issue.repository}#${String(issue.number)}`
+    : issue.identifier;
 }
 
 /**

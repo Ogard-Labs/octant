@@ -214,6 +214,41 @@ describe("ProjectOverview", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("offers a Code Project with no GitHub repository both linked-issue switches", async () => {
+    const user = userEvent.setup();
+    const onCodeIssueUpdatesChange = vi.fn(async () => true);
+    const codeProject = {
+      id: "20000000-0000-4000-8000-000000000005",
+      name: "Linear only",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/repository" },
+      codeAccessPersistence: "current-session",
+      agentsMayUpdateIssues: true,
+    } as unknown as ProjectSummary;
+    render(
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onCodeIssueUpdatesChange={onCodeIssueUpdatesChange}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={codeProject}
+      />,
+    );
+    const keep = screen.getByRole("switch", { name: "Keep linked issues up to date" });
+    expect(keep).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Agents may update linked issues" })).toBeChecked();
+    await user.click(keep);
+    expect(onCodeIssueUpdatesChange).toHaveBeenCalledWith(codeProject.id, {
+      keepLinkedIssuesCurrent: true,
+    });
+  });
+
   it("offers every Project a switch, off until chosen, that lets agents write its memory without asking", async () => {
     const user = userEvent.setup();
     const onAgentMemoryWritesChange = vi.fn(async () => true);

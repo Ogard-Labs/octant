@@ -15,7 +15,6 @@ import {
   decodeThreadIssueLinked,
   decodeThreadIssueUnlinked,
   decodeTrackerIssueWriteRecorded,
-  sameLinkedIssue,
   type EventActor as EventActorValue,
   type EventEnvelope,
   type LinkedIssueRef,
@@ -23,6 +22,7 @@ import {
   type ThreadLinkedIssue,
   type TrackerIssueWriteRecorded,
 } from "@octant/contracts";
+import { sameLinkedIssue } from "@octant/domain/tracker-issue-write-policy";
 import { Schema } from "effect";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { Journal } from "../persistence/journal";

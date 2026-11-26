@@ -4823,7 +4823,12 @@ take is refused rather than ignored.
   refuses, Full access writes, and below it the person is asked with the
   whole text unless the Project's Agents may update linked
   issues is on and the thread has read no outside content under Strict
-  (`decideAgentIssueUpdate`, the pull-request comment rule). A GitHub write
+  (`decideAgentIssueUpdate`, the pull-request comment rule). Only a window
+  on the host or a device the person paired may allow the ask, and the links
+  are read again once it is allowed. The tools reach the host's checks and
+  writes through one injected port (`LinkedIssueUpdatePort`), never the
+  tracker services themselves, and the Linear plugin's write operations are
+  refused on the client-facing integration route. A GitHub write
   needs the GitHub integration effective and first proves triage or push
   permission on the repository;
   a Linear write needs the `write` scope. Each attempt is journaled as

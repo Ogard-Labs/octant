@@ -7,7 +7,9 @@ import { pullRequestControlsLoadMessage, switchRefusalCopy } from "./ProjectPull
 
 export type MergeWhenReadyOfferClient = Pick<
   CodeClient,
-  "queryProjectPullRequestDetail" | "setProjectPullRequestMergeWhenReady"
+  | "queryProjectPullRequestDetail"
+  | "refreshProjectPullRequestDetail"
+  | "setProjectPullRequestMergeWhenReady"
 >;
 
 /**
@@ -32,8 +34,13 @@ export function MergeWhenReadyOffer(props: {
     if (busy || turnOn === undefined) return;
     setBusy(true);
     try {
-      const view = await props.client.queryProjectPullRequestDetail(props.target);
-      const detail = view.detail;
+      // A pull request the thread just opened has no cached detail yet, as the
+      // review page would have read it; the offer reads it from GitHub then.
+      const cached = (await props.client.queryProjectPullRequestDetail(props.target)).detail;
+      const detail =
+        cached.state === "observed" && cached.headSha !== ""
+          ? cached
+          : (await props.client.refreshProjectPullRequestDetail(props.target)).detail;
       if (detail.state !== "observed" || detail.headSha === "") {
         setMessage("Refresh the pull request to read its head first.");
         return;

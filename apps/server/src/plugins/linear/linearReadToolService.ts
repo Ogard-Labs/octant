@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CodeThread, ProjectLinearTarget, WindowId } from "@octant/contracts";
+import type { CodeThread, LinkedIssueRef, ProjectLinearTarget, WindowId } from "@octant/contracts";
 import type {
   IntegrationAuthenticationSnapshot,
   IntegrationExecutionResult,
@@ -25,11 +25,6 @@ import type {
   ExternalContentIngestionStore,
 } from "../../context/externalContentIngestionStore";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../../providers/appManagedToolSet";
-import {
-  runAgentIssueUpdate,
-  type AgentIssueAction,
-  type AgentIssueUpdates,
-} from "../../trackerIssues/agentIssueUpdates";
 import { redactLinearIssueContextText } from "./linearIssueContextService";
 
 const MAX_TOOL_INPUT_BYTES = 4 * 1024;
@@ -112,11 +107,31 @@ export interface LinearReadToolReader {
   ) => Promise<IntegrationExecutionResult>;
 }
 
+/**
+ * The host's port for an agent's write to one of its thread's linked issues:
+ * the links, and one call that decides, asks and writes. Present on a turn
+ * whose agent may update them.
+ */
+export interface LinearIssueUpdatePort {
+  readonly linked: () => ReadonlyArray<LinkedIssueRef>;
+  readonly update: (input: {
+    readonly turnThread: CodeThread;
+    readonly current: CodeThread | undefined;
+    readonly issue: LinkedIssueRef;
+    readonly action:
+      | { readonly kind: "set-state"; readonly state: string }
+      | { readonly kind: "comment"; readonly body: string };
+    readonly signal?: AbortSignal;
+  }) => Promise<{ readonly result: unknown; readonly isError: boolean }>;
+}
+
+type IssueUpdateAction = Parameters<LinearIssueUpdatePort["update"]>[0]["action"];
+
 export interface LinearReadToolContext {
   readonly windowId: WindowId;
   readonly thread: CodeThread;
   /** Present on a turn whose agent may update its thread's linked issues. */
-  readonly issueUpdates?: AgentIssueUpdates;
+  readonly issueUpdates?: LinearIssueUpdatePort;
   readonly readThread: (windowId: WindowId, threadId: CodeThread["id"]) => CodeThread | undefined;
   readonly readProjectLinearTarget: () => ProjectLinearTarget | undefined;
 }
@@ -194,14 +209,13 @@ export class LinearReadToolService {
           const issue = context.issueUpdates
             .linked()
             .find((linked) => linked.forge === "linear" && linked.identifier === update.identifier);
-          return runAgentIssueUpdate({
+          return context.issueUpdates.update({
             turnThread: context.thread,
             current,
             // An identifier the thread is not linked to still reaches the
             // policy, which refuses it by name; the node id is never guessed.
             issue: issue ?? { forge: "linear", identifier: update.identifier, issueId: "unlinked" },
             action: update.action,
-            updates: context.issueUpdates,
             ...(signal === undefined ? {} : { signal }),
           });
         }
@@ -493,7 +507,7 @@ function parseLinearReadInput(value: string): LinearReadToolInput | undefined {
 
 function parseLinearUpdateInput(
   value: string,
-): { readonly identifier: string; readonly action: AgentIssueAction } | undefined {
+): { readonly identifier: string; readonly action: IssueUpdateAction } | undefined {
   if (Buffer.byteLength(value, "utf8") > 2 * MAX_TOOL_INPUT_BYTES) return undefined;
   let parsed: unknown;
   try {

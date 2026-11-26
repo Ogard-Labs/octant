@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CodeThread, ProjectLinearTarget, WindowId } from "@octant/contracts";
+import { linkedIssueUpdatePort } from "../../trackerIssues/agentIssueUpdates";
+import type { CodeThread, LinkedIssueRef, ProjectLinearTarget, WindowId } from "@octant/contracts";
 import type { IntegrationAuthenticationSnapshot } from "@octant/contracts/integration";
 import {
   LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION,
@@ -298,7 +299,8 @@ describe("LinearReadToolService issue updates", () => {
     const thread = makeThread({ executionPolicy: input.executionPolicy });
     const current =
       input.lifecycle === undefined ? thread : { ...thread, lifecycle: input.lifecycle };
-    const ask = vi.fn(async () => "approved" as const);
+    let links: ReadonlyArray<LinkedIssueRef> = [linked];
+    const ask = vi.fn(async (_summary: string, _signal?: AbortSignal) => "approved" as const);
     const writes = {
       agentSetState: vi.fn(async () => ({ status: "applied" as const })),
       agentComment: vi.fn(async () => ({ status: "applied" as const })),
@@ -311,18 +313,37 @@ describe("LinearReadToolService issue updates", () => {
       thread,
       readThread: () => current,
       readProjectLinearTarget: () => TARGET,
-      issueUpdates: {
-        linked: () => [linked],
+      issueUpdates: linkedIssueUpdatePort({
+        linked: () => links,
         projectAllowsUpdates: () => input.projectAllowsUpdates === true,
         readOutsideContent: () => false,
         ask,
         writes,
-      },
+      }),
     });
     const run = (value: unknown) =>
       toolSet.execute({ name: LINEAR_READ_TOOL_NAME, inputJson: JSON.stringify(value) });
-    return { run, ask, writes };
+    return {
+      run,
+      ask,
+      writes,
+      unlink: () => {
+        links = [];
+      },
+    };
   }
+
+  it("refuses an approved update when the person unlinked the issue while the card waited", async () => {
+    const gated = updateHarness({ executionPolicy: "approval-gated" });
+    gated.ask.mockImplementation(async () => {
+      gated.unlink();
+      return "approved" as const;
+    });
+    expect(
+      await gated.run({ operation: "comment", identifier: "OCT-42", body: "Started." }),
+    ).toMatchObject({ result: { error: "issue-not-linked" }, isError: true });
+    expect(gated.writes.agentComment).not.toHaveBeenCalled();
+  });
 
   it("the agent cannot set the state of an issue that is not linked to its thread", async () => {
     const { run, writes, ask } = updateHarness({ executionPolicy: "full-access" });

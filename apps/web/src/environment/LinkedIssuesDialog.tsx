@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
-import { linkedIssueLabel, type LinkedIssueRef, type ThreadLinkedIssue } from "@octant/contracts";
+import type { LinkedIssueRef, ThreadLinkedIssue } from "@octant/contracts";
+import { linkedIssueLabel } from "@octant/domain/tracker-issue-write-policy";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";

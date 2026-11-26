@@ -1785,10 +1785,12 @@ describe("CodeOperationRuntime", () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const onProviderTurnRequested = vi.fn();
+    const onPersonTurnRequested = vi.fn();
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
       approvalValidator: false,
       onProviderTurnRequested,
+      onPersonTurnRequested,
     });
     const startOperation = operationId(11);
     const command = {
@@ -1803,9 +1805,35 @@ describe("CodeOperationRuntime", () => {
     await fixture.runtime.execute(windowId, command);
     expect(onProviderTurnRequested).toHaveBeenCalledTimes(1);
     expect(onProviderTurnRequested).toHaveBeenCalledWith(threadId);
+    expect(onPersonTurnRequested).toHaveBeenCalledWith(threadId);
 
     await fixture.runtime.execute(windowId, command);
     expect(onProviderTurnRequested).toHaveBeenCalledTimes(1);
+    fixture.close();
+  });
+
+  it("tells the host a person asked for a turn only when the turn was not the host's own", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const onPersonTurnRequested = vi.fn();
+    const onProviderTurnRequested = vi.fn();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      onPersonTurnRequested,
+      onProviderTurnRequested,
+    });
+    await fixture.runtime.execute(ROUTINE_HOST_SCOPE_ID, {
+      kind: "start-provider-turn",
+      operationId: operationId(13),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    // The host's wake reached the turn, and no person asked for it.
+    expect(onProviderTurnRequested).toHaveBeenCalledTimes(1);
+    expect(onPersonTurnRequested).not.toHaveBeenCalled();
     fixture.close();
   });
 
@@ -14331,6 +14359,7 @@ function runtimeFixture(options: {
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
   onProviderTurnRequested?: (threadId: CodeThreadId) => void;
+  onPersonTurnRequested?: (threadId: CodeThreadId) => void;
   probeProvider?: Parameters<typeof createCodeOperationRuntime>[0]["probeProvider"];
   isRuntimeStartedTurn?: Parameters<typeof createCodeOperationRuntime>[0]["isRuntimeStartedTurn"];
   changeThreadLevel?: Parameters<typeof createCodeOperationRuntime>[0]["changeThreadLevel"];
@@ -14843,6 +14872,9 @@ function runtimeFixture(options: {
     actor,
     clock: options.clock ?? (() => now),
     uuid: () => `90000000-0000-4000-8000-${(++uuidCounter).toString().padStart(12, "0")}`,
+    ...(options.onPersonTurnRequested === undefined
+      ? {}
+      : { onPersonTurnRequested: options.onPersonTurnRequested }),
     ...(options.onProviderTurnRequested === undefined
       ? {}
       : { onProviderTurnRequested: options.onProviderTurnRequested }),

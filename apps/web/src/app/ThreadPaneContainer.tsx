@@ -171,6 +171,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectActions"
     | "setProjectWorkStatusFile"
     | "setProjectOwnToolchain"
+    | "setCodeIssueUpdates"
     | "setProjectDelegatedCode"
     | "setProjectWorkDeveloperTools"
     | "setUsageOpen"
@@ -460,6 +461,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectActions,
     setProjectWorkStatusFile,
     setProjectOwnToolchain,
+    setCodeIssueUpdates,
     setProjectDelegatedCode,
     setProjectWorkDeveloperTools,
     setUsageOpen,
@@ -936,6 +938,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     onOwnToolchainChange={(projectId, enabled) =>
                       setProjectOwnToolchain(projectId, enabled ? "enabled" : "disabled")
                     }
+                    onCodeIssueUpdatesChange={setCodeIssueUpdates}
                     onDelegatedCodeChange={setProjectDelegatedCode}
                     onWorkDeveloperToolsChange={setProjectWorkDeveloperTools}
                     onSplitPane={(paneId, orientation, placement) =>

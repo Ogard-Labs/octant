@@ -18,12 +18,14 @@ const linked: ReadonlyArray<ThreadLinkedIssue> = [
 function writeBack(input: {
   readonly keepCurrent: boolean;
   readonly pullRequest?: LinkedThreadPullRequest;
+  readonly merged?: LinkedThreadPullRequest;
+  readonly offerShown?: boolean;
 }) {
   const advance = vi.fn(
     async (..._args: ReadonlyArray<unknown>): Promise<ReadonlyArray<never>> => [],
   );
   const tell = vi.fn(async () => undefined);
-  const offer = vi.fn(async () => undefined);
+  const offer = vi.fn(async () => input.offerShown ?? true);
   const service = new LinkedIssueWriteBack({
     writes: { advance },
     linked: () => linked,
@@ -31,6 +33,7 @@ function writeBack(input: {
     readThread: () => thread,
     keepCurrent: () => input.keepCurrent,
     pullRequest: async () => input.pullRequest,
+    mergedPullRequest: async () => input.merged,
     tell,
     offer,
   });
@@ -82,6 +85,18 @@ describe("LinkedIssueWriteBack", () => {
     });
   });
 
+  it("moves linked issues to Done when a merge made outside Octant is cached before the journal says so", async () => {
+    const merged = { ...open, state: "merged" } as const;
+    const { service, advance, offer } = writeBack({ keepCurrent: true, pullRequest: open, merged });
+    await service.pass();
+    expect(advance).toHaveBeenCalledWith(String(thread.id), "done", open.url, {
+      retry: false,
+      requireEarlierWrite: true,
+    });
+    expect(advance.mock.calls.some((call) => call[1] === "in-review")).toBe(false);
+    expect(offer).not.toHaveBeenCalled();
+  });
+
   it("offers Merge when ready on a linked thread's open pull request, which the person turns on", async () => {
     const { service, offer } = writeBack({ keepCurrent: false, pullRequest: open });
     await service.pass();
@@ -93,6 +108,17 @@ describe("LinkedIssueWriteBack", () => {
       "acme/app#9",
       `acme/app#9 ${MERGE_WHEN_READY_OFFER}`,
     );
+  });
+
+  it("offers Merge when ready again at the next pass when a follow-up the person set held it back", async () => {
+    const { service, offer } = writeBack({
+      keepCurrent: false,
+      pullRequest: open,
+      offerShown: false,
+    });
+    await service.pass();
+    await service.pass();
+    expect(offer).toHaveBeenCalledTimes(2);
   });
 
   it("a turn the person starts lets the next pass retry a refused moment", async () => {

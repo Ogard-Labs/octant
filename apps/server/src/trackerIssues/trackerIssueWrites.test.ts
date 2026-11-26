@@ -207,6 +207,21 @@ describe("TrackerIssueWrites", () => {
     expect(store.writes(threadId)).toEqual([]);
   });
 
+  it("a turn after an old merge does not let that merge close the reopened issue", async () => {
+    const store = openStore();
+    store.link(threadId, github, "created-from");
+    const fake = fakePort();
+    const writes = new TrackerIssueWrites({ store, port: fake.port });
+    // The switch went on after the merge; a follow-up turn records In Progress.
+    await writes.advance(threadId, "in-progress", undefined, trigger);
+    await writes.advance(threadId, "done", prUrl, { retry: false, requireEarlierWrite: true });
+    expect(fake.port.githubClose).not.toHaveBeenCalled();
+    // Seen open while the switch was on, the pull request's merge is this switch's to write.
+    await writes.advance(threadId, "in-review", undefined, pass);
+    await writes.advance(threadId, "done", prUrl, { retry: false, requireEarlierWrite: true });
+    expect(fake.port.githubClose).toHaveBeenCalledOnce();
+  });
+
   it("an already closed GitHub issue counts as Done applied", async () => {
     const store = openStore();
     store.link(threadId, github, "created-from");

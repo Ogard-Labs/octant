@@ -3,6 +3,7 @@ import {
   decodeIntegrationCommand,
   type IntegrationAuthenticationCommand,
 } from "@octant/contracts/integration";
+import { LINEAR_HOST_ONLY_OPERATIONS } from "@octant/contracts/linear-issues";
 import type { IntegrationService } from "./integration/integrationService";
 import { principalActsAsHostPerson } from "./clientPrincipal";
 import { resolvePrincipalRouteContext } from "./principalRouteContext";
@@ -101,6 +102,12 @@ export function createIntegrationRouteHandler(dependencies: {
           return failure("invalid", 400, origin);
         }
         if (command.kind !== "operation") return failure("invalid", 400, origin);
+        // A tracker write reaches only a thread's linked issues, through the
+        // host's own checks and the person's approval; no client may send one
+        // straight to the plugin under the host's credential.
+        if (api.slug === "linear" && LINEAR_HOST_ONLY_OPERATIONS.includes(command.operationId)) {
+          return failure("unauthorized", 403, origin);
+        }
         return response(
           await dependencies.service.executeOperation(api.slug, command, request.signal),
           200,

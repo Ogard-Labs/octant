@@ -90,13 +90,22 @@ export async function resolveLinearIdentifier(
   | { readonly status: "not-found" | "unavailable" }
 > {
   const result = await linear(LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION, { identifier }, signal);
-  if (result.kind === "refused") return { status: "not-found" };
+  // A disconnected or unauthorized Linear refuses too; that is not an answer
+  // about the issue, and the person's remedy is Integrations, not the identifier.
+  if (result.kind === "refused") {
+    return isConnectionRefusal(result.reason) ? { status: "unavailable" } : { status: "not-found" };
+  }
   if (result.kind !== "ok") return { status: "unavailable" };
   try {
     return { status: "found", issueId: decodeLinearIssueDetail(result.value).id };
   } catch {
     return { status: "unavailable" };
   }
+}
+
+/** Linear's plugin and the host say "connect" or "authorize" in every refusal that a sign-in fixes. */
+function isConnectionRefusal(reason: string): boolean {
+  return /connect|authori/i.test(reason);
 }
 
 function linearWrite(result: IntegrationExecutionResult): TrackerWriteResult {
@@ -110,7 +119,7 @@ function linearFailure(
     if (result.reason === LINEAR_MISSING_WRITE_SCOPE) {
       return { status: "refused", reason: "missing-scope" };
     }
-    return /connect|authori/i.test(result.reason)
+    return isConnectionRefusal(result.reason)
       ? { status: "refused", reason: "not-connected", message: result.reason }
       : { status: "refused", reason: "unavailable", message: result.reason };
   }

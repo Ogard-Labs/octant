@@ -2,13 +2,16 @@ import {
   LINEAR_MISSING_WRITE_SCOPE,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
   MAX_TRACKER_COMMENT_BYTES,
-  linkedIssueLabel,
   type CodeThread,
   type LinkedIssueRef,
 } from "@octant/contracts";
 import { clampTurnAccessPosture } from "@octant/domain";
 import { redactSecretsAndPrivateKeys } from "@octant/domain/secret-shaped-text-policy";
-import { decideAgentIssueUpdate } from "@octant/domain/tracker-issue-write-policy";
+import {
+  decideAgentIssueUpdate,
+  linkedIssueLabel,
+  sameLinkedIssue,
+} from "@octant/domain/tracker-issue-write-policy";
 import { noticeFor, type TrackerIssueWrites } from "./trackerIssueWrites";
 
 /**
@@ -35,6 +38,30 @@ export type AgentIssueAction =
   | { readonly kind: "comment"; readonly body: string };
 
 type ToolResult = { readonly result: unknown; readonly isError: boolean };
+
+/**
+ * What the Linear and GitHub tools receive: the thread's links, and one call
+ * that makes an agent's write with the host's checks. The tools never reach
+ * the host's tracker writes or approvals themselves, so a tool a plugin
+ * provides could be handed the same port.
+ */
+export interface LinkedIssueUpdatePort {
+  readonly linked: () => ReadonlyArray<LinkedIssueRef>;
+  readonly update: (input: {
+    readonly turnThread: CodeThread;
+    readonly current: CodeThread | undefined;
+    readonly issue: LinkedIssueRef;
+    readonly action: AgentIssueAction;
+    readonly signal?: AbortSignal;
+  }) => Promise<ToolResult>;
+}
+
+export function linkedIssueUpdatePort(updates: AgentIssueUpdates): LinkedIssueUpdatePort {
+  return {
+    linked: updates.linked,
+    update: (input) => runAgentIssueUpdate({ ...input, updates }),
+  };
+}
 
 /**
  * One agent write to a linked issue: reach, Plan and the ask are decided
@@ -100,6 +127,14 @@ export async function runAgentIssueUpdate(input: {
         answer === "denied"
           ? "The person declined this issue update. Nothing reached the tracker."
           : "The issue update was not approved. Nothing reached the tracker.",
+      );
+    }
+    // The person may have unlinked the issue while the card waited, and an
+    // approval never reaches past the links the thread has when it is used.
+    if (!input.updates.linked().some((linked) => sameLinkedIssue(linked, input.issue))) {
+      return failure(
+        "issue-not-linked",
+        `${linkedIssueLabel(input.issue)} was unlinked from this thread before the update ran. Nothing reached the tracker.`,
       );
     }
   }
