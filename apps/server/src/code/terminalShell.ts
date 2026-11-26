@@ -69,7 +69,10 @@ export function windowsShellArguments(
  * with what exit code, and the pattern that reads that back.
  *
  * The completion is part of the same input the shell parses with the command,
- * never a second line typed ahead into the terminal: a foreground program
+ * never a second line typed ahead into the terminal, and the command sits on
+ * a line of its own, so a trailing comment in it hides nothing after it (a
+ * PowerShell `# note` hid the closing brace and the marker, so the command
+ * never ran): a foreground program
  * that reads its input (a dev server, a test watcher) swallowed a typed-ahead
  * line, and a Ctrl-C flushed it, so the command never said it finished.
  *
@@ -93,17 +96,20 @@ export function terminalCompletion(
   switch (win32.basename(shell).toLowerCase()) {
     case "powershell.exe":
     case "pwsh.exe":
-      // A native program sets `$LASTEXITCODE` (to a new value, even an equal
-      // number) and nothing else does, so its code is reported when it ran,
-      // even where a failed native program also leaves an error record
-      // ($PSNativeCommandUseErrorActionPreference). Otherwise `$?` and the
-      // newest error record decide: a failed cmdlet, or one run with
-      // -ErrorAction Ignore that leaves no record, reports 1 rather than an
-      // earlier program's code. `$LASTEXITCODE` itself is never assigned, so
-      // a later command still reads what the last program left.
+      // `$?` is read inside the block on the line straight after the command,
+      // so it is the command's own last statement: one that handled a native
+      // failure and ended well reports 0. Only a failure then looks further: a
+      // new error record that is not a native exit (a failed cmdlet, or a
+      // terminating error, which leaves `$octantOk` false) reports 1, and a
+      // native program that ran reports its own code, even where
+      // $PSNativeCommandUseErrorActionPreference also left a record. A cmdlet
+      // under -ErrorAction Ignore leaves none and reports 1, unless a program
+      // earlier in the same command left a code. `$LASTEXITCODE` itself is
+      // never assigned, so a later command still reads what the last program
+      // left (a new value, even an equal number, says a program ran).
       return {
         wrap: (command) =>
-          `$octantLastError = $Error[0]; $octantLastExit = $global:LASTEXITCODE; . { ${command} }; $octantOk = $?; $octantExit = if (-not [object]::ReferenceEquals($global:LASTEXITCODE, $octantLastExit) -and $LASTEXITCODE) { $LASTEXITCODE } elseif ($octantOk -and ($Error.Count -eq 0 -or [object]::ReferenceEquals($Error[0], $octantLastError))) { 0 } else { 1 }; [Console]::WriteLine("octant=${marker};exit=$octantExit")`,
+          `$octantOk = $false; $octantLastError = $Error[0]; $octantLastExit = $global:LASTEXITCODE; . {\r${command}\r$octantOk = $?\r}; $octantExit = if ($octantOk) { 0 } elseif ($Error.Count -gt 0 -and -not [object]::ReferenceEquals($Error[0], $octantLastError) -and $Error[0].Exception.GetType().Name -ne 'NativeCommandExitException') { 1 } elseif (-not [object]::ReferenceEquals($global:LASTEXITCODE, $octantLastExit) -and $LASTEXITCODE) { $LASTEXITCODE } else { 1 }; [Console]::WriteLine("octant=${marker};exit=$octantExit")`,
         pattern: plain,
       };
     case "cmd.exe":
@@ -111,12 +117,14 @@ export function terminalCompletion(
       // it to 0 first; `%^ERRORLEVEL%` is expanded when `call` runs, after the
       // command, not when the line is read.
       return {
-        wrap: (command) => `(call ) & (${command}) & call echo octant=${marker};exit=%^ERRORLEVEL%`,
+        wrap: (command) =>
+          `(call ) & (\r${command}\r) & call echo octant=${marker};exit=%^ERRORLEVEL%`,
         pattern: plain,
       };
     default:
       return {
-        wrap: (command) => `{ ${command}\r}; printf '\\033]777;octant=${marker};exit=%s\\007' "$?"`,
+        wrap: (command) =>
+          `{\r${command}\r}; printf '\\033]777;octant=${marker};exit=%s\\007' "$?"`,
         pattern: new RegExp(`\\u001b\\]777;octant=${marker};exit=(-?\\d+)\\u0007`, "g"),
       };
   }
