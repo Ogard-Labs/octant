@@ -119,6 +119,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".browser-markup__swatch",
   ".claude-account-accent-picker__swatch",
   ".provider-history__swatch",
+  ".provider-history__token-swatch",
   // Meters, progress bars, and their fills.
   ".meter",
   ".ctxmeter",
@@ -143,6 +144,11 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   // A pooled window's placeholder for an account with no reading stands in
   // the meter track beside the other accounts' meters, so it keeps their shape.
   ".provider-limits__segment-empty",
+  // Usage's token bar and a model's share bar are meters; the pace mark is a
+  // thin tick standing on a limit's meter, rounded at its ends as the meter is.
+  ".provider-history__token-bar",
+  ".provider-history__share",
+  ".provider-limits__pace",
   // A slider's thumb, a scrollbar's thumb, and a sheet's grabber.
   ".octant-slider::-webkit-slider-thumb",
   ".octant-slider::-moz-range-thumb",
