@@ -274,9 +274,12 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   // user already opened.
   const disclosures = useReplyDisclosures();
   // A quiet level's hidden steps come back for Find, or when the person opens
-  // the turn's "N steps hidden" line; the line's choice stays with this turn.
+  // the turn's "N steps hidden" line. The line's choice is one of this turn's
+  // disclosures, so a change of level forgets it like the others: opened at
+  // Failures only, the steps must not stay open after a switch to Answers only.
   const findOpen = useContext(RevealHiddenStepsContext);
-  const [stepsOpened, setStepsOpened] = useState(false);
+  const stepsOpened = disclosures.isOpen(HIDDEN_STEPS_DISCLOSURE, false);
+  const setStepsOpened = (open: boolean) => disclosures.choose(HIDDEN_STEPS_DISCLOSURE, open);
   const subagentRows = useTurnSubagentRows(props.subagents);
   const [revealedSummaryIds, setRevealedSummaryIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -309,7 +312,9 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   // through its observations) still lists them.
   const hides = disclosures.opening.hides;
   if (!hasRows && !hasReasoning && !hasReasoningTiming && hides === "nothing") {
-    return props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />;
+    return props.subagents === undefined ? null : (
+      <TurnSubagentRows rows={subagentRows} window={props.subagents} />
+    );
   }
 
   // At a quiet level the rows are drawn flat, never inside the settled fold,
@@ -517,7 +522,12 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
       props.subagents !== undefined &&
       (quiet.subagents === "all" ? subagentRows.length > 0 : quiet.attentionSubagents > 0);
     const thinking = quiet.showThinking ? thinkingDisclosure : null;
+    // The caller leaves the turn's duration out of its header when Low's
+    // settled fold would carry it; a quiet level draws no fold, so the
+    // duration is its own line here, open or not.
+    const workedFor = settled && !running ? props.workedFor : undefined;
     if (
+      workedFor === undefined &&
       !offerHidden &&
       !offerHide &&
       quiet.rows.length === 0 &&
@@ -530,6 +540,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     }
     return (
       <div className="turn-activity" {...(running ? { "data-live": "true" } : {})}>
+        {workedFor === undefined ? null : <p className="turn-activity__worked-for">{workedFor}</p>}
         {offerHidden || offerHide ? (
           <OctantButton
             aria-expanded={offerHide}
@@ -554,6 +565,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         {showSubagents && props.subagents !== undefined ? (
           <TurnSubagentRows
             {...(quiet.subagents === "attention" ? { only: subagentFailedOrWaiting } : {})}
+            rows={subagentRows}
             window={props.subagents}
           />
         ) : null}
@@ -620,7 +632,9 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
       ) : (
         <>{renderRows(activity.rows)}</>
       )}
-      {props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />}
+      {props.subagents === undefined ? null : (
+        <TurnSubagentRows rows={subagentRows} window={props.subagents} />
+      )}
       {deliverables}
     </div>
   );
@@ -977,6 +991,9 @@ function subagentFailedOrWaiting(row: { readonly lifecycleStatus: string }): boo
 }
 
 /** The subagents a turn started, as its rows list them; none without a window. */
+/** The disclosure id of a quiet level's "N steps hidden" line. */
+const HIDDEN_STEPS_DISCLOSURE = "quiet:hidden-steps";
+
 function useTurnSubagentRows(window: TurnSubagentWindow | undefined) {
   const subagents = useContext(ThreadSubagentsContext);
   const providers = useSubagentProviders();

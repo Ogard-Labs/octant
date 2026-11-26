@@ -1,8 +1,10 @@
 import "../styles/thread-plan.css";
 import { Check, ChevronDown, Circle, CircleX, Clock3 } from "../ui/icons";
-import { useId, useState, type ReactNode } from "react";
+import { useContext, useId, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSpinner } from "../ui/base/OctantSpinner";
+import { ReplyDetailContext, useReplyDisclosures } from "./replyDetail";
+import { RevealHiddenStepsContext } from "./revealHiddenSteps";
 
 /** One task in an agent's restated work plan, with the provider's own wording. */
 export interface ThreadTaskRow {
@@ -76,6 +78,9 @@ function taskWording(task: ThreadTaskRow, turnRunning: boolean): string {
     : task.summary;
 }
 
+/** The disclosure id of Answers only's "N tasks hidden" line. */
+const HIDDEN_TASKS_DISCLOSURE = "quiet:hidden-tasks";
+
 /**
  * The agent's ongoing and planned tasks, live in the conversation.
  *
@@ -85,6 +90,16 @@ function taskWording(task: ThreadTaskRow, turnRunning: boolean): string {
  */
 export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
   const { tasks, running } = props.tasks;
+  // Answers only leaves a transcript's tasks out but for one that failed or
+  // waits on the person; a finished turn's others wait behind "N tasks
+  // hidden", and Find shows them all. The choice is one of the turn's
+  // disclosures, so a change of level forgets it. The Tasks dock panel, which
+  // a person opened to see the list, always shows it whole.
+  const level = useContext(ReplyDetailContext);
+  const findOpen = useContext(RevealHiddenStepsContext);
+  const disclosures = useReplyDisclosures();
+  const tasksOpened = disclosures.isOpen(HIDDEN_TASKS_DISCLOSURE, false);
+  const answersOnly = props.alwaysOpen !== true && level === "answers" && !findOpen;
   // The list stays open while the agent works through it, so the step in
   // hand is readable without a click, and folds to its summary once the turn
   // settles. Opening or folding it by hand wins over both.
@@ -121,6 +136,62 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
       ? tasks.find((task) => task.state === "running" && task.runningSummary !== undefined)
       : undefined;
   if (tasks.length === 0) return null;
+  const item = (task: ThreadTaskRow, index: number) => (
+    <li data-task-state={drawnState(task, running)} key={task.id}>
+      <span aria-hidden="true" className="thread-tasks__index">
+        {index + 1}.
+      </span>
+      <span className="thread-tasks__mark">{taskIcon(drawnState(task, running))}</span>
+      <span className="thread-tasks__summary">{taskWording(task, running)}</span>
+      {/* The mark is drawn for the eye only, so the state is said in words. */}
+      <span className="sr-only">
+        ,{" "}
+        {task.state === "running" && !running
+          ? // A stopped turn's task in hand did not finish; the header says Incomplete.
+            "not finished"
+          : TASK_STATE_WORDS[task.state]}
+      </span>
+    </li>
+  );
+  if (answersOnly) {
+    const hidden = tasks.length - failed - waiting;
+    // A running turn's Working line names its step, so it offers no line.
+    const offersLine = !running && hidden > 0;
+    const line = offersLine ? (
+      <OctantButton
+        aria-expanded={tasksOpened}
+        className="turn-activity__hidden-steps"
+        onClick={() => disclosures.choose(HIDDEN_TASKS_DISCLOSURE, !tasksOpened)}
+        size="sm"
+        type="button"
+        variant="link"
+      >
+        {tasksOpened ? "Hide tasks" : hidden === 1 ? "1 task hidden" : `${hidden} tasks hidden`}
+      </OctantButton>
+    ) : null;
+    if (!tasksOpened || !offersLine) {
+      const kept = tasks.flatMap((task, index) =>
+        task.state === "failed" || task.state === "waiting" ? [item(task, index)] : [],
+      );
+      if (kept.length === 0 && line === null) return null;
+      return (
+        <section aria-label="Agent tasks" className="thread-tasks" data-state={state}>
+          {line}
+          {kept.length === 0 ? null : (
+            <ol aria-label="Task list" className="thread-tasks__list">
+              {kept}
+            </ol>
+          )}
+        </section>
+      );
+    }
+    return (
+      <>
+        {line}
+        <ThreadTasksPanel tasks={props.tasks} alwaysOpen />
+      </>
+    );
+  }
 
   return (
     <section
@@ -154,23 +225,7 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
       </OctantButton>
       {open ? (
         <ol aria-label="Task list" className="thread-tasks__list" id={listId}>
-          {tasks.map((task, index) => (
-            <li data-task-state={drawnState(task, running)} key={task.id}>
-              <span aria-hidden="true" className="thread-tasks__index">
-                {index + 1}.
-              </span>
-              <span className="thread-tasks__mark">{taskIcon(drawnState(task, running))}</span>
-              <span className="thread-tasks__summary">{taskWording(task, running)}</span>
-              {/* The mark is drawn for the eye only, so the state is said in words. */}
-              <span className="sr-only">
-                ,{" "}
-                {task.state === "running" && !running
-                  ? // A stopped turn's task in hand did not finish; the header says Incomplete.
-                    "not finished"
-                  : TASK_STATE_WORDS[task.state]}
-              </span>
-            </li>
-          ))}
+          {tasks.map(item)}
         </ol>
       ) : null}
     </section>

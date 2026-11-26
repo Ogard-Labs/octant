@@ -118,7 +118,7 @@ import { PullRequestBabysitDialog } from "./PullRequestBabysitDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
-import { TurnSubagentRows, type TurnSubagentWindow } from "../agents/threadSubagents";
+import type { TurnSubagentWindow } from "../agents/threadSubagents";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { CodeCheckoutBar } from "./CodeCheckoutBar";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -171,7 +171,11 @@ import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
-import { runningStepTitle, settledTurnFoldsActivity } from "../transcript/turnActivity";
+import {
+  NO_TURN_ACTIVITY,
+  runningStepTitle,
+  settledTurnFoldsActivity,
+} from "../transcript/turnActivity";
 import { latestTurnTasks, splitTurnTasks } from "./transcriptActivity";
 import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
@@ -2594,40 +2598,36 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                               />
                             )}
                             {gallery}
-                            {activity === undefined ? (
-                              <CodeTurnSubagents window={subagentWindows.get(message.id)} />
-                            ) : (
-                              <TurnActivityRows
-                                activity={activity}
-                                {...(workedForInFold && workedFor !== undefined
-                                  ? { workedFor }
-                                  : {})}
-                                publishedSnapshotRuntime={(toolCallId) =>
-                                  publishedSnapshotRunRuntimeFor(props.canvasClient, {
-                                    mode: "code",
-                                    threadId: String(thread.id),
-                                    toolCallId,
-                                  })
-                                }
-                                running={message.status === "incomplete"}
-                                settled={
-                                  message.status === "completed" ||
-                                  message.status === "failed" ||
-                                  message.status === "interrupted"
-                                }
-                                {...subagentWindowProp(subagentWindows.get(message.id))}
-                                {...(canvasClient === undefined
-                                  ? {}
-                                  : {
-                                      canvasPreview: (preview: ThreadCanvasPreviewReceipt) => (
-                                        <CanvasPreviewMiniature
-                                          client={canvasClient}
-                                          preview={preview}
-                                        />
-                                      ),
-                                    })}
-                              />
-                            )}
+                            <TurnActivityRows
+                              // A turn whose subagents left no tool row still
+                              // lists them, at its level.
+                              activity={activity ?? NO_TURN_ACTIVITY}
+                              {...(workedForInFold && workedFor !== undefined ? { workedFor } : {})}
+                              publishedSnapshotRuntime={(toolCallId) =>
+                                publishedSnapshotRunRuntimeFor(props.canvasClient, {
+                                  mode: "code",
+                                  threadId: String(thread.id),
+                                  toolCallId,
+                                })
+                              }
+                              running={message.status === "incomplete"}
+                              settled={
+                                message.status === "completed" ||
+                                message.status === "failed" ||
+                                message.status === "interrupted"
+                              }
+                              {...subagentWindowProp(subagentWindows.get(message.id))}
+                              {...(canvasClient === undefined
+                                ? {}
+                                : {
+                                    canvasPreview: (preview: ThreadCanvasPreviewReceipt) => (
+                                      <CanvasPreviewMiniature
+                                        client={canvasClient}
+                                        preview={preview}
+                                      />
+                                    ),
+                                  })}
+                            />
                             {/* The turn's Canvases sit between its steps and its
                             reply, so a summary reads first and the reply adds to
                             it rather than introducing it. */}
@@ -4133,10 +4133,6 @@ function codeSubagentWindows(
   }
   close(undefined);
   return windows;
-}
-
-function CodeTurnSubagents(props: { readonly window: TurnSubagentWindow | undefined }) {
-  return props.window === undefined ? null : <TurnSubagentRows window={props.window} />;
 }
 
 function subagentWindowProp(window: TurnSubagentWindow | undefined): {

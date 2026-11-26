@@ -3,3 +3,11 @@
 .turn-activity__hidden-steps {
   align-self: flex-start;
 }
+
+/* The turn's duration, which Low's settled fold carries and a quiet level,
+   drawing no fold, gives a line of its own. */
+.turn-activity__worked-for {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}

@@ -88,6 +88,24 @@ describe("the Reply detail commands", () => {
     expect(onSet).toHaveBeenLastCalledWith(undefined);
   });
 
+  it("finds a quieter level first for a search for hiding steps", () => {
+    const commands = buildOctantCommands(
+      sources({
+        replyDetail: {
+          defaultLevel: "low",
+          onSetDefault: vi.fn(),
+          thread: { level: "low", override: undefined, onSet: vi.fn() },
+        },
+      }),
+    );
+    expect(filterOctantCommands(commands, "hide steps")[0]?.id).toBe("thread:reply-detail:answers");
+    expect(
+      filterOctantCommands(commands, "hide steps").some((command) =>
+        ["thread:reply-detail-cycle", "thread:reply-detail:high"].includes(command.id),
+      ),
+    ).toBe(false);
+  });
+
   it("still changes the default, and offers no thread commands when no thread is in front", () => {
     const onSetDefault = vi.fn();
     const commands = buildOctantCommands(

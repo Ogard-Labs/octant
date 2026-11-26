@@ -145,12 +145,18 @@ export function TurnSubagentRows(props: {
   readonly window: TurnSubagentWindow;
   /** Lists only the subagents this keeps, as Answers only does. */
   readonly only?: (row: SubagentRow) => boolean;
+  /**
+   * The window's rows, when the caller already built them to count them; the
+   * thread's whole list is not built again for the same turn.
+   */
+  readonly rows?: ReadonlyArray<SubagentRow>;
 }) {
   const subagents = useContext(ThreadSubagentsContext);
   const onOpen = useContext(ThreadSubagentOpenContext);
   const providers = useSubagentProviders();
-  const rows =
-    subagents === undefined || subagents.status !== "ready"
+  const windowRows =
+    props.rows ??
+    (subagents === undefined || subagents.status !== "ready"
       ? []
       : subagentRowsInWindow(
           buildSubagentRows({
@@ -159,7 +165,8 @@ export function TurnSubagentRows(props: {
             ...(providers === undefined ? {} : { providers }),
           }),
           props.window,
-        ).filter((row) => props.only?.(row) ?? true);
+        ));
+  const rows = windowRows.filter((row) => props.only?.(row) ?? true);
   const live = rows.some((row) => isActiveAgentHierarchyStatus(row.lifecycleStatus));
   const now = useNow(live);
   if (rows.length === 0) return null;

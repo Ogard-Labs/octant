@@ -2,7 +2,6 @@ import { threadDraftScope, typedClaimFor } from "@octant/client-runtime/typed-co
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
-import { TurnSubagentRows } from "../agents/threadSubagents";
 import {
   attachAllowingFiles,
   attachmentMediaType,
@@ -221,6 +220,7 @@ import { TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
 import {
   runningStepTitle,
+  NO_TURN_ACTIVITY,
   settledTurnFoldsActivity,
   toolStepsActivity,
 } from "../transcript/turnActivity";
@@ -558,21 +558,22 @@ function WorkToolGroup(props: {
     from: props.turn.acceptedAt,
     ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
   };
-  // A turn whose subagents left no tool row still lists them.
-  if (activity === undefined) return <TurnSubagentRows window={subagents} />;
   const workedFor = workTurnWorkedFor(props.turn);
   const status = props.turn.status;
   const canvasClient = props.canvasClient;
   const threadId = String(props.turn.threadId);
   return (
     <TurnActivityRows
-      activity={activity}
+      // A turn whose subagents left no tool row still lists them, at its level.
+      activity={activity ?? NO_TURN_ACTIVITY}
       publishedSnapshotRuntime={(toolCallId) =>
         publishedSnapshotRunRuntimeFor(canvasClient, { mode: "work", threadId, toolCallId })
       }
       running={status === "accepted" || status === "running"}
       settled={status === "completed" || status === "failed" || status === "cancelled"}
-      {...(workedFor !== undefined && settledTurnFoldsActivity(activity) ? { workedFor } : {})}
+      {...(workedFor !== undefined && activity !== undefined && settledTurnFoldsActivity(activity)
+        ? { workedFor }
+        : {})}
       {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
       subagents={subagents}
       {...(canvasClient === undefined

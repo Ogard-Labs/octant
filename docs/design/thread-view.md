@@ -229,9 +229,12 @@ binding):
 - **Answers only**: "Only the message and the final reply; a finished turn's
   steps wait behind one line." A turn shows the person's message and the reply.
   Thinking, tool calls, tasks and subagents are left out, except a subagent
-  that failed or waits on the person; a finished turn shows one "N steps
-  hidden" line that opens them in place, with **Hide steps** to put them away
-  again. A running turn shows
+  or a task that failed or waits on the person; a finished turn shows one "N
+  steps hidden" line that opens them in place, with **Hide steps** to put them
+  away again. A turn's task list, drawn apart from its steps, has its own "N
+  tasks hidden" line and **Hide tasks** the same way; the Tasks dock panel
+  always shows the whole list. A turn whose subagents left no tool row is
+  drawn the same way. A running turn shows
   no rows at all: its "Working · 12s · step" line already names the current
   step. Every mode draws a turn's reply as one body beside its activity rows,
   and a provider's interim narration is part of that body, so the whole body
@@ -244,7 +247,10 @@ binding):
   steps hidden" line. Thinking, tasks and subagent rows stay as at Low.
 
 At both quiet levels a turn's rows are drawn flat, never inside Low's settled
-fold, so what they keep is always in sight, and opened steps are flat too. Approvals, questions, credential requests, errors and a
+fold, so what they keep is always in sight, and opened steps are flat too. A
+settled turn's duration, which Low's fold carries, is a line of its own there.
+Opening the hidden steps or tasks is a disclosure like any other: a change of
+level puts it back. Approvals, questions, credential requests, errors and a
 parked usage limit are drawn outside the activity rows and never hidden, and
 the rows always keep a failed call, a call that never finished, every Octant
 Shield or provider-review decision, and a task that failed or waits on the

@@ -1290,6 +1290,37 @@ describe("the quiet Reply detail levels", () => {
     }
   });
 
+  it("puts opened steps away again when the thread changes to another quiet level", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      atLevel("failures", <TurnActivityRows activity={turn} running={false} settled />),
+    );
+    await user.click(screen.getByRole("button", { name: "2 steps hidden" }));
+    expect(screen.getByRole("button", { name: /^Bash/ })).toBeVisible();
+    view.rerender(atLevel("answers", <TurnActivityRows activity={turn} running={false} settled />));
+    expect(screen.queryByRole("button", { name: /^Bash/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "3 steps hidden" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("keeps a settled turn's duration, which Low's fold carries, at both quiet levels", async () => {
+    const user = userEvent.setup();
+    for (const level of ["failures", "answers"] as const) {
+      const view = render(
+        atLevel(
+          level,
+          <TurnActivityRows activity={turn} running={false} settled workedFor="Worked for 1m 5s" />,
+        ),
+      );
+      expect(screen.getByText("Worked for 1m 5s")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: /steps hidden/ }));
+      expect(screen.getByText("Worked for 1m 5s")).toBeVisible();
+      view.unmount();
+    }
+  });
+
   it("Find reveals hidden steps", () => {
     render(atLevel("answers", <TurnActivityRows activity={turn} running={false} settled />, true));
     expect(screen.getByRole("button", { name: "Thinking" })).toBeInTheDocument();
