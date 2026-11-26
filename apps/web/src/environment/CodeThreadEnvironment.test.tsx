@@ -1167,6 +1167,50 @@ describe("CodeThreadEnvironment branch and move actions", () => {
     }
   });
 
+  it("moves a thread on a shared checkout into a new worktree and says its changes were copied", async () => {
+    const onMoveToWorktree = vi.fn(async () => ({
+      status: "moved" as const,
+      branch: "octant/moved-1",
+    }));
+    const { user } = await openBranchMenuClicked({
+      checkoutKind: "existing-worktree",
+      onMoveToWorktree,
+    });
+    await user.click(await screen.findByRole("menuitem", { name: "Move to a new worktree…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Move to a new worktree" });
+    expect(dialog).toHaveTextContent("copied");
+    await user.click(within(dialog).getByRole("button", { name: "Move" }));
+    expect(onMoveToWorktree).toHaveBeenCalledWith(undefined);
+    expect(
+      await within(dialog).findByText(/Moved to worktree octant\/moved-1/),
+    ).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("still has them");
+  });
+
+  it("offers no move for a thread that already owns a worktree, and greys it while a turn runs or in Plan", async () => {
+    const onMoveToWorktree = vi.fn();
+    const owned = await openBranchMenuClicked({
+      checkoutKind: "managed-worktree",
+      onMoveToWorktree,
+    });
+    await screen.findByRole("menuitem", { name: "Worktrees" });
+    expect(screen.queryByRole("menuitem", { name: "Move to a new worktree…" })).toBeNull();
+    await owned.user.keyboard("{Escape}");
+    owned.unmount();
+    for (const extra of [{ threadBusy: true }, { threadPolicy: "plan" as const }]) {
+      const busy = await openBranchMenuClicked({
+        checkoutKind: "existing-worktree",
+        onMoveToWorktree,
+        ...extra,
+      });
+      expect(
+        await screen.findByRole("menuitem", { name: "Move to a new worktree…" }),
+      ).toHaveAttribute("aria-disabled", "true");
+      await busy.user.keyboard("{Escape}");
+      busy.unmount();
+    }
+  });
+
   it("draws the branch as a fact row when none of its actions can run", async () => {
     const { container } = render(
       <CodeThreadEnvironment

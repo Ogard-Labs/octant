@@ -2741,6 +2741,36 @@ does not survive the move; the thread lands on its persisted posture. A thread
 that owns a managed worktree is refused, because that checkout is the thread's
 own tree rather than the Project's.
 
+**Moving a thread into its own worktree.** A thread on the checkout it shares
+with its Project can move onto a managed worktree of its own
+(`move-code-thread-to-worktree`; maintainer decision, 2026-11-26). The person
+starts it from the Branch row's "Move to a new worktree…", from a window or a
+device the host's own person paired; an agent asks through `octant_threads`'
+`move-to-worktree`, which asks the person at every level, Full access
+included, is refused in Plan and offered to no turn the host started on its
+own, and runs only after the agent's turn ends. The host captures the source
+checkout as Git trees (objects only, as a fork's fresh capture does), makes a
+managed worktree at the captured head on a new branch (the one the person
+named, otherwise one derived as for a fork), and lays the trees over it, so
+staged, unstaged and untracked work all arrive; the source checkout is never
+written and keeps every change, and the dialog tells the person so and that
+they may discard them there. It refuses a thread that already owns a
+worktree, a plain folder, a server Project's checkout, Plan, a running turn,
+and another thread's running turn on the same checkout. Only after the
+worktree holds the changes does it journal, in one unit, the new checkout's
+`code.checkout-observed@1` and, on the thread's aggregate,
+`code.thread-moved-to-worktree@1` (the checkout it left, the new one, the
+branch, the captured head and trees) followed by `code.thread-updated@1` with
+the new checkout and branch. Any earlier failure removes the new worktree and
+leaves the thread as it was. Grants are revoked as for a rebind. The thread
+keeps its id and history; its next turn finds its last session on the
+checkout the move record names and, because every provider keeps its session
+under the folder it ran in, starts a new session on the worktree with the
+same disclosed text handoff a provider switch takes (journaled as
+`context-handoff-attached`, reason `provider-switch`, with the same provider
+and model on both sides). A session from any other checkout is still
+refused.
+
 Archiving a Code thread, by a person or the host's completed-thread timer,
 keeps the thread and tells the host once the journal records it. The host then
 asks `ManagedWorktreeService.cleanup` to remove the thread's managed worktree

@@ -89,6 +89,8 @@ import {
   type CodeCheckoutHead,
   type CodeCheckoutIdentity,
   type CodeCommand,
+  type CodeThreadWorktreeMoveRefusal,
+  CODE_THREAD_MOVED_TO_WORKTREE,
   type CodeCommandResult,
   type CodeWorktreeCreationProgress,
   type ForkCodeThreadCommand,
@@ -636,6 +638,8 @@ export interface CodeForkPointPort {
     source: CodeThread,
     throughOperationId: string,
   ) => Promise<CodeForkPoint>;
+  /** The thread's checkout as it stands now, for a move into a worktree. */
+  readonly capture: (windowId: WindowId, source: CodeThread) => Promise<CodeForkPoint>;
 }
 
 /**
@@ -2979,6 +2983,9 @@ export class CodeService {
         );
         return { kind: "thread-updated", thread: next };
       }
+      if (command.kind === "move-code-thread-to-worktree") {
+        return await this.#moveToWorktree(authenticatedWindowId, current, command, actor);
+      }
       if (command.kind === "rebind-code-thread-checkout") {
         // Recovery from a superseded checkout. The thread's id was derived from
         // the binding revision it was created against, so once the Project is
@@ -5224,6 +5231,160 @@ export class CodeService {
         },
       ],
     });
+  }
+
+  /**
+   * Moves a thread off the checkout it shares onto a managed worktree of its
+   * own. The source checkout is captured as Git trees (objects only), a
+   * worktree is made at the captured head on a new branch and the trees are
+   * laid over it, so staged, unstaged and untracked work all arrive; the
+   * source keeps every change. Only then is the move journaled, with the
+   * thread's new checkout, and every grant minted under the old checkout is
+   * revoked, as for a rebind. Anything that fails earlier removes the new
+   * worktree and leaves the thread where it was.
+   */
+  async #moveToWorktree(
+    windowId: WindowId,
+    current: CodeThread,
+    command: Extract<CodeCommand, { readonly kind: "move-code-thread-to-worktree" }>,
+    actor: EventActor | undefined,
+  ): Promise<CodeCommandResult> {
+    const refused = (reason: CodeThreadWorktreeMoveRefusal): CodeCommandResult => ({
+      kind: "thread-moved-to-worktree",
+      threadId: current.id,
+      outcome: { status: "refused", reason },
+    });
+    if (command.expectedVersion !== current.version) {
+      throw this.#failure("conflict", "Code thread version is stale.");
+    }
+    const checkout = this.#persistence.readCodeCheckout(current.checkoutId);
+    if (checkout === undefined || checkout.availability !== "available") {
+      return refused("unavailable");
+    }
+    if (checkout.kind === "managed-worktree") return refused("already-own-worktree");
+    if (checkout.kind === "remote-root") return refused("server-project");
+    if (checkout.kind === "plain-folder") return refused("not-a-repository");
+    if (current.executionPolicy === "plan") return refused("plan");
+    const executing = (threadId: CodeThreadId) =>
+      boardRuntimeActivityFromWorks(this.#persistence.readCodeRuntimeWorks(threadId)).executing;
+    if (executing(current.id)) return refused("turn-running");
+    const sharing = this.#persistence
+      .readCodeThreads()
+      .some(
+        (thread) =>
+          String(thread.id) !== String(current.id) &&
+          thread.lifecycle === "active" &&
+          String(thread.checkoutId) === String(current.checkoutId) &&
+          executing(thread.id),
+      );
+    if (sharing) return refused("checkout-in-use");
+    const creation = this.#managedThreadCreation;
+    if (this.#forkPoints === undefined || creation === undefined) return refused("unavailable");
+    const point = await this.#forkPoints.capture(windowId, current);
+    if (point.status !== "resolved") return refused("capture-failed");
+    const branch =
+      command.branchName ??
+      deriveDeliveryBranch({
+        baseBranch: current.deliveryTarget.branchIntent,
+        shortId: String(current.id).replace(/-/g, "").slice(0, 12),
+        prefix: this.#persistence.readCodeSettings()?.settings.worktrees?.branchPrefix,
+      });
+    const input: ManagedCodeThreadCreationInput = {
+      authenticatedWindowId: windowId,
+      projectId: current.projectId,
+      bindingRevisionId: current.bindingRevisionId,
+      threadId: current.id,
+      branchIntent: branch,
+      sourceBranch: current.deliveryTarget.branchIntent,
+      startFromOrigin: false,
+      sourceRevision: point.head,
+      sourceFiles: point.files,
+      executionPolicy: current.executionPolicy,
+    };
+    const signal = new AbortController().signal;
+    const prepared = await creation.prepare(input, signal);
+    if (prepared.status !== "prepared") return refused("unavailable");
+    const preparation = prepared.preparation;
+    const committed = await creation.commit(input, preparation, signal);
+    if (committed.status !== "created") {
+      return refused(
+        committed.status === "refused" && committed.reason === "source-files-unavailable"
+          ? "apply-failed"
+          : "unavailable",
+      );
+    }
+    if (committed.expectedHead !== preparation.resolvedHead) {
+      await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
+      return refused("unavailable");
+    }
+    const observedAt = decodeTimestamp(this.#clock());
+    const moved = decodeCodeCheckoutIdentity({
+      id: preparation.checkoutId,
+      repositoryId: preparation.repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: branch, oid: preparation.resolvedHead },
+      ownershipReceiptId: committed.receiptId,
+      observedAt,
+    });
+    const next = decodeCodeThread({
+      ...current,
+      repositoryId: preparation.repositoryId,
+      checkoutId: moved.id,
+      deliveryTarget: { ...current.deliveryTarget, branchIntent: branch },
+      version: command.expectedVersion + 2,
+      updatedAt: observedAt,
+    });
+    try {
+      this.#inUnit(() => {
+        this.#append(
+          "code-checkout",
+          moved.id,
+          this.#persistence.readCodeCheckoutAggregateVersion(moved.id),
+          "code.checkout-observed@1",
+          { kind: "checkout-observed", checkout: moved },
+        );
+        this.#appendBoth(
+          "code-thread",
+          current.id,
+          command.expectedVersion,
+          [
+            [
+              CODE_THREAD_MOVED_TO_WORKTREE,
+              {
+                kind: "thread-moved-to-worktree",
+                threadId: current.id,
+                fromCheckoutId: current.checkoutId,
+                toCheckoutId: moved.id,
+                branch,
+                sourceHead: point.head,
+                capturedTrees: point.files,
+                movedAt: observedAt,
+              },
+            ],
+            ["code.thread-updated@1", { kind: "thread-updated", thread: next }],
+          ],
+          actor ?? "local-user",
+        );
+      });
+    } catch (error) {
+      await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
+      throw error;
+    }
+    // As for a rebind: every capability minted under the checkout the thread
+    // left is discarded, in every window that holds one.
+    this.#sessionAuthority.revokeThreadEverywhere(current.id);
+    return {
+      kind: "thread-moved-to-worktree",
+      threadId: current.id,
+      outcome: {
+        status: "moved",
+        thread: this.#sessionAuthority.effectiveThread(windowId, next),
+        checkout: moved,
+        fromCheckoutId: current.checkoutId,
+        branch,
+      },
+    };
   }
 
   /** Runs `body` as one journal unit where the journal offers one. */

@@ -375,6 +375,8 @@ const HELP_LINES: Readonly<Record<ThreadsToolOperation, string>> = {
     "receipts takes messageIds you sent and returns whether each is queued, delivered, acknowledged, or refused, never its text.",
   board:
     "board reads this Project's task board as its designated planner: each task's state, delivery evidence, checks, and helper-agent activity, at most 100 tasks with truncated stated. It changes nothing; offer new work with octant_offer_side_task and target board.",
+  "move-to-worktree":
+    "move-to-worktree asks the person to move this thread off the checkout it shares onto a new worktree of its own, with branch as an optional name; the person is asked every time. Its uncommitted changes are copied there and the shared checkout keeps them. The move happens after this turn ends, the session ends with it, and the next turn continues this conversation in the worktree. Use it when this task should stop sharing the Project's checkout with other work.",
   start: `start creates a worker thread in this Project, as its coordinator: title (at most ${String(MAX_COORDINATOR_WORKER_TITLE_LENGTH)} characters) and prompt (at most ${String(MAX_COORDINATOR_WORKER_PROMPT_LENGTH)}), task (small-fix, feature, ui, tests, docs or review) and size (quick, normal or hard), which pick the worker's model role, and a level no higher than yours. Optionally retries (a worker that ended without Done; the new one starts a tier higher), reviews (the worker a review reviews), risk high (a review on the top tier), needsImages, and an override: role (quick-edit, builder, hard-problems, reviewer) or model (a handle from the role card), each with why (at most ${String(MAX_COORDINATOR_START_WHY_LENGTH)} characters). Octant chooses the model from the roles and says why; a refusal lists each model's reason. Only when this turn carries no role card, providerInstanceId with modelId names a model instead. The worker gets its own worktree and runs the prompt as its first message; its approvals wait for the person. The answer is started (with the worker's reference) or proposed (a person approves it first). Message workers with send; you hear when one finishes or needs the person.`,
 };
 
@@ -394,6 +396,7 @@ function threadsToolDefinition(
     ...(messaging ? ["message them"] : []),
     ...(offers.has("board") ? ["read this Project's board as its planner"] : []),
     ...(offers.has("start") ? ["start worker threads as this Project's coordinator"] : []),
+    ...(offers.has("move-to-worktree") ? ["move this thread into a worktree of its own"] : []),
   ];
   const last = purposes.at(-1) ?? "";
   const purpose =
@@ -530,6 +533,15 @@ function threadsToolDefinition(
               },
             }
           : {}),
+        ...(offers.has("move-to-worktree")
+          ? {
+              branch: {
+                type: "string",
+                maxLength: 255,
+                description: "For move-to-worktree: the new branch; omit to have Octant name it.",
+              },
+            }
+          : {}),
       },
       required: ["operation"],
       additionalProperties: false,
@@ -541,6 +553,7 @@ const NOT_MESSAGING = "This thread cannot message other threads.";
 const PLAN_REFUSAL = "Plan mode is read-only; this thread cannot send an agent message.";
 const NOT_PLANNER = "Only the Project's designated planner thread may read the board.";
 const NOT_COORDINATOR = "Only a coordinator thread may start workers.";
+const PLAN_REFUSAL_MOVE = "Plan mode is read-only; this thread cannot move into a worktree.";
 
 /**
  * What the threads tool needs from the host's coordinator start. `levelOf`
@@ -603,6 +616,17 @@ export function createThreadsTools(input: {
   readonly readsPerTurn?: () => number;
   /** Per-turn `wait` limit under Strict, from Settings; absent uses the default (4). */
   readonly waitsPerTurn?: () => number;
+  /**
+   * Asks the person to move this thread into a worktree of its own after the
+   * turn. Present only for an attended Code turn on a checkout the thread
+   * shares with its Project; the host asks at every level.
+   */
+  readonly worktreeMove?: {
+    readonly request: (
+      branchName: string | undefined,
+      signal?: AbortSignal,
+    ) => Promise<"scheduled" | "denied" | "cancelled" | "expired" | "unavailable">;
+  };
 }): AppManagedToolSet {
   const callerThreadId = decodeSiblingThreadId(input.callerThreadId);
   let readsThisTurn = 0;
@@ -633,6 +657,7 @@ export function createThreadsTools(input: {
       plannerThread: isPlanner(),
       ...(level === undefined ? {} : { coordinatorLevel: level }),
       profileAllowsStart: allows(THREADS_TOOL_START_ALLOWLIST_ENTRY),
+      worktreeMoveOffered: input.worktreeMove !== undefined,
     });
   };
   const operations = offeredNow();
@@ -739,6 +764,41 @@ export function createThreadsTools(input: {
           profileAllowsStart: allows(THREADS_TOOL_START_ALLOWLIST_ENTRY),
           ...(signal === undefined ? {} : { signal }),
         });
+      }
+      if (operation === "move-to-worktree") {
+        const move = input.worktreeMove;
+        if (input.mode !== "code" || move === undefined) {
+          return policy("This thread cannot move into a worktree from here.");
+        }
+        if (input.readPosture?.() === "plan") return policy(PLAN_REFUSAL_MOVE);
+        const profile = profileRefusal(SIBLING_THREADS_TOOL_NAME);
+        if (profile !== undefined) return policy(profile);
+        const { branch } = fields;
+        if (
+          Object.keys(fields).some((key) => key !== "operation" && key !== "branch") ||
+          (branch !== undefined &&
+            (typeof branch !== "string" || branch.trim() === "" || branch.length > 255))
+        ) {
+          return policy("The tool input is invalid.");
+        }
+        const answer = await move.request(
+          typeof branch === "string" ? branch.trim() : undefined,
+          signal,
+        );
+        return answer === "scheduled"
+          ? {
+              result: {
+                status: "scheduled",
+                message:
+                  "The person allowed the move. It happens after this turn ends; finish the turn normally, and the next one continues in the new worktree.",
+              },
+              isError: false,
+            }
+          : policy(
+              answer === "denied"
+                ? "The person declined the move. The thread stays on its current checkout."
+                : "The move was not allowed, so the thread stays on its current checkout.",
+            );
       }
       if (operation === "board") {
         if (input.mode !== "code" || input.planner === undefined) return policy(NOT_PLANNER);

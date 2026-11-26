@@ -172,6 +172,7 @@ import type { LocalServerClient } from "@octant/client-runtime";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { BrowserContextId, BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { LocalServerOpenTarget } from "@octant/contracts";
+import type { CodeThreadWorktreeMoveRefusal } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import {
   openDedicatedBrowserContext,
@@ -1968,6 +1969,32 @@ function renderCodeTab(
                               checkoutAvailability: activeCheckout.availability,
                             }),
                       }),
+                  })}
+              {...(activeThread === undefined || activeCheckout?.kind !== "existing-worktree"
+                ? {}
+                : {
+                    onMoveToWorktree: async (branchName) => {
+                      const result = await codeController.execute({
+                        kind: "move-code-thread-to-worktree",
+                        threadId: activeThread.id,
+                        expectedVersion: activeThread.version,
+                        ...(branchName === undefined ? {} : { branchName }),
+                      });
+                      if (result?.kind !== "thread-moved-to-worktree") {
+                        return {
+                          status: "refused",
+                          message:
+                            codeController.lastExecuteError.current?.message ??
+                            "The move could not be started.",
+                        };
+                      }
+                      return result.outcome.status === "moved"
+                        ? { status: "moved", branch: result.outcome.branch }
+                        : {
+                            status: "refused",
+                            message: worktreeMoveRefusalMessage(result.outcome.reason),
+                          };
+                    },
                   })}
               checkoutKind={activeCheckout?.kind}
               projects={props.projects}
@@ -3948,4 +3975,28 @@ function draftAutoReview(props: WorkspaceViewProps): {
   });
   if (autoReview === undefined) return {};
   return autoReview.status === "reviewer" ? { autoSupported: true, autoReview } : { autoReview };
+}
+
+/** Why the host did not move a thread into its own worktree, in the person's words. */
+function worktreeMoveRefusalMessage(reason: CodeThreadWorktreeMoveRefusal): string {
+  switch (reason) {
+    case "already-own-worktree":
+      return "This task already works in a worktree of its own.";
+    case "not-a-repository":
+      return "This folder is not a Git repository, so it has no worktrees.";
+    case "server-project":
+      return "A task in a Project on a server cannot move into a worktree here.";
+    case "plan":
+      return "Plan mode is read-only. Change the access level first.";
+    case "turn-running":
+      return "Wait until the current turn finishes.";
+    case "checkout-in-use":
+      return "Another task is working in this checkout right now. Try again when it finishes.";
+    case "capture-failed":
+      return "This checkout's changes could not be read, so nothing was moved.";
+    case "apply-failed":
+      return "The changes could not be copied into the new worktree, so nothing was moved.";
+    case "unavailable":
+      return "The worktree could not be created. Nothing was moved.";
+  }
 }

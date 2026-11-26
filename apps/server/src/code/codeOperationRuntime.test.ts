@@ -11714,6 +11714,102 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it("continues a thread moved into its own worktree on a new session with its conversation handed over as text", async () => {
+    const drivers = twoHarnesses();
+    const movedCheckoutId = decodeCodeCheckoutId("90000000-0000-4000-8000-000000000093");
+    const movedCheckout = decodeCodeCheckoutIdentity({
+      id: movedCheckoutId,
+      repositoryId: thread().repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "octant/moved", oid: "a".repeat(40) },
+      ownershipReceiptId: "90000000-0000-4000-8000-000000000094",
+      observedAt: "2026-07-30T12:00:00.000Z",
+    });
+    let moved = false;
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      movedCheckout,
+      readThreadMove: () =>
+        moved ? { fromCheckoutId: checkoutId, toCheckoutId: movedCheckoutId } : undefined,
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      moved = true;
+      fixture.setThread(
+        decodeCodeThread({
+          ...onProvider(providerInstance, "model-a", 3),
+          checkoutId: movedCheckoutId,
+        }),
+      );
+      const prompt = storedEvidence(86, "Carry on in the worktree.");
+      fixture.evidenceValues.set(prompt.contentId, "Carry on in the worktree.");
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(85),
+        threadId,
+        checkoutId: movedCheckoutId,
+        sessionId: switchSession,
+        prompt,
+      });
+      await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+      expect(drivers.provider.resume).not.toHaveBeenCalled();
+      const sent = vi.mocked(drivers.provider.send).mock.calls[1]?.[0];
+      expect(JSON.stringify(sent?.context)).toContain("First reply.");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ nativeSessionTransferred: false });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("still refuses a session from another checkout when the thread was not moved there", async () => {
+    const drivers = twoHarnesses();
+    const otherCheckoutId = decodeCodeCheckoutId("90000000-0000-4000-8000-000000000095");
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      movedCheckout: decodeCodeCheckoutIdentity({
+        id: otherCheckoutId,
+        repositoryId: thread().repositoryId,
+        kind: "managed-worktree",
+        availability: "available",
+        head: { kind: "branch", name: "octant/other", oid: "a".repeat(40) },
+        ownershipReceiptId: "90000000-0000-4000-8000-000000000096",
+        observedAt: "2026-07-30T12:00:00.000Z",
+      }),
+      readThreadMove: () => undefined,
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      fixture.setThread(
+        decodeCodeThread({
+          ...onProvider(providerInstance, "model-a", 3),
+          checkoutId: otherCheckoutId,
+        }),
+      );
+      const prompt = storedEvidence(86, "Carry on.");
+      fixture.evidenceValues.set(prompt.contentId, "Carry on.");
+      const result = await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(85),
+        threadId,
+        checkoutId: otherCheckoutId,
+        sessionId: switchSession,
+        prompt,
+      });
+      expect(JSON.stringify(result)).toContain("belongs to a different checkout");
+      expect(drivers.provider.send).toHaveBeenCalledTimes(1);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("leads a provider switch with the limit rule's summary, and says so on the journal", async () => {
     const drivers = twoHarnesses();
     const fixture = runtimeFixture({
@@ -14127,6 +14223,9 @@ function runtimeFixture(options: {
   >[0]["readThreadExternalContentTaint"];
   readProviderInstance?: Parameters<typeof createCodeOperationRuntime>[0]["readProviderInstance"];
   threads?: Parameters<typeof createCodeOperationRuntime>[0]["threads"];
+  /** A second checkout the thread can be moved onto. */
+  movedCheckout?: ReturnType<typeof decodeCodeCheckoutIdentity>;
+  readThreadMove?: Parameters<typeof createCodeOperationRuntime>[0]["readThreadMove"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
   serverCodeTurn?: Parameters<typeof createCodeOperationRuntime>[0]["serverCodeTurn"];
   holdsServerThread?: Parameters<typeof createCodeOperationRuntime>[0]["holdsServerThread"];
@@ -14144,6 +14243,7 @@ function runtimeFixture(options: {
   >[0]["confirmAgentMessagesDelivered"];
   /** Whether the thread's provider can carry app-managed tools (default true). */
   supportsAppManagedTools?: boolean;
+  moveThreadToWorktree?: Parameters<typeof createCodeOperationRuntime>[0]["moveThreadToWorktree"];
   /** Whether the provider natively serves ACP client capabilities. */
   supportsAcpClientCapabilities?: boolean;
   /** The checkout root a turn resolves (default a path that does not exist). */
@@ -14525,7 +14625,12 @@ function runtimeFixture(options: {
       readCodeThreadsWithUnconfirmedRemoteSteps: () =>
         readCodeThreadsWithUnconfirmedRemoteSteps(connection),
       readCodeThread: readThread,
-      readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
+      readCodeCheckout: (id) =>
+        id === checkoutId
+          ? checkout
+          : options.movedCheckout !== undefined && id === options.movedCheckout.id
+            ? options.movedCheckout
+            : undefined,
       readReviewFinding: (id) => readCodeReviewFinding(connection, id),
       readReviewFindings: (id) => readCodeReviewFindings(connection, id),
     },
@@ -14589,6 +14694,10 @@ function runtimeFixture(options: {
       ? {}
       : { readThreadExternalContentTaint: options.readThreadExternalContentTaint }),
     ...(options.threads === undefined ? {} : { threads: options.threads }),
+    ...(options.readThreadMove === undefined ? {} : { readThreadMove: options.readThreadMove }),
+    ...(options.moveThreadToWorktree === undefined
+      ? {}
+      : { moveThreadToWorktree: options.moveThreadToWorktree }),
     ...(options.serverCodeTurn === undefined ? {} : { serverCodeTurn: options.serverCodeTurn }),
     ...(options.holdsServerThread === undefined
       ? {}
@@ -15865,6 +15974,84 @@ describe("the threads tool on Code turns", () => {
     // None of the tools this one replaced reaches a turn under its old name.
     for (const retired of ["octant_agent_message", "octant_board", "octant_propose_thread"]) {
       expect((await offered({}, 1208)).names).not.toContain(retired);
+    }
+  });
+
+  it("asks the person before an agent moves its thread into a worktree, even at Full access, and moves only after the turn ends", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const moveThreadToWorktree = vi.fn(async () => undefined);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      supportsAppManagedTools: true,
+      moveThreadToWorktree,
+      threads: ({ windowId: turnWindowId, thread: caller, readPosture, worktreeMove }) =>
+        createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
+          service: { answer: async () => waited() },
+          source: quietSource,
+          callerThreadId: String(caller.id),
+          toolConstraints: [],
+          profileDisplayName: "Reviewer",
+          readPosture,
+          ...(worktreeMove === undefined ? {} : { worktreeMove }),
+        }),
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+    const startOperation = operationId(1301);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "move-1",
+            toolName: SIBLING_THREADS_TOOL_NAME,
+            inputJson: JSON.stringify({ operation: "move-to-worktree" }),
+          }),
+        ),
+      );
+      let frames: readonly OperationFrame[] = [];
+      await vi.waitFor(async () => {
+        frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 50);
+        expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
+      });
+      const approval = frames.find(
+        (
+          frame,
+        ): frame is OperationFrame & {
+          event: { kind: "approval-requested"; approvalId: string; summary: string };
+        } => frame.event.kind === "approval-requested",
+      );
+      if (approval === undefined) throw new Error("expected an approval");
+      expect(approval.event.summary).toContain("new worktree");
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1302),
+        threadId,
+        checkoutId,
+        approvalId: approval.event.approvalId,
+        decision: "approved",
+      });
+      await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalled());
+      expect(moveThreadToWorktree).not.toHaveBeenCalled();
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() =>
+        expect(moveThreadToWorktree).toHaveBeenCalledWith({ windowId, threadId }),
+      );
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
     }
   });
 

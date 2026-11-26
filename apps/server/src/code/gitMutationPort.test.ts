@@ -615,6 +615,36 @@ describe("GitMutationPort", () => {
     );
   });
 
+  it("copies a checkout's staged, unstaged and untracked work onto a new worktree and leaves the source as it was", async () => {
+    // A thread moving into its own worktree is this capture, a worktree made
+    // at the captured head on a new branch, and the trees laid over it.
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "README.md"), "staged\n");
+    git(repository, "add", "--", "README.md");
+    writeFileSync(join(repository, "README.md"), "staged then edited\n");
+    writeFileSync(join(repository, "notes.txt"), "untracked\n");
+    const before = gitOutput(repository, "status", "--porcelain");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
+    if (captured.status !== "captured") throw new Error("expected a capture");
+    const head = gitOutput(repository, "rev-parse", "HEAD").trim();
+    expect(captured.snapshot.head).toBe(head);
+    const worktree = join(temporaryDirectory(), "moved");
+    git(repository, "worktree", "add", "-b", "octant/moved", worktree, head);
+
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: worktree, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "applied" });
+
+    expect(readFileSync(join(worktree, "README.md"), "utf8")).toBe("staged then edited\n");
+    expect(readFileSync(join(worktree, "notes.txt"), "utf8")).toBe("untracked\n");
+    expect(gitOutput(worktree, "show", ":README.md")).toBe("staged\n");
+    // The source keeps every change it had.
+    expect(gitOutput(repository, "status", "--porcelain")).toBe(before);
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("staged then edited\n");
+  });
+
   it("checkpoints the working tree and puts every kind of change back on restore", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, "doomed.txt"), "doomed\n");

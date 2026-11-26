@@ -27,7 +27,7 @@ import type {
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ChevronRight,
   FolderOpen,
@@ -78,6 +78,12 @@ import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { ThreadPullRequestReviewerSection } from "../code/PullRequestReviewerSettings";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { SwitchBranchDialog } from "./SwitchBranchDialog";
+import type { MoveToWorktreeAnswer } from "./MoveToWorktreeDialog";
+
+// Moving is rare, so its dialog loads only when the person opens it.
+const MoveToWorktreeDialog = lazy(() =>
+  import("./MoveToWorktreeDialog").then((module) => ({ default: module.MoveToWorktreeDialog })),
+);
 import type { CodeBranchPreviewOutcome, SwitchCodeBranchOutcome } from "../code/switchCodeBranch";
 import { CODE_DELIVERY_OUTCOME_OPTIONS } from "../code/composer/CodeDeliveryOutcomeSelector";
 
@@ -150,6 +156,11 @@ export interface CodeThreadEnvironmentProps {
   }) => Promise<SwitchCodeBranchOutcome>;
   /** Opens the existing Move to Project dialog for this thread. */
   readonly onMoveToProject?: () => void;
+  /**
+   * Moves this thread off the checkout it shares onto a worktree of its own.
+   * Offered only for a thread on the Project's own checkout; absent hides it.
+   */
+  readonly onMoveToWorktree?: (branchName: string | undefined) => Promise<MoveToWorktreeAnswer>;
   /**
    * True while a turn occupies the thread: branch switching waits for idle
    * (the host also refuses mid-turn) and the busy move choice is offered.
@@ -283,6 +294,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     readyObservation !== undefined &&
     readyObservation.branch.kind === "named";
   const [switchBranchOpen, setSwitchBranchOpen] = useState(false);
+  const [moveToWorktreeOpen, setMoveToWorktreeOpen] = useState(false);
   const onExecute = props.onExecute;
   const fetchLocalRefs = useCallback(async (): Promise<ReadonlyArray<CodeWorktreeRef>> => {
     if (onExecute === undefined || project === undefined) return [];
@@ -357,6 +369,29 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           },
         ]
       : []),
+    // Only a thread on the checkout it shares with the Project can move out;
+    // one that owns a worktree already has one, and the host refuses the rest.
+    ...(props.onMoveToWorktree === undefined ||
+    props.checkoutKind !== "existing-worktree" ||
+    checkoutUnusable
+      ? []
+      : [
+          {
+            value: "move-to-worktree",
+            label: "Move to a new worktree…",
+            icon: <GitFork aria-hidden="true" size={16} />,
+            ...(props.threadBusy === true || props.threadPolicy === "plan"
+              ? {
+                  disabled: true,
+                  description:
+                    props.threadPolicy === "plan"
+                      ? "Plan mode is read-only."
+                      : "Available when the current turn finishes.",
+                }
+              : {}),
+            run: () => setMoveToWorktreeOpen(true),
+          },
+        ]),
     ...(project === undefined || props.onNewTaskOnBranch === undefined || checkoutUnusable
       ? []
       : [
@@ -883,6 +918,15 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           {props.children}
         </CodeCheckoutProvider>
       </div>
+      {moveToWorktreeOpen && props.onMoveToWorktree !== undefined ? (
+        <Suspense fallback={null}>
+          <MoveToWorktreeDialog
+            onClose={() => setMoveToWorktreeOpen(false)}
+            onMove={props.onMoveToWorktree}
+            sourceLabel="the Project's folder"
+          />
+        </Suspense>
+      ) : null}
       {switchBranchOpen && readyObservation !== undefined && project !== undefined ? (
         <SwitchBranchDialog
           currentBranch={

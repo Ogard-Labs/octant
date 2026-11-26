@@ -1173,6 +1173,10 @@ export function wireCode(deps: CodeDependencies) {
               codeOperationRuntime === undefined
                 ? { status: "refused", reason: "unavailable" }
                 : codeOperationRuntime.forkPoint(windowId, source, throughOperationId),
+            capture: async (windowId, source) =>
+              codeOperationRuntime === undefined
+                ? { status: "refused", reason: "unavailable" }
+                : codeOperationRuntime.checkoutCapture(windowId, source),
           },
           // A fork is created only when the conversation it carries over can be
           // read now, through the same selector its first turn uses.

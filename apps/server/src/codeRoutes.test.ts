@@ -715,7 +715,7 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledTimes(4);
   });
 
-  it("lets a device the host's own person paired change Strict, restart continuation, worktree naming and cleanup, branch suggestions and account choices, as that device, and refuses any other device", async () => {
+  it("lets a device the host's own person paired change Strict, restart continuation, worktree naming and cleanup, branch suggestions and account choices, and move a thread into a worktree, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
@@ -774,6 +774,7 @@ describe("Code routes", () => {
         expectedVersion: 1,
         providerInstanceId: "00000000-0000-4000-8000-000000000943",
       },
+      { kind: "move-code-thread-to-worktree", threadId, expectedVersion: 1 },
     ];
     const from = (command: unknown, admittedBy?: "host-person" | "hub-roster") => {
       const remote = request("/api/code/commands", {

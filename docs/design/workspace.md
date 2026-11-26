@@ -3780,8 +3780,14 @@ unreadable checkout. The items of a
 while the section is open, hold only New task in this Project.
 
 The rows above the section are themselves the actions their facts describe.
-The **Branch row** opens a menu (Branch) with Switch branch…, New task on
-another branch…, and Worktrees. Switch branch… appears only while the host
+The **Branch row** opens a menu (Branch) with Switch branch…, Move to a new
+worktree…, New task on another branch…, and Worktrees. Move to a new
+worktree… appears only for a thread on the checkout it shares with its
+Project, greyed with the reason while a turn runs or under Plan; its dialog
+(loaded when opened) takes an optional branch name, says the uncommitted
+changes are copied and the Project's folder keeps them, and after the move
+names the new branch and repeats that the source still has the changes
+([Architecture: moving a thread into its own worktree](../architecture.md#modes-chat-work-and-code)). Switch branch… appears only while the host
 reports a readable local Git checkout — a remote root or a plain folder has
 no local HEAD to move, and neither gets it — and waits, greyed with the
 reason, while a turn runs: switching under a running turn would move the

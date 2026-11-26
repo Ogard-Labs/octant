@@ -401,6 +401,14 @@ export function applyResult(current: CodeBootstrap | undefined, result: CodeComm
     case "worktree-refs-listed":
     case "fork-context-merge":
       return current;
+    case "thread-moved-to-worktree":
+      return result.outcome.status === "refused"
+        ? current
+        : {
+            ...current,
+            threads: replaceById(current.threads, result.outcome.thread),
+            checkouts: replaceById(current.checkouts, result.outcome.checkout),
+          };
     case "thread-checkout-rebind":
       return result.outcome.status === "refused"
         ? current

@@ -340,6 +340,32 @@ describe("sibling thread policy", () => {
       expect(threadsToolOperations({ ...work, profileAllowsSend: false })).not.toContain("send");
     });
 
+    it("offers move-to-worktree only to an attended Code turn outside Plan on a shared checkout", () => {
+      expect(threadsToolOperations(code)).not.toContain("move-to-worktree");
+      expect(threadsToolOperations({ ...code, worktreeMoveOffered: true })).toContain(
+        "move-to-worktree",
+      );
+      expect(
+        threadsToolOperations({ ...code, posture: "plan", worktreeMoveOffered: true }),
+      ).not.toContain("move-to-worktree");
+      expect(
+        threadsToolOperations({
+          ...code,
+          mode: "work",
+          posture: undefined,
+          worktreeMoveOffered: true,
+        }),
+      ).not.toContain("move-to-worktree");
+      expect(
+        threadsToolOperations({
+          ...code,
+          profileAllowsRead: false,
+          profileAllowsSend: false,
+          worktreeMoveOffered: true,
+        }),
+      ).not.toContain("move-to-worktree");
+    });
+
     it("offers board only to the designated planner whose profile names it", () => {
       expect(threadsToolOperations(code)).not.toContain("board");
       expect(
