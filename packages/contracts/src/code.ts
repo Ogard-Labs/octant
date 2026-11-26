@@ -1720,6 +1720,7 @@ export const CodeThreadWorktreeMoveRefusal = Schema.Literal(
   "capture-failed",
   "nested-changes",
   "apply-failed",
+  "working-folder",
   "unavailable",
 );
 export type CodeThreadWorktreeMoveRefusal = typeof CodeThreadWorktreeMoveRefusal.Type;

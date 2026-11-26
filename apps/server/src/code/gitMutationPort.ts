@@ -1049,7 +1049,10 @@ export class GitMutationPort {
         "status",
         "--porcelain=v2",
         "-z",
-        "--untracked-files=normal",
+        // `normal` collapses an untracked folder into one entry, hiding a
+        // repository deeper inside it; `all` lists files one by one and still
+        // stops at a nested repository, listing it as a folder.
+        "--untracked-files=all",
         "--ignore-submodules=none",
       ],
       signal,

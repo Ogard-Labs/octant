@@ -1313,7 +1313,11 @@ describe("moving a thread into its own worktree", () => {
   const recordedRevision = "e".repeat(40);
   const files = { worktree: "f".repeat(40), index: "d".repeat(40) };
 
-  function moving(overrides: Parameters<typeof harness>[0] = {}) {
+  function moving(
+    overrides: Parameters<typeof harness>[0] = {},
+    // Git refuses to remove a worktree with changes unless forced.
+    worktreeHasChanges = false,
+  ) {
     const applySourceFiles = vi.fn(async () => "applied" as const);
     const fixture = harness({
       threads: [sourceThread()],
@@ -1335,10 +1339,13 @@ describe("moving a thread into its own worktree", () => {
       branchCreated = true;
       return { status: "created" as const };
     });
-    (fixture.git.removeWorktree as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-      present = false;
-      return { status: "removed" as const };
-    });
+    (fixture.git.removeWorktree as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: { readonly force?: boolean }) => {
+        if (worktreeHasChanges && input.force !== true) return { status: "rejected" as const };
+        present = false;
+        return { status: "removed" as const };
+      },
+    );
     (fixture.git.branchExists as ReturnType<typeof vi.fn>).mockImplementation(
       async () => branchCreated,
     );
@@ -1546,6 +1553,43 @@ describe("moving a thread into its own worktree", () => {
     });
     expect(withNested.git.addWorktree).not.toHaveBeenCalled();
     expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+  });
+
+  it("refuses to move a task that works in another of the Project's folders", async () => {
+    const elsewhere = decodeCodeThread({
+      ...sourceThread(),
+      workingFolderId: `folder_${"a".repeat(64)}`,
+    });
+    const fixture = moving({ threads: [elsewhere] });
+    expect(
+      await fixture.codeService.execute(windowId, { ...move, expectedVersion: elsewhere.version }),
+    ).toMatchObject({ outcome: { status: "refused", reason: "working-folder" } });
+    expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+  });
+
+  it("removes a rolled-back worktree that holds the copied changes, so a retry succeeds", async () => {
+    const running: string[] = [];
+    let turnStartsDuringCopy = true;
+    // The copied changes are what makes the rolled-back worktree dirty.
+    const fixture = moving(
+      {
+        runningThreads: running,
+        applySourceFiles: vi.fn(async () => {
+          if (turnStartsDuringCopy) running.push(String(sourceThreadId));
+          return "applied" as const;
+        }),
+      },
+      true,
+    );
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "turn-running" },
+    });
+    expect(fixture.branchExists()).toBe(false);
+    running.splice(0);
+    turnStartsDuringCopy = false;
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "moved" },
+    });
   });
 
   it("refuses to move an archived thread", async () => {

@@ -644,7 +644,7 @@ export class ManagedWorktreeService {
    * Code thread (for example a journal failure or cancellation after the
    * worktree became ready). It removes the just-created worktree and marks the
    * receipt removed, without the thread-based cleanup authority check, because
-   * no thread owns this worktree yet. A removal that cannot complete leaves the
+   * no thread owns this worktree yet, forcing past any changes in it. A removal that cannot complete leaves the
    * receipt in cleanup-pending as an honest restart-recovery state.
    */
   async rollbackCreation(
@@ -688,9 +688,13 @@ export class ManagedWorktreeService {
       let removed: Awaited<ReturnType<ManagedWorktreeGitPort["removeWorktree"]>>;
       try {
         const targetPath = receipt.canonicalWorktreePath;
+        // No thread ever owned this worktree, so what it holds is only what
+        // creation put there (a move's copied changes, which its source still
+        // has). Git refuses to remove those unforced, which would strand the
+        // branch and fail the retry on it.
         removed = await forReceipt(receiptId, () =>
           this.#git.removeWorktree(
-            { repositoryRoot: observation.repositoryRoot, targetPath },
+            { repositoryRoot: observation.repositoryRoot, targetPath, force: true },
             signal,
           ),
         );

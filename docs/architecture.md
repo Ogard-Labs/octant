@@ -2761,15 +2761,20 @@ staged, unstaged and untracked work all arrive; the move writes none of the
 source checkout's files, so it keeps every change, and the dialog says so
 (Octant does not remove them there; a one-click reviewed Discard of them is
 not built). It refuses an archived or completed thread, a thread that already owns a
-worktree, a plain folder, a server Project's checkout, Plan, a running turn,
-and another thread's running turn on the same checkout, and reads the last
+worktree, a plain folder, a server Project's checkout, Plan, a task working
+in another of the Project's folders (a worktree of the main folder does not
+hold it, so the task would keep editing that folder), a running turn, and
+another thread's running turn on the same checkout, and reads the last
 two again inside the journal unit that records the move, so a turn started
 during the copy refuses it. It refuses too, naming the paths, when a
-submodule has changes of its own or an untracked folder is a repository of
-its own: a capture records either only as a commit pointer, so a copy would
-leave that work behind. A rolled-back creation deletes the branch it made
-while that branch still points at its start and no worktree holds it, so a
-retry under the same name is not refused as a collision. Only after the
+submodule has changes of its own or an untracked folder, at any depth below
+an untracked parent, is a repository of its own: a capture records either
+only as a commit pointer, so a copy would leave that work behind. A
+rolled-back creation removes its worktree forced (no thread ever owned it, so
+it holds only what creation put there, such as the copied changes the source
+still has) and deletes the branch it made while that branch still points at
+its start and no worktree holds it, so a retry under the same name is not
+refused as a collision. Only after the
 worktree holds the changes does it journal, in one unit, the new checkout's
 `code.checkout-observed@1` and, on the thread's aggregate,
 `code.thread-moved-to-worktree@1` (the checkout it left, the new one, the

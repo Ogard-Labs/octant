@@ -294,7 +294,12 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     readyObservation !== undefined &&
     readyObservation.branch.kind === "named";
   const [switchBranchOpen, setSwitchBranchOpen] = useState(false);
-  const [moveToWorktreeOpen, setMoveToWorktreeOpen] = useState(false);
+  // The move held while its dialog is open: a successful move makes the
+  // checkout managed, which withdraws `onMoveToWorktree`, and the dialog must
+  // stay to show its result until the person closes it.
+  const [moveToWorktree, setMoveToWorktree] = useState<
+    CodeThreadEnvironmentProps["onMoveToWorktree"] | undefined
+  >(undefined);
   const onExecute = props.onExecute;
   const fetchLocalRefs = useCallback(async (): Promise<ReadonlyArray<CodeWorktreeRef>> => {
     if (onExecute === undefined || project === undefined) return [];
@@ -389,7 +394,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                       : "Available when the current turn finishes.",
                 }
               : {}),
-            run: () => setMoveToWorktreeOpen(true),
+            run: () => setMoveToWorktree(() => props.onMoveToWorktree),
           },
         ]),
     ...(project === undefined || props.onNewTaskOnBranch === undefined || checkoutUnusable
@@ -918,11 +923,11 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           {props.children}
         </CodeCheckoutProvider>
       </div>
-      {moveToWorktreeOpen && props.onMoveToWorktree !== undefined ? (
+      {moveToWorktree !== undefined ? (
         <Suspense fallback={null}>
           <MoveToWorktreeDialog
-            onClose={() => setMoveToWorktreeOpen(false)}
-            onMove={props.onMoveToWorktree}
+            onClose={() => setMoveToWorktree(undefined)}
+            onMove={moveToWorktree}
             sourceLabel="the Project's folder"
           />
         </Suspense>

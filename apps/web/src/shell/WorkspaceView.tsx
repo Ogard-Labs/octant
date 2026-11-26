@@ -4004,6 +4004,8 @@ function worktreeMoveRefusalMessage(
       return `Changes inside ${(paths ?? []).join(", ") || "a submodule or nested repository"} cannot be copied into a worktree. Commit them there first; nothing was moved.`;
     case "apply-failed":
       return "The changes could not be copied into the new worktree, so nothing was moved.";
+    case "working-folder":
+      return "This task works in another of the Project's folders, which a worktree of the main folder does not hold. Start a new task there instead; nothing was moved.";
     case "unavailable":
       return "The worktree could not be created. Nothing was moved.";
   }

@@ -679,6 +679,20 @@ describe("GitMutationPort", () => {
     ]);
   });
 
+  it("names a nested repository below a folder that is untracked as a whole", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const nested = join(repository, "vendor", "lib");
+    mkdirSync(nested, { recursive: true });
+    git(nested, "init", "--initial-branch=main");
+    writeFileSync(join(nested, "notes.txt"), "nested\n");
+    writeFileSync(join(repository, "vendor", "README.md"), "untracked parent\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([
+      "vendor/lib",
+    ]);
+  });
+
   it("checkpoints the working tree and puts every kind of change back on restore", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, "doomed.txt"), "doomed\n");

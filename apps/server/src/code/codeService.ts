@@ -10,6 +10,7 @@ import {
 } from "@octant/contracts";
 import { composeThreadTouchedIssues } from "@octant/domain/thread-board-pull-request-policy";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
   coordinatorDoneWhenEqual,
@@ -5287,6 +5288,24 @@ export class CodeService {
     if (checkout.kind === "remote-root") return refused("server-project");
     if (checkout.kind === "plain-folder") return refused("not-a-repository");
     if (current.executionPolicy === "plan") return refused("plan");
+    // A task working in another of the Project's folders edits files the
+    // worktree, made from the main folder, never holds: after the move it
+    // would keep editing that folder outside its worktree.
+    if (current.workingFolderId !== undefined) {
+      const project = this.#persistence.readProject?.(current.projectId);
+      let root: string | undefined;
+      try {
+        root =
+          project?.type === "code"
+            ? approvedWorkingFolderRoot(project, current.workingFolderId)
+            : undefined;
+      } catch {
+        root = undefined;
+      }
+      if (project?.type !== "code" || root !== project.binding.canonicalRoot) {
+        return refused("working-folder");
+      }
+    }
     const executing = (threadId: CodeThreadId) =>
       boardRuntimeActivityFromWorks(this.#persistence.readCodeRuntimeWorks(threadId)).executing;
     // Read before the move starts and again just before it is journaled: a

@@ -1172,7 +1172,7 @@ describe("CodeThreadEnvironment branch and move actions", () => {
       status: "moved" as const,
       branch: "octant/moved-1",
     }));
-    const { user } = await openBranchMenuClicked({
+    const { user, rerender } = await openBranchMenuClicked({
       checkoutKind: "existing-worktree",
       onMoveToWorktree,
     });
@@ -1185,6 +1185,23 @@ describe("CodeThreadEnvironment branch and move actions", () => {
       await within(dialog).findByText(/Moved to worktree octant\/moved-1/),
     ).toBeInTheDocument();
     expect(dialog).toHaveTextContent("still has them");
+    // The refreshed checkout is the thread's own worktree now, which offers no
+    // move; the result stays until the person closes it.
+    rerender(
+      <CodeThreadEnvironment
+        environmentOpen
+        checkoutKind="managed-worktree"
+        onNewThreadInProject={vi.fn()}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    expect(screen.getByRole("dialog", { name: "Move to a new worktree" })).toHaveTextContent(
+      "still has them",
+    );
   });
 
   it("shows a refused move's reason, naming what could not be copied, and claims nothing was copied", async () => {
