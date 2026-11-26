@@ -1056,90 +1056,88 @@ export function ThreadScreen(props: ThreadScreenProps) {
           voice={voice}
         />
       )}
-      {detailsOpen ? (
-        <BottomSheet
-          onClose={() => setDetailsOpen(false)}
-          testID="mobile-thread-details"
-          title={MOBILE_COPY.threadDetails}
-          visible
-        >
-          <ScrollView contentContainerStyle={styles.details}>
-            {offlineDemo || transport === undefined ? null : (
-              <ListSection>
-                <ListRow
-                  accessory="chevron"
-                  icon="grid-outline"
-                  label={MOBILE_COPY.threadViewsAndPanes}
-                  last
-                  onPress={() => {
-                    setDetailsOpen(false);
-                    openPanes(undefined);
-                  }}
-                  testID="mobile-thread-panes-open"
-                />
-              </ListSection>
-            )}
-            {threadHint === undefined ? null : (
-              <Text style={styles.connectionStatus}>{threadHint}</Text>
-            )}
-            {offlineDemo || transport === undefined ? null : selected.mode === "code" &&
-              code.thread !== undefined ? (
-              <ThreadLevelPanel
-                actsAsHostPerson={standing.actsAsHostPerson}
-                warnings={fullAccessWarnings}
-                onChanged={() => void code.refresh({ quiet: true })}
-                subject={{ mode: "code", thread: code.thread }}
-                transport={transport}
+      <BottomSheet
+        onClose={() => setDetailsOpen(false)}
+        testID="mobile-thread-details"
+        title={MOBILE_COPY.threadDetails}
+        visible={detailsOpen}
+      >
+        <ScrollView contentContainerStyle={styles.details}>
+          {offlineDemo || transport === undefined ? null : (
+            <ListSection>
+              <ListRow
+                accessory="chevron"
+                icon="grid-outline"
+                label={MOBILE_COPY.threadViewsAndPanes}
+                last
+                onPress={() => {
+                  setDetailsOpen(false);
+                  openPanes(undefined);
+                }}
+                testID="mobile-thread-panes-open"
               />
-            ) : selected.mode === "work" && work.thread !== undefined ? (
-              <ThreadLevelPanel
-                actsAsHostPerson={standing.actsAsHostPerson}
-                warnings={fullAccessWarnings}
-                onChanged={() => void work.refresh({ quiet: true })}
-                subject={{ mode: "work", thread: work.thread }}
-                transport={transport}
-              />
-            ) : null}
-            {!offlineDemo &&
-            transport !== undefined &&
-            (selected.mode === "work" || selected.mode === "code") &&
-            routinesProjectId !== undefined ? (
-              <DefaultLevelsPanel
-                actsAsHostPerson={standing.actsAsHostPerson}
-                warnings={fullAccessWarnings}
-                mode={selected.mode}
-                projectId={routinesProjectId}
-                transport={transport}
-              />
-            ) : null}
-            {!offlineDemo &&
-            selected.mode === "code" &&
-            (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
-              <ApprovalDeferralSheet
-                executionPolicy={codePolicy}
-                mode="code"
-                operationSummary="Approval-gated Code operations"
-                threadTitle={title}
-                {...(hostLabel === undefined ? {} : { hostLabel })}
-              />
-            ) : null}
-            {!offlineDemo && selected.mode === "code" && transport !== undefined ? (
-              <PullRequestReviewPanel threadId={selected.threadId} transport={transport} />
-            ) : null}
-            {!offlineDemo &&
-            transport !== undefined &&
-            (selected.mode === "work" || selected.mode === "code") &&
-            routinesProjectId !== undefined ? (
-              <ThreadRoutinesPanel
-                mode={selected.mode}
-                projectId={routinesProjectId}
-                threadId={selected.threadId}
-                transport={transport}
-              />
-            ) : null}
-          </ScrollView>
-        </BottomSheet>
-      ) : null}
+            </ListSection>
+          )}
+          {threadHint === undefined ? null : (
+            <Text style={styles.connectionStatus}>{threadHint}</Text>
+          )}
+          {offlineDemo || transport === undefined ? null : selected.mode === "code" &&
+            code.thread !== undefined ? (
+            <ThreadLevelPanel
+              actsAsHostPerson={standing.actsAsHostPerson}
+              warnings={fullAccessWarnings}
+              onChanged={() => void code.refresh({ quiet: true })}
+              subject={{ mode: "code", thread: code.thread }}
+              transport={transport}
+            />
+          ) : selected.mode === "work" && work.thread !== undefined ? (
+            <ThreadLevelPanel
+              actsAsHostPerson={standing.actsAsHostPerson}
+              warnings={fullAccessWarnings}
+              onChanged={() => void work.refresh({ quiet: true })}
+              subject={{ mode: "work", thread: work.thread }}
+              transport={transport}
+            />
+          ) : null}
+          {!offlineDemo &&
+          transport !== undefined &&
+          (selected.mode === "work" || selected.mode === "code") &&
+          routinesProjectId !== undefined ? (
+            <DefaultLevelsPanel
+              actsAsHostPerson={standing.actsAsHostPerson}
+              warnings={fullAccessWarnings}
+              mode={selected.mode}
+              projectId={routinesProjectId}
+              transport={transport}
+            />
+          ) : null}
+          {!offlineDemo &&
+          selected.mode === "code" &&
+          (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
+            <ApprovalDeferralSheet
+              executionPolicy={codePolicy}
+              mode="code"
+              operationSummary="Approval-gated Code operations"
+              threadTitle={title}
+              {...(hostLabel === undefined ? {} : { hostLabel })}
+            />
+          ) : null}
+          {!offlineDemo && selected.mode === "code" && transport !== undefined ? (
+            <PullRequestReviewPanel threadId={selected.threadId} transport={transport} />
+          ) : null}
+          {!offlineDemo &&
+          transport !== undefined &&
+          (selected.mode === "work" || selected.mode === "code") &&
+          routinesProjectId !== undefined ? (
+            <ThreadRoutinesPanel
+              mode={selected.mode}
+              projectId={routinesProjectId}
+              threadId={selected.threadId}
+              transport={transport}
+            />
+          ) : null}
+        </ScrollView>
+      </BottomSheet>
       {offlineDemo || transport === undefined ? null : (
         <ThreadPanesSheet
           codeThread={selected.mode === "code" ? code.thread : undefined}

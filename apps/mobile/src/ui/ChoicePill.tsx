@@ -87,31 +87,30 @@ export function ChoicePill<Id extends string>(props: ChoicePillProps<Id>) {
         </Text>
         <Icon color={colors.textTertiary} name="chevron-down" size={14} />
       </Pressable>
-      {open ? (
-        <BottomSheet
-          contentStyle={styles.sheet}
-          onClose={() => setOpen(false)}
-          testID={`${props.testID}-sheet`}
-          title={props.title}
-          visible
-        >
-          <ListSection>
-            {props.options.map((option, index) => (
-              <ListRow
-                accessory={option.id === props.selected ? "check" : "none"}
-                key={option.id}
-                label={option.label}
-                last={index === props.options.length - 1}
-                onPress={() => {
-                  setOpen(false);
-                  props.onSelect(option.id);
-                }}
-                testID={`${props.testID}-${option.id}`}
-              />
-            ))}
-          </ListSection>
-        </BottomSheet>
-      ) : null}
+      <BottomSheet
+        contentStyle={styles.sheet}
+        onClose={() => setOpen(false)}
+        size="fitted"
+        testID={`${props.testID}-sheet`}
+        title={props.title}
+        visible={open}
+      >
+        <ListSection>
+          {props.options.map((option, index) => (
+            <ListRow
+              accessory={option.id === props.selected ? "check" : "none"}
+              key={option.id}
+              label={option.label}
+              last={index === props.options.length - 1}
+              onPress={() => {
+                setOpen(false);
+                props.onSelect(option.id);
+              }}
+              testID={`${props.testID}-${option.id}`}
+            />
+          ))}
+        </ListSection>
+      </BottomSheet>
     </>
   );
 }

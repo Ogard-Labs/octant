@@ -264,6 +264,7 @@ export function TodosScreen(props: TodosScreenProps) {
       </ScrollView>
       <BottomSheet
         onClose={() => setActionTodo(undefined)}
+        size="fitted"
         testID="mobile-todo-actions"
         title={actionTodo === undefined ? "" : formatScreenshotSafeLabel(actionTodo.title)}
         visible={actionTodo !== undefined}

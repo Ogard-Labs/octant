@@ -5,6 +5,7 @@ import type { ChatMessagePart, ReplyDetailLevel } from "@octant/contracts";
 import { radii, space, useTheme } from "../../design-system";
 import { MessageActions, type MessageActionItem } from "./MessageActions";
 import { MessageBlocks } from "./MessageBlocks";
+import { MessageMenu } from "./MessageMenu";
 import { resolveChatMessageParts } from "./messageDocument";
 import { ReasoningPart } from "./ReasoningPart";
 import { ToolActivity, type ToolCall } from "./ToolActivity";
@@ -98,8 +99,10 @@ export function MessageBubble(props: MessageBubbleProps) {
         },
         rowUser: { alignItems: "flex-end" },
         rowAssistant: { alignItems: "stretch" },
+        // The menu lifts the bubble alone, so it holds the bubble's width.
+        userMenu: { alignSelf: "flex-end", maxWidth: "84%" },
+        assistantMenu: { alignSelf: "stretch" },
         bubble: {
-          maxWidth: "84%",
           borderRadius: radii.bubble,
           paddingHorizontal: 14,
           paddingVertical: 10,
@@ -118,13 +121,16 @@ export function MessageBubble(props: MessageBubbleProps) {
   );
 
   if (user) {
+    const actions = [copy, ...(props.turnActions ?? [])];
     return (
       <View style={[styles.row, styles.rowUser]} testID={props.testID}>
-        <View style={[styles.bubble, styles.bubbleUser]}>
-          <MessageBlocks text={props.body} tone="user" />
-        </View>
+        <MessageMenu actions={actions} style={styles.userMenu}>
+          <View style={[styles.bubble, styles.bubbleUser]}>
+            <MessageBlocks text={props.body} tone="user" />
+          </View>
+        </MessageMenu>
         <MessageActions
-          actions={[copy, ...(props.turnActions ?? [])]}
+          actions={actions}
           at={props.at}
           trailing
           {...(props.testID === undefined ? {} : { testID: `${props.testID}-actions` })}
@@ -133,52 +139,55 @@ export function MessageBubble(props: MessageBubbleProps) {
     );
   }
 
+  const actions = [
+    ...(showActions ? [copy, ...(props.extraActions ?? [])] : []),
+    ...(props.turnActions ?? []),
+  ];
   return (
     <View style={[styles.row, styles.rowAssistant]} testID={props.testID}>
-      <View style={styles.assistantStack}>
-        {parts.map((part, index) => {
-          // The level is in the key so a change of level remounts each panel
-          // at the new level, dropping a choice made by hand at the old one.
-          const level = props.replyDetail ?? "low";
-          const key = `${part.kind}:${index}:${level}`;
-          if (part.kind === "reasoning") {
-            const presentation = mobileReplyDetailPresentation(level, part.text);
+      <MessageMenu actions={actions} style={styles.assistantMenu}>
+        <View style={styles.assistantStack}>
+          {parts.map((part, index) => {
+            // The level is in the key so a change of level remounts each panel
+            // at the new level, dropping a choice made by hand at the old one.
+            const level = props.replyDetail ?? "low";
+            const key = `${part.kind}:${index}:${level}`;
+            if (part.kind === "reasoning") {
+              const presentation = mobileReplyDetailPresentation(level, part.text);
+              return (
+                <ReasoningPart
+                  defaultExpanded={presentation.reasoningExpanded}
+                  key={key}
+                  preview={presentation.reasoningPreview}
+                  text={part.text}
+                />
+              );
+            }
+            if (part.kind === "tools") {
+              const presentation = mobileReplyDetailPresentation(level, "");
+              return (
+                <ToolActivity
+                  calls={part.calls}
+                  defaultDetailOpen={presentation.toolDetailOpen}
+                  defaultOpen={presentation.toolCallsOpen}
+                  key={key}
+                />
+              );
+            }
             return (
-              <ReasoningPart
-                defaultExpanded={presentation.reasoningExpanded}
+              <View
                 key={key}
-                preview={presentation.reasoningPreview}
-                text={part.text}
-              />
+                {...(props.testID === undefined ? {} : { testID: `${props.testID}-prose` })}
+              >
+                <MessageBlocks text={part.text} tone="assistant" />
+              </View>
             );
-          }
-          if (part.kind === "tools") {
-            const presentation = mobileReplyDetailPresentation(level, "");
-            return (
-              <ToolActivity
-                calls={part.calls}
-                defaultDetailOpen={presentation.toolDetailOpen}
-                defaultOpen={presentation.toolCallsOpen}
-                key={key}
-              />
-            );
-          }
-          return (
-            <View
-              key={key}
-              {...(props.testID === undefined ? {} : { testID: `${props.testID}-prose` })}
-            >
-              <MessageBlocks text={part.text} tone="assistant" />
-            </View>
-          );
-        })}
-      </View>
-      {showActions || (props.turnActions?.length ?? 0) > 0 ? (
+          })}
+        </View>
+      </MessageMenu>
+      {actions.length > 0 ? (
         <MessageActions
-          actions={[
-            ...(showActions ? [copy, ...(props.extraActions ?? [])] : []),
-            ...(props.turnActions ?? []),
-          ]}
+          actions={actions}
           at={props.at}
           {...(props.testID === undefined ? {} : { testID: `${props.testID}-actions` })}
         />

@@ -108,7 +108,7 @@ export function CanvasHtmlImportSheet(props: CanvasHtmlImportSheetProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
-      sheetStyle={styles.sheet}
+      size="full"
       testID="mobile-canvas-import"
       title={MOBILE_COPY.canvasImportTitle}
       visible={props.visible}
@@ -239,7 +239,6 @@ export function CanvasHtmlImportSheet(props: CanvasHtmlImportSheetProps) {
 }
 
 const styles = StyleSheet.create({
-  sheet: { maxHeight: "90%", minHeight: "60%" },
   body: { paddingHorizontal: mobileSpacing.md, gap: mobileSpacing.sm },
   row: { flexDirection: "row", alignItems: "center", gap: mobileSpacing.sm },
   grow: { flex: 1 },

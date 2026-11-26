@@ -20,12 +20,15 @@ export function ThreadRowActionsSheet(props: {
 }) {
   const { colors } = useTheme();
   const [message, setMessage] = useState<string | undefined>();
+  // Asked away once an action is done or the person closes it; the parent
+  // lets go once it has gone.
+  const [visible, setVisible] = useState(true);
   const { busy, run } = useThreadRowAction({
     row: props.row,
     transport: props.transport,
     onDone: () => {
       props.onChanged();
-      props.onClose();
+      setVisible(false);
     },
     onFailed: setMessage,
   });
@@ -76,10 +79,12 @@ export function ThreadRowActionsSheet(props: {
 
   return (
     <BottomSheet
-      onClose={props.onClose}
+      onClose={() => setVisible(false)}
+      onGone={props.onClose}
+      size="fitted"
       testID="mobile-thread-row-actions"
       title={formatScreenshotSafeLabel(props.row.title)}
-      visible
+      visible={visible}
     >
       <View style={styles.body}>
         {message === undefined ? null : <Text style={styles.message}>{message}</Text>}

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Icon } from "./Icon";
 import type { MobileIconName } from "./symbols";
@@ -26,6 +26,8 @@ const SOURCE_PRESENTATION: Readonly<
 
 export function AttachSourceSheet(props: AttachSourceSheetProps) {
   const { colors } = useTheme();
+  // The camera or picker opens once this sheet has gone.
+  const chosen = useRef<MobileAttachmentSource | undefined>(undefined);
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -65,6 +67,12 @@ export function AttachSourceSheet(props: AttachSourceSheetProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
+      onGone={() => {
+        const source = chosen.current;
+        chosen.current = undefined;
+        if (source !== undefined) props.onSelect(source);
+      }}
+      size="fitted"
       testID="mobile-attach-sheet"
       title={MOBILE_COPY.attachSheetTitle}
       visible={props.visible}
@@ -76,7 +84,10 @@ export function AttachSourceSheet(props: AttachSourceSheetProps) {
           <Pressable
             accessibilityRole="button"
             key={source}
-            onPress={() => props.onSelect(source)}
+            onPress={() => {
+              chosen.current = source;
+              props.onClose();
+            }}
             style={styles.row}
             testID={`mobile-attach-${source}`}
           >

@@ -98,7 +98,7 @@ export function ThreadPanesSheet(props: ThreadPanesSheetProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
-      sheetStyle={styles.sheet}
+      size="full"
       testID="mobile-thread-panes"
       title={
         props.views.length > 0 || props.tools.length > 0
@@ -191,7 +191,6 @@ const PANE_TITLES: Readonly<Record<MobileThreadPaneId, string>> = {
 };
 
 const styles = StyleSheet.create({
-  sheet: { maxHeight: "90%", minHeight: "60%" },
   views: { paddingBottom: space.sm },
   switcher: { paddingHorizontal: space.md, paddingBottom: space.md },
   scroll: { flexGrow: 0 },

@@ -144,7 +144,7 @@ it("keeps existing threads openable while the placement host refuses new threads
     );
   const element = (testId: string) =>
     container.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
-  const sheet = () => document.querySelector('[data-testid="mobile-home-composer-sheet"]');
+  const sheet = () => container.querySelector('[data-testid="mobile-home-composer-sheet"]');
   listInbox.mockResolvedValue({ rows: [existing], failures: [] });
   try {
     await render();

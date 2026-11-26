@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Alert, Pressable, Text, View } from "react-native";
 import type { PermissionMode } from "@octant/contracts";
 import {
   changeMobileThreadLevel,
@@ -49,12 +49,10 @@ export interface LevelChoicesProps {
 export function LevelChoices(props: LevelChoicesProps) {
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState<string>();
 
   const apply = async (level: PermissionMode | undefined) => {
     setBusy(true);
-    setConfirming(false);
     setMessage(undefined);
     const result = await props.onPick(level);
     setBusy(false);
@@ -63,7 +61,18 @@ export function LevelChoices(props: LevelChoicesProps) {
   };
   const choose = async (level: PermissionMode) => {
     if (level === "full-access" && !(await props.warnings.acknowledged(props.hostId))) {
-      setConfirming(true);
+      // The system's alert, so the warning cannot be scrolled past or missed.
+      Alert.alert(MOBILE_THREAD_LEVEL_LABELS["full-access"], MOBILE_FULL_ACCESS_WARNING, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Use Full access",
+          style: "destructive",
+          onPress: () => {
+            void props.warnings.acknowledge(props.hostId);
+            void apply("full-access");
+          },
+        },
+      ]);
       return;
     }
     await apply(level);
@@ -96,27 +105,12 @@ export function LevelChoices(props: LevelChoicesProps) {
             : MOBILE_THREAD_LEVEL_LABELS[props.current]
         }`}
       </Text>
-      {confirming ? (
-        <>
-          <Text style={{ color: colors.textSecondary }}>{MOBILE_FULL_ACCESS_WARNING}</Text>
-          {button("confirm", "Use Full access", () => {
-            void props.warnings.acknowledge(props.hostId);
-            void apply("full-access");
-          })}
-          {button("cancel", "Cancel", () => setConfirming(false))}
-        </>
-      ) : (
-        <>
-          {props.choices
-            .filter((level) => level !== props.current)
-            .map((level) =>
-              button(level, MOBILE_THREAD_LEVEL_LABELS[level], () => void choose(level)),
-            )}
-          {props.withoutLevelLabel === undefined || props.current === undefined
-            ? null
-            : button("without-level", props.withoutLevelLabel, () => void apply(undefined))}
-        </>
-      )}
+      {props.choices
+        .filter((level) => level !== props.current)
+        .map((level) => button(level, MOBILE_THREAD_LEVEL_LABELS[level], () => void choose(level)))}
+      {props.withoutLevelLabel === undefined || props.current === undefined
+        ? null
+        : button("without-level", props.withoutLevelLabel, () => void apply(undefined))}
       {message === undefined ? null : (
         <Text accessibilityLiveRegion="polite" style={{ color: colors.textSecondary }}>
           {message}

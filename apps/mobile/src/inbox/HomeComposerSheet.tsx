@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Icon } from "../ui/Icon";
 import { radii, space, typography, useTheme } from "../../design-system";
@@ -66,17 +66,13 @@ export function HomeComposerSheet(props: {
   /** Where the draft came from ("From to-do"); removing it leaves an ordinary draft. */
   readonly sourceLabel?: string | undefined;
   readonly onRemoveSource?: (() => void) | undefined;
+  /** Sheets shown over this one, which the system stacks only from inside it. */
+  readonly over?: ReactNode;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        sheet: {
-          marginHorizontal: space.sm,
-          marginBottom: process.env.EXPO_OS === "web" ? 48 : space.sm,
-          borderBottomLeftRadius: radii.composer,
-          borderBottomRightRadius: radii.composer,
-        },
         content: {
           minHeight: 420,
           paddingHorizontal: space.md,
@@ -177,7 +173,7 @@ export function HomeComposerSheet(props: {
       contentStyle={styles.content}
       headerVisible={false}
       onClose={props.onClose}
-      sheetStyle={styles.sheet}
+      size="full"
       testID="mobile-home-composer-sheet"
       title={MOBILE_COPY.newThread}
       visible={props.visible}
@@ -350,6 +346,7 @@ export function HomeComposerSheet(props: {
           variant="send"
         />
       </ComposerSurface>
+      {props.over}
     </BottomSheet>
   );
 }

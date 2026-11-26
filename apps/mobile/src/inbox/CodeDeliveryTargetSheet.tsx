@@ -119,6 +119,7 @@ export function CodeDeliveryTargetSheet(props: CodeDeliveryTargetSheetProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
+      size="full"
       title="Confirm Code delivery"
       visible={props.proposal !== undefined}
     >

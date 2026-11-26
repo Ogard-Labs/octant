@@ -199,7 +199,7 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
-      sheetStyle={styles.sheet}
+      size="full"
       testID="mobile-project-terminal"
       title={MOBILE_COPY.projectTerminalTitle}
       visible={props.visible}
@@ -357,7 +357,7 @@ export function ProjectPageSheet(props: ProjectPageSheetProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
-      sheetStyle={styles.sheet}
+      size="full"
       testID="mobile-project-page"
       title={MOBILE_COPY.projectPageTitle}
       visible={props.visible}
@@ -490,7 +490,6 @@ export function ToolButton(props: {
 }
 
 const styles = StyleSheet.create({
-  sheet: { maxHeight: "90%", minHeight: "60%" },
   body: { paddingHorizontal: mobileSpacing.md, gap: mobileSpacing.sm },
   output: {
     height: 320,

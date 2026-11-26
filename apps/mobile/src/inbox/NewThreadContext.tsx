@@ -406,6 +406,30 @@ export function NewThreadProvider(props: {
           setOpen(false);
         }}
         onPressModel={() => setModelOpen(true)}
+        over={
+          <>
+            <ModelPickerSheet
+              onClose={() => setModelOpen(false)}
+              onSelect={(id) => {
+                setModelOptionId(id);
+                setModelOpen(false);
+                setCodeRetry(undefined);
+              }}
+              options={models.options.map((option) => ({
+                id: option.id,
+                label: option.label,
+                detail: option.detail,
+              }))}
+              selectedId={modelOptionId}
+              visible={modelOpen}
+            />
+            <CodeDeliveryTargetSheet
+              onClose={() => finishDeliveryTarget(undefined)}
+              onConfirm={finishDeliveryTarget}
+              proposal={deliveryTargetProposal}
+            />
+          </>
+        }
         onSelectMode={(mode) => {
           setComposerMode(mode);
           setComposerError(undefined);
@@ -436,26 +460,6 @@ export function NewThreadProvider(props: {
         selectedProjectId={chosenProject?.projectId}
         visible={open}
         voice={voice}
-      />
-      <ModelPickerSheet
-        onClose={() => setModelOpen(false)}
-        onSelect={(id) => {
-          setModelOptionId(id);
-          setModelOpen(false);
-          setCodeRetry(undefined);
-        }}
-        options={models.options.map((option) => ({
-          id: option.id,
-          label: option.label,
-          detail: option.detail,
-        }))}
-        selectedId={modelOptionId}
-        visible={modelOpen}
-      />
-      <CodeDeliveryTargetSheet
-        onClose={() => finishDeliveryTarget(undefined)}
-        onConfirm={finishDeliveryTarget}
-        proposal={deliveryTargetProposal}
       />
     </Context.Provider>
   );
