@@ -1050,7 +1050,7 @@ function RemoveSection(props: ModelEndpointDetailProps & { readonly disabled: bo
           description={
             blocked
               ? `Remove it from the Octant app on ${computer}.`
-              : "Signs out and deletes its settings. Threads that used it keep their history."
+              : "Signs out and deletes its settings; threads that used it keep their history."
           }
           label={`Remove ${instance.displayName}`}
           scope="host"

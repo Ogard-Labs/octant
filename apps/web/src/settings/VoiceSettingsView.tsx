@@ -127,8 +127,8 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
               <SettingRow
                 description={
                   props.settings.transcriptionEngine === undefined
-                    ? "The language you speak. Automatic lets the model work it out."
-                    : "The language you speak. Automatic uses this Mac's own language."
+                    ? "The language you speak; Automatic lets the model work it out."
+                    : "The language you speak; Automatic uses this Mac's own language."
                 }
                 focused={props.focusedSetting === settingId("dictation-language")}
                 label="Language"
@@ -144,7 +144,7 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
                 />
               </SettingRow>
               <SettingRow
-                description="Names and terms to spell your way. Every transcription on this computer uses them."
+                description="Names and terms to spell your way, used by every transcription on this computer."
                 focused={props.focusedSetting === settingId("dictation-dictionary")}
                 label="Your dictionary"
                 scope="app"
@@ -200,7 +200,8 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
             <MicrophonePicker />
           </SettingRow>
           <SettingRow
-            description="Record ten seconds and play it back. The audio stays on this computer unless you transcribe it."
+            description="Record ten seconds and play it back."
+            more="The audio stays on this computer unless you transcribe it."
             focused={props.focusedSetting === settingId("microphone-test")}
             label="Test microphone"
             scope="app"

@@ -128,11 +128,18 @@ open: the built-in background pictures sit behind the current one and a
 Change action, and the pattern dials appear only while the pattern is drawn.
 The ASCII field's pattern, characters, density and speed sit in one folded Customize row. The starter set menu gains a "From plugins" group, each entry named with its plugin, while installed, trusted and enabled plugins offer grounds; a pick is copied and saved once. Importing a theme file whose photo is not on this computer leaves the photo out and says so in one quiet line under the import buttons, whose two lines are kept from the first paint, so nothing moves when it fills in. A Pixels ground showing another scene drops the dead photo quietly, since it draws no photo.
 Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
-draw the same hairline.
+draw the same hairline. A row's description is one sentence; the rest goes
+behind the row's **More** (`more`), and a default is named beside a value
+control (`defaultValue`, `atDefault`) rather than in the sentence
+([Design system: Settings page](../../DESIGN.md)). A safety condition, an
+assurance or a cost is never dropped to make a sentence short: its first
+sentence stays on the row and the rest moves behind More.
 
 **Octant's own limits** sit on Settings › Limits after Tool steps, as
 host settings in five sections of number steppers (1 to the stated top) and
-switches, each row naming its default in its description
+switches, each stepper naming its default beside it once the value differs, and
+a Strict-only limit saying "Under Strict" in its sentence, with what holds
+outside Strict behind its More
 ([Octant's own limits become settings](../architecture.md#security-and-authority)):
 **Wake-ups and messages** (Wake-ups waiting per thread, 8, up to 64; Message
 wakes per hour, 30; Rounds of replies that wake, 10; Thread messages per turn,

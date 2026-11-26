@@ -24,14 +24,47 @@ describe("Octant's own limits in Settings", () => {
     expect(onSettingsChange).toHaveBeenLastCalledWith({
       agentRoutinesStartActiveAtFullAccess: false,
     });
-    expect(
-      screen.getByText(/Default 8\. A recurring wake-up may fire as often as every minute/),
-    ).toBeTruthy();
+    // The default is named beside the stepper, not in the sentence, and hidden
+    // while the value is the default.
+    const waiting = screen.getByRole("group", { name: "Wake-ups waiting per thread setting" });
+    expect(waiting.querySelector(".setrow-default")).toHaveTextContent("Default 8");
+    expect(waiting.querySelector(".setrow-default")).toHaveAttribute("data-at-default", "true");
+    expect(screen.getByText(/A recurring wake-up may fire as often as every minute/)).toBeTruthy();
     expect(
       screen.getByText(
         /A routine you asked for starts enabled at every level, and below Full access a suggested one waits for you to confirm its card\./,
       ),
-    ).toBeTruthy();
+    ).toBeInTheDocument();
+  });
+
+  it("names the default beside a limit once it has been changed from it", () => {
+    render(
+      <OctantLimitsSettings
+        focusedSetting={undefined}
+        onSettingsChange={vi.fn()}
+        settings={{ ...defaultShellSettings(), coordinatorsPerProject: 6 }}
+      />,
+    );
+    const row = screen.getByRole("group", { name: "Coordinators per Project setting" });
+    expect(row.querySelector(".setrow-default")).toHaveAttribute("data-at-default", "false");
+    expect(row).toHaveAccessibleDescription(/Default 4$/);
+  });
+
+  it("says every limit in one sentence, with no default in it", () => {
+    render(
+      <OctantLimitsSettings
+        focusedSetting={undefined}
+        onSettingsChange={vi.fn()}
+        settings={defaultShellSettings()}
+      />,
+    );
+    for (const hint of document.querySelectorAll(".setrow-hint")) {
+      // The sentence alone, without the scope label the hint line also carries.
+      const sentence = hint.querySelector(":scope > span")?.textContent?.trim() ?? "";
+      expect(sentence, sentence).not.toMatch(/Default \d/);
+      // One sentence: a full stop only at the end.
+      expect(sentence.replace(/\.$/, ""), sentence).not.toMatch(/\.\s/);
+    }
   });
 
   it("changes Shield's brakes, a follow-up's lateness and a shown command's time from their defaults", async () => {
@@ -65,18 +98,13 @@ describe("Octant's own limits in Settings", () => {
       />,
     );
 
-    expect(
-      screen.getByText(/Applies under Strict only\. How many times one turn may ask/),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/Applies under Strict only\. How many times one turn may read/),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/Applies under Strict only\. How many times one turn may wait/),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/Applies under Strict only\. How long an agent's Browser may wait/),
-    ).toBeTruthy();
+    expect(screen.getByText(/^Under Strict, how many times one turn may ask/)).toBeTruthy();
+    expect(screen.getByText(/^Under Strict, how many times one turn may read/)).toBeTruthy();
+    expect(screen.getByText(/^Under Strict, how many times one turn may wait/)).toBeTruthy();
+    expect(screen.getByText(/^Under Strict, how long an agent's Browser may wait/)).toBeTruthy();
+    // What holds outside Strict is kept, behind each row's More.
+    expect(screen.getAllByText("Outside Strict there is no limit.")).toHaveLength(3);
+    expect(screen.getByText(/^Outside Strict there is no wait limit\./)).toBeTruthy();
 
     await userEvent.click(
       screen.getByRole("button", { name: "Increase Thread messages per turn" }),

@@ -278,7 +278,7 @@ export function GoogleCliAccountSettings({
             scope="host"
             settingId="secret-store-google-cli-scopes"
             htmlFor="google-cli-scopes"
-            description="One Google OAuth scope URL per line. Select only the access these commands need."
+            description="One Google OAuth scope URL per line, for only the access these commands need."
           >
             <OctantTextarea
               className="settings-view__text-input"

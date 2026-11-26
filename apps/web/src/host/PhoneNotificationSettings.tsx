@@ -19,7 +19,10 @@ export interface PhoneNotificationSettingsProps {
 
 /** What the switch means: the gateway carries sealed notifications it cannot read. */
 export const PHONE_NOTIFICATIONS_FACT =
-  "Let paired phones get notifications from this computer. They are sent through the push gateway below, sealed so only the phone can read them; the gateway sees when a phone is notified, never what about.";
+  "Let paired phones get notifications from this computer, sent sealed through the push gateway below.";
+
+const PHONE_NOTIFICATIONS_MORE =
+  "They are sent through the push gateway below, sealed so only the phone can read them; the gateway sees when a phone is notified, never what about.";
 
 /**
  * Settings › General: the switch that lets this host notify paired
@@ -99,6 +102,7 @@ export function PhoneNotificationSettings(props: PhoneNotificationSettingsProps)
       <div className="setgroup">
         <SettingRow
           description={PHONE_NOTIFICATIONS_FACT}
+          more={PHONE_NOTIFICATIONS_MORE}
           focused={props.focusedSetting === "host-phone-notifications"}
           label="Phone notifications"
           scope="host"
@@ -112,7 +116,8 @@ export function PhoneNotificationSettings(props: PhoneNotificationSettingsProps)
           />
         </SettingRow>
         <SettingRow
-          description={`Notifications go through ${settings.gatewayUrl}. Change it to use a gateway you run; a phone must get its delivery permit from the same gateway.`}
+          description={`Notifications go through ${settings.gatewayUrl}.`}
+          more="Change it to use a gateway you run; a phone must get its delivery permit from the same gateway."
           focused={props.focusedSetting === "host-push-gateway"}
           htmlFor={urlId}
           label="Push gateway"

@@ -231,7 +231,9 @@ export function ThemeAppearanceEditor(props: {
                 />
               ) : null}
               <SettingRow
-                description="Comfortable is the default. Compact takes less room: shorter navigation and Settings rows, a narrower thread gutter, and a tighter prompt."
+                atDefault={shownDensity === "comfortable"}
+                defaultValue="Comfortable"
+                description="Compact takes less room: shorter navigation and Settings rows, a narrower thread gutter, and a tighter prompt."
                 focused={focusedSetting === "appearance.density"}
                 label="Density"
                 scope="app"
@@ -251,7 +253,8 @@ export function ThemeAppearanceEditor(props: {
                 </OctantToggleGroup>
               </SettingRow>
               <SettingRow
-                description="Colour gives Octant an accent, status hues, and coloured tiles, board marks, and Project accents. Mono keeps everything grey."
+                description="Colour gives Octant an accent, status hues, and coloured tiles, board marks, and Project accents."
+                more="Mono keeps everything grey."
                 focused={focusedSetting === "appearance.scheme.style"}
                 label="Style"
                 scope="app"
@@ -271,7 +274,8 @@ export function ThemeAppearanceEditor(props: {
                 </OctantToggleGroup>
               </SettingRow>
               <SettingRow
-                description="Switches, primary buttons, and selected states. Mono is the grey look and sets Style to Mono."
+                description="Switches, primary buttons, and selected states."
+                more="Mono is the grey look and sets Style to Mono."
                 focused={focusedSetting === "appearance.scheme.accent"}
                 label="Accent"
                 scope="app"
@@ -402,7 +406,8 @@ export function ThemeAppearanceEditor(props: {
               />
               {runsOnMac() ? (
                 <SettingRow
-                  description="Smooth edges at a heavier weight, so text stays strong. Off draws the system's fuller, grainier strokes."
+                  description="Smooth edges at a heavier weight, so text stays strong."
+                  more="Off draws the system's fuller, grainier strokes."
                   focused={focusedSetting === "appearance.typography.smoothing"}
                   label="Smooth text"
                   scope="app"

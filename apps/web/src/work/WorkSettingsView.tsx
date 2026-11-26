@@ -11,15 +11,19 @@ import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggl
 import type { WorkSettingsController } from "./useWorkSettings";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { FULL_ACCESS_WARNING, useFullAccessWarning } from "../code/FullAccessWarning";
+import {
+  FULL_ACCESS_REDACTION,
+  FULL_ACCESS_RISK,
+  useFullAccessWarning,
+} from "../code/FullAccessWarning";
 import { useHostPlatform } from "../platform";
 
 const ACCESS_NOTES: Readonly<Record<WorkDefaultAccess, string>> = {
-  auto: "The provider's own reviewer approves each command and file change. Without one, it asks you.",
+  auto: "The provider's own reviewer approves each command and file change, or it asks you when there is none.",
   "ask-first": "Asks before running a command or changing a file in the Project folder.",
   "auto-accept-edits":
-    "Edits files in the Project folder without asking. Asks before commands. Anything outside the folder is refused.",
-  "full-access": FULL_ACCESS_WARNING,
+    "Edits files in the Project folder without asking, asks before commands, and refuses anything outside the folder.",
+  "full-access": FULL_ACCESS_RISK,
   plan: "Starts each new thread read-only: the agent looks and proposes a plan, and changes nothing until you approve it.",
 };
 
@@ -107,6 +111,7 @@ export function WorkSettingsView(props: {
         </SettingRow>
         <SettingRow
           description={ACCESS_NOTES[settings.defaultAccess]}
+          {...(settings.defaultAccess === "full-access" ? { more: FULL_ACCESS_REDACTION } : {})}
           focused={props.focusedSetting === "work-default-access"}
           label="Access"
           scope="host"
@@ -135,10 +140,11 @@ export function WorkSettingsView(props: {
           {warning.dialog}
         </SettingRow>
         <SettingRow
-          description={
+          description="Strict keeps provider sign-ins, SSH keys and cloud credentials protected."
+          more={
             hostPlatform === "win32"
-              ? "Strict keeps provider sign-ins, SSH keys and cloud credentials protected. On Windows, phase 1 works at Full access with native Codex, in Codex's own Windows sandbox; other providers and lower levels refuse by name. Changes apply to the next turn."
-              : "Strict keeps provider sign-ins, SSH keys and cloud credentials protected. It applies at every access level and preserves required approvals. Changes apply to the next turn."
+              ? "On Windows, phase 1 works at Full access with native Codex, in Codex's own Windows sandbox; other providers and lower levels refuse by name. Changes apply to the next turn."
+              : "It applies at every access level and preserves required approvals. Changes apply to the next turn."
           }
           focused={
             props.focusedSetting === "work-strict" ||
@@ -158,7 +164,8 @@ export function WorkSettingsView(props: {
           />
         </SettingRow>
         <SettingRow
-          description="When Octant stops in the middle of a turn, from a crash, a quit, or a restart of this computer, the thread picks the turn up by itself when Octant opens again. This applies to every Work thread, not only new ones. A thread can turn this off from its menu."
+          description="When Octant stops in the middle of a turn, the thread picks it up by itself when Octant opens again."
+          more="Octant may have stopped from a crash, a quit, or a restart of this computer. This applies to every Work thread, not only new ones. A thread can turn this off from its menu."
           focused={props.focusedSetting === "work-restart-continuation"}
           label="Continue after restart"
           scope="mode"

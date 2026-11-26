@@ -15,6 +15,7 @@ import {
   OctantFieldLabel,
 } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { Section, Specimen } from "./Specimen";
@@ -69,6 +70,7 @@ function SidebarSlice() {
 
 function SettingsGroup() {
   const [dark, setDark] = useState(true);
+  const [waiting, setWaiting] = useState(12);
   return (
     <SettingsPageScope.Provider value="app">
       <div className="gallery-settings">
@@ -88,6 +90,27 @@ function SettingsGroup() {
             settingId="gallery-rail"
           >
             <OctantSwitch checked={dark} label="Icon rail" onCheckedChange={setDark} />
+          </SettingRow>
+          <SettingRow
+            atDefault={waiting === 8}
+            defaultValue="8"
+            description="How many wake-ups an agent may have waiting in one thread."
+            label="Wake-ups waiting per thread"
+            more={
+              <p>
+                Missed wake-ups count. A recurring wake-up may come due as often as every minute.
+              </p>
+            }
+            scope="app"
+            settingId="gallery-wakeups"
+          >
+            <OctantNumberStepper
+              label="Wake-ups waiting per thread"
+              max={64}
+              min={1}
+              onChange={setWaiting}
+              value={waiting}
+            />
           </SettingRow>
         </SettingGroup>
       </div>
@@ -156,8 +179,8 @@ export function PatternSections() {
       </Specimen>
       <Specimen
         adapters={["OctantSelectField", "OctantSwitch"]}
-        props={`<SettingGroup><SettingRow label description scope>{OctantSelectField | OctantSwitch}</SettingRow></SettingGroup>`}
-        note="a Settings form-row group"
+        props={`<SettingGroup><SettingRow label description scope more? defaultValue? atDefault?>{OctantSelectField | OctantSwitch | OctantNumberStepper}</SettingRow></SettingGroup>`}
+        note="a Settings form-row group; the last row names its default beside the stepper and keeps the rest behind More"
         wide
       >
         <SettingsGroup />

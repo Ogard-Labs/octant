@@ -185,7 +185,8 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
             <SettingsSection title="At Full access">
               <div className="setgroup">
                 <SettingRow
-                  description={`When a thread at Full access makes an image and its Project keeps no choice, it uses this profile's default model instead of asking. First ready profile is ${firstReady ?? "the first one listed"} now. Below Full access the thread still asks.`}
+                  description="A thread at Full access whose Project keeps no choice makes images with this profile without asking."
+                  more={`It uses this profile's default model. First ready profile is ${firstReady ?? "the first one listed"} now. Below Full access the thread still asks.`}
                   label="Image profile at Full access"
                   scope="host"
                   settingId="image-profile-full-access"

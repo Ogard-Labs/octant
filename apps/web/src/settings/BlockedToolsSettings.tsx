@@ -152,7 +152,8 @@ export function BlockedToolsSettings(props: BlockedToolsSettingsProps) {
             ))
           )}
           <SettingRow
-            description="The tool's name as the provider names it, or server__tool for a tool of one of its MCP servers. Codex can block shell, view_image, web_search and MCP server tools."
+            description="The tool's name as the provider names it, or server__tool for a tool of one of its MCP servers."
+            more="Codex can block shell, view_image, web_search and MCP server tools."
             htmlFor={`${ids}-tool`}
             label="Block a tool"
             scope="host"

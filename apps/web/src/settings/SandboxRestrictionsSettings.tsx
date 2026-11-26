@@ -419,7 +419,8 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       : "host"
                 }
                 label="Host services"
-                description="Configure whether Strict blocks ambient local services. Provider and host-owned control bridges remain separate."
+                description="Configure whether Strict blocks ambient local services."
+                more="Provider and host-owned control bridges remain separate."
               >
                 <OctantSelectField
                   aria-label="Strict host services"
@@ -449,7 +450,8 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       : "host"
                 }
                 label="Local service exceptions"
-                description="Allow an exact address and port through the proxy while blocking other ambient host services; the service's effects are a separate authority."
+                description="Allow an exact address and port through the proxy while blocking other ambient host services."
+                more="The service's effects are a separate authority."
               >
                 <div className="settings-section-stack">
                   {(draft.localServices ?? []).map((service) => {
@@ -517,7 +519,8 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       : "host"
                 }
                 label="Personal files and credentials"
-                description="Protected-file rules stay active. Provider sign-in uses its scoped channel; saved credential commands keep their separate one-use recipient and account review in Secret stores."
+                description="Protected-file rules stay active."
+                more="Provider sign-in uses its scoped channel; saved credential commands keep their separate one-use recipient and account review in Secret stores."
               >
                 <span className="oct-meta">
                   {snapshot.strict === true ? "Standard Strict rules" : "Saved for Strict"}

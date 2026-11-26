@@ -143,6 +143,122 @@ describe("SettingRow", () => {
   });
 });
 
+describe("a SettingRow that keeps the rest behind More", () => {
+  function row() {
+    return render(
+      <SettingRow
+        description="Keeps agents out of these files."
+        label="Protected files"
+        more={<p>A file here is refused at every access level, Full access included.</p>}
+        scope="host"
+        settingId="protected-files"
+      >
+        <button type="button">Add file</button>
+      </SettingRow>,
+    );
+  }
+
+  it("shows one sentence at rest and the rest once More is opened, and closes again", async () => {
+    const user = userEvent.setup();
+    row();
+    const rest = screen.getByText(/refused at every access level/);
+    expect(screen.getByText("Keeps agents out of these files.")).toBeVisible();
+    expect(rest).not.toBeVisible();
+
+    const more = screen.getByText("More").closest("summary")!;
+    await user.click(more);
+    expect(rest).toBeVisible();
+    await user.click(more);
+    expect(rest).not.toBeVisible();
+  });
+
+  it("comes before the control in the document, so Tab reaches it before a stacked control", () => {
+    row();
+    const more = screen.getByText("More").closest("summary")!;
+    const control = screen.getByRole("button", { name: "Add file" });
+    // Tab follows the document; the test window cannot tab to a summary, so
+    // the order is read from the document itself.
+    expect(more.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("is a native disclosure, which the keyboard and find-in-page open without script", () => {
+    row();
+    const more = screen.getByText("More").closest("summary")!;
+    expect(more.parentElement?.tagName).toBe("DETAILS");
+    more.focus();
+    expect(more).toHaveFocus();
+  });
+
+  it("names the setting More is about, and keeps it out of the control's cell", () => {
+    row();
+    const more = screen.getByText("More").closest("summary")!;
+    expect(more).toHaveAccessibleName("More about Protected files");
+    // The control's cell holds the control alone: opening More adds a line
+    // under the sentence and leaves the control where it was.
+    const control = screen.getByRole("button", { name: "Add file" }).parentElement!;
+    expect(control).toHaveClass("setrow-control");
+    expect(control).not.toContainElement(more);
+    expect(more.closest("details")?.parentElement).toBe(screen.getByTestId("setting-row"));
+  });
+
+  it("draws no More on a row that has nothing further to say", () => {
+    render(
+      <SettingRow description="One sentence." label="Plain" scope="app" settingId="plain">
+        <button type="button">Go</button>
+      </SettingRow>,
+    );
+    expect(screen.queryByText("More")).not.toBeInTheDocument();
+  });
+});
+
+describe("a SettingRow that names its default", () => {
+  function row(value: number) {
+    return render(
+      <SettingRow
+        atDefault={value === 8}
+        defaultValue="8"
+        description="How many wake-ups may wait in one thread."
+        label="Wake-ups waiting"
+        scope="host"
+        settingId="thread-wakeups-waiting"
+      >
+        <input aria-label="Wake-ups waiting" readOnly type="number" value={value} />
+      </SettingRow>,
+    );
+  }
+
+  it("names the default beside the control once the value differs from it", () => {
+    row(12);
+    const note = screen.getByText("Default 8");
+    expect(note).toBeVisible();
+    expect(note.parentElement).toHaveClass("setrow-control");
+    expect(
+      screen.getByRole("group", { name: "Wake-ups waiting setting" }),
+    ).toHaveAccessibleDescription(/^How many wake-ups may wait in one thread\..*Default 8$/);
+  });
+
+  it("keeps the note's place while the value is the default, so a change moves nothing", () => {
+    row(8);
+    // Hidden, it is not read either: a screen reader hears the default once
+    // the value differs from it.
+    expect(
+      screen.getByRole("group", { name: "Wake-ups waiting setting" }),
+    ).not.toHaveAccessibleDescription(/Default 8/);
+    // Present and marked, not removed: the stylesheet hides it and keeps its
+    // width, so the sentence does not rewrap when the value changes.
+    expect(screen.getByText("Default 8")).toHaveAttribute("data-at-default", "true");
+  });
+
+  it("draws no note for a row that names no default", () => {
+    render(
+      <SettingRow description="One sentence." label="Plain" scope="app" settingId="plain">
+        <button type="button">Go</button>
+      </SettingRow>,
+    );
+    expect(document.querySelector(".setrow-default")).toBeNull();
+  });
+});
+
 describe("shared Settings surfaces", () => {
   it("keeps a section title and note outside its open row content", () => {
     render(

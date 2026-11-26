@@ -17,7 +17,8 @@ export default function RemoteDiagnostics(props: { readonly client: DiagnosticsE
       <SettingsSection title="Diagnostics">
         <div className="setgroup">
           <SettingRow
-            description="Saves a file about this host for you to read and send yourself. It lists versions, provider status, recent log lines, and activity names, never messages or keys. Nothing is uploaded."
+            description="Saves a file about this host for you to read and send yourself; nothing is uploaded."
+            more="It lists versions, provider status, recent log lines, and activity names, never messages or keys."
             label="Save diagnostics"
             scope="host"
             settingId="save-diagnostics"
@@ -25,7 +26,8 @@ export default function RemoteDiagnostics(props: { readonly client: DiagnosticsE
             <SupportBundleControl client={props.client} />
           </SettingRow>
           <SettingRow
-            description="Saves a redacted report about one failed action, found by the ID shown with the error. Check it before sharing."
+            description="Saves a redacted report about one failed action, found by the ID shown with the error."
+            more="Check it before sharing."
             label="Failure report"
             scope="host"
             settingId="export-diagnostics"
@@ -33,7 +35,8 @@ export default function RemoteDiagnostics(props: { readonly client: DiagnosticsE
             <DiagnosticsExportControl client={props.client} />
           </SettingRow>
           <SettingRow
-            description="Events per kind over the last 14 days. Counts only. Read when this section opens."
+            description="Events per kind over the last 14 days, counts only."
+            more="Read when this section opens."
             label="Journal growth"
             scope="host"
             settingId="journal-growth"

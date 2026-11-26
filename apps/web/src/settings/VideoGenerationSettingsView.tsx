@@ -49,7 +49,8 @@ export function VideoGenerationSettingsView(props: VideoGenerationSettingsViewPr
         <SettingsSection title="At Full access">
           <div className="setgroup">
             <SettingRow
-              description={`When a thread at Full access makes a clip and its Project keeps no choice, it uses this profile's first model instead of asking. First ready profile is ${firstReady ?? "the first one listed"} now. Below Full access the thread still asks.`}
+              description="A thread at Full access whose Project keeps no choice makes clips with this profile without asking."
+              more={`It uses this profile's first model. First ready profile is ${firstReady ?? "the first one listed"} now. Below Full access the thread still asks.`}
               label="Video profile at Full access"
               scope="host"
               settingId="video-profile-full-access"

@@ -152,7 +152,7 @@ export function OpenCodeManagedUpdate(props: {
                 key={String(instance.id)}
                 settingId={`opencode-managed-consent-${String(instance.id)}`}
                 label={`Use Octant's copy for ${instance.displayName}`}
-                description="This switches the provider to Octant's copy. It does not replace the OpenCode you installed elsewhere."
+                description="This switches the provider to Octant's copy, without replacing the OpenCode you installed elsewhere."
                 scope="host"
               >
                 <label className="settings-view__actions">

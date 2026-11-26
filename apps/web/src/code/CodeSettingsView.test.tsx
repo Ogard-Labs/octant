@@ -423,7 +423,7 @@ describe("CodeSettingsView", () => {
     expect(services).toBeChecked();
     expect(
       screen.getByText(/cannot write, run other programs, or reach the network/),
-    ).toBeVisible();
+    ).toBeInTheDocument();
 
     await userEvent.setup().click(services);
     expect(update).toHaveBeenLastCalledWith({
@@ -450,8 +450,8 @@ describe("CodeSettingsView", () => {
 
     const snapshotBoot = screen.getByRole("switch", { name: "Android snapshot boot" });
     expect(snapshotBoot).not.toBeChecked();
-    // The reason cold boot is the default stays beside the switch.
-    expect(screen.getByText(/can leave the emulator offline for minutes/)).toBeVisible();
+    // The reason cold boot is the default stays on the row, behind its More.
+    expect(screen.getByText(/can leave the emulator offline for minutes/)).toBeInTheDocument();
 
     await userEvent.setup().click(snapshotBoot);
     expect(update).toHaveBeenLastCalledWith({

@@ -427,7 +427,7 @@ import { useRemoteTodoProjects, type RemoteTodoProject } from "./todos/useRemote
 import { OctantDialog } from "./ui/base/OctantDialog";
 import { useTodoListHost } from "./todos/useTodoListHost";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
-import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
+import { TodoListHostSettingsContext } from "./todos/todoListHostSettingsContext";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import { coordinatorDoneWhenEqual } from "@octant/domain";

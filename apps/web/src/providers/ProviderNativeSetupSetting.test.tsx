@@ -17,6 +17,11 @@ function capabilities(nativeSetup?: ProviderCapabilities["nativeSetup"]) {
   };
 }
 
+/** The Settings row a control sits in: its sentence and what waits behind its More. */
+function rowOf(control: HTMLElement): HTMLElement | null {
+  return control.closest("[data-testid='setting-row']");
+}
+
 describe("A provider's own memory", () => {
   it("starts on, says where it stays off and what stays off with it, and turns off with one switch", async () => {
     const onChange = vi.fn(async () => true);
@@ -26,11 +31,11 @@ describe("A provider's own memory", () => {
     const { rerender } = render(view(codex));
     const toggle = screen.getByRole("switch", { name: "Use Codex work’s own memory" });
     expect(toggle).toBeChecked();
-    expect(toggle).toHaveAccessibleDescription(/On by default/);
-    expect(toggle).toHaveAccessibleDescription(
+    expect(rowOf(toggle)).toHaveTextContent(/On by default/);
+    expect(rowOf(toggle)).toHaveTextContent(
       /Under Strict it stays off in Plan and in Chat, because it writes its memory in the background/,
     );
-    expect(toggle).toHaveAccessibleDescription(
+    expect(rowOf(toggle)).toHaveTextContent(
       /does not change Codex’s telemetry or self-update; those follow Provider channels/,
     );
     await userEvent.click(toggle);
@@ -49,8 +54,8 @@ describe("A provider's own memory", () => {
       />,
     );
     expect(
-      screen.getByRole("switch", { name: "Use Claude work’s own memory" }),
-    ).toHaveAccessibleDescription(/In Plan and in Chat it reads its memory and cannot change it/);
+      rowOf(screen.getByRole("switch", { name: "Use Claude work’s own memory" })),
+    ).toHaveTextContent(/In Plan and in Chat it reads its memory and cannot change it/);
   });
 });
 
@@ -60,10 +65,15 @@ describe("Run a key provider as itself", () => {
     render(<ProviderNativeSetupSetting disabled={false} instance={codex} onChange={onChange} />);
     const toggle = screen.getByRole("switch", { name: "Run Codex work as itself" });
     expect(toggle).toBeChecked();
-    expect(toggle).toHaveAccessibleDescription(/its own\s+subagents, web search and fetch, skills/);
-    expect(toggle).toHaveAccessibleDescription(/On by default/);
-    expect(toggle).toHaveAccessibleDescription(/Plan stays read-only/);
-    expect(toggle).toHaveAccessibleDescription(
+    expect(rowOf(toggle)).toHaveTextContent(/its own\s+subagents, web search and fetch, skills/i);
+    // The sentence stays short; what the setup covers waits behind More, closed.
+    expect(rowOf(toggle)?.querySelector(".setrow-hint")).not.toHaveTextContent(/web search/);
+    expect(rowOf(toggle)?.querySelector(".setrow-more:not([open])")).toHaveTextContent(
+      /web search and fetch, skills/,
+    );
+    expect(rowOf(toggle)).toHaveTextContent(/On by default/);
+    expect(rowOf(toggle)).toHaveTextContent(/Plan stays read-only/);
+    expect(rowOf(toggle)).toHaveTextContent(
       /Turned off, web search and fetch stay\s+off in every mode/,
     );
     await userEvent.click(toggle);
@@ -99,7 +109,7 @@ describe("Run a key provider as itself", () => {
     );
     const toggle = screen.getByRole("switch", { name: "Run Codex work as itself" });
     expect(toggle).toBeChecked();
-    expect(toggle).toHaveAccessibleDescription(
+    expect(rowOf(toggle)).toHaveTextContent(
       /Not available for Codex yet: settings and hooks, a trusted Project’s own code\./,
     );
   });
@@ -113,15 +123,15 @@ describe("Run a key provider as itself", () => {
         onChange={vi.fn(async () => true)}
       />,
     );
-    expect(screen.getByRole("switch", { name: "Run Vibe as itself" })).toHaveAccessibleDescription(
+    expect(rowOf(screen.getByRole("switch", { name: "Run Vibe as itself" }))).toHaveTextContent(
       /Vibe doesn’t say which tool its subagents ask to run/,
     );
-    expect(screen.getByRole("switch", { name: "Run Vibe as itself" })).toHaveAccessibleDescription(
+    expect(rowOf(screen.getByRole("switch", { name: "Run Vibe as itself" }))).toHaveTextContent(
       /work in Work and Code outside Plan, at every level there/,
     );
-    expect(
-      screen.getByRole("switch", { name: "Run Vibe as itself" }),
-    ).not.toHaveAccessibleDescription(/only at Full access/);
+    expect(rowOf(screen.getByRole("switch", { name: "Run Vibe as itself" }))).not.toHaveTextContent(
+      /only at Full access/,
+    );
     unmount();
     render(
       <ProviderNativeSetupSetting
@@ -131,8 +141,8 @@ describe("Run a key provider as itself", () => {
       />,
     );
     expect(
-      screen.getByRole("switch", { name: "Run Codex work as itself" }),
-    ).not.toHaveAccessibleDescription(/its subagents ask/);
+      rowOf(screen.getByRole("switch", { name: "Run Codex work as itself" })),
+    ).not.toHaveTextContent(/its subagents ask/);
   });
 
   it("claims nothing for a checked driver that reports no native setup at all", () => {
@@ -145,8 +155,8 @@ describe("Run a key provider as itself", () => {
       />,
     );
     expect(
-      screen.getByRole("switch", { name: "Run Codex work as itself" }),
-    ).toHaveAccessibleDescription(
+      rowOf(screen.getByRole("switch", { name: "Run Codex work as itself" })),
+    ).toHaveTextContent(
       /Not available for Codex yet: its own subagents, web search and fetch, skills/,
     );
   });
@@ -161,9 +171,7 @@ describe("Run a key provider as itself", () => {
         />
       </HostPlatformContext.Provider>,
     );
-    expect(
-      screen.getByRole("switch", { name: "Run OpenCode as itself" }),
-    ).toHaveAccessibleDescription(
+    expect(rowOf(screen.getByRole("switch", { name: "Run OpenCode as itself" }))).toHaveTextContent(
       /OpenCode’s own permission rules—not Octant—keep its file and shell tools off, and its command templates and plugins run as they do in OpenCode itself/,
     );
     unmount();
@@ -177,7 +185,7 @@ describe("Run a key provider as itself", () => {
         />
       </HostPlatformContext.Provider>,
     );
-    expect(screen.getByRole("switch", { name: "Run Kilo as itself" })).toHaveAccessibleDescription(
+    expect(rowOf(screen.getByRole("switch", { name: "Run Kilo as itself" }))).toHaveTextContent(
       /Kilo’s own permission handling—not Octant confinement—applies/,
     );
   });

@@ -135,6 +135,22 @@ export interface SettingRowProps {
    * print its own label a second time.
    */
   readonly labelledBySection?: boolean;
+  /**
+   * What the row has to say beyond its one sentence: the mechanism, the
+   * exceptions, a safety condition's detail. It waits behind a "More" under
+   * the sentence, so a person scanning the page reads one sentence per row.
+   */
+  readonly more?: ReactNode;
+  /**
+   * The value the setting has until someone changes it, named beside the
+   * control instead of in the sentence. Pass `atDefault` with it.
+   */
+  readonly defaultValue?: string;
+  /**
+   * Whether the control shows the default now. The note is then hidden and
+   * keeps its width, so changing the value rewraps nothing under the pointer.
+   */
+  readonly atDefault?: boolean;
   readonly children: ReactNode;
 }
 
@@ -155,6 +171,9 @@ export function SettingRow({
   scope,
   focused = false,
   labelledBySection = false,
+  more,
+  defaultValue,
+  atDefault = false,
   children,
 }: SettingRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
@@ -165,7 +184,13 @@ export function SettingRow({
   return (
     <div
       aria-label={`${label} setting`}
-      aria-describedby={`${settingId}-description`}
+      aria-describedby={
+        // A hidden note named by id would still be read, so the default is
+        // described only while it shows, once the value differs from it.
+        defaultValue === undefined || atDefault
+          ? `${settingId}-description`
+          : `${settingId}-description ${settingId}-default`
+      }
       className="setrow"
       data-focused={focused ? "true" : "false"}
       data-setting-id={settingId}
@@ -201,7 +226,36 @@ export function SettingRow({
         {description === undefined ? null : <span>{description} </span>}
         {pageScope === scope ? null : <ScopeIndicator scope={scope} />}
       </p>
-      <div className="setrow-control">{children}</div>
+      {/* A native disclosure, so the browser's find-in-page opens it on a
+          match. It is the row's third line, under the sentence and outside the
+          control's cell: the control spans the first two lines only and stays
+          where it was when this opens. It comes before the control in the
+          document, so Tab reaches it in reading order also where the control
+          stacks under it (a list, a form, every row at phone width). */}
+      {more === undefined ? null : (
+        <OctantCollapsible
+          chevron="start"
+          chevronSize={12}
+          className="setrow-more"
+          summary="More"
+          summaryClassName="setrow-more__summary"
+          summaryProps={{ "aria-label": `More about ${label}` }}
+        >
+          <div className="setrow-more__body">{more}</div>
+        </OctantCollapsible>
+      )}
+      <div className="setrow-control">
+        {defaultValue === undefined ? null : (
+          <span
+            className="setrow-default"
+            data-at-default={atDefault ? "true" : "false"}
+            id={`${settingId}-default`}
+          >
+            Default {defaultValue}
+          </span>
+        )}
+        {children}
+      </div>
     </div>
   );
 }

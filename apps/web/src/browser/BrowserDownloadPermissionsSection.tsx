@@ -182,7 +182,8 @@ export function BrowserDownloadPermissionsSection(props: {
         scope="host"
         settingId="browser-download-permissions"
         focused={props.focusedSetting === "browser-download-permissions"}
-        description="Save known native source chains into one approved directory for a routine and account profile. Account access stays separate."
+        description="Save known native source chains into one approved directory for a routine and account profile."
+        more="Account access stays separate."
       >
         <div className="host-settings__controls">
           <OctantButton
