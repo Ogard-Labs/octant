@@ -222,6 +222,56 @@ describe("the server connection listing", () => {
     expect(connected.listing.servers[0]?.state).toBe("connected");
   });
 
+  it("asks a signed-out server added by hand to sign in once its own refusal offered one", async () => {
+    const offered = await list({
+      components: [server("remote")],
+      signIn: { remote: { kind: "signed-out" } },
+      slug: "my-own-server",
+      observations: [
+        {
+          extensionId,
+          componentId: "remote",
+          state: "failed",
+          reason: "MCP HTTP request failed with status 401.",
+          signInOffered: true,
+        },
+      ],
+    });
+    expect(offered.listing.servers[0]).toMatchObject({
+      state: "needs-sign-in",
+      reason: "Not signed in.",
+    });
+    const bare = await list({
+      components: [server("remote")],
+      signIn: { remote: { kind: "signed-out" } },
+      slug: "my-own-server",
+      observations: [
+        {
+          extensionId,
+          componentId: "remote",
+          state: "failed",
+          reason: "MCP HTTP request failed with status 401.",
+        },
+      ],
+    });
+    expect(bare.listing.servers[0]?.state).toBe("failed");
+  });
+
+  it("reads only the servers it is asked about", async () => {
+    const signInStatus = vi.fn(async (): Promise<McpServerSignInView> => ({ kind: "signed-out" }));
+    const readConfiguration = vi.fn(async () => "");
+    const listing = await listMcpServerConnections({
+      snapshot: () => snapshot([server("remote"), server("local")]),
+      observations: () => [],
+      signInStatus,
+      readConfiguration,
+      only: (_extensionId, componentId) => componentId === "remote",
+    });
+    expect(listing.servers.map((entry) => entry.serverName)).toEqual(["remote"]);
+    expect(signInStatus).toHaveBeenCalledTimes(1);
+    expect(readConfiguration).toHaveBeenCalledTimes(1);
+  });
+
   it("reads the transport of the entry this component runs from a shared mcp.json", () => {
     const shared = JSON.stringify({
       mcpServers: {

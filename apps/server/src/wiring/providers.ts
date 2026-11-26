@@ -1523,8 +1523,9 @@ export function wireProviders(deps: ProvidersDependencies) {
       (await mcpPlanReadOnlyRoutes(request)) ??
       (await blockedToolsRoutes(request)) ??
       (await providerToolingCommandRoutes(request));
-    const listServerConnections = () =>
+    const listServerConnections = (only?: (extensionId: string, componentId: string) => boolean) =>
       listMcpServerConnections({
+        ...(only === undefined ? {} : { only }),
         snapshot: () => extensionLifecycleService.snapshot(),
         observations: () => agentPluginMcpSessionManager.connectionObservations(),
         // Asked as a reader: a local window's status read polls a pending
@@ -1548,7 +1549,10 @@ export function wireProviders(deps: ProvidersDependencies) {
       snapshot: () => extensionApiService.snapshot(),
       resolveEffectiveState: (snapshot, query) =>
         extensionActivationService.resolve(snapshot, query),
-      connections: listServerConnections,
+      connections: (servers) =>
+        listServerConnections((extensionId, componentId) =>
+          servers.has(`${extensionId}/${componentId}`),
+        ),
       thread: createThreadMcpSignInThreads({
         readChatThread: (threadId) => persistence.readChatThread(threadId),
         readWorkThread: (threadId) => workThreadProjection.read(threadId),
@@ -1642,7 +1646,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           ),
       },
       mcpServerConnections: {
-        list: listServerConnections,
+        list: () => listServerConnections(),
         forThread: threadMcpSignIns,
         reconnect: async (extensionId, componentId) => {
           const installed = extensionLifecycleService

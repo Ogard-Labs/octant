@@ -62,11 +62,16 @@ function host(
   } = { signedIn: false, read: "ok" };
   const client = {
     toolGrantsAvailable: options.person ?? true,
-    mcpServersAwaitingSignIn: vi.fn(async () => {
-      if (state.read === "unreachable") throw new TypeError("offline");
-      if (state.read === "refused") throw new ExtensionClientFailure("unauthorized", "No.");
-      return { servers: state.signedIn || options.unused === true ? [] : [linear] };
-    }),
+    mcpServersAwaitingSignIn: vi.fn(
+      async (request: { readonly references: ReadonlyArray<string> }) => {
+        if (state.read === "unreachable") throw new TypeError("offline");
+        if (state.read === "refused") throw new ExtensionClientFailure("unauthorized", "No.");
+        if (state.signedIn || options.unused === true) return { servers: [] };
+        // The host names which of the draft's refused names are this server's.
+        const named = request.references.filter((reference) => reference === "@linear");
+        return { servers: [named.length === 0 ? linear : { ...linear, references: named }] };
+      },
+    ),
     mcpServerSignIn: vi.fn(async (request: { readonly kind: string }) =>
       request.kind === "begin" && options.begin !== undefined
         ? options.begin
@@ -205,6 +210,41 @@ describe("signing in to a server from the thread", () => {
     state.signedIn = true;
     rerender(notice(client, { receipts: [refused], onResolveReference, turnActive: true }));
     await waitFor(() => expect(screen.queryByText("Linear needs sign-in")).toBeNull());
+    expect(onResolveReference).toHaveBeenCalledExactlyOnceWith("@linear");
+  });
+
+  it("selects again only the names of the server that stopped waiting on a sign-in", async () => {
+    const docs = {
+      ...linear,
+      extensionId: "46000000-0000-4000-8000-000000000004",
+      packageName: "Docs",
+      serverName: "Docs",
+    } as McpServerConnection;
+    let linearSignedIn = false;
+    const client = {
+      toolGrantsAvailable: true,
+      mcpServersAwaitingSignIn: vi.fn(async () => ({
+        servers: [
+          ...(linearSignedIn ? [] : [{ ...linear, references: ["@linear"] }]),
+          { ...docs, references: ["@docs"] },
+        ],
+      })),
+      mcpServerSignIn: vi.fn(async () => ({ kind: "sign-in-again", reason: "expired" })),
+    } as unknown as ExtensionClient;
+    const onResolveReference = vi.fn(async () => true);
+    const refused = (reference: string) =>
+      ({
+        label: reference,
+        reference,
+        status: { kind: "blocked", reason: "unavailable" },
+      }) as const;
+    const receipts = [refused("@linear"), refused("@docs")];
+    const { rerender } = render(notice(client, { receipts, onResolveReference }));
+    await card();
+    linearSignedIn = true;
+    rerender(notice(client, { receipts, onResolveReference, turnActive: true }));
+    await waitFor(() => expect(screen.queryByText("Linear needs sign-in")).toBeNull());
+    expect(screen.getByText("Docs needs sign-in")).toBeVisible();
     expect(onResolveReference).toHaveBeenCalledExactlyOnceWith("@linear");
   });
 

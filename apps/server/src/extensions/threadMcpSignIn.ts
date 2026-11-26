@@ -109,7 +109,8 @@ export function createThreadMcpSignInReader(options: {
   ) => ExtensionEffectiveSnapshot;
   /** Undefined when there is no such thread, or its turns carry no extension tools. */
   readonly thread: (mode: OctantMode, threadId: string) => ThreadMcpSignInThread | undefined;
-  readonly connections: () => Promise<McpServerConnectionListing>;
+  /** The listing of these servers, each named `extensionId/componentId`. */
+  readonly connections: (servers: ReadonlySet<string>) => Promise<McpServerConnectionListing>;
 }): (request: ThreadMcpSignInRequest) => Promise<McpServerConnectionListing> {
   return async ({ mode, threadId, selections, references }) => {
     const none: McpServerConnectionListing = { servers: [] };
@@ -147,9 +148,15 @@ export function createThreadMcpSignInReader(options: {
     );
     // The composer refuses a server whose connection failed, so its draft holds
     // the name alone; the name is resolved here as the composer resolves one.
+    const namedBy = new Map<string, string[]>();
     const named = references.flatMap((reference) => {
       const resolved = resolveDraftExtensionReference(reference, addressing, "draft");
-      return resolved.kind === "selected" ? [resolved.selection] : [];
+      if (resolved.kind !== "selected") return [];
+      if (resolved.selection.kind === "plugin") {
+        const key = `${resolved.selection.extensionId}/${resolved.selection.componentId}`;
+        namedBy.set(key, [...(namedBy.get(key) ?? []), reference]);
+      }
+      return [resolved.selection];
     });
     const used = new Set(
       [
@@ -166,13 +173,16 @@ export function createThreadMcpSignInReader(options: {
       ),
     );
     if (used.size === 0) return none;
-    const { servers } = await options.connections();
+    const { servers } = await options.connections(used);
     return {
-      servers: servers.filter(
-        (server) =>
-          server.state === "needs-sign-in" &&
-          used.has(`${server.extensionId}/${server.componentId}`),
-      ),
+      servers: servers.flatMap((server) => {
+        const key = `${server.extensionId}/${server.componentId}`;
+        if (server.state !== "needs-sign-in" || !used.has(key)) return [];
+        // The composer resolves these names again once this server no longer
+        // waits on a sign-in, and leaves the names of other servers alone.
+        const references = namedBy.get(key);
+        return [references === undefined ? server : { ...server, references }];
+      }),
     };
   };
 }

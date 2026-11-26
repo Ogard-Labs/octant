@@ -122,7 +122,8 @@ the attempt can be finished that way.
   those of a turn waiting on a scheduled resume. A queued message counts until it
   starts running. An `@` name the composer refuses counts when the thread could
   use that server: one failed connection makes the composer refuse it, and signing
-  in selects it again. A server the person has switched off, not trusted, or not chosen for
+  in selects that server's names again, leaving the names of a server still
+  waiting as they are. A server the person has switched off, not trusted, or not chosen for
   this thread is never named, whatever state it is in.
 - A read-only thread, and a device that may not sign in, show nothing and ask
   nothing.

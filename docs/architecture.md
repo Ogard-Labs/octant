@@ -15015,9 +15015,12 @@ Ready rather than Connected. States, most decisive first: Off (package or
 server switched off), Needs sign-in (sign-in-again, consent pending, an attempt
 whose status or cancellation is not confirmed, client
 setup required for a registered-client connector, or a
-catalog connector that signs in and has no sign-in while not connected;
-signed out alone is only an offer, since a hosted server that takes a key or
-nothing reports it too), Connecting, Not connecting (the newest fact is a
+catalog connector that signs in and has no sign-in while not connected, or a
+signed-out server the person added by hand whose last connect was refused with
+an OAuth challenge naming its resource metadata (RFC 9728), the same header
+sign-in discovery reads first; signed out alone is only an offer, since a hosted
+server that takes a key or nothing reports it too, and a bare 401 stays Not
+connecting), Connecting, Not connecting (the newest fact is a
 failed attempt or closed transport, with its reason), Connected, Blocked (a
 lifecycle block such as quarantine, or a sign-in connector on a host whose
 sign-in is refused, such as one without the credential broker), Ready. A server with sessions in several
@@ -15040,7 +15043,10 @@ servers those are (`/api/extensions/connections`, `thread-sign-in`) from the
 thread's mode and id, the selections the next turn would carry, and the `@` names
 its draft could not select: the Project's pins (Work and Code), those selections
 and those names, each put through the checks the turn itself makes against the
-thread's own activation. It does not ask the sessions, because a turn drops a
+thread's own activation. It reads the listing of those servers alone, and
+says, for each one it names, which of the draft's refused names are that
+server's, so the composer selects only those again once it is signed in. It does
+not ask the sessions, because a turn drops a
 server whose connection failed, the composer refuses it, and a missing sign-in is
 what makes it fail. A thread whose turns carry no extension tools (a Project on
 a server, Strict on Windows, or in Work and Code a model known not to carry

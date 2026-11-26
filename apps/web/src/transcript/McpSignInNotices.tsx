@@ -61,16 +61,19 @@ export function McpSignInNotices(
   });
   // A name the composer refused while the server could not connect stays
   // refused in the draft; it is resolved again once the thread stops waiting
-  // on a sign-in, wherever that sign-in finished.
+  // on that server's sign-in, wherever it finished. The host says which names
+  // are each server's, so another server's names stay as they are.
   const latest = useRef({ refused, onResolveReference: props.onResolveReference });
   latest.current = { refused, onResolveReference: props.onResolveReference };
-  const listed = useRef<ReadonlySet<string>>(new Set());
+  const listed = useRef<ReadonlyMap<string, ReadonlyArray<string>>>(new Map());
   useEffect(() => {
-    const now = new Set(servers.map(serverKey));
-    const left = [...listed.current].some((key) => !now.has(key));
+    const now = new Map(servers.map((server) => [serverKey(server), server.references ?? []]));
+    const names = new Set(
+      [...listed.current].flatMap(([key, references]) => (now.has(key) ? [] : references)),
+    );
     listed.current = now;
-    if (left)
-      for (const receipt of latest.current.refused)
+    for (const receipt of latest.current.refused)
+      if (names.has(receipt.reference.slice(0, 256)))
         void latest.current.onResolveReference(receipt.reference);
   }, [servers]);
   const refresh = useCallback(

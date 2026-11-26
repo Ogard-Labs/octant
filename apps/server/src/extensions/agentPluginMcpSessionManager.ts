@@ -102,6 +102,8 @@ export interface McpConnectionObservation {
   readonly state: "connected" | "connecting" | "failed" | "idle";
   readonly reason?: string;
   readonly at?: string;
+  /** The failure was a server the person added by hand refusing with an OAuth sign-in on offer. */
+  readonly signInOffered?: true;
 }
 
 function pick(
@@ -239,6 +241,7 @@ export class AgentPluginMcpSessionManager {
       readonly target: AgentPluginMcpSessionKey;
       readonly reason: string;
       readonly at: string;
+      readonly signInOffered?: true;
     }
   >();
   readonly #now: () => Date;
@@ -302,7 +305,7 @@ export class AgentPluginMcpSessionManager {
       readonly target: AgentPluginMcpSessionKey;
       connecting: boolean;
       connected: boolean;
-      failure?: { readonly reason: string; readonly at: string };
+      failure?: { readonly reason: string; readonly at: string; readonly signInOffered?: true };
     };
     const components = new Map<string, Facts>();
     const entry = (target: AgentPluginMcpSessionKey): Facts => {
@@ -314,9 +317,10 @@ export class AgentPluginMcpSessionManager {
       return created;
     };
     for (const { target } of this.#lastConnected.values()) entry(target);
-    for (const { target, reason, at } of this.#failures.values()) {
+    for (const { target, reason, at, signInOffered } of this.#failures.values()) {
       const known = entry(target);
-      if (known.failure === undefined || known.failure.at < at) known.failure = { reason, at };
+      if (known.failure === undefined || known.failure.at < at)
+        known.failure = { reason, at, ...(signInOffered === undefined ? {} : { signInOffered }) };
     }
     for (const { target } of this.#connections.values()) entry(target).connecting = true;
     for (const record of this.#sessions.values()) entry(record).connected = true;
@@ -333,6 +337,9 @@ export class AgentPluginMcpSessionManager {
           state: "failed",
           reason: known.failure.reason,
           at: known.failure.at,
+          ...(known.failure.signInOffered === undefined
+            ? {}
+            : { signInOffered: known.failure.signInOffered }),
         };
       return { ...pick(known.target), state: known.connected ? "connected" : "idle", ...since };
     });
@@ -714,6 +721,11 @@ export class AgentPluginMcpSessionManager {
           target,
           reason: error instanceof Error ? error.message : "MCP connection failed.",
           at: this.#now().toISOString(),
+          // Only a server added by hand carries the host's own sign-in on
+          // connect, so only its refusal is one a sign-in here can answer.
+          ...(target.userAdded && error instanceof McpHttpStatusError && error.signInOffered
+            ? { signInOffered: true as const }
+            : {}),
         });
       }
     }

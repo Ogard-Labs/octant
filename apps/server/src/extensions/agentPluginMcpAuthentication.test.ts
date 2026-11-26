@@ -645,3 +645,45 @@ describe("MCP authentication retirement", () => {
     held.resolve();
   });
 });
+
+describe("a signed-out server the person added by hand", () => {
+  async function refusedWith(challenge: string | undefined, userAdded = true) {
+    const actual =
+      await vi.importActual<typeof import("./agentPluginMcpClient")>("./agentPluginMcpClient");
+    connect.mockImplementation(actual.connectAgentPluginMcpSession);
+    const fetchImpl: typeof fetch = Object.assign(
+      async () =>
+        new Response(null, {
+          status: 401,
+          headers: challenge === undefined ? {} : { "www-authenticate": challenge },
+        }),
+      { preconnect: () => undefined },
+    );
+    const subject = manager(async () => true, {
+      fetch: fetchImpl,
+      isUserAddedSource: () => userAdded,
+    });
+    await subject.reconcile(effective());
+    return subject.connectionObservations();
+  }
+
+  it("offers a sign-in when its refusal names where its OAuth sign-in is described", async () => {
+    expect(
+      await refusedWith(
+        'Bearer realm="mcp", resource_metadata="https://example.test/.well-known/oauth-protected-resource"',
+      ),
+    ).toEqual([expect.objectContaining({ state: "failed", signInOffered: true })]);
+  });
+
+  it("offers none for a bare refusal, or for a server the person did not add by hand", async () => {
+    const [bare] = await refusedWith(undefined);
+    expect(bare).toMatchObject({ state: "failed" });
+    expect(bare).not.toHaveProperty("signInOffered");
+    const [packaged] = await refusedWith(
+      'Bearer resource_metadata="https://example.test/.well-known/oauth-protected-resource"',
+      false,
+    );
+    expect(packaged).toMatchObject({ state: "failed" });
+    expect(packaged).not.toHaveProperty("signInOffered");
+  });
+});
