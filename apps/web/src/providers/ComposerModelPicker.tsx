@@ -32,6 +32,7 @@ import { ProviderGlyph } from "./ProviderGlyph";
 import { useModelToolVerifier } from "./ModelToolVerificationContext";
 import { ComposerBenchmarkHint, type ComposerBenchmarkScope } from "./ComposerBenchmarkHint";
 import { findSupportedReasoningOption, isComposerReasoningOption } from "./composerReasoningOption";
+import { pickerHasReadyInstance } from "./pickerReadiness";
 
 export { findSupportedReasoningOption, isComposerReasoningOption };
 
@@ -129,10 +130,7 @@ export function pickerHasListedModel(groups: ReadonlyArray<PickerGroup>): boolea
   return groups.some((group) => group.sections.some((section) => section.models.length > 0));
 }
 
-/** A ready or degraded instance can answer even when every model is hidden. */
-export function pickerHasReadyInstance(groups: ReadonlyArray<PickerGroup>): boolean {
-  return groups.some((group) => group.readiness === "ready" || group.readiness === "degraded");
-}
+export { pickerHasReadyInstance };
 
 function pickerHasBoundCurrent(groups: ReadonlyArray<PickerGroup>): boolean {
   return groups.some(
