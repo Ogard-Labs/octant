@@ -172,6 +172,15 @@ describe("a SettingRow that keeps the rest behind More", () => {
     expect(rest).not.toBeVisible();
   });
 
+  it("comes before the control in the document, so Tab reaches it before a stacked control", () => {
+    row();
+    const more = screen.getByText("More").closest("summary")!;
+    const control = screen.getByRole("button", { name: "Add file" });
+    // Tab follows the document; the test window cannot tab to a summary, so
+    // the order is read from the document itself.
+    expect(more.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("is a native disclosure, which the keyboard and find-in-page open without script", () => {
     row();
     const more = screen.getByText("More").closest("summary")!;
@@ -230,6 +239,11 @@ describe("a SettingRow that names its default", () => {
 
   it("keeps the note's place while the value is the default, so a change moves nothing", () => {
     row(8);
+    // Hidden, it is not read either: a screen reader hears the default once
+    // the value differs from it.
+    expect(
+      screen.getByRole("group", { name: "Wake-ups waiting setting" }),
+    ).not.toHaveAccessibleDescription(/Default 8/);
     // Present and marked, not removed: the stylesheet hides it and keeps its
     // width, so the sentence does not rewrap when the value changes.
     expect(screen.getByText("Default 8")).toHaveAttribute("data-at-default", "true");

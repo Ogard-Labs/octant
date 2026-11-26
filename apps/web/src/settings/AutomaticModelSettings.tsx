@@ -388,6 +388,12 @@ function ThreadTitleRows(props: {
     accountProblem(props.snapshot, choice) ??
     (missingModel ? "The saved model is unavailable." : undefined);
   const focusModel = props.focusedSetting === "automatic-model-thread-title-model";
+  const modelPurpose =
+    choice === undefined
+      ? source === "subscription"
+        ? "Choose a model from a ChatGPT plan endpoint, used when you send the first message."
+        : "Choose a model from an API endpoint; your provider may charge for title requests."
+      : `Octant sends up to 2,000 characters of the first message to ${destination(props.snapshot, choice)}, with recognizable secrets removed.`;
 
   async function save(next: ThreadTitleSettings) {
     if (busy) return;
@@ -434,18 +440,12 @@ function ThreadTitleRows(props: {
       </SettingRow>
       {source === "first-message" ? null : (
         <SettingRow
-          description={
-            <>
-              {choice === undefined
-                ? source === "subscription"
-                  ? "Choose a model from a ChatGPT plan endpoint, used when you send the first message."
-                  : "Choose a model from an API endpoint; your provider may charge for title requests."
-                : `Octant sends up to 2,000 characters of the first message to ${destination(props.snapshot, choice)}, with recognizable secrets removed.`}
-              {unavailable === undefined ? null : (
-                <> {unavailable} Octant will use the first message.</>
-              )}
-            </>
-          }
+          // A model that cannot be used now is the row's news, so its reason is
+          // the sentence and what the row usually says waits behind More.
+          description={unavailable ?? modelPurpose}
+          {...(unavailable === undefined
+            ? {}
+            : { more: `Octant names threads from the first message meanwhile. ${modelPurpose}` })}
           label={modelLabel}
           focused={focusModel}
           scope="host"

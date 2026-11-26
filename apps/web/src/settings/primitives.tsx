@@ -185,7 +185,9 @@ export function SettingRow({
     <div
       aria-label={`${label} setting`}
       aria-describedby={
-        defaultValue === undefined
+        // A hidden note named by id would still be read, so the default is
+        // described only while it shows, once the value differs from it.
+        defaultValue === undefined || atDefault
           ? `${settingId}-description`
           : `${settingId}-description ${settingId}-default`
       }
@@ -224,22 +226,12 @@ export function SettingRow({
         {description === undefined ? null : <span>{description} </span>}
         {pageScope === scope ? null : <ScopeIndicator scope={scope} />}
       </p>
-      <div className="setrow-control">
-        {defaultValue === undefined ? null : (
-          <span
-            className="setrow-default"
-            data-at-default={atDefault ? "true" : "false"}
-            id={`${settingId}-default`}
-          >
-            Default {defaultValue}
-          </span>
-        )}
-        {children}
-      </div>
       {/* A native disclosure, so the browser's find-in-page opens it on a
           match. It is the row's third line, under the sentence and outside the
           control's cell: the control spans the first two lines only and stays
-          where it was when this opens. */}
+          where it was when this opens. It comes before the control in the
+          document, so Tab reaches it in reading order also where the control
+          stacks under it (a list, a form, every row at phone width). */}
       {more === undefined ? null : (
         <OctantCollapsible
           chevron="start"
@@ -252,6 +244,18 @@ export function SettingRow({
           <div className="setrow-more__body">{more}</div>
         </OctantCollapsible>
       )}
+      <div className="setrow-control">
+        {defaultValue === undefined ? null : (
+          <span
+            className="setrow-default"
+            data-at-default={atDefault ? "true" : "false"}
+            id={`${settingId}-default`}
+          >
+            Default {defaultValue}
+          </span>
+        )}
+        {children}
+      </div>
     </div>
   );
 }

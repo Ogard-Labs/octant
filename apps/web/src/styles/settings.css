@@ -1560,8 +1560,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   line-height: var(--oct-line-detail);
 }
 
+/* A pointer target of 24px, 44px on touch, without growing the row at rest:
+   the summary's own padding makes the height and the margin gives it back. */
 .setrow-more__summary {
   width: fit-content;
+  min-height: 24px;
+  margin-block: -4px;
   gap: var(--oct-space-1);
   border-radius: var(--oct-radius-sm);
 }
@@ -3979,6 +3983,13 @@ html[data-octant-increased-contrast="true"]
 }
 
 /* Touch keeps the 16px dot but widens the hit area to the 44px target. */
+@media (pointer: coarse) {
+  .setrow-more__summary {
+    min-height: 44px;
+    margin-block: -14px 0;
+  }
+}
+
 @media (pointer: coarse), (max-width: 560px) {
   .settings-accent__swatch {
     width: 44px;
