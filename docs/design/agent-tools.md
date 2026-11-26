@@ -136,11 +136,12 @@ policy and Shield review, which a child is not.
   decision, 2026-11-17). On Windows OpenCode and ACP agents reach the tool
   bridge directly, as [Windows launches](provider-runtimes.md#windows-launches)
   says.
-- Not built yet: `octant_code` and `octant_github` in a Work thread whose
-  folder is a Git repository (maintainer decision, 2026-11-17). Both are bound
-  to a Code thread's checkout and its confirmed delivery repository, which a
-  Work folder does not have, so until that binding exists a Work thread is
-  offered neither.
+- `octant_code` and `octant_github` are deliberately Code-only, even when a
+  Work thread's folder is a Git repository (maintainer decisions, 2026-11-17
+  and 2026-11-26). Both are bound to a Code thread's checkout and its
+  confirmed delivery repository, which a Work folder does not have, and no
+  link from a Work Project to a repository will be built. A person who wants
+  them opens a Code thread on the same folder.
 
 "Code + tools" below means a Code thread on a provider that carries
 app-managed tools, subject to the thread profile's tool constraints.
