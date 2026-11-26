@@ -671,7 +671,10 @@ export class WorkThreadService {
         : { state: turn.status, limit: turn.failure?.usageLimit, turnId: String(turn.turnId) },
     );
     const limited = stop === undefined ? {} : { limited: limitedThreadFact(stop.limit) };
-    if (stop !== undefined && activity.waitsOnTurnAlone === true) return limited;
+    // A stop a move released is no longer current, but its turn still reads
+    // `waiting` with nothing asked of the person, so it stays out of Needs you.
+    const stoppedOnLimit = turn?.status === "waiting" && turn.failure?.usageLimit !== undefined;
+    if (stoppedOnLimit && activity.waitsOnTurnAlone === true) return limited;
     return {
       // Carried only when true, so an idle row's payload stays as it was.
       ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),

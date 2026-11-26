@@ -654,10 +654,10 @@ cannot rank the same facts differently.
   row; the renderer reads nothing from text or timing beyond dropping the word
   once the named reset has passed on its clock, on the row's minute tick. A
   snoozed or settled thread says where it rests instead. A Work turn stopped
-  on a limit is therefore not reported as waiting on the person unless a
-  request or a child also waits, so it raises no Needs you row, Inbox entry or
-  early wake, as in Chat and Code. A side task's receipt still reads such a
-  child as needing the person.
+  on a limit, a stop a move released included, is therefore not reported as
+  waiting on the person unless a request or a child also waits, so it raises no
+  Needs you row, Inbox entry or early wake, as in Chat and Code. A side task's
+  receipt still reads such a child as needing the person.
 - Nothing to report is the absence of a status (`undefined`), not a word: no
   "Idle" mark, filter value, or sort rank exists. The Status arrangement's
   **Idle** heading only gathers the threads no heading above it holds; it is

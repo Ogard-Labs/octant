@@ -917,10 +917,29 @@ export function readChatNavigation(
                  AND json_extract(attempt_json, '$.outcome') IN ('queued', 'streaming')
              ) AS executing,
              EXISTS (
-               SELECT 1 FROM chat_attempt_projection
-               WHERE thread_id = thread.thread_id
-                 AND json_extract(attempt_json, '$.outcome') = 'waiting'
-                 AND json_extract(attempt_json, '$.usageLimit') IS NOT NULL
+               SELECT 1 FROM chat_attempt_projection AS attempt
+               INNER JOIN chat_turn_projection AS stopped
+                 ON stopped.turn_id = attempt.turn_id
+               WHERE attempt.thread_id = thread.thread_id
+                 AND json_extract(attempt.attempt_json, '$.outcome') = 'waiting'
+                 AND json_extract(attempt.attempt_json, '$.usageLimit') IS NOT NULL
+                 -- No retry has replaced this attempt.
+                 AND json_extract(stopped.turn_json, '$.attempts[#-1].id') = attempt.attempt_id
+                 -- No later turn has passed it. A rewound edit can leave an
+                 -- unrewound turn superseded, so then the turn order decides.
+                 AND NOT EXISTS (
+                   SELECT 1 FROM chat_turn_projection AS later
+                   WHERE later.thread_id = thread.thread_id
+                     AND later.sequence > stopped.sequence
+                     AND json_type(later.turn_json, '$.rewound') IS NULL
+                     AND NOT EXISTS (
+                       SELECT 1 FROM chat_turn_projection AS edit
+                       WHERE edit.thread_id = thread.thread_id
+                         AND edit.sequence > later.sequence
+                         AND json_type(edit.turn_json, '$.rewound') IS NOT NULL
+                         AND json_type(edit.turn_json, '$.supersedes') IS NOT NULL
+                     )
+                 )
              ) AS limit_waiting
       FROM chat_thread_projection AS thread
       LEFT JOIN thread_follow_up_projection AS follow_up
@@ -939,8 +958,8 @@ export function readChatNavigation(
   return rows.map((row) => {
     assertChatProjectionSchema(row.schema_version);
     const thread = decodeChatThread(JSON.parse(row.thread_json));
-    // Only a thread holding a waiting limited attempt reads its latest turn:
-    // an older stop that a later turn passed leaves that attempt behind.
+    // Only a thread whose stop may still be current reads its turn order: a
+    // retried or passed stop leaves its waiting attempt in history for good.
     const limited = row.limit_waiting === 1 ? readChatLimitedFact(connection, thread) : undefined;
     return decodeChatNavigationThread({
       id: thread.id,

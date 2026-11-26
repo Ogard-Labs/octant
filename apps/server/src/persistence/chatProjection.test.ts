@@ -10,7 +10,7 @@ import {
   type ChatThread,
 } from "@octant/contracts";
 import { CANVAS_SCHEMA_VERSION } from "@octant/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AGENT_RESULT_STEERED,
   AGENT_RESULT_STEERING_AGGREGATE_TYPE,
@@ -1938,6 +1938,8 @@ describe("ChatProjection", () => {
       count: number,
       options: {
         readonly supersedes?: ReadonlyMap<number, number>;
+        /** Turns whose attempt stopped waiting on a spent usage limit. */
+        readonly limitedAt?: ReadonlySet<number>;
         readonly bodyOf?: (index: number) => string;
         readonly replyOf?: (index: number) => string;
       } = {},
@@ -1980,7 +1982,9 @@ describe("ChatProjection", () => {
                       providerSessionId: ids.session,
                       modelId: "model-a",
                       contextManifestId: ids.manifest,
-                      outcome: "completed",
+                      ...(options.limitedAt?.has(index) === true
+                        ? { outcome: "waiting", usageLimit: { kind: "exhausted" } }
+                        : { outcome: "completed" }),
                       responseRefs: [
                         {
                           contentId: contentId(index, "assistant"),
@@ -2042,6 +2046,49 @@ describe("ChatProjection", () => {
 
     const turnIndexes = (view: { readonly turns: ReadonlyArray<{ readonly id: string }> }) =>
       view.turns.map((turn) => Number(String(turn.id).slice(-12)));
+
+    /** The navigation row's limit, and whether reading it folded the turn order. */
+    function limitedRead(connection: SqliteConnection) {
+      const prepare = vi.spyOn(connection, "prepare");
+      const limited = readChatNavigation(connection)[0]?.limited;
+      const foldedTurnOrder = prepare.mock.calls.some(([sql]) => sql.includes("AS supersedes"));
+      prepare.mockRestore();
+      return { limited, foldedTurnOrder };
+    }
+
+    it("says Limited for a stop on the newest turn", () => {
+      const connection = seedThread(3, { limitedAt: new Set([2]) });
+
+      expect(limitedRead(connection).limited).toEqual({});
+      connection.close();
+    });
+
+    it("reads no turn order for a usage-limit stop a later turn has passed", () => {
+      const connection = seedThread(3, { limitedAt: new Set([1]) });
+
+      expect(limitedRead(connection)).toEqual({ limited: undefined, foldedTurnOrder: false });
+      connection.close();
+    });
+
+    it("keeps Limited when only a superseded turn and a rewound edit follow the stop", () => {
+      // Turn 2 revised turn 1 and was then rewound, so turn 0 is the newest
+      // active turn while turn 1 stays unrewound behind it.
+      const connection = seedThread(3, {
+        limitedAt: new Set([0]),
+        supersedes: new Map([[2, 1]]),
+      });
+      connection
+        .prepare(
+          "UPDATE chat_turn_projection SET turn_json = json_set(turn_json, '$.rewound', json(?)) WHERE turn_id = ?",
+        )
+        .run(
+          JSON.stringify({ rewindId: "86000000-0000-4000-8000-000000000001", rewoundAt: now }),
+          turnId(2),
+        );
+
+      expect(limitedRead(connection).limited).toEqual({});
+      connection.close();
+    });
 
     it("opens on the newest active turns without reading earlier message bodies", () => {
       const connection = seedThread(10);

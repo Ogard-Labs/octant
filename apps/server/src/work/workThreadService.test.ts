@@ -3757,6 +3757,28 @@ describe("scheduling a Work thread's usage-limit resume", () => {
     });
   });
 
+  it("raises neither Limited nor Needs you for a stop a model change released", async () => {
+    const turn = usageLimitTurn();
+    const released = thread({
+      providerHandoff: {
+        previousProviderInstanceId: ids.provider as never,
+        previousModelId: "model-a" as never,
+        nextProviderInstanceId: ids.provider as never,
+        nextModelId: "model-b" as never,
+        changedAt: now as never,
+        releasedStopId: String(turn.turnId),
+      },
+    });
+    const fixture = serviceFixture({
+      threads: [released],
+      turns: [turn],
+      observeRuntime: () => ({ executing: false, awaitingInput: true, waitsOnTurnAlone: true }),
+    });
+
+    const navigation = await fixture.service.navigation(ids.window);
+    expect(navigation.runtime).toEqual([{ threadId: ids.thread, executing: false }]);
+  });
+
   it("drops the limit from the navigation row once a later turn resumes the thread", async () => {
     const { failure: _limit, ...stopped } = usageLimitTurn();
     const resumed = decodeWorkTurnState({

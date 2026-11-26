@@ -6756,7 +6756,7 @@ describe("ChatService", () => {
   });
 
   it("marks the navigation row Limited while the stop is current and drops it after a resume", async () => {
-    const { service } = openFixture({
+    const { service, persistence } = openFixture({
       nativeConversation: true,
       turnOutcome: (index) => (index === 0 ? "limited" : "completed"),
       usageLimitResetsAt: "2099-01-02T09:00:00.000Z",
@@ -6798,7 +6798,12 @@ describe("ChatService", () => {
       () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
       { timeoutMs: 10_000 },
     );
+    const prepare = vi.spyOn(persistence.connection, "prepare");
     expect(service.navigation().threads[0]).not.toHaveProperty("limited");
+    // The retried attempt stays in history as waiting, and must not cost
+    // every later navigation read a fold over the thread's turns.
+    expect(prepare.mock.calls.some(([sql]) => sql.includes("AS supersedes"))).toBe(false);
+    prepare.mockRestore();
   });
 
   async function defaultArmingFixture() {
