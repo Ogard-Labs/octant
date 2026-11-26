@@ -16,6 +16,7 @@ import { HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort } from "./hubStateStore";
 import type { HubTransport } from "./pinnedHubTransport";
+import { publicCopyTargets } from "./publicStandIn";
 
 export const PUBLIC_FORWARD_ROUTE = "/api/hub/public/forward";
 
@@ -26,16 +27,26 @@ export async function forwardToActingHub(input: {
   readonly transport: HubTransport;
   readonly envelope: PublicForwardEnvelope;
   readonly now: number;
+  /** The standby this member follows while the hub is down; absent, the hub. */
+  readonly followingStandby?: string | undefined;
 }): Promise<PublicForwardAnswer | undefined> {
   const link = input.state.load().link;
   if (link === undefined || link.removed === true) return undefined;
+  const standby =
+    input.followingStandby === undefined
+      ? undefined
+      : publicCopyTargets(link, true).find((target) => target.memberId === input.followingStandby);
+  if (input.followingStandby !== undefined && standby === undefined) return undefined;
   const identity = input.identity();
   const answer = await sendHubLinkRequest({
     transport: input.transport,
-    target: { origin: link.hubOrigin, pin: listenerPinFromDigest(link.hubListenerPin) },
+    target:
+      standby === undefined
+        ? { origin: link.hubOrigin, pin: listenerPinFromDigest(link.hubListenerPin) }
+        : { origin: standby.origin, pin: listenerPinFromDigest(standby.pin) },
     signHostPayload: identity.signing.signHostPayload,
     senderMemberId: String(link.selfMemberId),
-    recipientMemberId: String(link.hubMemberId),
+    recipientMemberId: standby?.memberId ?? String(link.hubMemberId),
     method: "POST",
     path: PUBLIC_FORWARD_ROUTE,
     body: JSON.stringify(input.envelope),

@@ -114,8 +114,9 @@ On 2026-11-26 the maintainer added one narrow
 [public entrance](#public-entrance) on the hub, for visitor links, webhook
 triggers, and the person's own paired devices away from the private network,
 with failover and no Octant-run service, and settled
-[decisions H29 to H36](#decisions); slices 21 to 23 are built (the entrance
-itself and its Funnel front), and slices 24 to 27 are designed, not built.
+[decisions H29 to H36](#decisions); slices 21 to 26 are built as the
+delivery plan records, run only on loopback, and slice 27 is designed, not
+built.
 
 ## Outcome
 
@@ -3044,7 +3045,7 @@ person's work without any service Octant runs (maintainer decision,
 
 Built for a hub and its spokes, for Code and Chat threads, from `octant hub
 visitor` (slice 25); a Work thread, the window's Share menu and Request
-card, and the standby's copy (slice 26) are not built yet.
+card are not built yet. A standing-in standby serves them too (slice 26).
 
 - **Sharing.** In a thread's Share menu on the spoke that owns it, **Share
   with visitor** makes a read-only or comment-only link with an expiry, and
@@ -3108,7 +3109,7 @@ card, and the standby's copy (slice 26) are not built yet.
 
 #### Webhook triggers
 
-Built for a hub and its spokes (slice 24); the standby's part is slice 26.
+Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
 
 - **An endpoint is a routine's event source.** The spoke contributes a
   Webhook source on the ordinary integration-event trigger, and a routine
@@ -3262,24 +3263,41 @@ member in the roster.
 
 #### The public entrance during failover
 
-Designed, not built (maintainer decision, 2026-11-26):
+Built, run only between three hosts on loopback (maintainer decision,
+2026-11-26):
 
-- **What a standby holds.** A standby holds sealed copies of the endpoints
-  and their secrets and the spoke-signed link grants of every spoke whose
-  Public item and Standby item are both ticked.
-- **When it serves.** A standby opens its own entrance only while it stands
-  in, and only if its own person ticked Serve the public entrance on it.
-  With Funnel it turns its own Funnel on while it stands in and off when it
-  steps down, and Settings on each spoke shows the standby's URL for senders
-  that accept a fallback address. With the person's own multi-connector
-  front, the address does not change.
-- **Hand-back.** Stepping down hands the hub the undelivered queue with its
-  delivery ids, under the `handing-back` freeze above.
+- **What a standby holds.** A spoke whose Public and Standby items are both
+  ticked hands each named standby the same copies it hands the hub: its
+  endpoints, each secret sealed to that standby's own sealing key, and its
+  spoke-signed link grants. A standby takes copies only from a spoke its
+  hub-signed roster lists, with the key that roster fingerprints; a spoke
+  that ticked only Public hands the standby nothing. An endpoint made while
+  the hub is down reaches the standby only once the hub is back.
+- **When it serves.** A standby serves its entrance only while it stands in,
+  only while it is not handing back, and only if its own person turned on
+  Serve while standing in (`octant hub public standby on`; off by default,
+  journaled). That choice covers visitor links too, whatever the standby's
+  own visitor switch says. The rest of the time its entrance, if on,
+  forwards like any member's, and a member following a standing-in standby
+  forwards to that standby. Octant runs no Tailscale command when a stand-in
+  starts or ends: a Funnel the standby's own person turned on stays on and
+  forwards to the hub until the standby serves. `octant hub public status`
+  on each member lists the standbys' Tailscale URLs for senders that accept
+  a fallback address. With the person's own multi-connector front, the
+  address does not change.
+- **Hand-back.** Stepping down first freezes the stand-in (`handing-back`),
+  so the standby's entrance answers 404 and the sender retries at the hub;
+  then it hands the hub each delivery it still queues, with its dedupe keys,
+  one request each, before the membership hand-back. The hub queues a
+  delivery once: one whose keys it already queues is a duplicate. If the hub
+  does not take them all, the stand-in goes on until the next look.
 - **No delivery runs twice.** Dedupe is the spoke's: a delivery id the spoke
   has already claimed starts nothing, so a split network in which both hubs
-  forward the same delivery still runs it once.
+  forward the same delivery still runs it once. A spoke takes a delivery or a
+  visitor question from a standby only when its person ticked Standby.
 - **Links keep working.** The spoke checks every visitor fetch, so a link the
-  spoke revoked is refused on the standby as on the hub. The spoke answers a
+  spoke revoked is refused on the standby as on the hub, and a stopped link
+  is also withdrawn from each standby the spoke reaches. The spoke answers a
   standby's fetch only while its person ticked Standby and the spoke itself
   cannot reach the hub; a named standby is refused while the hub is up.
 
@@ -4611,7 +4629,7 @@ limits, and the device relay's channel design.
     source on the integration-event trigger rather than a new trigger kind;
     tested by server tests and a two-host loopback smoke with a fake
     Wake-on-LAN socket. Not built: a window screen for endpoints (the CLI and
-    loopback routes make them), and the standby's copy (slice 26).
+    loopback routes make them). The standby's copy is slice 26.
     **Linux container: yes**; a real GitHub delivery is a maintainer gate.
 25. **Visitor links.** Share with visitor and Stop sharing, expiry, the
     redacted live projection, and comment Requests with Send and Dismiss on
@@ -4632,8 +4650,11 @@ limits, and the device relay's channel design.
     standby's own Serve the public entrance choice, the queue in the
     hand-back, and spoke-side dedupe in a split network. Acceptance: a
     three-host loopback smoke stops the hub, the standby serves both
-    features, and no delivery is lost or runs twice. **Linux container:
-    yes**; failover on a real network is a maintainer gate.
+    features, and no delivery is lost or runs twice. Built, with that smoke;
+    not built yet: a window control for the standby's choice (the CLI and
+    the loopback route carry it), and a test of a member forwarding to a
+    standing-in standby through a real entrance. **Linux container: yes**;
+    failover on a real network is a maintainer gate.
 27. **Your own devices through the hub.** The relay route, the host's relay
     key list, relayed connections into the private listener with pairing and
     administration refused, and the per-device choice in the phone and

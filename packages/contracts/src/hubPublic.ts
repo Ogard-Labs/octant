@@ -205,6 +205,35 @@ export const HubPublicFunnelRequest = Schema.Struct({
 }).annotations(strict);
 export const decodeHubPublicFunnelRequest = Schema.decodeUnknownSync(HubPublicFunnelRequest);
 
+/**
+ * A standby's own choice to serve the public entrance while it stands in for
+ * the hub (decision H30). Off by default; without it a standing-in standby's
+ * entrance keeps forwarding and serves nothing itself.
+ */
+export const HubPublicStandbyServeRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(
+  strict,
+);
+export const decodeHubPublicStandbyServeRequest = Schema.decodeUnknownSync(
+  HubPublicStandbyServeRequest,
+);
+
+/**
+ * One delivery a standing-in standby still holds when the hub returns, handed
+ * back with its dedupe keys so the hub queues it once. The spoke's own claims
+ * stay the final word on whether it runs.
+ */
+export const HubWebhookHandback = Schema.Struct({
+  spokeMemberId: HubMemberId,
+  keys: Schema.Array(Schema.String.pipe(Schema.maxLength(320))).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(2),
+  ),
+  bytes: Schema.Int.pipe(Schema.nonNegative()),
+  envelope: WebhookDeliveryEnvelope,
+}).annotations(strict);
+export type HubWebhookHandback = typeof HubWebhookHandback.Type;
+export const decodeHubWebhookHandback = Schema.decodeUnknownSync(HubWebhookHandback);
+
 /** The most raw bytes a forwarded request or its answer carries, before base64. */
 export const PUBLIC_FORWARD_MAX_BODY_BYTES = 512 * 1024;
 

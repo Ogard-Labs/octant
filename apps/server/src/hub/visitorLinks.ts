@@ -16,6 +16,7 @@ import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
+import { publicCopyTargets, servingRosterMembers } from "./publicStandIn";
 import type { HubTransport } from "./pinnedHubTransport";
 import { grantConfirmTimeoutMs } from "./pushService";
 import type { SpokeVisitorHubPort } from "./spokeVisitorService";
@@ -27,8 +28,14 @@ interface LinkDependencies {
   readonly now: () => number;
 }
 
-/** What a spoke reaches its hub through for visitor links; nothing when it has no hub. */
-export function spokeVisitorHubPort(deps: LinkDependencies): SpokeVisitorHubPort {
+/**
+ * What a spoke reaches its hub through for visitor links, and each named
+ * standby when its person ticked Standby; nothing when it has no hub. Grants
+ * carry no secret, so every recipient gets the same update.
+ */
+export function spokeVisitorHubPort(
+  deps: LinkDependencies & { readonly standbyGranted: () => boolean },
+): SpokeVisitorHubPort {
   return {
     target: () => {
       const link = deps.state.load().link;
@@ -38,21 +45,26 @@ export function spokeVisitorHubPort(deps: LinkDependencies): SpokeVisitorHubPort
     },
     sendGrants: async (update: HubVisitorGrantsUpdate) => {
       const link = deps.state.load().link;
-      if (link === undefined || link.removed === true) return false;
+      const targets = publicCopyTargets(link, deps.standbyGranted());
+      if (link === undefined || targets.length === 0) return false;
       const identity = deps.identity();
-      const answer = await sendHubLinkRequest({
-        transport: deps.transport,
-        target: { origin: link.hubOrigin, pin: listenerPinFromDigest(link.hubListenerPin) },
-        signHostPayload: identity.signing.signHostPayload,
-        senderMemberId: String(link.selfMemberId),
-        recipientMemberId: String(link.hubMemberId),
-        method: "POST",
-        path: HUB_LINK_ROUTES.publicVisitorGrants,
-        body: JSON.stringify(update),
-        headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
-        now: deps.now(),
-      });
-      return answer.status === "answered" && answer.response.ok;
+      let complete = true;
+      for (const target of targets) {
+        const answer = await sendHubLinkRequest({
+          transport: deps.transport,
+          target: { origin: target.origin, pin: listenerPinFromDigest(target.pin) },
+          signHostPayload: identity.signing.signHostPayload,
+          senderMemberId: String(link.selfMemberId),
+          recipientMemberId: target.memberId,
+          method: "POST",
+          path: HUB_LINK_ROUTES.publicVisitorGrants,
+          body: JSON.stringify(update),
+          headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
+          now: deps.now(),
+        });
+        if (answer.status !== "answered" || !answer.response.ok) complete = false;
+      }
+      return complete;
     },
   };
 }
@@ -64,7 +76,8 @@ export async function askVisitorSpoke(
   request: VisitorFetchRequest,
 ): Promise<VisitorFetchAnswer | undefined> {
   const state = deps.state.load();
-  const member = state.hub?.roster?.roster.members.find(
+  // A standing-in standby reads the roster it holds as a member.
+  const member = servingRosterMembers(state).find(
     (entry) => String(entry.memberId) === spokeMemberId,
   );
   if (member === undefined) return undefined;

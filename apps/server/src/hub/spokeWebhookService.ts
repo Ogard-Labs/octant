@@ -61,12 +61,19 @@ const CLAIMED_MAX = 50_000;
 // more than this many unread deliveries per endpoint; the rest stay on the hub.
 const UNREAD_PER_ENDPOINT_MAX = 16;
 
-/** The hub this spoke hands its endpoints to, over the pinned private transport. */
+/**
+ * The hub this spoke hands its endpoints to, and each named standby when the
+ * spoke's person ticked Standby, over the pinned private transport. The hub is
+ * always first.
+ */
 export interface SpokeWebhookHubPort {
-  /** The hub's member id and the identity-key fingerprint the signed roster lists for it. */
-  readonly target: () => { readonly memberId: string; readonly fingerprint: string } | undefined;
-  readonly sealingKey: () => Promise<HubSealingKey | undefined>;
-  readonly sendEndpoints: (update: HubWebhookEndpointsUpdate) => Promise<boolean>;
+  /** Each recipient's member id and the identity-key fingerprint the hub-signed roster lists for it. */
+  readonly targets: () => ReadonlyArray<{
+    readonly memberId: string;
+    readonly fingerprint: string;
+  }>;
+  readonly sealingKey: (memberId: string) => Promise<HubSealingKey | undefined>;
+  readonly sendEndpoints: (memberId: string, update: HubWebhookEndpointsUpdate) => Promise<boolean>;
 }
 
 export interface SpokeWebhookServiceOptions {
@@ -219,9 +226,11 @@ export class SpokeWebhookService {
   }
 
   /**
-   * Hands the hub every endpoint, each secret sealed to the hub's sealing key.
-   * The key is taken only when its signer is the hub the roster lists. An empty
-   * list withdraws everything; without Public, that is what is sent.
+   * Hands the hub, and each standby the spoke lets stand in, every endpoint
+   * with its secret sealed to each recipient's own sealing key. A key is taken
+   * only when its signer is the member the hub-signed roster lists. An empty
+   * list withdraws everything; without Public, that is what is sent. It counts
+   * as published only once every recipient took it.
    */
   publish(): Promise<boolean> {
     const next = this.#publishing.then(
@@ -234,54 +243,67 @@ export class SpokeWebhookService {
 
   async #publishNow(): Promise<boolean> {
     const hub = this.#options.hub;
-    const target = hub?.target();
-    if (hub === undefined || target === undefined) return false;
+    const targets = hub?.targets() ?? [];
+    if (hub === undefined || targets.length === 0) return false;
     const revision = this.#revision;
     const held = this.#load();
     const endpoints = this.#options.publicGranted() ? held.endpoints : [];
-    let update: HubWebhookEndpointsUpdate = { endpoints: [] };
+    const keys = new Map<string, HubSealingKey>();
     if (endpoints.length > 0) {
-      const key = await hub.sealingKey();
-      if (
-        key === undefined ||
-        String(key.memberId) !== target.memberId ||
-        publicKeyFingerprint(key.signerPublicKey) !== target.fingerprint ||
-        !verifySignature({
-          payload: hubSealingKeyPayload(String(key.memberId), key.sealingPublicKey),
-          signature: key.signature,
-          publicKey: key.signerPublicKey,
-        })
-      ) {
-        return false;
+      for (const target of targets) {
+        const key = await hub.sealingKey(target.memberId);
+        if (
+          key !== undefined &&
+          String(key.memberId) === target.memberId &&
+          publicKeyFingerprint(key.signerPublicKey) === target.fingerprint &&
+          verifySignature({
+            payload: hubSealingKeyPayload(String(key.memberId), key.sealingPublicKey),
+            signature: key.signature,
+            publicKey: key.signerPublicKey,
+          })
+        ) {
+          keys.set(target.memberId, key);
+        }
       }
-      const spokeMemberId = this.#options.state.load().link?.selfMemberId;
-      if (spokeMemberId === undefined) return false;
-      update = {
-        endpoints: endpoints.map((endpoint) => ({
-          endpointId: endpoint.endpointId,
-          spokeMemberId,
-          scheme: endpoint.scheme,
-          sealedSecrets: [
-            sealWebhookSecret({
-              secret: endpoint.secret,
-              endpointId: String(endpoint.endpointId),
-              recipientMemberId: decodeMemberId(target.memberId),
-              recipientPublicKey: key.sealingPublicKey,
-            }),
-          ],
-        })),
-      };
+      // Without the hub's own key there is nothing the hub could open.
+      if (!keys.has(targets[0]?.memberId ?? "")) return false;
     }
+    const spokeMemberId = this.#options.state.load().link?.selfMemberId;
+    if (endpoints.length > 0 && spokeMemberId === undefined) return false;
+    const update: HubWebhookEndpointsUpdate = {
+      endpoints:
+        spokeMemberId === undefined
+          ? []
+          : endpoints.map((endpoint) => ({
+              endpointId: endpoint.endpointId,
+              spokeMemberId,
+              scheme: endpoint.scheme,
+              sealedSecrets: [...keys.values()].map((key) =>
+                sealWebhookSecret({
+                  secret: endpoint.secret,
+                  endpointId: String(endpoint.endpointId),
+                  recipientMemberId: decodeMemberId(String(key.memberId)),
+                  recipientPublicKey: key.sealingPublicKey,
+                }),
+              ),
+            })),
+    };
     const granted = this.#options.publicGranted();
-    const sent = await hub.sendEndpoints(update);
+    let complete = endpoints.length === 0 || keys.size === targets.length;
+    for (const target of targets) {
+      if (endpoints.length > 0 && !keys.has(target.memberId)) continue;
+      if (!(await hub.sendEndpoints(target.memberId, update))) complete = false;
+    }
     // An endpoint made or removed while this list was out is not in it; the
     // flag stays, and the next look sends the newer list.
-    if (sent && revision === this.#revision) {
+    if (complete && revision === this.#revision) {
       this.#publishedGranted = granted;
       const { unpublished: _unpublished, ...rest } = this.#load();
       this.#save(rest);
+    } else if (!complete) {
+      this.#save({ ...this.#load(), unpublished: true });
     }
-    return sent;
+    return complete;
   }
 
   /** Sends the list again when the hub has not taken it, or when the Public item changed since. */

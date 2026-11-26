@@ -31,6 +31,7 @@ import {
   decodeHubProvisionSwitchRequest,
   decodeHubPublicEntranceSwitchRequest,
   decodeHubPublicFunnelRequest,
+  decodeHubPublicStandbyServeRequest,
   decodeHubWebhookCreateRequest,
   decodeHubVisitorCommentRequest,
   decodeHubVisitorLinkRequest,
@@ -64,6 +65,7 @@ import type { OwnerApprovalAnswerUnlock } from "./ownerApprovalAnswerUnlock";
 import type { ProvisionService } from "./provisionService";
 import type { HubWebhookService } from "./hubWebhookService";
 import type { PublicEntranceService } from "./publicEntranceService";
+import type { ServeWhileStandingInOutcome, standbyPublicUrls } from "./publicStandIn";
 import type { SpokeWebhookService } from "./spokeWebhookService";
 import type { HubVisitorService } from "./hubVisitorService";
 import type { SpokeVisitorService } from "./spokeVisitorService";
@@ -139,6 +141,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   /** This host's public entrance and its Funnel front: only a window on this host turns them on or off. */
   publicEntrance: "/api/desktop/hub/public",
   publicFunnel: "/api/desktop/hub/public/funnel",
+  /** This host's own choice, as a standby, to serve the entrance while it stands in for the hub. */
+  publicStandby: "/api/desktop/hub/public/standby",
   /** This spoke's webhook endpoints: only a window on this host mints, rotates or removes one. */
   webhookCreate: "/api/desktop/hub/webhooks/create",
   webhookRotate: "/api/desktop/hub/webhooks/rotate",
@@ -192,6 +196,14 @@ export interface HubAdministrationRouteOptions {
   readonly certificate: TailscaleCertificateService;
   /** Absent where the public entrance is not composed; its routes then answer unavailable. */
   readonly publicEntrance?: PublicEntranceService;
+  /** A standby's own choice to serve the entrance while it stands in, and the standbys' public URLs. */
+  readonly publicStandby?: {
+    readonly set: (
+      enabled: boolean,
+      principal: AuditActingPrincipal,
+    ) => ServeWhileStandingInOutcome;
+    readonly standbyUrls: () => ReturnType<typeof standbyPublicUrls>;
+  };
   /** The hub's webhook receipt and this host's own endpoints; absent, their routes answer unavailable. */
   readonly webhooks?: Pick<HubWebhookService, "status">;
   readonly spokeWebhooks?: Pick<SpokeWebhookService, "view" | "create" | "rotate" | "remove">;
@@ -261,6 +273,9 @@ export function createHubAdministrationRouteHandler(
         ...(options.publicEntrance === undefined
           ? {}
           : { publicEntrance: options.publicEntrance.status() }),
+        ...(options.publicStandby === undefined
+          ? {}
+          : { publicStandbyUrls: options.publicStandby.standbyUrls() }),
         ...(options.spokeWebhooks === undefined || options.webhooks === undefined
           ? {}
           : {
@@ -467,6 +482,13 @@ export function createHubAdministrationRouteHandler(
               WINDOW_PRINCIPAL,
             ),
           );
+        }
+        case HUB_ADMINISTRATION_ROUTES.publicStandby: {
+          const value = decodeHubPublicStandbyServeRequest(parseJson(request, body.text));
+          if (options.publicStandby === undefined) return failure("unavailable", 503);
+          const changed = options.publicStandby.set(value.enabled, WINDOW_PRINCIPAL);
+          if (changed.status === "changed") await options.publicEntrance?.reconcile();
+          return outcome(changed);
         }
         case HUB_ADMINISTRATION_ROUTES.webhookCreate: {
           const value = decodeHubWebhookCreateRequest(parseJson(request, body.text));

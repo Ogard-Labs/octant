@@ -483,6 +483,11 @@ describe("the hub-link routes the private listener serves", () => {
       ],
       [REMOTE_HUB_LINK_ROUTE_IDS.publicVisitorGrants, "POST", HUB_LINK_ROUTES.publicVisitorGrants],
       [REMOTE_HUB_LINK_ROUTE_IDS.publicVisitorFetch, "POST", HUB_LINK_ROUTES.publicVisitorFetch],
+      [
+        REMOTE_HUB_LINK_ROUTE_IDS.publicWebhookHandback,
+        "POST",
+        HUB_LINK_ROUTES.publicWebhookHandback,
+      ],
       [REMOTE_HUB_LINK_ROUTE_IDS.provisionOffer, "POST", HUB_LINK_ROUTES.provisionOffer],
       [REMOTE_HUB_LINK_ROUTE_IDS.provisionMirror, "POST", HUB_LINK_ROUTES.provisionMirror],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegate, "POST", PEER_DELEGATION_ROUTES.create],

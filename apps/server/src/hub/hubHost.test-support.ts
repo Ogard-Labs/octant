@@ -51,8 +51,10 @@ import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { HubWebhookService } from "./hubWebhookService";
 import { SpokeWebhookService } from "./spokeWebhookService";
 import { sendWebhookDelivery, spokeWebhookHubPort } from "./webhookLinks";
+import { HubVisitorService } from "./hubVisitorService";
 import { SpokeVisitorService, type VisitorThreadSource } from "./spokeVisitorService";
-import { spokeVisitorHubPort } from "./visitorLinks";
+import { askVisitorSpoke, spokeVisitorHubPort } from "./visitorLinks";
+import { handBackWebhookQueue, servesPublicEntrance, servingRosterMembers } from "./publicStandIn";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
 import { TestCredentialBroker, TestPostureHost, TestThreadWakeHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
@@ -225,6 +227,8 @@ export interface HubTestHost {
   readonly webhooks: HubWebhookService;
   /** This host's own webhook endpoints, as a spoke. */
   readonly spokeWebhooks: SpokeWebhookService;
+  /** The acting hub's visitor links: each spoke's signed grants, and the visitor routes. */
+  readonly visitors: HubVisitorService;
   /** This host's own visitor links, as a spoke; its one thread is a fixed Code thread. */
   readonly spokeVisitors: SpokeVisitorService;
   /** The owner unlock a paired client's merge may need here, over the same challenges the owner route issues. */
@@ -510,6 +514,19 @@ export async function startHubTestHost(input: {
     ...(input.failoverAfterMs === undefined
       ? {}
       : { failoverAfterMs: () => input.failoverAfterMs }),
+    handBackPublic: async (link) => {
+      const queue = webhooks.handbackQueue();
+      if (queue.length === 0) return true;
+      const result = await handBackWebhookQueue({
+        link,
+        identity,
+        transport,
+        queue,
+        now: Date.now,
+      });
+      webhooks.handedBack(result.taken);
+      return result.complete;
+    },
   });
   const wakeNow = input.wakeClock ?? Date.now;
   const magicPackets: Uint8Array[] = [];
@@ -721,12 +738,15 @@ export async function startHubTestHost(input: {
     record: (change) => records.push(change),
     now: wakeNow,
   });
-  const webhookLinks = { state, identity: () => identity, transport, now: wakeNow };
+  const standbyGranted = () => spoke.hubMayUse("standby").status === "allowed";
+  const webhookLinks = { state, identity: () => identity, transport, now: wakeNow, standbyGranted };
+  const servesPublicNow = () =>
+    servesPublicEntrance({ hubEnabled: hub.status().enabled, state: state.load() });
   const webhooks = new HubWebhookService({
     state,
     identity: () => identity,
     hubMemberId: () => hub.hubMemberId(),
-    serving: () => hub.status().enabled,
+    serving: servesPublicNow,
     send: (spokeMemberId, envelope) =>
       sendWebhookDelivery(
         { ...webhookLinks, selfMemberId: () => hub.hubMemberId() },
@@ -769,6 +789,23 @@ export async function startHubTestHost(input: {
     record: (change) => records.push(change),
     now: Date.now,
   });
+  const visitors = new HubVisitorService({
+    state,
+    serving: servesPublicNow,
+    standingIn: () => !hub.status().enabled && servesPublicNow(),
+    hubMemberId: () => hub.hubMemberId(),
+    rosterFingerprintFor: (memberId) =>
+      servingRosterMembers(state.load()).find((member) => String(member.memberId) === memberId)
+        ?.identityKeyFingerprint,
+    ask: (spokeMemberId, request) =>
+      askVisitorSpoke(
+        { ...webhookLinks, selfMemberId: () => hub.hubMemberId() },
+        spokeMemberId,
+        request,
+      ),
+    record: (change) => records.push(change),
+    now: Date.now,
+  });
   const hubLinkRoutes = createHubLinkRouteHandler({
     hub,
     spoke,
@@ -797,7 +834,9 @@ export async function startHubTestHost(input: {
       }),
     webhooks,
     spokeWebhooks,
+    visitors,
     spokeVisitors,
+    publicState: () => state.load(),
     ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
   });
   const credentials = new TestCredentialBroker();
@@ -1062,6 +1101,7 @@ export async function startHubTestHost(input: {
     spokeSignIn,
     webhooks,
     spokeWebhooks,
+    visitors,
     spokeVisitors,
     pairedMergeUnlock,
     ownerApprovalAnswerUnlock,

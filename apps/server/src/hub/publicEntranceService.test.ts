@@ -151,6 +151,26 @@ describe("the Funnel front", () => {
     expect(calls.every((args) => args[0] === "funnel")).toBe(true);
   });
 
+  it("a standby that starts and stops standing in runs no Tailscale command, and serves only while it stands in", async () => {
+    const { service, calls, setRole, state } = setup({ role: "member" });
+    await service.setEnabled(true, WINDOW);
+    expect(await service.setFunnel({ enabled: true }, WINDOW)).toMatchObject({
+      status: "changed",
+    });
+    const before = calls.length;
+    const port = service.status().port;
+    const healthOf = async () => (await fetch(`http://127.0.0.1:${port}/healthz`)).status;
+    // Forwarding with nowhere to forward to answers 503; serving answers 200.
+    expect(await healthOf()).toBe(503);
+    await setRole("hub");
+    expect(await healthOf()).toBe(200);
+    await setRole("member");
+    expect(await healthOf()).toBe(503);
+    // The Funnel the person turned on stays on through both, and no command ran.
+    expect(calls.length).toBe(before);
+    expect(state.load().publicEntrance?.funnel).toEqual({ port: 443 });
+  });
+
   it("refuses Funnel while the entrance is off", async () => {
     const { service, calls } = setup();
     expect(await service.setFunnel({ enabled: true }, WINDOW)).toEqual({

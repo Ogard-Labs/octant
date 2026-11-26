@@ -65,6 +65,8 @@ export type HubCliCommand =
   | { readonly action: "public"; readonly mode: "on"; readonly front: "own" }
   | { readonly action: "public"; readonly mode: "off" }
   | { readonly action: "public"; readonly mode: "status" }
+  /** As a standby, serve the entrance while standing in for the hub, or stop. */
+  | { readonly action: "public"; readonly mode: "standby"; readonly serve: boolean }
   /** This spoke's webhook endpoints; a new or rotated endpoint's secret is printed once. */
   | {
       readonly action: "webhook";
@@ -262,7 +264,12 @@ export function resolveHubCliCommand(
       return undefined;
     }
     case "public": {
-      const [mode] = rest;
+      const [mode, choice] = rest;
+      if (mode === "standby") {
+        return rest.length === 2 && only() && (choice === "on" || choice === "off")
+          ? { action, mode, serve: choice === "on" }
+          : undefined;
+      }
       if (rest.length !== 1) return undefined;
       if (mode === "off") return only() ? { action, mode } : undefined;
       if (mode === "status") return only() ? { action, mode } : undefined;
@@ -569,6 +576,20 @@ async function runPublic(
   command: Extract<HubCliCommand, { action: "public" }>,
 ): Promise<number> {
   if (command.mode === "status") return await printPublicStatus(input);
+  if (command.mode === "standby") {
+    const response = await post(input, "/api/desktop/hub/public/standby", {
+      enabled: command.serve,
+    });
+    if (!isOk(response, "changed")) {
+      return refusal(input, response, "Octant refused to change what this standby serves.");
+    }
+    input.stdout.write(
+      command.serve
+        ? "While this computer stands in for the hub, its public entrance serves webhooks and visitor links. It forwards to the hub the rest of the time.\n"
+        : "This computer's public entrance only forwards to the hub, even while it stands in.\n",
+    );
+    return 0;
+  }
   if (command.mode === "off") {
     const funnel = await post(input, "/api/desktop/hub/public/funnel", { enabled: false });
     if (!isOk(funnel, "changed")) {
@@ -768,9 +789,22 @@ async function printPublicStatus(input: Input): Promise<number> {
       `  Funnel  ${
         field(funnel, "enabled") === true ? `on, port ${String(field(funnel, "port"))}` : "off"
       }`,
+      `  Serve while standing in  ${field(entrance, "serveWhileStandingIn") === true ? "on" : "off"}`,
+      ...standbyUrlLines(field(response.body, "publicStandbyUrls")),
     ].join("\n") + "\n",
   );
   return 0;
+}
+
+/** The standbys' public URLs, for senders that accept a fallback address. */
+function standbyUrlLines(value: unknown): ReadonlyArray<string> {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  return [
+    "  Standby addresses for senders that accept a fallback:",
+    ...value.map(
+      (entry: unknown) => `    ${String(field(entry, "name"))}  ${String(field(entry, "url"))}`,
+    ),
+  ];
 }
 
 async function runProvision(input: Input, enabled: boolean): Promise<number> {

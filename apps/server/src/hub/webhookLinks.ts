@@ -17,6 +17,7 @@ import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
+import { publicCopyTargets, servingRosterMembers } from "./publicStandIn";
 import type { HubTransport } from "./pinnedHubTransport";
 import type { SpokeWebhookHubPort } from "./spokeWebhookService";
 
@@ -27,18 +28,25 @@ interface LinkDependencies {
   readonly now: () => number;
 }
 
-/** What a spoke reaches its hub through for webhooks; nothing when it has no hub. */
-export function spokeWebhookHubPort(deps: LinkDependencies): SpokeWebhookHubPort {
-  const toHub = async (path: string, body: unknown) => {
+/**
+ * What a spoke reaches its hub through for webhooks, and each named standby
+ * when its person ticked Standby; nothing when it has no hub.
+ */
+export function spokeWebhookHubPort(
+  deps: LinkDependencies & { readonly standbyGranted: () => boolean },
+): SpokeWebhookHubPort {
+  const targets = () => publicCopyTargets(deps.state.load().link, deps.standbyGranted());
+  const toMember = async (memberId: string, path: string, body: unknown) => {
     const link = deps.state.load().link;
-    if (link === undefined || link.removed === true) return undefined;
+    const target = targets().find((entry) => entry.memberId === memberId);
+    if (link === undefined || target === undefined) return undefined;
     const identity = deps.identity();
     const answer = await sendHubLinkRequest({
       transport: deps.transport,
-      target: { origin: link.hubOrigin, pin: listenerPinFromDigest(link.hubListenerPin) },
+      target: { origin: target.origin, pin: listenerPinFromDigest(target.pin) },
       signHostPayload: identity.signing.signHostPayload,
       senderMemberId: String(link.selfMemberId),
-      recipientMemberId: String(link.hubMemberId),
+      recipientMemberId: memberId,
       method: "POST",
       path,
       body: JSON.stringify(body),
@@ -48,26 +56,17 @@ export function spokeWebhookHubPort(deps: LinkDependencies): SpokeWebhookHubPort
     return answer.status === "answered" && answer.response.ok ? answer.response : undefined;
   };
   return {
-    target: () => {
-      const link = deps.state.load().link;
-      if (link === undefined || link.removed === true) return undefined;
-      const hub = link.roster.roster.members.find(
-        (member) => String(member.memberId) === String(link.hubMemberId),
-      );
-      return hub === undefined
-        ? undefined
-        : { memberId: String(link.hubMemberId), fingerprint: hub.identityKeyFingerprint };
-    },
-    sealingKey: async (): Promise<HubSealingKey | undefined> => {
-      const response = await toHub(HUB_LINK_ROUTES.publicSealingKey, {});
+    targets: () => targets().map(({ memberId, fingerprint }) => ({ memberId, fingerprint })),
+    sealingKey: async (memberId): Promise<HubSealingKey | undefined> => {
+      const response = await toMember(memberId, HUB_LINK_ROUTES.publicSealingKey, {});
       try {
         return response === undefined ? undefined : decodeHubSealingKey(await response.json());
       } catch {
         return undefined;
       }
     },
-    sendEndpoints: async (update: HubWebhookEndpointsUpdate) =>
-      (await toHub(HUB_LINK_ROUTES.publicWebhookEndpoints, update)) !== undefined,
+    sendEndpoints: async (memberId, update: HubWebhookEndpointsUpdate) =>
+      (await toMember(memberId, HUB_LINK_ROUTES.publicWebhookEndpoints, update)) !== undefined,
   };
 }
 
@@ -78,7 +77,8 @@ export async function sendWebhookDelivery(
   envelope: WebhookDeliveryEnvelope,
 ): Promise<WebhookDeliveryAnswer | undefined> {
   const state = deps.state.load();
-  const member = state.hub?.roster?.roster.members.find(
+  // A standing-in standby reads the roster it holds as a member.
+  const member = servingRosterMembers(state).find(
     (entry) => String(entry.memberId) === spokeMemberId,
   );
   if (member === undefined) return undefined;

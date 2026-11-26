@@ -30,6 +30,7 @@ import { HUB_HANDBACK_MAX_BODY_BYTES, HUB_WAKE_COPY_MAX_BODY_BYTES } from "../re
 import {
   PUBLIC_FORWARD_MAX_BODY_BYTES,
   decodeHubWebhookEndpointsUpdate,
+  decodeHubWebhookHandback,
   decodeWebhookDeliveryEnvelope,
   decodeHubVisitorGrantsUpdate,
   decodeVisitorFetchRequest,
@@ -44,6 +45,8 @@ import type { SpokeWebhookService } from "./spokeWebhookService";
 import type { HubVisitorService } from "./hubVisitorService";
 import type { SpokeVisitorService } from "./spokeVisitorService";
 import { readForwardedRequest } from "./publicEntranceForwarding";
+import { copyHolderMemberKey, isNamedStandby, servesPublicEntrance } from "./publicStandIn";
+import type { HubState } from "./hubStateStore";
 import type { PushService } from "./pushService";
 import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
@@ -107,6 +110,8 @@ export const HUB_LINK_ROUTES = {
   publicVisitorGrants: "/api/hub/public/visitor-grants",
   /** The acting hub asks the spoke that owns a link on every visitor request. */
   publicVisitorFetch: "/api/hub/public/visitor-fetch",
+  /** A standby that stood in hands the hub back one webhook delivery it still queues. */
+  publicWebhookHandback: "/api/hub/public/webhook-handback",
 } as const;
 
 const decodeHubMemberId = Schema.decodeUnknownSync(HubMemberId);
@@ -145,8 +150,13 @@ export interface HubLinkRouteOptions {
   readonly readUsageLimits?: () => ProviderUsageLimitsSnapshot;
   /** This host's public entrance, which runs a request another member's entrance forwarded. */
   readonly publicEntrance?: Pick<PublicEntranceService, "dispatchForwarded">;
-  /** The acting hub's webhook receipt: its sealing key and each spoke's endpoints. */
-  readonly webhooks?: Pick<HubWebhookService, "sealingKey" | "receiveEndpoints">;
+  /** The acting hub's webhook receipt: its sealing key, each spoke's endpoints, and a standby's hand-back. */
+  readonly webhooks?: Pick<HubWebhookService, "sealingKey" | "receiveEndpoints" | "takeHandback">;
+  /**
+   * This host's hub state, read for the public entrance during failover: whether
+   * it serves the entrance now, and, as a named standby, which spoke may hand it copies.
+   */
+  readonly publicState?: () => HubState;
   /** This host's own webhook endpoints, as a spoke. */
   readonly spokeWebhooks?: Pick<SpokeWebhookService, "receive">;
   /** The acting hub's visitor links: each spoke's signed grants. */
@@ -213,7 +223,8 @@ export function createHubLinkRouteHandler(
           : route === HUB_LINK_ROUTES.publicForward ||
               route === HUB_LINK_ROUTES.publicWebhookDelivery ||
               route === HUB_LINK_ROUTES.publicWebhookEndpoints ||
-              route === HUB_LINK_ROUTES.publicVisitorGrants
+              route === HUB_LINK_ROUTES.publicVisitorGrants ||
+              route === HUB_LINK_ROUTES.publicWebhookHandback
             ? FORWARD_MAX_BODY_BYTES
             : MAX_BODY_BYTES,
     );
@@ -506,15 +517,25 @@ export function createHubLinkRouteHandler(
     }
 
     if (route === HUB_LINK_ROUTES.publicForward) {
-      // Only the acting hub serves the entrance; a member that is not forwards here.
-      if (!options.hub.status().enabled) return refused(403, "hub-role-off");
+      // Only the acting hub serves the entrance; a member that is not forwards
+      // here. A standby standing in is the acting hub when its person chose to serve.
+      const hubOn = options.hub.status().enabled;
+      const standingIn =
+        !hubOn &&
+        options.failover.standingIn() &&
+        options.publicState !== undefined &&
+        servesPublicEntrance({ hubEnabled: false, state: options.publicState() });
+      if (!hubOn && !standingIn) return refused(403, "hub-role-off");
       const verified = memberVerifier.verify({
         header,
         method: request.method,
         path: route,
         body,
         recipientMemberId: options.hub.hubMemberId(),
-        publicKeyFor: (sender) => options.hub.memberKey(sender, presentedKey ?? undefined),
+        publicKeyFor: (sender) =>
+          hubOn
+            ? options.hub.memberKey(sender, presentedKey ?? undefined)
+            : options.failover.memberKey(sender, presentedKey ?? undefined),
       });
       if (verified.status === "refused") return refused(401, verified.kind);
       const envelope = readForwardedRequest(body);
@@ -530,7 +551,8 @@ export function createHubLinkRouteHandler(
       route === HUB_LINK_ROUTES.publicSealingKey ||
       route === HUB_LINK_ROUTES.publicWebhookEndpoints
     ) {
-      if (!options.hub.status().enabled || options.webhooks === undefined) {
+      const copyKey = publicCopyKey(options, presentedKey);
+      if (copyKey === undefined || options.webhooks === undefined) {
         return refused(403, "hub-role-off");
       }
       const verified = memberVerifier.verify({
@@ -539,8 +561,7 @@ export function createHubLinkRouteHandler(
         path: route,
         body,
         recipientMemberId: options.hub.hubMemberId(),
-        // A guest owns no routine, so it cannot put a webhook on the internet.
-        publicKeyFor: (sender) => options.hub.hostMemberKey(sender, presentedKey ?? undefined),
+        publicKeyFor: copyKey,
       });
       if (verified.status === "refused") return refused(401, verified.kind);
       if (route === HUB_LINK_ROUTES.publicSealingKey) {
@@ -559,7 +580,8 @@ export function createHubLinkRouteHandler(
     }
 
     if (route === HUB_LINK_ROUTES.publicVisitorGrants) {
-      if (!options.hub.status().enabled || options.visitors === undefined) {
+      const copyKey = publicCopyKey(options, presentedKey);
+      if (copyKey === undefined || options.visitors === undefined) {
         return refused(403, "hub-role-off");
       }
       const verified = memberVerifier.verify({
@@ -568,8 +590,7 @@ export function createHubLinkRouteHandler(
         path: route,
         body,
         recipientMemberId: options.hub.hubMemberId(),
-        // A guest owns no thread, so it cannot put a visitor link on the internet.
-        publicKeyFor: (sender) => options.hub.hostMemberKey(sender, presentedKey ?? undefined),
+        publicKeyFor: copyKey,
       });
       if (verified.status === "refused") return refused(401, verified.kind);
       let update;
@@ -632,6 +653,11 @@ export function createHubLinkRouteHandler(
       if (sender.status === "refused") {
         return refused(SENDER_REFUSAL_STATUS.has(sender.kind) ? 401 : 403, sender.kind);
       }
+      // A standby forwards only for a spoke whose person ticked Standby.
+      if (sender.status === "standby") {
+        const allowed = options.spoke.hubMayUse("standby");
+        if (allowed.status === "refused") return refused(403, allowed.kind);
+      }
       if (options.spokeWebhooks === undefined) return refused(404, "invalid");
       let envelope;
       try {
@@ -641,6 +667,39 @@ export function createHubLinkRouteHandler(
       }
       // The spoke checks its Public item, the bytes, and its own claims itself.
       return Response.json(options.spokeWebhooks.receive(envelope), { headers: NO_STORE });
+    }
+
+    if (route === HUB_LINK_ROUTES.publicWebhookHandback) {
+      if (!options.hub.status().enabled || options.webhooks === undefined) {
+        return refused(403, "hub-role-off");
+      }
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        publicKeyFor: (sender) => options.hub.memberKey(sender, presentedKey ?? undefined),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      const roster = options.publicState?.().hub?.roster?.roster;
+      const named =
+        roster !== undefined &&
+        roster.standbyOrder.some((id) => String(id) === verified.senderMemberId) &&
+        roster.members.some(
+          (member) =>
+            String(member.memberId) === verified.senderMemberId && member.role === "standby-hub",
+        );
+      if (!named) return refused(403, "not-a-named-standby");
+      let queued;
+      try {
+        queued = decodeHubWebhookHandback(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      return Response.json(options.webhooks.takeHandback(verified.senderMemberId, queued), {
+        headers: NO_STORE,
+      });
     }
 
     if (route === HUB_LINK_ROUTES.push) {
@@ -881,4 +940,24 @@ export async function readBody(
 
 export function refused(status: number, kind: string): Response {
   return Response.json({ status: "refused", kind }, { status, headers: NO_STORE });
+}
+
+/**
+ * Who may hand this host public copies (a sealing-key request, endpoints, or
+ * grants): any member while this host is the hub, and, while it is a named
+ * standby, a spoke its hub-signed roster lists with the presented key.
+ * Undefined when this host takes copies from nobody.
+ */
+function publicCopyKey(
+  options: HubLinkRouteOptions,
+  presentedKey: string | null,
+): ((sender: string) => string | undefined) | undefined {
+  // A guest owns no routine or thread, so it can put neither a webhook nor a
+  // visitor link on the internet; the hub and a standby both refuse it.
+  if (options.hub.status().enabled) {
+    return (sender) => options.hub.hostMemberKey(sender, presentedKey ?? undefined);
+  }
+  const state = options.publicState?.();
+  if (state === undefined || !isNamedStandby(state.link)) return undefined;
+  return (sender) => copyHolderMemberKey(state, sender, presentedKey ?? undefined);
 }

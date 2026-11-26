@@ -1068,6 +1068,38 @@ describe("octant hub public", () => {
     expect(host.text()).toContain("http://127.0.0.1:41234");
   });
 
+  it("turns a standby's own choice to serve while standing in on, and lists the standbys' addresses", async () => {
+    expect(resolveHubCliCommand(["public", "standby", "on"], {})).toEqual({
+      action: "public",
+      mode: "standby",
+      serve: true,
+    });
+    expect(resolveHubCliCommand(["public", "standby", "maybe"], {})).toBeUndefined();
+    const host = await fixture((request) =>
+      request.method === "GET"
+        ? ok({
+            publicEntrance: {
+              enabled: true,
+              listening: true,
+              funnel: { enabled: false },
+              serveWhileStandingIn: true,
+            },
+            publicStandbyUrls: [
+              { memberId: "m", name: "Standby", url: "https://standby.tail1234.ts.net" },
+            ],
+          })
+        : ok({ status: "changed", enabled: true }),
+    );
+    expect(await host.run({ action: "public", mode: "standby", serve: true })).toBe(0);
+    expect(host.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/public/standby",
+      body: { enabled: true },
+    });
+    expect(await host.run({ action: "public", mode: "status" })).toBe(0);
+    expect(host.text()).toContain("Serve while standing in  on");
+    expect(host.text()).toContain("https://standby.tail1234.ts.net");
+  });
+
   it("says why Funnel was refused", async () => {
     const host = await fixture((request) =>
       request.path === "/api/desktop/hub/public"

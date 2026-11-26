@@ -75,6 +75,8 @@ export interface PublicEntranceStatus {
   /** Where the person points their own front: the loopback address on this machine. */
   readonly address?: string;
   readonly funnel: { readonly enabled: boolean; readonly port?: PublicFunnelPort };
+  /** This host's own choice, as a standby, to serve the entrance while it stands in. */
+  readonly serveWhileStandingIn: boolean;
 }
 
 const DEFAULT_FUNNEL_PORT: PublicFunnelPort = 443;
@@ -115,6 +117,7 @@ export class PublicEntranceService {
         saved?.funnel === undefined
           ? { enabled: false }
           : { enabled: true, port: saved.funnel.port },
+      serveWhileStandingIn: saved?.serveWhileStandingIn === true,
     };
   }
 
@@ -327,12 +330,14 @@ export class PublicEntranceService {
     readonly funnel?: PublicEntranceState["funnel"] | undefined;
   }): void {
     const state = this.#options.state.load();
+    const serve = state.publicEntrance?.serveWhileStandingIn;
     this.#options.state.save({
       ...state,
       publicEntrance: {
         enabled: next.enabled,
         ...(next.port === undefined ? {} : { port: next.port }),
         ...(next.funnel === undefined ? {} : { funnel: next.funnel }),
+        ...(serve === undefined ? {} : { serveWhileStandingIn: serve }),
       },
     });
   }

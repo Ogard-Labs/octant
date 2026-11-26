@@ -53,6 +53,12 @@ export interface FailoverOptions {
   readonly failoverAfterMs?: () => number | undefined;
   /** How long a heartbeat waits before the hub counts as silent; absent, an ordinary hub-link request's. */
   readonly linkTimeoutMs?: number;
+  /**
+   * Hands the hub what the public entrance still queues, under the same freeze
+   * as the membership changes; false when the hub did not take all of it, and
+   * the stand-in then goes on until the next look.
+   */
+  readonly handBackPublic?: (link: HubLinkState) => Promise<boolean>;
 }
 
 export type StandInJoinCodeOutcome =
@@ -563,6 +569,10 @@ export class FailoverService {
     // Freeze membership first, in the same step that reads the changes, so the
     // hand-back holds every change and the end of the stand-in drops none.
     this.#holdMembership(true);
+    if (this.#options.handBackPublic !== undefined && !(await this.#options.handBackPublic(link))) {
+      this.#holdMembership(false);
+      return;
+    }
     const handback: HubStandInHandback = {
       baseSequence: standIn.baseSequence,
       sequence: link.roster.roster.sequence,
