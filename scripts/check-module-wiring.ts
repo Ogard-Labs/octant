@@ -715,9 +715,11 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/hub/public/sealing-key",
     "/api/hub/public/webhook-endpoints",
     "/api/hub/public/webhook-delivery",
+    "/api/hub/public/visitor-grants",
+    "/api/hub/public/visitor-fetch",
   ].map((endpoint): [string, string] => [
     endpoint,
-    "Member-to-member request that a hub, standby, or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts, failoverService.ts, wakeService.ts, spokeWakeService.ts, pushService.ts, spokePushService.ts, provisionService.ts, spokeProvisionService.ts, signInService.ts, spokeSignInService.ts, publicEntranceForwarding.ts, hubWebhookService wiring in wiring/remote.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
+    "Member-to-member request that a hub, standby, or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts, failoverService.ts, wakeService.ts, spokeWakeService.ts, pushService.ts, spokePushService.ts, provisionService.ts, spokeProvisionService.ts, signInService.ts, spokeSignInService.ts, publicEntranceForwarding.ts, webhookLinks.ts, visitorLinks.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
   ]),
   [
     "/api/hub/usage",

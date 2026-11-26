@@ -11,6 +11,7 @@ import {
   type WebhookRefusalKind,
   type WebhookSignatureScheme,
 } from "@octant/contracts";
+import { redactSecretsAndPrivateKeys } from "./secretShapedTextPolicy";
 
 export type WebhookHeaders = Readonly<Record<string, string | undefined>>;
 
@@ -174,4 +175,17 @@ export function decideVisitorLink(input: {
   if (!input.secretMatches) return { status: "refused", kind: "secret-mismatch" };
   if (input.nowMs >= input.grant.expiresAt) return { status: "refused", kind: "expired" };
   return { status: "valid" };
+}
+
+// A path names the person's folders and account; a visitor reads none of them.
+// URLs are left alone: the scheme in front of `//` is not a path.
+const UNIX_PATH =
+  /(^|[\s("'`=:,;])(?:~|\/(?:Users|home|root|private|var|tmp|opt|etc|Volumes|mnt|srv|usr|Library))\/[^\s"'`)<>,;]*/g;
+const WINDOWS_PATH = /(^|[\s("'`=:,;])[A-Za-z]:\\[^\s"'`)<>,;]*/g;
+
+/** Message text as a visitor may read it: no secret-shaped value and no file-system path. */
+export function redactForVisitor(text: string): string {
+  return redactSecretsAndPrivateKeys(text)
+    .replace(UNIX_PATH, "$1[path]")
+    .replace(WINDOWS_PATH, "$1[path]");
 }

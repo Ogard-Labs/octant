@@ -59,7 +59,11 @@ function sameBytes(left: Buffer, right: Buffer): boolean {
  */
 export function checkVisitorLinkGrant(input: {
   readonly signed: SignedVisitorLinkGrant;
-  readonly secret: string;
+  /**
+   * The link's secret, on the request that opens it. A later request carries
+   * no secret: the spoke holds it to the browser that opened the link instead.
+   */
+  readonly secret?: string;
   readonly nowMs: number;
   readonly rosterFingerprintFor: (memberId: HubMemberId) => string | undefined;
 }): VisitorLinkDecision {
@@ -73,13 +77,18 @@ export function checkVisitorLinkGrant(input: {
       signature,
       publicKey: signerPublicKey,
     });
-  const presented = Buffer.from(visitorLinkSecretHash(grant.linkId, input.secret));
+  const secretMatches =
+    input.secret === undefined ||
+    sameBytes(
+      Buffer.from(visitorLinkSecretHash(grant.linkId, input.secret)),
+      Buffer.from(grant.secretHash),
+    );
   return decideVisitorLink({
     grant,
     nowMs: input.nowMs,
     signerListed,
     signatureValid,
-    secretMatches: sameBytes(presented, Buffer.from(grant.secretHash)),
+    secretMatches,
   });
 }
 

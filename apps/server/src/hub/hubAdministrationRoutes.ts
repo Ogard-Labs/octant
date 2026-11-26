@@ -32,6 +32,10 @@ import {
   decodeHubPublicEntranceSwitchRequest,
   decodeHubPublicFunnelRequest,
   decodeHubWebhookCreateRequest,
+  decodeHubVisitorCommentRequest,
+  decodeHubVisitorLinkRequest,
+  decodeHubVisitorShareRequest,
+  decodeHubVisitorSwitchRequest,
   decodeHubWebhookEndpointRequest,
   decodeHubPushSwitchRequest,
   decodeHubSignInAsk,
@@ -61,6 +65,8 @@ import type { ProvisionService } from "./provisionService";
 import type { HubWebhookService } from "./hubWebhookService";
 import type { PublicEntranceService } from "./publicEntranceService";
 import type { SpokeWebhookService } from "./spokeWebhookService";
+import type { HubVisitorService } from "./hubVisitorService";
+import type { SpokeVisitorService } from "./spokeVisitorService";
 import type { PushService } from "./pushService";
 import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
@@ -137,6 +143,11 @@ export const HUB_ADMINISTRATION_ROUTES = {
   webhookCreate: "/api/desktop/hub/webhooks/create",
   webhookRotate: "/api/desktop/hub/webhooks/rotate",
   webhookRemove: "/api/desktop/hub/webhooks/remove",
+  /** The hub's visitor-link switch, and this spoke's links and their comments: only a window on this host changes them. */
+  visitorSwitch: "/api/desktop/hub/visitors",
+  visitorShare: "/api/desktop/hub/visitors/share",
+  visitorStop: "/api/desktop/hub/visitors/stop",
+  visitorComment: "/api/desktop/hub/visitors/comment",
   /** The hub's offer switch: only a window on the hub turns it on or off. */
   provision: "/api/desktop/hub/provision",
   /** The hub's window makes an offer for its spokes. */
@@ -184,6 +195,9 @@ export interface HubAdministrationRouteOptions {
   /** The hub's webhook receipt and this host's own endpoints; absent, their routes answer unavailable. */
   readonly webhooks?: Pick<HubWebhookService, "status">;
   readonly spokeWebhooks?: Pick<SpokeWebhookService, "view" | "create" | "rotate" | "remove">;
+  /** The hub's visitor links and this host's own; absent, their routes answer unavailable. */
+  readonly visitors?: Pick<HubVisitorService, "status" | "setEnabled">;
+  readonly spokeVisitors?: Pick<SpokeVisitorService, "view" | "share" | "stop" | "decideComment">;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -251,6 +265,11 @@ export function createHubAdministrationRouteHandler(
           ? {}
           : {
               webhooks: { hub: options.webhooks.status(), spoke: options.spokeWebhooks.view() },
+            }),
+        ...(options.visitors === undefined || options.spokeVisitors === undefined
+          ? {}
+          : {
+              visitors: { hub: options.visitors.status(), spoke: options.spokeVisitors.view() },
             }),
       });
     }
@@ -463,6 +482,26 @@ export function createHubAdministrationRouteHandler(
               ? await options.spokeWebhooks.rotate(String(value.endpointId))
               : await options.spokeWebhooks.remove(String(value.endpointId)),
           );
+        }
+        case HUB_ADMINISTRATION_ROUTES.visitorSwitch: {
+          const value = decodeHubVisitorSwitchRequest(parseJson(request, body.text));
+          if (options.visitors === undefined) return failure("unavailable", 503);
+          return outcome(await options.visitors.setEnabled(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.visitorShare: {
+          const value = decodeHubVisitorShareRequest(parseJson(request, body.text));
+          if (options.spokeVisitors === undefined) return failure("unavailable", 503);
+          return outcome(await options.spokeVisitors.share(value));
+        }
+        case HUB_ADMINISTRATION_ROUTES.visitorStop: {
+          const value = decodeHubVisitorLinkRequest(parseJson(request, body.text));
+          if (options.spokeVisitors === undefined) return failure("unavailable", 503);
+          return outcome(await options.spokeVisitors.stop(String(value.linkId)));
+        }
+        case HUB_ADMINISTRATION_ROUTES.visitorComment: {
+          const value = decodeHubVisitorCommentRequest(parseJson(request, body.text));
+          if (options.spokeVisitors === undefined) return failure("unavailable", 503);
+          return outcome(options.spokeVisitors.decideComment(value.commentId, value.action));
         }
         case HUB_ADMINISTRATION_ROUTES.directPush: {
           const value = decodeHubDirectPushSwitchRequest(parseJson(request, body.text));

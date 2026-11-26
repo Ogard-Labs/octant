@@ -291,3 +291,119 @@ export const HubWebhookEndpointRequest = Schema.Struct({
   endpointId: WebhookEndpointId,
 }).annotations(strict);
 export const decodeHubWebhookEndpointRequest = Schema.decodeUnknownSync(HubWebhookEndpointRequest);
+
+/** A thread a visitor link shares, as only the spoke that owns it knows it. */
+export const VisitorThreadMode = Schema.Literal("chat", "code");
+export type VisitorThreadMode = typeof VisitorThreadMode.Type;
+
+/** Everything one spoke lets the hub hold for visitor links: it replaces what the hub held for it. */
+export const HubVisitorGrantsUpdate = Schema.Struct({
+  grants: Schema.Array(SignedVisitorLinkGrant).pipe(Schema.maxItems(256)),
+}).annotations(strict);
+export type HubVisitorGrantsUpdate = typeof HubVisitorGrantsUpdate.Type;
+export const decodeHubVisitorGrantsUpdate = Schema.decodeUnknownSync(HubVisitorGrantsUpdate);
+
+/**
+ * What a visitor sees of a thread: its title, whether the owner is deciding
+ * something, and the messages. Never a tool's input or output, a diff, a file,
+ * an attachment, a path, or what an approval asks.
+ */
+export const VisitorProjection = Schema.Struct({
+  title: Schema.String.pipe(Schema.maxLength(256)),
+  state: Schema.Literal("working", "idle", "owner-deciding"),
+  messages: Schema.Array(
+    Schema.Struct({
+      role: Schema.Literal("person", "agent", "visitor"),
+      text: Schema.String.pipe(Schema.maxLength(32_000)),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(200)),
+}).annotations(strict);
+export type VisitorProjection = typeof VisitorProjection.Type;
+
+/**
+ * The hub asks the spoke on every visitor request. `binding` is the SHA-256 of
+ * the browser's key: `open` binds the first one, and every later request must
+ * name the same.
+ */
+export const VisitorFetchRequest = Schema.Struct({
+  linkId: VisitorLinkId,
+  revision: Schema.Int.pipe(Schema.positive()),
+  binding: digest,
+  kind: Schema.Literal("open", "read", "comment"),
+  comment: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_000))),
+}).annotations(strict);
+export type VisitorFetchRequest = typeof VisitorFetchRequest.Type;
+export const decodeVisitorFetchRequest = Schema.decodeUnknownSync(VisitorFetchRequest);
+
+export const VISITOR_FETCH_REFUSAL_KINDS = [
+  "public-not-granted",
+  "unknown-link",
+  "revoked",
+  "expired",
+  "ended",
+  "not-bound",
+  "bound-elsewhere",
+  "comment-not-allowed",
+  "comments-full",
+] as const;
+export const VisitorFetchRefusalKind = Schema.Literal(...VISITOR_FETCH_REFUSAL_KINDS);
+export type VisitorFetchRefusalKind = typeof VisitorFetchRefusalKind.Type;
+
+export const VisitorFetchAnswer = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("ok"),
+    scope: VisitorLinkScope,
+    expiresAt: millis,
+    projection: Schema.optional(VisitorProjection),
+  }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("refused"), kind: VisitorFetchRefusalKind }).annotations(
+    strict,
+  ),
+);
+export type VisitorFetchAnswer = typeof VisitorFetchAnswer.Type;
+export const decodeVisitorFetchAnswer = Schema.decodeUnknownSync(VisitorFetchAnswer);
+
+/** A window on a spoke shares one thread with a visitor. */
+export const HubVisitorShareRequest = Schema.Struct({
+  mode: VisitorThreadMode,
+  threadId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  scope: VisitorLinkScope,
+  /** Absent means a day; never more than seven. */
+  lifetimeMs: Schema.optional(
+    Schema.Int.pipe(Schema.between(60_000, VISITOR_LINK_MAX_LIFETIME_MS)),
+  ),
+}).annotations(strict);
+export type HubVisitorShareRequest = typeof HubVisitorShareRequest.Type;
+export const decodeHubVisitorShareRequest = Schema.decodeUnknownSync(HubVisitorShareRequest);
+
+/** A window on a spoke stops sharing a link. */
+export const HubVisitorLinkRequest = Schema.Struct({ linkId: VisitorLinkId }).annotations(strict);
+export const decodeHubVisitorLinkRequest = Schema.decodeUnknownSync(HubVisitorLinkRequest);
+
+/** A window on a spoke sends or dismisses a visitor's comment. */
+export const HubVisitorCommentRequest = Schema.Struct({
+  commentId: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{22}$/)),
+  action: Schema.Literal("send", "dismiss"),
+}).annotations(strict);
+export type HubVisitorCommentRequest = typeof HubVisitorCommentRequest.Type;
+export const decodeHubVisitorCommentRequest = Schema.decodeUnknownSync(HubVisitorCommentRequest);
+
+/** A window on the hub turns visitor links on or off; off, their routes answer 404. */
+export const HubVisitorSwitchRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(
+  strict,
+);
+export const decodeHubVisitorSwitchRequest = Schema.decodeUnknownSync(HubVisitorSwitchRequest);
+
+/** The header a viewer signs each request with, and the one that names its key. */
+export const VISITOR_PROOF_HEADER = "octant-visitor-proof";
+export const VISITOR_KEY_HEADER = "octant-visitor-key";
+/** How far a proof's time may stray from the hub's clock. */
+export const VISITOR_PROOF_SKEW_MS = 60_000;
+/** The text a viewer's key signs for one request. */
+export const visitorProofPayload = (input: {
+  readonly method: string;
+  readonly path: string;
+  readonly timestamp: string;
+  readonly nonce: string;
+}): string =>
+  `octant/visitor-proof/v1|${input.method}|${input.path}|${input.timestamp}|${input.nonce}`;
