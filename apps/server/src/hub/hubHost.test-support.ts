@@ -51,6 +51,8 @@ import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { HubWebhookService } from "./hubWebhookService";
 import { SpokeWebhookService } from "./spokeWebhookService";
 import { sendWebhookDelivery, spokeWebhookHubPort } from "./webhookLinks";
+import { SpokeVisitorService, type VisitorThreadSource } from "./spokeVisitorService";
+import { spokeVisitorHubPort } from "./visitorLinks";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
 import { TestCredentialBroker, TestPostureHost, TestThreadWakeHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
@@ -223,6 +225,8 @@ export interface HubTestHost {
   readonly webhooks: HubWebhookService;
   /** This host's own webhook endpoints, as a spoke. */
   readonly spokeWebhooks: SpokeWebhookService;
+  /** This host's own visitor links, as a spoke; its one thread is a fixed Code thread. */
+  readonly spokeVisitors: SpokeVisitorService;
   /** The owner unlock a paired client's merge may need here, over the same challenges the owner route issues. */
   readonly pairedMergeUnlock: PairedMergeUnlockService;
   /** Whether each owner approval answer needs its own unlock here, as a window on this host sets it. */
@@ -741,6 +745,30 @@ export async function startHubTestHost(input: {
     record: (change) => records.push(change),
     now: wakeNow,
   });
+  const visitorSource: VisitorThreadSource = {
+    read: () => ({
+      status: "found",
+      title: "Fix the login page",
+      archived: false,
+      state: "idle",
+      messages: [{ role: "agent", text: "Working on it." }],
+    }),
+  };
+  const spokeVisitors = new SpokeVisitorService({
+    state,
+    publicGranted: () => spoke.hubMayUse("public").status === "allowed",
+    remoteAccessPaused: () => false,
+    hub: spokeVisitorHubPort(webhookLinks),
+    signing: () => ({
+      memberId: state.load().link?.selfMemberId,
+      publicKey: identity.signing.hostPublicKey,
+      sign: (payload) => identity.signing.signHostPayload(payload),
+    }),
+    source: visitorSource,
+    taint: () => true,
+    record: (change) => records.push(change),
+    now: Date.now,
+  });
   const hubLinkRoutes = createHubLinkRouteHandler({
     hub,
     spoke,
@@ -769,6 +797,7 @@ export async function startHubTestHost(input: {
       }),
     webhooks,
     spokeWebhooks,
+    spokeVisitors,
     ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
   });
   const credentials = new TestCredentialBroker();
@@ -1033,6 +1062,7 @@ export async function startHubTestHost(input: {
     spokeSignIn,
     webhooks,
     spokeWebhooks,
+    spokeVisitors,
     pairedMergeUnlock,
     ownerApprovalAnswerUnlock,
     accounts,

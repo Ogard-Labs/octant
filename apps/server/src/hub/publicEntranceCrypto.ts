@@ -33,7 +33,7 @@ export function mintVisitorLinkSecret(): string {
   return randomBytes(32).toString("base64url");
 }
 
-/** Sixteen random bytes: a link id or an endpoint id. */
+/** Sixteen random bytes: a link id, an endpoint id, or a visitor comment id. */
 export function mintPublicId(): string {
   // An id that began with "-" would read as a flag to `octant hub`.
   for (;;) {
@@ -48,6 +48,18 @@ export function visitorLinkSecretHash(linkId: string, secret: string): string {
     .digest("base64url");
 }
 
+/** Whether `secret` opens the link whose grant carries `secretHash`, compared in constant time. */
+export function visitorLinkSecretMatches(input: {
+  readonly linkId: string;
+  readonly secret: string;
+  readonly secretHash: string;
+}): boolean {
+  return sameBytes(
+    Buffer.from(visitorLinkSecretHash(input.linkId, input.secret)),
+    Buffer.from(input.secretHash),
+  );
+}
+
 function sameBytes(left: Buffer, right: Buffer): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
@@ -59,7 +71,11 @@ function sameBytes(left: Buffer, right: Buffer): boolean {
  */
 export function checkVisitorLinkGrant(input: {
   readonly signed: SignedVisitorLinkGrant;
-  readonly secret: string;
+  /**
+   * The link's secret, on the request that opens it. A later request carries
+   * no secret: the spoke holds it to the browser that opened the link instead.
+   */
+  readonly secret?: string;
   readonly nowMs: number;
   readonly rosterFingerprintFor: (memberId: HubMemberId) => string | undefined;
 }): VisitorLinkDecision {
@@ -73,13 +89,18 @@ export function checkVisitorLinkGrant(input: {
       signature,
       publicKey: signerPublicKey,
     });
-  const presented = Buffer.from(visitorLinkSecretHash(grant.linkId, input.secret));
+  const secretMatches =
+    input.secret === undefined ||
+    sameBytes(
+      Buffer.from(visitorLinkSecretHash(grant.linkId, input.secret)),
+      Buffer.from(grant.secretHash),
+    );
   return decideVisitorLink({
     grant,
     nowMs: input.nowMs,
     signerListed,
     signatureValid,
-    secretMatches: sameBytes(presented, Buffer.from(grant.secretHash)),
+    secretMatches,
   });
 }
 

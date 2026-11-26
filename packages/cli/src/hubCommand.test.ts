@@ -1442,3 +1442,101 @@ describe("octant hub webhook", () => {
     expect(created.text()).toContain("/hooks/AAAAAAAAAAAAAAAAAAAAAA");
   });
 });
+
+describe("octant hub visitor", () => {
+  it("reads share, list, stop, send, dismiss and the hub's switch", () => {
+    expect(
+      resolveHubCliCommand(["visitor", "share", "code", "thread-1"], {
+        comment: true,
+        hours: "48",
+      }),
+    ).toEqual({
+      action: "visitor",
+      mode: "share",
+      threadMode: "code",
+      threadId: "thread-1",
+      scope: "comment",
+      hours: 48,
+    });
+    expect(resolveHubCliCommand(["visitor", "share", "chat", "t"], {})).toEqual({
+      action: "visitor",
+      mode: "share",
+      threadMode: "chat",
+      threadId: "t",
+      scope: "read",
+    });
+    expect(resolveHubCliCommand(["visitor", "list"], {})).toEqual({
+      action: "visitor",
+      mode: "list",
+    });
+    expect(resolveHubCliCommand(["visitor", "on"], {})).toEqual({ action: "visitor", mode: "on" });
+    expect(resolveHubCliCommand(["visitor", "stop", "AAAAAAAAAAAAAAAAAAAAAA"], {})).toEqual({
+      action: "visitor",
+      mode: "stop",
+      id: "AAAAAAAAAAAAAAAAAAAAAA",
+    });
+    expect(resolveHubCliCommand(["visitor", "send", "BBBBBBBBBBBBBBBBBBBBBB"], {})).toEqual({
+      action: "visitor",
+      mode: "send",
+      id: "BBBBBBBBBBBBBBBBBBBBBB",
+    });
+    expect(resolveHubCliCommand(["visitor", "share", "work", "t"], {})).toBeUndefined();
+    expect(
+      resolveHubCliCommand(["visitor", "share", "code", "t"], { hours: "200" }),
+    ).toBeUndefined();
+    // A bare --hours names no lifetime, so it is refused rather than read as one hour.
+    expect(
+      resolveHubCliCommand(["visitor", "share", "code", "t"], { hours: true }),
+    ).toBeUndefined();
+  });
+
+  it("prints a new link once, with its secret in the fragment", async () => {
+    const shared = await fixture(() =>
+      ok({
+        status: "shared",
+        linkId: "AAAAAAAAAAAAAAAAAAAAAA",
+        url: "/v/AAAAAAAAAAAAAAAAAAAAAA#k=secret",
+        expiresAt: 1_800_000_000_000,
+        published: true,
+      }),
+    );
+    expect(
+      await shared.run({
+        action: "visitor",
+        mode: "share",
+        threadMode: "code",
+        threadId: "thread-1",
+        scope: "read",
+      }),
+    ).toBe(0);
+    expect(shared.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/visitors/share",
+      body: { mode: "code", threadId: "thread-1", scope: "read" },
+    });
+    expect(shared.out.join("")).toContain("/v/AAAAAAAAAAAAAAAAAAAAAA#k=secret");
+  });
+
+  it("prints a visitor's comment without the escape sequences it carries", async () => {
+    const listed = await fixture(() =>
+      ok({
+        visitors: {
+          spoke: {
+            links: [],
+            comments: [
+              {
+                commentId: "c1",
+                linkId: "AAAAAAAAAAAAAAAAAAAAAA",
+                text: "hi\u001b[2J\u001b]0;owned\u0007\nnext \u202eevil",
+                at: 1,
+              },
+            ],
+          },
+        },
+      }),
+    );
+    expect(await listed.run({ action: "visitor", mode: "list" })).toBe(0);
+    const printed = listed.out.join("");
+    expect(printed).not.toMatch(/[\u001b\u0007\u202e]/);
+    expect(printed.trimEnd().split("\n")).toHaveLength(1);
+  });
+});

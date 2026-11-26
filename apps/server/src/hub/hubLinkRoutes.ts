@@ -31,6 +31,8 @@ import {
   PUBLIC_FORWARD_MAX_BODY_BYTES,
   decodeHubWebhookEndpointsUpdate,
   decodeWebhookDeliveryEnvelope,
+  decodeHubVisitorGrantsUpdate,
+  decodeVisitorFetchRequest,
 } from "@octant/contracts";
 import type { FailoverService } from "./failoverService";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, HubLinkVerifier } from "./hubLink";
@@ -39,6 +41,8 @@ import type { ProvisionService } from "./provisionService";
 import type { HubWebhookService } from "./hubWebhookService";
 import type { PublicEntranceService } from "./publicEntranceService";
 import type { SpokeWebhookService } from "./spokeWebhookService";
+import type { HubVisitorService } from "./hubVisitorService";
+import type { SpokeVisitorService } from "./spokeVisitorService";
 import { readForwardedRequest } from "./publicEntranceForwarding";
 import type { PushService } from "./pushService";
 import type { SignInService } from "./signInService";
@@ -99,6 +103,10 @@ export const HUB_LINK_ROUTES = {
   publicWebhookEndpoints: "/api/hub/public/webhook-endpoints",
   /** The acting hub hands a spoke a webhook delivery it queued for it. */
   publicWebhookDelivery: "/api/hub/public/webhook-delivery",
+  /** A spoke whose person ticked Public hands the hub the visitor-link grants it signed. */
+  publicVisitorGrants: "/api/hub/public/visitor-grants",
+  /** The acting hub asks the spoke that owns a link on every visitor request. */
+  publicVisitorFetch: "/api/hub/public/visitor-fetch",
 } as const;
 
 const decodeHubMemberId = Schema.decodeUnknownSync(HubMemberId);
@@ -141,6 +149,10 @@ export interface HubLinkRouteOptions {
   readonly webhooks?: Pick<HubWebhookService, "sealingKey" | "receiveEndpoints">;
   /** This host's own webhook endpoints, as a spoke. */
   readonly spokeWebhooks?: Pick<SpokeWebhookService, "receive">;
+  /** The acting hub's visitor links: each spoke's signed grants. */
+  readonly visitors?: Pick<HubVisitorService, "receiveGrants">;
+  /** This host's own visitor links, as a spoke. */
+  readonly spokeVisitors?: Pick<SpokeVisitorService, "fetch">;
   readonly now?: () => number;
 }
 
@@ -200,7 +212,8 @@ export function createHubLinkRouteHandler(
           ? HUB_WAKE_COPY_MAX_BODY_BYTES
           : route === HUB_LINK_ROUTES.publicForward ||
               route === HUB_LINK_ROUTES.publicWebhookDelivery ||
-              route === HUB_LINK_ROUTES.publicWebhookEndpoints
+              route === HUB_LINK_ROUTES.publicWebhookEndpoints ||
+              route === HUB_LINK_ROUTES.publicVisitorGrants
             ? FORWARD_MAX_BODY_BYTES
             : MAX_BODY_BYTES,
     );
@@ -541,6 +554,69 @@ export function createHubLinkRouteHandler(
       }
       // A spoke hands over only its own endpoints; any other is dropped.
       return Response.json(options.webhooks.receiveEndpoints(verified.senderMemberId, update), {
+        headers: NO_STORE,
+      });
+    }
+
+    if (route === HUB_LINK_ROUTES.publicVisitorGrants) {
+      if (!options.hub.status().enabled || options.visitors === undefined) {
+        return refused(403, "hub-role-off");
+      }
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        // A guest owns no thread, so it cannot put a visitor link on the internet.
+        publicKeyFor: (sender) => options.hub.hostMemberKey(sender, presentedKey ?? undefined),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      let update;
+      try {
+        update = decodeHubVisitorGrantsUpdate(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      // A spoke hands over only grants it signed for itself; any other is dropped.
+      return Response.json(options.visitors.receiveGrants(verified.senderMemberId, update), {
+        headers: NO_STORE,
+      });
+    }
+
+    if (route === HUB_LINK_ROUTES.publicVisitorFetch) {
+      const sender = options.spoke.authenticateRosterSender({
+        header,
+        publicKey: presentedKey,
+        method: request.method,
+        path: route,
+        body,
+      });
+      if (sender.status === "refused") {
+        return refused(SENDER_REFUSAL_STATUS.has(sender.kind) ? 401 : 403, sender.kind);
+      }
+      // A named standby serves a visitor only while it stands in: for a spoke
+      // whose person ticked Standby, and only while this spoke cannot reach the
+      // hub. Roster identity alone would let it read a shared thread any time.
+      if (sender.status === "standby") {
+        const allowed = options.spoke.hubMayUse("standby");
+        if (allowed.status === "refused") return refused(403, allowed.kind);
+        if (!(await options.failover.hubUnreachable())) return refused(403, "hub-reachable");
+        // The probe can take the whole link deadline; Standby unticked meanwhile still refuses.
+        const stillAllowed = options.spoke.hubMayUse("standby");
+        if (stillAllowed.status === "refused") return refused(403, stillAllowed.kind);
+      }
+      if (options.spokeVisitors === undefined) return refused(404, "invalid");
+      let fetchRequest;
+      try {
+        fetchRequest = decodeVisitorFetchRequest(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      const askedBy =
+        sender.status === "hub" ? String(sender.principal.memberId) : String(sender.memberId);
+      // The spoke checks its Public item, the link, its thread, and the browser itself.
+      return Response.json(options.spokeVisitors.fetch(fetchRequest, askedBy), {
         headers: NO_STORE,
       });
     }

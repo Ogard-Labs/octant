@@ -4,6 +4,7 @@ import {
   decideVisitorLink,
   decideWebhookDelivery,
   readWebhookHeaders,
+  redactForVisitor,
   visitorLinkSigningPayload,
   webhookDedupeKeys,
 } from "./hubPublicPolicy";
@@ -231,5 +232,37 @@ describe("visitor links", () => {
         grant: { ...grant, expiresAt: grant.issuedAt + 7 * 24 * 3_600_000 + 1 },
       }),
     ).toEqual({ status: "refused", kind: "lifetime-too-long" });
+  });
+});
+
+describe("what a visitor reads", () => {
+  it("never carries an absolute path, a home-relative path, or a secret-shaped value", () => {
+    const text = redactForVisitor(
+      "Edited /Users/ada/dev/app/src/main.ts and C:\\Users\\ada\\notes.txt, see ~/secrets/.env; key ghp_" +
+        "a".repeat(36),
+    );
+    expect(text).not.toContain("/Users/ada");
+    expect(text).not.toContain("C:\\Users");
+    expect(text).not.toContain("~/secrets");
+    expect(text).not.toContain("ghp_");
+    expect(text).toContain("[path]");
+  });
+
+  it("redacts an absolute path under any folder, a network share, and a file URL", () => {
+    const text = redactForVisitor(
+      "Read /workspace/private-project/strategy.md and /data/customer/export.csv, " +
+        "then \\\\fileserver\\finance\\q3.xlsx, D:/clients/acme/plan.md and file:///srv/app/env.",
+    );
+    expect(text).not.toContain("private-project");
+    expect(text).not.toContain("customer");
+    expect(text).not.toContain("fileserver");
+    expect(text).not.toContain("acme");
+    expect(text).not.toContain("/srv/app");
+  });
+
+  it("leaves ordinary prose and web addresses alone", () => {
+    expect(redactForVisitor("The build passed; see https://example.com/a/b for notes.")).toBe(
+      "The build passed; see https://example.com/a/b for notes.",
+    );
   });
 });

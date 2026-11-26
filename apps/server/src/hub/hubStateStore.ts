@@ -31,6 +31,8 @@ import {
   NewMemberAlert,
   PeerGrant,
   PublicFunnelPort,
+  SignedVisitorLinkGrant,
+  VisitorThreadMode,
   HubWebhookEndpoint,
   WebhookDeliveryEnvelope,
   WebhookEndpointId,
@@ -504,6 +506,42 @@ export const SpokeWebhookState = Schema.Struct({
 }).annotations(strict);
 export type SpokeWebhookState = typeof SpokeWebhookState.Type;
 
+/** One of this spoke's visitor links: the signed grant the hub holds, the thread only this spoke knows, and the browser bound to it. */
+export const SpokeVisitorLink = Schema.Struct({
+  signed: SignedVisitorLinkGrant,
+  mode: VisitorThreadMode,
+  threadId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  /** SHA-256 of the first browser's key; every later request must name it. */
+  binding: Schema.optional(Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/))),
+  /** Set when the person stopped sharing; kept so the link answers "revoked" until it would have expired. */
+  stoppedAt: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+}).annotations(strict);
+export type SpokeVisitorLink = typeof SpokeVisitorLink.Type;
+
+/** A visitor's comment waiting for the person's Send or Dismiss. */
+export const SpokeVisitorComment = Schema.Struct({
+  commentId: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{22}$/)),
+  linkId: Schema.String.pipe(Schema.maxLength(64)),
+  text: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_000)),
+  at: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type SpokeVisitorComment = typeof SpokeVisitorComment.Type;
+
+export const SpokeVisitorState = Schema.Struct({
+  links: Schema.Array(SpokeVisitorLink).pipe(Schema.maxItems(256)),
+  comments: Schema.Array(SpokeVisitorComment).pipe(Schema.maxItems(5_120)),
+  /** The hub has not taken the current grant list yet; the next look sends it again. */
+  unpublished: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type SpokeVisitorState = typeof SpokeVisitorState.Type;
+
+/** What the acting hub holds for visitor links: its switch and each spoke's signed grants. */
+export const HubVisitorHubState = Schema.Struct({
+  enabled: Schema.Boolean,
+  grants: Schema.Array(SignedVisitorLinkGrant).pipe(Schema.maxItems(4_096)),
+}).annotations(strict);
+export type HubVisitorHubState = typeof HubVisitorHubState.Type;
+
 export const HubState = Schema.Struct({
   hub: Schema.optional(HubSideState),
   link: Schema.optional(HubLinkState),
@@ -512,6 +550,10 @@ export const HubState = Schema.Struct({
   webhookHub: Schema.optional(HubWebhookHubState),
   /** This spoke's own webhook endpoints and deliveries. */
   webhooks: Schema.optional(SpokeWebhookState),
+  /** The acting hub's visitor-link switch and grants (decision H32). */
+  visitorHub: Schema.optional(HubVisitorHubState),
+  /** This spoke's own visitor links and the comments waiting on them. */
+  visitors: Schema.optional(SpokeVisitorState),
   /** Guest devices a dropped link, or the hub dropping a member window, could not revoke because the device pairing was not running; revoked once it is. */
   pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
   /** Devices that paired directly with this host, until a window clears each alert or the device is removed. */

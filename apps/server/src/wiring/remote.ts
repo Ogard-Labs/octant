@@ -228,6 +228,11 @@ import { forwardToActingHub } from "../hub/publicEntranceForwarding";
 import { HubWebhookService } from "../hub/hubWebhookService";
 import { SpokeWebhookService } from "../hub/spokeWebhookService";
 import { sendWebhookDelivery, spokeWebhookHubPort } from "../hub/webhookLinks";
+import { HubVisitorService } from "../hub/hubVisitorService";
+import { SpokeVisitorService } from "../hub/spokeVisitorService";
+import { askVisitorSpoke, spokeVisitorHubPort } from "../hub/visitorLinks";
+import { visitorThreadSource } from "../hub/visitorThreadSources";
+import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { SpokeWakeService } from "../hub/spokeWakeService";
 import { createUdpWakeOnLanPort } from "../hub/wakeOnLan";
 import { WakeService } from "../hub/wakeService";
@@ -1357,6 +1362,74 @@ export function wireRemote(deps: RemoteDependencies) {
     now: Date.now,
   });
   webhookEventSourceSlot.bind(spokeWebhooks.eventSources());
+  // Visitor links (decisions H31 and H32): the spoke that owns a thread signs
+  // each link and decides every fetch; the acting hub checks the grant and the
+  // browser's proof, then asks the spoke. Send taints the thread as the
+  // person's own act before the comment reaches it.
+  const visitorTaint = new ExternalContentIngestionStore({
+    journal: persistence.journal,
+    connection: persistence.connection,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
+  const spokeVisitors = new SpokeVisitorService({
+    state: hubStateStore,
+    publicGranted: () => spokeLinkService.hubMayUse("public").status === "allowed",
+    remoteAccessPaused: () => readRemoteAccessPaused(persistence.connection),
+    hub: spokeVisitorHubPort({
+      state: hubStateStore,
+      identity: resolveHubIdentity,
+      transport: hubTransport,
+      now: Date.now,
+    }),
+    signing: () => {
+      const identity = resolveHubIdentity();
+      return {
+        memberId: hubStateStore.load().link?.selfMemberId,
+        publicKey: identity.signing.hostPublicKey,
+        sign: (payload) => identity.signing.signHostPayload(payload),
+      };
+    },
+    source: visitorThreadSource(() => persistence.connection),
+    taint: (input) => {
+      const result = visitorTaint.record({
+        threadId: input.threadId,
+        provenance: { origin: "external-content", sourceLabel: "visitor-comment" },
+        contentReference: input.contentReference,
+        correlationId: randomUUID(),
+        authorized: true,
+      });
+      return result.kind === "recorded" || result.kind === "already-recorded";
+    },
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  const hubVisitors = new HubVisitorService({
+    state: hubStateStore,
+    serving: () => hubService.status().enabled,
+    hubMemberId: () => hubService.hubMemberId(),
+    rosterFingerprintFor: (memberId) =>
+      hubStateStore
+        .load()
+        .hub?.roster?.roster.members.find((member) => String(member.memberId) === memberId)
+        ?.identityKeyFingerprint,
+    ask: (spokeMemberId, request) =>
+      askVisitorSpoke(
+        {
+          state: hubStateStore,
+          identity: resolveHubIdentity,
+          transport: hubTransport,
+          now: Date.now,
+          selfMemberId: () => hubService.hubMemberId(),
+        },
+        spokeMemberId,
+        request,
+      ),
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  setInterval(() => void spokeVisitors.look().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
   setInterval(() => void hubWebhooks.tick().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
   setInterval(() => void spokeWebhooks.look().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
   const publicEntrance = new PublicEntranceService({
@@ -1374,7 +1447,7 @@ export function wireRemote(deps: RemoteDependencies) {
       const link = hubStateStore.load().link;
       return link !== undefined && link.removed !== true ? "member" : "none";
     },
-    handlers: () => ({ webhook: hubWebhooks.handle }),
+    handlers: () => ({ webhook: hubWebhooks.handle, ...hubVisitors.handlers() }),
     forward: (envelope) =>
       forwardToActingHub({
         state: hubStateStore,
@@ -1416,6 +1489,8 @@ export function wireRemote(deps: RemoteDependencies) {
     publicEntrance,
     webhooks: hubWebhooks,
     spokeWebhooks,
+    visitors: hubVisitors,
+    spokeVisitors,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   const hubLinkRoutes = createHubLinkRouteHandler({
@@ -1434,6 +1509,8 @@ export function wireRemote(deps: RemoteDependencies) {
     publicEntrance,
     webhooks: hubWebhooks,
     spokeWebhooks,
+    visitors: hubVisitors,
+    spokeVisitors,
   });
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's

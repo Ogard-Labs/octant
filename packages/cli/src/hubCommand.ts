@@ -74,6 +74,17 @@ export type HubCliCommand =
     }
   | { readonly action: "webhook"; readonly mode: "list" }
   | { readonly action: "webhook"; readonly mode: "rotate" | "remove"; readonly endpointId: string }
+  /** The hub's visitor-link switch, and this spoke's links and the comments waiting on them. */
+  | { readonly action: "visitor"; readonly mode: "on" | "off" | "list" }
+  | {
+      readonly action: "visitor";
+      readonly mode: "share";
+      readonly threadMode: "code" | "chat";
+      readonly threadId: string;
+      readonly scope: "read" | "comment";
+      readonly hours?: number;
+    }
+  | { readonly action: "visitor"; readonly mode: "stop" | "send" | "dismiss"; readonly id: string }
   | {
       readonly action: "certificate";
       readonly mode: "status" | "disable" | "enable";
@@ -285,6 +296,38 @@ export function resolveHubCliCommand(
       }
       return { action, mode, scheme, label };
     }
+    case "visitor": {
+      const [mode, first, second] = rest;
+      if (mode === "on" || mode === "off" || mode === "list") {
+        return rest.length === 1 && only() ? { action, mode } : undefined;
+      }
+      if (mode === "stop" || mode === "send" || mode === "dismiss") {
+        return rest.length === 2 &&
+          only() &&
+          first !== undefined &&
+          /^[A-Za-z0-9_-]{22}$/.test(first)
+          ? { action, mode, id: first }
+          : undefined;
+      }
+      if (mode !== "share" || rest.length !== 3 || !only("comment", "hours")) return undefined;
+      if ((first !== "code" && first !== "chat") || second === undefined) return undefined;
+      if (flags.comment !== undefined && !isSwitch(flags.comment)) return undefined;
+      // A bare --hours parses as true, which Number would read as one hour.
+      if (flags.hours !== undefined && typeof flags.hours !== "string") return undefined;
+      const hours = flags.hours === undefined ? undefined : Number(flags.hours);
+      // A link lasts a day unless the person says otherwise, and never more than a week.
+      if (hours !== undefined && !(Number.isInteger(hours) && hours >= 1 && hours <= 168)) {
+        return undefined;
+      }
+      return {
+        action,
+        mode,
+        threadMode: first,
+        threadId: second,
+        scope: flags.comment === true ? "comment" : "read",
+        ...(hours === undefined ? {} : { hours }),
+      };
+    }
     case "certificate": {
       if (rest.length !== 0 || !only("enable", "disable", "status", "acknowledge-transparency")) {
         return undefined;
@@ -438,6 +481,8 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runPublic(input, command);
     case "webhook":
       return await runWebhook(input, command);
+    case "visitor":
+      return await runVisitor(input, command);
   }
 }
 
@@ -611,6 +656,96 @@ async function runWebhook(
     ].join("\n") + "\n",
   );
   return 0;
+}
+
+async function runVisitor(
+  input: Input,
+  command: Extract<HubCliCommand, { action: "visitor" }>,
+): Promise<number> {
+  switch (command.mode) {
+    case "on":
+    case "off": {
+      const response = await post(input, "/api/desktop/hub/visitors", {
+        enabled: command.mode === "on",
+      });
+      if (!isOk(response, "changed")) return refusal(input, response, "Octant refused that.");
+      input.stdout.write(
+        command.mode === "on"
+          ? "Visitor links are on for this hub's public entrance.\n"
+          : "Visitor links are off; every visitor route answers nothing.\n",
+      );
+      return 0;
+    }
+    case "list": {
+      const response = await input.session.send({ path: "/api/desktop/hub/status", method: "GET" });
+      const spoke = field(field(response.body, "visitors"), "spoke");
+      const links = field(spoke, "links");
+      const comments = field(spoke, "comments");
+      if (response.status !== 200 || !Array.isArray(links) || !Array.isArray(comments)) {
+        input.stderr.write(`${failureMessage(response, "Octant could not read the links.")}\n`);
+        return 1;
+      }
+      const lines = [
+        ...links.map(
+          (link: unknown) =>
+            `${String(field(link, "linkId"))}  ${String(field(link, "mode"))} ${String(field(link, "threadId"))}  ${String(field(link, "scope"))}  until ${new Date(Number(field(link, "expiresAt"))).toISOString()}${field(link, "opened") === true ? "  opened" : ""}`,
+        ),
+        ...comments.map(
+          (comment: unknown) =>
+            `Request ${String(field(comment, "commentId"))} on ${String(field(comment, "linkId"))}: ${terminalSafe(String(field(comment, "text")), "one-line")}`,
+        ),
+      ];
+      input.stdout.write(
+        lines.length === 0
+          ? "This computer shares no thread with a visitor.\n"
+          : `${lines.join("\n")}\n`,
+      );
+      return 0;
+    }
+    case "share": {
+      const response = await post(input, "/api/desktop/hub/visitors/share", {
+        mode: command.threadMode,
+        threadId: command.threadId,
+        scope: command.scope,
+        ...(command.hours === undefined ? {} : { lifetimeMs: command.hours * 3_600_000 }),
+      });
+      if (!isOk(response, "shared")) {
+        return refusal(input, response, "Octant refused to share that thread.");
+      }
+      input.stdout.write(
+        [
+          `Link on your hub's public address  ${String(field(response.body, "url"))}`,
+          "The part after # is the link's secret. Octant does not show it again; send the whole link to your visitor now.",
+          ...(field(response.body, "published") === true
+            ? []
+            : ["The hub has not taken the link yet; this computer tries again shortly."]),
+        ].join("\n") + "\n",
+      );
+      return 0;
+    }
+    case "stop": {
+      const response = await post(input, "/api/desktop/hub/visitors/stop", { linkId: command.id });
+      if (!isOk(response, "stopped")) return refusal(input, response, "Octant refused that.");
+      input.stdout.write("The link is stopped; its next request is refused.\n");
+      return 0;
+    }
+    case "send":
+    case "dismiss": {
+      const response = await post(input, "/api/desktop/hub/visitors/comment", {
+        commentId: command.id,
+        action: command.mode,
+      });
+      if (!isOk(response, command.mode === "send" ? "sent" : "dismissed")) {
+        return refusal(input, response, "Octant refused that.");
+      }
+      input.stdout.write(
+        command.mode === "send"
+          ? `The thread now carries outside content. Send this as your next message there:\n${terminalSafe(String(field(response.body, "text")), "lines")}\n`
+          : "The comment is dismissed.\n",
+      );
+      return 0;
+    }
+  }
 }
 
 async function printPublicStatus(input: Input): Promise<number> {
@@ -1361,6 +1496,7 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "public-not-granted":
     "This computer's hub grant does not tick Public. Tick it with `octant hub grant --items` first.",
   "unknown-endpoint": "This computer has no endpoint with that id.",
+  "unknown-thread": "This computer has no live thread with that id in that mode.",
   "provision-service-off": "Offers are off. Turn them on with `octant hub provision on`.",
   "needs-person":
     "That proposal needs you: a routine is applied with --project <project-id>, and a routine or an endpoint row never applies on its own.",
@@ -1376,6 +1512,17 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
 };
 
 /** The server's refusal as a sentence plus its own word for it, so nothing is hidden. */
+// A visitor writes this text, so it could carry escape sequences that rewrite
+// the owner's terminal or reorder what it shows. Control and bidirectional
+// characters print as a visible mark instead.
+const TERMINAL_CONTROLS =
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+function terminalSafe(text: string, shape: "one-line" | "lines"): string {
+  const shown = text.replace(TERMINAL_CONTROLS, "\ufffd");
+  return shape === "one-line" ? shown.replace(/[\n\t]+/g, " ") : shown;
+}
+
 function refusal(input: Input, response: LocalControlResponse, fallback: string): number {
   const kind = field(response.body, "kind");
   if (field(response.body, "status") === "refused" && typeof kind === "string") {
