@@ -1,11 +1,11 @@
 import { generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import {
-  visitorProofPayload,
   type HubMemberId,
   type HubMembershipChangedPayload,
   type HubVisitorGrantsUpdate,
   type VisitorLinkId,
 } from "@octant/contracts";
+import { visitorProofPayload } from "@octant/domain";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
 import { publicKeyFingerprint } from "./hubCrypto";
@@ -48,6 +48,7 @@ function world() {
   const spoke = new SpokeVisitorService({
     state: memoryState(),
     publicGranted: () => true,
+    remoteAccessPaused: () => false,
     hub: {
       target: () => ({ memberId: HUB }),
       sendGrants: async (update: HubVisitorGrantsUpdate) => {
@@ -135,7 +136,8 @@ function request(
     path: `/v/${linkId}${suffix}`,
     headers,
     principal: { kind: "visitor", linkId },
-    readBody: async () => ({ status: "read", bytes }),
+    readBody: async (maxBytes) =>
+      bytes.length > maxBytes ? { status: "too-large" } : { status: "read", bytes },
     signal: controller.signal,
   };
 }
@@ -264,6 +266,18 @@ describe("visitor links on the hub", () => {
     expect(answer.status).toBe(202);
     expect(context.spoke.view().comments.map((comment) => comment.text)).toEqual(["approve"]);
     expect(context.hub.handlers()).not.toHaveProperty("visitorApprove");
+  });
+
+  it("takes a full-length comment in a script that needs three bytes a character", async () => {
+    const context = world();
+    const link = await shareComment(context);
+    const visitor = browser();
+    await call(context.hub, "visitor-open", link.linkId, visitor, { secret: link.secret });
+    const text = "你".repeat(4_000);
+    expect(
+      (await call(context.hub, "visitor-comments", link.linkId, visitor, { text })).status,
+    ).toBe(202);
+    expect(context.spoke.view().comments.map((comment) => comment.text.length)).toEqual([4_000]);
   });
 
   it("the spoke binds no browser that a hub names without the link's secret", async () => {

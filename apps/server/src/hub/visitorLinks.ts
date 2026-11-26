@@ -4,6 +4,7 @@
 // link on every visitor request.
 
 import {
+  VISITOR_FETCH_ANSWER_MAX_BYTES,
   decodeVisitorFetchAnswer,
   type HubVisitorGrantsUpdate,
   type VisitorFetchAnswer,
@@ -82,6 +83,7 @@ export async function askVisitorSpoke(
     body: JSON.stringify(request),
     headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
     now: deps.now(),
+    maxResponseBytes: VISITOR_FETCH_ANSWER_MAX_BYTES,
   });
   if (answer.status === "unreachable" || !answer.response.ok) return undefined;
   try {

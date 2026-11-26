@@ -248,6 +248,18 @@ describe("what a visitor reads", () => {
     expect(text).toContain("[path]");
   });
 
+  it("redacts an absolute path under any folder, a network share, and a file URL", () => {
+    const text = redactForVisitor(
+      "Read /workspace/private-project/strategy.md and /data/customer/export.csv, " +
+        "then \\\\fileserver\\finance\\q3.xlsx, D:/clients/acme/plan.md and file:///srv/app/env.",
+    );
+    expect(text).not.toContain("private-project");
+    expect(text).not.toContain("customer");
+    expect(text).not.toContain("fileserver");
+    expect(text).not.toContain("acme");
+    expect(text).not.toContain("/srv/app");
+  });
+
   it("leaves ordinary prose and web addresses alone", () => {
     expect(redactForVisitor("The build passed; see https://example.com/a/b for notes.")).toBe(
       "The build passed; see https://example.com/a/b for notes.",

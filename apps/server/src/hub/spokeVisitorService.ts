@@ -13,6 +13,7 @@ import {
   VISITOR_COMMENT_MAX_CHARACTERS,
   VISITOR_LINK_DEFAULT_LIFETIME_MS,
   VISITOR_LINK_MAX_PENDING_COMMENTS,
+  VISITOR_PROJECTION_MAX_BYTES,
   VisitorLinkId,
   type HubMembershipChangedPayload,
   type HubVisitorGrantsUpdate,
@@ -73,6 +74,8 @@ export interface SpokeVisitorServiceOptions {
   readonly state: HubStatePort;
   /** Whether this spoke's person ticked Public in the hub grant. Read on every request. */
   readonly publicGranted: () => boolean;
+  /** Whether this host's person paused remote access; a paused spoke answers no visitor. */
+  readonly remoteAccessPaused: () => boolean;
   readonly hub: SpokeVisitorHubPort | undefined;
   /** This host's member id and identity key; the grant is signed with it. */
   readonly signing: () => {
@@ -100,7 +103,10 @@ export type SpokeVisitorShared =
       readonly expiresAt: number;
       readonly published: boolean;
     }
-  | { readonly status: "refused"; readonly kind: "public-not-granted" | "not-a-member" | "full" };
+  | {
+      readonly status: "refused";
+      readonly kind: "public-not-granted" | "not-a-member" | "unknown-thread" | "full";
+    };
 
 export type SpokeVisitorCommentDecision =
   | {
@@ -133,6 +139,10 @@ function empty(): SpokeVisitorState {
 export class SpokeVisitorService {
   readonly #options: SpokeVisitorServiceOptions;
   #publishedGranted: boolean | undefined;
+  /** One publication at a time, so an older list can never reach the hub after a newer one. */
+  #publishing: Promise<boolean> = Promise.resolve(true);
+  /** Counts link changes; a send clears `unpublished` only if none came while it was out. */
+  #revision = 0;
 
   constructor(options: SpokeVisitorServiceOptions) {
     this.#options = options;
@@ -162,6 +172,12 @@ export class SpokeVisitorService {
     if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
     const signing = this.#options.signing();
     if (signing.memberId === undefined) return { status: "refused", kind: "not-a-member" };
+    // A link to a thread the visitor could never open is refused now, not at
+    // the visitor's first fetch.
+    const thread = this.#options.source.read(input.mode, input.threadId);
+    if (thread.status === "missing" || thread.archived) {
+      return { status: "refused", kind: "unknown-thread" };
+    }
     const now = this.#options.now();
     const held = this.#prune(this.#load(), now);
     if (held.links.length >= MAX_LINKS) return { status: "refused", kind: "full" };
@@ -187,6 +203,7 @@ export class SpokeVisitorService {
       mode: input.mode,
       threadId: input.threadId,
     };
+    this.#revision += 1;
     this.#save({ ...held, links: [...held.links, link], unpublished: true });
     this.#options.record({ change: "visitor-link-shared", actingPrincipal: LOCAL_WINDOW });
     const published = await this.publish();
@@ -210,6 +227,7 @@ export class SpokeVisitorService {
     if (link === undefined || link.stoppedAt !== undefined) {
       return { status: "refused", kind: "unknown-link" };
     }
+    this.#revision += 1;
     this.#save({
       ...held,
       links: held.links.map((entry) =>
@@ -226,6 +244,8 @@ export class SpokeVisitorService {
   /** What the hub, or a standing-in standby, asks on every visitor request. */
   fetch(request: VisitorFetchRequest, askedBy: string): VisitorFetchAnswer {
     if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
+    // Pause refuses this spoke's links, as it refuses its paired devices.
+    if (this.#options.remoteAccessPaused()) return { status: "refused", kind: "paused" };
     const now = this.#options.now();
     const held = this.#load();
     const linkId = String(request.linkId);
@@ -308,9 +328,19 @@ export class SpokeVisitorService {
   }
 
   /** Hands the hub every live grant; without Public, an empty list withdraws them all. */
-  async publish(): Promise<boolean> {
+  publish(): Promise<boolean> {
+    const next = this.#publishing.then(
+      () => this.#publishNow(),
+      () => this.#publishNow(),
+    );
+    this.#publishing = next.catch(() => false);
+    return next;
+  }
+
+  async #publishNow(): Promise<boolean> {
     const hub = this.#options.hub;
     if (hub === undefined || hub.target() === undefined) return false;
+    const revision = this.#revision;
     const granted = this.#options.publicGranted();
     const now = this.#options.now();
     const held = this.#prune(this.#load(), now);
@@ -320,7 +350,9 @@ export class SpokeVisitorService {
           .map((link) => link.signed)
       : [];
     const sent = await hub.sendGrants({ grants });
-    if (sent) {
+    // A link shared or stopped while this list was out is not in it; the flag
+    // stays, and the next look sends the newer list.
+    if (sent && revision === this.#revision) {
       this.#publishedGranted = granted;
       const { unpublished: _unpublished, ...rest } = this.#prune(this.#load(), now);
       this.#save(rest);
@@ -381,14 +413,22 @@ export class SpokeVisitorService {
   }
 }
 
-/** The visitor's view of a thread: titles and messages only, redacted, newest last. */
+/**
+ * The visitor's view of a thread: titles and messages only, redacted, newest
+ * last, and only as many of the newest as fit in the projection's bytes.
+ */
 function projectionOf(thread: Extract<VisitorThreadRead, { status: "found" }>): VisitorProjection {
-  return {
-    title: redactForVisitor(thread.title).slice(0, 256),
-    state: thread.state,
-    messages: thread.messages.slice(-MAX_MESSAGES).map((message) => ({
+  const title = redactForVisitor(thread.title).slice(0, 256);
+  let room = VISITOR_PROJECTION_MAX_BYTES - Buffer.byteLength(JSON.stringify({ title }));
+  const kept: VisitorProjection["messages"][number][] = [];
+  for (const message of thread.messages.slice(-MAX_MESSAGES).toReversed()) {
+    const shown = {
       role: message.role,
       text: redactForVisitor(message.text).slice(0, MAX_MESSAGE_CHARACTERS),
-    })),
-  };
+    };
+    room -= Buffer.byteLength(JSON.stringify(shown)) + 1;
+    if (room < 0) break;
+    kept.push(shown);
+  }
+  return { title, state: thread.state, messages: kept.reverse() };
 }

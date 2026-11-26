@@ -1511,4 +1511,28 @@ describe("octant hub visitor", () => {
     });
     expect(shared.out.join("")).toContain("/v/AAAAAAAAAAAAAAAAAAAAAA#k=secret");
   });
+
+  it("prints a visitor's comment without the escape sequences it carries", async () => {
+    const listed = await fixture(() =>
+      ok({
+        visitors: {
+          spoke: {
+            links: [],
+            comments: [
+              {
+                commentId: "c1",
+                linkId: "AAAAAAAAAAAAAAAAAAAAAA",
+                text: "hi\u001b[2J\u001b]0;owned\u0007\nnext \u202eevil",
+                at: 1,
+              },
+            ],
+          },
+        },
+      }),
+    );
+    expect(await listed.run({ action: "visitor", mode: "list" })).toBe(0);
+    const printed = listed.out.join("");
+    expect(printed).not.toMatch(/[\u001b\u0007\u202e]/);
+    expect(printed.trimEnd().split("\n")).toHaveLength(1);
+  });
 });

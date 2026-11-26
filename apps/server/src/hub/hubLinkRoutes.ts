@@ -568,7 +568,8 @@ export function createHubLinkRouteHandler(
         path: route,
         body,
         recipientMemberId: options.hub.hubMemberId(),
-        publicKeyFor: (sender) => options.hub.memberKey(sender, presentedKey ?? undefined),
+        // A guest owns no thread, so it cannot put a visitor link on the internet.
+        publicKeyFor: (sender) => options.hub.hostMemberKey(sender, presentedKey ?? undefined),
       });
       if (verified.status === "refused") return refused(401, verified.kind);
       let update;

@@ -14,7 +14,6 @@ import {
   VISITOR_LINK_REQUESTS_PER_MINUTE,
   VISITOR_PROOF_HEADER,
   VISITOR_PROOF_SKEW_MS,
-  visitorProofPayload,
   type AuditActingPrincipal,
   type HubMembershipChangedPayload,
   type HubVisitorGrantsUpdate,
@@ -22,6 +21,7 @@ import {
   type VisitorFetchAnswer,
   type VisitorFetchRequest,
 } from "@octant/contracts";
+import { visitorProofPayload } from "@octant/domain";
 import { Schema } from "effect";
 import type { HubStatePort, HubVisitorHubState } from "./hubStateStore";
 import { publicKeyFingerprint, verifySignature } from "./hubCrypto";
@@ -31,7 +31,9 @@ import { checkVisitorLinkGrant } from "./publicEntranceCrypto";
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
 const MINUTE_MS = 60_000;
 const DEFAULT_POLL_MS = 2_000;
-const BODY_MAX_BYTES = 8 * 1024;
+// A comment is up to 4,000 characters, which as UTF-8 inside JSON may take
+// four bytes each and six for an escaped control character.
+const BODY_MAX_BYTES = 32 * 1024;
 const NONCES_MAX = 4_096;
 const STREAMS_PER_BROWSER = 4;
 // Windows are keyed per browser key, which anyone can mint, so idle ones go.
@@ -90,6 +92,7 @@ function refusalAnswer(answer: Extract<VisitorFetchAnswer, { status: "refused" }
   switch (answer.kind) {
     case "public-not-granted":
     case "unknown-link":
+    case "paused":
       return NOT_FOUND;
     case "revoked":
     case "expired":

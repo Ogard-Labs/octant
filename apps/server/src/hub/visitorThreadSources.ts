@@ -30,13 +30,15 @@ function readCode(connection: SqliteConnection, threadId: string): VisitorThread
       SELECT content_role, body_text
       FROM code_transcript_search_projection
       WHERE thread_id = ? AND rewound = 0
-      ORDER BY start_sequence DESC, content_role DESC
+      ORDER BY start_sequence DESC, content_role ASC
       LIMIT ?
     `)
     .all(threadId, MAX_MESSAGES) as ReadonlyArray<{
     readonly content_role: "user" | "assistant";
     readonly body_text: string;
   }>;
+  // A completed turn's prompt and reply share a sequence. Newest first, the
+  // reply comes before its prompt here, so the reversal below puts the prompt first.
   const messages: Message[] = rows
     .filter((row) => row.body_text.trim() !== "")
     .map(

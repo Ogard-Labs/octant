@@ -1376,6 +1376,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const spokeVisitors = new SpokeVisitorService({
     state: hubStateStore,
     publicGranted: () => spokeLinkService.hubMayUse("public").status === "allowed",
+    remoteAccessPaused: () => readRemoteAccessPaused(persistence.connection),
     hub: spokeVisitorHubPort({
       state: hubStateStore,
       identity: resolveHubIdentity,

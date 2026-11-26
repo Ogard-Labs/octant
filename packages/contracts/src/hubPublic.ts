@@ -28,6 +28,14 @@ export type VisitorLinkScope = typeof VisitorLinkScope.Type;
 export const VISITOR_LINK_DEFAULT_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export const VISITOR_LINK_MAX_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 export const VISITOR_COMMENT_MAX_CHARACTERS = 4_000;
+/**
+ * The most a visitor projection takes as JSON. The spoke keeps the newest
+ * messages that fit, so the answer crosses the pinned private link, and a
+ * member's forward, whole.
+ */
+export const VISITOR_PROJECTION_MAX_BYTES = 384 * 1024;
+/** What a spoke's answer to a visitor fetch may take on the private link, the projection and its wrapper. */
+export const VISITOR_FETCH_ANSWER_MAX_BYTES = 448 * 1024;
 export const VISITOR_LINK_MAX_PENDING_COMMENTS = 20;
 export const VISITOR_LINK_REQUESTS_PER_MINUTE = 120;
 export const VISITOR_LINK_COMMENTS_PER_MINUTE = 10;
@@ -347,6 +355,8 @@ export const VISITOR_FETCH_REFUSAL_KINDS = [
   "bound-elsewhere",
   "comment-not-allowed",
   "comments-full",
+  // The spoke's person paused remote access.
+  "paused",
 ] as const;
 export const VisitorFetchRefusalKind = Schema.Literal(...VISITOR_FETCH_REFUSAL_KINDS);
 export type VisitorFetchRefusalKind = typeof VisitorFetchRefusalKind.Type;
@@ -401,11 +411,3 @@ export const VISITOR_PROOF_HEADER = "octant-visitor-proof";
 export const VISITOR_KEY_HEADER = "octant-visitor-key";
 /** How far a proof's time may stray from the hub's clock. */
 export const VISITOR_PROOF_SKEW_MS = 60_000;
-/** The text a viewer's key signs for one request. */
-export const visitorProofPayload = (input: {
-  readonly method: string;
-  readonly path: string;
-  readonly timestamp: string;
-  readonly nonce: string;
-}): string =>
-  `octant/visitor-proof/v1|${input.method}|${input.path}|${input.timestamp}|${input.nonce}`;

@@ -18,6 +18,7 @@ import {
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
   SHELL_SETTINGS_PATH,
+  VISITOR_FETCH_ANSWER_MAX_BYTES,
   SERVICE_OFFERS_DECIDE_PATH,
   SERVICE_OFFERS_PATH,
   SERVICE_OFFER_DECISION_MAX_BYTES,
@@ -629,7 +630,7 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 16_384,
-    maxResponseBytes: 8_388_608,
+    maxResponseBytes: VISITOR_FETCH_ANSWER_MAX_BYTES,
   },
   {
     id: REMOTE_HUB_LINK_ROUTE_IDS.pushGrant,

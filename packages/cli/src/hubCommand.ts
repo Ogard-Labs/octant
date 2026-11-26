@@ -690,7 +690,7 @@ async function runVisitor(
         ),
         ...comments.map(
           (comment: unknown) =>
-            `Request ${String(field(comment, "commentId"))} on ${String(field(comment, "linkId"))}: ${String(field(comment, "text"))}`,
+            `Request ${String(field(comment, "commentId"))} on ${String(field(comment, "linkId"))}: ${terminalSafe(String(field(comment, "text")), "one-line")}`,
         ),
       ];
       input.stdout.write(
@@ -738,7 +738,7 @@ async function runVisitor(
       }
       input.stdout.write(
         command.mode === "send"
-          ? `The thread now carries outside content. Send this as your next message there:\n${String(field(response.body, "text"))}\n`
+          ? `The thread now carries outside content. Send this as your next message there:\n${terminalSafe(String(field(response.body, "text")), "lines")}\n`
           : "The comment is dismissed.\n",
       );
       return 0;
@@ -1494,6 +1494,7 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "public-not-granted":
     "This computer's hub grant does not tick Public. Tick it with `octant hub grant --items` first.",
   "unknown-endpoint": "This computer has no endpoint with that id.",
+  "unknown-thread": "This computer has no live thread with that id in that mode.",
   "provision-service-off": "Offers are off. Turn them on with `octant hub provision on`.",
   "needs-person":
     "That proposal needs you: a routine is applied with --project <project-id>, and a routine or an endpoint row never applies on its own.",
@@ -1509,6 +1510,17 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
 };
 
 /** The server's refusal as a sentence plus its own word for it, so nothing is hidden. */
+// A visitor writes this text, so it could carry escape sequences that rewrite
+// the owner's terminal or reorder what it shows. Control and bidirectional
+// characters print as a visible mark instead.
+const TERMINAL_CONTROLS =
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+function terminalSafe(text: string, shape: "one-line" | "lines"): string {
+  const shown = text.replace(TERMINAL_CONTROLS, "\ufffd");
+  return shape === "one-line" ? shown.replace(/[\n\t]+/g, " ") : shown;
+}
+
 function refusal(input: Input, response: LocalControlResponse, fallback: string): number {
   const kind = field(response.body, "kind");
   if (field(response.body, "status") === "refused" && typeof kind === "string") {

@@ -2,9 +2,11 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import type {
   HubMemberId,
   HubMembershipChangedPayload,
+  HubVisitorGrantsUpdate,
   VisitorFetchRequest,
   VisitorLinkId,
 } from "@octant/contracts";
+import { VISITOR_PROJECTION_MAX_BYTES } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
 import { publicKeyFingerprint } from "./hubCrypto";
@@ -37,6 +39,8 @@ function setup(
   options: {
     thread?: () => VisitorThreadRead;
     granted?: () => boolean;
+    paused?: () => boolean;
+    sendGrants?: (update: HubVisitorGrantsUpdate) => Promise<boolean>;
   } = {},
 ) {
   let now = 1_800_000_000_000;
@@ -47,12 +51,15 @@ function setup(
   const service = new SpokeVisitorService({
     state: memoryState(),
     publicGranted: options.granted ?? (() => true),
+    remoteAccessPaused: options.paused ?? (() => false),
     hub: {
       target: () => ({ memberId: "22222222-2222-4222-8222-222222222222" }),
-      sendGrants: async (update) => {
-        sent.push(update);
-        return true;
-      },
+      sendGrants:
+        options.sendGrants ??
+        (async (update) => {
+          sent.push(update);
+          return true;
+        }),
     },
     signing: () => key,
     source: {
@@ -298,5 +305,75 @@ describe("visitor comments", () => {
     expect(
       context.service.fetch(fetchOf(link.linkId, "comment", BROWSER, { comment: "one more" }), HUB),
     ).toEqual({ status: "refused", kind: "comments-full" });
+  });
+
+  it("answers no visitor while its person has paused remote access", async () => {
+    let paused = false;
+    const context = setup({ paused: () => paused });
+    const link = await shared(context);
+    const open = fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) });
+    expect(context.service.fetch(open, HUB).status).toBe("ok");
+    paused = true;
+    expect(context.service.fetch(fetchOf(link.linkId, "read"), HUB)).toEqual({
+      status: "refused",
+      kind: "paused",
+    });
+    paused = false;
+    expect(context.service.fetch(fetchOf(link.linkId, "read"), HUB).status).toBe("ok");
+  });
+
+  it("refuses to share a thread it cannot find, or one that is archived", async () => {
+    let thread: VisitorThreadRead = { status: "missing" };
+    const context = setup({ thread: () => thread });
+    expect(
+      await context.service.share({ mode: "code", threadId: "no-such", scope: "read" }),
+    ).toEqual({ status: "refused", kind: "unknown-thread" });
+    thread = { status: "found", title: "Old", archived: true, state: "idle", messages: [] };
+    expect(await context.service.share({ mode: "code", threadId: "old", scope: "read" })).toEqual({
+      status: "refused",
+      kind: "unknown-thread",
+    });
+  });
+
+  it("keeps a long thread's projection small enough for the private link, newest messages kept", async () => {
+    const messages = Array.from({ length: 200 }, (_, index) => ({
+      role: index % 2 === 0 ? ("person" as const) : ("agent" as const),
+      text: `${index} ${"x".repeat(31_000)}`,
+    }));
+    const context = setup({
+      thread: () => ({ status: "found", title: "Long", archived: false, state: "idle", messages }),
+    });
+    const link = await shared(context);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    if (answer.status !== "ok") throw new Error(answer.kind);
+    expect(Buffer.byteLength(JSON.stringify(answer))).toBeLessThanOrEqual(
+      VISITOR_PROJECTION_MAX_BYTES + 1_024,
+    );
+    expect(answer.projection?.messages.at(-1)?.text.startsWith("199 ")).toBe(true);
+  });
+
+  it("an older grant list never reaches the hub after a newer one", async () => {
+    const sent: number[] = [];
+    let releaseFirst: (() => void) | undefined;
+    let calls = 0;
+    const context = setup({
+      sendGrants: async (update) => {
+        calls += 1;
+        if (calls === 1) await new Promise<void>((resolve) => (releaseFirst = resolve));
+        sent.push(update.grants.length);
+        return true;
+      },
+    });
+    const first = context.service.share({ mode: "code", threadId: "thread-1", scope: "read" });
+    await Promise.resolve();
+    const second = context.service.share({ mode: "code", threadId: "thread-2", scope: "read" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseFirst?.();
+    await Promise.all([first, second]);
+    expect(sent.at(-1)).toBe(2);
+    expect(context.service.view().published).toBe(true);
   });
 });

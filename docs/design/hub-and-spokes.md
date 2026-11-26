@@ -3048,16 +3048,27 @@ person's work without any service Octant runs (maintainer decision,
 - **What a visitor sees.** A projection the spoke builds and redacts: the
   messages and the titles and states of steps, live. Never tool inputs or
   outputs, diffs, files, attachments, Canvases, paths, or approval contents;
-  an approval shows only that the owner is deciding. The page is a small
+  an approval shows only that the owner is deciding. Any absolute path, a
+  network share, and a `file:` URL in a message read `[path]`. The newest
+  messages that fit in 384 KiB are shown, so the answer crosses the private
+  link whole. The page is a small
   viewer the hub serves, separate from the web app, that runs no script from
   the thread.
 - **Comments.** On a comment-only link, a visitor's message lands on the
   spoke as a **Request** in the thread with **Send** and **Dismiss**. Only
   the person's Send delivers it, framed as outside content from the visitor.
   A visitor never answers an approval, changes the model or mode, or acts on
-  the thread.
+  the thread. Until the thread's Request is built in the window,
+  `octant hub visitor send` marks the thread as carrying outside content and
+  prints the framed comment for the person to send there themselves; the
+  CLI shows a visitor's text with its control characters replaced.
 - **Ends.** A link ends when it expires, is revoked, or its thread is
-  archived or moves to another member.
+  archived or moves to another member. A spoke refuses to share a thread it
+  cannot find or one already archived, and while its person pauses remote
+  access it answers no visitor.
+- **Streams through the hub's own entrance.** A member's entrance forwards a
+  visitor's open and comments, but not the live stream, which answers 501
+  there; a front for visitor links points at the hub's entrance.
 
 #### Webhook triggers
 

@@ -133,6 +133,16 @@ export function hubSealingKeyPayload(memberId: string, sealingPublicKey: string)
   return `octant/sealing-key/v1|${memberId}|${sealingPublicKey}`;
 }
 
+/** The text a viewer's key signs for one request. */
+export function visitorProofPayload(input: {
+  readonly method: string;
+  readonly path: string;
+  readonly timestamp: string;
+  readonly nonce: string;
+}): string {
+  return `octant/visitor-proof/v1|${input.method}|${input.path}|${input.timestamp}|${input.nonce}`;
+}
+
 const VISITOR_LINK_DOMAIN = "octant/visitor-link/v1";
 
 /** The text a spoke signs for a grant: a domain line, then the grant as JSON with sorted keys. */
@@ -178,14 +188,20 @@ export function decideVisitorLink(input: {
 }
 
 // A path names the person's folders and account; a visitor reads none of them.
-// URLs are left alone: the scheme in front of `//` is not a path.
-const UNIX_PATH =
-  /(^|[\s("'`=:,;])(?:~|\/(?:Users|home|root|private|var|tmp|opt|etc|Volumes|mnt|srv|usr|Library))\/[^\s"'`)<>,;]*/g;
-const WINDOWS_PATH = /(^|[\s("'`=:,;])[A-Za-z]:\\[^\s"'`)<>,;]*/g;
+// Any absolute path of two or more parts is one, whatever its first folder,
+// since a fixed list of roots let `/workspace/...` and `/data/...` through.
+// Web addresses are left alone: the `//` after a scheme starts no path, but a
+// `file:` URL is a path and goes.
+const FILE_URL = /(^|[\s("'`=:,;])file:\/\/[^\s"'`)<>,;]*/gi;
+const UNIX_PATH = /(^|[\s("'`=:,;])(?:~|\/[\w.@+-]+)\/[^\s"'`)<>,;]*/g;
+const WINDOWS_PATH = /(^|[\s("'`=:,;])[A-Za-z]:[\\/][^\s"'`)<>,;]*/g;
+const NETWORK_SHARE = /(^|[\s("'`=:,;])\\\\[^\s\\"'`)<>,;]+\\[^\s"'`)<>,;]*/g;
 
 /** Message text as a visitor may read it: no secret-shaped value and no file-system path. */
 export function redactForVisitor(text: string): string {
   return redactSecretsAndPrivateKeys(text)
+    .replace(FILE_URL, "$1[path]")
     .replace(UNIX_PATH, "$1[path]")
-    .replace(WINDOWS_PATH, "$1[path]");
+    .replace(WINDOWS_PATH, "$1[path]")
+    .replace(NETWORK_SHARE, "$1[path]");
 }
