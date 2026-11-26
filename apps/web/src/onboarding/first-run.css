@@ -27,13 +27,20 @@
 
   container-type: inline-size;
   container-name: first-run;
+}
 
-  /*
-   * One height for every step. A wizard that resizes as the user moves
-   * through it makes the footer jump out from under the pointer, so the
-   * dialog holds its size and the step panel takes the scrolling.
-   */
+/*
+ * One height for every step. A wizard that resizes as the user moves through it
+ * makes the footer jump out from under the pointer, so the dialog holds its
+ * size. It draws to its edges and its body is the only thing that scrolls; the
+ * popup's own class is repeated so the shared dialog sheet, whichever order the
+ * two load in, does not add a second inset and a second scroller around it.
+ */
+.octant-dialog__popup.first-run {
+  display: flex;
+  flex-direction: column;
   block-size: var(--octant-dialog-height);
+  padding: 0;
   overflow: hidden;
 }
 
@@ -49,11 +56,18 @@
     "rail panel"
     "notice notice"
     "actions actions";
-  grid-template-rows: minmax(0, 1fr) auto auto;
-  gap: var(--oct-space-6) var(--oct-space-8);
+  /* The one scroller. A panel that scrolled inside the card drew a second
+     scrollbar and cut its rows in half at an edge in the middle of the dialog.
+     The first row stretches to hold the footer at the bottom of a short step
+     and never shrinks below a long one. */
+  grid-template-rows: minmax(max-content, 1fr) auto auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: var(--oct-space-4) var(--oct-space-8);
   min-width: 0;
-  block-size: 100%;
-  padding: var(--oct-space-6);
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: var(--oct-space-5) var(--oct-space-6);
 }
 
 @container first-run (max-width: 40rem) {
@@ -61,31 +75,10 @@
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "rail" "panel" "notice" "actions";
 
-    /*
-     * Stacked, every row takes its own height. A bounded panel row would clip
-     * or, once the panel stops scrolling itself, paint the current step over
-     * the notice and the footer beneath it.
-     */
+    /* Stacked, every row takes its own height. */
     grid-template-rows: auto auto auto auto;
-    gap: var(--oct-space-5);
+    gap: var(--oct-space-4);
     padding: var(--oct-space-5);
-
-    /*
-     * Stacked, the rail and the footer are both full-height rows that cannot
-     * shrink, so at a short viewport — a normal window at 200% zoom — they can
-     * together outgrow the dialog. The dialog clips, so without a scroller here
-     * Continue would sit below the fold with no way to reach it. The whole
-     * stacked wizard scrolls instead.
-     */
-    overflow-y: auto;
-  }
-
-  /* One scroller, not two: the body took it over, and the panel's own row
-     grows with it rather than holding it to a height it does not have. */
-  .first-run__panel {
-    overflow-y: visible;
-    padding-block-end: 0;
-    mask-image: none;
   }
 }
 
@@ -97,15 +90,6 @@
   min-width: 0;
   padding-inline-end: var(--oct-space-4);
   border-inline-end: 1px solid var(--oct-border-soft);
-
-  /*
-   * Five steps and a title can outgrow the row they share with the panel when
-   * the dialog is wide but short — a wide window at 200% zoom. The rail takes
-   * its own scrolling there rather than spilling over the notice and the
-   * footer beneath it. Stacked, its row grows instead and this never engages.
-   */
-  min-height: 0;
-  overflow-y: auto;
 }
 
 .first-run__rail-list {
@@ -134,29 +118,26 @@
   text-align: start;
 }
 
-.first-run__rail-step[aria-current="step"] .first-run__rail-marker {
-  border-color: var(--oct-fg);
-  background: var(--oct-fg);
-  color: var(--oct-bg);
-}
-
+/* One mark set, one circle: the current step's number filled, a passed step's
+   check, and a pending step's number in a hairline ring. */
 .first-run__rail-marker {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
-  inline-size: 1.15rem;
-  block-size: 1.15rem;
-  border: 1px solid var(--oct-border);
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  border: 1px solid var(--oct-hairline-strong);
   border-radius: var(--oct-radius-pill);
+  color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
 }
 
-/* Configured is also written into the marker (the check) and announced by the
-   sr-only text; the accent is reinforcement. */
-.first-run__rail-step[data-configured="true"]:not([aria-current="step"]) .first-run__rail-marker {
-  border-color: var(--oct-accent-fg);
-  color: var(--oct-accent-fg);
+.first-run__rail-step[data-progress="current"] .first-run__rail-marker {
+  border-color: var(--oct-fg);
+  background: var(--oct-fg);
+  color: var(--oct-bg);
 }
 
 .first-run__rail-title {
@@ -172,27 +153,9 @@
   overflow-wrap: anywhere;
 }
 
-/* The step's own scroller. The footer stays put beside it; the rail scrolls
-   only if it has to. */
 .first-run__panel {
   grid-area: panel;
   min-width: 0;
-  min-height: 0;
-  padding-inline-end: var(--oct-space-2);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-
-  /* A long step (the model list, the readiness facts) ended in a row cut in
-     half against the footer rule, which read as broken layout rather than
-     more content. The edge fades, and the padding lets the last row scroll
-     clear of the fade. */
-  padding-block-end: var(--oct-space-6);
-  mask-image: linear-gradient(
-    to bottom,
-    var(--oct-fg) calc(100% - var(--oct-space-6)),
-    transparent
-  );
 }
 
 .first-run__step-header {
@@ -219,13 +182,12 @@
   white-space: nowrap;
 }
 
-/* Sections need to read as separate objects, which the wizard's old 12px did
-   not do once each drew its own edge; Settings' own 32px is too much for a
-   panel this narrow that also has to keep its footer above the fold. */
+/* Sections read as separate objects at 16px; more pushes the footer below the
+   fold of a window 800px tall. */
 .first-run__step {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-6);
+  gap: var(--oct-space-4);
   min-width: 0;
 }
 
@@ -246,9 +208,18 @@
 }
 
 .first-run__intro {
-  margin: 0;
   font-size: var(--oct-text-sm);
   color: var(--oct-fg-2);
+}
+
+.first-run__intro p {
+  margin: 0;
+}
+
+.first-run__readiness {
+  display: grid;
+  gap: var(--oct-space-3);
+  min-width: 0;
 }
 
 .first-run__caveat {
@@ -258,9 +229,11 @@
   color: var(--oct-muted);
 }
 
-/* The verdict for the whole list is the section's note, so it takes that
-   line's type and inset from Settings. Only the icon column is placed here. */
+/* The verdict for the whole list: what works, then what that means. */
 .first-run__summary {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -280,10 +253,23 @@
 
 /* A provider, and a handoff fact, are `.setrow`s in a `.setgroup`: the shared
    row owns the inset, the hairline, and the two-line grid. What is left is a
-   list that draws no bullets, and the two places a row holds more than one
-   thing — an icon before the name, and a state word before the switch. */
+   list that draws no bullets, a glyph before a provider's name, and a handoff
+   fact's state word before its control. */
 .first-run__providers {
+  margin: 0;
+  padding: 0;
   list-style: none;
+}
+
+.first-run__fold {
+  justify-self: start;
+}
+
+/* The compact Settings row: a name and one state line in at least 52px. */
+.first-run__readiness .first-run__provider {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 52px;
+  padding: var(--oct-space-2) var(--oct-space-4);
 }
 
 .first-run__provider > .setrow-label {
@@ -291,6 +277,12 @@
   align-items: center;
   gap: var(--oct-space-2);
   overflow-wrap: anywhere;
+}
+
+.first-run__readiness .first-run__provider > .setrow-control {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  margin: 0;
 }
 
 .first-run__provider > .setrow-control {

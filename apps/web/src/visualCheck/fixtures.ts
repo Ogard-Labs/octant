@@ -15,8 +15,12 @@ import {
   decodeWorkspaceTabId,
   type AgentRunCenterSummary,
   type CodeEnvironmentObservation,
+  type DiscoverySnapshot,
   type LocalUsageHistoryResponse,
   type ProjectSummary,
+  type ProviderInstance,
+  type ProviderInstanceId,
+  type ProviderObservedState,
   type UsageDashboardResponse,
   type WorkspaceTab,
 } from "@octant/contracts";
@@ -29,6 +33,7 @@ import type { AgentHierarchyInputEntry } from "../agents/buildAgentHierarchyMode
 import { buildChildRunStatusSummary } from "../agents/buildChildRunStatusSummary";
 import type { ChildRunStatusController } from "../agents/useChildRunStatus";
 import type { AutomationEditorCatalog } from "../automation/automationCenterModel";
+import { summarizeFirstRunReadiness } from "../onboarding/firstRunReadinessModel";
 import { automationWorkDraftFixture } from "../automation/automationTestFixtures";
 
 /**
@@ -812,3 +817,63 @@ export function subagentsRead(
     refresh: () => undefined,
   };
 }
+
+const FIRST_RUN_PROVIDERS = [
+  // Registry order as a host that recorded them in scan order might hold it:
+  // the one that works is not first.
+  { driverKind: "opencode", displayName: "OpenCode", enabled: false, installed: true },
+  { driverKind: "pi", displayName: "Pi", enabled: false, installed: false },
+  { driverKind: "claude", displayName: "Claude Code", enabled: true, installed: true },
+  { driverKind: "codex", displayName: "Codex", enabled: false, installed: true },
+  { driverKind: "gemini-cli", displayName: "Gemini CLI", enabled: false, installed: false },
+  { driverKind: "kimi-code", displayName: "Kimi Code", enabled: false, installed: false },
+  { driverKind: "qwen-code", displayName: "Qwen Code", enabled: false, installed: false },
+  { driverKind: "devin", displayName: "Devin", enabled: false, installed: false },
+  { driverKind: "cline", displayName: "Cline", enabled: false, installed: false },
+].map((provider, index) => ({
+  ...provider,
+  id: `00000000-0000-4000-8000-0000000005${String(index).padStart(2, "0")}`,
+  binaryPath: `/opt/octant-example/bin/${provider.driverKind}`,
+}));
+
+/**
+ * First run on a host with nine providers: one ready, two installed and turned
+ * off, the rest not installed.
+ */
+export const FIRST_RUN_READINESS = summarizeFirstRunReadiness({
+  providerStatus: "ready",
+  instances: FIRST_RUN_PROVIDERS.map(
+    (provider) =>
+      ({
+        id: provider.id,
+        displayName: provider.displayName,
+        driverKind: provider.driverKind,
+        enabled: provider.enabled,
+        configuration: { binaryPath: provider.binaryPath },
+      }) as unknown as ProviderInstance,
+  ),
+  observedByInstance: new Map(
+    FIRST_RUN_PROVIDERS.filter((provider) => provider.enabled).map((provider) => [
+      provider.id as ProviderInstanceId,
+      {
+        instanceId: provider.id,
+        readiness: "ready",
+        processState: "running",
+        models: [{ id: "model", displayName: "Model" }],
+        capabilities: {},
+        observedAt: "2026-08-18T09:00:00.000Z",
+      } as unknown as ProviderObservedState,
+    ]),
+  ),
+  discovery: {
+    scanning: false,
+    snapshot: {
+      status: "completed",
+      candidates: FIRST_RUN_PROVIDERS.filter((provider) => provider.installed),
+      searchedDirectories: FIRST_RUN_PROVIDERS.map((provider) => ({
+        driverKind: provider.driverKind,
+        directories: ["/opt/octant-example/bin"],
+      })),
+    } as unknown as DiscoverySnapshot,
+  },
+});

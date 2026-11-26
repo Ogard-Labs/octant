@@ -60,7 +60,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 12        | 11      | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 21        | 17      | 4            | 0                   |
-| [Start screen](#start-screen)                                                         | 4         | 4       | 0            | 0                   |
+| [Start screen](#start-screen)                                                         | 5         | 5       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 7       | 5            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 3       | 2            | 0                   |
 | [Browser](#browser)                                                                   | 10        | 5       | 5            | 0                   |
@@ -73,7 +73,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 1       | 0            | 0                   |
-| **All areas**                                                                         | **321**   | **215** | **102**      | **4**               |
+| **All areas**                                                                         | **322**   | **216** | **102**      | **4**               |
 
 ## Principles and hard lines
 
@@ -3178,6 +3178,18 @@ Under the Code composer, the start screen is an agent home of work to pick up.
 - Code Home's activity cards count from journaled facts or the signed-in GitHub account's bounded history, name their source, and say when a read is partial.
 
 Status: Built. Detail: [Start screen: Code agent home](start-screen.md#code-agent-home) and [Activity timeframes](start-screen.md#activity-timeframes).
+
+### First-run setup
+
+First run is one calm dialog: it asks for providers, a Project folder, a model and a mode, leads with the providers that work, and never states a fact its rows contradict (maintainer decision, 2026-11-26).
+
+- The Providers step opens with one sentence, with what first run enables behind **More**; its summary names the providers that work.
+- Providers that can answer lead, then installed ones that are off, then the rest; past five rows they fold behind **Show N more**. Rows hold their places once the person has used a switch.
+- A row is the provider's mark and name, one state line and its switch, whose accessible name states both. Not installed is said only when the scan searched for the provider and did not find it.
+- The dialog scrolls as a whole when a step outgrows it; nothing inside the card has its own scroller.
+- A rail check means the person moved forward from the step and its answer is held; any other step shows its number.
+
+Status: Built. Since: 2026-11-26. Detail: [Start screen: First run](start-screen.md#first-run).
 
 ### First-run provider folder scan
 

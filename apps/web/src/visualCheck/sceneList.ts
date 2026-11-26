@@ -33,6 +33,7 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
   { id: "qa-device-self-read-only", narrow: true },
   { id: "qa-device-self-full", narrow: true },
   { id: "home" },
+  { id: "first-run", narrow: true },
   { id: "code-side-panel", narrow: true },
   { id: "settings-appearance" },
   {

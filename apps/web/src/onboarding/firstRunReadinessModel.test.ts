@@ -21,6 +21,7 @@ function instance(overrides: Partial<ProviderInstance> = {}): ProviderInstance {
     displayName: "Ollama",
     driverKind: "ollama",
     enabled: true,
+    configuration: {},
     ...overrides,
   } as ProviderInstance;
 }
@@ -77,31 +78,45 @@ describe("first-run provider readiness", () => {
     expect(summary.overall).toBe("action-required");
     expect(summary.providers.map((provider) => [provider.state, provider.label])).toEqual([
       ["unverified", "Not checked"],
-      ["disabled", "Disabled"],
+      ["disabled", "Off"],
     ]);
   });
 
-  it("gives an Off provider the host's withheld reason instead of the plain turned-off line", () => {
-    const reason = "fx is not offered yet: the current fx release cannot load certificates.";
-    const fx = instance({ displayName: "fx", driverKind: "fx", enabled: false });
+  it("says a turned-off provider is not installed only where the scan looked for it", () => {
+    const codex = instance({
+      displayName: "Codex",
+      driverKind: "codex",
+      enabled: false,
+      configuration: { binaryPath: "/opt/bin/codex" },
+    } as unknown as Partial<ProviderInstance>);
+    const scan = (candidates: ReadonlyArray<unknown>, directories: ReadonlyArray<string>) =>
+      summarize({
+        instances: [codex],
+        discovery: {
+          scanning: false,
+          snapshot: {
+            status: "completed",
+            candidates,
+            searchedDirectories: [{ driverKind: "codex", directories }],
+          } as unknown as DiscoverySnapshot,
+        },
+      }).providers[0]?.label;
 
+    expect(scan([{ driverKind: "codex", binaryPath: "/opt/bin/codex" }], ["/opt/bin"])).toBe(
+      "Installed · off",
+    );
+    expect(scan([], ["/opt/bin"])).toBe("Not installed");
+    expect(scan([], ["/usr/bin"])).toBe("Off");
+  });
+
+  it("claims no provider is ready while the registry cannot be read", () => {
     const summary = summarize({
-      instances: [fx],
-      observedByInstance: new Map([
-        [
-          fx.id,
-          observed({
-            readiness: "unavailable",
-            processState: "stopped",
-            models: [],
-            reason: "driver-not-admitted",
-            message: reason,
-          }),
-        ],
-      ]),
+      providerStatus: "disconnected",
+      instances: [instance()],
+      observedByInstance: new Map([[instance().id, observed()]]),
     });
 
-    expect(summary.providers[0]).toMatchObject({ state: "disabled", detail: reason });
+    expect(summary.providers[0]?.label).toBe("Not checked");
   });
 
   it("reports a probed provider as ready only when the host also observed models", () => {
@@ -115,7 +130,7 @@ describe("first-run provider readiness", () => {
     });
 
     expect(withModels.overall).toBe("ready");
-    expect(withModels.headline).toBe("1 provider is ready");
+    expect(withModels.headline).toBe("Ollama is ready");
     expect(withoutModels.readyCount).toBe(0);
     expect(withoutModels.providers[0]?.label).toBe("No models");
   });
@@ -133,6 +148,7 @@ describe("first-run provider readiness", () => {
     });
 
     expect(degraded.overall).toBe("ready");
+    expect(degraded.headline).toBe("Ollama can answer");
     expect(degraded.usableCount).toBe(1);
     expect(degraded.readyCount).toBe(0);
     expect(degraded.providers[0]?.state).toBe("degraded");
@@ -291,12 +307,10 @@ describe.each([
   {
     hostPlatform: "linux",
     computer: "this computer",
-    unlock: "Unlock this computer's credential store or sign in again.",
   },
   {
     hostPlatform: "darwin",
     computer: "this Mac",
-    unlock: "Unlock the login keychain or sign in again.",
   },
 ] as const)("first-run copy on a $hostPlatform host", (host) => {
   const onHost = (overrides: Partial<FirstRunReadinessInput>) =>
@@ -325,19 +339,6 @@ describe.each([
 
     expect(summary.detail).toBe(
       `Octant detected 1 installed runtime on ${host.computer}. Enable one in provider settings to send a message.`,
-    );
-  });
-
-  it("names the host's credential store when a stored credential cannot be read", () => {
-    const summary = onHost({
-      instances: [instance()],
-      observedByInstance: new Map([
-        [instance().id, observed({ readiness: "ready", credentialStatus: "unavailable" })],
-      ]),
-    });
-
-    expect(summary.providers[0]?.detail).toBe(
-      `Octant cannot read this provider's stored credential. ${host.unlock}`,
     );
   });
 });

@@ -1,5 +1,10 @@
-import type { DiscoverySnapshot, ProviderInstance, ProviderInstanceId } from "@octant/contracts";
-import { render, screen, within } from "@testing-library/react";
+import type {
+  DiscoverySnapshot,
+  ProviderInstance,
+  ProviderInstanceId,
+  ProviderObservedState,
+} from "@octant/contracts";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HostPlatformContext } from "../platform";
@@ -12,7 +17,8 @@ const instance = {
   displayName: "Ollama",
   driverKind: "ollama",
   enabled: true,
-} as ProviderInstance;
+  configuration: {},
+} as unknown as ProviderInstance;
 
 // A scan that ran to completion: only then may the surface claim the host has
 // no provider on it.
@@ -38,9 +44,169 @@ function mount(overrides: Partial<FirstRunProviderStepProps> = {}) {
   return props;
 }
 
+const AT = "2026-08-15T10:00:00.000Z";
+
+/** A command-line provider as the host records one, found or not by the scan. */
+function cli(index: number, displayName: string, enabled: boolean): ProviderInstance {
+  return {
+    id: `00000000-0000-4000-8000-0000000000${String(index).padStart(2, "0")}` as ProviderInstanceId,
+    displayName,
+    driverKind: `driver-${String(index)}`,
+    enabled,
+    configuration: { binaryPath: `/opt/bin/tool-${String(index)}` },
+  } as unknown as ProviderInstance;
+}
+
+/** A finished scan that searched every provider's folder and found the named ones. */
+function readinessFor(
+  instances: ReadonlyArray<ProviderInstance>,
+  found: ReadonlyArray<ProviderInstance>,
+  ready: ReadonlyArray<ProviderInstance>,
+) {
+  return summarizeFirstRunReadiness({
+    providerStatus: "ready",
+    instances,
+    observedByInstance: new Map(
+      ready.map((provider) => [
+        provider.id,
+        {
+          instanceId: provider.id,
+          readiness: "ready",
+          processState: "running",
+          models: [{ id: "model", displayName: "Model" }],
+          capabilities: {},
+          observedAt: AT,
+        } as unknown as ProviderObservedState,
+      ]),
+    ),
+    discovery: {
+      scanning: false,
+      snapshot: {
+        status: "completed",
+        candidates: found.map((provider) => ({
+          driverKind: provider.driverKind,
+          binaryPath: `/opt/bin/tool-${provider.driverKind.slice("driver-".length)}`,
+        })),
+        searchedDirectories: instances.map((provider) => ({
+          driverKind: provider.driverKind,
+          directories: ["/opt/bin"],
+        })),
+      } as unknown as DiscoverySnapshot,
+    },
+  });
+}
+
+// Registry order puts the providers that work last, as a host that recorded
+// them in scan order can.
+const missing = [3, 4, 5, 6, 7, 8].map((index) => cli(index, `Tool ${String(index)}`, false));
+const installedOff = [cli(2, "OpenCode", false), cli(9, "Pi", false)];
+const claude = cli(1, "Claude Code", true);
+const many = [...missing, ...installedOff, claude];
+const manyReadiness = readinessFor(many, [claude, ...installedOff], [claude]);
+
+function rows() {
+  return within(screen.getByRole("list")).getAllByRole("listitem");
+}
+
+/** A row as it reads: the glyph is decoration, hidden from assistive technology. */
+function reading(element: Element | null | undefined) {
+  const copy = element?.cloneNode(true) as Element | undefined;
+  for (const hidden of copy?.querySelectorAll('[aria-hidden="true"]') ?? []) hidden.remove();
+  return copy?.textContent;
+}
+
+function rowNames() {
+  return rows().map((row) => reading(row.querySelector(".setrow-label")));
+}
+
 describe("FirstRunProviderStep", () => {
-  it("says first run enables a detected Claude Code or Codex and leaves other CLIs off", () => {
+  it("the provider step names the ready provider and lists it first", () => {
+    mount({ readiness: manyReadiness });
+
+    expect(screen.getByRole("status")).toHaveTextContent("Claude Code is ready");
+    expect(rowNames().slice(0, 3)).toEqual(["Claude Code", "OpenCode", "Pi"]);
+  });
+
+  it("names every ready provider in the summary", () => {
+    const codex = cli(2, "Codex", true);
+    mount({ readiness: readinessFor([claude, codex], [claude, codex], [claude, codex]) });
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "2 providers are ready: Claude Code and Codex",
+    );
+  });
+
+  it("a row says its state once, and the switch carries it in its name", () => {
+    mount({ readiness: manyReadiness, onSetProviderEnabled: vi.fn() });
+
+    expect(rows().slice(0, 4).map(reading)).toEqual([
+      "Claude CodeReady",
+      "OpenCodeInstalled · off",
+      "PiInstalled · off",
+      "Tool 3Not installed",
+    ]);
+    expect(screen.getByRole("switch", { name: "Enable Claude Code, Ready" })).toBeChecked();
+    expect(
+      screen.getByRole("switch", { name: "Enable OpenCode, Installed · off" }),
+    ).not.toBeChecked();
+    expect(document.body.textContent).not.toMatch(/Disabled|Enabled|Turned off for this host/);
+  });
+
+  it("providers past the first five fold behind Show N more", async () => {
+    const user = userEvent.setup();
+    mount({ readiness: manyReadiness });
+
+    expect(rowNames()).toEqual(["Claude Code", "OpenCode", "Pi", "Tool 3", "Tool 4"]);
+    const more = screen.getByRole("button", { name: "Show 4 more" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    await user.click(more);
+
+    expect(rowNames()).toHaveLength(9);
+    expect(screen.getByRole("button", { name: "Show fewer" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("keeps rows where they are once the person has used a switch", async () => {
+    const user = userEvent.setup();
+    const onSetProviderEnabled = vi.fn();
+    const props: FirstRunProviderStepProps = {
+      readiness: manyReadiness,
+      onOpenProviderSettings: vi.fn(),
+      onRescan: vi.fn(),
+      onSetProviderEnabled,
+      scanning: false,
+    };
+    const view = render(<FirstRunProviderStep {...props} />);
+
+    await user.click(screen.getByRole("switch", { name: "Enable OpenCode, Installed · off" }));
+    // The host answers: OpenCode is on and not yet checked, which on a fresh
+    // list would sort it behind the providers that are only turned off.
+    const enabled = many.map((provider) =>
+      provider.displayName === "OpenCode" ? { ...provider, enabled: true } : provider,
+    );
+    view.rerender(
+      <FirstRunProviderStep
+        {...props}
+        readiness={readinessFor(enabled, [claude, ...installedOff], [claude])}
+      />,
+    );
+
+    expect(rowNames().slice(0, 3)).toEqual(["Claude Code", "OpenCode", "Pi"]);
+    expect(screen.getByRole("switch", { name: "Enable OpenCode, Not checked" })).toHaveFocus();
+  });
+
+  it("opens with one sentence and keeps what first run enables behind More", () => {
     mount();
+
+    expect(
+      screen.getByText(
+        "Choose the AI providers Octant uses. You can change this later in Settings.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText(/If Claude Code or Codex is already installed/)).not.toBeVisible();
+    fireEvent.click(screen.getByText("More"));
 
     expect(screen.getByText(/If Claude Code or Codex is already installed/)).toBeVisible();
     expect(screen.getByText(/you can turn it off later/)).toBeVisible();

@@ -25,6 +25,7 @@ import { FirstRunReadinessStep } from "./FirstRunReadinessStep";
 import type { FirstRunDiscoveryNotice, FirstRunReadinessSummary } from "./firstRunReadinessModel";
 import {
   buildFirstRunSteps,
+  FIRST_RUN_STEP_IDS,
   nextFirstRunStep,
   previousFirstRunStep,
   type FirstRunStepId,
@@ -128,6 +129,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const hostPlatform = useHostPlatform();
   const { controller } = props;
   const [step, setStep] = useState<FirstRunStepId>("providers");
+  const [passedSteps, setPassedSteps] = useState<ReadonlySet<FirstRunStepId>>(() => new Set());
   const [chosenMode, setChosenMode] = useState<PermissionMode>();
   const [modeRecorded, setModeRecorded] = useState(false);
   // Off until the person answers: first run is where the question is asked,
@@ -147,7 +149,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   // Focusing the action below a long provider list scrolls the step title out
   // of view on open. Start at the heading; Tab still reaches the step's controls.
   const stepHeading = useRef<HTMLHeadingElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const blocked = controller.blockedMessage !== undefined;
 
   const mode: FirstRunTaskMode = props.workEnabled ? selectedMode : "code";
@@ -190,20 +192,21 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     ],
   );
 
-  // The panel is one scroller shared by every step, so a step opened after a
+  // The dialog is one scroller shared by every step, so a step opened after a
   // long one started scrolled past its own header.
   useEffect(() => {
-    panel.current?.scrollTo?.({ top: 0 });
+    body.current?.scrollTo?.({ top: 0 });
   }, [step, handoffOpen]);
 
   const steps = buildFirstRunSteps({
-    current: step,
+    current: handoffOpen ? undefined : step,
+    passed: passedSteps,
     hostPlatform,
     providersReady: props.readiness.overall === "ready",
     projectReady: handoff.project !== undefined,
     modelChosen: modeModel !== undefined,
     modeChosen: modeRecorded,
-  }).map((descriptor) => ({ ...descriptor, current: descriptor.current && !handoffOpen }));
+  });
   const currentStepIndex = Math.max(
     0,
     steps.findIndex((descriptor) => descriptor.id === step),
@@ -277,8 +280,16 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   function goTo(target: FirstRunStepId) {
     if (importingProjects) return;
     if (step === "mode" && !modeRecorded) recordMode(permissionMode);
+    // Going back, or opening a step from the readiness view, moves past nothing.
+    if (!handoffOpen && FIRST_RUN_STEP_IDS.indexOf(target) > FIRST_RUN_STEP_IDS.indexOf(step)) {
+      markPassed(step);
+    }
     setHandoffOpen(false);
     setStep(target);
+  }
+
+  function markPassed(passed: FirstRunStepId) {
+    setPassedSteps((current) => new Set(current).add(passed));
   }
 
   // The outcome is recorded last, and only once every answer has been
@@ -356,7 +367,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
       onClose={skip}
       open={controller.visible}
     >
-      <div className="first-run__body">
+      <div className="first-run__body" ref={body}>
         <nav aria-label="Setup steps" className="first-run__rail">
           <h2 className="first-run__title" id={titleId}>
             Welcome to Octant
@@ -365,27 +376,24 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             {steps.map((descriptor, index) => (
               <li key={descriptor.id}>
                 <OctantButton
-                  aria-current={descriptor.current ? "step" : undefined}
+                  aria-current={descriptor.progress === "current" ? "step" : undefined}
                   className="first-run__rail-step"
-                  data-configured={descriptor.configured}
-                  data-progress={
-                    descriptor.current ? "current" : descriptor.configured ? "completed" : "pending"
-                  }
+                  data-progress={descriptor.progress}
                   disabled={importingProjects}
                   onClick={() => goTo(descriptor.id)}
                   type="button"
-                  variant={descriptor.current ? "secondary" : "ghost"}
+                  variant={descriptor.progress === "current" ? "secondary" : "ghost"}
                 >
                   <span className="first-run__rail-marker" aria-hidden>
-                    {descriptor.configured && !descriptor.current ? (
-                      <Check size={14} strokeWidth={MARK_TICK_STROKE_WIDTH} />
+                    {descriptor.progress === "completed" ? (
+                      <Check size={12} strokeWidth={MARK_TICK_STROKE_WIDTH} />
                     ) : (
                       String(index + 1)
                     )}
                   </span>
                   <span className="first-run__rail-title">{descriptor.title}</span>
                   <span className="first-run__rail-summary">{descriptor.summary}</span>
-                  {descriptor.configured && !descriptor.current ? (
+                  {descriptor.progress === "completed" ? (
                     <span className="sr-only">Configured</span>
                   ) : null}
                 </OctantButton>
@@ -394,7 +402,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           </ol>
         </nav>
 
-        <div className="first-run__panel" ref={panel}>
+        <div className="first-run__panel">
           {handoffOpen ? (
             // The readiness view follows the last counted step and is not
             // another setup step, so it carries a title and no count.
@@ -592,6 +600,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                     return;
                   }
                   if (step === "mode" && !modeRecorded) recordMode(permissionMode);
+                  markPassed(step);
                   setHandoffOpen(true);
                 }}
                 type="button"

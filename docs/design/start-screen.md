@@ -913,8 +913,13 @@ ready shows **Set up a provider** in the composer's model control.
 
 First run is a four-step wizard with a progress rail: Providers, Project, Model,
 and Mode, in that order, followed by an uncounted readiness view titled Your first
-task. Each step is pending, current, or completed: the current step is a filled
-card, completed steps show a check, and pending steps show their number. The
+task. Each step is pending, current, or completed. The marks are one set in one
+circle size: the current step is a filled card with its number filled, a pending
+step shows its number in a hairline ring, and a completed step shows a check. A
+check means the person moved forward from that step and the host holds its
+answer. A step nobody has reached stays pending even when its answer already
+exists, such as a Project made earlier, and so does a step walked past without
+one. The
 Project step chooses the first task's mode (Work or Code; Code alone when Work
 is off; Chat Projects have no folder and are not offered) and its folder with
 `OctantToggleGroup`; Choose a folder… opens the same Project create surface as
@@ -939,6 +944,31 @@ progress across relaunch. Setup is optional and never grants an agent app access
 it changes no setting or readiness answer. It adds no step or progress count.
 [Start screen](#optional-capability-card-in-your-first-task)
 owns its behavior.
+
+The dialog reads like Settings' calm rows. It holds one height for every step and
+draws to its edges; when a step outgrows it, the dialog scrolls as a whole, and
+no step or list draws a scroller of its own inside the card.
+
+The Providers step opens with one sentence, "Choose the AI providers Octant uses.
+You can change this later in Settings.", with the rest behind **More**: Octant
+runs on this computer, first run enables a detected Claude Code or Codex, and
+other detected CLIs stay off until the person turns them on. A summary then names
+what works ("Claude Code is ready", or "2 providers are ready: Claude Code and
+Codex"; "can answer" when one of them is degraded), or says no provider is ready
+yet. The rows follow in this order: providers that are on and can answer, then
+installed ones that are off, then the rest, with a provider that is on and needs
+attention ahead of those that are off or missing. Past the first five, rows fold
+behind **Show N more**. Once the person has used a switch, rows keep their places
+until they leave the step, so a switched row never jumps or folds out of sight.
+A row is the provider's mark and name, one state line in the meta ink, and its
+switch, whose accessible name states the provider and that state. The state is
+Ready, a problem word (No models, Sign-in required, Credential unavailable,
+Unreachable, Incompatible, Degraded, Checking, Not checked), or for a provider
+that is off: Installed · off when the latest scan found it, Not installed only
+when the scan searched where it should be and did not find it, and Off
+otherwise. While the provider registry is loading or unreachable, no row claims
+Ready. The full reason and remedy for a problem are in Settings › Providers &
+Models.
 
 ## Verification
 

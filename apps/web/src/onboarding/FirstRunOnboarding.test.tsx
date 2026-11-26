@@ -490,7 +490,7 @@ describe("FirstRunOnboarding", () => {
     // The discovered provider is on, so this switch turns it off; the wizard
     // waits on the write either way, and asserting the direction keeps the
     // fixture from drifting out from under the test.
-    await user.click(screen.getByRole("switch", { name: "Enable Ollama" }));
+    await user.click(screen.getByRole("switch", { name: /^Enable Ollama,/ }));
     expect(onSetProviderEnabled).toHaveBeenCalledWith(instanceId, false);
 
     await openHandoff(user);
@@ -596,7 +596,7 @@ describe("FirstRunOnboarding", () => {
     const onSelectModel = vi.fn(async () => false);
     const props = mount({ ...readyHandoff(), onSelectModel, onSetProviderEnabled });
 
-    await user.click(screen.getByRole("switch", { name: "Enable Ollama" }));
+    await user.click(screen.getByRole("switch", { name: /^Enable Ollama,/ }));
     await openHandoff(user);
     await user.click(screen.getByRole("button", { name: "Start a task" }));
 
@@ -869,12 +869,33 @@ describe("FirstRunOnboarding", () => {
     const user = userEvent.setup();
     mount({ ...readyHandoff(), codeModel: undefined, projects: [] });
 
-    expect(railStep("Providers")).toHaveAttribute("data-configured", "true");
     // Walking past a step is not the same fact as answering it.
     await user.click(railStep("Project"));
     await user.click(railStep("Model"));
-    expect(railStep("Project")).toHaveAttribute("data-configured", "false");
-    expect(railStep("Model")).toHaveAttribute("data-configured", "false");
+    await user.click(railStep("Mode"));
+    expect(railStep("Providers")).toHaveAttribute("data-progress", "completed");
+    expect(railStep("Project")).toHaveAttribute("data-progress", "pending");
+    expect(railStep("Model")).toHaveAttribute("data-progress", "pending");
+  });
+
+  it("a step the person has not reached shows its number, not a check", async () => {
+    const user = userEvent.setup();
+    mount(readyHandoff());
+
+    // The Project and model already exist, but nobody has been there yet.
+    for (const [title, number] of [
+      ["Project", "2"],
+      ["Model", "3"],
+      ["Mode", "4"],
+    ] as const) {
+      expect(railStep(title)).toHaveAttribute("data-progress", "pending");
+      expect(railStep(title).querySelector(".first-run__rail-marker")).toHaveTextContent(number);
+    }
+
+    // Jumping ahead on the rail passes only the step that was left.
+    await user.click(railStep("Mode"));
+    expect(railStep("Providers")).toHaveAttribute("data-progress", "completed");
+    expect(railStep("Project")).toHaveAttribute("data-progress", "pending");
   });
 
   it("marks the current setup step and leaves unanswered steps pending", async () => {

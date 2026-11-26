@@ -499,3 +499,57 @@ export function providerProcessFailureSummary(
 export function formatProbeTimestamp(value: string): string {
   return probeTimestampFormatter.format(new Date(value));
 }
+
+/** Whether the latest scan found this instance's own runtime on the host. */
+export function isDetectedLocally(
+  instance: ProviderInstance,
+  snapshot: DiscoverySnapshot | undefined,
+): boolean {
+  if (snapshot === undefined || snapshot.status === "failed" || snapshot.status === "cancelled") {
+    return false;
+  }
+  if (instance.driverKind === "ollama") {
+    return snapshot.candidates.some((candidate) => candidate.driverKind === "ollama");
+  }
+  const binaryPath = providerBinaryPath(instance);
+  return (
+    binaryPath !== undefined &&
+    snapshot.candidates.some(
+      (candidate) =>
+        candidate.driverKind === instance.driverKind &&
+        (candidate.binaryPath === binaryPath || candidate.discoveredPath === binaryPath),
+    )
+  );
+}
+
+export function providerBinaryPath(instance: ProviderInstance): string | undefined {
+  return "binaryPath" in instance.configuration ? instance.configuration.binaryPath : undefined;
+}
+
+/**
+ * Whether the current scan searched the directory holding this path and found
+ * nothing for this provider. Silence about a directory the scan never visited,
+ * or a driverKind the scan never finished, proves nothing, so a missing or
+ * pre-`searchedDirectories` snapshot never proves absence.
+ */
+export function isAbsenceProven(
+  binaryPath: string,
+  driverKind: ProviderInstance["driverKind"],
+  snapshot: DiscoverySnapshot | undefined,
+): boolean {
+  if (snapshot === undefined || snapshot.status === "failed" || snapshot.status === "cancelled") {
+    return false;
+  }
+  const coverage = snapshot.searchedDirectories;
+  if (coverage === undefined || coverage.length === 0) return false;
+  const directory = directoryOf(binaryPath);
+  const driverCoverage = coverage.find((entry) => entry.driverKind === driverKind);
+  if (driverCoverage === undefined) return false;
+  return driverCoverage.directories.some((candidate) => candidate === directory);
+}
+
+/** The parent directory of an absolute path, without node's path module. */
+function directoryOf(path: string): string {
+  const separator = path.lastIndexOf("/");
+  return separator <= 0 ? "/" : path.slice(0, separator);
+}
