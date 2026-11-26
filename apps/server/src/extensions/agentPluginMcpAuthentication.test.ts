@@ -694,6 +694,11 @@ describe("a signed-out server the person added by hand", () => {
     expect(await refusedWith(`Bearer realm="mcp", resource_metadata = "${METADATA}"`)).toEqual([
       expect.objectContaining({ state: "failed", signInOffered: true }),
     ]);
+    expect(
+      await refusedWith(
+        `Bearer realm="gateway", resource_metadata="", Bearer realm="mcp", resource_metadata="${METADATA}"`,
+      ),
+    ).toEqual([expect.objectContaining({ state: "failed", signInOffered: true })]);
     expect(await refusedWith(`Basic realm="old", Bearer resource_metadata="${METADATA}"`)).toEqual([
       expect.objectContaining({ state: "failed", signInOffered: true }),
     ]);
@@ -775,26 +780,53 @@ describe("a signed-out server the person added by hand", () => {
     const actual =
       await vi.importActual<typeof import("./agentPluginMcpClient")>("./agentPluginMcpClient");
     connect.mockImplementation(actual.connectAgentPluginMcpSession);
-    const subject = manager(async () => true, {
-      fetch: Object.assign(
-        async () =>
-          new Response(null, {
-            status: 401,
-            headers: { "www-authenticate": `Bearer resource_metadata="${METADATA}"` },
-          }),
-        { preconnect: () => undefined },
-      ),
-      isUserAddedSource: () => true,
-      addedByHandSource: () => true,
-    });
-    await subject.reconcile(effective());
-    await subject.invalidateAuthentication(EXTENSION, "mcp-remote", { grant: "unchanged" });
-    await subject.reconcileLifecycleSnapshot(effective() as never);
-    expect(subject.connectionObservations()).toEqual([
+    const cancelled = async () => {
+      const subject = manager(async () => true, {
+        fetch: Object.assign(
+          async () =>
+            new Response(null, {
+              status: 401,
+              headers: { "www-authenticate": `Bearer resource_metadata="${METADATA}"` },
+            }),
+          { preconnect: () => undefined },
+        ),
+        isUserAddedSource: () => true,
+        addedByHandSource: () => true,
+      });
+      await subject.reconcile(effective());
+      await subject.invalidateAuthentication(EXTENSION, "mcp-remote", { grant: "unchanged" });
+      return subject;
+    };
+    const kept = await cancelled();
+    await kept.reconcileLifecycleSnapshot(effective() as never);
+    expect(kept.connectionObservations()).toEqual([
       expect.objectContaining({ state: "failed", signInOffered: true }),
     ]);
-    await subject.reconcileLifecycleSnapshot({ packages: [] } as never);
-    expect(subject.connectionObservations()).toEqual([]);
+    // An uninstalled package stays in the lifecycle snapshot with its
+    // components blocked as not installed; a switched-off one is blocked too.
+    const blocked = (reason: string) => {
+      const snapshot = effective();
+      return {
+        ...snapshot,
+        packages: snapshot.packages.map((packageState) => ({
+          ...packageState,
+          components: packageState.components.map((component) => ({
+            ...component,
+            effectiveState: { kind: "blocked", reason },
+          })),
+        })),
+      };
+    };
+    for (const gone of [
+      { packages: [] },
+      blocked("not-installed"),
+      blocked("plugin-disabled"),
+      blocked("component-disabled"),
+    ]) {
+      const subject = await cancelled();
+      await subject.reconcileLifecycleSnapshot(gone as never);
+      expect(subject.connectionObservations()).toEqual([]);
+    }
   });
 
   it("does not bring back an older sign-in offer over a newer failure when a sign-out changed no grant", async () => {

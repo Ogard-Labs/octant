@@ -22,7 +22,7 @@ const TOKEN68 = /^[A-Za-z0-9\-._~+/]+=*/;
  * The `resource_metadata` parameter (RFC 9728) of the Bearer challenge in a
  * `WWW-Authenticate` header, read by the challenge grammar of RFC 9110 §11.6.1:
  * one header may hold several challenges, and a parameter belongs only to the
- * challenge it follows. Only an address discovery will read counts: a bare
+ * challenge it follows. The first address discovery will read counts: a bare
  * word is no place to start a sign-in from. Both the connection's refusal and
  * sign-in discovery read the header through this, so they never disagree
  * about what a server offered.
@@ -72,8 +72,14 @@ export function bearerResourceMetadata(header: string | null): string | undefine
     // A value runs to the next list element; anything else (an unquoted URL)
     // is not the grammar, and a misread value would name the wrong address.
     if (!/^[ \t]*(?:,|$)/.test(rest)) return undefined;
-    if (scheme === "bearer" && token.toLowerCase() === "resource_metadata")
-      return readableMetadataAddress(value) ? value : undefined;
+    // An unreadable address in one Bearer challenge does not void a readable
+    // one in a later challenge of the same header.
+    if (
+      scheme === "bearer" &&
+      token.toLowerCase() === "resource_metadata" &&
+      readableMetadataAddress(value)
+    )
+      return value;
   }
   return undefined;
 }

@@ -638,7 +638,7 @@ describe("signing in to a hosted MCP server", () => {
         return new Response(null, {
           status: 401,
           headers: {
-            "www-authenticate": `Basic resource_metadata="https://elsewhere.example.test/meta", Bearer resource_metadata = "${named}"`,
+            "www-authenticate": `Basic resource_metadata="https://elsewhere.example.test/meta", Bearer realm="gateway", resource_metadata="metadata", Bearer resource_metadata = "${named}"`,
           },
         });
       if (String(input) === named) return issuer(fallback, init);
