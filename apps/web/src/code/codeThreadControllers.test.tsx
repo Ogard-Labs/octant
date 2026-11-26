@@ -1148,6 +1148,46 @@ describe("switching between Code threads the window has loaded", () => {
     return { frames, host, readCursorStore, registry, replies, show };
   }
 
+  it("draws the transcript under the refresh warning, and takes the warning down once a read succeeds", async () => {
+    const host = conversingHost(new Map([[String(threadA), "Reply from the first thread"]]));
+    const conversationWindow = host.client.conversationWindow;
+    if (conversationWindow === undefined) throw new Error("A windowed host reads windows.");
+    const registry = createCodeThreadControllers();
+    const props = {
+      client: host.client,
+      readCursorStore: createCodeReadCursorStore(),
+      registry,
+      threadId: threadA,
+    };
+    const view = render(<ThreadWindow {...props} navigationBootstrap={bootstrap()} />);
+    await screen.findByText("Reply from the first thread");
+
+    vi.mocked(conversationWindow).mockRejectedValueOnce(new Error("The host did not answer."));
+    act(() => {
+      registry.get(threadA)?.refreshConversation();
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Conversation history could not be refreshed.",
+    );
+    expect(screen.getByText("Reply from the first thread")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+
+    // The thread's activity moves, and the read it starts succeeds.
+    view.rerender(
+      <ThreadWindow
+        {...props}
+        navigationBootstrap={{
+          ...bootstrap(),
+          activity: [{ threadId: threadA, lastSequence: 5 }] as never,
+        }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Conversation history could not be refreshed.")).toBeNull(),
+    );
+    expect(screen.getByText("Reply from the first thread")).toBeInTheDocument();
+  });
+
   it("still reads again a thread it drew from what it kept when that first read fails", async () => {
     const opened = await openBoth();
     const conversationWindow = opened.host.client.conversationWindow;
