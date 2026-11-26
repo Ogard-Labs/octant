@@ -2047,7 +2047,7 @@ describe("CodeThreadWorkspace", () => {
     // bound to the thread and checkout the rewind ran on.
     expect(noteRestoreUndo).toHaveBeenCalledWith(
       checkpoint,
-      expect.objectContaining({ threadId, checkoutId: expect.anything() }),
+      expect.objectContaining({ threadId, checkoutId: "20000000-0000-4000-8000-000000000002" }),
     );
   });
 
@@ -2173,8 +2173,13 @@ describe("CodeThreadWorkspace", () => {
     ];
     // The undo point belongs to the controller, which outlives this surface;
     // opening another tab unmounts the surface exactly like this.
+    const noted = vi.fn();
     function Harness(props: { readonly open: boolean }) {
-      const [restoreUndo, noteRestoreUndo] = useState<unknown>();
+      const [restoreUndo, setRestoreUndo] = useState<unknown>();
+      const noteRestoreUndo = (point: unknown, ranOn?: unknown) => {
+        noted(point, ranOn);
+        setRestoreUndo(point);
+      };
       if (!props.open) return <p>Another tab</p>;
       return (
         <CodeThreadWorkspace
@@ -2192,8 +2197,13 @@ describe("CodeThreadWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Restore files" }));
     await waitFor(() => expect(screen.getByText("Files restored to this point.")).toBeVisible());
     // The host returned what it replaced, so the destructive overwrite is
-    // reachable rather than stranded.
+    // reachable rather than stranded, bound to the thread and checkout the
+    // restore ran on.
     expect(await screen.findByRole("button", { name: "Undo restore" })).toBeVisible();
+    expect(noted).toHaveBeenLastCalledWith(
+      undo,
+      expect.objectContaining({ threadId, checkoutId: "20000000-0000-4000-8000-000000000002" }),
+    );
 
     rerender(<Harness open={false} />);
     expect(screen.queryByRole("button", { name: "Undo restore" })).toBeNull();

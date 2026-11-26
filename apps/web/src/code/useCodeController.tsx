@@ -795,8 +795,8 @@ export function useCodeController(options: CodeControllerOptions) {
   // It is bound to the thread and checkout it belongs to, and offered only
   // while the open thread is that thread on that checkout: sent to another
   // checkout, a way back would overwrite files nobody asked about. A restore
-  // or rewind binds what it replaced to the thread and checkout it ran on, so
-  // a result that lands after the thread moved is not offered. A point read
+  // or rewind result that lands after the view left the thread or checkout it
+  // ran on is not kept, and does not take the open thread's own way back. A point read
   // from the host binds to the checkout installed when it is read. The host's
   // page does not say which checkout its point belongs to, and it reports the
   // thread's last one after a rebind too, so a successful read after a rebind
@@ -823,10 +823,16 @@ export function useCodeController(options: CodeControllerOptions) {
         readonly checkoutId: CodeThreadView["checkout"]["id"];
       },
     ) => {
+      if (
+        ranOn !== undefined &&
+        (String(ranOn.threadId) !== String(activeThreadId.current) ||
+          String(ranOn.checkoutId) !== installedCheckout.current)
+      )
+        return;
       setRestorePoint(
         checkpoint && {
-          threadId: String(ranOn?.threadId ?? activeThreadId.current),
-          checkoutId: ranOn === undefined ? installedCheckout.current : String(ranOn.checkoutId),
+          threadId: String(activeThreadId.current),
+          checkoutId: installedCheckout.current,
           checkpoint,
         },
       );

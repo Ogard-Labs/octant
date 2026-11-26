@@ -3020,17 +3020,25 @@ describe("useCodeController", () => {
       });
     });
     expect(result.current.restoreUndo).toBeUndefined();
-    // Nor is another thread's way back offered on this one.
-    act(() => {
-      result.current.noteRestoreUndo(checkpoint, {
-        threadId: "10000000-0000-4000-8000-000000000002" as CodeThreadId,
-        checkoutId: replacement as never,
-      });
-    });
-    expect(result.current.restoreUndo).toBeUndefined();
     act(() => {
       result.current.noteRestoreUndo(checkpoint, {
         threadId: ids.thread,
+        checkoutId: replacement as never,
+      });
+    });
+    expect(result.current.restoreUndo).toEqual(checkpoint);
+    // A late result for the old checkout, or for another thread, is not
+    // offered here, and does not take this checkout's own way back either.
+    const elsewhere = { worktree: "e".repeat(40), index: "f".repeat(40) };
+    act(() => {
+      result.current.noteRestoreUndo(elsewhere, {
+        threadId: ids.thread,
+        checkoutId: ids.checkout as never,
+      });
+    });
+    act(() => {
+      result.current.noteRestoreUndo(elsewhere, {
+        threadId: "10000000-0000-4000-8000-000000000002" as CodeThreadId,
         checkoutId: replacement as never,
       });
     });
