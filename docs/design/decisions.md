@@ -637,7 +637,8 @@ Status: Partly built. Since: 2026-11-16. Detail: [Architecture: Current Release 
   window build treats `Schema` calls and workspace package sources as free of
   import-time side effects, so a package module the window imports must do no
   work at import time. The budget
-  was re-baselined on 2026-11-23. Detail:
+  was re-baselined on 2026-11-23, and its gzip measure was raised by
+  2,048 B on 2026-11-26 (maintainer decision). Detail:
   [Process topology](../architecture.md#process-topology).
 - Crash recovery retains desktop lifetime through replacement-window preparation;
   last-window quit must not race it. Explicit quit wins and recovery is bounded
