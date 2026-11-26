@@ -27,6 +27,7 @@ import {
   pullRequestKey,
   pullRequestMergeability,
   pullRequestReview,
+  pullRequestMergeWhenReadyOn,
   pullRequestStateChip,
   type MobilePullRequest,
 } from "./pullRequestPresentation";
@@ -89,7 +90,10 @@ export function PullRequestDetailScreen(props: {
   const [babysitBusy, setBabysitBusy] = useState(false);
   const [babysitNotice, setBabysitNotice] = useState<string>();
   const { projectId, repositoryOwner, repositoryName, number } = row;
+  // What the person last turned it to here, and what the computer's switch
+  // read said when the page opened.
   const [mergeWhenReadyConfirmed, setMergeWhenReadyOn] = useState<boolean>();
+  const [mergeWhenReadyRead, setMergeWhenReadyRead] = useState(false);
   useEffect(() => {
     if (transport === undefined || !open) return;
     let live = true;
@@ -101,13 +105,17 @@ export function PullRequestDetailScreen(props: {
     }).then((state) => {
       if (!live || state === undefined) return;
       setAutoFix(state.autoFix);
-      setMergeWhenReadyOn(state.mergeWhenReadyOn);
+      setMergeWhenReadyRead(state.mergeWhenReadyOn);
     });
     return () => {
       live = false;
     };
   }, [transport, open, projectId, repositoryOwner, repositoryName, number]);
-  const mergeWhenReadyOn = mergeWhenReadyConfirmed ?? row.merging === "auto-merge";
+  const mergeWhenReadyOn = pullRequestMergeWhenReadyOn({
+    turnedHere: mergeWhenReadyConfirmed,
+    switchRead: mergeWhenReadyRead,
+    row,
+  });
   // What the page says of the pull request follows the switch the computer
   // confirmed; the row's queue place stays its own.
   const shownRow: CodeProjectPullRequestRow =

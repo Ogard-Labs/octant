@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ThemeProvider } from "../../design-system/theme";
 import { createMobileMockScenario } from "../dev/mobileMockScenario";
 import { RootNavigator } from "../navigation/RootNavigator";
+import { pullRequestMergeWhenReadyOn } from "./pullRequestPresentation";
 
 const context = vi.hoisted(() => {
   Object.assign(globalThis, {
@@ -252,5 +253,24 @@ describe("the phone's pull requests", () => {
     expect(seen(`mobile-pr-babysit-on-${resumeThread}`)).toBeUndefined();
     expect(asked).toEqual(["Turn off Babysit?", "Turn on Babysit?"]);
     vi.restoreAllMocks();
+  });
+});
+
+describe("Merge when ready's off switch", () => {
+  it("is offered for auto-merge turned on in GitHub, which Octant's switch does not know of", () => {
+    const github = { merging: "auto-merge" as const };
+    expect(
+      pullRequestMergeWhenReadyOn({ turnedHere: undefined, switchRead: false, row: github }),
+    ).toBe(true);
+    expect(pullRequestMergeWhenReadyOn({ turnedHere: undefined, switchRead: true, row: {} })).toBe(
+      true,
+    );
+    expect(pullRequestMergeWhenReadyOn({ turnedHere: undefined, switchRead: false, row: {} })).toBe(
+      false,
+    );
+    // What the person just did here wins over a row read before it.
+    expect(pullRequestMergeWhenReadyOn({ turnedHere: false, switchRead: true, row: github })).toBe(
+      false,
+    );
   });
 });

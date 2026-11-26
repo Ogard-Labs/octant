@@ -180,3 +180,17 @@ export function babysitStatusLabel(row: CodeProjectPullRequestRow): string {
   if (row.babysit === undefined) return MOBILE_COPY.pullRequestBabysitOff;
   return row.babysit.blockerDetail ?? BABYSIT_STATUS[row.babysit.status];
 }
+
+/**
+ * Whether Merge when ready is on, for its off switch. What the person turned
+ * it to here wins. Otherwise either source says on: the computer's switch read
+ * knows only what Octant turned on, and auto-merge turned on in GitHub itself
+ * shows only on the row.
+ */
+export function pullRequestMergeWhenReadyOn(input: {
+  readonly turnedHere: boolean | undefined;
+  readonly switchRead: boolean;
+  readonly row: Pick<CodeProjectPullRequestRow, "merging">;
+}): boolean {
+  return input.turnedHere ?? (input.switchRead || input.row.merging === "auto-merge");
+}
