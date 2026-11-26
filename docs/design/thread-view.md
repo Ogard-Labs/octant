@@ -819,6 +819,28 @@ attached `pasted-text-<n>.txt`." in its place. The Chat start screen keeps a
 large paste as text, because a first Chat message needs words: the thread's
 title is made from them.
 
+### Start and stay, and one prompt on several models
+
+On the Code start composer, ⌘↩ (Ctrl+↩) starts the thread and stays: the
+thread is created and its first turn started in the background, the window does
+not open it, and the composer is the next draft at once, keeping its Project,
+workspace and base branch (maintainer decision, 2026-11-26). What the start
+reached is listed under the composer with **Open** once the window lists the
+thread, and a start that began nothing puts the prompt back. The Chat and Work
+start composers do not start and stay yet; their ⌘↩ sends as Enter does.
+
+Shift-click in the Code start composer's model picker adds a model beside the
+chosen one, up to four in all, and Shift-click again takes it out (maintainer
+decision D2, 2026-11-26). Before Send the composer says how many threads will
+start and on which models, with **Use one model** to go back, and Send reads
+**Start N threads**. Each model gets an ordinary create of its own, in a new
+worktree whatever the Project's habit, one after another; the first worktree
+keeps the branch the composer showed and each later one adds its model's
+name. The host admits each one as it would any other, and the composer stays
+on the draft and lists each model's outcome: a refused model shows its reason
+and leaves the threads that started running. A reviewed planner proposal is one
+exact thread and starts on one model.
+
 ### Saved drafts
 
 The desktop and web composer in Chat, Work, and Code offers **Stash draft** and
@@ -1075,6 +1097,13 @@ browser shows it on its next read of the running turn; the phone on its next
 read too, and a phone showing the thread settled looks for a turn it does not
 show every ten seconds. A message the runtime does not take stays in the queue for
 the next turn.
+
+On the paired phone, a Work or Code thread's composer stays editable while a
+turn runs; what the person sends then joins the host's queue and waits for
+that turn to end, since the host never steers a paired device's message. The
+queue shows above the phone's composer, and each message the host still holds
+unsent can be edited or removed there. Send now, and a choice between Steer
+and Queue, wait on the queue-control design on the issue that owns them.
 
 ## Scheduled wake-ups
 
