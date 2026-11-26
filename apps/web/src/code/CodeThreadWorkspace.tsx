@@ -44,6 +44,7 @@ import type {
 import type { PermissionMode, CodeTurnReviewCapture } from "@octant/contracts";
 import {
   parkedStopReleased,
+  currentUsageLimitStop,
   decidesCodeEffectsByApproval,
   permissionModeOf,
   startedCodeThreadPickerGroups,
@@ -1174,23 +1175,21 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // would resend the prompt there, so a released stop keeps the strip only
   // while a resume is still scheduled for it, offering Cancel alone: a
   // model-only change leaves that resume armed.
-  const stoppedResume =
-    thread.usageResume === undefined ||
-    String(thread.usageResume.record.turnId) !== String(providerTurnOperationId)
-      ? undefined
-      : thread.usageResume;
+  const currentStop = currentUsageLimitStop(thread, {
+    state: props.controller.turnStatus,
+    limit: props.controller.turnUsageLimit,
+    turnId: providerTurnOperationId === undefined ? undefined : String(providerTurnOperationId),
+  });
   const usageLimitNotice =
-    props.controller.turnStatus !== "waiting" ||
-    props.controller.turnUsageLimit === undefined ||
-    (releasedStop && stoppedResume?.status !== "scheduled")
+    currentStop === undefined
       ? undefined
       : usageLimitStripNotice({
-          limit: props.controller.turnUsageLimit,
+          limit: currentStop.limit,
           provider: providerInstanceLabel(props.providerGroups ?? [], thread.providerInstanceId),
-          usageResume: stoppedResume,
+          usageResume: currentStop.resume,
           ...(readOnly
             ? {}
-            : releasedStop
+            : currentStop.released
               ? { onCancelResume: cancelUsageResume }
               : {
                   ...(stoppedPrompt === undefined

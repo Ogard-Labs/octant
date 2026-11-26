@@ -67,3 +67,10 @@ describe("Project View filter contracts", () => {
     expect(() => decodeProjectViewFilters("active")).toThrow();
   });
 });
+
+describe("a saved view that filters for Limited", () => {
+  it("round-trips the status", () => {
+    const filters = { ...DEFAULT_PROJECT_VIEW_FILTERS, statuses: ["limited"] };
+    expect(decodeProjectViewFilters(filters)).toEqual(filters);
+  });
+});

@@ -15,6 +15,7 @@ function thread(overrides: Partial<SidebarThreadStatusInput> = {}): SidebarThrea
   return {
     working: overrides.working ?? false,
     attention: overrides.attention ?? false,
+    limited: overrides.limited ?? false,
     woke: overrides.woke ?? false,
     unread: overrides.unread ?? false,
   };
@@ -50,6 +51,18 @@ describe("resolveSidebarThreadStatus", () => {
 
   it("shows an ended snooze ahead of unread activity", () => {
     expect(resolveSidebarThreadStatus(thread({ woke: true, unread: true }))).toBe("woke");
+  });
+});
+
+describe("a thread stopped on a usage limit", () => {
+  it("ranks Limited below Needs you and above unread", () => {
+    expect(resolveSidebarThreadStatus(thread({ limited: true, attention: true }))).toBe(
+      "attention",
+    );
+    expect(resolveSidebarThreadStatus(thread({ limited: true, woke: true, unread: true }))).toBe(
+      "limited",
+    );
+    expect(SIDEBAR_THREAD_STATUS_LABEL.limited).toBe("Limited");
   });
 });
 

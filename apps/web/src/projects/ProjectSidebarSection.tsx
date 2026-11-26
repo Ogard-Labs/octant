@@ -476,11 +476,14 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   // A saved view can filter and order on what threads are doing, so the rows it
   // reads carry their status facts alongside their timestamps. Rows keep every
   // field they already had, so everything downstream still reads them as rows.
+  // Re-read each minute: a row stops being Limited when its reset passes,
+  // without anything in the list changing.
+  const minute = Math.floor(useMinuteClock() / 60_000);
   const statedThreads = useMemo(
     () =>
       listedThreads?.map((thread) => ({ ...thread, status: threadRowStatusInput(thread) })) ??
       undefined,
-    [listedThreads],
+    [listedThreads, minute],
   );
   const timeFilteredThreads =
     currentFilters === undefined || statedThreads === undefined
@@ -1384,8 +1387,11 @@ function ProjectStatusRollup(props: {
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
 }) {
   const shows = useSidebarRowProperties();
+  const now = useMinuteClock();
   if (!shows.status) return null;
-  const rollup = rollUpSidebarProjectStatus(props.threads.map(threadRowStatusInput));
+  const rollup = rollUpSidebarProjectStatus(
+    props.threads.map((thread) => threadRowStatusInput(thread, now)),
+  );
   if (rollup === undefined) return null;
   const label = describeSidebarProjectStatus(props.projectName, rollup);
   const Icon = sidebarThreadStatusIcon(rollup.status);
@@ -1695,6 +1701,9 @@ function ActivityThreadButton(props: {
         woke: props.thread.woke,
         followUp: props.thread.followUp,
         startedAt: props.thread.turnStartedAt,
+        limited: props.thread.limited,
+        shelf: props.thread.shelf,
+        now,
       })
     : NO_THREAD_ROW_STATE;
   const hasMenu = !threadRowMenuIsEmpty(props.actions);

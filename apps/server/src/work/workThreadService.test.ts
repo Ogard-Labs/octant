@@ -3726,6 +3726,55 @@ describe("scheduling a Work thread's usage-limit resume", () => {
     expect(view?.usageResume?.status).toBe("scheduled");
   });
 
+  it("marks the navigation row Limited, not Needs you, while the stop is current", async () => {
+    const turn = usageLimitTurn();
+    const fixture = serviceFixture({
+      threads: [thread()],
+      turns: [turn],
+      observeRuntime: () => ({ executing: false, awaitingInput: true, waitsOnTurnAlone: true }),
+    });
+
+    const navigation = await fixture.service.navigation(ids.window);
+    expect(navigation.runtime).toEqual([
+      {
+        threadId: ids.thread,
+        executing: false,
+        limited: { resetsAt: "2026-07-19T13:00:00.000Z" },
+      },
+    ]);
+    expect((await fixture.service.bootstrap(ids.window)).runtime).toEqual(navigation.runtime);
+  });
+
+  it("keeps Needs you on a limited thread that also waits on the person", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      turns: [usageLimitTurn()],
+      observeRuntime: () => ({ executing: false, awaitingInput: true }),
+    });
+
+    await expect(fixture.service.navigation(ids.window)).resolves.toMatchObject({
+      runtime: [{ awaitingInput: true, limited: {} }],
+    });
+  });
+
+  it("drops the limit from the navigation row once a later turn resumes the thread", async () => {
+    const { failure: _limit, ...stopped } = usageLimitTurn();
+    const resumed = decodeWorkTurnState({
+      ...stopped,
+      requestId: "72000000-0000-4000-8000-0000000000a2",
+      turnId: "72000000-0000-4000-8000-0000000000b3",
+      status: "running",
+    });
+    const fixture = serviceFixture({
+      threads: [thread()],
+      turns: [usageLimitTurn(), resumed],
+      observeRuntime: () => ({ executing: true, awaitingInput: false }),
+    });
+
+    const navigation = await fixture.service.navigation(ids.window);
+    expect(navigation.runtime).toEqual([{ threadId: ids.thread, executing: true }]);
+  });
+
   it("refuses to hide a thread whose latest turn is not waiting on a usage limit", async () => {
     const fixture = serviceFixture({ threads: [thread()], turns: [] });
     await expect(

@@ -5794,6 +5794,7 @@ function LaunchedShell(
             ...(thread.awaitingKind === undefined ? {} : { awaitingKind: thread.awaitingKind }),
             ...(thread.turnStartedAt === undefined ? {} : { turnStartedAt: thread.turnStartedAt }),
             ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
+            ...(thread.limited === undefined ? {} : { limited: thread.limited }),
             ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
             ...(thread.pullRequestSummaries === undefined
               ? {}

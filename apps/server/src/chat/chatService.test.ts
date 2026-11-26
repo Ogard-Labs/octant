@@ -6755,6 +6755,52 @@ describe("ChatService", () => {
     expect(view.thread.usageResume?.record.resetsAt).toBe("2026-07-19T13:00:00.000Z");
   });
 
+  it("marks the navigation row Limited while the stop is current and drops it after a resume", async () => {
+    const { service } = openFixture({
+      nativeConversation: true,
+      turnOutcome: (index) => (index === 0 ? "limited" : "completed"),
+      usageLimitResetsAt: "2099-01-02T09:00:00.000Z",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    expect(service.navigation().threads[0]?.limited).toEqual({
+      resetsAt: "2099-01-02T09:00:00.000Z",
+    });
+
+    const parked = service.read(created.thread.id);
+    const turn = parked.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) {
+      throw new Error("Expected the parked attempt.");
+    }
+    await service.execute({
+      kind: "retry-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: parked.thread.version,
+      turnId: turn.id,
+      attemptId: attempt.id,
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+      { timeoutMs: 10_000 },
+    );
+    expect(service.navigation().threads[0]).not.toHaveProperty("limited");
+  });
+
   async function defaultArmingFixture() {
     const { service, persistence } = openFixture({
       nativeConversation: true,

@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
-import { ThreadRestFields } from "./threadRest";
+import { ThreadRestFields, ThreadLimitedFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubIssueContextRequest } from "./githubIssueContext";
 import { TerminalSessionImportRequest } from "./terminalSessions";
@@ -646,6 +646,8 @@ export const WorkThreadNavigationRuntime = Schema.Struct({
   followUpDue: Schema.optional(WorkStatusDatedItem),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
+  /** The latest turn's current usage-limit stop; absent otherwise. */
+  ...ThreadLimitedFields,
 }).annotations(strict);
 export type WorkThreadNavigationRuntime = typeof WorkThreadNavigationRuntime.Type;
 

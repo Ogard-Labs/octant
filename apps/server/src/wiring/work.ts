@@ -2240,7 +2240,9 @@ export function wireWork(deps: WorkDependencies) {
               // thread, so it says nothing of what this child asks.
               return sideTaskChildState({
                 executing: runtime.executing,
-                awaitingInput: runtime.awaitingInput === true,
+                // A limit stop is not input on the row, but the child is
+                // still stopped and the receipt keeps saying so.
+                awaitingInput: runtime.awaitingInput === true || runtime.limited !== undefined,
               });
             }
             const navigation = await (code ??= readCode());

@@ -77,6 +77,7 @@ import {
   ThreadTouchedIssues,
   ThreadLinkedIssue,
   type ThreadLiveStep,
+  type ThreadUsageLimited,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRetainedRecord } from "../polling/useRetainedRecord";
@@ -228,6 +229,7 @@ export interface CodeThreadNavigationItem {
   /** When the running turn began and its latest step; absent outside a live turn. */
   readonly turnStartedAt?: string;
   readonly liveStep?: ThreadLiveStep;
+  readonly limited?: ThreadUsageLimited;
   readonly executionPolicy: CodeThread["executionPolicy"];
   readonly lifecycle: CodeThread["lifecycle"];
   readonly projectId: CodeThread["projectId"];
@@ -2581,6 +2583,7 @@ export function useCodeController(options: CodeControllerOptions) {
         readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
         readonly turnStartedAt?: string;
         readonly liveStep?: ThreadLiveStep;
+        readonly limited?: ThreadUsageLimited;
       }
     >();
     for (const entry of bootstrap?.runtime ?? []) {
@@ -2591,6 +2594,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(entry.awaitingInput === true ? { awaitingKind: entry.awaitingKind ?? "approval" } : {}),
         ...(entry.turnStartedAt === undefined ? {} : { turnStartedAt: entry.turnStartedAt }),
         ...(entry.liveStep === undefined ? {} : { liveStep: entry.liveStep }),
+        ...(entry.limited === undefined ? {} : { limited: entry.limited }),
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
         ...(pullRequestSummaries === undefined ? {} : { pullRequestSummaries }),
         ...(entry.touchedIssues === undefined ? {} : { touchedIssues: entry.touchedIssues }),
@@ -2656,6 +2660,7 @@ export function useCodeController(options: CodeControllerOptions) {
               ? {}
               : { turnStartedAt: runtime.turnStartedAt }),
             ...(runtime?.liveStep === undefined ? {} : { liveStep: runtime.liveStep }),
+            ...(runtime?.limited === undefined ? {} : { limited: runtime.limited }),
             ...(runtime?.checkoutChip === undefined ? {} : { checkoutChip: runtime.checkoutChip }),
             ...(runtime?.pullRequestSummaries === undefined
               ? {}

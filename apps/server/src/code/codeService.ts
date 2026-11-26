@@ -11,6 +11,8 @@ import {
   type LinkedIssueRef,
   type LinkedIssueSource,
   type ThreadLinkedIssue,
+  type ThreadUsageLimited,
+  type ProviderUsageLimit,
   MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS,
 } from "@octant/contracts";
 import { composeThreadTouchedIssues } from "@octant/domain/thread-board-pull-request-policy";
@@ -32,6 +34,8 @@ import {
   unsupportedModelOptionValues,
   withUsageLimitHandoff,
   withUsageLimitHandoffOutcome,
+  currentUsageLimitStop,
+  limitedThreadFact,
 } from "@octant/domain";
 import {
   defaultFullAccessSandboxFor,
@@ -1248,6 +1252,15 @@ export class CodeServiceError extends Error {
 }
 
 export class CodeService {
+  /** Each limited thread's stop as last read from the journal, keyed by its work record. */
+  readonly #limitStops = new Map<
+    string,
+    {
+      readonly key: string;
+      readonly state: string | undefined;
+      readonly limit: ProviderUsageLimit | undefined;
+    }
+  >();
   readonly #persistence: CodePersistencePort;
   readonly #coordinatorsPerProject: (() => number) | undefined;
   readonly #access: CodeWindowAccessPort;
@@ -1738,12 +1751,43 @@ export class CodeService {
         ...(hasPullRequests ? { pullRequestSummaries, threadPullRequests } : {}),
         ...this.#touchedIssuesFor(thread, pullRequests),
         ...this.#linkedIssuesFor(thread),
+        ...this.#limitedFact(thread),
         // Rides on the row the caller was already allowed to see: `threads`
         // is the authority-filtered list, so a window never learns what a
         // thread it cannot browse is running.
         ...(parked ? {} : this.#liveTurns?.read(String(thread.id))),
       };
     });
+  }
+
+  /**
+   * The current usage-limit stop for a thread's navigation row. Only a latest
+   * provider turn still waiting reads the journal, and once per recorded state:
+   * navigation is read on a timer and a long turn's stream is thousands of
+   * frames.
+   */
+  #limitedFact(thread: CodeThread): { readonly limited?: ThreadUsageLimited } {
+    const latest = this.#persistence
+      .readCodeRuntimeWorks(thread.id)
+      .filter(({ work }) => work.kind === "provider-turn")
+      .at(-1)?.work;
+    if (latest === undefined || latest.state !== "waiting") {
+      this.#limitStops.delete(String(thread.id));
+      return {};
+    }
+    const key = `${String(latest.id)} ${String(latest.updatedAt)}`;
+    let read = this.#limitStops.get(String(thread.id));
+    if (read === undefined || read.key !== key) {
+      const stopped = this.#latestProviderTurnState(latest.id);
+      read = { key, state: stopped?.state, limit: stopped?.failure?.usageLimit };
+      this.#limitStops.set(String(thread.id), read);
+    }
+    const stop = currentUsageLimitStop(thread, {
+      state: read.state,
+      limit: read.limit,
+      turnId: String(latest.id),
+    });
+    return stop === undefined ? {} : { limited: limitedThreadFact(stop.limit) };
   }
 
   #linkedIssuesFor(thread: CodeThread): {

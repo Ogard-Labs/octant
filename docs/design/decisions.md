@@ -2955,6 +2955,7 @@ Status: Built. Detail: [Workspace: Navigation and Projects](workspace.md#navigat
 The sidebar speaks about what a thread is doing now with one fixed vocabulary, and a shortcut jumps to the next thread that needs the person.
 
 - The vocabulary is owned by the domain package. Nothing to report is no status, and a failure is never inferred from silence.
+- A thread whose latest turn a provider usage limit holds says Limited in the warning tone, with the time until a named reset, ranked below Needs you and above Snooze ended (maintainer decision, 2026-11-26). The host reports the stop by the same rule as the strip above the composer; the word goes when the turn resumes, the reset passes, or the thread is snoozed or settled. A saved view can filter for it.
 - The jump adds no host read.
 - A row's age slot and provider mark never move on hover, focus or an open menu (maintainer request, 2026-11-15); the uncommitted-changes count lives in Environment (maintainer request, 2026-11-16).
 

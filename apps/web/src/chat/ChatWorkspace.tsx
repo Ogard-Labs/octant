@@ -54,6 +54,7 @@ import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/co
 import { decodeProviderModelId } from "@octant/contracts/providers";
 import {
   parkedStopReleased,
+  currentUsageLimitStop,
   providerAccountMoveTargets,
   startedConversationPickerGroups,
   type PickerGroup,
@@ -1429,15 +1430,17 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // keeps the strip only while a resume is still scheduled for it, offering
   // Cancel alone.
   const stoppedAttempt = activeChatTurns(view.turns).at(-1)?.attempts.at(-1);
-  const stoppedReleased =
-    stoppedAttempt !== undefined && parkedStopReleased(view.thread, String(stoppedAttempt.id));
-  const stoppedResume =
-    stoppedAttempt === undefined ||
-    view.thread.usageResume === undefined ||
-    String(view.thread.usageResume.record.turnId) !== String(stoppedAttempt.turnId) ||
-    String(view.thread.usageResume.record.attemptId) !== String(stoppedAttempt.id)
+  const currentStop = currentUsageLimitStop(
+    view.thread,
+    stoppedAttempt === undefined
       ? undefined
-      : view.thread.usageResume;
+      : {
+          state: stoppedAttempt.outcome,
+          limit: stoppedAttempt.usageLimit,
+          turnId: String(stoppedAttempt.turnId),
+          attemptId: String(stoppedAttempt.id),
+        },
+  );
   const cancelChatUsageResume = () => {
     void enqueueThreadCommand(async (previous) => {
       const result = await props.controller.execute({
@@ -1449,21 +1452,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     }).catch(() => undefined);
   };
   const usageLimitNotice =
-    stoppedAttempt === undefined ||
-    stoppedAttempt.outcome !== "waiting" ||
-    stoppedAttempt.usageLimit === undefined ||
-    (stoppedReleased && stoppedResume?.status !== "scheduled")
+    stoppedAttempt === undefined || currentStop === undefined
       ? undefined
       : usageLimitStripNotice({
-          limit: stoppedAttempt.usageLimit,
+          limit: currentStop.limit,
           provider:
             props.providerGroups === undefined
               ? "The provider"
               : providerInstanceLabel(props.providerGroups, stoppedAttempt.providerInstanceId),
-          usageResume: stoppedResume,
+          usageResume: currentStop.resume,
           ...(readOnly
             ? {}
-            : stoppedReleased
+            : currentStop.released
               ? { onCancelResume: cancelChatUsageResume }
               : {
                   onResumeNow: () => {

@@ -1,5 +1,6 @@
 import type {
   ThreadLiveStep,
+  ThreadUsageLimited,
   WorkStatusDatedItem,
   WorkThread,
   WorkThreadBootstrap,
@@ -23,6 +24,7 @@ export function buildWorkThreadNavigation(
     readonly followUpDue?: WorkStatusDatedItem | undefined;
     readonly turnStartedAt?: string | undefined;
     readonly liveStep?: ThreadLiveStep | undefined;
+    readonly limited?: ThreadUsageLimited | undefined;
   }> = [],
 ): ReadonlyArray<ChatThreadNavigationItem> {
   const runtimeByThread = new Map(runtime.map((entry) => [String(entry.threadId), entry] as const));
@@ -44,6 +46,7 @@ export function buildWorkThreadNavigation(
         ...(live?.followUpDue === undefined ? {} : { followUpDue: live.followUpDue }),
         ...(live?.turnStartedAt === undefined ? {} : { turnStartedAt: live.turnStartedAt }),
         ...(live?.liveStep === undefined ? {} : { liveStep: live.liveStep }),
+        ...(live?.limited === undefined ? {} : { limited: live.limited }),
         projectId: String(thread.projectId),
         providerInstanceId: String(thread.providerInstanceId),
         updatedAt: thread.updatedAt,

@@ -37,6 +37,7 @@ import { type SidebarThreadStatus } from "@octant/contracts/sidebar-thread-statu
 export const SIDEBAR_THREAD_STATUS_ORDER = [
   "working",
   "attention",
+  "limited",
   "woke",
   "unread",
 ] as const satisfies ReadonlyArray<SidebarThreadStatus>;
@@ -49,6 +50,7 @@ export const SIDEBAR_THREAD_STATUS_ORDER = [
 export const SIDEBAR_THREAD_STATUS_LABEL: Readonly<Record<SidebarThreadStatus, string>> = {
   working: "Working",
   attention: "Needs attention",
+  limited: "Limited",
   woke: "Snooze ended",
   unread: "New activity",
 };
@@ -63,6 +65,8 @@ export interface SidebarThreadStatusInput {
   readonly working: boolean;
   /** An open follow-up, or another obligation the host raised on the thread. */
   readonly attention: boolean;
+  /** A provider usage limit holds the latest turn, and its reset has not passed. */
+  readonly limited: boolean;
   /** A snooze ended but the thread has not been opened since. */
   readonly woke: boolean;
   /** The thread has activity past what this client has read. */

@@ -7918,6 +7918,34 @@ describe("scheduling a Code thread's usage-limit resume", () => {
     aggregateId: operationId as never,
   });
 
+  it("marks the navigation row Limited while the stop is current and drops it after a resume", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      events: [waitingLimitEnvelope()],
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+
+    const parked = await fixture.service.navigation(ids.window);
+    expect(parked.runtime[0]).toMatchObject({ executing: false, limited: { resetsAt } });
+    expect(parked.runtime[0]).not.toHaveProperty("awaitingInput");
+
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue([
+      ...waitingProviderWork(),
+      {
+        work: decodeCodeRuntimeWork({
+          id: testUuid(3102),
+          threadId: ids.thread,
+          kind: "provider-turn",
+          state: "running",
+          updatedAt: now,
+        }),
+        firstSequence: 2,
+      },
+    ]);
+    const resumed = await fixture.service.navigation(ids.window);
+    expect(resumed.runtime[0]).not.toHaveProperty("limited");
+  });
+
   it("schedules a host-owned resume for a provider turn waiting on a usage limit", async () => {
     const fixture = serviceFixture({
       threads: [thread()],

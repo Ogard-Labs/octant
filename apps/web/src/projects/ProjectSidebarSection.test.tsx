@@ -3058,6 +3058,51 @@ describe("snoozed and completed shelves", () => {
     expect(onSelectThread).toHaveBeenCalledWith("thread-c");
   });
 
+  it("shows a thread snoozed until the reset in Snoozed, not as Limited", async () => {
+    const user = userEvent.setup();
+    const resetsAt = "2099-01-02T09:00:00.000Z" as never;
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projects={[chatProjectA]}
+        threads={[
+          {
+            projectId: String(chatProjectA.id),
+            threadId: "thread-a",
+            title: "Stopped on a limit",
+            limited: { resetsAt },
+          },
+          {
+            projectId: String(chatProjectA.id),
+            threadId: "thread-b",
+            title: "Parked until the reset",
+            limited: { resetsAt },
+            shelf: "snoozed",
+            snooze: { until: resetsAt, at: "2026-09-07T10:00:00.000Z" },
+            wakeLabel: "7d",
+          },
+        ]}
+      />,
+    );
+
+    const projects = screen.getByRole("region", { name: "Projects" });
+    expect(
+      within(projects).getByRole("button", { name: /Stopped on a limit.*Limited/ }),
+    ).toBeVisible();
+    const snoozed = screen.getByText("Snoozed").closest("details");
+    await user.click(within(snoozed!).getByText("Snoozed"));
+    const parked = within(snoozed!).getByRole("button", { name: /Parked until the reset/ });
+    expect(parked).not.toHaveAccessibleName(/Limited/);
+    expect(within(parked).queryByText(/Limited/)).toBeNull();
+  });
+
   it("opens the Settled shelf, or the Activity feed, when a sidebar tile asks for it", async () => {
     // The shelf scrolls itself into view a frame after it opens, and this
     // test now waits long enough for that frame; jsdom has no scrollIntoView.

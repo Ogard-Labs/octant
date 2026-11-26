@@ -4,6 +4,7 @@ import type {
   ThreadLinkedIssue,
   ThreadLiveStep,
   ThreadTouchedIssues,
+  ThreadUsageLimited,
 } from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { SidebarThreadStatusInput } from "@octant/domain/sidebar-thread-status-policy";
@@ -104,6 +105,8 @@ export interface ChatThreadNavigationSource {
   /** When the running turn began and what it is doing; absent outside a live turn. */
   readonly turnStartedAt?: string | undefined;
   readonly liveStep?: ThreadLiveStep | undefined;
+  /** The host's current usage-limit stop for the thread; absent from an older host. */
+  readonly limited?: ThreadUsageLimited | undefined;
   readonly followUpOpen?: boolean;
   readonly lastSequence?: number;
   /**
@@ -169,6 +172,11 @@ export interface ChatThreadNavigationItem {
    */
   readonly turnStartedAt?: string;
   readonly liveStep?: ThreadLiveStep;
+  /**
+   * The host says a provider usage limit holds the latest turn. The row says
+   * Limited until the reset it names passes, or while the thread rests.
+   */
+  readonly limited?: ThreadUsageLimited;
   /** The kind of Work request currently waiting on the person, when known. */
   readonly awaitingKind?: "approval" | "user-input";
   /** Present when the host projected a Git checkout for this row. */
@@ -285,6 +293,22 @@ export function threadRowActivity(thread: ChatThreadNavigationItem): ThreadRowAc
 }
 
 /**
+ * Whether a row still says Limited. The host reports the stop; the row drops
+ * it once the reset the host named has passed on this clock, and a snoozed or
+ * settled thread says where it rests instead.
+ */
+export function threadLimitHolds(
+  row: {
+    readonly limited?: ThreadUsageLimited | undefined;
+    readonly shelf?: ChatThreadNavigationItem["shelf"] | undefined;
+  },
+  now: number,
+): boolean {
+  if (row.limited === undefined || row.shelf !== undefined) return false;
+  return row.limited.resetsAt === undefined || Date.parse(row.limited.resetsAt) > now;
+}
+
+/**
  * The status facts behind the states a row already renders.
  *
  * The row's mark and the Project heading above it both read these, so a folded
@@ -295,18 +319,28 @@ export function sidebarThreadStatusInput(row: {
   readonly activity: ThreadRowActivity;
   readonly unread: boolean;
   readonly woke: boolean;
+  readonly limited?: ThreadUsageLimited | undefined;
+  readonly shelf?: ChatThreadNavigationItem["shelf"] | undefined;
+  readonly now?: number | undefined;
 }): SidebarThreadStatusInput {
   return {
     working: row.activity === "working",
     attention: row.activity === "attention",
+    limited: threadLimitHolds(row, row.now ?? Date.now()),
     woke: row.woke,
     unread: row.unread,
   };
 }
 
 /** The same facts for a navigation item the sidebar has not drawn yet. */
-export function threadRowStatusInput(thread: ChatThreadNavigationItem): SidebarThreadStatusInput {
+export function threadRowStatusInput(
+  thread: ChatThreadNavigationItem,
+  now: number = Date.now(),
+): SidebarThreadStatusInput {
   return sidebarThreadStatusInput({
+    now,
+    limited: thread.limited,
+    shelf: thread.shelf,
     activity: threadRowActivity(thread),
     unread: thread.unread === true,
     woke: thread.woke === true,
@@ -328,6 +362,7 @@ export function buildChatThreadNavigation(
     ...(thread.awaitingInput === true || thread.liveStep === undefined
       ? {}
       : { liveStep: thread.liveStep }),
+    ...(thread.limited === undefined ? {} : { limited: thread.limited }),
     ...(thread.followUpOpen === undefined ? {} : { followUp: thread.followUpOpen }),
     ...(thread.lineageParentThreadId === undefined
       ? {}
