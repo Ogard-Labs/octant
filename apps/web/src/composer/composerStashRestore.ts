@@ -4,7 +4,7 @@ import { MAX_CHAT_TURN_PREVIEW_SELECTIONS } from "@octant/contracts/chat";
 import { MAX_CODE_REVIEW_CORRECTION_FINDINGS } from "@octant/contracts/code-operations";
 import { MAX_SIDE_CHAT_DRAFT_RETURNS } from "@octant/contracts/side-chat-return";
 import { isImageAttachment } from "./attachmentMediaType";
-import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "./composerQuoteMark";
+import { loadComposerQuoteTools, QUOTE_HEADER_TAIL, REPLY_QUOTE_SOURCE } from "./composerQuoteMark";
 import {
   composerStashContextValues,
   composerStashLocationKey,
@@ -97,6 +97,14 @@ export function planComposerStashRestore(
   }
 
   const sameComposer = composerStashLocationKey(origin) === composerStashLocationKey(destination);
+  // A reply quote names "this thread" as its source, so in another thread's
+  // composer it would present that reply as the destination's own history.
+  if (
+    !sameComposer &&
+    saved.text.includes(`Quoted from ${REPLY_QUOTE_SOURCE}${QUOTE_HEADER_TAIL}`)
+  ) {
+    return { kind: "refused", reason: `${CONTEXT_LABELS.quote} needs its original composer.` };
+  }
   const sameNewTaskScope =
     origin.threadId === null &&
     destination.threadId === null &&

@@ -3669,7 +3669,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             <ComposerInput
               typedScope={typedScope}
               recall={promptsToRecall(
-                { images: images.staged.length, receipts: extensionDraft.receipts.length },
+                {
+                  images: images.staged.length,
+                  receipts: extensionDraft.receipts.length,
+                  files: fileMentions.selectedPaths.length,
+                },
                 () =>
                   sentPromptsNewestFirst(
                     turns.flatMap((turn) =>

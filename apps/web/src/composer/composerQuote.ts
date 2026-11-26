@@ -108,10 +108,12 @@ export function fileQuoteSource(path: string, startLine: number, endLine: number
 /**
  * The quote as the prompt holds it. The fence outruns the longest backtick run
  * in the words, because a fixed one closes on any output that prints a fence of
- * its own, and everything after it would read as the person's request.
+ * its own, and everything after it would read as the person's request. The
+ * words keep their trailing whitespace: an editor's replacement replaces the
+ * whole selection, line break included, so the model must see all of it.
  */
 export function composerQuoteText(quote: ComposerQuote): string {
-  const body = quote.text.replace(/\r\n?/g, "\n").replace(/\s+$/, "");
+  const body = quote.text.replace(/\r\n?/g, "\n");
   const longestRun = [...body.matchAll(/`+/g)].reduce(
     (longest, match) => Math.max(longest, match[0].length),
     0,

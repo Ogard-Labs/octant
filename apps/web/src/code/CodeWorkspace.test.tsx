@@ -1049,7 +1049,8 @@ describe("appendTerminalSelection", () => {
 
   it("a terminal selection becomes one chip and sends as a fenced reference block", () => {
     const draft = appendTerminalSelection("", "error: missing token\n");
-    expect(draft).toBe(`${header}\n\`\`\`\nerror: missing token\n\`\`\`\n`);
+    // The words are quoted exactly, their final line break included.
+    expect(draft).toBe(`${header}\n\`\`\`\nerror: missing token\n\n\`\`\`\n`);
     expect(findComposerQuotes(draft)).toHaveLength(1);
   });
 

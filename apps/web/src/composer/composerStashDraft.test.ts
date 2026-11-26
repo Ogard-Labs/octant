@@ -248,6 +248,28 @@ describe("restoring a saved composer draft", () => {
     });
   });
 
+  it("refuses to move a quote of this thread's reply into another thread's composer", () => {
+    const saved = {
+      ...emptyComposerStashDraft(),
+      text: appendComposerQuote("Why? ", {
+        source: REPLY_QUOTE_SOURCE,
+        text: "Exact excerpt",
+        comment: "",
+      }),
+    };
+    expect(
+      planComposerStashRestore(
+        chat,
+        { ...target, location: { ...chat, composerId: "other-thread", threadId: "other-thread" } },
+        emptyComposerStashDraft(),
+        saved,
+      ),
+    ).toEqual({ kind: "refused", reason: "A quoted reply needs its original composer." });
+    expect(planComposerStashRestore(chat, target, emptyComposerStashDraft(), saved).kind).toBe(
+      "ready",
+    );
+  });
+
   it("keeps a draft within the host that owns its source scope", () => {
     expect(
       planComposerStashRestore(

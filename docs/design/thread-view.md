@@ -793,23 +793,31 @@ chip as ordinary text.
 - Quoted words are another party's text, so a draft that holds a quote is
   never counted as typed by the person, whatever is typed around it.
 - A draft stashed while Chat kept quotes beside the prompt restores them as
-  chips ahead of its text.
+  chips ahead of its text. A draft holding a quote of "an earlier reply in
+  this thread" restores only in its original composer, since in another
+  thread it would name that thread's history as the source.
+- The quoted words keep their trailing whitespace, so an editor selection's
+  final line break reaches the model with the rest of what a replacement
+  replaces.
 
-In a thread's empty composer with no attachments or selected context, ArrowUp
+In a thread's empty composer with no attachments, uploads in progress or selected context, ArrowUp
 brings back the prompts the person sent in this thread, newest first, and
 ArrowDown walks forward again to an empty prompt. The arrows recall only while
 the recalled text is unedited and the caret is on its first line (ArrowUp) or
 last line (ArrowDown); once the person edits it, the arrows move the caret
 again. The prompts come from the loaded transcript; reports the host delivered
-are not the person's and are not recalled. A recalled prompt is not counted as
+and a routine's scheduled follow-ups are not the person's and are not recalled. A recalled prompt is not counted as
 typed until the person edits it.
 
 A paste of 32 KiB or more, or one that would take the prompt past the 200,000
 characters a message may hold, attaches as `pasted-text-<n>.txt` instead of
 filling the prompt, through the composer's own attach path: a Chat, Work or
 Code thread, and the Work and Code start screens. ⌘⇧V (Ctrl+Shift+V) pastes it
-inline anyway. The Chat start screen keeps a large paste as text, because a
-first Chat message needs words: the thread's title is made from them.
+inline anyway. Every composer sends only a prompt with words in it, so when
+the paste would be the whole prompt it leaves the editable line "See the
+attached `pasted-text-<n>.txt`." in its place. The Chat start screen keeps a
+large paste as text, because a first Chat message needs words: the thread's
+title is made from them.
 
 ### Saved drafts
 

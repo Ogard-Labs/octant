@@ -81,6 +81,7 @@ import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/Thr
 import { ChatPendingQuestions, ChatTranscript, type ChatTranscriptProps } from "./ChatTranscript";
 import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
 import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
@@ -2594,7 +2595,12 @@ function chatPromptsNewestFirst(view: ChatThreadView): ReadonlyArray<string> {
       content.role === "user" ? [[String(content.contentId), content.body] as const] : [],
     ),
   );
-  return sentPromptsNewestFirst(activeChatTurns(view.turns), (turn) =>
-    turn.delivery === undefined ? bodies.get(String(turn.userMessageRef.contentId)) : undefined,
-  );
+  return sentPromptsNewestFirst(activeChatTurns(view.turns), (turn) => {
+    const body =
+      turn.delivery === undefined ? bodies.get(String(turn.userMessageRef.contentId)) : undefined;
+    // A routine's scheduled follow-up is sent as an ordinary turn, but it is the host's.
+    return body === undefined || parseAutomationFollowUpTurnPrompt(body) !== undefined
+      ? undefined
+      : body;
+  });
 }

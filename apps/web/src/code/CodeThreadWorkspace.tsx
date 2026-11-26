@@ -3253,6 +3253,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               recall={promptsToRecall(
                 {
                   attachments: attachments.staged.length,
+                  // An upload in progress joins the prompt once it lands.
+                  uploads: attachments.busy ? 1 : 0,
                   receipts: extensionDraft.receipts.length,
                 },
                 () =>
@@ -3260,7 +3262,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     message.role === "user" &&
                     message.delivery === undefined &&
                     (message.sourceThreadId === undefined ||
-                      String(message.sourceThreadId) === String(thread.id))
+                      String(message.sourceThreadId) === String(thread.id)) &&
+                    // A routine's scheduled follow-up is the host's, not the person's.
+                    parseAutomationFollowUpTurnPrompt(message.text) === undefined
                       ? message.text
                       : undefined,
                   ),

@@ -1,5 +1,6 @@
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import { composerQuoteText, REPLY_QUOTE_SOURCE } from "../composer/composerQuote";
+import { automationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { decodeChatAttachment } from "@octant/contracts/chat";
 import type { ThreadMessageQueueResult } from "@octant/contracts";
 import {
@@ -2373,6 +2374,37 @@ describe("ChatWorkspace", () => {
     message.focus();
     await user.keyboard("{ArrowUp}");
     expect(message).toHaveValue("");
+  });
+
+  it("skips a routine's scheduled follow-up when ArrowUp recalls the person's last prompt", async () => {
+    const user = userEvent.setup();
+    const view = viewWithQuotableReplies();
+    const activeView = decodeChatThreadView({
+      ...view,
+      contents: view.contents.map((content) =>
+        content.body === "Second question."
+          ? { ...content, body: automationFollowUpTurnPrompt("Check the deploy.") }
+          : content,
+      ),
+    });
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView,
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
+    const message = screen.getByLabelText("Message");
+    message.focus();
+    await user.keyboard("{ArrowUp}");
+    expect(message).toHaveValue("First question.");
   });
 
   it("keeps an attachment visible when authoritative discard fails", async () => {

@@ -629,7 +629,11 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       historyRef.current = { entries, index: entries.length - 1, at: now, typing };
     };
 
-    const emit = (typed: string, typedCaret: number, options: { readonly typing: boolean }) => {
+    const emit = (
+      typed: string,
+      typedCaret: number,
+      options: { readonly typing: boolean; readonly pastedQuotes?: ReadonlyArray<string> },
+    ) => {
       const root = rootRef.current;
       if (root === null) return;
       const tools = loadedComposerQuoteTools();
@@ -639,10 +643,13 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           : tools.separateComposerQuotes(
               typed,
               typedCaret,
-              // The quotes it held before the edit, and any the edit brought in.
+              // The quotes it held before the edit, any the edit brought in, and
+              // any it pasted: a pasted quote glued to the text after it is not
+              // found by its shape, only by its exact text.
               [
                 ...tools.composerQuoteTextsIn(modelRef.current),
                 ...tools.composerQuoteTextsIn(typed),
+                ...(options.pastedQuotes ?? []),
               ],
             );
       modelRef.current = next;
@@ -654,11 +661,16 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       tick();
     };
 
-    const replaceSelection = (root: HTMLElement, text: string) => {
+    const replaceSelection = (
+      root: HTMLElement,
+      text: string,
+      pastedQuotes?: ReadonlyArray<string>,
+    ) => {
       const { start, end } = currentSelection(root);
       const current = modelRef.current;
       emit(`${current.slice(0, start)}${text}${current.slice(end)}`, start + text.length, {
         typing: false,
+        ...(pastedQuotes === undefined ? {} : { pastedQuotes }),
       });
     };
 
@@ -689,19 +701,30 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     const plainPasteRef = useRef(0);
     const pastedFilesRef = useRef(0);
 
-    const pasteText = (root: HTMLElement, text: string, plain: boolean) => {
+    const pasteText = (
+      root: HTMLElement,
+      text: string,
+      plain: boolean,
+      pastedQuotes?: ReadonlyArray<string>,
+    ) => {
       const { start, end } = currentSelection(root);
+      const current = modelRef.current;
       const tooLarge =
         new TextEncoder().encode(text).length >= PASTE_AS_FILE_BYTES ||
-        modelRef.current.length - (end - start) + text.length >
-          MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS;
+        current.length - (end - start) + text.length > MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS;
       if (!plain && tooLarge && onPasteAsFile !== undefined) {
         pastedFilesRef.current += 1;
         const name = `pasted-text-${String(pastedFilesRef.current)}.txt`;
         onPasteAsFile(new File([text], name, { type: "text/plain" }));
+        // Every composer sends only a prompt with words in it, so a paste that
+        // would be the whole prompt leaves an editable line that points at its
+        // file; otherwise the file waits beside an empty prompt that cannot send.
+        if (`${current.slice(0, start)}${current.slice(end)}`.trim() === "") {
+          replaceSelection(root, `See the attached ${name}.`);
+        }
         return;
       }
-      replaceSelection(root, text);
+      replaceSelection(root, text, pastedQuotes);
     };
 
     const recallStep = (root: HTMLElement, direction: "older" | "newer"): boolean => {
@@ -1089,16 +1112,21 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const tools = loadedComposerQuoteTools();
         if (copied.length > 0 && tools === undefined) {
           // Quotes copied in another window: the quote code loads, takes them
-          // as Octant's own, and the prompt draws them as chips.
+          // as Octant's own, puts each back on lines of its own (the paste
+          // landed before it could), and the prompt draws them as chips.
           void loadComposerQuoteTools()
             .then((loaded) => {
               loaded.trustComposerQuotes(copied);
-              tick();
+              const current = modelRef.current;
+              const at = lastSelectionRef.current.end;
+              const separated = loaded.separateComposerQuotes(current, at, copied);
+              if (separated.value === current) tick();
+              else replaceRange(0, current.length, separated.value, separated.caret);
             })
             .catch(() => undefined);
         }
         tools?.trustComposerQuotes(copied);
-        pasteText(root, text.replace(/\r\n?/g, "\n"), plain);
+        pasteText(root, text.replace(/\r\n?/g, "\n"), plain, copied);
       },
       onCopy: (event: ClipboardEvent<ComposerInputElement>) => {
         const root = rootRef.current;

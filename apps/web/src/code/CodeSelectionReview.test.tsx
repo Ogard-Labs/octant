@@ -55,4 +55,10 @@ describe("agent selection review", () => {
     expect(quotes[0]?.source).toBe("src/file.ts, line 1");
     expect(quotes[0]?.text).toBe(selection.text);
   });
+
+  it("quotes a selection's trailing line break, since a replacement replaces it too", () => {
+    const text = "const n = 1;\n";
+    const quotes = findComposerQuotes(selectionPrompt("src/file.ts", { ...selection, text }));
+    expect(quotes[0]?.text).toBe(text);
+  });
 });

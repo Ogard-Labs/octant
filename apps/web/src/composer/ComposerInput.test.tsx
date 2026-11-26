@@ -55,8 +55,11 @@ function Recalling(props: { readonly recall: ReadonlyArray<string> }) {
   );
 }
 
-function Attaching(props: { readonly onPasteAsFile?: (file: File) => void }) {
-  const [value, setValue] = useState("Draft ");
+function Attaching(props: {
+  readonly onPasteAsFile?: (file: File) => void;
+  readonly initial?: string;
+}) {
+  const [value, setValue] = useState(props.initial ?? "Draft ");
   return (
     <>
       <label htmlFor="attaching">Message</label>
@@ -355,6 +358,23 @@ describe("ComposerInput", () => {
     expect(input).toHaveValue(`Why? \n${composerQuoteText({ ...quote, comment: "only on CI" })}`);
   });
 
+  it("keeps a copied quote's closing fence on its own line when it is pasted before existing text", () => {
+    const quote = { source: "the terminal", text: "exit 1", comment: "" };
+    render(<Prompt initial="Why did this fail?" />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    input.setSelectionRange(0, 0);
+    const copied = composerQuoteText(quote);
+    fireEvent.paste(input, {
+      clipboardData: {
+        getData: (type: string) =>
+          type === COMPOSER_QUOTE_CLIPBOARD_TYPE ? JSON.stringify([copied]) : copied,
+      },
+    });
+    expect(input).toHaveValue(`${copied}\nWhy did this fail?`);
+    expect(screen.getByRole("button", { name: "Quote from the terminal: exit 1" })).toBeVisible();
+  });
+
   it("never counts a draft that carries a quote as typed", async () => {
     forgetTypedComposerText();
     const draft = appendComposerQuote("", { source: "the terminal", text: "ls", comment: "" });
@@ -414,6 +434,16 @@ describe("ComposerInput", () => {
     expect(file.name).toBe("pasted-text-1.txt");
     expect(file.type).toBe("text/plain");
     expect(await file.text()).toBe(large);
+  });
+
+  it("leaves a sendable line pointing at the file when a large paste is the whole prompt", () => {
+    const onPasteAsFile = vi.fn();
+    render(<Attaching initial="" onPasteAsFile={onPasteAsFile} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    fireEvent.paste(input, { clipboardData: { getData: () => "x".repeat(40 * 1024) } });
+    expect(onPasteAsFile).toHaveBeenCalledOnce();
+    expect(input).toHaveValue("See the attached pasted-text-1.txt.");
   });
 
   it("⌘⇧V keeps a large paste inline", () => {

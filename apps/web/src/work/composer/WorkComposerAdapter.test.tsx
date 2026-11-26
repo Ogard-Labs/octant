@@ -235,7 +235,8 @@ describe("WorkComposerAdapter interactions", () => {
         types: ["text/plain"],
       },
     });
-    expect(prompt).toHaveValue("");
+    // A start needs words, so the prompt points at the file instead of staying empty.
+    expect(prompt).toHaveValue("See the attached pasted-text-1.txt.");
     expect(await screen.findByText("pasted-text-1.txt")).toBeInTheDocument();
   });
 
