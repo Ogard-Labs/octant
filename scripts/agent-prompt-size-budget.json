@@ -5,11 +5,11 @@
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 48056,
+      "firstPromptBytes": 48211,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 63605,
+      "firstPromptBytes": 64376,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -31,11 +31,11 @@
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 48380,
+      "firstPromptBytes": 48535,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 64073,
+      "firstPromptBytes": 64844,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -57,11 +57,11 @@
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 49395,
+      "firstPromptBytes": 49550,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 65274,
+      "firstPromptBytes": 66045,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -83,12 +83,12 @@
       "laterTurnBytes": 4724
     },
     "work": {
-      "firstPromptBytes": 49395,
+      "firstPromptBytes": 49550,
       "laterTurnBytes": 7880
     },
     "code": {
-      "firstPromptBytes": 65274,
-      "laterTurnBytes": 8687
+      "firstPromptBytes": 66045,
+      "laterTurnBytes": 8715
     },
     "chat-child": {
       "firstPromptBytes": 3405,
@@ -109,11 +109,11 @@
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 49395,
+      "firstPromptBytes": 49550,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 65274,
+      "firstPromptBytes": 66045,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -135,12 +135,12 @@
       "laterTurnBytes": 40509
     },
     "work": {
-      "firstPromptBytes": 61628,
-      "laterTurnBytes": 61628
+      "firstPromptBytes": 61783,
+      "laterTurnBytes": 61783
     },
     "code": {
-      "firstPromptBytes": 78390,
-      "laterTurnBytes": 78390
+      "firstPromptBytes": 79161,
+      "laterTurnBytes": 79161
     },
     "chat-child": {
       "firstPromptBytes": 3451,
