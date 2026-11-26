@@ -34,7 +34,12 @@ function hubIdentity() {
   };
 }
 
-function setup(options: { readonly forward?: "unreachable" | "accepted" } = {}) {
+function setup(
+  options: {
+    readonly forward?: "unreachable" | "accepted" | "busy";
+    readonly members?: () => ReadonlyArray<string> | undefined;
+  } = {},
+) {
   const clock = { now: NOW };
   const forwarded: string[] = [];
   const woken: string[] = [];
@@ -46,9 +51,11 @@ function setup(options: { readonly forward?: "unreachable" | "accepted" } = {}) 
     serving: () => true,
     send: async (_spoke, envelope) => {
       if (options.forward === "unreachable") return undefined;
+      if (options.forward === "busy") return { status: "refused", kind: "busy" };
       forwarded.push(envelope.deliveryId);
       return { status: "accepted" };
     },
+    ...(options.members === undefined ? {} : { members: options.members }),
     wake: async (memberId) => void woken.push(memberId),
     record: () => undefined,
     now: () => clock.now,
@@ -186,6 +193,28 @@ describe("webhook receipt on the hub", () => {
     await reachable.service.tick();
     expect(reachable.forwarded).toEqual(["msg_1"]);
     expect(reachable.service.status().queued).toBe(0);
+  });
+
+  it("keeps a delivery a busy spoke has no room for, and sends no wake", async () => {
+    const { service, secret, woken } = setup({ forward: "busy" });
+    await service.handle(delivery({ secret, id: "msg_1", timestampMs: NOW }));
+    await service.tick();
+    await service.tick();
+    expect(service.status().queued).toBe(1);
+    expect(woken).toEqual([]);
+  });
+
+  it("forgets the endpoints and queue of a spoke the roster no longer lists", async () => {
+    let members: ReadonlyArray<string> = [HUB, SPOKE];
+    const { service, secret } = setup({ forward: "unreachable", members: () => members });
+    await service.handle(delivery({ secret, id: "msg_1", timestampMs: NOW }));
+    await service.tick();
+    members = [HUB];
+    await service.tick();
+    expect(service.status()).toMatchObject({ endpoints: 0, queued: 0 });
+    expect((await service.handle(delivery({ secret, id: "msg_2", timestampMs: NOW }))).status).toBe(
+      404,
+    );
   });
 
   it("drops a delivery held longer than a day and counts it as expired", async () => {

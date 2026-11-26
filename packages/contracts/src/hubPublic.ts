@@ -262,12 +262,20 @@ export const HubWebhookEndpointsUpdate = Schema.Struct({
 export type HubWebhookEndpointsUpdate = typeof HubWebhookEndpointsUpdate.Type;
 export const decodeHubWebhookEndpointsUpdate = Schema.decodeUnknownSync(HubWebhookEndpointsUpdate);
 
-/** What a spoke answers a forwarded delivery; only `accepted` and `duplicate` take it off the hub's queue for good. */
+/**
+ * What a spoke answers a forwarded delivery. Every answer takes it off the
+ * hub's queue except `busy`, which leaves it for a later look within the hold.
+ */
 export const WebhookDeliveryAnswer = Schema.Union(
   Schema.Struct({ status: Schema.Literal("accepted", "duplicate") }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    kind: Schema.Literal(...WEBHOOK_REFUSAL_KINDS, "public-not-granted", "unknown-endpoint"),
+    kind: Schema.Literal(
+      ...WEBHOOK_REFUSAL_KINDS,
+      "public-not-granted",
+      "unknown-endpoint",
+      "busy",
+    ),
   }).annotations(strict),
 );
 export type WebhookDeliveryAnswer = typeof WebhookDeliveryAnswer.Type;

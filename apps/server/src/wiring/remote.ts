@@ -1338,6 +1338,8 @@ export function wireRemote(deps: RemoteDependencies) {
         envelope,
       ),
     wake: async (spokeMemberId) => void (await wakeService.wakeForDelivery(spokeMemberId)),
+    members: () =>
+      hubService.status().roster?.roster.members.map((member) => String(member.memberId)),
     record: recordHubMembership,
     now: Date.now,
   });

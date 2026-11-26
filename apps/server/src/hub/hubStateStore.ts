@@ -474,6 +474,8 @@ export const SpokeWebhookDelivery = Schema.Struct({
   receivedAt: Schema.Int.pipe(Schema.nonNegative()),
   event: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
   data: Schema.String.pipe(Schema.maxLength(2_048)),
+  /** When a routine's read first showed it; until then it counts against the endpoint's backlog. */
+  readAt: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
 }).annotations(strict);
 export type SpokeWebhookDelivery = typeof SpokeWebhookDelivery.Type;
 
@@ -493,7 +495,7 @@ export const SpokeWebhookState = Schema.Struct({
       key: Schema.String.pipe(Schema.maxLength(320)),
       at: Schema.Int.pipe(Schema.nonNegative()),
     }).annotations(strict),
-  ).pipe(Schema.maxItems(10_000)),
+  ).pipe(Schema.maxItems(50_000)),
   log: Schema.Array(SpokeWebhookLogEntry).pipe(Schema.maxItems(50)),
   /** The hub has not taken the current endpoint list yet; the next look sends it again. */
   unpublished: Schema.optional(Schema.Literal(true)),

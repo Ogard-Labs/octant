@@ -211,6 +211,30 @@ describe("revalidateAutomationAuthority", () => {
     ).toEqual({ kind: "ok" });
   });
 
+  it("blocks an occurrence of a webhook routine whose stored definition reaches above Ask first", () => {
+    const definition = automationDefinitionFixture();
+    const run = automationRunForDefinition(definition);
+    const webhook = {
+      kind: "integration-event",
+      integrationId: "octant.webhooks",
+      sourceId: "endpoint",
+      filters: { endpoint: "AAAAAAAAAAAAAAAAAAAAAA" },
+      pollMinutes: 1,
+      automaticStartLimit: 8,
+    };
+    for (const levels of [{ projectLevel: "opted-in" }, { runLevel: "auto" }]) {
+      // Such a definition fails contract decode; this is the stored copy a
+      // run carries, checked again before every occurrence.
+      const poisoned = {
+        ...run,
+        definitionSnapshot: { ...run.definitionSnapshot, trigger: webhook, ...levels },
+      };
+      expect(
+        revalidateAutomationAuthority({ definition, run: poisoned as never, facts: facts() }),
+      ).toMatchObject({ kind: "blocked", reason: "full-access-ineligible" });
+    }
+  });
+
   it("digests the task prompt stably", () => {
     expect(automationPromptDigest("Summarize the Project's open work.")).toEqual(
       automationPromptDigest("Summarize the Project's open work."),

@@ -53,6 +53,8 @@ export interface HubWebhookServiceOptions {
   ) => Promise<WebhookDeliveryAnswer | undefined>;
   /** Sends a Wake-on-LAN packet to a spoke whose address the wake service holds; nothing else. */
   readonly wake?: (spokeMemberId: string) => Promise<void>;
+  /** The member ids the roster this host serves lists; absent while it holds none. */
+  readonly members?: () => ReadonlyArray<string> | undefined;
   readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now: () => number;
 }
@@ -81,6 +83,7 @@ export class HubWebhookService {
   readonly #rate = new Map<string, number[]>();
   readonly #wokenAt = new Map<string, number>();
   #inFlight: Promise<void> | undefined;
+  #unsaved = { forwarded: 0, refused: 0 };
 
   constructor(options: HubWebhookServiceOptions) {
     this.#options = options;
@@ -146,8 +149,8 @@ export class HubWebhookService {
     return {
       endpoints: hub?.endpoints.length ?? 0,
       queued: hub?.queue.length ?? 0,
-      forwarded: counts.forwarded,
-      refused: counts.refused,
+      forwarded: counts.forwarded + this.#unsaved.forwarded,
+      refused: counts.refused + this.#unsaved.refused,
       expired: counts.expired,
     };
   }
@@ -156,9 +159,10 @@ export class HubWebhookService {
   readonly handle = async (request: PublicRequest): Promise<PublicAnswer> => {
     if (!this.#options.serving()) return NOT_FOUND;
     const endpointId = request.params.id ?? "";
-    const hub = this.#options.state.load().webhookHub;
-    const endpoint = hub?.endpoints.find((entry) => String(entry.endpointId) === endpointId);
-    if (hub === undefined || endpoint === undefined) return NOT_FOUND;
+    const known = this.#options.state
+      .load()
+      .webhookHub?.endpoints.some((entry) => String(entry.endpointId) === endpointId);
+    if (known !== true) return NOT_FOUND;
     const now = this.#options.now();
     if (!this.#takeRate(endpointId, now)) {
       this.#count("refused");
@@ -167,6 +171,12 @@ export class HubWebhookService {
     const body = await request.readBody(WEBHOOK_BODY_MAX_BYTES);
     if (body.status === "too-large") return answer(413, { error: "too-large" });
     if (body.status === "aborted") return answer(400, { error: "invalid" });
+    // The body read awaited; the endpoint, its queue and this host's role are
+    // judged as they are now, and nothing below awaits before the save.
+    if (!this.#options.serving()) return NOT_FOUND;
+    const hub = this.#options.state.load().webhookHub;
+    const endpoint = hub?.endpoints.find((entry) => String(entry.endpointId) === endpointId);
+    if (hub === undefined || endpoint === undefined) return NOT_FOUND;
     const headers = Object.fromEntries(
       WEBHOOK_FORWARDED_HEADERS.flatMap((name) => {
         const value = request.headers.get(name);
@@ -235,12 +245,10 @@ export class HubWebhookService {
       },
     };
     const latest = this.#options.state.load();
-    if (latest.webhookHub !== undefined) {
-      this.#options.state.save({
-        ...latest,
-        webhookHub: { ...latest.webhookHub, queue: [...latest.webhookHub.queue, queued] },
-      });
-    }
+    this.#options.state.save({
+      ...latest,
+      webhookHub: { ...hub, queue: [...hub.queue, queued] },
+    });
     void this.tick().catch(() => undefined);
     return answer(202, { queued: true });
   };
@@ -256,15 +264,24 @@ export class HubWebhookService {
   }
 
   async #look(): Promise<void> {
+    this.#flushCounts();
+    this.#forgetDeparted();
     this.#expire();
     const queue = this.#options.state.load().webhookHub?.queue ?? [];
     const unreachable = new Set<string>();
+    const busy = new Set<string>();
     for (const queued of queue) {
       const spoke = String(queued.spokeMemberId);
-      if (unreachable.has(spoke)) continue;
+      if (unreachable.has(spoke) || busy.has(spoke)) continue;
       const result = await this.#options.send(spoke, queued.envelope);
       if (result === undefined) {
         unreachable.add(spoke);
+        continue;
+      }
+      if (result.status === "refused" && result.kind === "busy") {
+        // The spoke is awake but its routine has not caught up; no wake, and
+        // the rest of its queue waits for the next look.
+        busy.add(spoke);
         continue;
       }
       this.#remove(queued);
@@ -338,13 +355,52 @@ export class HubWebhookService {
     });
   }
 
+  /**
+   * Counts in memory and lands them in the state file at the next look, so an
+   * unauthenticated flood of refused requests never rewrites the file per request.
+   */
   #count(kind: "forwarded" | "refused"): void {
+    this.#unsaved[kind] += 1;
+  }
+
+  #flushCounts(): void {
+    if (this.#unsaved.forwarded === 0 && this.#unsaved.refused === 0) return;
     const state = this.#options.state.load();
     const hub = state.webhookHub;
     if (hub === undefined) return;
     this.#options.state.save({
       ...state,
-      webhookHub: { ...hub, counts: { ...hub.counts, [kind]: hub.counts[kind] + 1 } },
+      webhookHub: {
+        ...hub,
+        counts: {
+          ...hub.counts,
+          forwarded: hub.counts.forwarded + this.#unsaved.forwarded,
+          refused: hub.counts.refused + this.#unsaved.refused,
+        },
+      },
+    });
+    this.#unsaved = { forwarded: 0, refused: 0 };
+  }
+
+  /** Drops the endpoints and queue of a spoke the roster no longer lists; it cannot withdraw them itself. */
+  #forgetDeparted(): void {
+    const listed = this.#options.members?.();
+    if (listed === undefined) return;
+    const members = new Set(listed);
+    const state = this.#options.state.load();
+    const hub = state.webhookHub;
+    if (hub === undefined) return;
+    const endpoints = hub.endpoints.filter((endpoint) =>
+      members.has(String(endpoint.spokeMemberId)),
+    );
+    if (endpoints.length === hub.endpoints.length) return;
+    this.#options.state.save({
+      ...state,
+      webhookHub: {
+        ...hub,
+        endpoints,
+        queue: hub.queue.filter((queued) => members.has(String(queued.spokeMemberId))),
+      },
     });
   }
 }

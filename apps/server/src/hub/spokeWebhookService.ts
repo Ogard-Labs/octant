@@ -51,7 +51,10 @@ const EVENT_DATA_MAX = 2_048;
 const EVENTS_PER_READ = 128;
 const LOG_MAX = 50;
 const DELIVERIES_MAX = 1_024;
-const CLAIMED_MAX = 10_000;
+const CLAIMED_MAX = 50_000;
+// A routine takes at most 32 waiting events at one look, so a spoke takes no
+// more than this many unread deliveries per endpoint; the rest stay on the hub.
+const UNREAD_PER_ENDPOINT_MAX = 16;
 
 /** The hub this spoke hands its endpoints to, over the pinned private transport. */
 export interface SpokeWebhookHubPort {
@@ -169,11 +172,17 @@ export class SpokeWebhookService {
     };
   }
 
-  /** A new URL and secret for the same routine choice; the old pair stops at once. */
+  /**
+   * A new URL and secret with the same scheme and label; the old pair stops at
+   * once. The new endpoint has a new id, so a routine that named the old one
+   * shows its source unavailable until it is pointed at the new one.
+   */
   async rotate(endpointId: string): Promise<SpokeWebhookCreated> {
     const held = this.#load();
     const old = held.endpoints.find((endpoint) => String(endpoint.endpointId) === endpointId);
     if (old === undefined) return { status: "refused", kind: "unknown-endpoint" };
+    // Checked before the old one goes, so a refused rotate leaves it working.
+    if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
     this.#drop(endpointId);
     return this.create({ scheme: old.scheme, label: old.label });
   }
@@ -309,6 +318,18 @@ export class SpokeWebhookService {
           });
     if (decision.status === "duplicate") return outcome({ status: "duplicate" });
     if (decision.status === "refused") return outcome({ status: "refused", kind: decision.kind });
+    // Claims are the only replay guard for GitHub, so they are never evicted
+    // to make room; a spoke that is full, or whose routine has not read what
+    // it holds, answers busy and the hub keeps the delivery for a later look.
+    const unread = held.deliveries.filter(
+      (entry) => String(entry.endpointId) === endpointId && entry.readAt === undefined,
+    ).length;
+    if (
+      unread >= UNREAD_PER_ENDPOINT_MAX ||
+      held.claimed.length + decision.claimKeys.length > CLAIMED_MAX
+    ) {
+      return outcome({ status: "refused", kind: "busy" });
+    }
     const delivery: SpokeWebhookDelivery = {
       endpointId: endpoint.endpointId,
       deliveryId: reading.deliveryId,
@@ -320,11 +341,11 @@ export class SpokeWebhookService {
     };
     this.#save({
       ...held,
-      deliveries: [...held.deliveries, delivery].slice(-DELIVERIES_MAX),
+      deliveries: keepUnread([...held.deliveries, delivery]),
       claimed: [
         ...held.claimed,
         ...decision.claimKeys.map((key) => ({ key: `${endpointId}|${key}`, at: now })),
-      ].slice(-CLAIMED_MAX),
+      ],
     });
     return outcome({ status: "accepted" });
   }
@@ -376,13 +397,21 @@ export class SpokeWebhookService {
           current: exists,
           read: async () => {
             if (!exists()) return { kind: "unavailable", reason: "source-unavailable" };
-            return {
-              kind: "complete",
-              events: this.#load()
-                .deliveries.filter((delivery) => String(delivery.endpointId) === endpointId)
-                .slice(-EVENTS_PER_READ)
-                .map(eventOf),
-            };
+            const held = this.#load();
+            const shown = held.deliveries
+              .filter((delivery) => String(delivery.endpointId) === endpointId)
+              .slice(-EVENTS_PER_READ);
+            // What a read has shown the routine no longer holds the hub back.
+            const readAt = this.#options.now();
+            this.#save({
+              ...held,
+              deliveries: held.deliveries.map((delivery) =>
+                delivery.readAt === undefined && shown.includes(delivery)
+                  ? { ...delivery, readAt }
+                  : delivery,
+              ),
+            });
+            return { kind: "complete", events: shown.map(eventOf) };
           },
         };
       },
@@ -419,6 +448,21 @@ export class SpokeWebhookService {
   #save(webhooks: SpokeWebhookState): void {
     this.#options.state.save({ ...this.#options.state.load(), webhooks });
   }
+}
+
+/** Trims the oldest deliveries a routine already read, never one it has not. */
+function keepUnread(
+  deliveries: ReadonlyArray<SpokeWebhookDelivery>,
+): ReadonlyArray<SpokeWebhookDelivery> {
+  let excess = deliveries.length - DELIVERIES_MAX;
+  if (excess <= 0) return deliveries;
+  return deliveries.filter((delivery) => {
+    if (excess > 0 && delivery.readAt !== undefined) {
+      excess -= 1;
+      return false;
+    }
+    return true;
+  });
 }
 
 function eventOf(delivery: SpokeWebhookDelivery): AutomationIntegrationEvent {

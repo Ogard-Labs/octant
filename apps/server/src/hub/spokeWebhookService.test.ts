@@ -89,6 +89,49 @@ describe("webhook deliveries on the spoke", () => {
     expect((await readEvents(service, created.endpointId)).events).toHaveLength(1);
   });
 
+  it("answers busy past sixteen unread deliveries, and takes more once the routine reads", async () => {
+    const { service } = setup();
+    const created = await service.create({ scheme: "github", label: "Repository pushes" });
+    if (created.status !== "created") throw new Error(created.status);
+    const send = (index: number) =>
+      service.receive(
+        githubEnvelope({
+          endpointId: created.endpointId,
+          secret: created.secret,
+          guid: `guid-${index}`,
+          body: `{"n":${index}}`,
+          receivedAt: NOW,
+        }),
+      );
+    for (let index = 0; index < 16; index += 1) expect(send(index)).toEqual({ status: "accepted" });
+    expect(send(16)).toEqual({ status: "refused", kind: "busy" });
+    expect((await readEvents(service, created.endpointId)).events).toHaveLength(16);
+    expect(send(16)).toEqual({ status: "accepted" });
+  });
+
+  it("a GitHub delivery replayed after thousands of other claims still starts nothing", async () => {
+    const { service } = setup();
+    const created = await service.create({ scheme: "github", label: "Repository pushes" });
+    if (created.status !== "created") throw new Error(created.status);
+    const envelope = (guid: string, body: string) =>
+      githubEnvelope({
+        endpointId: created.endpointId,
+        secret: created.secret,
+        guid,
+        body,
+        receivedAt: NOW,
+      });
+    expect(service.receive(envelope("first", '{"n":"first"}'))).toEqual({ status: "accepted" });
+    for (let index = 0; index < 6_000; index += 1) {
+      if (index % 16 === 0) await readEvents(service, created.endpointId);
+      service.receive(envelope(`other-${index}`, `{"n":${index}}`));
+    }
+    expect(service.receive(envelope("replayed", '{"n":"first"}'))).toEqual({
+      status: "duplicate",
+    });
+    // Past the 10,000 claims the spoke once evicted from; that takes a while.
+  }, 60_000);
+
   it("checks the original bytes again with its own secret", () => {
     const { service } = setup();
     return service.create({ scheme: "github", label: "Pushes" }).then((created) => {
