@@ -5,7 +5,7 @@ import {
   type AgentAccessResult,
   type AgentThreadAttributions,
 } from "@octant/contracts";
-import { principalActsAsHostPerson } from "../clientPrincipal";
+import { principalAccessLevel, principalActsAsHostPerson } from "../clientPrincipal";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -36,7 +36,7 @@ export interface AgentGrantRouteOptions {
  * The grant list, revoking a grant, and which threads each agent started.
  * A local window and a paired device both reach these: a phone can see what
  * an agent may do and end its grant, because revoking only takes authority
- * away. Making, widening, connection codes and keys are the person's: a
+ * away. Stopping the running turns with it is refused at Read only. Making, widening, connection codes and keys are the person's: a
  * device the host's own person paired sends them to `commands`, journaled as
  * that device (maintainer decision, 2026-11-12), and a local window keeps the
  * desktop routes behind the bridge secret, so `commands` refuses it, as it
@@ -137,6 +137,16 @@ export function createAgentGrantRouteHandler(options: AgentGrantRouteOptions): A
       revoke = decodeAgentGrantRevokeRequest(JSON.parse(text));
     } catch {
       return failure("That revoke request is not valid.", 400, origin);
+    }
+    // Revoking only takes authority away, so a Read only device may do it.
+    // Stopping the running turns does not: it can stop the person's own turn
+    // on a thread the agent used, which Read only never allows.
+    if (revoke.stopRunningTurns && principalAccessLevel(principal) === "read-only") {
+      return failure(
+        "A Read only device can revoke a grant but cannot stop running turns.",
+        403,
+        origin,
+      );
     }
     const result = options.service.execute(
       { kind: "revoke", grantId: revoke.grantId, stopRunningTurns: revoke.stopRunningTurns },

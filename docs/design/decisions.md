@@ -2529,7 +2529,7 @@ Status: Partly built. Detail: [Architecture: Security and authority, Proxy sessi
 An agent on another machine on the person's own network works as its own principal, held to an agent grant the person creates. It is never a paired device and never the person.
 
 - A grant names Projects, modes, a highest level, tools, models, spend limits and expiry, inside a restricted device's clamps. It may reach Full access behind the one-time warning (maintainer decision, 2026-11-12); `start_work` gives Full access to the thread alone (maintainer decision, 2026-11-13). Its prompts stay outside content.
-- A window, the loopback CLI or a Full device creates or widens a grant (maintainer decision, 2026-11-12). Other devices may view and revoke it, a Read only one included (maintainer decision, 2026-11-26).
+- A window, the loopback CLI or a Full device creates or widens a grant (maintainer decision, 2026-11-12). Other devices may view and revoke it, a Read only one included, but a Read only device cannot stop the running turns with it (maintainer decision, 2026-11-26).
 - It never adds Projects or answers approvals; its threads and turns are marked as its own.
 - Revocation voids its credentials and ends its sessions and requests at once.
 - Reach stays on the person's network (maintainer decision, 2026-11-11): no public bots, nothing Octant operates.

@@ -295,7 +295,9 @@ lists only rows on threads in scope. `list_threads` lists only threads in scope.
   device, a Read only one included, sees the list and can revoke, since
   revoking only reduces authority (`GET /api/agent-grants`,
   `POST /api/agent-grants/revoke`, action `agent-access.revoke`, journaled as
-  that device; maintainer decision, 2026-11-26). An outside agent reaches neither route.
+  that device; maintainer decision, 2026-11-26). A paired browser that may
+  revoke but not make grants sees the same list with Revoke only (remote
+  surface `agent-revoke`). An outside agent reaches neither route.
 - A thread an outside agent started shows "Started by <agent name>" in its
   pane header and on its sidebar row, read from `GET /api/agent-grants/threads`,
   which names each such thread with its grant's current name.
@@ -319,7 +321,10 @@ off, and a host identity rotation each void the grant's credentials in one
 journaled step (generation + 1). Open MCP sessions end and in-flight requests
 are cancelled through the remote request registry, as device revocation does.
 Turns already running keep running, since they are the person's threads; the
-revoke dialog offers **Also stop its running turns**.
+revoke dialog offers **Also stop its running turns**. A Read only device does
+not get that choice, and the host refuses its revoke that asks to stop turns:
+the stop can end the person's own turn on a thread the agent used, and Read
+only never acts on a turn.
 
 A grant that narrows narrows the agent's existing threads too. Every thread in
 reach, whether the agent started it or the person did in a granted Project, is

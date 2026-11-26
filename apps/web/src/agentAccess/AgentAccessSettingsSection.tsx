@@ -74,8 +74,14 @@ export function AgentAccessSettingsSection(props: {
   readonly administration?: AgentAccessAdministrationBridge;
   readonly client?: AgentGrantClient;
   readonly projectNames: ReadonlyMap<string, string>;
+  /**
+   * False on a device paired Read only: it may revoke, but the host refuses
+   * its request to stop the turns that were running, so the choice is not offered.
+   */
+  readonly canStopTurns?: boolean;
 }) {
   const { administration, client } = props;
+  const canStopTurns = props.canStopTurns !== false;
   const [grants, setGrants] = useState<ReadonlyArray<AgentGrantView>>();
   const [message, setMessage] = useState<Message>();
   const [busy, setBusy] = useState(false);
@@ -166,7 +172,7 @@ export function AgentAccessSettingsSection(props: {
 
   const revoke = (view: AgentGrantView) =>
     act(async () => {
-      const request = { grantId: view.grant.grantId, stopRunningTurns: stopTurns };
+      const request = { grantId: view.grant.grantId, stopRunningTurns: canStopTurns && stopTurns };
       const answer =
         administration !== undefined
           ? await send({ kind: "revoke", ...request })
@@ -408,16 +414,19 @@ export function AgentAccessSettingsSection(props: {
           title={`Revoke ${revoking.grant.name}?`}
         >
           <p>
-            Its keys stop working at once and its open connections end. The threads it started stay
-            yours, and turns already running keep running unless you stop them.
+            {canStopTurns
+              ? "Its keys stop working at once and its open connections end. The threads it started stay yours, and turns already running keep running unless you stop them."
+              : "Its keys stop working at once and its open connections end. The threads it started stay yours, and turns already running keep running: this device is Read only, so stop them from a device that can."}
           </p>
-          <label className="host-settings__controls">
-            <OctantCheckbox
-              checked={stopTurns}
-              onChange={(event) => setStopTurns(event.currentTarget.checked)}
-            />
-            Also stop its running turns
-          </label>
+          {canStopTurns ? (
+            <label className="host-settings__controls">
+              <OctantCheckbox
+                checked={stopTurns}
+                onChange={(event) => setStopTurns(event.currentTarget.checked)}
+              />
+              Also stop its running turns
+            </label>
+          ) : null}
         </OctantConfirmDialog>
       )}
       {message === undefined ? null : (

@@ -12432,7 +12432,10 @@ the model at another size.
   `question-too-many-waiting` or `approval-too-many-waiting`, journals
   nothing, and tells the lead nobody was asked. Outside Strict there is no
   cap: an approval or question waits until it is answered or its turn stops,
-  and stopping the turn ends a lead or child that keeps asking. The cap
+  and stopping the turn ends a lead or child that keeps asking. A session's
+  history keeps its newest 50 approvals and 50 questions, but drops settled
+  ones first, so a waiting ask is never pushed out of reach; while more than
+  50 wait, the view shows the oldest 50 and the next appears as one settles. The cap
   protects no hard line, so it is one of Octant's own limits
   ([Octant's own limits become settings](#security-and-authority);
   maintainer decision, 2026-11-26). `NativeHarnessTurnObserver` puts the stable
