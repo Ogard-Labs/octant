@@ -228,7 +228,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         <SettingRow
           description={
             allowedRings === undefined || allowedRings.includes("candidate")
-              ? "Stable is the released build; Preview tests the next release."
+              ? "Stable is the released build; Preview tests the next, and going back waits for a newer stable release."
               : "Stable is the released build; switching takes effect at the next check."
           }
           more={

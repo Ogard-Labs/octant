@@ -162,8 +162,8 @@ function WorktreeSettingsControls(props: {
               />
             </SettingRow>
             <SettingRow
-              description="Also remove the worktree folder of an open thread once everything is committed and pushed or merged."
-              more="A thread that is still open loses its folder a day after its last activity. The branch stays, and Cleaned-up worktrees below brings the folder back."
+              description="Also remove an open thread's worktree folder a day after its last activity, once all is pushed or merged."
+              more="Everything must be committed first. The branch stays, and Cleaned-up worktrees below brings the folder back."
               label="Clean up merged worktrees"
               scope="app"
               focused={props.focusedSetting === "code-worktree-cleanup-merged"}

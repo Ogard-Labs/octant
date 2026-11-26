@@ -1838,8 +1838,8 @@ function ActiveSectionContent({
                   props.settings.browserCapturesPerThread === DEFAULT_BROWSER_CAPTURES_PER_THREAD
                 }
                 defaultValue={String(DEFAULT_BROWSER_CAPTURES_PER_THREAD)}
-                description="How many screenshots and recordings each thread keeps, newest first."
-                more="A smaller number drops a thread's older captures, and a larger one never brings them back."
+                description="How many screenshots and recordings each thread keeps; lowering it deletes older ones for good."
+                more="The newest are kept. Raising the number again does not bring deleted captures back."
                 focused={focusedSetting === settingId("browser-captures-per-thread")}
                 label="Captures kept per thread"
                 scope="host"

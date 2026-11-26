@@ -695,7 +695,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
           </SettingRow>
           <SettingRow
             description="Where else workers show, besides their coordinator's thread."
-            more="Workers live in their coordinator's thread. Their requests always reach Needs you."
+            more="Workers live in their coordinator's thread. Their requests always reach Needs you. Projects can choose their own."
             focused={props.focusedSetting === "code-coordinator-show-workers"}
             label="Show workers"
             scope="mode"

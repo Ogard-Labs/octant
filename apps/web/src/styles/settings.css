@@ -1546,8 +1546,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 /* What a row says beyond its one sentence waits behind More, the row's third
    line. The control spans the row's first two lines only, so opening this adds
    height below the sentence and leaves the control where it was. */
+/* Its own track: a row that stacks its control under the sentence (a list, a
+   form, every row at phone width) places the control after it, so More still
+   sits under the sentence. */
 .setrow-more {
   grid-column: 1;
+  grid-row: 3;
   max-width: 62ch;
   margin-top: var(--oct-space-1);
   color: var(--oct-meta);
