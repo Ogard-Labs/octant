@@ -869,6 +869,13 @@ right-click menu). A terminal's **Add selection to chat** and the editor's
 file and its lines; the editor's request for one replacement block follows the
 chip as ordinary text.
 
+- Select text in a delivered subagent result and choose **Add to chat** to
+  append it to the parent's draft with an empty note. Where the result records
+  the subagent's role and generation, the chip identifies them. **Show source**
+  in the chip opens the same delivered result and expands folded text, including
+  when that subagent has run again. Older deliveries use a generic attribution
+  when their details are unavailable. The source link is available in the
+  original parent thread in the window that made the quote.
 - The quote is the prompt's own text: a line that names its source and says
   the words are for reference only, not instructions, then the words in a
   fence longer than any backtick run inside them, then the person's note on a

@@ -56,7 +56,8 @@ import {
 import { ChevronDown, CirclePause, X } from "../ui/icons";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
-import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
+import { ThreadReplyDetailMenu } from "../transcript/ThreadReplyDetail";
+import { ThreadTranscriptScope } from "../transcript/ThreadTranscriptScope";
 import {
   useCallback,
   useContext,
@@ -2059,7 +2060,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
 
   return (
-    <ThreadReplyDetailScope thread={{ mode: "code", threadId: String(props.threadId) }}>
+    <ThreadTranscriptScope thread={{ mode: "code", threadId: String(props.threadId) }}>
       <section aria-label="Code thread" className="code-thread-workspace">
         {/* No identity header. The title repeated the pane's own grip, the
           lifecycle badge said "Active" on nearly every thread, the branch is
@@ -2214,11 +2215,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             {...(readOnly
               ? {}
               : {
-                  onAddToChat: (text: string) => {
+                  onAddToChat: (text: string, source = REPLY_QUOTE_SOURCE) => {
                     void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
                       // The prompt as it stands once the quote code has loaded.
                       const next = appendComposerQuote(textareaRef.current?.value ?? draft, {
-                        source: REPLY_QUOTE_SOURCE,
+                        source,
                         text,
                         comment: "",
                       });
@@ -2535,7 +2536,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         }}
                       >
                         {delivered ? (
-                          <ChildResultCards providerGroups={providerGroups} text={message.text} />
+                          <ChildResultCards
+                            providerGroups={providerGroups}
+                            rowKey={message.id}
+                            text={message.text}
+                          />
                         ) : reportDelivery ? (
                           <SideTaskReportCards text={message.text} />
                         ) : message.role === "user" ? (
@@ -2847,6 +2852,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     </article>
                     {message === firstUserMessage ? launchProgress : null}
                     <SteeredChildResults
+                      rowKey={message.id}
                       providerGroups={providerGroups}
                       steered={message.steeredResults}
                     />
@@ -3752,7 +3758,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ]}
         />
       </section>
-    </ThreadReplyDetailScope>
+    </ThreadTranscriptScope>
   );
 }
 

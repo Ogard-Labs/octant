@@ -78,7 +78,8 @@ import {
 } from "./ChatComposer";
 import { attemptCanForceStop } from "./attemptForceStop";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
-import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
+import { ThreadReplyDetailMenu } from "../transcript/ThreadReplyDetail";
+import { ThreadTranscriptScope } from "../transcript/ThreadTranscriptScope";
 import { ChatPendingQuestions, ChatTranscript, type ChatTranscriptProps } from "./ChatTranscript";
 import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
 import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
@@ -1515,7 +1516,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   });
 
   return (
-    <ThreadReplyDetailScope thread={{ mode: "chat", threadId: String(view.thread.id) }}>
+    <ThreadTranscriptScope thread={{ mode: "chat", threadId: String(view.thread.id) }}>
       <ThreadConnectionLostContext value={connectionLost}>
         <section aria-label="Chat workspace" className="chat-workspace">
           <ThreadConnectionNotice connected={!connectionLost} onRetry={props.controller.retry} />
@@ -1841,11 +1842,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {...(readOnly
                 ? {}
                 : ({
-                    onQuoteSelection: ({ text }) => {
+                    onQuoteSelection: ({ text, source = REPLY_QUOTE_SOURCE }) => {
                       void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
                         // The draft as it stands once the quote code has loaded.
                         const next = appendComposerQuote(latestDraftRef.current, {
-                          source: REPLY_QUOTE_SOURCE,
+                          source,
                           text,
                           comment: "",
                         });
@@ -2482,7 +2483,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           />
         </section>
       </ThreadConnectionLostContext>
-    </ThreadReplyDetailScope>
+    </ThreadTranscriptScope>
   );
 }
 

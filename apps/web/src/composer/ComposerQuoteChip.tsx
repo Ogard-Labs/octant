@@ -1,3 +1,4 @@
+import { readResultQuoteSource, useResultQuoteScope } from "../transcript/ResultQuoteScope";
 import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
@@ -19,12 +20,15 @@ export interface ComposerQuoteChipProps {
  */
 export function ComposerQuoteChip(props: ComposerQuoteChipProps) {
   const { quote } = props;
+  const result = readResultQuoteSource(quote.source);
+  const scope = useResultQuoteScope();
+  const source = result?.label ?? quote.source;
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState(quote.comment);
   const noteId = useId();
   const preview = quotePreview(quote.text);
   const label = [
-    `Quote from ${quote.source}: ${preview}`,
+    `Quote from ${source}: ${preview}`,
     ...(quote.comment === "" ? [] : [`Your note: ${quote.comment}`]),
   ].join(". ");
 
@@ -56,7 +60,7 @@ export function ComposerQuoteChip(props: ComposerQuoteChipProps) {
       triggerClassName="composer-chip__button"
       triggerLabel={label}
     >
-      <p className="composer-quote-card__source">From {quote.source}</p>
+      <p className="composer-quote-card__source">From {source}</p>
       <pre className="composer-quote-card__text">{quote.text}</pre>
       <label className="composer-quote-card__label" htmlFor={noteId}>
         Your note
@@ -77,6 +81,19 @@ export function ComposerQuoteChip(props: ComposerQuoteChipProps) {
         value={note}
       />
       <div className="composer-quote-card__actions">
+        {result !== undefined && scope?.threadId === result.threadId ? (
+          <OctantButton
+            onClick={() => {
+              setOpen(false);
+              scope.reveal(result);
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Show source
+          </OctantButton>
+        ) : null}
         <OctantButton
           disabled={!props.editable}
           onClick={() => {

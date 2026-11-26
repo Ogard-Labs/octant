@@ -120,7 +120,8 @@ import type { ThreadSessionClient } from "../code/codeSessionClient";
 import { createWorkSessionClient } from "./workSessionClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
-import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
+import { ThreadReplyDetailMenu } from "../transcript/ThreadReplyDetail";
+import { ThreadTranscriptScope } from "../transcript/ThreadTranscriptScope";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -3022,7 +3023,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         });
 
   return (
-    <ThreadReplyDetailScope thread={{ mode: "work", threadId: String(props.threadId) }}>
+    <ThreadTranscriptScope thread={{ mode: "work", threadId: String(props.threadId) }}>
       <section aria-label="Task workspace" className="work-thread-workspace">
         <h1 className="sr-only">{props.title}</h1>
         <OctantDialogPresence>
@@ -3040,12 +3041,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           {...(readOnly
             ? {}
             : {
-                onAddToChat: (text: string) => {
+                onAddToChat: (text: string, source = REPLY_QUOTE_SOURCE) => {
                   void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
                     // The prompt as it stands once the quote code has loaded.
                     const current = textareaRef.current?.value ?? composerDraft.text;
                     const next = appendComposerQuote(current, {
-                      source: REPLY_QUOTE_SOURCE,
+                      source,
                       text,
                       comment: "",
                     });
@@ -3158,6 +3159,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           <SideTaskReportCards text={row.entry.text} />
                         ) : (
                           <ChildResultCards
+                            rowKey={row.key}
                             providerGroups={props.providerGroups}
                             text={row.entry.text}
                           />
@@ -3371,6 +3373,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               if (row.kind === "steered") {
                 return (
                   <SteeredChildResults
+                    rowKey={row.key}
                     providerGroups={props.providerGroups}
                     steered={row.steered}
                   />
@@ -4147,6 +4150,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           ]}
         />
       </section>
-    </ThreadReplyDetailScope>
+    </ThreadTranscriptScope>
   );
 }

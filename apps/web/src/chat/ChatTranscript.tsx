@@ -117,6 +117,7 @@ export interface ChatTranscriptProps {
   readonly onQuoteSelection?: (input: {
     readonly turnId: ChatTurnId;
     readonly text: string;
+    readonly source?: string;
   }) => void;
   /** True while a turn is running, so rewinding and forking stay unavailable. */
   readonly busy?: boolean;
@@ -650,7 +651,17 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   turn.delivery?.kind === "side-task-report" ? (
                     <SideTaskReportCards text={delivery.body} />
                   ) : (
-                    <ChildResultCards providerGroups={props.providerGroups} text={delivery.body} />
+                    <ChildResultCards
+                      providerGroups={props.providerGroups}
+                      rowKey={String(turn.id)}
+                      onQuote={
+                        props.onQuoteSelection === undefined
+                          ? undefined
+                          : (text, source) =>
+                              props.onQuoteSelection?.({ turnId: turn.id, text, source })
+                      }
+                      text={delivery.body}
+                    />
                   )
                 ) : (
                   <>
@@ -728,6 +739,12 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               ))}
             </TurnActionMenu>
             <SteeredChildResults
+              rowKey={String(turn.id)}
+              onQuote={
+                props.onQuoteSelection === undefined
+                  ? undefined
+                  : (text, source) => props.onQuoteSelection?.({ turnId: turn.id, text, source })
+              }
               providerGroups={props.providerGroups}
               steered={turn.steeredResults}
             />
