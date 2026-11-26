@@ -593,7 +593,8 @@ export function RemoteAccessSettingsSection({
         <div className="setgroup">
           <SettingRow
             focused={focusedSetting === "remote-listener"}
-            description="The address paired devices connect to. Use a private network or Tailscale address with a certificate browsers trust. Loopback and public addresses are refused."
+            description="The address paired devices connect to."
+            more="Use a private network or Tailscale address with a certificate browsers trust. Loopback and public addresses are refused."
             label={status?.enabled === true ? "Move the listener" : "Enable the listener"}
             scope="host"
             settingId="remote-listener"
@@ -722,7 +723,8 @@ export function RemoteAccessSettingsSection({
         {browserCannotVerify ? (
           <div className="setgroup">
             <SettingRow
-              description="Enter this code on the other device, then approve the request below. It works once, for five minutes, and lets the device confirm it reached this computer."
+              description="Enter this code on the other device, then approve the request below."
+              more="It works once, for five minutes, and lets the device confirm it reached this computer."
               label="Pairing code"
               scope="host"
               settingId="remote-pairing-code"
@@ -755,7 +757,8 @@ export function RemoteAccessSettingsSection({
         ) : (
           <div className="setgroup">
             <SettingRow
-              description="A pairing link is single-use and expires in five minutes. Open it on the other device, then approve the request that appears below."
+              description="Open the pairing link on the other device, then approve the request that appears below."
+              more="A pairing link is single-use and expires in five minutes."
               label="Pairing link"
               scope="host"
               settingId="remote-pairing"
@@ -907,7 +910,8 @@ export function RemoteAccessSettingsSection({
         <SettingsSection title="Pairing length">
           <div className="setgroup">
             <SettingRow
-              description="How long a device stays paired, counted from when it was paired and applied to devices already paired, so a shorter length can end some pairings now; Never expires means only Revoke ends a pairing."
+              description="How long a device stays paired; a shorter length can end some pairings now."
+              more="It is counted from when the device was paired and applies to devices already paired. Never expires means only Revoke ends a pairing."
               focused={focusedSetting === "remote-paired-device-lifetime"}
               label="Keep devices paired for"
               scope="host"
@@ -950,7 +954,8 @@ export function RemoteAccessSettingsSection({
           )}
           {paused === undefined ? null : (
             <SettingRow
-              description="Refuses every paired device until you turn it off here. Devices stay paired and keep their keys; this computer's own hub links are not affected."
+              description="Refuses every paired device until you turn it off here."
+              more="Devices stay paired and keep their keys; this computer's own hub links are not affected."
               focused={focusedSetting === "remote-access-pause"}
               label="Pause remote access"
               scope="host"

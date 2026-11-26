@@ -184,7 +184,7 @@ export function ProtectedFilesSettings(props: ProtectedFilesSettingsProps) {
             </SettingsCompactRow>
           ))}
           <SettingRow
-            description="A file, or a folder and everything in it. Absolute, or starting with ~/."
+            description="A file, or a folder and everything in it, absolute or starting with ~/."
             htmlFor={inputId}
             label="Protect another path"
             scope="host"
