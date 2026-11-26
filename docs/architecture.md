@@ -1873,7 +1873,12 @@ it (`run` or `write`) asks the person in the thread with the command shown
 first; an approval for a command that starts the terminal also mints the
 host's one-use approval for that start. Reading and stopping it ask nothing.
 A host that cannot ask refuses it below Full access. The ask shows the whole
-command; one too long to show whole (over 8,192 characters) is refused. In
+command; one too long to show whole (over 8,192 characters) is refused. `run`
+waits up to 30 seconds for its command to finish; one still running then,
+such as a dev server started in the foreground, is left running, and `run`
+returns its output so far with `commandCompleted: false`, in Code, Work and a
+helper's terminal alike (maintainer decision, 2026-11-26). The completion line
+follows the shell the terminal started in. In
 Work it is one shell per thread in the thread's folder, at the thread's level
 and confined as its own commands are; a routine's run is offered none. It
 outlives the turn that started it, under Strict too, and ends when the agent

@@ -379,7 +379,7 @@ describe("Code app-managed tools", () => {
     expect(executeOperation).toHaveBeenCalledOnce();
   });
 
-  it("interrupts a command before returning a terminal timeout", async () => {
+  it("leaves a command still running at the wait bound running, and returns its output so far", async () => {
     const checkoutActivity = vi.fn();
     let now = 0;
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -431,10 +431,13 @@ describe("Code app-managed tools", () => {
       });
       expect(checkoutActivity).toHaveBeenCalledTimes(1);
       expect(result).toMatchObject({
-        result: { error: "terminal-command-timeout", commandCompleted: false },
-        isError: true,
+        result: { status: "running", commandCompleted: false },
+        isError: false,
       });
-      expect(interrupt).toHaveBeenCalledOnce();
+      expect(JSON.stringify(result.result)).toContain("still running");
+      expect(JSON.stringify(result.result)).not.toContain("terminal-command-timeout");
+      // A dev server started in the foreground keeps running.
+      expect(interrupt).not.toHaveBeenCalled();
     } finally {
       nowSpy.mockRestore();
     }

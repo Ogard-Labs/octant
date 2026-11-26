@@ -61,43 +61,62 @@ describe("the shell a Windows terminal opens", () => {
 
 describe("how a terminal command says it finished", () => {
   const marker = "oo0123456789abcdef";
-  // What each shell prints once the marker line runs, after echoing the typed line.
-  const cases = [
-    {
-      shell: "/bin/zsh",
-      printed: (exit: number) => `\u001b]777;octant=${marker};exit=${exit}\u0007`,
-    },
-    {
-      shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-      printed: (exit: number) => `\u001b]777;octant=${marker};exit=${exit}\u0007`,
-    },
-    {
-      shell: "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-      printed: (exit: number) => `\u001b]777;octant=${marker};exit=${exit}\u0007`,
-    },
-    {
-      shell: "C:\\Windows\\System32\\cmd.exe",
-      printed: (exit: number) => `octant=${marker};exit=${exit}\r\n`,
-    },
-  ];
+  const powershell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+  const pwsh = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+  const cmd = "C:\\Windows\\System32\\cmd.exe";
+  const codes = (transcript: string, pattern: RegExp) =>
+    [...transcript.matchAll(pattern)].map((match) => match[1]);
+  // PSReadLine echoes the typed line token by token, coloured, after its prompt.
+  const colouredEcho = (line: string) =>
+    `PS C:\\work> ${line
+      .split(" ")
+      .map((token) => `\u001b[93m${token}\u001b[0m`)
+      .join(" ")}\r\n`;
 
-  it.each(cases)(
-    "is written in $shell's own syntax and read back with its exit code",
-    ({ shell, printed }) => {
-      const { command, pattern } = terminalCompletion(shell, marker);
-      const windows = shell.endsWith(".exe");
-      // No POSIX printf or numeric $? reaches a Windows shell, which has neither.
-      expect(command.includes("printf")).toBe(!windows);
-      if (shell.endsWith("powershell.exe") || shell.endsWith("pwsh.exe")) {
-        expect(command).toContain("$LASTEXITCODE");
-        expect(command).toContain("[char]27");
-      }
-      if (shell.endsWith("cmd.exe")) expect(command).toContain("%ERRORLEVEL%");
-      // The shell's echo of the typed marker line is not a completion.
-      expect([...command.matchAll(pattern)]).toEqual([]);
-      const transcript = `${command}\r\n${printed(0)}`;
-      expect([...transcript.matchAll(pattern)].map((match) => match[1])).toEqual(["0"]);
-      expect([...`${command}\r\n${printed(2)}`.matchAll(pattern)].at(-1)?.[1]).toBe("2");
+  it("writes a POSIX shell's line with printf and reads its framed code", () => {
+    const { before, command, pattern } = terminalCompletion("/bin/zsh", marker);
+    expect(before).toBeUndefined();
+    expect(command).toContain("printf");
+    const transcript = `% ${command}\r\n\u001b]777;octant=${marker};exit=0\u0007`;
+    expect(codes(transcript, pattern)).toEqual(["0"]);
+  });
+
+  it.each([powershell, pwsh])(
+    "writes %s's line without printf, clearing a stale native exit code first",
+    (shell) => {
+      const { before, command, pattern } = terminalCompletion(shell, marker);
+      expect(command).not.toContain("printf");
+      // A failed cmdlet after a failed native program must not report the program's code.
+      expect(before).toBe("$global:LASTEXITCODE = 0");
+      expect(command.indexOf("$?")).toBeLessThan(command.indexOf("$LASTEXITCODE"));
+      const echoed = colouredEcho(before ?? "") + colouredEcho(command);
+      expect(codes(echoed, pattern)).toEqual([]);
+      expect(
+        codes(`${echoed}\u001b]777;octant=${marker};exit=1\u0007PS C:\\work> `, pattern),
+      ).toEqual(["1"]);
+      expect(codes(`${echoed}\u001b]777;octant=${marker};exit=-1\u0007`, pattern)).toEqual(["-1"]);
     },
   );
+
+  it("writes Command Prompt's line as plain text ending its line, with a signed code", () => {
+    const { before, command, pattern } = terminalCompletion(cmd, marker);
+    expect(before).toBeUndefined();
+    expect(command).toContain("%ERRORLEVEL%");
+    // The console host echoes the typed line after its prompt, then prints the marker.
+    const echoed = `C:\\work>${command}\r\n`;
+    expect(codes(echoed, pattern)).toEqual([]);
+    expect(codes(`${echoed}octant=${marker};exit=0\r\n\r\nC:\\work>`, pattern)).toEqual(["0"]);
+    expect(codes(`${echoed}octant=${marker};exit=-1073741510\u001b[K\r\n`, pattern)).toEqual([
+      "-1073741510",
+    ]);
+  });
+
+  it.each([
+    ["/bin/zsh", `\u001b]777;octant=${marker};exit=12`],
+    [powershell, `\u001b]777;octant=${marker};exit=12`],
+    [cmd, `octant=${marker};exit=12`],
+  ])("does not read %s's marker cut off mid-read as a finished command", (shell, partial) => {
+    const { pattern } = terminalCompletion(shell, marker);
+    expect(codes(partial, pattern)).toEqual([]);
+  });
 });

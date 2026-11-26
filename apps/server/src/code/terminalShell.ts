@@ -65,31 +65,44 @@ export function windowsShellArguments(
 }
 
 /**
- * The line typed after an agent's command so the terminal says it finished
+ * The lines typed around an agent's command so the terminal says it finished
  * and with what exit code, in the syntax of the shell it runs in, and the
  * pattern that reads it back. Windows PowerShell has no POSIX `printf` and
  * its `$?` is a Boolean, so a POSIX marker never printed there and every
  * command timed out. Command Prompt cannot print an escape character, so its
- * marker is plain text. The shell's echo of the typed line never matches:
- * there the exit code is still a variable, not digits.
+ * marker is plain text ending its line. The pattern needs the marker's whole
+ * frame (the closing BEL, or the line end), so a read that stops inside
+ * `exit=127` is not taken as exit code 1, and takes a signed code, as Windows
+ * reports. The shell's echo of the typed line never matches: there the exit
+ * code is still a variable, not digits.
  */
 export function terminalCompletion(
   shell: string,
   marker: string,
-): { readonly command: string; readonly pattern: RegExp } {
-  const pattern = new RegExp(`(?:\\u001b\\]777;)?octant=${marker};exit=(\\d+)\\u0007?`, "g");
+): { readonly before?: string; readonly command: string; readonly pattern: RegExp } {
+  const framed = new RegExp(`\\u001b\\]777;octant=${marker};exit=(-?\\d+)\\u0007`, "g");
   switch (win32.basename(shell).toLowerCase()) {
     case "powershell.exe":
     case "pwsh.exe":
-      // `$?` first, before anything else resets it; a failed native program
-      // leaves its code in `$LASTEXITCODE`, a failed cmdlet leaves none.
+      // A failed cmdlet sets `$?` but leaves `$LASTEXITCODE` as the last
+      // native program left it, so it is cleared before the command: a failed
+      // `cmd /c exit 7` followed by a failed `Get-Item` reported 7. `$?` is
+      // read first, before anything else resets it.
       return {
+        before: "$global:LASTEXITCODE = 0",
         command: `$octantOk = $?; $octantExit = if ($octantOk) { 0 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }; [Console]::Write("$([char]27)]777;octant=${marker};exit=$octantExit$([char]7)")`,
-        pattern,
+        pattern: framed,
       };
     case "cmd.exe":
-      return { command: `echo octant=${marker};exit=%ERRORLEVEL%`, pattern };
+      return {
+        command: `echo octant=${marker};exit=%ERRORLEVEL%`,
+        // The console host may clear the rest of the line before its end.
+        pattern: new RegExp(
+          `octant=${marker};exit=(-?\\d+)(?:\\u001b\\[[0-9;?]*[A-Za-z])*\\r?\\n`,
+          "g",
+        ),
+      };
     default:
-      return { command: `printf '\\033]777;octant=${marker};exit=%s\\007' "$?"`, pattern };
+      return { command: `printf '\\033]777;octant=${marker};exit=%s\\007' "$?"`, pattern: framed };
   }
 }
