@@ -116,6 +116,9 @@ function switchFixture(input: {
     enableAutoMerge: vi.fn(async () => ({ status: "enabled" as const })),
     disableAutoMerge: vi.fn(async () => ({ status: "disabled" as const })),
     observe: vi.fn(async () => observed),
+    readCiLogs: vi.fn(async () => ({ status: "unavailable" as const })),
+    planCiRerun: vi.fn(async () => ({ status: "unavailable" as const })),
+    rerunCi: vi.fn(async () => ({ status: "unavailable" as const })),
   };
   const threads: PullRequestAutoFixThreads = {
     inspect: () => ({ status: "available", turnActive: false }),

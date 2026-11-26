@@ -81,6 +81,9 @@ import type { CodeRouteService, PullRequestPairedSession } from "../codeRoutes";
 import type { Journal } from "../persistence/journal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type {
+  GhCiLogsResult,
+  GhCiRerunPlan,
+  GhCiRerunResult,
   GhAutoFixFailureDetail,
   GhAutoMergeResult,
   GhAutoMergeSettings,
@@ -90,6 +93,15 @@ import type {
   GhPullRequestSwitchRequest,
 } from "./ghPullRequestSwitchPort";
 import type { PullRequestWatchOutcome, PullRequestWatchPort } from "./pullRequestWatchPort";
+import {
+  MAX_PULL_REQUEST_CI_RERUNS,
+  type PullRequestCiLogsOutcome,
+  type PullRequestCiPort,
+  type PullRequestCiRerunOutcome,
+} from "./pullRequestCiPort";
+
+/** The most a CI log read returns to the agent, across every log in it. */
+const MAX_CI_LOG_BYTES = 32 * 1024;
 
 /**
  * How long a keystroke in a thread's composer holds Auto-fix back. The
@@ -160,6 +172,21 @@ export interface PullRequestSwitchForge {
     signal: AbortSignal,
     reads: GhPullRequestSwitchReads,
   ): Promise<GhPullRequestSwitchObservation>;
+  readCiLogs(
+    request: GhPullRequestSwitchRequest,
+    input: { readonly check?: string; readonly tailLines: number; readonly maxBytes: number },
+    signal: AbortSignal,
+  ): Promise<GhCiLogsResult>;
+  planCiRerun(
+    request: GhPullRequestSwitchRequest,
+    input: { readonly check?: string; readonly headSha?: string; readonly maxReruns: number },
+    signal: AbortSignal,
+  ): Promise<GhCiRerunPlan>;
+  rerunCi(
+    request: GhPullRequestSwitchRequest,
+    plan: Extract<GhCiRerunPlan, { status: "planned" }>,
+    signal: AbortSignal,
+  ): Promise<GhCiRerunResult>;
 }
 
 /**
@@ -609,6 +636,134 @@ export class CodeProjectPullRequestSwitchService
       return { status: "unwatched", target: canonicalTarget };
     }
     return { status: "not-watching" };
+  }
+
+  /**
+   * The ends of the failed job logs on the thread's own pull request. Nobody
+   * is asked: a read changes nothing on the forge, and the tool marks the
+   * thread as having read outside content.
+   */
+  async ciLogs(input: Parameters<PullRequestCiPort["logs"]>[0]): Promise<PullRequestCiLogsOutcome> {
+    const own = await this.#threadPullRequest(input.windowId, input.threadId);
+    if (own.status !== "resolved") return own;
+    const result = await this.#forge.readCiLogs(
+      forgeRequest(own.target),
+      {
+        ...(input.check === undefined ? {} : { check: input.check }),
+        ...(own.pullRequestNodeId === undefined
+          ? {}
+          : { expectedPullRequestNodeId: own.pullRequestNodeId }),
+        tailLines: input.tailLines,
+        maxBytes: MAX_CI_LOG_BYTES,
+      },
+      input.signal,
+    );
+    if (result.status === "unavailable") return { status: "unavailable", reason: "unavailable" };
+    if (result.status === "refused") return result;
+    return {
+      status: "read",
+      target: own.target,
+      headSha: result.headSha,
+      logs: result.logs,
+      running: result.running,
+    };
+  }
+
+  /**
+   * Reruns failed checks on the thread's own pull request's current head. The
+   * plan is read first, so the person is asked about exactly what will run;
+   * the forge then refuses it if a push moved the head in the meantime.
+   */
+  async ciRerun(
+    input: Parameters<PullRequestCiPort["rerun"]>[0],
+  ): Promise<PullRequestCiRerunOutcome> {
+    const own = await this.#threadPullRequest(input.windowId, input.threadId);
+    if (own.status !== "resolved") return own;
+    const request = forgeRequest(own.target);
+    const plan = await this.#forge.planCiRerun(
+      request,
+      {
+        ...(input.check === undefined ? {} : { check: input.check }),
+        ...(input.headSha === undefined ? {} : { headSha: input.headSha }),
+        ...(own.pullRequestNodeId === undefined
+          ? {}
+          : { expectedPullRequestNodeId: own.pullRequestNodeId }),
+        maxReruns: MAX_PULL_REQUEST_CI_RERUNS,
+      },
+      input.signal,
+    );
+    if (plan.status === "unavailable") return { status: "unavailable", reason: "unavailable" };
+    if (plan.status === "refused") return plan;
+    const checks = plan.runs.flatMap((run) => run.checks);
+    if (input.confirm !== undefined) {
+      const answer = await input.confirm({
+        number: own.target.number,
+        headSha: plan.headSha,
+        checks,
+      });
+      if (answer !== "approved") return { status: "not-confirmed", answer };
+    }
+    const result = await this.#forge.rerunCi(request, plan, input.signal);
+    switch (result.status) {
+      case "rerun":
+        return {
+          status: "rerun",
+          target: own.target,
+          headSha: plan.headSha,
+          checks: result.checks,
+        };
+      case "refused":
+        return result;
+      case "failed":
+        return result;
+      case "unavailable":
+        return { status: "unavailable", reason: "unavailable" };
+    }
+  }
+
+  /** The thread's one linked pull request, resolved and authorized by the host. */
+  async #threadPullRequest(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+  ): Promise<
+    | {
+        readonly status: "resolved";
+        readonly target: CodeProjectPullRequestSwitchTarget;
+        readonly pullRequestNodeId?: string;
+      }
+    | {
+        readonly status: "refused";
+        readonly reason:
+          | "no-pull-request"
+          | "ambiguous-pull-request"
+          | "not-authorized"
+          | "thread-unavailable";
+      }
+    | { readonly status: "unavailable"; readonly reason: "disconnected" }
+  > {
+    const [target, ...others] = await this.#authority.linkedPullRequests(windowId, threadId);
+    if (target === undefined) return { status: "refused", reason: "no-pull-request" };
+    if (others.length > 0) return { status: "refused", reason: "ambiguous-pull-request" };
+    const authority = await this.#authority.authorizePullRequest(windowId, target);
+    if (authority.status === "not-authorized") {
+      return { status: "refused", reason: "not-authorized" };
+    }
+    if (authority.status === "disconnected") {
+      return { status: "unavailable", reason: "disconnected" };
+    }
+    if (!authority.linkedThreadIds.includes(String(threadId))) {
+      return { status: "refused", reason: "no-pull-request" };
+    }
+    if (this.#threads.inspect(threadId).status !== "available") {
+      return { status: "refused", reason: "thread-unavailable" };
+    }
+    const resolved = this.#resolveIdentity(authority.canonicalTarget ?? target);
+    const pullRequestNodeId = resolved.pullRequestNodeId ?? authority.pullRequestNodeId;
+    return {
+      status: "resolved",
+      target: resolved.target,
+      ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
+    };
   }
 
   async #admitWatch(

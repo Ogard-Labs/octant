@@ -195,6 +195,7 @@ import {
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { PullRequestWatchPort } from "./pullRequestWatchPort";
+import type { PullRequestCiPort, PullRequestCiRerunPlanSummary } from "./pullRequestCiPort";
 import type { ProjectForgeChoices } from "./standingMergeAllowance";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import type {
@@ -504,6 +505,8 @@ export interface CodeOperationRuntimeOptions {
   readonly projectForgeChoices?: (thread: CodeThread) => ProjectForgeChoices;
   /** A thread's watch on its own pull request; absent, the tool refuses watch and unwatch. */
   readonly pullRequestWatch?: PullRequestWatchPort;
+  /** CI logs and reruns of a thread's own pull request; absent, the tool refuses both. */
+  readonly pullRequestCi?: PullRequestCiPort;
   readonly reviewFiles: ReviewFindingFilePort;
   readonly evidence: CodeOperationEvidencePort;
   /** The images Code threads have staged for their next turn. */
@@ -5423,6 +5426,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     }
   }
 
+  /**
+   * Asks the person to allow one CI rerun. The question names the pull
+   * request, the head, and every check the host planned, so an approval
+   * never covers a check the person did not see.
+   */
+  async #askCiRerunApproval(
+    active: ActiveTurn,
+    plan: PullRequestCiRerunPlanSummary,
+    signal?: AbortSignal,
+  ): Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable"> {
+    const shown = `Rerun failed CI on pull request #${plan.number} at ${plan.headSha.slice(0, 12)}?\n${plan.checks.join("\n")}`;
+    const summary = boundProviderSummary(shown);
+    if (summary === undefined || summary !== shown.trim()) return "unavailable";
+    return this.#askToolApproval(active, summary, undefined, signal);
+  }
+
   async #askPullRequestApproval(
     active: ActiveTurn,
     command: PullRequestToolCommand,
@@ -6306,6 +6325,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             });
       const browserProfiles = this.#options.browserProfiles;
       const pullRequestWatch = this.#options.pullRequestWatch;
+      const pullRequestCi = this.#options.pullRequestCi;
       sets.push(
         this.#options.computerUseTools?.({
           windowId: active.windowId,
@@ -6371,6 +6391,29 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     }),
                 },
               }),
+          ...(pullRequestCi === undefined
+            ? {}
+            : {
+                pullRequestCi: {
+                  logs: (input, signal) =>
+                    pullRequestCi.logs({
+                      ...input,
+                      windowId: active.windowId,
+                      threadId: active.thread.id,
+                      signal: signal ?? active.abort.signal,
+                    }),
+                  rerun: (input, signal) =>
+                    pullRequestCi.rerun({
+                      ...input,
+                      windowId: active.windowId,
+                      threadId: active.thread.id,
+                      signal: signal ?? active.abort.signal,
+                    }),
+                },
+              }),
+          pullRequestCiApproval: {
+            request: (plan, signal) => this.#askCiRerunApproval(active, plan, signal),
+          },
           terminalApproval: {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),
           },
