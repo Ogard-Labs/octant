@@ -26,23 +26,20 @@ import {
 import { createPortal, flushSync } from "react-dom";
 import { MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS } from "@octant/contracts/thread-message-queue";
 import { lazyOr } from "../lib/lazyOr";
+import type { ComposerQuotePlace } from "./composerQuote";
 import {
   COMPOSER_QUOTE_CLIPBOARD_TYPE,
-  composerQuoteText,
-  composerQuoteTextsIn,
-  findComposerQuotes,
-  quotePreview,
-  separateComposerQuotes,
-  trustComposerQuotes,
-  type ComposerQuotePlace,
-} from "./composerQuote";
+  loadComposerQuoteTools,
+  loadedComposerQuoteTools,
+  QUOTE_HEADER_TAIL,
+} from "./composerQuoteMark";
 import type { ComposerQuoteChipProps } from "./ComposerQuoteChip";
 
 const LazyQuoteChip = lazyOr<ComposerQuoteChipProps>(
   async () => (await import("./ComposerQuoteChip")).ComposerQuoteChip,
   ({ quote }) => (
     <span className="composer-chip__label">
-      {`Quote · ${quotePreview(quote.text)}${quote.comment === "" ? "" : ` · Note: ${quote.comment}`}`}
+      {`Quote · ${quote.text.slice(0, 40)}${quote.comment === "" ? "" : ` · Note: ${quote.comment.slice(0, 40)}`}`}
     </span>
   ),
 );
@@ -200,7 +197,8 @@ function overlaps(
  * chip's text.
  */
 function chipsOf(value: string, findInline: FindInlineChips): ReadonlyArray<Chip> {
-  const quotes = findComposerQuotes(value).map(
+  // Until the quote code loads no quote Octant wrote can exist, so none is found.
+  const quotes = (loadedComposerQuoteTools()?.findComposerQuotes(value) ?? []).map(
     (quote, index): Chip => ({
       kind: "quote",
       start: quote.start,
@@ -389,7 +387,7 @@ function isCanonical(root: HTMLElement, value: string, findInline: FindInlineChi
 /** Writes a copy's text, and beside it, under Octant's own type, the quotes Octant wrote in it. */
 function copyText(clipboard: DataTransfer, text: string): void {
   clipboard.setData("text/plain", text);
-  const quotes = composerQuoteTextsIn(text);
+  const quotes = loadedComposerQuoteTools()?.composerQuoteTextsIn(text) ?? [];
   if (quotes.length > 0) clipboard.setData(COMPOSER_QUOTE_CLIPBOARD_TYPE, JSON.stringify(quotes));
 }
 
@@ -552,7 +550,10 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       // and dictation. A value a caller writes does not, and undoing back to one
       // is not typing it. A quote's words are not the person's, so a draft that
       // carries one is never counted as typed, whatever is typed around it.
-      if (typed && findComposerQuotes(modelRef.current).length === 0) {
+      if (
+        typed &&
+        (loadedComposerQuoteTools()?.findComposerQuotes(modelRef.current).length ?? 0) === 0
+      ) {
         noteTypedComposerText(scopeRef.current, modelRef.current);
       } else {
         composerTextReplaced(scopeRef.current, modelRef.current);
@@ -631,12 +632,19 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     const emit = (typed: string, typedCaret: number, options: { readonly typing: boolean }) => {
       const root = rootRef.current;
       if (root === null) return;
-      const { value: next, caret } = separateComposerQuotes(
-        typed,
-        typedCaret,
-        // The quotes it held before the edit, and any the edit brought in.
-        [...composerQuoteTextsIn(modelRef.current), ...composerQuoteTextsIn(typed)],
-      );
+      const tools = loadedComposerQuoteTools();
+      const { value: next, caret } =
+        tools === undefined
+          ? { value: typed, caret: typedCaret }
+          : tools.separateComposerQuotes(
+              typed,
+              typedCaret,
+              // The quotes it held before the edit, and any the edit brought in.
+              [
+                ...tools.composerQuoteTextsIn(modelRef.current),
+                ...tools.composerQuoteTextsIn(typed),
+              ],
+            );
       modelRef.current = next;
       pendingRef.current = { start: caret, end: caret };
       lastSelectionRef.current = { start: caret, end: caret };
@@ -969,6 +977,16 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       return () => label.removeEventListener("click", onLabelClick);
     }, []);
 
+    // A prompt that holds a quote's mark (a restored draft, say) loads the quote
+    // code, which then says which of them Octant wrote.
+    const marked = value.includes(QUOTE_HEADER_TAIL);
+    useEffect(() => {
+      if (!marked || loadedComposerQuoteTools() !== undefined) return;
+      void loadComposerQuoteTools()
+        .then(() => tick())
+        .catch(() => undefined);
+    }, [marked]);
+
     useEffect(() => {
       if (autoFocus === true) rootRef.current?.focus();
     }, []);
@@ -1067,7 +1085,19 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const text = event.clipboardData.getData("text/plain");
         // A paste with no text (an image the caller did not take) changes nothing.
         if (text === "") return;
-        trustComposerQuotes(copiedQuotes(event.clipboardData, text));
+        const copied = copiedQuotes(event.clipboardData, text);
+        const tools = loadedComposerQuoteTools();
+        if (copied.length > 0 && tools === undefined) {
+          // Quotes copied in another window: the quote code loads, takes them
+          // as Octant's own, and the prompt draws them as chips.
+          void loadComposerQuoteTools()
+            .then((loaded) => {
+              loaded.trustComposerQuotes(copied);
+              tick();
+            })
+            .catch(() => undefined);
+        }
+        tools?.trustComposerQuotes(copied);
         pasteText(root, text.replace(/\r\n?/g, "\n"), plain);
       },
       onCopy: (event: ClipboardEvent<ComposerInputElement>) => {
@@ -1128,7 +1158,8 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
                 editable={editable}
                 onChange={(next) => {
                   const { start, end } = locate();
-                  replaceRange(start, end, composerQuoteText(next));
+                  const tools = loadedComposerQuoteTools();
+                  if (tools !== undefined) replaceRange(start, end, tools.composerQuoteText(next));
                 }}
                 onRemove={() => {
                   const { start, end } = locate();

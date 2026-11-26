@@ -204,7 +204,7 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
-import { appendComposerQuote, type ComposerQuote } from "../composer/composerQuote";
+import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
@@ -2920,10 +2920,18 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           {...(readOnly
             ? {}
             : {
-                onAddToChat: (quote: ComposerQuote) => {
-                  const next = appendComposerQuote(composerDraft.text, quote);
-                  composerDraft.setDraft(next, next.length);
-                  queueMicrotask(() => textareaRef.current?.focus());
+                onAddToChat: (text: string) => {
+                  void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
+                    // The prompt as it stands once the quote code has loaded.
+                    const current = textareaRef.current?.value ?? composerDraft.text;
+                    const next = appendComposerQuote(current, {
+                      source: REPLY_QUOTE_SOURCE,
+                      text,
+                      comment: "",
+                    });
+                    composerDraft.setDraft(next, next.length);
+                    textareaRef.current?.focus();
+                  });
                 },
               })}
           projectId={thread?.projectId ?? projectId}

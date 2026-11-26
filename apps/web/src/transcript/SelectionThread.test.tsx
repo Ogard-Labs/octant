@@ -40,7 +40,7 @@ describe("selectionAsBlockQuote", () => {
 });
 
 describe("SelectionThreadSurface", () => {
-  it("offers a new thread from the selected reply text in the same Project and mode", () => {
+  it("offers a new thread from the selected reply text in the same Project and mode", async () => {
     const start = vi.fn();
     render(
       <SelectionThreadStarterContext.Provider value={start}>
@@ -54,7 +54,7 @@ describe("SelectionThreadSurface", () => {
     expect(screen.queryByRole("button", { name: "New thread from selection" })).toBeNull();
 
     selectAll();
-    fireEvent.click(screen.getByRole("button", { name: "New thread from selection" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New thread from selection" }));
 
     expect(start).toHaveBeenCalledWith({
       mode: "code",
@@ -79,7 +79,11 @@ describe("SelectionThreadSurface", () => {
       return (
         <SelectionThreadScope
           mode="work"
-          onAddToChat={(quote) => setDraft((current) => appendComposerQuote(current, quote))}
+          onAddToChat={(text) =>
+            setDraft((current) =>
+              appendComposerQuote(current, { source: REPLY_QUOTE_SOURCE, text, comment: "" }),
+            )
+          }
           projectId={projectId}
         >
           <SelectionThreadSurface>
@@ -96,7 +100,7 @@ describe("SelectionThreadSurface", () => {
     }
     render(<WorkThread />);
     selectAll();
-    fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add to chat" }));
 
     expect(
       await screen.findByRole("button", {

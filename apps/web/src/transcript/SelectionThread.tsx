@@ -1,7 +1,6 @@
 import { followSelectionWithin } from "./selectionOwner";
 import type { ProjectId } from "@octant/contracts/projects";
-import { MessageSquarePlus, Quote } from "../ui/icons";
-import { REPLY_QUOTE_SOURCE, type ComposerQuote } from "../composer/composerQuote";
+import { MessageSquarePlus } from "../ui/icons";
 import {
   createContext,
   useCallback,
@@ -30,8 +29,9 @@ export const SelectionThreadStarterContext = createContext<
   ((request: SelectionThreadRequest) => void) | undefined
 >(undefined);
 
-const QuoteSelectionContext = createContext<((text: string) => void) | undefined>(undefined);
-const AddToChatContext = createContext<((text: string) => void) | undefined>(undefined);
+/** What a selection in a reply can do here, in the order offered. */
+type SelectionAction = { readonly label: string; readonly run: (text: string) => void };
+const QuoteSelectionContext = createContext<ReadonlyArray<SelectionAction>>([]);
 
 /** Selected prose as a Markdown block quote, ready for a composer to continue under. */
 export function selectionAsBlockQuote(text: string): string {
@@ -47,36 +47,30 @@ export function selectionAsBlockQuote(text: string): string {
 export function SelectionThreadScope(props: {
   readonly mode: "work" | "code";
   readonly projectId: ProjectId | undefined;
-  /** Adds a selection to this thread's own composer as a quote chip. */
-  readonly onAddToChat?: ((quote: ComposerQuote) => void) | undefined;
+  /** Adds selected reply text to this thread's own composer as a quote chip. */
+  readonly onAddToChat?: ((text: string) => void) | undefined;
   readonly children: ReactNode;
 }) {
   const start = useContext(SelectionThreadStarterContext);
   const { mode, projectId, onAddToChat } = props;
   const quote = useMemo(
-    () =>
-      start === undefined || projectId === undefined
-        ? undefined
-        : (text: string) => start({ mode, projectId, prompt: selectionAsBlockQuote(text) }),
-    [mode, projectId, start],
-  );
-  const addToChat = useMemo(
-    () =>
-      onAddToChat === undefined
-        ? undefined
-        : (text: string) => onAddToChat({ source: REPLY_QUOTE_SOURCE, text, comment: "" }),
-    [onAddToChat],
+    () => [
+      ...(onAddToChat === undefined ? [] : [{ label: "Add to chat", run: onAddToChat }]),
+      ...(start === undefined || projectId === undefined
+        ? []
+        : [
+            {
+              label: "New thread from selection",
+              run: (text: string) =>
+                start({ mode, projectId, prompt: selectionAsBlockQuote(text) }),
+            },
+          ]),
+    ],
+    [mode, projectId, start, onAddToChat],
   );
   return (
-    <QuoteSelectionContext.Provider value={quote}>
-      <AddToChatContext.Provider value={addToChat}>{props.children}</AddToChatContext.Provider>
-    </QuoteSelectionContext.Provider>
+    <QuoteSelectionContext.Provider value={quote}>{props.children}</QuoteSelectionContext.Provider>
   );
-}
-
-// Keep the selection until click runs; mouse-down would clear it.
-function keepSelection(event: ReactMouseEvent<HTMLButtonElement>): void {
-  event.preventDefault();
 }
 
 function selectionWithin(container: HTMLElement | null): string {
@@ -89,9 +83,6 @@ function selectionWithin(container: HTMLElement | null): string {
   return selection.toString().trim();
 }
 
-const MENU_VALUE = "new-thread-from-selection";
-const ADD_TO_CHAT_VALUE = "add-to-chat";
-
 /**
  * Wraps one assistant reply. Selecting text in it offers "Add to chat" (a quote
  * chip in this thread's composer) and "New thread from selection" as small
@@ -99,20 +90,19 @@ const ADD_TO_CHAT_VALUE = "add-to-chat";
  */
 export function SelectionThreadSurface(props: { readonly children: ReactNode }) {
   const quote = useContext(QuoteSelectionContext);
-  const addToChat = useContext(AddToChatContext);
   const containerRef = useRef<HTMLDivElement>(null);
   const [offer, setOffer] = useState("");
   const [menuText, setMenuText] = useState("");
-  const enabled = quote !== undefined || addToChat !== undefined;
+  const enabled = quote.length > 0;
 
   useEffect(() => {
     if (!enabled) return;
     return followSelectionWithin(() => containerRef.current, setOffer);
   }, [enabled]);
 
-  const act = useCallback((text: string, action: ((text: string) => void) | undefined) => {
+  const start = useCallback((text: string, action: SelectionAction | undefined) => {
     if (text === "") return;
-    action?.(text);
+    action?.run(text);
     setOffer("");
     document.getSelection()?.removeAllRanges();
   }, []);
@@ -125,62 +115,41 @@ export function SelectionThreadSurface(props: { readonly children: ReactNode }) 
       ref={containerRef}
     >
       <OctantContextMenu
-        items={[
-          ...(addToChat === undefined
-            ? []
-            : [
-                {
-                  value: ADD_TO_CHAT_VALUE,
-                  label: "Add to chat",
-                  icon: <Quote size={14} />,
-                  disabled: menuText === "",
-                },
-              ]),
-          ...(quote === undefined
-            ? []
-            : [
-                {
-                  value: MENU_VALUE,
-                  label: "New thread from selection",
-                  icon: <MessageSquarePlus size={14} />,
-                  disabled: menuText === "",
-                },
-              ]),
-        ]}
-        onValueChange={(value) => act(menuText, value === ADD_TO_CHAT_VALUE ? addToChat : quote)}
+        items={quote.map(({ label }) => ({
+          value: label,
+          label,
+          icon: <MessageSquarePlus size={14} />,
+          disabled: menuText === "",
+        }))}
+        onValueChange={(value) =>
+          start(
+            menuText,
+            quote.find((action) => action.label === value),
+          )
+        }
       >
         {props.children}
       </OctantContextMenu>
       {offer === "" ? null : (
         <div className="transcript-selection-thread__offer">
-          {addToChat === undefined ? null : (
+          {quote.map((action) => (
             <OctantButton
+              key={action.label}
               onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
                 event.preventDefault();
-                act(offer, addToChat);
+                start(offer, action);
               }}
-              onMouseDown={keepSelection}
+              onMouseDown={(event) => {
+                // Keep the selection until click runs; mouse-down would clear it.
+                event.preventDefault();
+              }}
               size="sm"
               type="button"
               variant="secondary"
             >
-              Add to chat
+              {action.label}
             </OctantButton>
-          )}
-          {quote === undefined ? null : (
-            <OctantButton
-              onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
-                event.preventDefault();
-                act(offer, quote);
-              }}
-              onMouseDown={keepSelection}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              New thread from selection
-            </OctantButton>
-          )}
+          ))}
         </div>
       )}
     </div>

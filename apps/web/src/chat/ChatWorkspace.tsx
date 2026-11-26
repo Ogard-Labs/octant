@@ -80,7 +80,7 @@ import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { ChatPendingQuestions, ChatTranscript, type ChatTranscriptProps } from "./ChatTranscript";
 import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
-import { appendComposerQuote, REPLY_QUOTE_SOURCE } from "../composer/composerQuote";
+import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
@@ -118,6 +118,7 @@ import {
   composerStashContextValues,
   recoveredComposerThreadDraft,
 } from "../composer/composerStashDraft";
+import { withStashedQuotesInText } from "../composer/composerStashRestore";
 import type { ComposerStashBinding, ComposerStashSubmission } from "../composer/useComposerStash";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { MoveToProjectChoice } from "./MoveToProjectDialog";
@@ -368,6 +369,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     activeThread === undefined ? undefined : String(activeThread.id),
   );
   const draftEditRevisionRef = useRef(0);
+  const latestDraftRef = useRef(props.controller.pendingDraft);
+  latestDraftRef.current = props.controller.pendingDraft;
   const messageQueue = useThreadMessageQueue({
     mode: "chat",
     hostId: props.hostId,
@@ -824,7 +827,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       messageQueue.uncertain
         ? "Wait for the current attachment or queue action to finish."
         : undefined,
-    prepare: async (next) => {
+    prepare: async (stashed) => {
+      // Quotes a draft kept beside the prompt before they lived in its text.
+      const next = await withStashedQuotesInText(stashed);
       const canvas = composerStashContextValues(next, "canvas");
       const extensions = composerStashContextValues(next, "extension");
       if (!canvasCanMove || props.pendingExtensionSelections !== undefined) {
@@ -1602,13 +1607,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 ? {}
                 : ({
                     onQuoteSelection: ({ text }) => {
-                      const next = appendComposerQuote(props.controller.pendingDraft, {
-                        source: REPLY_QUOTE_SOURCE,
-                        text,
-                        comment: "",
+                      void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
+                        // The draft as it stands once the quote code has loaded.
+                        const next = appendComposerQuote(latestDraftRef.current, {
+                          source: REPLY_QUOTE_SOURCE,
+                          text,
+                          comment: "",
+                        });
+                        draftEditRevisionRef.current += 1;
+                        props.controller.setPendingDraft(next, next.length);
                       });
-                      draftEditRevisionRef.current += 1;
-                      props.controller.setPendingDraft(next, next.length);
                     },
                     onBranchTurn: (turnId) => {
                       if (branchPending) return;

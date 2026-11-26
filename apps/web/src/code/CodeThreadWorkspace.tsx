@@ -210,7 +210,7 @@ import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
-import { appendComposerQuote, type ComposerQuote } from "../composer/composerQuote";
+import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
@@ -2159,12 +2159,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             {...(readOnly
               ? {}
               : {
-                  onAddToChat: (quote: ComposerQuote) => {
-                    const next = appendComposerQuote(draft, quote);
-                    draftRevisionRef.current += 1;
-                    setDraft(next);
-                    props.controller.setPendingDraft?.(next, next.length);
-                    queueMicrotask(() => textareaRef.current?.focus());
+                  onAddToChat: (text: string) => {
+                    void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
+                      // The prompt as it stands once the quote code has loaded.
+                      const next = appendComposerQuote(textareaRef.current?.value ?? draft, {
+                        source: REPLY_QUOTE_SOURCE,
+                        text,
+                        comment: "",
+                      });
+                      draftRevisionRef.current += 1;
+                      setDraft(next);
+                      props.controller.setPendingDraft?.(next, next.length);
+                      textareaRef.current?.focus();
+                    });
                   },
                 })}
             projectId={view?.thread.projectId}

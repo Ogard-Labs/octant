@@ -4,7 +4,7 @@ import { MAX_CHAT_TURN_PREVIEW_SELECTIONS } from "@octant/contracts/chat";
 import { MAX_CODE_REVIEW_CORRECTION_FINDINGS } from "@octant/contracts/code-operations";
 import { MAX_SIDE_CHAT_DRAFT_RETURNS } from "@octant/contracts/side-chat-return";
 import { isImageAttachment } from "./attachmentMediaType";
-import { appendComposerQuote, REPLY_QUOTE_SOURCE } from "./composerQuote";
+import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "./composerQuoteMark";
 import {
   composerStashContextValues,
   composerStashLocationKey,
@@ -63,10 +63,14 @@ function matchingTodo(
  * A draft stashed while quoted replies sat beside the prompt carries them as
  * context; the prompt now holds quotes in its own text, so they come back as
  * quote chips ahead of the text. Quoted words are not the person's typing.
+ * The quote code loads only for such a draft.
  */
-function withStashedQuotesInText(draft: ComposerStashDraft): ComposerStashDraft {
+export async function withStashedQuotesInText(
+  draft: ComposerStashDraft,
+): Promise<ComposerStashDraft> {
   const quotes = composerStashContextValues(draft, "quote");
   if (quotes.length === 0) return draft;
+  const { appendComposerQuote } = await loadComposerQuoteTools();
   const lead = quotes.reduce(
     (text, quote) =>
       appendComposerQuote(text, { source: REPLY_QUOTE_SOURCE, text: quote.text, comment: "" }),
@@ -169,7 +173,7 @@ export function planComposerStashRestore(
     (saved.text === "" || saved.typed === true);
   return {
     kind: "ready",
-    draft: withStashedQuotesInText({
+    draft: {
       ...(typed ? { typed: true as const } : {}),
       text: starter + separator + saved.text,
       caret:
@@ -178,7 +182,7 @@ export function planComposerStashRestore(
           : starter.length + separator.length + saved.caret,
       files: [...current.files, ...saved.files],
       context,
-    }),
+    },
   };
 }
 
@@ -216,7 +220,7 @@ export function planComposerStashRecovery(
   const { typed: _savedTyped, ...saved } = record.draft;
   return {
     kind: "ready",
-    draft: withStashedQuotesInText({
+    draft: {
       ...saved,
       ...(useSavedPrompt && record.draft.typed === true ? { typed: true as const } : {}),
       text: useSavedPrompt ? record.draft.text : current.text,
@@ -224,6 +228,6 @@ export function planComposerStashRecovery(
       context: record.draft.context.map((part) =>
         part.kind === "todo" && todo !== undefined ? { kind: "todo", value: todo } : part,
       ),
-    }),
+    },
   };
 }

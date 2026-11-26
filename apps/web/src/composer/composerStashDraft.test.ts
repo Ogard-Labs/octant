@@ -5,8 +5,12 @@ import {
   type ComposerStashLocation,
   type ComposerStashTarget,
 } from "./composerStashDraft";
-import { appendComposerQuote, REPLY_QUOTE_SOURCE } from "./composerQuote";
-import { planComposerStashRecovery, planComposerStashRestore } from "./composerStashRestore";
+import { appendComposerQuote, findComposerQuotes, REPLY_QUOTE_SOURCE } from "./composerQuote";
+import {
+  planComposerStashRecovery,
+  planComposerStashRestore,
+  withStashedQuotesInText,
+} from "./composerStashRestore";
 
 const chat: ComposerStashLocation = {
   host: "host",
@@ -159,7 +163,7 @@ describe("restoring a saved composer draft", () => {
     expect(restore.draft.files[0]?.name).toBe("notes.md");
   });
 
-  it("writes a quote stashed before quotes lived in the text into the prompt as a chip", () => {
+  it("writes a quote stashed before quotes lived in the text into the prompt as a chip", async () => {
     const quote = {
       kind: "quote" as const,
       value: { id: "quote", turnId: "turn", text: "Exact excerpt" },
@@ -170,27 +174,29 @@ describe("restoring a saved composer draft", () => {
       caret: 5,
       context: [quote],
     };
+    const plan = planComposerStashRestore(
+      chat,
+      target,
+      { ...emptyComposerStashDraft(), text: "New text" },
+      saved,
+    );
+    expect(plan).toEqual({
+      kind: "ready",
+      draft: { ...saved, text: "New text\n\nSaved follow-up", caret: 15 },
+    });
+    if (plan.kind !== "ready") return;
     const chip = appendComposerQuote("", {
       source: REPLY_QUOTE_SOURCE,
       text: "Exact excerpt",
       comment: "",
     });
-    expect(
-      planComposerStashRestore(
-        chat,
-        target,
-        { ...emptyComposerStashDraft(), text: "New text" },
-        saved,
-      ),
-    ).toEqual({
-      kind: "ready",
-      draft: {
-        ...saved,
-        context: [],
-        text: `${chip}New text\n\nSaved follow-up`,
-        caret: chip.length + 15,
-      },
+    await expect(withStashedQuotesInText(plan.draft)).resolves.toEqual({
+      ...saved,
+      context: [],
+      text: `${chip}New text\n\nSaved follow-up`,
+      caret: chip.length + 15,
     });
+    expect(findComposerQuotes(chip)).toHaveLength(1);
   });
 
   it("refuses to relabel a quote as a reply from a different conversation", () => {
