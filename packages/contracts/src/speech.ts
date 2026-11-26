@@ -95,8 +95,17 @@ export const MAX_VOICE_DICTIONARY_TERMS = 100;
 export const VoiceDictionaryTerm = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
 export type VoiceDictionaryTerm = typeof VoiceDictionaryTerm.Type;
 
+/** Speech to text that runs on the host itself, with no endpoint. */
+export const SpeechLocalEngine = Schema.Literal("apple-speech");
+export type SpeechLocalEngine = typeof SpeechLocalEngine.Type;
+
 /**
  * Voice settings section.
+ *
+ * `transcriptionEngine` names an engine on the host itself. While it is set
+ * the host transcribes nothing through an endpoint, for anyone: `transcription`
+ * is kept for the person to go back to and is not used. Absent, as it is for
+ * everyone who set dictation up before it existed, means `transcription`.
  *
  * `transcription` is the endpoint that turns speech into text. Absent means
  * the host reports transcription `unconfigured` and every voice control that
@@ -111,6 +120,7 @@ export type VoiceDictionaryTerm = typeof VoiceDictionaryTerm.Type;
  * they live here rather than in any one client.
  */
 export const VoiceSettings = Schema.Struct({
+  transcriptionEngine: Schema.optional(SpeechLocalEngine),
   transcription: Schema.optional(SpeechEndpointRef),
   synthesis: Schema.optional(SpeechSynthesisEndpointRef),
   /** The language dictation assumes when a request names none; absent lets the model detect it. */
@@ -139,7 +149,7 @@ export type SpeechSynthesisRequest = typeof SpeechSynthesisRequest.Type;
 
 /**
  * Honest readiness of one speech direction. `ready` names the endpoint the
- * host would call. `unconfigured` means Settings holds nothing for it, and
+ * host would call, or the engine that runs on the host itself. `unconfigured` means Settings holds nothing for it, and
  * `unavailable` means Settings names an endpoint the host cannot use right
  * now (removed, disabled, or not an OpenAI-compatible instance). Both carry
  * the exact Settings destination that fixes it.
@@ -150,6 +160,10 @@ export const SpeechCapabilityStatus = Schema.Union(
     providerInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
     voice: Schema.optional(SpeechSynthesisVoice),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("ready"),
+    engine: SpeechLocalEngine,
   }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("unconfigured"),
@@ -168,6 +182,41 @@ export const SpeechStatusResponse = Schema.Struct({
   synthesis: SpeechCapabilityStatus,
 }).annotations(strict);
 export type SpeechStatusResponse = typeof SpeechStatusResponse.Type;
+
+/**
+ * The one shape of clip the on-device engine takes: a WAV file of 16 kHz mono
+ * 16-bit PCM behind a plain 44-byte header. The window that recorded the clip
+ * decodes it, so no compressed container reaches native code.
+ */
+export const SPEECH_LOCAL_SAMPLE_RATE = 16_000;
+export const SPEECH_LOCAL_WAV_HEADER_BYTES = 44;
+/** Two minutes, the longest dictation a window records, and ten seconds' slack. */
+export const SPEECH_LOCAL_MAX_PCM_BYTES = 130 * SPEECH_LOCAL_SAMPLE_RATE * 2;
+
+/**
+ * Whether the on-device engine can transcribe in the language Voice settings
+ * name. The speech model is the operating system's own; it is fetched only
+ * when the person asks, and `language` is the one it would be fetched for.
+ */
+export const SpeechLocalEngineStatus = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("unsupported"),
+    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("unsupported-language") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("ready", "not-downloaded", "download-failed"),
+    language: SpeechTranscriptionLanguage,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("downloading"),
+    language: SpeechTranscriptionLanguage,
+    fraction: Schema.Number.pipe(Schema.between(0, 1)),
+  }).annotations(strict),
+  /** The helper did not answer; nothing is known about the model. */
+  Schema.Struct({ status: Schema.Literal("failed") }).annotations(strict),
+);
+export type SpeechLocalEngineStatus = typeof SpeechLocalEngineStatus.Type;
 
 /**
  * A refused or failed speech request. `unconfigured` and `invalid` are the
@@ -202,4 +251,5 @@ export const decodeSpeechTranscript = Schema.decodeUnknownSync(SpeechTranscript)
 export const decodeSpeechSynthesisRequest = Schema.decodeUnknownSync(SpeechSynthesisRequest);
 export const decodeSpeechCapabilityStatus = Schema.decodeUnknownSync(SpeechCapabilityStatus);
 export const decodeSpeechStatusResponse = Schema.decodeUnknownSync(SpeechStatusResponse);
+export const decodeSpeechLocalEngineStatus = Schema.decodeUnknownSync(SpeechLocalEngineStatus);
 export const decodeSpeechFailureResponse = Schema.decodeUnknownSync(SpeechFailureResponse);

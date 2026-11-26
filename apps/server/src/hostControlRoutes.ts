@@ -194,6 +194,8 @@ export interface HostDataMapRouteDependencies {
   readonly credentialStore?: HostDataMapCredentialStoreInput;
   /** Where the desktop app keeps Browser profile stores, when this host has one. */
   readonly browserProfilesDirectory?: string;
+  /** Whether this host carries the on-device speech helper. */
+  readonly speechModelDownloads?: boolean;
   readonly listProjects?: () => ReadonlyArray<HostDataMapProjectInput>;
 }
 
@@ -506,6 +508,9 @@ function handleDataMap(
           ...(dataMap.browserProfilesDirectory === undefined
             ? {}
             : { browserProfilesDirectory: dataMap.browserProfilesDirectory }),
+          ...(dataMap.speechModelDownloads === undefined
+            ? {}
+            : { speechModelDownloads: dataMap.speechModelDownloads }),
           ...(dataMap.listProjects === undefined ? {} : { projects: dataMap.listProjects() }),
         }),
   });

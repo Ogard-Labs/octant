@@ -551,6 +551,7 @@ describe("desktop packaging boundary", () => {
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
       "Octant.app/Contents/Resources/native/octant-sandbox-scope",
       "Octant.app/Contents/Resources/native/octant-device-helper",
+      "Octant.app/Contents/Resources/native/octant-speech-helper",
       "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
       "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
       "Octant.app/Contents/Resources/native/cua-driver",
@@ -580,6 +581,7 @@ describe("desktop packaging boundary", () => {
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-keychain-helper");
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-code-file-helper");
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-device-helper");
+    expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-speech-helper");
     expect(PACKAGED_EXECUTABLE_FILES).toContain(
       "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
     );
@@ -606,6 +608,7 @@ describe("desktop packaging boundary", () => {
       "native/octant-code-file-helper",
       "native/octant-sandbox-scope",
       "native/octant-device-helper",
+      "native/octant-speech-helper",
       "native/cua-driver",
       "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
       "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
@@ -625,7 +628,10 @@ describe("desktop packaging boundary", () => {
     expect(FORBIDDEN_PACKAGED_FILES).toContain(
       "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-device-helper",
     );
-    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(6);
+    expect(FORBIDDEN_PACKAGED_FILES).toContain(
+      "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-speech-helper",
+    );
+    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(7);
     expect(
       FORBIDDEN_LINUX_HELPER_PATTERNS.some((pattern) =>
         pattern.test("native/octant-browser-text-input.node"),
@@ -990,6 +996,7 @@ describe("desktop packaging boundary", () => {
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
       "Octant.app/Contents/Resources/native/octant-sandbox-scope",
       "Octant.app/Contents/Resources/native/octant-device-helper",
+      "Octant.app/Contents/Resources/native/octant-speech-helper",
       "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
       "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
@@ -1169,7 +1176,7 @@ describe("desktop packaging boundary", () => {
     ) as { readonly scripts: { readonly build: string } };
 
     expect(desktopPackage.scripts.build).toBe(
-      "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts && bun ../../scripts/build-sandbox-scope.ts && bun ../../scripts/build-device-helper.ts",
+      "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts && bun ../../scripts/build-sandbox-scope.ts && bun ../../scripts/build-device-helper.ts && bun ../../scripts/build-speech-helper.ts",
     );
   });
 

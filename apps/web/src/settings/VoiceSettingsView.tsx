@@ -7,6 +7,7 @@ import {
   type ProviderModelId,
   type SettingsSettingId,
   type SpeechEndpointRef,
+  type SpeechLocalEngineStatus,
   type SpeechSynthesisEndpointRef,
   type SpeechSynthesisVoice,
   type SpeechTranscriptionLanguage,
@@ -18,16 +19,19 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import {
   addVoiceDictionaryTerms,
   listSpeechEligibleInstances,
+  LOCAL_SPEECH_PAIRED_REASON,
+  localSpeechProblem,
   resolveSpeechEndpoint,
   type SpeechEndpointResolution,
 } from "@octant/domain";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { X } from "../ui/icons";
 import { MicrophonePicker } from "../voice/MicrophonePicker";
 import { MicrophoneTest } from "../voice/MicrophoneTest";
+import { useSpeechCapability } from "../voice/SpeechCapabilityContext";
 import { transcriptionChoices, type TranscriptionChoice } from "./harness/voiceModels";
 import { SettingRow, SettingsSection } from "./primitives";
 import { settingId } from "./registry";
@@ -55,23 +59,35 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
   const apply = (next: VoiceSettings) => props.onSettingsChange({ voice: next });
   const hasConfiguredEndpoint =
     props.settings.transcription !== undefined || props.settings.synthesis !== undefined;
+  const showEndpoints = eligible.length > 0 || hasConfiguredEndpoint;
+  const local = useLocalEngine(props.settings.language);
+  const localOffered =
+    props.settings.transcriptionEngine !== undefined ||
+    (local.status !== undefined && local.status.status !== "unsupported");
+  const noEndpoint = (
+    <OctantEmpty
+      layout="line"
+      action={
+        props.onOpenModelEndpoints === undefined ? null : (
+          <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">
+            Open Model endpoints
+          </OctantButton>
+        )
+      }
+      detail={
+        localOffered
+          ? "Reading replies aloud with a provider's voice needs an OpenAI-compatible endpoint; add one under Octant Harness › Model endpoints."
+          : "Voice runs on an OpenAI-compatible endpoint. An OpenAI API or Mistral key can transcribe; add one under Octant Harness › Model endpoints."
+      }
+      title={localOffered ? "No endpoint for reading aloud yet" : "No endpoint for voice yet"}
+      tone="page"
+    />
+  );
 
   return (
     <section aria-label="Voice" id="settings-voice">
-      {eligible.length === 0 && !hasConfiguredEndpoint ? (
-        <OctantEmpty
-          layout="line"
-          action={
-            props.onOpenModelEndpoints === undefined ? null : (
-              <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">
-                Open Model endpoints
-              </OctantButton>
-            )
-          }
-          detail="Voice runs on an OpenAI-compatible endpoint. An OpenAI API or Mistral key can transcribe; add one under Octant Harness › Model endpoints."
-          title="No endpoint for voice yet"
-          tone="page"
-        />
+      {!showEndpoints && !localOffered ? (
+        noEndpoint
       ) : (
         <>
           <SettingsSection title="Speech to text">
@@ -88,15 +104,32 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
                   current={props.settings.transcription}
                   eligible={eligible}
                   instances={instances}
+                  local={local}
+                  localChosen={props.settings.transcriptionEngine !== undefined}
+                  localOffered={localOffered}
                   onClear={() => {
-                    const { transcription: _cleared, ...rest } = props.settings;
+                    const {
+                      transcription: _cleared,
+                      transcriptionEngine: _engine,
+                      ...rest
+                    } = props.settings;
                     apply(rest);
                   }}
-                  onSave={(ref) => apply({ ...props.settings, transcription: ref })}
+                  onSave={(ref) => {
+                    const { transcriptionEngine: _engine, ...rest } = props.settings;
+                    apply({ ...rest, transcription: ref });
+                  }}
+                  onUseLocal={() =>
+                    apply({ ...props.settings, transcriptionEngine: "apple-speech" })
+                  }
                 />
               </SettingRow>
               <SettingRow
-                description="The language you speak. Automatic lets the model work it out."
+                description={
+                  props.settings.transcriptionEngine === undefined
+                    ? "The language you speak. Automatic lets the model work it out."
+                    : "The language you speak. Automatic uses this Mac's own language."
+                }
                 focused={props.focusedSetting === settingId("dictation-language")}
                 label="Language"
                 scope="app"
@@ -127,29 +160,32 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
               </SettingRow>
             </div>
           </SettingsSection>
-          <SettingsSection title="Text to speech">
-            <div className="setgroup">
-              <SettingRow
-                description="Pick a provider voice, or use this computer's voices with no provider call."
-                focused={props.focusedSetting === settingId("synthesis")}
-                label="Speech"
-                scope="app"
-                settingId="synthesis"
-              >
-                <SpeechEndpointForm
-                  current={props.settings.synthesis}
-                  direction="synthesis"
-                  eligible={eligible}
-                  instances={instances}
-                  onClear={() => {
-                    const { synthesis: _cleared, ...rest } = props.settings;
-                    apply(rest);
-                  }}
-                  onSave={(ref) => apply({ ...props.settings, synthesis: ref })}
-                />
-              </SettingRow>
-            </div>
-          </SettingsSection>
+          {showEndpoints ? null : noEndpoint}
+          {!showEndpoints ? null : (
+            <SettingsSection title="Text to speech">
+              <div className="setgroup">
+                <SettingRow
+                  description="Pick a provider voice, or use this computer's voices with no provider call."
+                  focused={props.focusedSetting === settingId("synthesis")}
+                  label="Speech"
+                  scope="app"
+                  settingId="synthesis"
+                >
+                  <SpeechEndpointForm
+                    current={props.settings.synthesis}
+                    direction="synthesis"
+                    eligible={eligible}
+                    instances={instances}
+                    onClear={() => {
+                      const { synthesis: _cleared, ...rest } = props.settings;
+                      apply(rest);
+                    }}
+                    onSave={(ref) => apply({ ...props.settings, synthesis: ref })}
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
+          )}
         </>
       )}
       <SettingsSection title="Microphone">
@@ -179,6 +215,125 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
 }
 
 const OFF = "off";
+const LOCAL = "apple-speech";
+
+interface LocalEngine {
+  /** Absent until the host answers, and where it cannot be asked. */
+  readonly status: SpeechLocalEngineStatus | undefined;
+  readonly download: () => void;
+}
+
+/**
+ * What the host's own engine says about the language shown, read while
+ * Settings is open and every second while its model downloads. When the model
+ * arrives the composers are told, so a microphone appears without a reload.
+ */
+function useLocalEngine(language: string | undefined): LocalEngine {
+  const speech = useSpeechCapability();
+  const client = speech.client;
+  const [status, setStatus] = useState<SpeechLocalEngineStatus>();
+  const [asked, setAsked] = useState(0);
+  const last = useRef<SpeechLocalEngineStatus | undefined>(undefined);
+  const downloading = status?.status === "downloading";
+
+  useEffect(() => {
+    if (client === undefined) return undefined;
+    let live = true;
+    client.localEngine(language).then(
+      (next) => {
+        if (!live) return;
+        // Told outside the state update: React may run an updater while it
+        // renders, and the composers' provider must not change then.
+        if (last.current?.status !== "ready" && next.status === "ready") speech.refresh();
+        last.current = next;
+        setStatus(next);
+      },
+      () => {
+        if (!live) return;
+        last.current = undefined;
+        setStatus(undefined);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [client, language, asked]);
+
+  useEffect(() => {
+    if (!downloading) return undefined;
+    const timer = window.setTimeout(() => setAsked((count) => count + 1), 1_000);
+    return () => window.clearTimeout(timer);
+  }, [downloading, status]);
+
+  return {
+    status,
+    download: () => {
+      if (client === undefined) return;
+      void client.downloadLocalModel(language).then(setStatus, () => {
+        setStatus(
+          status?.status === "not-downloaded" || status?.status === "download-failed"
+            ? { status: "download-failed", language: status.language }
+            : { status: "failed" },
+        );
+      });
+    },
+  };
+}
+
+function languageName(tag: string): string {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(tag) ?? tag;
+  } catch {
+    return tag;
+  }
+}
+
+/** What the on-device engine would do now, said for the person choosing it. */
+function LocalEngineState(props: {
+  readonly local: LocalEngine;
+  readonly fallback: string | undefined;
+}) {
+  const status = props.local.status;
+  let sentence: string;
+  let action: string | undefined;
+  switch (status?.status) {
+    case undefined:
+      sentence = props.fallback ?? "Checking Apple Speech on this Mac…";
+      break;
+    case "ready":
+      sentence = `Dictation is turned into text on this Mac in ${languageName(status.language)}; no recording leaves it. Paired phones and browsers cannot dictate, and agents cannot transcribe recordings, while this is chosen.`;
+      break;
+    case "not-downloaded":
+      sentence = `Apple's speech model for ${languageName(status.language)} is not on this Mac yet. macOS downloads it from Apple when you ask; no audio is sent.`;
+      action = "Download model";
+      break;
+    case "downloading":
+      sentence = `Downloading Apple's speech model for ${languageName(status.language)}… ${String(Math.round(status.fraction * 100))}%`;
+      break;
+    case "download-failed":
+      sentence = `Apple's speech model for ${languageName(status.language)} could not be downloaded. Check the connection and free space on this Mac.`;
+      action = "Try again";
+      break;
+    default:
+      sentence =
+        (status === undefined ? undefined : localSpeechProblem(status)) ??
+        "Apple Speech did not answer on this Mac.";
+  }
+  return (
+    <>
+      <p className="provider-settings__field-guidance" role="status">
+        {sentence}
+      </p>
+      {action === undefined ? null : (
+        <div className="settings-view__actions">
+          <OctantButton onClick={props.local.download} size="sm" type="button" variant="secondary">
+            {action}
+          </OctantButton>
+        </div>
+      )}
+    </>
+  );
+}
 const OTHER = "other";
 const SAVED = "saved";
 
@@ -189,10 +344,15 @@ interface TranscriptionMenuProps {
   readonly instances: ReadonlyArray<ProviderRegistrySnapshot["instances"][number]>;
   readonly onSave: (ref: SpeechEndpointRef) => void;
   readonly onClear: () => void;
+  readonly local: LocalEngine;
+  readonly localChosen: boolean;
+  readonly localOffered: boolean;
+  readonly onUseLocal: () => void;
 }
 
 /**
- * Transcription is one choice: Off, or a model an endpoint already serves.
+ * Transcription is one choice: Off, Apple Speech on a Mac that can run it, or
+ * a model an endpoint already serves.
  * Picking one saves it, so turning dictation on takes no typing. A model no
  * endpoint lists stays reachable under Other model…, and a saved one keeps
  * its own entry so the menu never claims something else is in use.
@@ -208,8 +368,10 @@ function TranscriptionMenu(props: TranscriptionMenuProps) {
             String(choice.instanceId) === String(current.providerInstanceId) &&
             String(choice.modelId) === String(current.modelId),
         );
+  const speech = useSpeechCapability();
   const options: Array<{ readonly id: string; readonly label: string }> = [
     { id: OFF, label: "Off" },
+    ...(props.localOffered ? [{ id: LOCAL, label: "Apple Speech on this Mac" }] : []),
     ...props.choices.map((choice, index) => ({
       id: `choice-${index}`,
       label: `${String(choice.modelId)} on ${choice.instanceName}`,
@@ -221,14 +383,17 @@ function TranscriptionMenu(props: TranscriptionMenuProps) {
         ?.displayName ?? "Removed provider";
     options.push({ id: SAVED, label: `${String(current.modelId)} on ${name}` });
   }
-  options.push({ id: OTHER, label: "Other model…" });
+  if (props.eligible.length > 0 || current !== undefined)
+    options.push({ id: OTHER, label: "Other model…" });
   const selected = otherOpen
     ? OTHER
-    : current === undefined
-      ? OFF
-      : currentIndex === -1
-        ? SAVED
-        : `choice-${currentIndex}`;
+    : props.localChosen
+      ? LOCAL
+      : current === undefined
+        ? OFF
+        : currentIndex === -1
+          ? SAVED
+          : `choice-${currentIndex}`;
   const resolution = resolveSpeechEndpoint(current, props.instances);
 
   return (
@@ -243,7 +408,15 @@ function TranscriptionMenu(props: TranscriptionMenuProps) {
           }
           setOtherOpen(false);
           if (value === OFF) {
-            if (current !== undefined) props.onClear();
+            if (current !== undefined || props.localChosen) props.onClear();
+            return;
+          }
+          if (value === LOCAL) {
+            if (!props.localChosen) props.onUseLocal();
+            return;
+          }
+          if (value === SAVED) {
+            if (current !== undefined) props.onSave(current);
             return;
           }
           const choice = props.choices[Number(value.replace("choice-", ""))];
@@ -267,6 +440,18 @@ function TranscriptionMenu(props: TranscriptionMenuProps) {
             setOtherOpen(false);
             props.onSave(ref);
           }}
+        />
+      ) : props.localChosen ? (
+        <LocalEngineState
+          fallback={
+            // Only the host's own answer is worth repeating here; before it
+            // answers the status holds a placeholder, not a fact.
+            speech.status.transcription.status === "unavailable" &&
+            speech.status.transcription.reason === LOCAL_SPEECH_PAIRED_REASON
+              ? speech.status.transcription.reason
+              : undefined
+          }
+          local={props.local}
         />
       ) : (
         <p className="provider-settings__field-guidance" role="status">

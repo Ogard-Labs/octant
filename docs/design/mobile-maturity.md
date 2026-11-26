@@ -809,7 +809,9 @@ that reaches it.
   route for a paired device with the same audio sniffing and bounds as the
   desktop, a per-device budget, and the same `ready`/`unconfigured`/`unavailable`
   status; it persists nothing. The phone shows the microphone only while
-  transcription is `ready`.
+  transcription is `ready`. While the host owner has chosen Apple Speech on
+  the Mac, a paired device is told transcription is `unavailable` and its
+  clip is refused: that engine serves only the Mac's own windows.
 - The transcript is appended to the draft; the person still sends. Read-aloud
   stays desktop-only. The system keyboard's own dictation is outside Octant's
   control and unaffected.

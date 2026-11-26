@@ -87,6 +87,13 @@ export const BUNDLED_LANGUAGE_SERVER_SIGNING_PATH =
  */
 export const SANDBOX_SCOPE_SIGNING_PATH = "Contents/Resources/native/octant-sandbox-scope";
 
+/**
+ * The on-device speech helper. It takes none of Octant's entitlements: it
+ * compiles no JavaScript and never opens the microphone; it reads a clip the
+ * person already recorded.
+ */
+export const SPEECH_HELPER_SIGNING_PATH = "Contents/Resources/native/octant-speech-helper";
+
 // Thin 64-bit Mach-O and universal (fat, 32- and 64-bit offset) binaries, in
 // either byte order.
 const MACH_O_MAGIC = new Set([
@@ -327,7 +334,11 @@ export async function signAndNotarizeDesktop(input: {
   for (const target of await findMachOFiles(`${input.appPath}/${MANAGED_TOOLS_PATH}`)) {
     await input.run(createCodesignArgv({ identity: input.credentials.identity, target }));
   }
-  for (const path of [BUNDLED_LANGUAGE_SERVER_SIGNING_PATH, SANDBOX_SCOPE_SIGNING_PATH]) {
+  for (const path of [
+    BUNDLED_LANGUAGE_SERVER_SIGNING_PATH,
+    SANDBOX_SCOPE_SIGNING_PATH,
+    SPEECH_HELPER_SIGNING_PATH,
+  ]) {
     await input.run(
       createCodesignArgv({
         identity: input.credentials.identity,

@@ -1,6 +1,7 @@
 import {
   type SettingsDeepLink,
   type SpeechFailureCategory,
+  SpeechLocalEngineStatus,
   SpeechStatusResponse,
   type SpeechSynthesisFormat,
   SpeechTranscript,
@@ -31,6 +32,10 @@ export interface SpeechClient {
     readonly format?: SpeechSynthesisFormat;
     readonly signal?: AbortSignal;
   }): Promise<SpeechSynthesisAudio>;
+  /** Whether the host's own engine can transcribe in `language` (absent: the Mac's own). */
+  localEngine(language?: string): Promise<SpeechLocalEngineStatus>;
+  /** Asks the host to fetch the engine's model; only a person's press calls this. */
+  downloadLocalModel(language?: string): Promise<SpeechLocalEngineStatus>;
 }
 
 /**
@@ -79,6 +84,14 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
       });
       return decodeOrFail(response, decodeHostAnswer(SpeechTranscript), input.signal);
     },
+    async localEngine(language) {
+      const response = await send(options, localEnginePath(language), { method: "GET", headers });
+      return decodeOrFail(response, decodeHostAnswer(SpeechLocalEngineStatus), undefined);
+    },
+    async downloadLocalModel(language) {
+      const response = await send(options, localEnginePath(language), { method: "POST", headers });
+      return decodeOrFail(response, decodeHostAnswer(SpeechLocalEngineStatus), undefined);
+    },
     async synthesize(input) {
       const response = await send(options, "/api/speech/synthesis", {
         method: "POST",
@@ -114,6 +127,12 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
       return { bytes, mediaType };
     },
   };
+}
+
+function localEnginePath(language: string | undefined): string {
+  return language === undefined
+    ? "/api/speech/local-engine"
+    : `/api/speech/local-engine?${new URLSearchParams({ language }).toString()}`;
 }
 
 async function send(options: SpeechClientOptions, path: string, init: RequestInit) {

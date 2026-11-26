@@ -1442,13 +1442,14 @@ function ActiveSectionContent({
               onDetailChange={onHarnessEndpointChange}
               voice={{
                 settings: props.settings.voice,
-                onUseForTranscription: (providerInstanceId, modelId) =>
+                onUseForTranscription: (providerInstanceId, modelId) => {
+                  // Choosing an endpoint here replaces Apple Speech, as the
+                  // Transcribe with menu does.
+                  const { transcriptionEngine: _engine, ...voice } = props.settings.voice;
                   props.onSettingsChange({
-                    voice: {
-                      ...props.settings.voice,
-                      transcription: { providerInstanceId, modelId },
-                    },
-                  }),
+                    voice: { ...voice, transcription: { providerInstanceId, modelId } },
+                  });
+                },
                 onOpenVoice: () =>
                   onApplyDeepLink({ section: "voice", setting: settingId("transcription") }),
               }}

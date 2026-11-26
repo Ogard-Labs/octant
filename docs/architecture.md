@@ -8854,6 +8854,32 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and `/api/speech/synthesis` behind window authority, sniffs and bounds the
   audio, persists nothing, and reports each direction `ready`, `unconfigured`,
   or `unavailable` with the Settings link that fixes it.
+  **Apple Speech on this Mac** is a Transcribe with choice (Voice settings'
+  `transcriptionEngine`; absent keeps the endpoint, so nothing changes for
+  anyone who does not pick it). It runs on the host, not in the window: the
+  desktop app passes its signed `octant-speech-helper` (macOS 26 or later,
+  Apple's `SpeechAnalyzer` with `DictationTranscriber`) to its own host only,
+  so a headless, Linux or Windows host, an older macOS, and a host the app did
+  not start report it `unsupported` and Settings does not offer it. While it is
+  chosen the host calls no transcription endpoint for anyone: it serves only
+  the host's own windows, refuses a paired phone or browser and reports it
+  transcription `unavailable` (their recording would otherwise leave the
+  device it was made on for another computer), and an agent's
+  `octant_transcribe` is not offered. Reason: "turned into text on this Mac"
+  stays true only where the window and the engine are on the same Mac. The
+  window decodes its clip and sends 16 kHz mono 16-bit PCM in a plain WAV (at
+  most 130 seconds); the host checks every header field and hands the samples
+  to one helper process per request over stdin, with the language (absent: the
+  Mac's own first language) and the dictionary as `contextualStrings`. Nothing
+  is written to a file or log; the helper exits when its stdin closes, so a
+  cancelled dictation, a stopped host or a crashed host leaves none running,
+  and a helper that crashes, stalls past 110 seconds or answers something
+  unreadable fails only that request. Dictations share the same two host
+  slots. Apple's speech model is fetched by macOS from Apple only when the
+  person presses Download in Voice settings, with progress and failure shown
+  there and the fetch named in the host data map; no audio or text is sent.
+  The helper uses no `SFSpeechRecognizer`, so Apple's speech recognition
+  permission is not asked; the microphone permission is the app's, as before.
   An attended Work or Code agent outside Plan can use `octant_transcribe`
   only when its provider carries Octant tools and transcription is ready.
   The host checks that a file under the turn's current folder contains supported
@@ -22364,7 +22390,9 @@ defers, and it owns the architectural rules behind it.
 Silicon technical preview with the provider-neutral plugin/skill marketplace.
 It needs macOS 15 Sequoia or later: the app bundle declares 15.0 because the
 bundled Simulator accessibility and camera tools need it, while the core
-helpers declare 14.0 and are covered by the app's floor. Macs on macOS 14
+helpers declare 14.0 and are covered by the app's floor. The speech helper
+declares macOS 26 and is started only there; packaging builds it with an
+installed Xcode that has the macOS 26 SDK and fails without one. Macs on macOS 14
 must not update past the last version released before this requirement. The
 update feed does not guard against it (maintainer decision, 2026-11-22): an
 older installed copy on macOS 14 can still download a newer build, through the

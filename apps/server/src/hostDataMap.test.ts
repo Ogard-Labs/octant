@@ -155,6 +155,21 @@ describe("composeHostDataMap", () => {
     expect(decoded.projects.projects[0]?.boundRoot).toBeUndefined();
   });
 
+  it("names the speech model download only on a host that can make one", () => {
+    const base = { hostId: "host-under-test", serviceMode: "desktop", platform: "darwin" } as const;
+    const speech = (report: ReturnType<typeof composeHostDataMap>) =>
+      decodeHostDataMap(report).host.outbound.find(
+        (entry) => entry.category === "speech-model-downloads",
+      );
+    expect(speech(composeHostDataMap(base))).toBeUndefined();
+    expect(speech(composeHostDataMap({ ...base, speechModelDownloads: true }))).toEqual({
+      kind: "known",
+      category: "speech-model-downloads",
+      leavesMachine: true,
+      purpose: expect.stringContaining("No audio"),
+    });
+  });
+
   it("fails closed to unknown when the host cannot verify a category", () => {
     const report = composeHostDataMap({
       hostId: "host-under-test",
