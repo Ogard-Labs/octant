@@ -1826,37 +1826,6 @@ html[data-octant-native-host="true"]
   white-space: nowrap;
 }
 
-.workspace-drag-preview__action {
-  margin-right: var(--oct-space-2);
-  color: var(--octant-text-primary);
-  font-weight: var(--oct-weight-strong);
-}
-
-/* A sidebar group or shelf a dragged row would pin, settle, wake or take out
-   of; lit with the pane drop's wash, and only while the pointer is over it. */
-[data-sidebar-row-drop][data-drop-lit="true"],
-.sidebar-navigation__thread[data-file-drop-over="true"] {
-  background: color-mix(in srgb, var(--octant-focus-ring) 13%, transparent);
-  border-radius: var(--oct-radius-sm);
-  outline: 1px solid color-mix(in srgb, var(--octant-focus-ring) 65%, var(--octant-border-strong));
-  outline-offset: -1px;
-}
-
-[data-sidebar-row-drop="list"][data-drop-lit="true"] {
-  outline-offset: -2px;
-}
-
-/* Stands in for the Pinned group or the Settled shelf while a row is dragged
-   and the list has none to drop on. */
-.sidebar-row-drop-slot {
-  margin: var(--oct-space-1) 0;
-  padding: var(--oct-space-1) var(--oct-space-2);
-  color: var(--octant-text-secondary);
-  border: 1px dashed var(--octant-border-strong);
-  border-radius: var(--oct-radius-sm);
-  font-size: var(--oct-text-xs);
-}
-
 /* Fill, radius and shadow are the shared float's, from components.css; it
    stands above the dock like any menu, at the popup layer. */
 .workspace-disclosure {

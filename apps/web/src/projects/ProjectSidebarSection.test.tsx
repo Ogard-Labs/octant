@@ -12,7 +12,7 @@ import {
   type SidebarThreadDragRow,
   type SidebarThreadDragTargets,
 } from "../shell/useWorkspaceTabDrag";
-import { runSidebarRowDrop, sidebarRowDropDestination } from "./sidebarRowDrop";
+import { runSidebarRowDrop, sidebarRowDropDestination } from "./sidebarRowDropRules";
 import type { ThreadRowActions } from "./ThreadRowMenu";
 import { ProjectSidebarSection } from "./ProjectSidebarSection";
 
@@ -1316,10 +1316,7 @@ describe("ProjectSidebarSection activity view", () => {
       fireEvent.drop(row, { dataTransfer });
 
       expect(onSelectThread).toHaveBeenCalledWith("thread-a");
-      expect(drag.offerFiles).toHaveBeenCalledWith(
-        expect.objectContaining({ threadId: "thread-a" }),
-        [file],
-      );
+      expect(drag.offerFiles).toHaveBeenCalledWith("thread-a", [file]);
       expect(row).not.toHaveAttribute("data-file-drop-over");
 
       // A drag that carries no files, such as text, passes over the row.

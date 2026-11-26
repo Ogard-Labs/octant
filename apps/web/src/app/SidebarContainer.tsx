@@ -86,7 +86,6 @@ export interface SidebarContainerProps {
     | "markCodeThreadRead"
     | "moveProject"
     | "noteHandedOffDocument"
-    | "offerThreadRestUndo"
     | "openAgentsCenter"
     | "openArchive"
     | "openArtifactLibrary"

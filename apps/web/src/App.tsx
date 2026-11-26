@@ -110,12 +110,7 @@ import { SurfaceLoading } from "./surface/SurfaceLoading";
 import { DockModuleBoundary } from "./shell/DockModuleBoundary";
 import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
-import {
-  threadRestRowActions,
-  type ThreadRestRow,
-  type ThreadRestUndoNotice,
-} from "./app/threadRestRowActions";
-import { ThreadRestUndoToast } from "./app/ThreadRestUndoToast";
+import { threadRestRowActions, type ThreadRestRow } from "./app/threadRestRowActions";
 import { TerminalShellContext, type TerminalShellFacts } from "./shell/terminalSlot";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
@@ -528,12 +523,11 @@ import {
 } from "./shell/dockEnvironmentStrip";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
-import { runSidebarRowDrop, sidebarRowDropDestination } from "./projects/sidebarRowDrop";
-import { offerFilesToThread, THREAD_FILE_OFFERS_FULL } from "./composer/threadImageOffers";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
 import {
   CoordinatorBoundsDialog,
   LazyHostNoticeToasts,
+  LazyThreadRestUndoHost,
   RemotePairingView,
   RemoteTodoDraft,
 } from "./shell/deferredSurfaces";
@@ -1771,6 +1765,10 @@ function LaunchedShell(
   // another Project of this mode lands as its own pane; the host resolves that
   // pane's Project and judges every call made from it.
   const sidebarDragRows = useRef(new Map<string, SidebarThreadDragRow>());
+  // What a row dropped within the sidebar does loads with the first row drag,
+  // during the press before it becomes a drag, so the first load does not
+  // carry it.
+  const sidebarRowDropRules = useRef<typeof import("./projects/sidebarRowDropRules")>(undefined);
   // The Chat list's thread ids, read when a drag starts; filled in below once
   // the Chat controller exists.
   const chatThreadIdsForDrag = useRef<ReadonlySet<string>>(new Set());
@@ -1780,19 +1778,21 @@ function LaunchedShell(
       : { focusedPaneId: controller.workspace.focusedPaneId }),
     resolveSidebarDrop: (point, source) => {
       const row = sidebarDragRows.current.get(source.dragKey);
-      if (row === undefined) return null;
+      const rules = sidebarRowDropRules.current;
+      if (row === undefined || rules === undefined) return null;
       const mode = sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current);
-      return sidebarRowDropDestination({ point, row, canPin: mode === "code" });
+      return rules.sidebarRowDropDestination({ point, row, canPin: mode === "code" });
     },
     onDrop: (source, destination) => {
       const row = sidebarDragRows.current.get(source.dragKey);
       sidebarDragRows.current.delete(source.dragKey);
       if (destination.kind === "sidebar") {
-        if (row === undefined) return;
+        const rules = sidebarRowDropRules.current;
+        if (row === undefined || rules === undefined) return;
         // The same handlers as the row menu, so the host decides, a refusal
         // shows its sentence, and an accepted change offers Undo.
         const mode = sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current);
-        runSidebarRowDrop(destination.action, row.rowId, threadRestRowActions(actions)[mode]);
+        rules.runSidebarRowDrop(destination.action, row.rowId, threadRestRowActions(actions)[mode]);
         return;
       }
       if (destination.kind === "composer") {
@@ -1871,6 +1871,11 @@ function LaunchedShell(
   const sidebarThreadDrag = useMemo<SidebarThreadDragTargets>(
     () => ({
       beginThreadDrag: (event, row) => {
+        if (sidebarRowDropRules.current === undefined) {
+          void import("./projects/sidebarRowDropRules").then((rules) => {
+            sidebarRowDropRules.current = rules;
+          });
+        }
         const dragKey = `thread:${row.rowId}`;
         sidebarDragRows.current.set(dragKey, row);
         workspaceDrag.onPointerDown(event, {
@@ -1891,11 +1896,13 @@ function LaunchedShell(
         workspaceDrag.active === null
           ? null
           : (sidebarDragRows.current.get(workspaceDrag.active.source.dragKey) ?? null),
-      offerFiles: (row, files) => {
-        const mode = sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current);
-        void offerFilesToThread(mode, row.threadId, files).then((full) => {
-          if (full) setThreadExportNotice(THREAD_FILE_OFFERS_FULL);
-        });
+      offerFiles: (threadId, files) => {
+        const mode = sidebarRowMode(activeMode, threadId, chatThreadIdsForDrag.current);
+        // The offer store loads with the first file drop: the same store the
+        // thread composers take from.
+        void import("./composer/threadFileOffers").then(({ offerRowFiles }) =>
+          offerRowFiles(mode, threadId, files, setThreadExportNotice),
+        );
       },
     }),
     [activeMode, workspaceDrag],
@@ -2127,12 +2134,6 @@ function LaunchedShell(
   // The row menu closes before this operation finishes. Keep its progress or
   // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
-  // One Undo at a time: a newer sidebar change replaces the notice and its
-  // five seconds start again.
-  const [threadRestUndo, setThreadRestUndo] = useState<ThreadRestUndoNotice>();
-  // The newest change ever offered Undo: a slower reply to an older change
-  // arriving after it must not take its place.
-  const newestThreadRestUndo = useRef(0);
   // The running coordinator whose limits a person is changing, from its row
   // menu or its pane's header menu.
   const [coordinatorBoundsThreadId, setCoordinatorBoundsThreadId] = useState<CodeThreadId>();
@@ -6276,11 +6277,6 @@ function LaunchedShell(
       moveProject: projectController.move,
       noteCanvasReferences,
       noteHandedOffDocument,
-      offerThreadRestUndo: (notice) => {
-        if (notice.sequence < newestThreadRestUndo.current) return;
-        newestThreadRestUndo.current = notice.sequence;
-        setThreadRestUndo(notice);
-      },
       onComputerUseSessionChange,
       openAgentsCenter,
       openArchive,
@@ -10302,13 +10298,9 @@ function LaunchedShell(
             title={`Reply detail: ${REPLY_DETAIL_LABELS[replyDetailNotice]}`}
           />
         )}
-        {threadRestUndo === undefined ? null : (
-          <ThreadRestUndoToast
-            key={threadRestUndo.sequence}
-            notice={threadRestUndo}
-            onDismiss={() => setThreadRestUndo(undefined)}
-          />
-        )}
+        <Suspense fallback={null}>
+          <LazyThreadRestUndoHost />
+        </Suspense>
         {threadExportNotice === undefined ? null : (
           <OctantToast
             detail={threadExportNotice}

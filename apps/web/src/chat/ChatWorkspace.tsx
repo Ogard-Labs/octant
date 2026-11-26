@@ -42,11 +42,6 @@ import {
   supportsAttachmentFile,
 } from "./composerAttachmentCapability";
 import { attachmentMediaType, isImageAttachment } from "../composer/attachmentMediaType";
-import {
-  threadImageOfferKey,
-  useThreadImageOffers,
-  type ThreadImageVerdict,
-} from "../composer/threadImageOffers";
 import { useSeesImages } from "../harness/useSeesImages";
 import { pastedImageName } from "./composerImagePaste";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
@@ -603,14 +598,21 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   );
   // A file dropped on this thread's sidebar row waits here for the composer
   // and takes the same path as one chosen in it, with the same limits.
+  // The offer store loads on its own, so Chat's first load does not carry it.
   const takeOfferedFile = useRef<(file: File) => void>(() => {});
-  useThreadImageOffers(
-    view === undefined ? undefined : threadImageOfferKey("chat", String(view.thread.id)),
-    (file): ThreadImageVerdict => {
-      takeOfferedFile.current(file);
-      return { status: "accepted" };
-    },
-  );
+  const offeredThreadId = view === undefined ? undefined : String(view.thread.id);
+  useEffect(() => {
+    if (offeredThreadId === undefined) return;
+    let stop: (() => void) | undefined;
+    let closed = false;
+    void import("../composer/threadFileOffers").then(({ takeChatFiles }) => {
+      if (!closed) stop = takeChatFiles(offeredThreadId, (file) => takeOfferedFile.current(file));
+    });
+    return () => {
+      closed = true;
+      stop?.();
+    };
+  }, [offeredThreadId]);
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">

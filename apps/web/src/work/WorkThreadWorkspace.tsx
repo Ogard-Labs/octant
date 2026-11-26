@@ -176,11 +176,8 @@ import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
 import { useSeesImages } from "../harness/useSeesImages";
 import { DescribedImagesNote } from "../harness/DescribedImagesNote";
-import {
-  threadImageOfferKey,
-  useThreadImageOffers,
-  type ThreadImageVerdict,
-} from "../composer/threadImageOffers";
+import { threadImageOfferKey, type ThreadImageVerdict } from "../composer/threadImageOffers";
+import { useThreadImageOffers } from "../composer/useThreadImageOffers";
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
 import {
   composerStashContextValues,

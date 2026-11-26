@@ -24,7 +24,7 @@ import {
   measureComposerThreadDropZones,
   setActiveComposerThreadDropKey,
 } from "../chat/composerThreadDrop";
-import { setLitSidebarRowDropZone, type SidebarRowDropState } from "../projects/sidebarRowDrop";
+import { lightSidebarRowDropZone, type SidebarRowDropState } from "../projects/sidebarRowDrop";
 
 export interface WorkspaceSurfaceDragState {
   readonly destination: WorkspaceSurfaceDropDestination | null;
@@ -78,7 +78,7 @@ export interface SidebarThreadDragTargets {
    * composer once it is open, through its own attach path. The row opens the
    * thread itself, the way its click does.
    */
-  readonly offerFiles: (row: SidebarThreadDragRow, files: ReadonlyArray<File>) => void;
+  readonly offerFiles: (threadId: string, files: ReadonlyArray<File>) => void;
 }
 
 /**
@@ -143,7 +143,7 @@ export function useWorkspaceSurfaceDrag(options: {
         setActiveComposerThreadDropKey(
           next?.destination?.kind === "composer" ? next.destination.composerKey : undefined,
         );
-        setLitSidebarRowDropZone(
+        lightSidebarRowDropZone(
           next?.destination?.kind === "sidebar" ? next.destination.zone : undefined,
         );
       },

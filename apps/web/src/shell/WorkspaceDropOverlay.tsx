@@ -1,7 +1,6 @@
 import type { CSSProperties } from "react";
 import type { WorkspaceSurfaceDragState } from "./useWorkspaceTabDrag";
 import type { WorkspaceSurfaceDropDestination } from "./workspaceTabDragGeometry";
-import { SIDEBAR_ROW_DROP_LABELS } from "../projects/sidebarRowDrop";
 
 export function WorkspaceDropOverlay(props: {
   readonly destination: WorkspaceSurfaceDropDestination | null;
@@ -35,7 +34,7 @@ export function WorkspaceDragStatus(props: { readonly drag: WorkspaceSurfaceDrag
     destination === null
       ? `Dragging ${props.drag.source.title}. Nothing to drop it on here.`
       : destination.kind === "sidebar"
-        ? `${SIDEBAR_ROW_DROP_LABELS[destination.action]} ${props.drag.source.title}.`
+        ? `${destination.label} ${props.drag.source.title}.`
         : destination.kind === "composer"
           ? `Attach ${props.drag.source.title} as context. The draft will not be sent.`
           : destination.kind === "edge"
@@ -58,9 +57,7 @@ export function WorkspaceDragStatus(props: { readonly drag: WorkspaceSurfaceDrag
       >
         {/* Over the sidebar the dragged row says what letting go does. */}
         {destination?.kind === "sidebar" ? (
-          <strong className="workspace-drag-preview__action">
-            {SIDEBAR_ROW_DROP_LABELS[destination.action]}
-          </strong>
+          <strong className="workspace-drag-preview__action">{destination.label}</strong>
         ) : null}
         {props.drag.source.title}
       </div>

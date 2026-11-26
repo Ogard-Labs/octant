@@ -158,11 +158,8 @@ import type { HostId } from "@octant/contracts/host";
 import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { isImageAttachment, useCodeAttachments } from "./useCodeAttachments";
-import {
-  threadImageOfferKey,
-  useThreadImageOffers,
-  type ThreadImageVerdict,
-} from "../composer/threadImageOffers";
+import { threadImageOfferKey, type ThreadImageVerdict } from "../composer/threadImageOffers";
+import { useThreadImageOffers } from "../composer/useThreadImageOffers";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import { ThreadMentionTypeahead, useThreadMentionTypeahead } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";

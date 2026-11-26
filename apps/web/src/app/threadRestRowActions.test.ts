@@ -1,16 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ShellActions } from "./shellActions";
-import {
-  inverseThreadRestChange,
-  threadRestRowActions,
-  type ThreadRestUndoNotice,
-} from "./threadRestRowActions";
+import { threadRestRowActions, type ThreadRestUndoNotice } from "./threadRestRowActions";
+import { threadRestUndoStore } from "./threadRestUndoStore";
+import { inverseThreadRestChange } from "./threadRestRun";
 
 const CODE_ID = "00000000-0000-4000-8000-0000000000c1";
 const WORK_ID = "00000000-0000-4000-8000-0000000000d1";
 
 function shellActions() {
+  // The notices the window's Undo store shows, in the order it shows them.
   const offered: ThreadRestUndoNotice[] = [];
+  stopWatching = threadRestUndoStore.subscribe(() => {
+    const notice = threadRestUndoStore.current();
+    if (notice !== undefined) offered.push(notice);
+  });
   return {
     offered,
     completeChatThread: vi.fn(async () => ({ status: "ok" as const })),
@@ -37,9 +40,6 @@ function shellActions() {
     markCodeThreadDone: vi.fn(async () => ({ status: "ok" as const })),
     tryWorkRestCommand: vi.fn<ShellActions["tryWorkRestCommand"]>(async () => ({ status: "ok" })),
     setThreadExportNotice: vi.fn(),
-    offerThreadRestUndo: vi.fn((notice: ThreadRestUndoNotice) => {
-      offered.push(notice);
-    }),
     threadRestRow: vi.fn(
       (): {
         title: string;
@@ -53,7 +53,12 @@ function shellActions() {
   };
 }
 
-afterEach(() => vi.useRealTimers());
+let stopWatching = () => {};
+afterEach(() => {
+  stopWatching();
+  threadRestUndoStore.dismiss();
+  vi.useRealTimers();
+});
 
 describe("Undo after a sidebar state change", () => {
   it("Undo within five seconds sends the inverse command and shows a refusal", async () => {
@@ -80,7 +85,7 @@ describe("Undo after a sidebar state change", () => {
     shell.completeCodeThread.mockResolvedValueOnce({ status: "refused", message: "Not done." });
     threadRestRowActions(shell).code.onCompleteThread?.(CODE_ID);
     await vi.waitFor(() => expect(shell.setThreadExportNotice).toHaveBeenCalledWith("Not done."));
-    expect(shell.offerThreadRestUndo).not.toHaveBeenCalled();
+    expect(shell.offered).toHaveLength(0);
   });
 
   it("sends each mode's own inverse, with Work through its versioned command", async () => {
@@ -137,7 +142,7 @@ describe("Undo after a sidebar state change", () => {
         "This thread changed in another window.",
       ),
     );
-    expect(shell.offerThreadRestUndo).not.toHaveBeenCalled();
+    expect(shell.offered).toHaveLength(0);
   });
 
   it("marks a reopened Work thread Done again on Undo", async () => {
@@ -156,7 +161,7 @@ describe("Undo after a sidebar state change", () => {
     });
   });
 
-  it("numbers each change when it is made, whatever order the host answers in", async () => {
+  it("keeps the newer change's Undo when an older change's reply arrives after it", async () => {
     const shell = shellActions();
     let answerFirst: (value: { readonly status: "ok" }) => void = () => {};
     shell.completeCodeThread.mockReturnValueOnce(
@@ -169,11 +174,11 @@ describe("Undo after a sidebar state change", () => {
     actions.code.onPinThread?.(CODE_ID, true);
     await vi.waitFor(() => expect(shell.offered).toHaveLength(1));
     answerFirst({ status: "ok" });
-    await vi.waitFor(() => expect(shell.offered).toHaveLength(2));
-    const [pinned, settled] = shell.offered;
-    expect(pinned?.title).toBe("Pinned");
-    expect(settled?.title).toBe("Settled");
-    // The settle was asked for first, so its later reply carries the older number.
-    expect(settled!.sequence).toBeLessThan(pinned!.sequence);
+    await vi.waitFor(() => expect(shell.completeCodeThread).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The settle was asked for first, so its later reply does not replace the
+    // pin's Undo.
+    expect(shell.offered.map((notice) => notice.title)).toEqual(["Pinned"]);
+    expect(threadRestUndoStore.current()?.title).toBe("Pinned");
   });
 });

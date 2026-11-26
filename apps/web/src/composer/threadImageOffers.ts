@@ -1,5 +1,3 @@
-import { useEffect, useRef } from "react";
-
 /**
  * Pictures another surface of this window has offered to a thread's next
  * message. A composer takes an offer through its own attach path, so every
@@ -154,23 +152,4 @@ export async function offerFilesToThread(
     if (result.status === "full") full = true;
   }
   return full;
-}
-
-/**
- * Take the pictures offered to this thread while its composer is mounted. The
- * handler is read at the moment a file arrives, so it may change every render.
- */
-export function useThreadImageOffers(
-  key: ThreadImageOfferKey | undefined,
-  onFile: (
-    file: File,
-    arrival: ThreadImageArrival,
-  ) => ThreadImageVerdict | Promise<ThreadImageVerdict>,
-): void {
-  const handler = useRef(onFile);
-  handler.current = onFile;
-  useEffect(() => {
-    if (key === undefined) return;
-    return threadImageOffers.subscribe(key, (file, arrival) => handler.current(file, arrival));
-  }, [key]);
 }

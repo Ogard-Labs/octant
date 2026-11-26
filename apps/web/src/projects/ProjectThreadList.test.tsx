@@ -361,7 +361,10 @@ describe("ProjectThreadRows", () => {
 
     await userEvent.pointer({ target: row, keys: "[MouseRight]" });
     expect(row).toHaveAttribute("aria-expanded", "true");
-    expect(document.querySelector(".thread-row-context-menu")).toBeInTheDocument();
+    // The menu's items load with the first right-click.
+    await waitFor(() =>
+      expect(document.querySelector(".thread-row-context-menu")).toBeInTheDocument(),
+    );
   });
 
   it("pins a thread from its own right-click menu", async () => {

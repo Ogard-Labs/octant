@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { isApplePlatform } from "../platform";
 import { OctantToast } from "../ui/base/OctantToast";
 import type { ThreadRestUndoNotice } from "./threadRestRowActions";
+import { threadRestUndoStore } from "./threadRestUndoStore";
 
 /** How long a sidebar state change can be taken back. */
 export const THREAD_REST_UNDO_MS = 5_000;
@@ -52,6 +53,22 @@ export function ThreadRestUndoToast(props: {
       leavesAfterMs={THREAD_REST_UNDO_MS}
       onDismiss={props.onDismiss}
       title={props.notice.title}
+    />
+  );
+}
+
+/** Draws the window's Undo notice, if one is offered. */
+export function ThreadRestUndoHost() {
+  const notice = useSyncExternalStore(
+    threadRestUndoStore.subscribe,
+    threadRestUndoStore.current,
+    threadRestUndoStore.current,
+  );
+  return notice === undefined ? null : (
+    <ThreadRestUndoToast
+      key={notice.sequence}
+      notice={notice}
+      onDismiss={threadRestUndoStore.dismiss}
     />
   );
 }

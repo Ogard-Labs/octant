@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveSidebarRowDropZone, sidebarRowDropAction } from "./sidebarRowDrop";
+import { resolveSidebarRowDropZone, sidebarRowDropAction } from "./sidebarRowDropRules";
 
 const rect = (top: number, height: number) => ({ left: 0, top, width: 240, height });
 

@@ -41,7 +41,6 @@ import {
   threadRowPullRequestDestinations,
 } from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
-import { useThreadRowFileDrop } from "./sidebarRowDrop";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
 import {
@@ -57,7 +56,12 @@ import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarThreadRowContent, sidebarThreadRowLabel } from "./SidebarThreadRowContent";
 import { NO_THREAD_ROW_STATE, sidebarThreadStatusIcon, threadRowState } from "./threadRowState";
 import { ThreadRenameField } from "./ThreadRenameField";
-import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
+import {
+  ThreadCoordinatorMenuItems,
+  threadCoordinatorMenuOffers,
+  type ThreadRowActions,
+  threadRowMenuIsEmpty,
+} from "./ThreadRowMenu";
 import {
   lineageParentTitle,
   threadAncestorChain,
@@ -569,6 +573,12 @@ function scrollMarginFor(list: HTMLElement, scrollElement: HTMLElement): number 
   return listRect.top - scrollRect.top + scrollElement.scrollTop;
 }
 
+// The right-click menu's items are drawn only while it is open, so they load
+// with the first right-click rather than with the window.
+const DeferredThreadRowMenu = lazy(() =>
+  import("./ThreadRowMenuItems").then((module) => ({ default: module.ThreadRowMenu })),
+);
+
 interface ProjectThreadRowProps {
   readonly actions: ThreadRowActions;
   readonly activeThreadId?: string;
@@ -632,19 +642,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     },
     [drag, props.thread, rowId],
   );
-  const fileDrop = useThreadRowFileDrop(
-    () => {
-      tabs?.openAsPreview(props.thread.threadId);
-      props.onSelectThread(rowId);
-    },
-    drag === null
-      ? undefined
-      : (files) =>
-          drag.offerFiles(
-            { rowId, threadId: props.thread.threadId, title: props.thread.title },
-            files,
-          ),
-  );
+
   const activity = threadRowActivity(props.thread);
   const unread = activity === "unread" || props.thread.unread === true;
   if (props.isRenaming) {
@@ -705,7 +703,6 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       }
       onClick={onSelect}
       onDoubleClick={() => tabs?.keep(props.thread.threadId)}
-      {...fileDrop}
       {...(drag === null
         ? {}
         : {
@@ -995,7 +992,21 @@ export function ThreadRowContextMenu(props: {
         {props.inlineActions ? (
           <ThreadRowActionsGutter actions={props.actions} thread={props.thread} />
         ) : null}
-        <ThreadRowMenu actions={props.actions} thread={props.thread} />
+        {open ? (
+          <Suspense fallback={null}>
+            <DeferredThreadRowMenu
+              actions={props.actions}
+              {...(threadCoordinatorMenuOffers(props.thread, props.actions)
+                ? {
+                    coordinatorItems: (
+                      <ThreadCoordinatorMenuItems actions={props.actions} thread={props.thread} />
+                    ),
+                  }
+                : {})}
+              thread={props.thread}
+            />
+          </Suspense>
+        ) : null}
       </OctantContextMenuRoot>
     </div>
   );

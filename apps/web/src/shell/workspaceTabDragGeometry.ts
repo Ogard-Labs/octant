@@ -39,6 +39,8 @@ export type WorkspaceSurfaceDropDestination =
       readonly kind: "sidebar";
       readonly zone: SidebarRowDropZone;
       readonly action: SidebarRowDropAction;
+      /** What letting go does, said on the dragged label: "Pin", "Settle". */
+      readonly label: string;
     };
 
 export interface ComposerThreadDropZone {
