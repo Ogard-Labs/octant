@@ -732,7 +732,10 @@ describe("waitForStorageReady", () => {
     // publication during the first probe went unseen in about 1 of 20 tries
     // under parallel load, and CI then timed out. Publishing again until the
     // woken probe arrives makes the outcome depend only on the wake.
+    // The loop's failure is caught as soon as it starts, so a failed write
+    // fails this test below instead of surfacing as an unhandled rejection.
     let publishing: Promise<void> = Promise.resolve();
+    let publishFailure: unknown;
     let stopPublishing = false;
     try {
       const fetch = vi.fn(async () => {
@@ -743,7 +746,9 @@ describe("waitForStorageReady", () => {
               await rename(join(dir, "publishing"), hostInfoPath);
               await delay(20);
             }
-          })();
+          })().catch((error: unknown) => {
+            publishFailure = error;
+          });
           return new Response(null, { status: 503 });
         }
         return Response.json({
@@ -768,6 +773,7 @@ describe("waitForStorageReady", () => {
       stopPublishing = true;
       await publishing;
       await rm(dir, { recursive: true, force: true });
+      expect(publishFailure).toBeUndefined();
     }
   });
 
