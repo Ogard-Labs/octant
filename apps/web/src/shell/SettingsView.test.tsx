@@ -14,7 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import { settingsPastFirstRun } from "../App.test-fixtures";
 import { HostPlatformContext } from "../platform";
 import { SettingsView, type SettingsViewProps } from "./SettingsView";
-import { TodoListHostSettingsContext } from "../todos/TodoListHostSettings";
+import { TodoListHostSettingsContext } from "../todos/todoListHostSettingsContext";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";

@@ -1,30 +1,8 @@
-import type { StableHostId } from "@octant/contracts/remote-access";
-import type { TodoListHostChoice, TodoListHostView } from "@octant/contracts/todos";
-import { createContext, useContext, useState } from "react";
+import type { TodoListHostChoice } from "@octant/contracts/todos";
+import { useContext, useState } from "react";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-
-export type TodoListHostRead =
-  | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly view: TodoListHostView }
-  | { readonly status: "failed"; readonly message: string };
-
-/** A computer this window is paired with, which could keep the list. */
-export interface TodoListHostComputer {
-  readonly hostId: StableHostId;
-  readonly name: string;
-}
-
-export interface TodoListHostSettingsValue {
-  readonly read: TodoListHostRead;
-  readonly computers: ReadonlyArray<TodoListHostComputer>;
-  /** Resolves to the host's refusal or failure, or undefined once saved. */
-  readonly choose: (choice: TodoListHostChoice) => Promise<string | undefined>;
-}
-
-export const TodoListHostSettingsContext = createContext<TodoListHostSettingsValue | undefined>(
-  undefined,
-);
+import { TodoListHostSettingsContext } from "./todoListHostSettingsContext";
 
 const THIS_HOST = "this-host";
 
