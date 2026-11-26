@@ -167,6 +167,38 @@ describe("the hub principal on a spoke", () => {
     });
   });
 
+  it("reads plan-limit readings only while the hub's Usage item is ticked, which no default grant ticks", async () => {
+    const { a, b } = await joinedPair();
+    const read = () =>
+      b.hubLink(signedRequest({ signer: a, recipient: b, method: "GET", path: "/api/hub/usage" }));
+
+    const byDefault = await read();
+    expect(byDefault?.status).toBe(403);
+    expect(await byDefault?.json()).toEqual({ status: "refused", kind: "item-not-granted" });
+
+    b.spoke.setGrant({ items: ["roster", "status"], actProjects: [] }, window);
+    expect((await read())?.status).toBe(403);
+
+    b.spoke.setGrant({ items: ["roster", "usage"], actProjects: [] }, window);
+    const ticked = await read();
+    expect(ticked?.status).toBe(200);
+    const body = (await ticked?.json()) as { readonly limits: { readonly entries: unknown[] } };
+    expect(Object.keys(body)).toEqual(["limits"]);
+    expect(body.limits.entries).toHaveLength(1);
+
+    // A stranger's signature never reaches the readings, whatever the grant.
+    const stranger = await startHubTestHost({
+      name: "Stranger",
+      address: "100.101.102.105",
+      network: new HubTestNetwork(),
+      cleanups,
+    });
+    const refused = await b.hubLink(
+      signedRequest({ signer: stranger, recipient: b, method: "GET", path: "/api/hub/usage" }),
+    );
+    expect(refused?.status).toBe(401);
+  });
+
   it("is refused a spoke's own administration and every product route over the listener", async () => {
     const { network, a, b } = await joinedPair();
     b.spoke.setGrant({ items: ["roster", "status", "act", "provision"], actProjects: [] }, window);
@@ -425,6 +457,7 @@ describe("the hub-link routes the private listener serves", () => {
       [REMOTE_HUB_LINK_ROUTE_IDS.leave, "POST", HUB_LINK_ROUTES.leave],
       [REMOTE_HUB_LINK_ROUTE_IDS.roster, "PUT", HUB_LINK_ROUTES.roster],
       [REMOTE_HUB_LINK_ROUTE_IDS.status, "GET", HUB_LINK_ROUTES.status],
+      [REMOTE_HUB_LINK_ROUTE_IDS.usage, "GET", HUB_LINK_ROUTES.usage],
       [REMOTE_HUB_LINK_ROUTE_IDS.guestRoster, "GET", HUB_LINK_ROUTES.guestRoster],
       [REMOTE_HUB_LINK_ROUTE_IDS.guest, "POST", HUB_LINK_ROUTES.guest],
       [REMOTE_HUB_LINK_ROUTE_IDS.standby, "PUT", HUB_LINK_ROUTES.standby],

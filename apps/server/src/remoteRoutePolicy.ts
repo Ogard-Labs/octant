@@ -212,6 +212,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   leave: "hub-link-leave",
   roster: "hub-link-roster",
   status: "hub-link-status",
+  usage: "hub-link-usage",
   guestRoster: "hub-link-guest-roster",
   guest: "hub-link-guest",
   windowGuest: "hub-link-window-guest",
@@ -662,6 +663,16 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowQuery: false,
     allowedRequestHeaders: [HUB_LINK_HEADER],
     maxResponseBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.usage,
+    match: { kind: "exact", path: "/api/hub/usage" },
+    surface: "pre-auth",
+    methods: ["GET"],
+    allowQuery: false,
+    allowedRequestHeaders: [HUB_LINK_HEADER],
+    // At most 128 provider entries, each a handful of windows.
+    maxResponseBytes: 524_288,
   },
   {
     id: REMOTE_HUB_LINK_ROUTE_IDS.guestRoster,
