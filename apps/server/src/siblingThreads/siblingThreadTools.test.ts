@@ -25,7 +25,7 @@ import {
 } from "@octant/contracts";
 import { SIBLING_THREAD_UNREACHABLE } from "@octant/domain";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXTERNAL_CONTENT_FRAME_OPEN_PREFIX } from "../context/externalContentFraming";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
@@ -109,6 +109,7 @@ interface HarnessOptions {
   readonly strict?: () => boolean;
   readonly readsPerTurn?: () => number;
   readonly waitsPerTurn?: () => number;
+  readonly worktreeMove?: Parameters<typeof createThreadsTools>[0]["worktreeMove"];
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -200,6 +201,7 @@ function harness(options: HarnessOptions = {}) {
       ...(options.strict === undefined ? {} : { strict: options.strict }),
       ...(options.readsPerTurn === undefined ? {} : { readsPerTurn: options.readsPerTurn }),
       ...(options.waitsPerTurn === undefined ? {} : { waitsPerTurn: options.waitsPerTurn }),
+      ...(options.worktreeMove === undefined ? {} : { worktreeMove: options.worktreeMove }),
     });
   const tools = newTurn();
   const call = async (input: unknown, signal?: AbortSignal, turn = tools) =>
@@ -917,5 +919,34 @@ describe("the planner's board in the threads tool", () => {
     const named = harness({ planner: planner(1), toolConstraints: ["octant_threads.board"] });
     expect(operationsOf(named.tools)).toEqual(["help", "board"]);
     expect((await named.call({ operation: "board" })).isError).toBe(false);
+  });
+});
+
+describe("moving the caller's own thread into a worktree through the threads tool", () => {
+  const operationsOf = (tools: {
+    readonly definitions: ReadonlyArray<{ inputSchema: unknown }>;
+  }): ReadonlyArray<string> => {
+    const schema = tools.definitions[0]?.inputSchema as
+      | { readonly properties: { readonly operation: { readonly enum: ReadonlyArray<string> } } }
+      | undefined;
+    return schema?.properties.operation.enum ?? [];
+  };
+  it("asks the person and moves only after the turn, offering the operation only where the host can", async () => {
+    const plain = harness();
+    expect(operationsOf(plain.tools)).not.toContain("move-to-worktree");
+
+    const request = vi.fn(async () => "scheduled" as const);
+    const offered = harness({ worktreeMove: { request } });
+    expect(operationsOf(offered.tools)).toContain("move-to-worktree");
+    const answer = await offered.call({ operation: "move-to-worktree", branch: "octant/split" });
+    expect(answer.isError).toBe(false);
+    expect(JSON.stringify(answer.result)).toContain("after this turn");
+    expect(request).toHaveBeenCalledWith("octant/split", undefined);
+
+    request.mockResolvedValueOnce("denied" as never);
+    const declined = await offered.call({ operation: "move-to-worktree" });
+    expect(declined.isError).toBe(true);
+    expect(JSON.stringify(declined.result)).toContain("declined");
+    expect(request).toHaveBeenLastCalledWith(undefined, undefined);
   });
 });

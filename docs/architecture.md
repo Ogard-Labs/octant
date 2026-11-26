@@ -2741,6 +2741,57 @@ does not survive the move; the thread lands on its persisted posture. A thread
 that owns a managed worktree is refused, because that checkout is the thread's
 own tree rather than the Project's.
 
+**Moving a thread into its own worktree.** A thread on the checkout it shares
+with its Project can move onto a managed worktree of its own
+(`move-code-thread-to-worktree`; maintainer decision, 2026-11-26). The person
+starts it from the Branch row's "Move to a new worktree…", from a window or a
+device the host's own person paired; an agent asks through `octant_threads`'
+`move-to-worktree`, which asks the person at every level, Full access
+included, is refused in Plan, and is offered only to a turn a local window
+or a device the host's own person paired started (never one the host started
+on its own or a device the hub introduced, which could otherwise allow its
+own ask); only such a window may allow the ask. The move runs only after the
+agent's turn completed (a stopped, interrupted or failed turn moves nothing),
+and the thread is then marked for the person's follow-up with what happened:
+"Moved to worktree <branch>", or the refusal and its reason. The host captures the source
+checkout as Git trees (objects only, as a fork's fresh capture does), makes a
+managed worktree at the captured head on a new branch (the one the person
+named, otherwise one derived as for a fork), and lays the trees over it, so
+staged, unstaged and untracked work all arrive; the move writes none of the
+source checkout's files, so it keeps every change, and the dialog says so
+(Octant does not remove them there; a one-click reviewed Discard of them is
+not built). It refuses an archived or completed thread, a thread that already owns a
+worktree, a plain folder, a server Project's checkout, Plan, a task working
+in another of the Project's folders (a worktree of the main folder does not
+hold it, so the task would keep editing that folder), a running turn, and
+another thread's running turn on the same checkout, and reads the last
+two again inside the journal unit that records the move, so a turn started
+during the copy refuses it. A second move of the same thread is refused
+while the first runs. It refuses too, naming the paths, when a
+submodule has changes of its own or an untracked folder, at any depth below
+an untracked parent, is a repository of its own: a capture records either
+only as a commit pointer, so a copy would leave that work behind. The search
+for such folders walks at most 100,000 untracked entries per move, skipping
+folders Git ignores; past that it refuses rather than claim a full copy. A
+rolled-back creation removes its worktree forced (no thread ever owned it, so
+it holds only what creation put there, such as the copied changes the source
+still has) and deletes the branch it made while that branch still points at
+its start and no worktree holds it, so a retry under the same name is not
+refused as a collision. Only after the
+worktree holds the changes does it journal, in one unit, the new checkout's
+`code.checkout-observed@1` and, on the thread's aggregate,
+`code.thread-moved-to-worktree@1` (the checkout it left, the new one, the
+branch, the captured head and trees) followed by `code.thread-updated@1` with
+the new checkout and branch. Any earlier failure removes the new worktree and
+leaves the thread as it was. Grants are revoked as for a rebind. The thread
+keeps its id and history; its next turn finds its last session on the
+checkout the move record names and, because every provider keeps its session
+under the folder it ran in, starts a new session on the worktree with the
+same disclosed text handoff a provider switch takes (journaled as
+`context-handoff-attached`, reason `provider-switch`, with the same provider
+and model on both sides). A session from any other checkout is still
+refused.
+
 Archiving a Code thread, by a person or the host's completed-thread timer,
 keeps the thread and tells the host once the journal records it. The host then
 asks `ManagedWorktreeService.cleanup` to remove the thread's managed worktree

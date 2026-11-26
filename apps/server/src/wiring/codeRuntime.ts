@@ -78,6 +78,7 @@ import { SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID } from "@octant/plugin-
 import { isFirstPartyIntegrationEffective } from "../github/githubIntegrationEffective";
 import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import type { PullRequestCiPort } from "../code/pullRequestCiPort";
+import { CODE_THREAD_MOVED_TO_WORKTREE, decodeCodeThreadMovedToWorktree } from "@octant/contracts";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -101,6 +102,7 @@ import {
   CodeThreadBoardService,
 } from "../code/codeThreadBoardService";
 import { CodeFollowUpService } from "../code/codeFollowUpService";
+import { runAllowedWorktreeMove } from "../code/agentWorktreeMove";
 import { FailingChecksFollowUps } from "../code/failingChecksFollowUps";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "../code/terminalProcessPort";
@@ -1622,6 +1624,33 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         },
         // The agent's ask to plan, or to leave Plan, changes the level the way
         // the person's own level menu does, for the window that approved it.
+        // The person allowed an agent's move during its turn; it runs after
+        // the turn, and the thread says what happened either way.
+        moveThreadToWorktree: (input) =>
+          runAllowedWorktreeMove(input, {
+            readThread: (threadId) => persistence.readCodeThread(threadId),
+            execute: async (windowId, command) => await codeService.execute(windowId, command),
+            notify: async (threadId, text) => {
+              const view = codeFollowUpService.read(threadId);
+              await codeFollowUpService.observeTrigger({
+                threadId,
+                sourceEventId: randomUUID(),
+                sourceSequence:
+                  Math.max(
+                    view.followUp?.triggerSequence ?? 0,
+                    view.followUp?.acknowledgedThroughSequence ?? 0,
+                  ) + 1,
+                reason: text,
+                origin: "automatic",
+                triggeredAt: new Date().toISOString(),
+              });
+            },
+          }),
+        actsAsPerson: (windowId) =>
+          !isRoutineHostScope(windowId) &&
+          !deps.isRestrictedDeviceScope(windowId) &&
+          (deps.isPairedDeviceScope(windowId) ||
+            deps.windowAuthorityStore.listWindowIds().includes(windowId)),
         changeThreadLevel: async ({ windowId, threadId, executionPolicy, planReturnPolicy }) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return false;
@@ -2104,8 +2133,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         // The facts come from the host's own records on every call. The
         // Code runtime, the decision reader, and the mention directory are
         // declared later in this startup; a turn runs only after they exist.
-        threads: ({ windowId, thread, readPosture, planner }) =>
+        threads: ({ windowId, thread, readPosture, planner, worktreeMove }) =>
           createThreadsTools({
+            ...(worktreeMove === undefined ? {} : { worktreeMove }),
             mode: "code",
             windowId,
             service: siblingThreadsService,
@@ -2199,6 +2229,26 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         forgeChanges: runtimeForgeChanges,
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
+        // A thread moves into its own worktree at most once (a worktree thread
+        // is refused), so its one move record is the one this reads.
+        readThreadMove: (threadId) => {
+          const [envelope] = persistence.journal.replayAggregateType({
+            aggregateType: "code-thread",
+            eventName: CODE_THREAD_MOVED_TO_WORKTREE,
+            payloadPrefix: { path: "threadId", prefix: String(threadId) },
+            afterSequence: 0,
+            limit: 1,
+          });
+          if (envelope === undefined) return undefined;
+          try {
+            const moved = decodeCodeThreadMovedToWorktree(envelope.payload);
+            return String(moved.threadId) === String(threadId)
+              ? { fromCheckoutId: moved.fromCheckoutId, toCheckoutId: moved.toCheckoutId }
+              : undefined;
+          } catch {
+            return undefined;
+          }
+        },
         resolveStrict: (threadId) => resolveThreadStrict(String(threadId)),
         resolveProviderCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,

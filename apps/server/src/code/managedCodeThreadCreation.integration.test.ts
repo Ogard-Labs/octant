@@ -12,12 +12,17 @@ import {
   decodeProjectId,
   decodeThreadRetentionThreadId,
   decodeWindowId,
+  CODE_THREAD_MOVED_TO_WORKTREE,
+  decodeCodeCheckoutIdentity,
+  type CodeCheckoutIdentity,
+  type CodeRuntimeWork,
   type CodeThread,
   type CodeThreadId,
   type Project,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { approvedWorkingFolderChoices } from "../approvedWorkingFolders";
 import { createCheckpointCodePort } from "../checkpoint/threadCheckpointPorts";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
@@ -46,6 +51,7 @@ import {
   type ManagedCodeThreadCreationDeps,
 } from "./managedCodeThreadCreation";
 import { ManagedRootGrantStore } from "./managedRootGrantStore";
+import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import type { CodeForkConversationReader } from "./codeForkHandoff";
 import type {
   ManagedWorktreeAuthorityPort,
@@ -160,6 +166,12 @@ function harness(
     readonly connection?: SqliteConnection;
     readonly uuid?: () => string;
     readonly recordExternalContentIngestion?: CodeServiceOptions["recordExternalContentIngestion"];
+    /** The checkout each thread is bound to, by checkout id. */
+    readonly checkouts?: ReadonlyArray<CodeCheckoutIdentity>;
+    /** Threads whose latest turn is still running. */
+    readonly runningThreads?: ReadonlyArray<string>;
+    readonly sessionAuthority?: CodeSessionAuthorityStore;
+    readonly captureOverride?: NonNullable<CodeServiceOptions["forkPoints"]>["capture"];
   } = {},
 ) {
   // Observations: prepare repo-id lookup, prepare resolve fresh-state, commit plan fresh-state,
@@ -192,6 +204,7 @@ function harness(
     isDirty: vi.fn(async () => ({ status: "observed" as const, dirty: false })),
     removeWorktree: vi.fn(async () => ({ status: "removed" as const })),
     removeCheckpointRefs: vi.fn(async () => {}),
+    deleteBranch: vi.fn(async () => ({ status: "deleted" as const })),
   };
   const authority: ManagedWorktreeAuthorityPort = {
     observeCleanupEligibility: vi.fn(async () => ({
@@ -225,10 +238,12 @@ function harness(
       if (options.connection !== undefined) return readThreadIdModes(options.connection, id);
       return options.threads?.some((entry) => String(entry.id) === id) === true ? ["code"] : [];
     },
-    readCodeThreads: () => [],
+    readCodeThreads: () => options.threads ?? [],
     readCodeThreadActivity: () => [],
-    readCodeRuntimeWorks: () => [],
-    readCodeCheckout: () => undefined,
+    readCodeRuntimeWorks: (id) =>
+      options.runningThreads?.includes(String(id)) === true ? [runningTurn(id)] : [],
+    readCodeCheckout: (id) =>
+      options.checkouts?.find((checkout) => String(checkout.id) === String(id)),
     readCodeCheckoutAggregateVersion: (id) =>
       options.journal === undefined
         ? 0
@@ -282,7 +297,16 @@ function harness(
       : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
     ...(options.forkPoint === undefined
       ? {}
-      : { forkPoints: { resolve: vi.fn(async () => options.forkPoint as CodeForkPoint) } }),
+      : {
+          forkPoints: {
+            resolve: vi.fn(async () => options.forkPoint as CodeForkPoint),
+            capture:
+              options.captureOverride ?? vi.fn(async () => options.forkPoint as CodeForkPoint),
+          },
+        }),
+    ...(options.sessionAuthority === undefined
+      ? {}
+      : { sessionAuthority: options.sessionAuthority }),
   });
   return { codeService, git, receipts, journal, repository };
 }
@@ -1262,5 +1286,349 @@ describe("a thread confirmed from a marked planner thread's proposal", () => {
       expect(host.marked(String(threadId))).toBe(false);
       expect(planner.readView(windowId, projectId).proposals[0]?.proposal.status).toBe("pending");
     }
+  });
+});
+
+function runningTurn(id: CodeThreadId | string) {
+  return {
+    work: {
+      id: `turn-${String(id)}`,
+      threadId: String(id),
+      kind: "provider-turn",
+      state: "running",
+    } as unknown as CodeRuntimeWork,
+    firstSequence: 1,
+  };
+}
+
+describe("moving a thread into its own worktree", () => {
+  const sharedCheckoutId = "60000000-0000-4000-8000-000000000072";
+  const sharedCheckout = decodeCodeCheckoutIdentity({
+    id: sharedCheckoutId,
+    repositoryId,
+    kind: "existing-worktree",
+    availability: "available",
+    head: { kind: "branch", name: "feature/source", oid: "c".repeat(40) },
+    observedAt: now,
+  });
+  const recordedRevision = "e".repeat(40);
+  const files = { worktree: "f".repeat(40), index: "d".repeat(40) };
+
+  function moving(
+    overrides: Parameters<typeof harness>[0] = {},
+    // Git refuses to remove a worktree with changes unless forced.
+    worktreeHasChanges = false,
+  ) {
+    const applySourceFiles = vi.fn(async () => "applied" as const);
+    const fixture = harness({
+      threads: [sourceThread()],
+      checkouts: [sharedCheckout],
+      forkPoint: { status: "resolved", head: recordedRevision, files },
+      applySourceFiles,
+      ...overrides,
+    });
+    (fixture.git.resolveRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: "resolved",
+      oid: recordedRevision,
+    });
+    // Git as the move sees it: the worktree exists between its creation and
+    // its removal, and the branch from its creation until it is deleted.
+    let present = false;
+    let branchCreated = false;
+    (fixture.git.addWorktree as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      present = true;
+      branchCreated = true;
+      return { status: "created" as const };
+    });
+    (fixture.git.removeWorktree as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: { readonly force?: boolean }) => {
+        if (worktreeHasChanges && input.force !== true) return { status: "rejected" as const };
+        present = false;
+        return { status: "removed" as const };
+      },
+    );
+    (fixture.git.branchExists as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => branchCreated,
+    );
+    (fixture.git.deleteBranch as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      branchCreated = false;
+      return { status: "deleted" as const };
+    });
+    const moveBranch = () =>
+      (fixture.git.addWorktree as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]
+        ?.branchIntent as string;
+    // The moving thread keeps its id, so its worktree sits at that id's path.
+    const movedPath = `/workspace/.octant-worktrees/${repositoryId}/${sourceThreadId}`;
+    const withMovedWorktree = () => {
+      const observed = observation(true, recordedRevision, moveBranch());
+      const [checkout, managed] = observed.worktrees;
+      if (checkout === undefined || managed === undefined) return observed;
+      return {
+        ...observed,
+        worktrees: [checkout, { ...managed, reportedPath: movedPath, canonicalPath: movedPath }],
+      };
+    };
+    (fixture.repository.observe as ReturnType<typeof vi.fn>).mockImplementation(async () =>
+      present ? withMovedWorktree() : observation(false),
+    );
+    return { ...fixture, applySourceFiles, branchExists: () => branchCreated };
+  }
+
+  const move = {
+    kind: "move-code-thread-to-worktree",
+    threadId: sourceThreadId,
+    expectedVersion: 3,
+  } as const;
+
+  it("moves a thread with uncommitted changes into a new worktree and keeps its history", async () => {
+    const { codeService, journal, applySourceFiles, git } = moving();
+    const result = await codeService.execute(windowId, move);
+    if (result?.kind !== "thread-moved-to-worktree" || result.outcome.status !== "moved") {
+      throw new Error(`expected a move, got ${JSON.stringify(result)}`);
+    }
+    const movedCheckoutId = deriveManagedWorktreeCheckoutId({
+      repositoryId: String(repositoryId),
+      threadId: String(sourceThreadId),
+    });
+    // The worktree starts at the captured head, and the captured trees carry
+    // the uncommitted work onto it.
+    expect(git.addWorktree).toHaveBeenCalledTimes(1);
+    expect(applySourceFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ files }),
+      expect.anything(),
+    );
+    expect(result.outcome.fromCheckoutId).toBe(sharedCheckoutId);
+    expect(String(result.outcome.thread.checkoutId)).toBe(String(movedCheckoutId));
+    // Same thread, same id: its conversation and history stay where they are.
+    expect(String(result.outcome.thread.id)).toBe(String(sourceThreadId));
+    expect(result.outcome.thread.version).toBe(5);
+    const appended = journal.append.mock.calls.map(([request]) => request);
+    const threadAppend = appended.find(
+      (request) => request.aggregate.aggregateType === "code-thread",
+    );
+    expect(threadAppend?.expectedVersion).toBe(3);
+    expect(threadAppend?.events.map((event: { eventName: string }) => event.eventName)).toEqual([
+      CODE_THREAD_MOVED_TO_WORKTREE,
+      "code.thread-updated@1",
+    ]);
+    expect(threadAppend?.events[0]?.payload).toMatchObject({
+      fromCheckoutId: sharedCheckoutId,
+      toCheckoutId: String(movedCheckoutId),
+      sourceHead: recordedRevision,
+      capturedTrees: files,
+    });
+    // Nothing the move journals is about the checkout it left.
+    expect(
+      appended.some(
+        (request) =>
+          request.aggregate.aggregateType === "code-checkout" &&
+          request.aggregate.aggregateId === sharedCheckoutId,
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses to move a thread that already owns a worktree", async () => {
+    const owned = decodeCodeCheckoutIdentity({
+      id: sharedCheckoutId,
+      repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/source", oid: "c".repeat(40) },
+      ownershipReceiptId: "60000000-0000-4000-8000-000000000099",
+      observedAt: now,
+    });
+    const { codeService, git } = moving({ checkouts: [owned] });
+    expect(await codeService.execute(windowId, move)).toMatchObject({
+      kind: "thread-moved-to-worktree",
+      outcome: { status: "refused", reason: "already-own-worktree" },
+    });
+    expect(git.addWorktree).not.toHaveBeenCalled();
+  });
+
+  it("refuses while another thread is writing to the same checkout, or its own turn runs", async () => {
+    const other = decodeCodeThread({
+      ...sourceThread(),
+      id: "60000000-0000-4000-8000-000000000073",
+    });
+    const busy = moving({
+      threads: [sourceThread(), other],
+      runningThreads: [String(other.id)],
+    });
+    expect(await busy.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "checkout-in-use" },
+    });
+    const own = moving({ runningThreads: [String(sourceThreadId)] });
+    expect(await own.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "turn-running" },
+    });
+    const plan = moving({
+      threads: [decodeCodeThread({ ...sourceThread(), executionPolicy: "plan" })],
+    });
+    expect(await plan.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "plan" },
+    });
+    expect(busy.git.addWorktree).not.toHaveBeenCalled();
+  });
+
+  it("removes the new worktree and leaves the thread as it was when laying the changes down fails", async () => {
+    const { codeService, journal, git } = moving({
+      applySourceFiles: vi.fn(async () => "failed" as const),
+    });
+    expect(await codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "apply-failed" },
+    });
+    expect(git.removeWorktree).toHaveBeenCalled();
+    expect(journal.append).not.toHaveBeenCalled();
+  });
+
+  it("a Full access session grant does not survive the move", async () => {
+    const sessionAuthority = new CodeSessionAuthorityStore();
+    const gated = decodeCodeThread({ ...sourceThread(), executionPolicy: "approval-gated" });
+    sessionAuthority.grantFullAccess(windowId, gated.id);
+    const { codeService } = moving({ threads: [gated], sessionAuthority });
+    const result = await codeService.execute(windowId, move);
+    if (result?.kind !== "thread-moved-to-worktree" || result.outcome.status !== "moved") {
+      throw new Error("expected a move");
+    }
+    expect(result.outcome.thread.executionPolicy).toBe("approval-gated");
+    expect(sessionAuthority.effectiveThread(windowId, gated).executionPolicy).toBe(
+      "approval-gated",
+    );
+  });
+
+  it("refuses and removes its worktree when a turn starts on the source during the move", async () => {
+    const running: string[] = [];
+    const fixture = moving({
+      runningThreads: running,
+      applySourceFiles: vi.fn(async () => {
+        // A phone, a wake or a routine starts a turn on the source mid-move.
+        running.push(String(sourceThreadId));
+        return "applied" as const;
+      }),
+    });
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "turn-running" },
+    });
+    expect(fixture.git.removeWorktree).toHaveBeenCalled();
+    expect(fixture.branchExists()).toBe(false);
+    expect(
+      fixture.journal.append.mock.calls.some(
+        ([request]) => request.aggregate.aggregateType === "code-thread",
+      ),
+    ).toBe(false);
+  });
+
+  it("a failed move leaves no branch, and a retry succeeds", async () => {
+    let fail = true;
+    const fixture = moving({
+      applySourceFiles: vi.fn(async () => (fail ? ("failed" as const) : ("applied" as const))),
+    });
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "apply-failed" },
+    });
+    expect(fixture.branchExists()).toBe(false);
+    expect(fixture.git.deleteBranch).toHaveBeenCalledTimes(1);
+    fail = false;
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "moved" },
+    });
+  });
+
+  it("reports a dirty submodule instead of claiming its changes were copied", async () => {
+    const fixture = moving();
+    const capture = vi.fn(async () => ({
+      status: "refused" as const,
+      reason: "nested-changes" as const,
+      paths: ["vendor/lib"],
+    }));
+    const withNested = harness({
+      threads: [sourceThread()],
+      checkouts: [sharedCheckout],
+      forkPoint: { status: "resolved", head: recordedRevision, files },
+      captureOverride: capture,
+    });
+    expect(await withNested.codeService.execute(windowId, move)).toEqual({
+      kind: "thread-moved-to-worktree",
+      threadId: sourceThreadId,
+      outcome: { status: "refused", reason: "nested-changes", paths: ["vendor/lib"] },
+    });
+    expect(withNested.git.addWorktree).not.toHaveBeenCalled();
+    expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+  });
+
+  it("refuses to move a task that works in another of the Project's folders", async () => {
+    const elsewhere = decodeCodeThread({
+      ...sourceThread(),
+      workingFolderId: `folder_${"a".repeat(64)}`,
+    });
+    const fixture = moving({ threads: [elsewhere] });
+    expect(
+      await fixture.codeService.execute(windowId, { ...move, expectedVersion: elsewhere.version }),
+    ).toMatchObject({ outcome: { status: "refused", reason: "working-folder" } });
+    expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+
+    // The main folder chosen by its own id is the checkout the worktree is made from.
+    const mainFolder = approvedWorkingFolderChoices(project as never).find(
+      (folder) => folder.kind === "main",
+    );
+    if (mainFolder === undefined) throw new Error("no main folder");
+    const inMain = decodeCodeThread({ ...sourceThread(), workingFolderId: mainFolder.id });
+    const main = moving({ threads: [inMain] });
+    expect(
+      await main.codeService.execute(windowId, { ...move, expectedVersion: inMain.version }),
+    ).toMatchObject({ outcome: { status: "moved" } });
+  });
+
+  it("refuses a second move of a thread while its first is still running", async () => {
+    let release: () => void = () => undefined;
+    const fixture = moving({
+      applySourceFiles: vi.fn(
+        () =>
+          new Promise<"applied">((resolve) => {
+            release = () => resolve("applied");
+          }),
+      ),
+    });
+    const first = fixture.codeService.execute(windowId, move);
+    await vi.waitFor(() => expect(fixture.git.addWorktree).toHaveBeenCalled());
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "turn-running" },
+    });
+    release();
+    expect(await first).toMatchObject({ outcome: { status: "moved" } });
+  });
+
+  it("removes a rolled-back worktree that holds the copied changes, so a retry succeeds", async () => {
+    const running: string[] = [];
+    let turnStartsDuringCopy = true;
+    // The copied changes are what makes the rolled-back worktree dirty.
+    const fixture = moving(
+      {
+        runningThreads: running,
+        applySourceFiles: vi.fn(async () => {
+          if (turnStartsDuringCopy) running.push(String(sourceThreadId));
+          return "applied" as const;
+        }),
+      },
+      true,
+    );
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "turn-running" },
+    });
+    expect(fixture.branchExists()).toBe(false);
+    running.splice(0);
+    turnStartsDuringCopy = false;
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "moved" },
+    });
+  });
+
+  it("refuses to move an archived thread", async () => {
+    const archived = decodeCodeThread({ ...sourceThread(), lifecycle: "archived" });
+    const fixture = moving({ threads: [archived] });
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "unavailable" },
+    });
+    expect(fixture.git.addWorktree).not.toHaveBeenCalled();
   });
 });

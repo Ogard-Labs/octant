@@ -39,6 +39,7 @@ export const ThreadsToolOperation = Schema.Literal(
   "receipts",
   "board",
   "start",
+  "move-to-worktree",
 );
 export type ThreadsToolOperation = typeof ThreadsToolOperation.Type;
 

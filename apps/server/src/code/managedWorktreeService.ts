@@ -644,7 +644,7 @@ export class ManagedWorktreeService {
    * Code thread (for example a journal failure or cancellation after the
    * worktree became ready). It removes the just-created worktree and marks the
    * receipt removed, without the thread-based cleanup authority check, because
-   * no thread owns this worktree yet. A removal that cannot complete leaves the
+   * no thread owns this worktree yet, forcing past any changes in it. A removal that cannot complete leaves the
    * receipt in cleanup-pending as an honest restart-recovery state.
    */
   async rollbackCreation(
@@ -688,9 +688,13 @@ export class ManagedWorktreeService {
       let removed: Awaited<ReturnType<ManagedWorktreeGitPort["removeWorktree"]>>;
       try {
         const targetPath = receipt.canonicalWorktreePath;
+        // No thread ever owned this worktree, so what it holds is only what
+        // creation put there (a move's copied changes, which its source still
+        // has). Git refuses to remove those unforced, which would strand the
+        // branch and fail the retry on it.
         removed = await forReceipt(receiptId, () =>
           this.#git.removeWorktree(
-            { repositoryRoot: observation.repositoryRoot, targetPath },
+            { repositoryRoot: observation.repositoryRoot, targetPath, force: true },
             signal,
           ),
         );
@@ -700,6 +704,7 @@ export class ManagedWorktreeService {
       if (removed.status !== "removed") return { status: "waiting" };
       await this.#releaseCheckpoints(observation.repositoryRoot, receipt.checkoutId, signal);
     }
+    await this.#deleteCreatedBranch(receipt, observation, signal);
     try {
       await this.#receipts.transition(receiptId, "removed");
     } catch {
@@ -1060,6 +1065,46 @@ export class ManagedWorktreeService {
    * Deletes the discard branch when this repository still has it and no
    * worktree holds it. Undefined means it is gone or was deleted.
    */
+  /**
+   * Deletes the branch a rolled-back creation made, so a retry under the same
+   * derived name is not refused as a collision for good. Only while the branch
+   * still points at the commit the creation started it on (nothing was
+   * committed there) and no other worktree holds it; best effort, since a
+   * branch left behind costs a name, not work.
+   */
+  async #deleteCreatedBranch(
+    receipt: ManagedWorktreeReceipt,
+    observation: Extract<RepositoryIdentityObservation, { status: "available" }>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const branch = receipt.branchIntent;
+    if (
+      observation.worktrees.some(
+        (worktree) =>
+          worktree.status === "present" &&
+          worktree.canonicalPath !== receipt.canonicalWorktreePath &&
+          worktree.branch === branchRef(branch),
+      )
+    ) {
+      return;
+    }
+    try {
+      if (!(await this.#git.branchExists(receipt.canonicalRepositoryPath, branch, signal))) return;
+      const tip = await this.#git.resolveRef(
+        receipt.canonicalRepositoryPath,
+        branchRef(branch),
+        signal,
+      );
+      if (tip.status !== "resolved" || tip.oid !== receipt.expectedHead) return;
+      await this.#git.deleteBranch?.(
+        { repositoryRoot: receipt.canonicalRepositoryPath, branch },
+        signal,
+      );
+    } catch {
+      // The branch stays; the next creation under its name is refused, not lost.
+    }
+  }
+
   async #deleteDiscardBranch(
     receipt: ManagedWorktreeReceipt,
     observation: RepositoryIdentityObservation,

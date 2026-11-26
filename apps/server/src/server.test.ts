@@ -1624,6 +1624,10 @@ describe("startOctantServer", () => {
         status: "refused" as const,
         reason: "unavailable" as const,
       })),
+      checkoutCapture: vi.fn(async () => ({
+        status: "refused" as const,
+        reason: "unavailable" as const,
+      })),
       close: vi.fn(async () => undefined),
     };
 

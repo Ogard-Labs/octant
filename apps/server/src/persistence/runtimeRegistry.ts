@@ -130,6 +130,8 @@ import {
   CodeProjectDesktopRecipeChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
+  CODE_THREAD_MOVED_TO_WORKTREE,
+  CodeThreadMovedToWorktree,
   CodeFileReferenceUpdated,
   CodeRuntimeWorkUpdated,
   CodeReviewFindingUpdated,
@@ -765,6 +767,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     })
     .register("code.checkout-observed@1", 1, CodeCheckoutObserved)
     .register("code.checkout-removed@1", 1, CodeCheckoutRemoved)
+    .register(CODE_THREAD_MOVED_TO_WORKTREE, 1, CodeThreadMovedToWorktree)
     .register("code.file-reference-updated@1", 1, CodeFileReferenceUpdated)
     .register("code.runtime-work-updated@1", 1, CodeRuntimeWorkUpdated)
     .register("code.review-finding-updated@1", 1, CodeReviewFindingUpdated)

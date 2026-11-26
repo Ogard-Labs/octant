@@ -1096,6 +1096,22 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // Moving a thread into a worktree ends its session and changes its
+          // checkout, so it is the person's act; an agent asks through its tool.
+          if (
+            callerAuthority !== "local-window" &&
+            command?.kind === "move-code-thread-to-worktree"
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message:
+                  "Only you, from a window or a device you paired, can move a task into a worktree.",
+              },
+              403,
+              origin,
+            );
+          }
           if (command?.kind === "change-code-thread-browser-profile") {
             return failureResponse(
               {

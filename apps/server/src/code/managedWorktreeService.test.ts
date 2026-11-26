@@ -1230,7 +1230,7 @@ describe("ManagedWorktreeService.rollbackCreation", () => {
       service.rollbackCreation(receipt.receiptId, new AbortController().signal),
     ).resolves.toEqual({ status: "removed" });
     expect(git.removeWorktree).toHaveBeenCalledWith(
-      { repositoryRoot, targetPath },
+      { repositoryRoot, targetPath, force: true },
       expect.any(AbortSignal),
     );
     expect(receipts.records.get(receipt.receiptId)?.state).toBe("removed");
