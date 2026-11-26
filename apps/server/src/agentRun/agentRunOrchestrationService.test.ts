@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AGENT_RUN_CAPACITY_WAITING_REASON,
   AGENT_RUN_DEPENDENCY_WAITING_REASON,
   AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS,
   AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
@@ -508,11 +509,7 @@ describe("AgentRunOrchestrationService", () => {
       });
     }
     const reserve = vi.spyOn(capacity, "tryReserve");
-    // A paused parent does not hold a run waiting for room: the capacity queue
-    // starts it when a slot frees, so it needs no one.
-    const { orchestration, persistence } = createHarness(capacity, true, undefined, {
-      isHeld: () => true,
-    });
+    const { orchestration, persistence } = createHarness(capacity);
     const admitted = orchestration.admit({
       command: requestCommand(),
       parentAuthority: authority,
@@ -1281,7 +1278,7 @@ describe("AgentRun dependency graphs", () => {
   ] as const;
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-  function graphHarness() {
+  function graphHarness(capacity = createInMemoryCapacityPort()) {
     const starts: string[] = [];
     const processes: AgentRunProcessSupervisorPort = {
       start: (run) => {
@@ -1302,7 +1299,7 @@ describe("AgentRun dependency graphs", () => {
         );
       },
     };
-    const harness = createHarness(createInMemoryCapacityPort(), true, processes, parentSessions);
+    const harness = createHarness(capacity, true, processes, parentSessions);
     sessions = new NativeHarnessSessionStore({
       journal: harness.journal,
       uuid: randomUUID,
@@ -1551,6 +1548,35 @@ describe("AgentRun dependency graphs", () => {
     await settle();
     expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("starting");
     expect(starts).toContain(String(dependent.id));
+  });
+
+  it("keeps a child waiting for room while its parent's session is paused, and starts it once the session resumes", async () => {
+    const { persistence, orchestration, starts, admit, run, sessions } = graphHarness(
+      createInMemoryCapacityPort(() => ({ perThread: 1, onHost: 4 })),
+    );
+    const first = run(requestIds[0]);
+    const waiting = admit(requestIds[1]);
+    expect(waiting).toMatchObject({
+      lifecycleStatus: "waiting",
+      recoveryReason: AGENT_RUN_CAPACITY_WAITING_REASON,
+    });
+    expect(orchestration.startsWithoutPerson(waiting)).toBe(true);
+    sessions.pause(String(ids.thread), "paused-by-user", "Checking the plan.");
+    expect(orchestration.startsWithoutPerson(waiting)).toBe(false);
+
+    // The first child finishing frees the thread's one slot.
+    orchestration.onSessionSettled({
+      runId: first,
+      outcome: { kind: "completed", responseText: "first finding" },
+    });
+    await settle();
+    expect(persistence.getById(waiting.id)?.lifecycleStatus).toBe("waiting");
+    expect(starts).not.toContain(String(waiting.id));
+
+    sessions.resume(String(ids.thread));
+    await settle();
+    expect(persistence.getById(waiting.id)?.lifecycleStatus).toBe("starting");
+    expect(starts).toContain(String(waiting.id));
   });
 });
 

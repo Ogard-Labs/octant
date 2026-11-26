@@ -3908,7 +3908,8 @@ and 8, each at most `MAX_AGENT_RUN_CONCURRENCY` = 16), further bounded by
 start: `createInMemoryCapacityPort` counts reservations per thread and per
 host, reads the limits on every reservation, and reports which limit is full;
 the capacity queue skips a waiter whose own thread is full so another thread's
-waiter can take a freed slot. A run waiting on dependencies or a slot holds no
+waiter can take a freed slot, and one whose parent's harness session is paused
+or `recovery-required` until that session is resumed. A run waiting on dependencies or a slot holds no
 slot, and neither does one waiting for the provider to take another request
 ([Provider capacity](#context-and-usage-accounting)). Admission separately caps unfinished children (any active status,
 waiting included) at 16 per parent and 32 per host as the runaway guard.
@@ -17636,7 +17637,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   another folder, whose repository it never borrows from the old one. Linked pull requests and issues are identities only, because a title
   on a forge is text an outsider may have written. A coordinator is derived
   without delivery evidence; a Chat thread is a row only while it runs or waits;
-  a subagent is a row only under a thread already listed, In progress while queued, starting, running, or waiting on what the host ends by itself, as the orchestration service decides from its own holds, judging each run and reading each parent session once per read (room under the subagent limit, which the capacity queue fills whatever the parent session does; a free request slot or siblings on their way, unless the parent session or a restart holds the run); Waiting for a pool with no eligible model, a sibling a person must retry, and any other wait, and
+  a subagent is a row only under a thread already listed, In progress while queued, starting, running, or waiting on what the host ends by itself, as the orchestration service decides from its own holds, judging each run and reading each parent session once per read (room under the subagent limit or a free request slot, unless the parent session holds the run; siblings on their way, unless the parent session or a restart holds it); Waiting for a pool with no eligible model, a sibling a person must retry, and any other wait, and
   its task is named only to a local window the
   AgentRun authorization admits, the same one the Agents center applies. A Chat
   thread's subagents are listed to such a window alone. The read takes a local
