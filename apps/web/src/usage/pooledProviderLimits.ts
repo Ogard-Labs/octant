@@ -86,6 +86,33 @@ function windowReadings(limits: ProviderServiceLimits): ReadonlyArray<WindowRead
   return [...windows, ...buckets];
 }
 
+/**
+ * Driver kinds whose accounts are all accounts of one service, so their
+ * windows can share a bar. A compatible endpoint (OpenAI-compatible,
+ * Anthropic-compatible, Azure Foundry) names a protocol, not a service: two
+ * of them are often different services with their own quotas, and pooling
+ * them presented two independent request limits as one window.
+ */
+const ONE_SERVICE_KINDS: ReadonlySet<string> = new Set([
+  "claude",
+  "codex",
+  "opencode",
+  "devin",
+  "mistral-vibe",
+]);
+
+/**
+ * Whether an entry belongs in its provider's pool. An account that can report
+ * limits but has not yet (`unsupported` keeps that meaning, `not-ready` waits
+ * on an account endpoint) stays in as a No reading segment; dropping it made
+ * a provider with one reporting account lose its pooled row.
+ */
+const poolable = (entry: ProviderUsageLimitsEntry | undefined): boolean =>
+  entry !== undefined &&
+  (entry.status !== "unavailable" ||
+    entry.reason === "unsupported" ||
+    entry.reason === "not-ready");
+
 const readingOf = (
   entry: ProviderUsageLimitsEntry | undefined,
 ): { readonly limits: ProviderServiceLimits; readonly stale: boolean } | undefined => {
@@ -104,8 +131,9 @@ const readingOf = (
  * account is counted on its own: Octant has no account identity, so two
  * entries for one real account are two segments.
  *
- * A provider none of whose accounts can report limits is left out; the panel
- * lists those in its closing row.
+ * A provider none of whose accounts has a reading is left out, and so is a
+ * kind that is not one service; the panel lists their accounts on their
+ * own rows or in its closing row.
  */
 export function poolProviderLimits(input: {
   readonly entries: ReadonlyArray<ProviderUsageLimitsEntry>;
@@ -115,10 +143,15 @@ export function poolProviderLimits(input: {
   const byId = new Map(input.entries.map((entry) => [String(entry.providerInstanceId), entry]));
   const groups = new Map<string, ProviderInstance[]>();
   for (const instance of input.instances) {
-    const entry = byId.get(String(instance.id));
-    if (entry === undefined || entry.status === "unavailable") continue;
     const kind = String(instance.driverKind);
+    if (!ONE_SERVICE_KINDS.has(kind) || !poolable(byId.get(String(instance.id)))) continue;
     groups.set(kind, [...(groups.get(kind) ?? []), instance]);
+  }
+  // Accounts that have all yet to report stay in the closing row.
+  for (const [kind, accounts] of groups) {
+    if (!accounts.some((account) => readingOf(byId.get(String(account.id))) !== undefined)) {
+      groups.delete(kind);
+    }
   }
   return [...groups.entries()].map(([driverKind, accounts]) => {
     const readings = new Map(
@@ -144,13 +177,15 @@ export function poolProviderLimits(input: {
         }
         // A reset already past says nothing about what is left now.
         const expired = match.resetsAt !== undefined && Date.parse(match.resetsAt) <= input.now;
+        // A provider's own "limit reached" outranks the share it reported:
+        // Codex can say a window is spent below 100% utilization.
         return {
           kind: "reading",
           providerInstanceId: String(account.id),
           account: account.displayName,
           ...(match.remainingPercent === undefined || expired
             ? {}
-            : { remainingPercent: match.remainingPercent }),
+            : { remainingPercent: match.exhausted ? 0 : match.remainingPercent }),
           exhausted: match.exhausted && !expired,
           ...(match.resetsAt === undefined || expired ? {} : { resetsAt: match.resetsAt }),
           awaitingUpdate: expired,

@@ -300,10 +300,14 @@ export function ProviderUsageLimitsPanel(props: {
   );
   // Providers that cannot report limits collapse into one closing row instead
   // of a wall of identical cards; the runtime's reason still names each.
+  // An account that has not reported yet sits in its provider's pool as No
+  // reading, so it is not listed again here; one with a capture keeps its row.
   const unavailable =
     visible?.filter(
       (entry): entry is Extract<ProviderUsageLimitsEntry, { status: "unavailable" }> =>
-        entry.status === "unavailable" && captureFor(entry) === undefined,
+        entry.status === "unavailable" &&
+        captureFor(entry) === undefined &&
+        !pooledIds.has(String(entry.providerInstanceId)),
     ) ?? [];
   const body = (
     <>
@@ -613,12 +617,11 @@ function segmentReading(
 ): string {
   if (segment.kind === "missing") return "No reading";
   if (segment.awaitingUpdate) return `Awaiting updated limits${segment.stale ? " · stale" : ""}`;
-  const share =
-    segment.remainingPercent !== undefined
+  const share = segment.exhausted
+    ? "Limit reached"
+    : segment.remainingPercent !== undefined
       ? `${segment.remainingPercent}% left`
-      : segment.exhausted
-        ? "Limit reached"
-        : "Remaining not reported";
+      : "Remaining not reported";
   const reset =
     segment.resetsAt === undefined
       ? ""

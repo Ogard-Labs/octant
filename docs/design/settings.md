@@ -404,12 +404,17 @@ reads as one row (maintainer decision, 2026-11-26): each limit window is one
 bar with one segment per account, side by side and ordered by which refills
 first, and the bar names the soonest reset. There is no averaged share, since
 Octant does not know each account's plan size; an account with no reading for
-a window is a dashed segment labelled No reading, never zero; a spent account
-is an empty bar; a reading whose reset passed says Awaiting updated limits; and
-the row says
+a window, including one that has not reported yet, is a dashed segment
+labelled No reading, never zero, and is not listed again under Not reporting
+limits; a spent account is an empty bar that says Limit reached, whatever share
+the provider reported beside it; a reading whose reset passed says Awaiting
+updated limits; and the row says
 each account is counted on its own, because Octant has no account identity to
-tell that two entries are one account. Each account's full reading sits behind
-**Each account**. Provider cards use the shared surface typography and tokens
+tell that two entries are one account. Only accounts of one service pool:
+Claude Code, Codex, OpenCode, Devin and Mistral Vibe. Two OpenAI-compatible,
+Anthropic-compatible or Azure Foundry endpoints keep their own rows, since one
+protocol is often two services with their own quotas. Each account's full
+reading sits behind **Each account**. Provider cards use the shared surface typography and tokens
 and stack at narrow widths. Inside Settings, Usage has no title of its own: its
 controls sit above kit sections (overview, token totals, provider limits,
 breakdown), each a label over one card, and the Settings header is the only

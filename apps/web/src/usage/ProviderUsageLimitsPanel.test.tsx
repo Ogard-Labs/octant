@@ -854,7 +854,7 @@ describe("ProviderUsageLimitsPanel", () => {
     expect(screen.getByText(/2 accounts · each account counted on its own/)).toBeVisible();
   });
 
-  it("says a pooled reading whose reset passed is awaiting updated limits, and draws a spent account as an empty meter", async () => {
+  it("says a pooled reading whose reset passed is awaiting updated limits, and draws a spent account as an empty meter whatever share it reported", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-08-23T15:00:00.000Z"));
     const secondId = "55555555-5555-4555-8555-555555555555" as ProviderInstanceId;
@@ -888,7 +888,12 @@ describe("ProviderUsageLimitsPanel", () => {
           utilization: 0.4,
           resetsAt: "2026-08-23T14:00:00.000Z",
         }),
-        account(secondId, { status: "exhausted", resetsAt: "2026-08-23T18:00:00.000Z" }),
+        // A provider can say the limit was reached while its utilization is below 100%.
+        account(secondId, {
+          status: "exhausted",
+          utilization: 0.4,
+          resetsAt: "2026-08-23T18:00:00.000Z",
+        }),
       ],
     });
     try {
@@ -905,6 +910,11 @@ describe("ProviderUsageLimitsPanel", () => {
       expect(bar.querySelector('[data-state="awaiting"]')).not.toBeNull();
       const spent = bar.querySelector('meter[data-state="exhausted"]');
       expect(spent?.getAttribute("value")).toBe("0");
+      const spentLegend = [...bar.querySelectorAll('[data-segment="reading"]')].find((row) =>
+        row.textContent?.startsWith("Spent account"),
+      );
+      expect(spentLegend).toHaveTextContent("Limit reached");
+      expect(bar).not.toHaveTextContent("60% left");
       expect(bar.querySelector('[data-state="missing"]')).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -940,5 +950,83 @@ describe("ProviderUsageLimitsPanel", () => {
     expect(missing).toHaveTextContent("Second account");
     expect(missing).toHaveTextContent("No reading");
     expect(missing).not.toHaveTextContent("0%");
+  });
+
+  it("keeps an account that has not reported yet in its provider's bar as No reading, and out of the closing row", async () => {
+    const secondId = "66666666-6666-4666-8666-666666666666" as ProviderInstanceId;
+    const data = decodeProviderUsageLimitsSnapshot({
+      ...snapshot("available"),
+      entries: [
+        ...snapshot("available").entries,
+        {
+          providerInstanceId: secondId,
+          status: "unavailable",
+          source: "provider-runtime",
+          observedAt: "2026-08-23T12:05:00.000Z",
+          reason: "unsupported",
+        },
+      ],
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[provider, { ...provider, id: secondId, displayName: "Quiet account" }]}
+      />,
+    );
+    await screen.findByText("Each account");
+    const bar = document.querySelector('[data-pooled-window="five_hour"]') as HTMLElement;
+    expect(bar.querySelector('[data-segment="missing"]')).toHaveTextContent("Quiet account");
+    expect(screen.queryByText("Not reporting limits")).not.toBeInTheDocument();
+    expect(screen.getByText(/2 accounts · each account counted on its own/)).toBeVisible();
+  });
+
+  it("keeps two compatible endpoints apart, since one protocol does not make them one service", async () => {
+    const secondId = "77777777-7777-4777-8777-777777777777" as ProviderInstanceId;
+    const endpoint = (id: ProviderInstanceId) => ({
+      providerInstanceId: id,
+      status: "available" as const,
+      source: "provider-runtime" as const,
+      observedAt: "2026-08-23T12:00:00.000Z",
+      limits: {
+        providerInstanceId: id,
+        scope: "provider-instance",
+        requests: {
+          status: "available",
+          limit: 100,
+          remaining: 50,
+          resetsAt: "2026-08-23T12:01:00.000Z",
+        },
+        tokens: { status: "unavailable" },
+        concurrency: { status: "unavailable" },
+        retry: { status: "inactive" },
+        quota: "available",
+        source: "runtime-reported",
+        confidence: "high",
+        updatedAt: "2026-08-23T12:00:00.000Z",
+      },
+    });
+    const data = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: "2026-08-23T12:00:00.000Z",
+      entries: [endpoint(providerInstanceId), endpoint(secondId)],
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[
+          { ...provider, driverKind: "openai-compatible", displayName: "API" } as ProviderInstance,
+          {
+            ...provider,
+            driverKind: "openai-compatible",
+            id: secondId,
+            displayName: "Gateway",
+          } as ProviderInstance,
+        ]}
+      />,
+    );
+    expect(await screen.findByText("Gateway")).toBeVisible();
+    expect(screen.getByText("API")).toBeVisible();
+    expect(document.querySelector("[data-pooled-window]")).toBeNull();
+    expect(screen.queryByText("Each account")).not.toBeInTheDocument();
   });
 });
