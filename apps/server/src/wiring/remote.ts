@@ -329,6 +329,7 @@ export type RemoteDependencies = {
     | "imageJobService"
     | "managedWorktreeReclaim"
     | "providerDataDirectory"
+    | "providerUsageLimitsService"
     | "providerService"
   > &
   Pick<WorkspaceWiring, "shellService" | "projectService"> &
@@ -1328,6 +1329,7 @@ export function wireRemote(deps: RemoteDependencies) {
     spokeProvision: spokeProvisionService,
     signIn: signInService,
     spokeSignIn: spokeSignInService,
+    readUsageLimits: () => deps.providerUsageLimitsService.snapshot(),
   });
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's

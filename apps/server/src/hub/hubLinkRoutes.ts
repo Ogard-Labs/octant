@@ -23,6 +23,7 @@ import {
   decodeHubWindowGuestRequest,
   decodeSignedHubRoster,
   encodeSignedHubRoster,
+  ProviderUsageLimitsSnapshot,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { HUB_HANDBACK_MAX_BODY_BYTES, HUB_WAKE_COPY_MAX_BODY_BYTES } from "../remoteRoutePolicy";
@@ -44,6 +45,11 @@ export const HUB_LINK_ROUTES = {
   leave: "/api/hub/leave",
   roster: "/api/hub/roster",
   status: "/api/hub/status",
+  /**
+   * The hub reads a spoke's plan-limit readings while its grant ticks Usage:
+   * the provider-reported windows, never a credential, a thread or a cost.
+   */
+  usage: "/api/hub/usage",
   /** The hub asks a spoke whether its person ticked Standby, when the person names it a standby. */
   standby: "/api/hub/standby",
   /** A member asks the hub, or a standby that is standing in, whether it is there. */
@@ -79,6 +85,7 @@ export const HUB_LINK_ROUTES = {
 } as const;
 
 const decodeHubMemberId = Schema.decodeUnknownSync(HubMemberId);
+const encodeProviderUsageLimitsSnapshot = Schema.encodeSync(ProviderUsageLimitsSnapshot);
 
 type RouteValue = (typeof HUB_LINK_ROUTES)[keyof typeof HUB_LINK_ROUTES];
 
@@ -107,6 +114,8 @@ export interface HubLinkRouteOptions {
   readonly spokeProvision: SpokeProvisionService;
   readonly signIn: SignInService;
   readonly spokeSignIn: SpokeSignInService;
+  /** This computer's provider plan-limit readings, as its own Limits view reads them. */
+  readonly readUsageLimits?: () => ProviderUsageLimitsSnapshot;
   readonly now?: () => number;
 }
 
@@ -152,6 +161,7 @@ export function createHubLinkRouteHandler(
       route === HUB_LINK_ROUTES.pushCopy
         ? "PUT"
         : route === HUB_LINK_ROUTES.status ||
+            route === HUB_LINK_ROUTES.usage ||
             route === HUB_LINK_ROUTES.guestRoster ||
             route === HUB_LINK_ROUTES.heartbeat
           ? "GET"
@@ -190,6 +200,25 @@ export function createHubLinkRouteHandler(
       return status === undefined
         ? refused(403, "not-a-spoke")
         : Response.json({ status }, { headers: NO_STORE });
+    }
+
+    if (route === HUB_LINK_ROUTES.usage) {
+      const authenticated = options.spoke.authenticateHub({
+        header,
+        method: request.method,
+        path: route,
+        body,
+      });
+      if (authenticated.status === "refused") return refused(401, authenticated.kind);
+      // Off unless the person ticked Usage: the readings name this computer's
+      // provider accounts, which the Status item never lets the hub see.
+      const allowed = options.spoke.hubMayUse("usage");
+      if (allowed.status === "refused") return refused(403, allowed.kind);
+      if (options.readUsageLimits === undefined) return refused(404, "unavailable");
+      return Response.json(
+        { limits: encodeProviderUsageLimitsSnapshot(options.readUsageLimits()) },
+        { headers: NO_STORE },
+      );
     }
 
     if (route === HUB_LINK_ROUTES.roster) {

@@ -399,7 +399,25 @@ capacity independently of ledger loading. Each provider window leads with its
 remaining percentage and an accessible meter, followed by its reset countdown.
 Account, model, and provider-instance scopes remain distinct. An elapsed reset
 shows Awaiting updated limits until a fresh reading arrives; it never implies
-refilled capacity. Provider cards use the shared surface typography and tokens
+refilled capacity. A provider with more than one account on this computer
+reads as one row (maintainer decision, 2026-11-26): each limit window is one
+bar with one segment per account, side by side and ordered by which refills
+first, and the bar names the soonest reset. There is no averaged share, since
+Octant does not know each account's plan size; an account with no reading for
+a window, including one that has not reported yet, is a dashed segment
+labelled No reading, never zero, and is not listed again under Not reporting
+limits; an account the provider says is spent says Limit reached, keeping the share a
+window still reports beside it ("Limit reached · 60% of this window left"),
+since Codex flags the account rather than the window that ran out; a reading whose reset passed says Awaiting
+updated limits; and the row says
+each account is counted on its own, because Octant has no account identity to
+tell that two entries are one account. A provider pools only when it has a window to draw, so an account that
+reports only an account-wide limit keeps its own row and warning. Only
+accounts of one service pool:
+Claude Code, Codex, OpenCode, Devin and Mistral Vibe. Two OpenAI-compatible,
+Anthropic-compatible or Azure Foundry endpoints keep their own rows, since one
+protocol is often two services with their own quotas. Each account's full
+reading sits behind **Each account**. Provider cards use the shared surface typography and tokens
 and stack at narrow widths. Inside Settings, Usage has no title of its own: its
 controls sit above kit sections (overview, token totals, provider limits,
 breakdown), each a label over one card, and the Settings header is the only

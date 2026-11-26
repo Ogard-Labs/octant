@@ -2276,6 +2276,7 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      providerUsageLimitsService,
       hostDrain,
       shieldServerStore,
       serverConnection,

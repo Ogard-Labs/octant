@@ -1,3 +1,4 @@
+import { decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts";
 import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // A whole Octant host for the hub tests: its journal, its real remote gateway
@@ -721,6 +722,20 @@ export async function startHubTestHost(input: {
     spokeProvision,
     signIn,
     spokeSignIn,
+    readUsageLimits: () =>
+      decodeProviderUsageLimitsSnapshot({
+        version: 1,
+        refreshedAt: "2026-08-23T12:00:00.000Z",
+        entries: [
+          {
+            providerInstanceId: "11111111-1111-4111-8111-111111111111",
+            status: "unavailable",
+            source: "provider-runtime",
+            reason: "unsupported",
+            observedAt: "2026-08-23T12:00:00.000Z",
+          },
+        ],
+      }),
     ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
   });
   const credentials = new TestCredentialBroker();

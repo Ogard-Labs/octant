@@ -51,7 +51,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 18        | 10      | 7            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 6       | 4            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 14        | 7       | 7            | 0                   |
-| [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 5       | 3            | 0                   |
+| [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 4       | 4            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 21        | 16      | 5            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **302**   | **184** | **114**      | **4**               |
+| **All areas**                                                                         | **302**   | **183** | **115**      | **4**               |
 
 ## Principles and hard lines
 
@@ -2881,8 +2881,10 @@ Plan limits for providers that report them only from an account endpoint are rea
 - Failures carry a fixed message, a changed response shape keeps the last reading, and the key stays out of logs, journal, snapshots and errors.
 - Vibe remaining quota never reads Vibe's Keychain item or `~/.vibe/.env`, and never scrapes `admin.mistral.ai`. A missing allowance or a key without usage permission is unavailable or plan limits not applying, never 0% used.
 - A spent Vibe included window with pay-as-you-go on is not an account limit; pay-as-you-go off at 100% is.
+- A hub reads a spoke's plan-limit readings only under the spoke's **Usage** hub grant item, off by default (maintainer decision C, 2026-11-26): the spoke checks it on every `GET /api/hub/usage`, which answers the readings alone. A standby standing in may not read it, the same as `/api/hub/status`: both answer only the hub the spoke joined, a deliberate narrow reading of the Standby item (maintainer decision, 2026-11-26). Built; the hub's view that merges them, and the history totals the item also covers, are not built yet.
+- Limits pools a provider's accounts on this computer (maintainer decisions B and D, 2026-11-26): one bar per window with a segment per account, ordered by the soonest reset, no averaged share, a labelled segment for an account without a reading (one that has not reported yet included), a spent account marked Limit reached while its windows keep the share they reported, a provider pooled only when it has a window to draw, only accounts of one service pooled (never two compatible endpoints), and each computer and account counted on its own. Built. Pooling across paired computers waits on the cross-host read; not built yet.
 
-Status: Built. Since: —. Detail: [Architecture: Security and authority, Account usage endpoints](../architecture.md#security-and-authority).
+Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Account usage endpoints](../architecture.md#security-and-authority) and [Settings: Models, providers, and skills](settings.md#models-providers-and-skills).
 
 ### Claude gateway accounts
 

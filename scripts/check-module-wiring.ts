@@ -715,6 +715,10 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     endpoint,
     "Member-to-member request that a hub, standby, or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts, failoverService.ts, wakeService.ts, spokeWakeService.ts, pushService.ts, spokePushService.ts, provisionService.ts, spokeProvisionService.ts, signInService.ts, spokeSignInService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
   ]),
+  [
+    "/api/hub/usage",
+    "A spoke's plan-limit readings, served to a hub its person ticked Usage for (docs/design/hub-and-spokes.md, What the hub may do on a spoke). The hub's merged usage view that reads it comes with the cross-host read. Remove once that view calls it.",
+  ],
   ...["/api/hub/guest", "/api/hub/guest-roster"].map((endpoint): [string, string] => [
     endpoint,
     "Served to a guest's signed request from the phone app, which builds the path inside the guest client in packages/client-runtime (hubGuestClient.ts); no window script names it. Remove when the checker counts packages/client-runtime as a caller of a host route.",
