@@ -1135,8 +1135,8 @@ describe("agentRunRoutes", () => {
     });
   });
 
-  it("marks a run the host holds before it starts, and not one that is only queued", async () => {
-    const { handler, persistence, token } = createHandler();
+  it("marks a run the host holds before it starts by its record, not by its reason text", async () => {
+    const { handler, persistence, token, orchestration } = createHandler();
     const accepted = persistence.requestRun({
       command: {
         kind: "request-agent-run",
@@ -1178,8 +1178,14 @@ describe("agentRunRoutes", () => {
       if (current === undefined) throw new Error("Missing run");
       persistence.applyCommand({ kind, runId: accepted.run.id, expectedVersion: current.version });
     }
-    wait("waiting-on-dependencies");
+    // A provider-slot wait is the host's own record; its reason text alone,
+    // which a provider's own wait can share, marks nothing.
+    wait("Waiting for a free request slot");
+    const slot = vi.spyOn(orchestration, "waitsForProviderSlot").mockReturnValue(false);
+    expect(await read()).not.toHaveProperty("heldBeforeStart");
+    slot.mockReturnValue(true);
     expect(await read()).toMatchObject({ heldBeforeStart: true });
+    slot.mockRestore();
   });
 
   it("returns parent summary for an authenticated window", async () => {
