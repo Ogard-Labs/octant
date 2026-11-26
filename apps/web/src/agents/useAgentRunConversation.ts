@@ -29,6 +29,12 @@ export interface AgentRunConversationController {
 export function useAgentRunConversation(
   client: AgentRunClient,
   runId: AgentRunId | undefined,
+  /**
+   * Changes when the run starts working again under the same id (a Resume,
+   * a follow-up or a Retry). The stream ends with the run's last attempt, so
+   * a new attempt needs a new subscription or its replies never arrive.
+   */
+  attempt?: string,
 ): AgentRunConversationController {
   const [state, setState] = useState<{
     readonly runId: AgentRunId | undefined;
@@ -215,7 +221,7 @@ export function useAgentRunConversation(
       if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
       controller.abort();
     };
-  }, [client, runId]);
+  }, [client, runId, attempt]);
 
   return {
     conversation: state.runId === runId ? state.conversation : undefined,

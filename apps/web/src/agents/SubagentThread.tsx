@@ -109,7 +109,15 @@ export function SubagentThread(props: {
     () => (row === undefined ? undefined : decodeAgentRunId(row.runId)),
     [row?.runId],
   );
-  const conversation = useAgentRunConversation(props.client, conversationRunId);
+  // A resumed, continued or retried run works again under the same id; each
+  // time it does, its conversation is read again so the new attempt shows.
+  const [attempt, setAttempt] = useState(0);
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current) setAttempt((current) => current + 1);
+    wasActive.current = active;
+  }, [active]);
+  const conversation = useAgentRunConversation(props.client, conversationRunId, String(attempt));
   const items = useMemo(
     () => subagentTranscript(conversation.conversation?.entries ?? []),
     [conversation.conversation],

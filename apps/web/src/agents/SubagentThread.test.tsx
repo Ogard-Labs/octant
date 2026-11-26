@@ -134,6 +134,31 @@ describe("SubagentThread", () => {
     expect(runs.steer).not.toHaveBeenCalled();
   });
 
+  it("reads the conversation again once a continued subagent works again", async () => {
+    let status = "completed";
+    const runs = client("completed");
+    const summary = runs.parentSummary as ReturnType<typeof vi.fn>;
+    const first = await (
+      summary.getMockImplementation() as () => Promise<{
+        readonly entries: ReadonlyArray<Record<string, unknown>>;
+      }>
+    )();
+    summary.mockImplementation(async () => ({
+      ...first,
+      parentThreadId,
+      entries: first.entries.map((entry) => ({ ...entry, lifecycleStatus: status })),
+    }));
+    (runs.resume as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      status = "running";
+      return { kind: "run-updated" as const, run: {} as never };
+    });
+    view(runs);
+    const field = await screen.findByRole("textbox", { name: "Message to continue it" });
+    await waitFor(() => expect(runs.conversation).toHaveBeenCalledTimes(1));
+    await userEvent.type(field, "Now fix it{Enter}");
+    await waitFor(() => expect(runs.conversation).toHaveBeenCalledTimes(2));
+  });
+
   it("opens a subagent the provider runs read-only, with no composer", async () => {
     view(client("running", { executionKind: "provider-native" }));
     expect(
