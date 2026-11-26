@@ -112,11 +112,22 @@ function pick(
   return { extensionId: String(target.extensionId), componentId: String(target.componentId) };
 }
 
+/** What a sign-in change did to the component's grant, when it knows. */
+export interface McpAuthenticationChange {
+  readonly grant: "unchanged";
+}
+
 /** A component the manager should keep connected, with the server name its mcp.json uses. */
 type AgentPluginMcpSessionTarget = AgentPluginMcpSessionKey & {
   readonly serverNameHint: string;
   /** True for a package the host wrote for a server the person added by hand. */
   readonly userAdded: boolean;
+  /**
+   * Of those, one the person typed in themselves, not a catalog connector or
+   * a local setup the host wrote for them: the catalog says how those sign
+   * in, so a refusal never makes them offer a sign-in of its own.
+   */
+  readonly addedByHand?: true;
   /**
    * The hosts a stdio server may reach through the host's proxy, from the
    * bundled catalog entry the host's own store vouches for. Never read from
@@ -164,6 +175,8 @@ export interface AgentPluginMcpSessionManagerOptions {
    * broker: a third-party package never gets to name a secret.
    */
   readonly isUserAddedSource?: (sourceRef: string) => boolean;
+  /** Whether that package is a server the person typed in, not a catalog connector or local setup. */
+  readonly addedByHandSource?: (sourceRef: string) => boolean;
   /** The catalog's listed hosts for a package the host wrote for a command connector. */
   readonly egressHostsForSource?: (sourceRef: string) => ReadonlyArray<string> | undefined;
   readonly askEveryCallForSource?: (sourceRef: string) => ReadonlyArray<string> | undefined;
@@ -191,6 +204,7 @@ export class AgentPluginMcpSessionManager {
   readonly #recordExternalContentIngestion: AgentPluginMcpSessionManagerOptions["recordExternalContentIngestion"];
   readonly #uuid: () => string;
   readonly #isUserAddedSource: AgentPluginMcpSessionManagerOptions["isUserAddedSource"];
+  readonly #addedByHandSource: AgentPluginMcpSessionManagerOptions["addedByHandSource"];
   readonly #egressHostsForSource: AgentPluginMcpSessionManagerOptions["egressHostsForSource"];
   readonly #askEveryCallForSource: AgentPluginMcpSessionManagerOptions["askEveryCallForSource"];
   readonly #exclusiveForSource: AgentPluginMcpSessionManagerOptions["exclusiveForSource"];
@@ -269,6 +283,7 @@ export class AgentPluginMcpSessionManager {
     this.#uuid = options.uuid ?? randomUUID;
     this.#now = options.now ?? (() => new Date());
     this.#isUserAddedSource = options.isUserAddedSource;
+    this.#addedByHandSource = options.addedByHandSource;
     this.#egressHostsForSource = options.egressHostsForSource;
     this.#askEveryCallForSource = options.askEveryCallForSource;
     this.#exclusiveForSource = options.exclusiveForSource;
@@ -659,6 +674,11 @@ export class AgentPluginMcpSessionManager {
           userAdded:
             "sourceRef" in packageState.source &&
             this.#isUserAddedSource?.(packageState.source.sourceRef) === true,
+          ...("sourceRef" in packageState.source &&
+          this.#isUserAddedSource?.(packageState.source.sourceRef) === true &&
+          this.#addedByHandSource?.(packageState.source.sourceRef) === true
+            ? { addedByHand: true as const }
+            : {}),
           ...(egressHosts === undefined || egressHosts.length === 0 ? {} : { egressHosts }),
           ...(askEveryCall === undefined || askEveryCall.length === 0 ? {} : { askEveryCall }),
           ...(sourceRef !== undefined && this.#exclusiveForSource?.(sourceRef) === true
@@ -723,7 +743,9 @@ export class AgentPluginMcpSessionManager {
           at: this.#now().toISOString(),
           // Only a server added by hand carries the host's own sign-in on
           // connect, so only its refusal is one a sign-in here can answer.
-          ...(target.userAdded && error instanceof McpHttpStatusError && error.signInOffered
+          ...(target.addedByHand === true &&
+          error instanceof McpHttpStatusError &&
+          error.signInOffered
             ? { signInOffered: true as const }
             : {}),
         });
@@ -731,7 +753,17 @@ export class AgentPluginMcpSessionManager {
     }
   }
 
-  async invalidateAuthentication(extensionId: string, componentId: string): Promise<void> {
+  /**
+   * `grant: "unchanged"` is a sign-out that found no grant, such as cancelling
+   * a first sign-in. The server's refusal that offered the sign-in still
+   * stands then, so it is kept: dropping it made the thread stop offering
+   * Sign in until another turn failed the same way.
+   */
+  async invalidateAuthentication(
+    extensionId: string,
+    componentId: string,
+    change?: McpAuthenticationChange,
+  ): Promise<void> {
     const matches = (target: AgentPluginMcpSessionKey) =>
       target.extensionId === extensionId && target.componentId === componentId;
     const identity = { extensionId, componentId };
@@ -746,7 +778,11 @@ export class AgentPluginMcpSessionManager {
       }
     for (const [key, target] of this.#desired) if (matches(target)) this.#desired.delete(key);
     for (const [key, failure] of this.#failures)
-      if (matches(failure.target)) this.#failures.delete(key);
+      if (
+        matches(failure.target) &&
+        !(change?.grant === "unchanged" && failure.signInOffered === true)
+      )
+        this.#failures.delete(key);
     const closing: Promise<void>[] = [];
     for (const [key, record] of this.#sessions)
       if (matches(record)) closing.push(this.#close(key, record));

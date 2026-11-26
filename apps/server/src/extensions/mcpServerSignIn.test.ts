@@ -153,7 +153,11 @@ async function signIn(options: {
   readonly retirementTimeoutMs?: number;
   readonly beginTimeoutMs?: number;
   readonly replaceState?: (path: string, contents: string) => Promise<void>;
-  readonly onAuthenticationChanged?: (extensionId: string, componentId: string) => Promise<void>;
+  readonly onAuthenticationChanged?: (
+    extensionId: string,
+    componentId: string,
+    change?: { readonly grant: "unchanged" },
+  ) => Promise<void>;
 }) {
   const directory = await mkdtemp(join(tmpdir(), "octant-mcp-sign-in-"));
   directories.push(directory);
@@ -620,6 +624,22 @@ describe("signing in to a hosted MCP server", () => {
     expect(JSON.parse(await readFile(statePath, "utf8")).registrations[SERVER].clientId).toBe(
       publicSetup.clientId,
     );
+  });
+
+  it("tells the sessions no grant changed when cancelling a first sign-in", async () => {
+    const { oauth } = fakeOauth();
+    const invalidate = vi.fn(async () => undefined);
+    const { service } = await signIn({
+      fetchImpl: issuerFetch().fetchImpl,
+      oauth,
+      onAuthenticationChanged: invalidate,
+    });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    expect(await service.signOut(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "signed-out",
+    });
+    expect(oauth.cancel).toHaveBeenCalledOnce();
+    expect(invalidate).toHaveBeenLastCalledWith(EXTENSION, COMPONENT, { grant: "unchanged" });
   });
 
   it("invalidates cached authentication on a proven revoked grant and refuses remote sign-out", async () => {

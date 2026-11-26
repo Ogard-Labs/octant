@@ -1306,6 +1306,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
+        addedByHandSource: (sourceRef) => userAddedMcpServers.addedByHand(sourceRef),
         egressHostsForSource: (sourceRef) => userAddedMcpServers.egressHosts(sourceRef),
         askEveryCallForSource: (sourceRef) => userAddedMcpServers.askEveryCall(sourceRef),
         exclusiveForSource: (sourceRef) => userAddedMcpServers.exclusive(sourceRef),
@@ -2072,8 +2073,8 @@ export function wireProviders(deps: ProvidersDependencies) {
         actorId: OCTANT_LOCAL_ACTOR_ID,
         serverUrl: mcpServerSignInAddress,
         serverPolicy: mcpServerSignInPolicy,
-        onAuthenticationChanged: (extensionId, componentId) =>
-          agentPluginMcpSessionManager.invalidateAuthentication(extensionId, componentId),
+        onAuthenticationChanged: (extensionId, componentId, change) =>
+          agentPluginMcpSessionManager.invalidateAuthentication(extensionId, componentId, change),
         ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
           ? {}
           : {

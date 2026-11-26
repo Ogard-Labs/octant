@@ -1,28 +1,23 @@
 import type { Readable, Writable } from "node:stream";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import { readBoundedResponseBody } from "./boundedResponseBody";
+import { bearerResourceMetadata } from "./mcpAuthenticationChallenge";
 
 export class McpHttpStatusError extends Error {
   constructor(
     readonly status: number,
     /**
-     * The server refused with an OAuth challenge that names its resource
-     * metadata (RFC 9728), the first place sign-in discovery looks. A bare 401
-     * says only that something was refused, not that a sign-in would help.
+     * The server refused `initialize` with an OAuth challenge that names its
+     * resource metadata (RFC 9728), the first place sign-in discovery looks.
+     * A bare 401 says only that something was refused, not that a sign-in
+     * would help; a refusal of a later step is not one discovery's own
+     * `initialize` probe would meet, so Sign in would find nothing to offer.
      */
     readonly signInOffered = false,
   ) {
     super(`MCP HTTP request failed with status ${status}.`);
     this.name = "McpHttpStatusError";
   }
-}
-
-function offersOAuthSignIn(challenge: string | null): boolean {
-  return (
-    challenge !== null &&
-    /\bbearer\b/i.test(challenge) &&
-    /(?:^|[\s,])resource_metadata="[^"]+"/i.test(challenge)
-  );
 }
 
 export class McpJsonRpcError extends Error {
@@ -456,7 +451,9 @@ class StreamableHttpJsonRpcTransport implements JsonRpcTransport {
       if (response.status === 404) this.#fail();
       throw new McpHttpStatusError(
         response.status,
-        response.status === 401 && offersOAuthSignIn(response.headers.get("www-authenticate")),
+        response.status === 401 &&
+          message.method === "initialize" &&
+          bearerResourceMetadata(response.headers.get("www-authenticate")) !== undefined,
       );
     }
     return response;

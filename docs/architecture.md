@@ -15016,11 +15016,13 @@ server switched off), Needs sign-in (sign-in-again, consent pending, an attempt
 whose status or cancellation is not confirmed, client
 setup required for a registered-client connector, or a
 catalog connector that signs in and has no sign-in while not connected, or a
-signed-out server the person added by hand whose last connect was refused with
-an OAuth challenge naming its resource metadata (RFC 9728), the same header
-sign-in discovery reads first; signed out alone is only an offer, since a hosted
-server that takes a key or nothing reports it too, and a bare 401 stays Not
-connecting), Connecting, Not connecting (the newest fact is a
+signed-out server the person typed in by hand, not a catalog connector or
+local setup, whose last `initialize` was refused with a Bearer challenge naming
+its resource metadata (RFC 9728), read by the same parser sign-in discovery
+uses on its own `initialize` probe; cancelling a first sign-in keeps that
+refusal, since no grant changed; signed out alone is only an offer, since a
+hosted server that takes a key or nothing reports it too, and a bare 401, or a
+refusal only of the tool list, stays Not connecting), Connecting, Not connecting (the newest fact is a
 failed attempt or closed transport, with its reason), Connected, Blocked (a
 lifecycle block such as quarantine, or a sign-in connector on a host whose
 sign-in is refused, such as one without the credential broker), Ready. A server with sessions in several
