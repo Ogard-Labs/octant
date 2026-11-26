@@ -18,7 +18,6 @@ import {
   WEBHOOK_HOLD_MS,
   WEBHOOK_TIMESTAMP_WINDOW_MS,
   WebhookEndpointId,
-  hubSealingKeyPayload,
   type AutomationIntegrationEvent,
   type HubMembershipChangedPayload,
   type HubSealingKey,
@@ -27,7 +26,12 @@ import {
   type WebhookDeliveryEnvelope,
   type WebhookSignatureScheme,
 } from "@octant/contracts";
-import { decideWebhookDelivery, readWebhookHeaders, webhookDedupeKeys } from "@octant/domain";
+import {
+  decideWebhookDelivery,
+  readWebhookHeaders,
+  webhookDedupeKeys,
+  hubSealingKeyPayload,
+} from "@octant/domain";
 import type { IntegrationEventSourceProvider } from "@octant/plugin-api/integration";
 import { Schema } from "effect";
 import { publicKeyFingerprint, verifySignature } from "./hubCrypto";

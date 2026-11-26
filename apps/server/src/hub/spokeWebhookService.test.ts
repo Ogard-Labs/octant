@@ -1,11 +1,11 @@
 import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import {
-  hubSealingKeyPayload,
   type HubMemberId,
   type HubSealingKey,
   type WebhookDeliveryEnvelope,
   type WebhookEndpointId,
 } from "@octant/contracts";
+import { hubSealingKeyPayload } from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
 import { SpokeWebhookService, type SpokeWebhookHubPort } from "./spokeWebhookService";

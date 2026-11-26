@@ -247,10 +247,6 @@ export const HubSealingKey = Schema.Struct({
 export type HubSealingKey = typeof HubSealingKey.Type;
 export const decodeHubSealingKey = Schema.decodeUnknownSync(HubSealingKey);
 
-/** The text a hub signs for its sealing key. */
-export const hubSealingKeyPayload = (memberId: string, sealingPublicKey: string): string =>
-  `octant/sealing-key/v1|${memberId}|${sealingPublicKey}`;
-
 export const HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE = 64;
 
 /** Everything one spoke lets the hub hold for webhooks: it replaces what the hub held for it. */

@@ -14,7 +14,6 @@ import {
   WEBHOOK_QUEUE_MAX_BYTES,
   WEBHOOK_QUEUE_MAX_DELIVERIES,
   WEBHOOK_REQUESTS_PER_MINUTE,
-  hubSealingKeyPayload,
   type HubMembershipChangedPayload,
   type HubSealingKey,
   type HubWebhookEndpoint,
@@ -23,7 +22,12 @@ import {
   type WebhookDeliveryEnvelope,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { decideWebhookDelivery, readWebhookHeaders, webhookDedupeKeys } from "@octant/domain";
+import {
+  decideWebhookDelivery,
+  readWebhookHeaders,
+  webhookDedupeKeys,
+  hubSealingKeyPayload,
+} from "@octant/domain";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort, HubWebhookQueued } from "./hubStateStore";
 import type { PublicAnswer, PublicRequest } from "./publicEntrance";
