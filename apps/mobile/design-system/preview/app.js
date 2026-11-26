@@ -774,11 +774,21 @@ const INBOX_KIND = {
 function inboxRowHTML(t) {
   const n = INBOX_KIND[inboxKind(t)];
   return `
-    <div class="nrow" data-kind="${inboxKind(t)}" data-open="thread/${t.id}" role="button" tabindex="0" aria-label="${esc(n.title)}: ${esc(t.title)}">
+    ${
+      // A row with Allow and Deny holds buttons, so it is not one itself: its
+      // own label opens the thread, and each action is its own control.
+      t.ask === "approval"
+        ? `<div class="nrow" data-kind="${inboxKind(t)}" data-open="thread/${t.id}">`
+        : `<div class="nrow" data-kind="${inboxKind(t)}" data-open="thread/${t.id}" role="button" tabindex="0" aria-label="${esc(n.title)}: ${esc(t.title)}">`
+    }
       <div class="kindic" style="background:color-mix(in srgb, ${n.tint} 16%, transparent);color:${n.tint}">${I(n.icon)}</div>
       <div class="main">
         <div class="k1">${esc(n.title)}</div>
-        <div class="k2">${esc(t.title)}</div>
+        ${
+          t.ask === "approval"
+            ? `<div class="k2" data-open="thread/${t.id}" role="button" tabindex="0" aria-label="Open ${esc(t.title)}">${esc(t.title)}</div>`
+            : `<div class="k2">${esc(t.title)}</div>`
+        }
         <div class="k3">${compName(t.computer)} · ${esc(t.project)}</div>
         ${
           t.ask === "approval"
@@ -2375,6 +2385,10 @@ function rewindSheetHTML() {
 
 function doRewind() {
   const t = msgTargetEl;
+  if (t && routeStale(screenOf(t).route)) {
+    toast("This thread is read-only while its computer is offline");
+    return;
+  }
   if (!t || !t.isConnected) {
     toast("Nothing to rewind");
     return;
@@ -2430,9 +2444,12 @@ function openMessageMenu(x, y, target) {
   closeMenus();
   menuRoot.innerHTML = `<div class="menu-backdrop" data-close-menu></div><div class="menu ctxmenu" id="ctxmenu"></div>`;
   const menu = $("#ctxmenu", menuRoot);
-  menu.innerHTML = MSG_ACTIONS.map(
-    (it) => `<button data-msgact="${it.label}">${I(it.icon)}<span>${it.label}</span></button>`,
-  ).join("");
+  // A thread whose computer is offline is read-only: nothing in it can be
+  // rewound, as its composer cannot send.
+  const readOnly = routeStale(screenOf(target).route);
+  menu.innerHTML = MSG_ACTIONS.filter((it) => !(readOnly && it.label === "Rewind to here"))
+    .map((it) => `<button data-msgact="${it.label}">${I(it.icon)}<span>${it.label}</span></button>`)
+    .join("");
   placeMenu(menu, x, y);
   $$("button", menu).forEach((b) =>
     b.addEventListener("click", () => {
@@ -2593,10 +2610,13 @@ function restItems(t) {
 
 function currentThreadStale() {
   const t = topScreen();
-  if (!t) return false;
-  const name = parseRoute(t.route).name;
-  if (name !== "thread") return false;
-  const th = threadById(parseRoute(t.route).arg);
+  return t ? routeStale(t.route) : false;
+}
+
+/** Whether the thread a screen shows is on a computer that is offline. */
+function routeStale(route) {
+  if (parseRoute(route).name !== "thread") return false;
+  const th = threadById(parseRoute(route).arg);
   return th && COMPUTERS[th.computer].status === "stale";
 }
 

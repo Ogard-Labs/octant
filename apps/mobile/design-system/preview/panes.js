@@ -577,7 +577,9 @@ function goBack(p = focusedPane()) {
   layout.focus = p.id;
   const other = otherPane(p);
   if (p.stack.length > 1) popTo(p, p.stack.length - 2);
-  else if (isOpen(other) && p.linked) closePane(p);
+  // goBack settles the address itself below, so the thread's own entry stays
+  // whole for the browser's Forward.
+  else if (isOpen(other) && p.linked) closePane(p, { sync: false });
   else if (isOpen(other))
     relayout(() => {
       layout.focus = other.id;
@@ -586,7 +588,7 @@ function goBack(p = focusedPane()) {
   else syncHash();
 }
 
-function closePane(p) {
+function closePane(p, { sync = true } = {}) {
   const other = otherPane(p);
   if (!isOpen(other)) return;
   relayout(() => {
@@ -596,7 +598,7 @@ function closePane(p) {
     other.linked = false;
     ensureRoot(other);
   });
-  syncHash();
+  if (sync) syncHash();
 }
 
 function fullScreen(p) {
