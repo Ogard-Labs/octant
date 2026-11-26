@@ -5,6 +5,7 @@ import {
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeBootstrap, CodeThreadId } from "@octant/contracts/code";
 import { memo, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useThreadActivityRevision } from "../polling/ThreadActivityRevisions";
 import {
   useCodeController,
   type CodeController,
@@ -279,6 +280,9 @@ export function CodeThreadControllerSlots(props: CodeThreadControllerSlotsProps)
     () => ({ bootstrap: props.navigationBootstrap }),
     [props.navigationBootstrap],
   );
+  // Read once here, not in each slot: a slot re-renders, and publishes, on
+  // every other activity the context carries.
+  const messageQueueRevision = useThreadActivityRevision("threadMessageQueue");
   return (
     <>
       {props.threadIds.map((threadId) => (
@@ -286,6 +290,7 @@ export function CodeThreadControllerSlots(props: CodeThreadControllerSlotsProps)
           client={props.client}
           navigation={navigation}
           key={String(threadId)}
+          messageQueueRevision={messageQueueRevision}
           readCursorStore={props.readCursorStore}
           registry={props.registry}
           threadId={threadId}
@@ -305,6 +310,7 @@ export function CodeThreadControllerSlots(props: CodeThreadControllerSlotsProps)
 const CodeThreadControllerSlot = memo(function CodeThreadControllerSlot(props: {
   readonly navigation: { readonly bootstrap: CodeBootstrap | undefined };
   readonly client: CodeClient;
+  readonly messageQueueRevision: number | undefined;
   readonly readCursorStore: CodeReadCursorStore;
   readonly registry: CodeThreadControllerRegistry;
   readonly threadId: CodeThreadId;
@@ -317,6 +323,7 @@ const CodeThreadControllerSlot = memo(function CodeThreadControllerSlot(props: {
     // ask the host for the same list several times a second and answer nothing
     // this thread's own stream does not already report.
     navigationRefreshMs: 0,
+    messageQueueRevision: props.messageQueueRevision,
     readCursorStore: props.readCursorStore,
   });
   const { registry, threadId } = props;

@@ -1347,6 +1347,52 @@ describe("createWorkThreadMentionDirectory", () => {
     ).toBeUndefined();
   });
 
+  it("quotes what the person sent into a running Work turn after that turn's prompt, unfinished turns included", async () => {
+    const steered = (text: string, messageId: string, steeredAt: string) => ({
+      messageId,
+      body: text,
+      steeredAt: steeredAt as UtcTimestamp,
+    });
+    const work = createWorkThreadMentionDirectory({
+      bootstrap: async () => ({ threads: [] }),
+      transcript: async () => ({
+        turns: [
+          {
+            status: "completed",
+            transcript: [
+              { role: "user" as const, text: "draft the launch brief" },
+              { role: "assistant" as const, text: "Drafted it." },
+            ],
+            steeredMessages: [
+              steered("skip the appendix", "m1", "2026-08-14T10:00:02.000Z"),
+              steered("cite sources", "m2", "2026-08-14T10:00:03.000Z"),
+            ],
+            acceptedAt: "2026-08-14T10:00:00.000Z" as UtcTimestamp,
+            updatedAt: "2026-08-14T10:00:05.000Z" as UtcTimestamp,
+          },
+          {
+            status: "failed",
+            transcript: [{ role: "user" as const, text: "add the pricing table" }],
+            steeredMessages: [steered("in euros", "m3", "2026-08-14T10:01:02.000Z")],
+            acceptedAt: "2026-08-14T10:01:00.000Z" as UtcTimestamp,
+            updatedAt: "2026-08-14T10:01:05.000Z" as UtcTimestamp,
+          },
+        ],
+      }),
+    });
+
+    expect(
+      await work.readTranscript(windowId, decodeMentionableThreadId(String(openable))),
+    ).toEqual([
+      { role: "user", text: "draft the launch brief", occurredAt: "2026-08-14T10:00:00.000Z" },
+      { role: "user", text: "skip the appendix", occurredAt: "2026-08-14T10:00:02.000Z" },
+      { role: "user", text: "cite sources", occurredAt: "2026-08-14T10:00:03.000Z" },
+      { role: "assistant", text: "Drafted it.", occurredAt: "2026-08-14T10:00:05.000Z" },
+      { role: "user", text: "add the pricing table", occurredAt: "2026-08-14T10:01:00.000Z" },
+      { role: "user", text: "in euros", occurredAt: "2026-08-14T10:01:02.000Z" },
+    ]);
+  });
+
   it("quotes an answered Work exchange and never an unfinished turn's partial output", async () => {
     const work = createWorkThreadMentionDirectory({
       bootstrap: async () => ({ threads: [] }),
@@ -1447,6 +1493,45 @@ describe("createCodeThreadMentionDirectory", () => {
     expect(
       await code.readTranscript(windowId, decodeMentionableThreadId(String(openable))),
     ).toBeUndefined();
+  });
+
+  it("quotes what the person sent into a running Code turn after that turn's prompt, unfinished turns included", async () => {
+    const turn = (prompt: string, status: string, assistant: ReadonlyArray<string>) => ({
+      operationId,
+      prompt: { contentId: prompt },
+      assistant: assistant.map((contentId) => ({ contentId })),
+      status,
+      startedAt: "2026-08-14T10:00:00.000Z" as UtcTimestamp,
+      updatedAt: "2026-08-14T10:00:05.000Z" as UtcTimestamp,
+    });
+    const steeredAt = "2026-08-14T10:00:02.000Z" as UtcTimestamp;
+    const code = createCodeThreadMentionDirectory({
+      bootstrap: async () => ({ threads: [] }),
+      conversation: async () => ({
+        turns: [
+          {
+            ...turn("p1", "completed", ["a1"]),
+            steeredMessages: [{ body: "skip the backfill", steeredAt }],
+          },
+          { ...turn("p2", "incomplete", []), steeredMessages: [{ body: "use main", steeredAt }] },
+        ],
+        nextCursor: 2,
+        hasMore: false,
+      }),
+      readEvidence: evidence({ p1: "add the index", a1: "Added.", p2: "open the request" }),
+    });
+
+    expect(
+      (await code.readTranscript(windowId, decodeMentionableThreadId(String(openable))))?.map(
+        (entry) => [entry.role, entry.text, entry.occurredAt],
+      ),
+    ).toEqual([
+      ["user", "add the index", "2026-08-14T10:00:00.000Z"],
+      ["user", "skip the backfill", steeredAt],
+      ["assistant", "Added.", "2026-08-14T10:00:05.000Z"],
+      ["user", "open the request", "2026-08-14T10:00:00.000Z"],
+      ["user", "use main", steeredAt],
+    ]);
   });
 
   it("quotes an answered Code exchange and never an unfinished turn's partial output", async () => {

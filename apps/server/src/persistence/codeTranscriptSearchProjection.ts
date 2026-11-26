@@ -9,6 +9,7 @@ import {
   type CodeThreadId,
   type EventEnvelope,
 } from "@octant/contracts";
+import { threadMessageSteeredFrom } from "../messageQueue/threadMessageSteeredRecord";
 import type { Projection } from "./projection";
 import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
 import {
@@ -23,12 +24,14 @@ interface Statements {
   readonly evidence: SqliteStatement;
   readonly startTurn: SqliteStatement;
   readonly appendReply: SqliteStatement;
+  readonly appendSteered: SqliteStatement;
   readonly rewind: SqliteStatement;
 }
 
 /**
  * Per-turn Code message text for message search: one row for the prompt and
- * one for the reply of every provider turn, keyed by the turn's operation.
+ * one for the reply of every provider turn, keyed by the turn's operation. The
+ * prompt row also holds what the person sent into the turn while it ran.
  *
  * The text itself lives in the evidence store, one row per streamed burst, so
  * a word can straddle two rows. The reply row therefore keeps the bursts
@@ -51,6 +54,19 @@ export class CodeTranscriptSearchProjection implements Projection {
   }
 
   apply(connection: SqliteConnection, event: EventEnvelope): void {
+    const steered = threadMessageSteeredFrom(event);
+    if (steered !== undefined) {
+      if (steered.mode !== "code") return;
+      this.#statementsFor(connection).appendSteered.run(
+        steered.body,
+        steered.body.toLowerCase(),
+        event.globalSequence,
+        steered.turnKey,
+        String(steered.threadId),
+        event.globalSequence,
+      );
+      return;
+    }
     if (event.eventName !== CODE_OPERATION_EVENT_RECORDED || event.eventVersion !== 1) return;
     let frame: ReturnType<typeof decodeCodeOperationEventFrame>;
     try {
@@ -137,6 +153,17 @@ export class CodeTranscriptSearchProjection implements Projection {
           AND thread_id = ?
           AND last_sequence < ?
           AND part_count < ?
+      `),
+      // What the person sent into the running turn, on a line of its own.
+      appendSteered: connection.prepare(`
+        UPDATE code_transcript_search_projection
+        SET body_text = body_text || char(10) || ?,
+            search_text = search_text || char(10) || ?,
+            last_sequence = ?
+        WHERE operation_id = ?
+          AND content_role = 'user'
+          AND thread_id = ?
+          AND last_sequence < ?
       `),
       rewind: connection.prepare(`
         UPDATE code_transcript_search_projection

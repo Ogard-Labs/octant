@@ -74,6 +74,7 @@ import { useThreadTurnActions } from "./thread/useThreadTurnActions";
 import { useWorkThread } from "./thread/useWorkThread";
 import {
   MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS,
+  MOBILE_CHAT_IDLE_REFRESH_MAX_DELAY_MS,
   enteredMobileForeground,
 } from "./threadRefreshPolicy";
 import { useRemoteSessionStanding } from "./useRemoteSessionStanding";
@@ -225,13 +226,28 @@ export function ThreadScreen(props: ThreadScreenProps) {
   // place, and the polling stops the moment the turn settles.
   const workTurnLive = work.live;
   const codeTurnLive = code.live;
+  const codeRereads = code.rereads;
   useEffect(() => {
-    if (mode === "chat" || (!workTurnLive && !codeTurnLive)) return;
+    if (mode === "chat" || (!workTurnLive && !codeRereads)) return;
     const timer = setInterval(() => {
       if (AppState.currentState === "active") void refresh({ quiet: true });
     }, MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS);
     return () => clearInterval(timer);
-  }, [codeTurnLive, mode, refresh, workTurnLive]);
+  }, [codeRereads, mode, refresh, workTurnLive]);
+
+  // A turn started on another device reaches a settled Code page no other
+  // way, so the page takes one light look at the newest turn on the idle
+  // cadence; a turn it does not show, even one that already finished,
+  // refreshes it once, and for a running turn the re-reads above take over.
+  const codeLooksForNewTurn = mode === "code" && code.looksForNewTurn;
+  const noticeCodeTurn = code.noticeTurnStartedElsewhere;
+  useEffect(() => {
+    if (!codeLooksForNewTurn) return;
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active") void noticeCodeTurn();
+    }, MOBILE_CHAT_IDLE_REFRESH_MAX_DELAY_MS);
+    return () => clearInterval(timer);
+  }, [codeLooksForNewTurn, noticeCodeTurn]);
 
   const turnActions = useThreadTurnActions({
     transport,

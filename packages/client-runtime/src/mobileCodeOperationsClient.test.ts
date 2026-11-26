@@ -8,6 +8,7 @@ import {
   mergeMobilePullRequest,
   setMobileMergeWhenReady,
   observeMobilePullRequest,
+  readMobileCodeNewestTurn,
   sendMobileCodeTurn,
 } from "./mobileCodeOperationsClient";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
@@ -747,6 +748,42 @@ describe("mobile Code follow-through", () => {
     );
     expect(requests[0]?.query).toBe(`?limit=${MOBILE_CODE_CONVERSATION_TURNS}`);
     expect(requests.some((request) => request.path.endsWith("/conversation"))).toBe(false);
+  });
+
+  it("reads only the newest turn's identity and status, without its text", async () => {
+    for (const status of ["incomplete", "waiting", "completed"]) {
+      const fetch = vi.fn(async (input: { method: string; path: string; query?: string }) =>
+        input.path === `/api/code/threads/${threadId}/conversation/window`
+          ? jsonResponse({
+              version: 1,
+              threadId,
+              turns: [{ ...numberedTurn(7), status }],
+              hasEarlier: true,
+              hasLater: false,
+            })
+          : jsonResponse({ category: "unavailable" }, 404),
+      );
+      const transport = {
+        hostId: "host-1",
+        authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+      };
+      await expect(readMobileCodeNewestTurn(transport, threadId)).resolves.toEqual({
+        operationId: numberedTurn(7).operationId,
+        status,
+      });
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledWith(expect.objectContaining({ query: "?limit=1" }));
+    }
+    const older = vi.fn(async () => jsonResponse({ category: "unavailable" }, 404));
+    await expect(
+      readMobileCodeNewestTurn(
+        {
+          hostId: "host-1",
+          authenticatedFetch: older as MobileRemoteTransport["authenticatedFetch"],
+        },
+        threadId,
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("shows the tail of the forward read on a host without the window read", async () => {
