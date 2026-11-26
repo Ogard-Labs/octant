@@ -8,6 +8,7 @@ import { listMcpServerConnections, transportOf } from "./mcpServerConnections";
 import type { McpConnectionObservation } from "./agentPluginMcpSessionManager";
 
 const extensionId = "44000000-0000-4000-8000-000000000002";
+const catalogSourceRef = "user-added:connector-linear";
 const activation = {
   installed: true,
   trusted: true,
@@ -49,7 +50,7 @@ function snapshot(
         packageId: "linear",
         displayName: "Linear",
         slug,
-        addedInSettings: true,
+        source: { kind: "user-added", sourceRef: catalogSourceRef },
         version: "1.0.0",
         digest: `sha256:${"a".repeat(64)}`,
         components: [
@@ -66,6 +67,7 @@ async function list(input: {
   readonly signIn?: Record<string, McpServerSignInView>;
   readonly observations?: ReadonlyArray<McpConnectionObservation>;
   readonly slug?: string;
+  readonly addedInSettings?: boolean;
 }) {
   const signInStatus = vi.fn(
     async (_extensionId: string, componentId: string): Promise<McpServerSignInView> =>
@@ -75,6 +77,8 @@ async function list(input: {
     snapshot: () => snapshot(input.components, input.slug),
     observations: () => input.observations ?? [],
     signInStatus,
+    addedInSettings: (sourceRef) =>
+      (input.addedInSettings ?? true) && sourceRef === catalogSourceRef,
     readConfiguration: async (_packageState, componentId) =>
       componentId === "local"
         ? JSON.stringify({ mcpServers: { local: { command: "node", args: ["server.js"] } } })
@@ -222,6 +226,23 @@ describe("the server connection listing", () => {
     expect(connected.listing.servers[0]?.state).toBe("connected");
   });
 
+  it("asks a signed-out catalog connector to sign in although the installed snapshot carries no Settings mark", async () => {
+    const { listing } = await list({
+      components: [server("remote")],
+      signIn: { remote: { kind: "signed-out" } },
+    });
+    expect(listing.servers[0]).toMatchObject({ state: "needs-sign-in", reason: "Not signed in." });
+  });
+
+  it("does not take a connector slug the host did not write for a sign-in connector", async () => {
+    const { listing } = await list({
+      components: [server("remote")],
+      signIn: { remote: { kind: "signed-out" } },
+      addedInSettings: false,
+    });
+    expect(listing.servers[0]?.state).toBe("ready");
+  });
+
   it("asks a signed-out server added by hand to sign in once its own refusal offered one", async () => {
     const offered = await list({
       components: [server("remote")],
@@ -265,6 +286,7 @@ describe("the server connection listing", () => {
       observations: () => [],
       signInStatus,
       readConfiguration,
+      addedInSettings: () => true,
       only: (_extensionId, componentId) => componentId === "remote",
     });
     expect(listing.servers.map((entry) => entry.serverName)).toEqual(["remote"]);
