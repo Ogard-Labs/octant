@@ -3219,11 +3219,16 @@ card. A click opens the pull request in Review; Cmd-click, or the line's GitHub
 control, which appears with the line's hover or focus, opens it on GitHub. The
 row's menus reach the same destinations: up to three pull requests inline, more
 under one Pull requests submenu of the right-click menu, while the flat
-overflow menu keeps the first three. A pull request the thread's tool calls
+overflow menu keeps the first three. After them come the thread's issues, at
+most five with the rest counted, as facts rather than links: first those it is
+linked to, each marked "Linked", then the others its tool calls wrote to. An
+issue both linked and written to is one line, with the title and state the write
+gave; a link no write has described shows its key and "Linked" under a neutral
+mark. The card draws them from the navigation entry alone, with no forge or
+tracker call. A pull request the thread's tool calls
 created, merged or reviewed links the thread as its own branch does, and every
 GitHub and Linear issue those calls touched is listed in the thread's
-Environment tool and, at most five with the rest counted, in the card, as
-facts there rather than links (maintainer decisions, 2026-11-23). Only a write
+Environment tool and in the card (maintainer decisions, 2026-11-23). Only a write
 counts (created, merged, reviewed, commented on, edited, closed, reopened),
 never a read, and only an exact identity the call itself gave; the Claude and
 Codex adapters report them, and an adapter that cannot see a call's command and
