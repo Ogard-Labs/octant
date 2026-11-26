@@ -330,8 +330,13 @@ which the person sets, like any turn.
     estimate when no usage was reported.
   - A clip Gemini finished but the host could not download in the job time
     settles at the usage Gemini last reported with it, and at the estimate when
-    it reported none. The host keeps that usage only while it runs: a job
-    resumed after a restart settles at what the provider reports again.
+    it reported none. A later status check that fails without a charge of
+    its own, as Gemini's 404 or 400 does once the interaction is gone, settles
+    at that last reported usage too, never at zero (maintainer decision,
+    2026-11-26). The host keeps that usage only while it runs: a job resumed
+    after a restart settles at what the provider reports again.
+  - A reported count or charge that is not a finite amount of at least zero
+    comes only from a broken report; the job settles at its estimate instead.
   - A cancelled job settles at the reported usage, or at the estimate when
     none is reported, because a provider may bill a job it had already
     started. Stop releases the reservation after a confirmed rejection
