@@ -155,6 +155,7 @@ import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { morePullRequestsThanTheFirst } from "./threadRowPullRequests";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
+import { useLitSidebarRowDropZone, useThreadRowFileDrop } from "./sidebarRowDrop";
 import { AddRepositoryToComputerContext } from "./addRepositoryToComputerContext";
 import {
   useContext,
@@ -367,6 +368,8 @@ export interface ProjectSidebarSectionProps {
 }
 
 export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
+  const drag = useContext(SidebarThreadDragContext);
+  const litZone = useLitSidebarRowDropZone();
   const [projectSort, setProjectSort] = useState<ProjectSort>("manual");
   const [collapsedProjects, setCollapsedProjects] = useState<ReadonlySet<ProjectId>>(
     () => new Set(),
@@ -719,6 +722,18 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     nestThreads &&
     activityView &&
     (activity.working.length > 0 || completedThreads.length > 0);
+  // A row dragged within the sidebar pins, settles, wakes or undoes one of
+  // those; a group the list does not show yet stands in as a slot while the
+  // row is dragged, so Pinned and Settled can always be reached.
+  const draggingRow = drag?.draggingRow ?? null;
+  const pinTarget = props.threadActions?.onPinThread !== undefined;
+  const showPinSlot =
+    draggingRow !== null &&
+    pinTarget &&
+    draggingRow.pinned !== true &&
+    !(nestThreads && activityView && activity.groups.some((group) => group.id === "pinned"));
+  const showSettleSlot =
+    draggingRow !== null && draggingRow.shelf !== "completed" && completedThreads.length === 0;
   const snoozedShelf = { key: "snoozed", label: "Snoozed", threads: snoozedThreads } as const;
   const settledShelf = { key: "completed", label: "Settled", threads: completedThreads } as const;
   function renderShelf(shelf: typeof snoozedShelf | typeof settledShelf) {
@@ -729,6 +744,8 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       <OctantCollapsible
         className="project-archive project-shelf"
         data-shelf={shelf.key}
+        data-sidebar-row-drop={shelf.key}
+        data-drop-lit={litZone === shelf.key ? "true" : undefined}
         key={shelf.key}
         onToggle={(event) => {
           if (shelf.key === "completed") setCompletedShelfOpen(event.currentTarget.open);
@@ -833,7 +850,12 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     ) : undefined;
   return (
     <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>
-      <nav aria-label="Projects" className="project-nav window-no-drag">
+      <nav
+        aria-label="Projects"
+        className="project-nav window-no-drag"
+        data-sidebar-row-drop="list"
+        data-drop-lit={litZone === "list" ? "true" : undefined}
+      >
         <div className="project-nav__list">
           {/* Views sort and filter Projects; with none yet the row only said
             "All Projects" over a heading that said "Projects" again. The
@@ -843,6 +865,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             Project tree moved it into its heading, pressing the switch threw
             the switch itself 62px left and 20px down from under the pointer. */}
           {listTools}
+          {showPinSlot ? (
+            <SidebarRowDropSlot label="Pinned" lit={litZone === "pinned"} zone="pinned" />
+          ) : null}
           <OctantDialogPresence>
             {projectViewEditor === undefined || projectViewState === undefined ? null : (
               <CodeProjectViewEditorDialog
@@ -894,6 +919,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                     ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
                     : {})}
                   actions={props.threadActions ?? {}}
+                  pinTarget={pinTarget}
                   counted={arrangement === "status"}
                   groups={activity.groups}
                   mode={activityMode}
@@ -968,6 +994,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             </>
           )}
           {onSelectThread === undefined ? null : renderShelf(snoozedShelf)}
+          {showSettleSlot ? (
+            <SidebarRowDropSlot label="Settled" lit={litZone === "completed"} zone="completed" />
+          ) : null}
           {onSelectThread === undefined || (nestThreads && activityView)
             ? null
             : renderShelf(settledShelf)}
@@ -1027,6 +1056,24 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         ) : null}
       </nav>
     </SidebarRowPropertiesContext.Provider>
+  );
+}
+
+/** A Pinned or Settled target shown only while a row is dragged and the list has none. */
+function SidebarRowDropSlot(props: {
+  readonly label: string;
+  readonly lit: boolean;
+  readonly zone: "pinned" | "completed";
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className="sidebar-row-drop-slot"
+      data-drop-lit={props.lit ? "true" : undefined}
+      data-sidebar-row-drop={props.zone}
+    >
+      {props.label}
+    </div>
   );
 }
 
@@ -1573,7 +1620,10 @@ function ActivityThreadList(props: {
   readonly counted?: boolean;
   /** Whose folded Status groups this window remembers. */
   readonly mode?: SidebarActivityMode;
+  /** The Pinned group takes a dragged row to pin it, where the host has list pins. */
+  readonly pinTarget?: boolean;
 }) {
+  const pinnedLit = useLitSidebarRowDropZone() === "pinned";
   // Every other group is bounded by its day. "Earlier" is everything older than
   // a week, so it is the one group that only grows, and left open it pushed the
   // recent groups' neighbours off the bottom of a feed meant for what happened
@@ -1632,7 +1682,17 @@ function ActivityThreadList(props: {
             ? group.threads
             : group.threads.filter((thread) => thread.navigationId === props.activeThreadId);
         return (
-          <section aria-label={group.label} className="activity-nav__group" key={group.id}>
+          <section
+            aria-label={group.label}
+            className="activity-nav__group"
+            key={group.id}
+            {...(group.id === "pinned" && props.pinTarget === true
+              ? {
+                  "data-sidebar-row-drop": "pinned",
+                  "data-drop-lit": pinnedLit ? "true" : undefined,
+                }
+              : {})}
+          >
             {folds ? (
               <h2 className="oct-nav-group sidebar-section">
                 <OctantButton
@@ -1656,6 +1716,7 @@ function ActivityThreadList(props: {
             <div className="activity-nav__threads" id={folds ? threadsId : undefined}>
               {threads.map((thread) => (
                 <ActivityThreadButton
+                  {...(group.id === "pinned" ? { inPinnedGroup: true } : {})}
                   actions={props.actions}
                   {...(props.activeThreadId === undefined
                     ? {}
@@ -1675,6 +1736,8 @@ function ActivityThreadList(props: {
 }
 
 function ActivityThreadButton(props: {
+  /** The row sits in the Pinned group, so dragging it out unpins it. */
+  readonly inPinnedGroup?: boolean;
   readonly lineageThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly actions: ThreadRowActions;
   readonly activeThreadId?: string;
@@ -1709,6 +1772,19 @@ function ActivityThreadButton(props: {
     : NO_THREAD_ROW_STATE;
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
+  const fileDrop = useThreadRowFileDrop(
+    () => {
+      tabs?.openAsPreview(props.thread.threadId);
+      props.onSelectThread(props.thread.navigationId);
+    },
+    drag === null
+      ? undefined
+      : (files) =>
+          drag.offerFiles(
+            { rowId, threadId: props.thread.threadId, title: props.thread.title },
+            files,
+          ),
+  );
   const row = (
     <OctantButton
       aria-current={selected ? "page" : undefined}
@@ -1730,6 +1806,7 @@ function ActivityThreadButton(props: {
         props.onSelectThread(props.thread.navigationId);
       }}
       onDoubleClick={() => tabs?.keep(props.thread.threadId)}
+      {...fileDrop}
       {...(drag === null
         ? {}
         : {
@@ -1742,6 +1819,9 @@ function ActivityThreadButton(props: {
                 ...(props.thread.projectId === undefined
                   ? {}
                   : { projectId: props.thread.projectId }),
+                ...(props.thread.pinned === true ? { pinned: true } : {}),
+                ...(props.thread.shelf === undefined ? {} : { shelf: props.thread.shelf }),
+                ...(props.inPinnedGroup === true ? { fromPinned: true } : {}),
               }),
             onPointerMove: drag.onPointerMove,
             onPointerUp: drag.onPointerUp,

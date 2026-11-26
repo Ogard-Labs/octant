@@ -41,6 +41,7 @@ import {
   threadRowPullRequestDestinations,
 } from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
+import { useThreadRowFileDrop } from "./sidebarRowDrop";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
 import {
@@ -625,9 +626,24 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         threadId: props.thread.threadId,
         title: props.thread.title,
         ...(props.thread.projectId === undefined ? {} : { projectId: props.thread.projectId }),
+        ...(props.thread.pinned === true ? { pinned: true } : {}),
+        ...(props.thread.shelf === undefined ? {} : { shelf: props.thread.shelf }),
       });
     },
     [drag, props.thread, rowId],
+  );
+  const fileDrop = useThreadRowFileDrop(
+    () => {
+      tabs?.openAsPreview(props.thread.threadId);
+      props.onSelectThread(rowId);
+    },
+    drag === null
+      ? undefined
+      : (files) =>
+          drag.offerFiles(
+            { rowId, threadId: props.thread.threadId, title: props.thread.title },
+            files,
+          ),
   );
   const activity = threadRowActivity(props.thread);
   const unread = activity === "unread" || props.thread.unread === true;
@@ -689,6 +705,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       }
       onClick={onSelect}
       onDoubleClick={() => tabs?.keep(props.thread.threadId)}
+      {...fileDrop}
       {...(drag === null
         ? {}
         : {

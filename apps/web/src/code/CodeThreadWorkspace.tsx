@@ -996,16 +996,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     refused: serverCheckout || props.pairedDevice === true,
     onFiles: (files) => void attachFiles(files),
   });
-  // A picture marked up in this thread's Browser arrives here as a file and
-  // meets the same checks as one dropped on the composer.
+  // A picture marked up in this thread's Browser, or a file dropped on the
+  // thread's sidebar row, arrives here and meets the same checks as one
+  // dropped on the composer.
   useThreadImageOffers(
     threadImageOfferKey("code", String(props.threadId)),
     async (file, arrival): Promise<ThreadImageVerdict> => {
       let reason: string | undefined;
       if (props.attachmentClient === undefined) {
-        reason = "Image attachments are unavailable on this host.";
+        reason = isImageAttachment(file)
+          ? "Image attachments are unavailable on this host."
+          : "Attachments are unavailable on this host.";
         attachments.refuse(reason);
-      } else if (seesImages.takesImages === false) {
+      } else if (seesImages.takesImages === false && isImageAttachment(file)) {
         reason = seesImages.refusal ?? "Choose a vision model to attach images.";
         attachments.refuse(reason);
       } else {

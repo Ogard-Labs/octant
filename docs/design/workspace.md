@@ -770,6 +770,35 @@ composer in Chat, Work and Code; a Work task marked Done shows its Done banner
 instead. A row's hover slot offers **Settle**, or **Un-settle** once the row
 has settled, in place of Archive, which stays in the row menu.
 
+**Dragging a row within the sidebar** (maintainer decision, 2026-11-26) uses the
+same pointer drag as a drop on a pane. Dropped on the **Pinned** group a Code
+row is pinned; on the **Settled** shelf a row is settled. Dragged out of the
+Pinned group, the Settled shelf or the Snoozed shelf, onto anywhere else in the
+list, a row is unpinned, un-settled or woken. Snoozed is never a target,
+because a snooze needs a time; the row menu and the palette keep it. While the
+row is over a target, that group or shelf takes the pane drop's wash and the
+dragged label leads with what letting go does ("Pin", "Unpin", "Settle",
+"Un-settle", "Wake"); a list that shows no Pinned group (the Project tree, or
+Status with nothing pinned) or no Settled shelf draws a slot for it while a row
+is dragged. Each drop sends the mode's ordinary command through the row menu's
+own handler, so the host decides and a refusal shows its sentence. Every drop
+has the row menu's item as its keyboard path, and the drag has no animation of
+its own to still under reduced motion.
+
+**Undo** (maintainer decision, 2026-11-26). Every sidebar state change the host
+accepts offers **Undo** in a notice for five seconds: pin, unpin, Settle, Mark
+done, Un-settle or Reopen, snooze and wake, whether it came from the row menu,
+a drag or the palette. Undo is a new person command, never a rewrite: it sends
+the inverse command (Un-settle for a Settle or Mark done; Mark done again for a
+reopened thread that was marked Done; Wake for a snooze), and the host may
+refuse it like any other, its sentence then showing. Undoing a wake snoozes the
+thread again only while its old wake time is still ahead; otherwise the thread
+stays awake and the notice says so. A newer change replaces the notice.
+Archive has no Undo, because no command takes it back. While the notice shows,
+⌘Z (Ctrl+Z off Apple platforms) runs it, but only with focus outside a text
+field, an editor and a terminal, which keep the chord as their own undo; it is
+not a remappable binding.
+
 **Settled** is the only name people see for this state, beside the board's
 Done: the sidebar group, the row-menu actions (**Settle**, **Un-settle**), the
 Review page action, the Settings rows and the host's refusal sentences all use
@@ -996,6 +1025,15 @@ composer attaches Code threads of its own Project only, and any other
 composer the Code threads of the window's lead Project, exactly as in a
 window that shows only that Project. Image and file drops, and dropping a thread on a pane rather
 than its composer, stay pane and attachment behaviour.
+
+**Files dropped on a row.** Files dragged from the computer onto a Chat, Work
+or Code thread row open that thread the way a click does, and the files go to
+its composer once it is open, through the composer's own attach path, so every
+limit, model check and message a drop on the composer has applies. Until the
+composer opens they wait in this window's memory only (a reload drops them, as
+a draft keeps no attachments), at most eight for a thread; past that the
+person is told to drop the rest on the composer. A drag that carries no files
+passes over the row.
 
 ### Find in a thread, and a new thread from a selection
 

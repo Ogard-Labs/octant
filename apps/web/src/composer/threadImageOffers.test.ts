@@ -3,6 +3,7 @@ import {
   MAX_WAITING_OFFERS,
   MAX_WAITING_OFFERS_IN_ALL,
   createThreadImageOffers,
+  offerFilesToThread,
   type ThreadImageVerdict,
 } from "./threadImageOffers";
 
@@ -155,5 +156,23 @@ describe("pictures offered to a thread's message", () => {
     const unsubscribe = offers.subscribe("code:t1", () => accepted);
     unsubscribe();
     await expect(offers.offer("code:t1", file("a.png"))).resolves.toEqual({ status: "waiting" });
+  });
+
+  it("keeps files dropped on a sidebar row for the thread's composer, in order", async () => {
+    const offers = createThreadImageOffers();
+    const notes = new File(["n"], "notes.md", { type: "text/markdown" });
+    await expect(offerFilesToThread("chat", "t1", [file("a.png"), notes], offers)).resolves.toBe(
+      false,
+    );
+    const taker = vi.fn((_taken: File) => accepted);
+    offers.subscribe("chat:t1", taker);
+    await vi.waitFor(() => expect(taker).toHaveBeenCalledTimes(2));
+    expect(taker.mock.calls.map(([taken]) => taken.name)).toEqual(["a.png", "notes.md"]);
+  });
+
+  it("says when a row's dropped files find no room to wait", async () => {
+    const offers = createThreadImageOffers();
+    const many = Array.from({ length: MAX_WAITING_OFFERS + 1 }, (_, index) => file(`${index}.png`));
+    await expect(offerFilesToThread("work", "t1", many, offers)).resolves.toBe(true);
   });
 });

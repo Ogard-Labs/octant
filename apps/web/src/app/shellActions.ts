@@ -34,6 +34,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
+import type { ThreadRestRow, ThreadRestUndoNotice } from "./threadRestRowActions";
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import type { ChildPendingRequest } from "../pendingRequests/pendingRequests";
@@ -158,6 +159,8 @@ export type ShellActions = {
   readonly requestMoveToProject: (request: ThreadMoveRequest | undefined) => void;
   readonly noteCanvasReferences: NonNullable<WorkspaceViewProps["onCanvasReferencesObserved"]>;
   readonly noteHandedOffDocument: (mode: OctantMode, threadId: string, canvasId: string) => void;
+  /** Shows Undo for a sidebar state change; a newer change replaces it. */
+  readonly offerThreadRestUndo: (notice: ThreadRestUndoNotice) => void;
   readonly onComputerUseSessionChange: NonNullable<
     WorkspaceViewProps["onComputerUseSessionChange"]
   >;
@@ -407,6 +410,8 @@ export type ShellActions = {
   /** Shows a tool that is not on screen, and leaves one that is. */
   readonly showDockToolFromRest: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;
   readonly touchMemoryRevision: ProjectController["touchMemoryRevision"];
+  /** The sidebar row a state change starts from, so its Undo can put it back. */
+  readonly threadRestRow: (mode: OctantMode, threadId: string) => ThreadRestRow | undefined;
   readonly tryWorkRestCommand: (
     threadId: string,
     command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,

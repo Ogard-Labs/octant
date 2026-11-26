@@ -1,7 +1,7 @@
 import type { ContextHealth } from "@octant/contracts/context";
 import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import { DEFAULT_SIDEBAR_ROW_PROPERTIES, type SidebarRowProperties } from "@octant/contracts/shell";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -905,6 +905,8 @@ describe("ProjectSidebarSection activity view", () => {
       onPointerUp: vi.fn(),
       onPointerCancel: vi.fn(),
       consumeThreadClickSuppression: vi.fn(() => suppressNextClick),
+      draggingRow: null,
+      offerFiles: vi.fn(),
     };
 
     try {
@@ -956,6 +958,207 @@ describe("ProjectSidebarSection activity view", () => {
       suppressNextClick = false;
       fireEvent.click(row);
       expect(onSelectThread).toHaveBeenCalledWith("thread-idle-a");
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+
+  function sidebarDrag(
+    overrides: Partial<SidebarThreadDragTargets> = {},
+  ): SidebarThreadDragTargets {
+    return {
+      beginThreadDrag: vi.fn(),
+      onPointerMove: vi.fn(),
+      onPointerUp: vi.fn(),
+      onPointerCancel: vi.fn(),
+      consumeThreadClickSuppression: vi.fn(() => false),
+      draggingRow: null,
+      offerFiles: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  function renderCodeStatus(
+    drag: SidebarThreadDragTargets,
+    threads: ReadonlyArray<ChatThreadNavigationItem>,
+    onSelectThread = vi.fn(),
+  ) {
+    return render(
+      <SidebarThreadDragContext.Provider value={drag}>
+        <ProjectSidebarSection
+          activityMode="code"
+          archivedProjects={[]}
+          availabilityByProject={new Map()}
+          now={new Date("2026-08-14T15:00:00.000Z")}
+          onArchive={vi.fn()}
+          onMove={vi.fn()}
+          onProjectOpen={vi.fn()}
+          onReorder={vi.fn()}
+          onRestore={vi.fn()}
+          onSelectThread={onSelectThread}
+          projects={[chatProjectA]}
+          threadActions={{ onPinThread: vi.fn(), onCompleteThread: vi.fn() }}
+          threads={threads}
+        />
+      </SidebarThreadDragContext.Provider>,
+    );
+  }
+
+  it("pins a Code thread dropped on Pinned and unpins one dragged out", () => {
+    window.localStorage.clear();
+    const drag = sidebarDrag();
+    try {
+      const { container, rerender } = renderCodeStatus(drag, [
+        {
+          projectId: String(chatProjectA.id),
+          threadId: "thread-pinned",
+          title: "Pinned plan",
+          pinned: true,
+          updatedAt: "2026-08-14T14:00:00.000Z",
+        },
+        {
+          projectId: String(chatProjectA.id),
+          threadId: "thread-loose",
+          title: "Loose ends",
+          updatedAt: "2026-08-14T13:00:00.000Z",
+        },
+      ]);
+      // A row in the Pinned group starts its drag as one that leaves Pinned.
+      fireEvent.pointerDown(screen.getByRole("button", { name: /Pinned plan/ }), {
+        button: 0,
+        pointerId: 1,
+      });
+      expect(drag.beginThreadDrag).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ pinned: true, fromPinned: true }),
+      );
+      expect(container.querySelector('[data-sidebar-row-drop="pinned"]')).toHaveAccessibleName(
+        "Pinned",
+      );
+      expect(container.querySelector('nav[data-sidebar-row-drop="list"]')).not.toBeNull();
+
+      // With no pinned thread, dragging a row offers a Pinned slot to drop on.
+      const dragging = sidebarDrag({
+        draggingRow: { rowId: "thread-loose", threadId: "thread-loose", title: "Loose ends" },
+      });
+      rerender(
+        <SidebarThreadDragContext.Provider value={dragging}>
+          <ProjectSidebarSection
+            activityMode="code"
+            archivedProjects={[]}
+            availabilityByProject={new Map()}
+            now={new Date("2026-08-14T15:00:00.000Z")}
+            onArchive={vi.fn()}
+            onMove={vi.fn()}
+            onProjectOpen={vi.fn()}
+            onReorder={vi.fn()}
+            onRestore={vi.fn()}
+            onSelectThread={vi.fn()}
+            projects={[chatProjectA]}
+            threadActions={{ onPinThread: vi.fn(), onCompleteThread: vi.fn() }}
+            threads={[
+              {
+                projectId: String(chatProjectA.id),
+                threadId: "thread-loose",
+                title: "Loose ends",
+                updatedAt: "2026-08-14T13:00:00.000Z",
+              },
+            ]}
+          />
+        </SidebarThreadDragContext.Provider>,
+      );
+      expect(
+        container.querySelector('.sidebar-row-drop-slot[data-sidebar-row-drop="pinned"]'),
+      ).not.toBeNull();
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+
+  it("settles a thread dropped on the Settled shelf and un-settles one dragged out", () => {
+    window.localStorage.clear();
+    const drag = sidebarDrag({
+      draggingRow: { rowId: "thread-open", threadId: "thread-open", title: "Open work" },
+    });
+    try {
+      const { container } = renderCodeStatus(drag, [
+        {
+          projectId: String(chatProjectA.id),
+          threadId: "thread-open",
+          title: "Open work",
+          updatedAt: "2026-08-14T13:00:00.000Z",
+        },
+      ]);
+      // Nothing has settled yet, so the dragged row gets a Settled slot.
+      expect(
+        container.querySelector('.sidebar-row-drop-slot[data-sidebar-row-drop="completed"]'),
+      ).toHaveTextContent("Settled");
+    } finally {
+      window.localStorage.clear();
+    }
+    cleanup();
+    const settledDrag = sidebarDrag();
+    try {
+      const { container } = renderCodeStatus(settledDrag, [
+        {
+          projectId: String(chatProjectA.id),
+          threadId: "thread-done",
+          title: "Finished work",
+          completedAt: "2026-08-14T14:00:00.000Z",
+          shelf: "completed",
+          updatedAt: "2026-08-14T14:00:00.000Z",
+        },
+      ]);
+      const shelf = container.querySelector('[data-sidebar-row-drop="completed"]');
+      expect(shelf).toHaveAttribute("data-shelf", "completed");
+      fireEvent.click(within(shelf as HTMLElement).getByText("Settled"));
+      fireEvent.pointerDown(screen.getByRole("button", { name: /Finished work/ }), {
+        button: 0,
+        pointerId: 1,
+      });
+      expect(settledDrag.beginThreadDrag).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ shelf: "completed" }),
+      );
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+
+  it("opens the thread and attaches files dropped on its row", () => {
+    window.localStorage.clear();
+    const drag = sidebarDrag();
+    const onSelectThread = vi.fn();
+    try {
+      renderCodeStatus(
+        drag,
+        [
+          {
+            projectId: String(chatProjectA.id),
+            threadId: "thread-a",
+            title: "Release notes",
+            updatedAt: "2026-08-14T13:00:00.000Z",
+          },
+        ],
+        onSelectThread,
+      );
+      const row = screen.getByRole("button", { name: /Release notes/ });
+      const file = new File(["notes"], "notes.md", { type: "text/markdown" });
+      const dataTransfer = { types: ["Files"], files: [file], dropEffect: "none" };
+      fireEvent.dragOver(row, { dataTransfer });
+      expect(row).toHaveAttribute("data-file-drop-over", "true");
+      fireEvent.drop(row, { dataTransfer });
+
+      expect(onSelectThread).toHaveBeenCalledWith("thread-a");
+      expect(drag.offerFiles).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: "thread-a" }),
+        [file],
+      );
+      expect(row).not.toHaveAttribute("data-file-drop-over");
+
+      // A drag that carries no files, such as text, passes over the row.
+      fireEvent.drop(row, { dataTransfer: { types: ["text/plain"], files: [] } });
+      expect(drag.offerFiles).toHaveBeenCalledTimes(1);
     } finally {
       window.localStorage.clear();
     }

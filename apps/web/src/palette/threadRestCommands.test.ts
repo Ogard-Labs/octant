@@ -24,8 +24,11 @@ function shellActions() {
     snoozeCodeThread: vi.fn(async () => ({ status: "ok" as const })),
     wakeCodeThread: vi.fn(async () => ({ status: "ok" as const })),
     pinCodeThread: vi.fn(async () => true),
-    runWorkRestCommand: vi.fn(async () => {}),
+    markCodeThreadDone: vi.fn(async () => ({ status: "ok" as const })),
+    tryWorkRestCommand: vi.fn(async () => ({ status: "ok" as const })),
     setThreadExportNotice: vi.fn(),
+    offerThreadRestUndo: vi.fn(),
+    threadRestRow: vi.fn(() => undefined),
   };
 }
 
@@ -193,7 +196,7 @@ describe("the commands for the thread in front", () => {
     const shell = shellActions();
     run(frontCommands("work", {}, shell), "Settle");
     run(frontCommands("work", { snooze: SNOOZE }, shell), "Wake");
-    const built = (shell.runWorkRestCommand.mock.calls as unknown[][]).map((call) => {
+    const built = (shell.tryWorkRestCommand.mock.calls as unknown[][]).map((call) => {
       const [threadId, command] = call as [string, (version: number) => unknown];
       return [threadId, command(4)];
     });

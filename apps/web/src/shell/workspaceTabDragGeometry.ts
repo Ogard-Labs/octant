@@ -1,4 +1,5 @@
 import type { PaneId, WorkspaceTab } from "@octant/contracts/shell";
+import type { SidebarRowDropAction, SidebarRowDropZone } from "../projects/sidebarRowDrop";
 
 export interface WorkspaceDragPoint {
   readonly x: number;
@@ -32,7 +33,13 @@ export type WorkspaceSurfaceDropDestination =
       readonly targetPaneId: PaneId;
       readonly edge: WorkspaceSurfaceDropEdge;
     }
-  | { readonly kind: "composer"; readonly composerKey: string };
+  | { readonly kind: "composer"; readonly composerKey: string }
+  /** A sidebar row dropped in the sidebar: it pins, settles, wakes or undoes one. */
+  | {
+      readonly kind: "sidebar";
+      readonly zone: SidebarRowDropZone;
+      readonly action: SidebarRowDropAction;
+    };
 
 export interface ComposerThreadDropZone {
   readonly key: string;

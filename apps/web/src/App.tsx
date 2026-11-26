@@ -110,7 +110,12 @@ import { SurfaceLoading } from "./surface/SurfaceLoading";
 import { DockModuleBoundary } from "./shell/DockModuleBoundary";
 import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
-import { threadRestRowActions } from "./app/threadRestRowActions";
+import {
+  threadRestRowActions,
+  type ThreadRestRow,
+  type ThreadRestUndoNotice,
+} from "./app/threadRestRowActions";
+import { ThreadRestUndoToast } from "./app/ThreadRestUndoToast";
 import { TerminalShellContext, type TerminalShellFacts } from "./shell/terminalSlot";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
@@ -523,6 +528,12 @@ import {
 } from "./shell/dockEnvironmentStrip";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
+import {
+  measureSidebarRowDropZones,
+  resolveSidebarRowDropZone,
+  sidebarRowDropAction,
+} from "./projects/sidebarRowDrop";
+import { offerFilesToThread, THREAD_FILE_OFFERS_FULL } from "./composer/threadImageOffers";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
 import {
   CoordinatorBoundsDialog,
@@ -1771,9 +1782,33 @@ function LaunchedShell(
     ...(controller.workspace?.focusedPaneId === undefined
       ? {}
       : { focusedPaneId: controller.workspace.focusedPaneId }),
+    resolveSidebarDrop: (point, source) => {
+      const row = sidebarDragRows.current.get(source.dragKey);
+      if (row === undefined) return null;
+      const zone = resolveSidebarRowDropZone(point, measureSidebarRowDropZones());
+      if (zone === null) return null;
+      const mode = sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current);
+      const action = sidebarRowDropAction({ row, zone, canPin: mode === "code" });
+      // Over the sidebar a row never falls through to the panes behind it.
+      return action === null ? null : { kind: "sidebar", zone, action };
+    },
     onDrop: (source, destination) => {
       const row = sidebarDragRows.current.get(source.dragKey);
       sidebarDragRows.current.delete(source.dragKey);
+      if (destination.kind === "sidebar") {
+        if (row === undefined) return;
+        // The same handlers as the row menu, so the host decides, a refusal
+        // shows its sentence, and an accepted change offers Undo.
+        const mode = sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current);
+        const rest = threadRestRowActions(actions)[mode];
+        const id = row.rowId;
+        if (destination.action === "pin") rest.onPinThread?.(id, true);
+        else if (destination.action === "unpin") rest.onPinThread?.(id, false);
+        else if (destination.action === "settle") rest.onCompleteThread?.(id);
+        else if (destination.action === "reopen") rest.onReopenThread?.(id);
+        else rest.onWakeThread?.(id);
+        return;
+      }
       if (destination.kind === "composer") {
         if (row === undefined || row.threadId.trim().length === 0) {
           void deliverComposerThreadDrop({
@@ -1866,6 +1901,16 @@ function LaunchedShell(
       onPointerCancel: workspaceDrag.onPointerCancel,
       consumeThreadClickSuppression: (rowId) =>
         workspaceDrag.consumeSuppressedClick(`thread:${rowId}`),
+      draggingRow:
+        workspaceDrag.active === null
+          ? null
+          : (sidebarDragRows.current.get(workspaceDrag.active.source.dragKey) ?? null),
+      offerFiles: (row, files) => {
+        const mode = sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current);
+        void offerFilesToThread(mode, row.threadId, files).then((full) => {
+          if (full) setThreadExportNotice(THREAD_FILE_OFFERS_FULL);
+        });
+      },
     }),
     [activeMode, workspaceDrag],
   );
@@ -2096,6 +2141,12 @@ function LaunchedShell(
   // The row menu closes before this operation finishes. Keep its progress or
   // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
+  // One Undo at a time: a newer sidebar change replaces the notice and its
+  // five seconds start again.
+  const [threadRestUndo, setThreadRestUndo] = useState<{
+    readonly notice: ThreadRestUndoNotice;
+    readonly sequence: number;
+  }>();
   // The running coordinator whose limits a person is changing, from its row
   // menu or its pane's header menu.
   const [coordinatorBoundsThreadId, setCoordinatorBoundsThreadId] = useState<CodeThreadId>();
@@ -6239,6 +6290,8 @@ function LaunchedShell(
       moveProject: projectController.move,
       noteCanvasReferences,
       noteHandedOffDocument,
+      offerThreadRestUndo: (notice) =>
+        setThreadRestUndo((current) => ({ notice, sequence: (current?.sequence ?? 0) + 1 })),
       onComputerUseSessionChange,
       openAgentsCenter,
       openArchive,
@@ -6421,6 +6474,7 @@ function LaunchedShell(
       showDockToolFromRest,
       runDockToolMenu,
       touchMemoryRevision: projectController.touchMemoryRevision,
+      threadRestRow,
       tryWorkRestCommand,
       updateSettings: controller.updateSettings,
       viewAllChatProjectThreads,
@@ -7080,6 +7134,19 @@ function LaunchedShell(
             : "The host could not change this thread.",
       };
     }
+  }
+  function threadRestRow(mode: OctantMode, threadId: string): ThreadRestRow | undefined {
+    const rows =
+      mode === "code"
+        ? navigationModel.codeSidebarThreads
+        : mode === "work"
+          ? navigationModel.workProjectThreads
+          : chatController.status === "ready"
+            ? navigationModel.markedChatNavigation
+            : [];
+    return rows.find(
+      (row) => (row.navigationId ?? row.threadId) === threadId || row.threadId === threadId,
+    );
   }
   // A sidebar row has nowhere of its own to report a refusal, so its answer
   // reads where thread notices already appear.
@@ -10240,6 +10307,13 @@ function LaunchedShell(
             detail={`This thread: ${REPLY_DETAIL_DESCRIPTIONS[replyDetailNotice]}`}
             onDismiss={() => setReplyDetailNotice(undefined)}
             title={`Reply detail: ${REPLY_DETAIL_LABELS[replyDetailNotice]}`}
+          />
+        )}
+        {threadRestUndo === undefined ? null : (
+          <ThreadRestUndoToast
+            key={threadRestUndo.sequence}
+            notice={threadRestUndo.notice}
+            onDismiss={() => setThreadRestUndo(undefined)}
           />
         )}
         {threadExportNotice === undefined ? null : (

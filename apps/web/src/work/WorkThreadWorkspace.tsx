@@ -3,7 +3,11 @@ import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-cl
 import { settledThreadNotice } from "../composer/settledThreadNotice";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import { TurnSubagentRows } from "../agents/threadSubagents";
-import { attachAllowingFiles, attachmentMediaType } from "../composer/attachmentMediaType";
+import {
+  attachAllowingFiles,
+  attachmentMediaType,
+  isImageAttachment,
+} from "../composer/attachmentMediaType";
 import {
   ProjectMemoryProposalPrompt,
   type ProjectMemoryProposalClient,
@@ -2609,7 +2613,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     threadImageOfferKey("work", String(props.threadId)),
     (file, arrival): ThreadImageVerdict => {
       let reason: string | undefined;
-      if (imageSupport === false) {
+      // A file dropped on the sidebar row arrives here too; only a picture
+      // needs a model that reads images, as on a drop on the composer.
+      if (imageSupport === false && isImageAttachment(file)) {
         reason = "Choose an image-capable model to attach images.";
         images.refuse(reason);
       } else {

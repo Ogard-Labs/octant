@@ -18,7 +18,10 @@ export const MAX_WAITING_OFFERS_IN_ALL = 16;
 
 export type ThreadImageOfferKey = string;
 
-export function threadImageOfferKey(mode: "work" | "code", threadId: string): ThreadImageOfferKey {
+export function threadImageOfferKey(
+  mode: "chat" | "work" | "code",
+  threadId: string,
+): ThreadImageOfferKey {
   return `${mode}:${threadId}`;
 }
 
@@ -126,8 +129,32 @@ export function createThreadImageOffers(): ThreadImageOffers {
   };
 }
 
-/** This window's offers: the Browser makes them, the thread composers take them. */
+/**
+ * This window's offers: the Browser makes them, and so do files dropped on a
+ * sidebar row; the thread composers take them.
+ */
 export const threadImageOffers = createThreadImageOffers();
+
+export const THREAD_FILE_OFFERS_FULL = `A thread holds at most ${MAX_WAITING_OFFERS} files until its composer opens. Drop the rest on the composer.`;
+
+/**
+ * Files dropped on a sidebar row, handed to that thread's composer in order.
+ * The composer applies its own limits and says what it refused; the answer
+ * here is only whether some files found no room to wait.
+ */
+export async function offerFilesToThread(
+  mode: "chat" | "work" | "code",
+  threadId: string,
+  files: ReadonlyArray<File>,
+  offers: ThreadImageOffers = threadImageOffers,
+): Promise<boolean> {
+  let full = false;
+  for (const file of files) {
+    const result = await offers.offer(threadImageOfferKey(mode, threadId), file);
+    if (result.status === "full") full = true;
+  }
+  return full;
+}
 
 /**
  * Take the pictures offered to this thread while its composer is mounted. The
