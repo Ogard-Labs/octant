@@ -40,6 +40,11 @@ export interface ThreadRestUndoNotice {
 
 let lastRestChange = 0;
 
+/** The number of the newest sidebar change asked for in this window. */
+export function latestThreadRestChange(): number {
+  return lastRestChange;
+}
+
 export type ThreadRestShellActions = Pick<
   ShellActions,
   | "completeChatThread"

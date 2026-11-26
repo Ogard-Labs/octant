@@ -136,4 +136,36 @@ describe("the sidebar Undo notice", () => {
     view.unmount();
     expect(threadRestUndoStore.current()).toBeUndefined();
   });
+  it("offers no Undo for a change its old host answers after the window moved", async () => {
+    // A fresh window: earlier tests' notices raised the store's newest number.
+    vi.resetModules();
+    const { threadRestRowActions } = await import("./threadRestRowActions");
+    const { ThreadRestUndoHost } = await import("./ThreadRestUndoToast");
+    const answers: Array<(outcome: { readonly status: "ok" }) => void> = [];
+    const completeCodeThread = vi.fn(
+      () => new Promise<{ readonly status: "ok" }>((resolve) => answers.push(resolve)),
+    );
+    const actions = threadRestRowActions({
+      threadRestRow: () => ({ title: "Plan" }),
+      setThreadExportNotice: vi.fn(),
+      completeCodeThread,
+    } as never);
+    const view = render(<ThreadRestUndoHost hostKey="http://127.0.0.1:4000" />);
+    const settle = async (count: number) => {
+      actions.code.onCompleteThread?.("00000000-0000-4000-8000-0000000000c1");
+      await vi.waitFor(() => expect(completeCodeThread).toHaveBeenCalledTimes(count), {
+        timeout: 5_000,
+      });
+    };
+
+    await settle(1);
+    await act(async () => answers[0]?.({ status: "ok" }));
+    expect(screen.getByRole("button", { name: "Undo" })).toBeVisible();
+
+    await settle(2);
+    view.rerender(<ThreadRestUndoHost hostKey="https://other-host.example" />);
+    await act(async () => answers[1]?.({ status: "ok" }));
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    view.unmount();
+  });
 });

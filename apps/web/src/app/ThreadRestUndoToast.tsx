@@ -65,7 +65,7 @@ export function ThreadRestUndoHost(props: {
    */
   readonly hostKey: string;
 }) {
-  useEffect(() => threadRestUndoStore.dismiss, [props.hostKey]);
+  useEffect(() => threadRestUndoStore.retire, [props.hostKey]);
   const notice = useSyncExternalStore(
     threadRestUndoStore.subscribe,
     threadRestUndoStore.current,

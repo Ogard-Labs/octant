@@ -59,8 +59,7 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { couldNotLoad, WindowNoticeContext } from "../shell/windowNotice";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
@@ -600,9 +599,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // A file dropped on this thread's sidebar row waits here for the composer
   // and takes the same path as one chosen in it, with the same limits.
   // The offer store loads on its own, so Chat's first load does not carry it.
+  // A failed load says nothing here: a drop loads the same module first and
+  // says so itself when it cannot, so a failure here, with nothing dropped,
+  // would only warn on every Chat thread opened.
   const takeOfferedFile = useRef<(file: File) => void>(() => {});
   const offeredThreadId = view === undefined ? undefined : String(view.thread.id);
-  const sayWindowNotice = useContext(WindowNoticeContext);
   useEffect(() => {
     if (offeredThreadId === undefined) return;
     let stop: (() => void) | undefined;
@@ -611,15 +612,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       ({ takeChatFiles }) => {
         if (!closed) stop = takeChatFiles(offeredThreadId, (file) => takeOfferedFile.current(file));
       },
-      () => {
-        if (!closed) sayWindowNotice?.(couldNotLoad("files dropped on this thread's row"));
-      },
+      () => {},
     );
     return () => {
       closed = true;
       stop?.();
     };
-  }, [offeredThreadId, sayWindowNotice]);
+  }, [offeredThreadId]);
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
