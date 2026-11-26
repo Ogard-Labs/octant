@@ -631,6 +631,13 @@ export function ThreadScreen(props: ThreadScreenProps) {
   // A search hit lands on its turn once that turn has been read.
   const focusIndex = transcriptRows.findIndex((row) => row.focused);
   const landed = useRef<string | undefined>(undefined);
+  // A search hit opened in this screen is in the conversation, so a full
+  // view (the Browser) gives way to it.
+  useEffect(() => {
+    if (props.focusTurnId === undefined) return;
+    setViewFloating(false);
+    setSurface("chat");
+  }, [props.focusTurnId]);
   useEffect(() => {
     if (focusIndex < 0 || props.focusTurnId === undefined) return;
     if (landed.current === props.focusTurnId) return;

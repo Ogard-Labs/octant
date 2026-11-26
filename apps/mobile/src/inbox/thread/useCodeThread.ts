@@ -98,9 +98,11 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     [enabled, guard, identity, threadId, transport, ui],
   );
 
+  // A new hit loads its page; the thread opened again with no hit (its row
+  // tapped) leaves an older page for the newest, as a fresh open does.
   const lookedFor = useRef(focusOperationId);
   useEffect(() => {
-    if (focusOperationId === undefined || focusOperationId === lookedFor.current) return;
+    if (focusOperationId === lookedFor.current) return;
     lookedFor.current = focusOperationId;
     pendingFocus.current = focusOperationId;
     anchor.current = undefined;

@@ -6,7 +6,9 @@ import { expect, it, vi } from "vitest";
 import { createSelectedThreadGuard } from "./selectedThreadGuard";
 import { useCodeThread } from "./useCodeThread";
 
-const asked = vi.hoisted(() => ({ focus: [] as Array<string | undefined> }));
+const asked = vi.hoisted(() => ({
+  reads: [] as Array<{ readonly anchor: string | undefined; readonly focus: string | undefined }>,
+}));
 vi.mock("@octant/client-runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@octant/client-runtime")>()),
   loadMobileCodeThread: async () => ({
@@ -19,11 +21,12 @@ vi.mock("./codeConversationPage", () => ({
   loadCodeConversationPage: async (
     _transport: unknown,
     _threadId: string,
-    _anchor: string | undefined,
+    anchor: string | undefined,
     focus: string | undefined,
   ) => {
-    asked.focus.push(focus);
-    return { loaded: { turns: [] }, anchoredAt: undefined };
+    asked.reads.push({ anchor, focus });
+    // A hit's page is an older one, anchored on that hit.
+    return { loaded: { turns: [] }, anchoredAt: focus };
   },
   looksForTurnStartedElsewhere: () => false,
   refreshesForNewestTurn: () => false,
@@ -56,13 +59,20 @@ function Harness(props: { readonly focus: string | undefined }) {
   return null;
 }
 
-it("loads a second search hit in the thread already open, without opening it again", async () => {
+it("loads a second search hit's page in the thread already open, and the newest once its row is opened", async () => {
   guard.select("host:t1");
   const root = createRoot(document.createElement("div"));
   await act(async () => root.render(createElement(Harness, { focus: "turn-a" })));
   await act(async () => refresh?.());
-  expect(asked.focus).toEqual(["turn-a"]);
+  // Read again while on the first hit's older page: it stays there.
+  await act(async () => refresh?.());
   await act(async () => root.render(createElement(Harness, { focus: "turn-b" })));
-  expect(asked.focus).toEqual(["turn-a", "turn-b"]);
+  await act(async () => root.render(createElement(Harness, { focus: undefined })));
+  expect(asked.reads).toEqual([
+    { anchor: undefined, focus: "turn-a" },
+    { anchor: "turn-a", focus: undefined },
+    { anchor: undefined, focus: "turn-b" },
+    { anchor: undefined, focus: undefined },
+  ]);
   act(() => root.unmount());
 });
