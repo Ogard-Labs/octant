@@ -17,6 +17,7 @@ import { formatDateTime, type TimestampFormatPreference } from "../theme/timesta
 import { OctantButton } from "../ui/base/OctantButton";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { driverLabel } from "../providers/providerSettingsPresentation";
+import { poolProviderLimits, type PooledProvider, type PooledWindow } from "./pooledProviderLimits";
 import "../styles/usage.css";
 
 const CAPTURE_POLL_INTERVAL_MS = 2_000;
@@ -285,6 +286,18 @@ export function ProviderUsageLimitsPanel(props: {
   const visible = snapshot?.entries.filter((entry) => names.has(String(entry.providerInstanceId)));
   const captureFor = (entry: ProviderUsageLimitsEntry): ProviderLimitsCaptureStatus | undefined =>
     captures[String(entry.providerInstanceId)];
+  // A provider with more than one account reads as one row: a bar per limit
+  // window with a segment per account. Its accounts' own rows fold into it.
+  const pooled = useMemo(
+    () =>
+      poolProviderLimits({ entries: visible ?? [], instances: props.instances, now }).filter(
+        (provider) => provider.accounts.length > 1,
+      ),
+    [visible, props.instances, now],
+  );
+  const pooledIds = new Set(
+    pooled.flatMap((provider) => provider.accounts.map((account) => String(account.id))),
+  );
   // Providers that cannot report limits collapse into one closing row instead
   // of a wall of identical cards; the runtime's reason still names each.
   const unavailable =
@@ -311,10 +324,19 @@ export function ProviderUsageLimitsPanel(props: {
       ) : null}
       {visible === undefined || visible.length === 0 ? null : (
         <ul className="surface-list provider-limits__list">
+          {pooled.map((provider) => (
+            <PooledProviderRow
+              entries={visible}
+              key={provider.driverKind}
+              now={now}
+              provider={provider}
+            />
+          ))}
           {visible.map((entry) => {
             const instanceId = String(entry.providerInstanceId);
             const capture = captureFor(entry);
             if (entry.status === "unavailable" && capture === undefined) return null;
+            if (pooledIds.has(instanceId)) return null;
             const instance = names.get(instanceId);
             const scopeDetail =
               capture?.planTier !== undefined
@@ -472,6 +494,125 @@ export function ProviderUsageLimitsPanel(props: {
       {body}
     </SurfaceSection>
   );
+}
+
+/**
+ * One provider's accounts pooled: each limit window is one bar with a segment
+ * per account, side by side and ordered by which refills first, never an
+ * averaged share, since Octant does not know each account's plan size. Each
+ * account's full reading stays one disclosure away.
+ */
+function PooledProviderRow(props: {
+  readonly provider: PooledProvider;
+  readonly entries: ReadonlyArray<ProviderUsageLimitsEntry>;
+  readonly now: number;
+}) {
+  const first = props.provider.accounts[0];
+  const runtime = driverLabel(props.provider.driverKind as ProviderInstance["driverKind"]);
+  return (
+    <li className="surface-row provider-limits__row provider-limits__row--pooled">
+      <div className="surface-row__copy">
+        <span className="provider-limits__identity">
+          {first === undefined ? null : (
+            <ProviderGlyph displayName={runtime} driverKind={first.driverKind} size={16} />
+          )}
+          <span className="oct-row-label">{runtime}</span>
+        </span>
+        <span className="oct-row-detail">
+          {props.provider.accounts.length} accounts · each account counted on its own
+        </span>
+      </div>
+      <div className="surface-row__control">
+        <div className="provider-limits__details">
+          {props.provider.windows.length === 0 ? <p>No quota windows reported</p> : null}
+          {props.provider.windows.map((window) => (
+            <PooledWindowBar key={window.window} now={props.now} window={window} />
+          ))}
+          <details className="provider-limits__accounts">
+            <summary>Each account</summary>
+            {props.provider.accounts.map((account) => {
+              const entry = props.entries.find(
+                (candidate) => String(candidate.providerInstanceId) === String(account.id),
+              );
+              return entry === undefined ? null : (
+                <div className="provider-limits__account" key={String(account.id)}>
+                  <p className="oct-row-label">{account.displayName}</p>
+                  <EntryDetails entry={entry} now={props.now} runtime={runtime} />
+                </div>
+              );
+            })}
+          </details>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function PooledWindowBar(props: { readonly window: PooledWindow; readonly now: number }) {
+  const timestampFormat = useTimestampFormat();
+  const label = windowLabel(props.window.window);
+  return (
+    <div className="provider-limits__window" data-pooled-window={props.window.window}>
+      <div className="provider-limits__window-heading">
+        <span>{label}</span>
+        {props.window.soonestResetAt === undefined ? null : (
+          <time
+            dateTime={props.window.soonestResetAt}
+            title={formatTime(props.window.soonestResetAt, timestampFormat)}
+          >
+            Soonest reset {formatTime(props.window.soonestResetAt, timestampFormat)} ·{" "}
+            {resetCountdown(props.window.soonestResetAt, props.now)}
+          </time>
+        )}
+      </div>
+      <div className="provider-limits__segments">
+        {props.window.segments.map((segment) =>
+          segment.kind === "reading" && segment.remainingPercent !== undefined ? (
+            <meter
+              aria-label={`${segment.account}, ${label} remaining`}
+              key={segment.providerInstanceId}
+              max={100}
+              min={0}
+              value={segment.remainingPercent}
+            />
+          ) : (
+            <span
+              aria-hidden="true"
+              className="provider-limits__segment-empty"
+              data-state={segment.kind === "missing" ? "missing" : "unreported"}
+              key={segment.providerInstanceId}
+            />
+          ),
+        )}
+      </div>
+      <ul className="provider-limits__segment-legend">
+        {props.window.segments.map((segment) => (
+          <li data-segment={segment.kind} key={segment.providerInstanceId}>
+            <span>{segment.account}</span>
+            <span>{segmentReading(segment, timestampFormat)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function segmentReading(
+  segment: PooledWindow["segments"][number],
+  timestampFormat: TimestampFormatPreference | undefined,
+): string {
+  if (segment.kind === "missing") return "No reading";
+  const share =
+    segment.remainingPercent !== undefined
+      ? `${segment.remainingPercent}% left`
+      : segment.exhausted
+        ? "Limit reached"
+        : "Remaining not reported";
+  const reset =
+    segment.resetsAt === undefined
+      ? ""
+      : ` · resets ${formatTime(segment.resetsAt, timestampFormat)}`;
+  return `${share}${reset}${segment.stale ? " · stale" : ""}`;
 }
 
 /**

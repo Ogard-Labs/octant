@@ -399,7 +399,15 @@ capacity independently of ledger loading. Each provider window leads with its
 remaining percentage and an accessible meter, followed by its reset countdown.
 Account, model, and provider-instance scopes remain distinct. An elapsed reset
 shows Awaiting updated limits until a fresh reading arrives; it never implies
-refilled capacity. Provider cards use the shared surface typography and tokens
+refilled capacity. A provider with more than one account on this computer
+reads as one row (maintainer decision, 2026-11-26): each limit window is one
+bar with one segment per account, side by side and ordered by which refills
+first, and the bar names the soonest reset. There is no averaged share, since
+Octant does not know each account's plan size; an account with no reading for
+a window is a dashed segment labelled No reading, never zero; and the row says
+each account is counted on its own, because Octant has no account identity to
+tell that two entries are one account. Each account's full reading sits behind
+**Each account**. Provider cards use the shared surface typography and tokens
 and stack at narrow widths. Inside Settings, Usage has no title of its own: its
 controls sit above kit sections (overview, token totals, provider limits,
 breakdown), each a label over one card, and the Settings header is the only

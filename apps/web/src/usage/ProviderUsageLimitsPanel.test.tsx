@@ -651,8 +651,11 @@ describe("ProviderUsageLimitsPanel", () => {
         ]}
       />,
     );
-    expect(await screen.findByText("Home Claude")).toBeVisible();
-    expect(screen.getByText("Work Claude")).toBeVisible();
+    // Two accounts of one provider pool into one row; each account's full
+    // reading stays behind "Each account".
+    await userEvent.click(await screen.findByText("Each account"));
+    expect(screen.getAllByText("Home Claude").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Work Claude").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/Last updated/).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/Overage in use/)).toBeVisible();
     expect(screen.getAllByText(/Resets in /).length).toBeGreaterThanOrEqual(2);
@@ -782,5 +785,101 @@ describe("ProviderUsageLimitsPanel", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("groups two Claude accounts into one window bar with two segments", async () => {
+    const secondId = "33333333-3333-4333-8333-333333333333" as ProviderInstanceId;
+    const account = (id: ProviderInstanceId, utilization: number, resetsAt: string) => ({
+      providerInstanceId: id,
+      status: "available" as const,
+      source: "provider-runtime" as const,
+      observedAt: "2026-08-23T12:00:00.000Z",
+      limits: {
+        providerInstanceId: id,
+        scope: "account",
+        requests: { status: "unavailable" },
+        tokens: { status: "unavailable" },
+        concurrency: { status: "unavailable" },
+        retry: { status: "inactive" },
+        quota: "available",
+        source: "runtime-reported",
+        confidence: "high",
+        updatedAt: "2026-08-23T12:00:00.000Z",
+        rateLimitWindows: [
+          {
+            window: "five_hour",
+            status: "allowed",
+            utilization,
+            resetsAt,
+            observedAt: "2026-08-23T12:00:00.000Z",
+          },
+        ],
+      },
+    });
+    const data = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: "2026-08-23T12:00:00.000Z",
+      entries: [
+        account(providerInstanceId, 0.6, "2026-08-23T16:00:00.000Z"),
+        account(secondId, 0.1, "2026-08-23T14:00:00.000Z"),
+      ],
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[
+          { ...provider, driverKind: "claude", displayName: "Home Claude" } as ProviderInstance,
+          {
+            ...provider,
+            driverKind: "claude",
+            id: secondId,
+            displayName: "Work Claude",
+          } as ProviderInstance,
+        ]}
+      />,
+    );
+    await screen.findByText("Each account");
+    const bars = document.querySelectorAll("[data-pooled-window]");
+    expect(bars).toHaveLength(1);
+    const bar = bars[0] as HTMLElement;
+    const segments = bar.querySelectorAll("meter");
+    expect(segments).toHaveLength(2);
+    // The account that refills first leads, and the bar names that reset.
+    expect(segments[0]?.getAttribute("aria-label")).toBe("Work Claude, 5-hour window remaining");
+    expect(segments[0]?.getAttribute("value")).toBe("90");
+    expect(segments[1]?.getAttribute("value")).toBe("40");
+    expect(bar).toHaveTextContent("Soonest reset");
+    expect(screen.getByText(/2 accounts · each account counted on its own/)).toBeVisible();
+  });
+
+  it("an account without a reading is labelled, not counted as zero", async () => {
+    const secondId = "44444444-4444-4444-8444-444444444444" as ProviderInstanceId;
+    const data = decodeProviderUsageLimitsSnapshot({
+      ...snapshot("available"),
+      entries: [
+        ...snapshot("available").entries,
+        {
+          providerInstanceId: secondId,
+          status: "failed",
+          source: "provider-runtime",
+          observedAt: "2026-08-23T12:05:00.000Z",
+          failure: { category: "timeout", message: "Provider limits could not be read." },
+        },
+      ],
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[provider, { ...provider, id: secondId, displayName: "Second account" }]}
+      />,
+    );
+    await screen.findByText("Each account");
+    const bar = document.querySelector('[data-pooled-window="five_hour"]') as HTMLElement;
+    expect(bar.querySelectorAll("meter")).toHaveLength(1);
+    expect(bar.querySelector('[data-state="missing"]')).not.toBeNull();
+    const missing = bar.querySelector('[data-segment="missing"]');
+    expect(missing).toHaveTextContent("Second account");
+    expect(missing).toHaveTextContent("No reading");
+    expect(missing).not.toHaveTextContent("0%");
   });
 });
