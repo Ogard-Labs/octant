@@ -106,7 +106,8 @@ const SCRIPT = String.raw`
   // waking up, a rate limit) is retried.
   const ENDS = {
     410: "This link has ended.",
-    403: "This link is open in another browser.",
+    // The link stays with the first browser and address that opened it.
+    403: "This link is open in another browser, or at another address.",
     404: "This link does not exist.",
     401: "This link could not be checked. Make sure this device's clock is set correctly, then reload.",
     // A member's entrance carries opens and comments but not the live thread.

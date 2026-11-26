@@ -233,7 +233,9 @@ import { SpokeVisitorService } from "../hub/spokeVisitorService";
 import { askVisitorSpoke, spokeVisitorHubPort } from "../hub/visitorLinks";
 import {
   handBackPublicQueue,
+  holdsPublicCopies,
   servesPublicEntrance,
+  servingRosterMemberIds,
   servingRosterMembers,
   setServeWhileStandingIn,
   standbyPublicUrls,
@@ -1356,14 +1358,16 @@ export function wireRemote(deps: RemoteDependencies) {
           identity: resolveHubIdentity,
           transport: hubTransport,
           now: Date.now,
+          own: () => ownPublic(),
           selfMemberId: () => hubService.hubMemberId(),
         },
         spokeMemberId,
         envelope,
       ),
     wake: async (spokeMemberId) => void (await wakeService.wakeForDelivery(spokeMemberId)),
-    members: () =>
-      hubService.status().roster?.roster.members.map((member) => String(member.memberId)),
+    // The roster this host serves from: a standby standing in reads the one
+    // it holds as a member, not a roster left from a time it was the hub.
+    members: () => servingRosterMemberIds(hubStateStore.load()),
     record: recordHubMembership,
     now: Date.now,
   });
@@ -1376,6 +1380,7 @@ export function wireRemote(deps: RemoteDependencies) {
       identity: resolveHubIdentity,
       transport: hubTransport,
       now: Date.now,
+      own: () => ownPublic(),
       standbyGranted,
     }),
     record: recordHubMembership,
@@ -1402,6 +1407,7 @@ export function wireRemote(deps: RemoteDependencies) {
       identity: resolveHubIdentity,
       transport: hubTransport,
       now: Date.now,
+      own: () => ownPublic(),
       standbyGranted,
     }),
     signing: () => {
@@ -1426,6 +1432,12 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
     now: Date.now,
   });
+  const ownPublic = () => ({
+    webhooks: hubWebhooks,
+    visitors: hubVisitors,
+    spokeWebhooks,
+    spokeVisitors,
+  });
   const hubVisitors = new HubVisitorService({
     state: hubStateStore,
     serving: servesPublicNow,
@@ -1442,6 +1454,7 @@ export function wireRemote(deps: RemoteDependencies) {
           identity: resolveHubIdentity,
           transport: hubTransport,
           now: Date.now,
+          own: () => ownPublic(),
           selfMemberId: () => hubService.hubMemberId(),
         },
         spokeMemberId,
@@ -1453,6 +1466,14 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   setInterval(() => void spokeVisitors.look().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
   setInterval(() => void hubWebhooks.tick().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
+  // A standby the hub took out of the order keeps no copy of a spoke's sealed
+  // secrets or grants; the spokes can no longer reach it to withdraw them.
+  setInterval(() => {
+    if (holdsPublicCopies({ hubEnabled: hubService.status().enabled, state: hubStateStore.load() }))
+      return;
+    hubWebhooks.forgetCopies();
+    hubVisitors.forgetCopies();
+  }, WEBHOOK_LOOK_MS).unref();
   setInterval(() => void spokeWebhooks.look().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
   const publicEntrance = new PublicEntranceService({
     state: hubStateStore,
@@ -1526,7 +1547,10 @@ export function wireRemote(deps: RemoteDependencies) {
           principal,
           record: recordHubMembership,
         }),
-      standbyUrls: () => standbyPublicUrls(hubStateStore.load().link),
+      standbyUrls: () => {
+        const state = hubStateStore.load();
+        return standbyPublicUrls(state.link, state.publicEntrance?.funnel?.port);
+      },
     },
     webhooks: hubWebhooks,
     spokeWebhooks,

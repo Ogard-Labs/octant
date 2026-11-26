@@ -802,7 +802,12 @@ function standbyUrlLines(value: unknown): ReadonlyArray<string> {
   return [
     "  Standby addresses for senders that accept a fallback:",
     ...value.map(
-      (entry: unknown) => `    ${String(field(entry, "name"))}  ${String(field(entry, "url"))}`,
+      (entry: unknown) =>
+        `    ${String(field(entry, "name"))}  ${String(field(entry, "url"))}${
+          field(entry, "portKnown") === true
+            ? ""
+            : "  (port 443 unless that computer's Funnel uses 8443 or 10000)"
+        }`,
     ),
   ];
 }

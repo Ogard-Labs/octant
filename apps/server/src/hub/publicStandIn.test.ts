@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { HubLinkState, HubState, HubStatePort } from "./hubStateStore";
 import {
   handBackPublicQueue,
+  holdsPublicCopies,
   servesPublicEntrance,
+  servingRosterMemberIds,
   setServeWhileStandingIn,
+  standbyPublicUrls,
 } from "./publicStandIn";
 
 const WINDOW = { kind: "local-window" } as const;
@@ -70,13 +73,13 @@ describe("who serves the public entrance", () => {
 });
 
 describe("handing the webhook queue back to the hub", () => {
-  const delivery = (id: string) =>
+  const delivery = (id: string, endpointId = "AAAAAAAAAAAAAAAAAAAAAA") =>
     ({
       spokeMemberId: "33333333-3333-4333-8333-333333333333",
       keys: [`id:${id}`],
       bytes: 2,
       envelope: {
-        endpointId: "AAAAAAAAAAAAAAAAAAAAAA",
+        endpointId,
         deliveryId: id,
         receivedAt: 1,
         headers: {},
@@ -84,11 +87,14 @@ describe("handing the webhook queue back to the hub", () => {
       },
     }) as never;
 
-  function attempt(answers: ReadonlyArray<() => Response>) {
-    let queue: ReadonlyArray<{ readonly envelope: { readonly deliveryId: string } }> = [
+  function attempt(
+    answers: ReadonlyArray<() => Response>,
+    initial: ReadonlyArray<{ readonly envelope: { readonly deliveryId: string } }> = [
       delivery("one"),
       delivery("two"),
-    ];
+    ],
+  ) {
+    let queue = initial;
     const dropped: string[] = [];
     const webhooks = {
       handbackQueue: () => queue as never,
@@ -155,5 +161,83 @@ describe("handing the webhook queue back to the hub", () => {
     expect(await handback.run()).toBe(true);
     expect(handback.queue()).toEqual([]);
     expect(handback.dropped).toEqual(["one"]);
+  });
+
+  it("a full endpoint waits for the next attempt while another endpoint's deliveries go back now", async () => {
+    const handback = attempt(
+      [() => Response.json({ status: "queue-full" }), () => Response.json({ status: "queued" })],
+      [delivery("full-1"), delivery("full-2"), delivery("other", "BBBBBBBBBBBBBBBBBBBBBB")],
+    );
+    expect(await handback.run()).toBe(false);
+    expect(handback.queue().map((entry) => entry.envelope.deliveryId)).toEqual([
+      "full-1",
+      "full-2",
+    ]);
+  });
+
+  it("a hub from before hand-back answers 404, and the stand-in ends with the rest on the record", async () => {
+    const handback = attempt([() => new Response("", { status: 404 })]);
+    expect(await handback.run()).toBe(true);
+    expect(handback.dropped).toEqual(["one", "two"]);
+  });
+
+  it("drops a delivery the hub's own copy of the secret does not verify", async () => {
+    const handback = attempt([
+      () => Response.json({ status: "refused" }),
+      () => Response.json({ status: "queued" }),
+    ]);
+    expect(await handback.run()).toBe(true);
+    expect(handback.dropped).toEqual(["one"]);
+  });
+});
+
+describe("where a standby can be reached and what it keeps", () => {
+  const STANDBY = "22222222-2222-4222-8222-222222222222";
+  const anchored = (self: string) =>
+    ({
+      selfMemberId: self,
+      removed: false,
+      roster: {
+        signedBy: { kind: "hub" },
+        roster: {
+          standbyOrder: [STANDBY],
+          members: [
+            {
+              memberId: STANDBY,
+              role: "standby-hub",
+              name: "Studio",
+              privateNames: ["studio.tail1234.ts.net"],
+            },
+          ],
+        },
+      },
+    }) as never;
+
+  it("gives this standby's own fallback URL its Funnel port, and says another's port is a guess", () => {
+    expect(standbyPublicUrls(anchored(STANDBY), 10000)).toMatchObject([
+      { url: "https://studio.tail1234.ts.net:10000", portKnown: true },
+    ]);
+    expect(
+      standbyPublicUrls(anchored("33333333-3333-4333-8333-333333333333"), 10000),
+    ).toMatchObject([{ url: "https://studio.tail1234.ts.net", portKnown: false }]);
+  });
+
+  it("a member that is neither the hub nor a named standby keeps no public copies", () => {
+    expect(holdsPublicCopies({ hubEnabled: true, state: {} })).toBe(true);
+    expect(holdsPublicCopies({ hubEnabled: false, state: {} })).toBe(true);
+    expect(
+      holdsPublicCopies({
+        hubEnabled: false,
+        state: { link: anchored("33333333-3333-4333-8333-333333333333") },
+      }),
+    ).toBe(false);
+  });
+
+  it("a standing-in host that was once a hub prunes by the roster it now serves from", () => {
+    const state = {
+      hub: { enabled: false, roster: { roster: { members: [{ memberId: "old-spoke" }] } } },
+      link: { roster: { roster: { members: [{ memberId: STANDBY }, { memberId: "new-spoke" }] } } },
+    } as never;
+    expect(servingRosterMemberIds(state)).toEqual([STANDBY, "new-spoke"]);
   });
 });

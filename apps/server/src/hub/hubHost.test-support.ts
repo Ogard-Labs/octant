@@ -728,7 +728,14 @@ export async function startHubTestHost(input: {
     now: wakeNow,
   });
   const standbyGranted = () => spoke.hubMayUse("standby").status === "allowed";
-  const webhookLinks = { state, identity: () => identity, transport, now: wakeNow, standbyGranted };
+  const webhookLinks = {
+    state,
+    identity: () => identity,
+    transport,
+    now: wakeNow,
+    standbyGranted,
+    own: () => ({ webhooks, visitors, spokeWebhooks, spokeVisitors }),
+  };
   const servesPublicNow = () =>
     servesPublicEntrance({ hubEnabled: hub.status().enabled, state: state.load() });
   const webhooks = new HubWebhookService({

@@ -7,7 +7,8 @@
 // the standby hands back what it still queues. Every delivery runs once.
 
 import { createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { HubMemberId, visitorProofPayload, type HubGrant } from "@octant/contracts";
+import { HubMemberId, type HubGrant } from "@octant/contracts";
+import { visitorProofPayload } from "@octant/domain";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
@@ -269,5 +270,50 @@ describe("the public entrance during failover", () => {
     expect(
       (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "x"))).status,
     ).toBe(404);
+  });
+
+  it("a standby serves its own webhook endpoint and visitor link while it stands in", async () => {
+    const network = new HubTestNetwork();
+    const hub = await start(network, "Mac mini", 30);
+    const standby = await start(network, "Standby", 31);
+    expect(hub.hub.enable(window).status).toBe("enabled");
+    await join(hub, standby);
+    standby.spoke.setGrant(spokeGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    await vi.waitFor(() =>
+      expect(standby.state.load().link?.roster.roster.standbyOrder ?? []).toHaveLength(1),
+    );
+    await hub.visitors.setEnabled(true, window);
+    setServeWhileStandingIn({
+      state: standby.state,
+      enabled: true,
+      principal: window,
+      record: (change) => standby.records.push(change),
+    });
+    await standby.failover.tick();
+
+    // The standby is a spoke too: its own copies stay on it, beside the hub's.
+    const created = await standby.spokeWebhooks.create({
+      scheme: "standard-webhooks",
+      label: "CI",
+    });
+    if (created.status !== "created") throw new Error(created.status);
+    expect(created.published).toBe(true);
+    expect(hub.webhooks.status().endpoints).toBe(1);
+    expect(standby.webhooks.status().endpoints).toBe(1);
+    const own = await share(standby);
+    expect(standby.visitors.heldGrants()).toHaveLength(1);
+
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    expect(
+      (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "own-1"))).status,
+    ).toBe(202);
+    await standby.webhooks.tick();
+    expect(standby.webhooks.status()).toMatchObject({ queued: 0, forwarded: 1 });
+    expect((await openLink(standby, own.linkId, own.secret, browser())).status).toBe(200);
   });
 });

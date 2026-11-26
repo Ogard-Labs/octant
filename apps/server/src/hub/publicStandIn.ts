@@ -5,7 +5,10 @@
 // of the spokes that ticked both Public and Standby, so it can serve the
 // moment it stands in, and hands the hub back what it still queues.
 
+import type { HubVisitorService } from "./hubVisitorService";
 import type { HubWebhookService } from "./hubWebhookService";
+import type { SpokeVisitorService } from "./spokeVisitorService";
+import type { SpokeWebhookService } from "./spokeWebhookService";
 import {
   type AuditActingPrincipal,
   type HubMembershipChangedPayload,
@@ -25,8 +28,8 @@ export const PUBLIC_WEBHOOK_HANDBACK_ROUTE = "/api/hub/public/webhook-handback";
 /**
  * Whether this host serves the public entrance now: it is the hub, or it is a
  * standby standing in, not yet handing back, whose own person chose to serve.
- * A delivery that arrives during the hand-back is answered 404 so the sender
- * retries at the hub rather than into a queue that is being emptied.
+ * During the hand-back its entrance forwards to the returned hub like any
+ * member's, so nothing new lands in a queue that is being emptied.
  */
 export function servesPublicEntrance(input: {
   readonly hubEnabled: boolean;
@@ -41,6 +44,23 @@ export function servesPublicEntrance(input: {
     link.standIn.handingBack !== true &&
     input.state.publicEntrance?.serveWhileStandingIn === true
   );
+}
+
+/**
+ * Whether this host may hold copies of spokes' public endpoints and grants: it
+ * is the hub, or a standby the hub-signed roster names. A member the hub took
+ * out of the order, or one that left, forgets them, since the spokes can no
+ * longer reach it to withdraw them.
+ */
+export function holdsPublicCopies(input: {
+  readonly hubEnabled: boolean;
+  readonly state: HubState;
+}): boolean {
+  if (input.hubEnabled) return true;
+  // A host that was a hub and is in no hub now keeps what it held, so turning
+  // the role back on does not lose every spoke's endpoints.
+  if (input.state.link === undefined) return true;
+  return isNamedStandby(input.state.link);
 }
 
 /** Whether this host is a standby the latest hub-signed roster names. */
@@ -76,7 +96,29 @@ export function copyHolderMemberKey(
     : undefined;
 }
 
-/** A member a spoke hands its public copies to: the hub, and each named standby when the spoke ticked Standby. */
+/**
+ * This host's own public services. A standby is a spoke too, and the copies of
+ * its own endpoints and grants, and the deliveries and fetches for them, stay
+ * on this host instead of going out and back over its own listener.
+ */
+export interface OwnPublicServices {
+  readonly webhooks: Pick<HubWebhookService, "sealingKey" | "receiveEndpoints">;
+  readonly visitors: Pick<HubVisitorService, "receiveGrants">;
+  readonly spokeWebhooks: Pick<SpokeWebhookService, "receive">;
+  readonly spokeVisitors: Pick<SpokeVisitorService, "fetch">;
+}
+
+/** Whether a member id names this host, as its hub link knows it. */
+export function isSelf(state: HubState, memberId: string): boolean {
+  const self = state.link?.selfMemberId;
+  return self !== undefined && String(self) === memberId;
+}
+
+/**
+ * A member a spoke hands its public copies to: the hub, and each named standby
+ * when the spoke ticked Standby, this host included when it is one, so it can
+ * serve its own links and endpoints while it stands in.
+ */
 export interface PublicCopyTarget {
   readonly memberId: string;
   readonly fingerprint: string;
@@ -103,7 +145,6 @@ export function publicCopyTargets(
   }
   if (!standbyGranted || anchor === undefined) return targets;
   for (const id of anchor.roster.standbyOrder) {
-    if (String(id) === String(link.selfMemberId)) continue;
     const entry: RosterMember | undefined = members.find(
       (member) => String(member.memberId) === String(id) && member.role === "standby-hub",
     );
@@ -125,6 +166,12 @@ export function servingRosterMembers(state: HubState): ReadonlyArray<RosterMembe
   // that is on makes it the one to read.
   const own = state.hub?.enabled === true ? state.hub.roster?.roster.members : undefined;
   return own ?? state.link?.roster.roster.members ?? [];
+}
+
+/** The member ids of that roster, or nothing to prune by while this host serves from none. */
+export function servingRosterMemberIds(state: HubState): ReadonlyArray<string> | undefined {
+  const members = servingRosterMembers(state);
+  return members.length === 0 ? undefined : members.map((member) => String(member.memberId));
 }
 
 export type ServeWhileStandingInOutcome =
@@ -152,10 +199,21 @@ export function setServeWhileStandingIn(input: {
   return { status: "changed", enabled: input.enabled };
 }
 
-/** Where a standby's public URL would be, for senders that accept a fallback: its Tailscale name on 443. */
+/**
+ * Where a standby's public URL would be, for senders that accept a fallback:
+ * its Tailscale name, on the Funnel port this host turned on when the standby
+ * is this host, and on 443 for another standby, whose port only its own
+ * person knows (`portKnown` says which).
+ */
 export function standbyPublicUrls(
   link: HubLinkState | undefined,
-): ReadonlyArray<{ readonly memberId: string; readonly name: string; readonly url: string }> {
+  ownFunnelPort?: number,
+): ReadonlyArray<{
+  readonly memberId: string;
+  readonly name: string;
+  readonly url: string;
+  readonly portKnown: boolean;
+}> {
   const anchor = link === undefined ? undefined : hubSignedAnchor(link);
   if (anchor === undefined) return [];
   return anchor.roster.standbyOrder.flatMap((id) => {
@@ -163,9 +221,17 @@ export function standbyPublicUrls(
       (member) => String(member.memberId) === String(id) && member.role === "standby-hub",
     );
     const name = entry?.privateNames.find((candidate) => candidate.endsWith(".ts.net"));
-    return entry === undefined || name === undefined
-      ? []
-      : [{ memberId: String(id), name: entry.name, url: `https://${name}` }];
+    if (entry === undefined || name === undefined) return [];
+    const own = link !== undefined && String(id) === String(link.selfMemberId);
+    const port = own ? (ownFunnelPort ?? 443) : 443;
+    return [
+      {
+        memberId: String(id),
+        name: entry.name,
+        url: port === 443 ? `https://${name}` : `https://${name}:${port}`,
+        portKnown: own && ownFunnelPort !== undefined,
+      },
+    ];
   });
 }
 
@@ -191,7 +257,12 @@ export async function handBackWebhookQueue(input: {
 }> {
   const taken: HubWebhookHandback[] = [];
   const dropped: HubWebhookHandback[] = [];
+  // The hub counts room per endpoint, so one full endpoint waits for the next
+  // attempt while the others are handed back now.
+  const full = new Set<string>();
   for (const queued of input.queue) {
+    const endpointId = String(queued.envelope.endpointId);
+    if (full.has(endpointId)) continue;
     const answer = await sendHubLinkRequest({
       transport: input.transport,
       target: {
@@ -208,7 +279,12 @@ export async function handBackWebhookQueue(input: {
       now: input.now(),
     });
     if (answer.status === "unreachable") return { taken, dropped, outcome: "incomplete" };
-    if (answer.response.status === 403) return { taken, dropped, outcome: "refused" };
+    // A hub from before hand-back has no such route and answers 404. It can
+    // never take the queue, so it counts as refusing it, rather than keeping
+    // this host standing in until the hub is upgraded.
+    if (answer.response.status === 403 || answer.response.status === 404) {
+      return { taken, dropped, outcome: "refused" };
+    }
     if (answer.response.status === 400) {
       dropped.push(queued);
       continue;
@@ -221,10 +297,13 @@ export async function handBackWebhookQueue(input: {
       )
       .catch(() => undefined);
     if (status === "queued" || status === "duplicate") taken.push(queued);
-    else if (status === "unknown-endpoint") dropped.push(queued);
+    // An endpoint the hub no longer holds, or a delivery whose signature its
+    // own copy of the secret does not match, is one the hub will never take.
+    else if (status === "unknown-endpoint" || status === "refused") dropped.push(queued);
+    else if (status === "queue-full") full.add(endpointId);
     else return { taken, dropped, outcome: "incomplete" };
   }
-  return { taken, dropped, outcome: "complete" };
+  return { taken, dropped, outcome: full.size > 0 ? "incomplete" : "complete" };
 }
 
 /**

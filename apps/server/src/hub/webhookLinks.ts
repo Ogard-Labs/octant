@@ -17,7 +17,12 @@ import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
-import { publicCopyTargets, servingRosterMembers } from "./publicStandIn";
+import {
+  isSelf,
+  publicCopyTargets,
+  servingRosterMembers,
+  type OwnPublicServices,
+} from "./publicStandIn";
 import type { HubTransport } from "./pinnedHubTransport";
 import type { SpokeWebhookHubPort } from "./spokeWebhookService";
 
@@ -26,6 +31,8 @@ interface LinkDependencies {
   readonly identity: () => HubHostIdentity;
   readonly transport: HubTransport;
   readonly now: () => number;
+  /** This host's own services, for the copies and deliveries that name it. */
+  readonly own?: () => OwnPublicServices;
 }
 
 /**
@@ -61,6 +68,9 @@ export function spokeWebhookHubPort(
     targets: () => targets().map(({ memberId, fingerprint }) => ({ memberId, fingerprint })),
     named: () => publicCopyTargets(deps.state.load().link, true).map((entry) => entry.memberId),
     sealingKey: async (memberId): Promise<HubSealingKey | undefined> => {
+      const own = deps.own?.();
+      if (own !== undefined && isSelf(deps.state.load(), memberId))
+        return own.webhooks.sealingKey();
       const response = await toMember(memberId, HUB_LINK_ROUTES.publicSealingKey, {});
       try {
         return response === undefined ? undefined : decodeHubSealingKey(await response.json());
@@ -68,8 +78,16 @@ export function spokeWebhookHubPort(
         return undefined;
       }
     },
-    sendEndpoints: async (memberId, update: HubWebhookEndpointsUpdate) =>
-      (await toMember(memberId, HUB_LINK_ROUTES.publicWebhookEndpoints, update)) !== undefined,
+    sendEndpoints: async (memberId, update: HubWebhookEndpointsUpdate) => {
+      const own = deps.own?.();
+      if (own !== undefined && isSelf(deps.state.load(), memberId)) {
+        own.webhooks.receiveEndpoints(memberId, update);
+        return true;
+      }
+      return (
+        (await toMember(memberId, HUB_LINK_ROUTES.publicWebhookEndpoints, update)) !== undefined
+      );
+    },
   };
 }
 
@@ -80,6 +98,8 @@ export async function sendWebhookDelivery(
   envelope: WebhookDeliveryEnvelope,
 ): Promise<WebhookDeliveryAnswer | undefined> {
   const state = deps.state.load();
+  const own = deps.own?.();
+  if (own !== undefined && isSelf(state, spokeMemberId)) return own.spokeWebhooks.receive(envelope);
   // A standing-in standby reads the roster it holds as a member.
   const member = servingRosterMembers(state).find(
     (entry) => String(entry.memberId) === spokeMemberId,

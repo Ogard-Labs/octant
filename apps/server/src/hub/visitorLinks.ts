@@ -16,7 +16,12 @@ import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
-import { publicCopyTargets, servingRosterMembers } from "./publicStandIn";
+import {
+  isSelf,
+  publicCopyTargets,
+  servingRosterMembers,
+  type OwnPublicServices,
+} from "./publicStandIn";
 import type { HubTransport } from "./pinnedHubTransport";
 import { grantConfirmTimeoutMs } from "./pushService";
 import type { SpokeVisitorHubPort } from "./spokeVisitorService";
@@ -26,6 +31,8 @@ interface LinkDependencies {
   readonly identity: () => HubHostIdentity;
   readonly transport: HubTransport;
   readonly now: () => number;
+  /** This host's own services, for the copies and fetches that name it. */
+  readonly own?: () => OwnPublicServices;
 }
 
 /**
@@ -64,6 +71,11 @@ export function spokeVisitorHubPort(
         ...withdrawn.map((target) => ({ target, body: { grants: [] } })),
       ];
       for (const { target, body } of sends) {
+        const own = deps.own?.();
+        if (own !== undefined && isSelf(deps.state.load(), target.memberId)) {
+          own.visitors.receiveGrants(target.memberId, body);
+          continue;
+        }
         const answer = await sendHubLinkRequest({
           transport: deps.transport,
           target: { origin: target.origin, pin: listenerPinFromDigest(target.pin) },
@@ -90,6 +102,10 @@ export async function askVisitorSpoke(
   request: VisitorFetchRequest,
 ): Promise<VisitorFetchAnswer | undefined> {
   const state = deps.state.load();
+  const own = deps.own?.();
+  if (own !== undefined && isSelf(state, spokeMemberId)) {
+    return own.spokeVisitors.fetch(request, spokeMemberId);
+  }
   // A standing-in standby reads the roster it holds as a member.
   const member = servingRosterMembers(state).find(
     (entry) => String(entry.memberId) === spokeMemberId,

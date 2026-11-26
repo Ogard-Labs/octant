@@ -134,6 +134,13 @@ export class HubVisitorService {
     return this.#load().enabled || this.#options.standingIn?.() === true;
   }
 
+  /** Forgets every grant this host holds as a copy; for a host that is no longer a hub or a named standby. */
+  forgetCopies(): void {
+    const held = this.#load();
+    if (held.grants.length === 0) return;
+    this.#save({ ...held, grants: [] });
+  }
+
   heldGrants(): ReadonlyArray<SignedVisitorLinkGrant> {
     return this.#load().grants;
   }
