@@ -111,6 +111,21 @@ function fixture(
       status: "disabled",
     })),
     observe: vi.fn<PullRequestSwitchForge["observe"]>(async () => observation),
+    readCiLogs: vi.fn<PullRequestSwitchForge["readCiLogs"]>(async () => ({
+      status: "read",
+      headSha: "a1",
+      logs: [],
+      running: [],
+    })),
+    planCiRerun: vi.fn<PullRequestSwitchForge["planCiRerun"]>(async () => ({
+      status: "planned",
+      headSha: "a1",
+      runs: [{ runId: "7", checks: ["test"] }],
+    })),
+    rerunCi: vi.fn<PullRequestSwitchForge["rerunCi"]>(async () => ({
+      status: "rerun",
+      checks: ["test"],
+    })),
   };
   const order: string[] = [];
   const threads = {
@@ -1282,6 +1297,50 @@ describe("a thread watching its own pull request", () => {
     expect(await f.service.unwatch({ threadId, providerInstanceId })).toEqual({
       status: "unwatched",
       target,
+    });
+  });
+});
+
+describe("CI logs and reruns for the thread's own pull request", () => {
+  it("reads and reruns only the thread's own linked pull request", async () => {
+    const notLinked = fixture({ linked: ["10000000-0000-4000-8000-0000000000ff"] });
+    expect(await notLinked.service.ciLogs({ windowId, threadId, tailLines: 200, signal })).toEqual({
+      status: "refused",
+      reason: "no-pull-request",
+    });
+    expect(await notLinked.service.ciRerun({ windowId, threadId, signal })).toEqual({
+      status: "refused",
+      reason: "no-pull-request",
+    });
+    expect(notLinked.forge.readCiLogs).not.toHaveBeenCalled();
+    expect(notLinked.forge.planCiRerun).not.toHaveBeenCalled();
+
+    const two = fixture({ threadPullRequests: [target, { ...target, number: target.number + 1 }] });
+    expect(await two.service.ciRerun({ windowId, threadId, signal })).toEqual({
+      status: "refused",
+      reason: "ambiguous-pull-request",
+    });
+  });
+
+  it("asks about exactly the planned checks and reruns nothing when the person declines", async () => {
+    const f = fixture();
+    const confirm = vi.fn(async () => "denied" as const);
+    expect(await f.service.ciRerun({ windowId, threadId, confirm, signal })).toEqual({
+      status: "not-confirmed",
+      answer: "denied",
+    });
+    expect(confirm).toHaveBeenCalledWith({
+      number: target.number,
+      headSha: "a1",
+      checks: ["test"],
+    });
+    expect(f.forge.planCiRerun).toHaveBeenCalledWith(expect.anything(), { maxReruns: 3 }, signal);
+    expect(f.forge.rerunCi).not.toHaveBeenCalled();
+
+    expect(await f.service.ciRerun({ windowId, threadId, signal })).toMatchObject({
+      status: "rerun",
+      headSha: "a1",
+      checks: ["test"],
     });
   });
 });

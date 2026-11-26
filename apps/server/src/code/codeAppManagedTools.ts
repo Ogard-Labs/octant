@@ -111,11 +111,21 @@ import { isRoutineHostScope } from "../routineHostScope";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 import type { PullRequestWatchOutcome } from "./pullRequestWatchPort";
+import type {
+  PullRequestCiConfirmation,
+  PullRequestCiLogsOutcome,
+  PullRequestCiRerunOutcome,
+  PullRequestCiRerunPlanSummary,
+} from "./pullRequestCiPort";
+import type { GhCiMissingLogReason } from "./ghPullRequestSwitchPort";
 
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
 // A pull-request body is often longer than any other tool input.
 const MAX_PULL_REQUEST_TOOL_INPUT_BYTES = 128 * 1024;
 const MAX_TERMINAL_RESULT_BYTES = 32 * 1024;
+/** How many lines of each failed job's log a CI read returns, by default and at most. */
+const DEFAULT_CI_LOG_LINES = 200;
+const MAX_CI_LOG_LINES = 2_000;
 const MAX_TERMINAL_SCAN_BYTES = 64 * 1024;
 const TERMINAL_COMMAND_TIMEOUT_MS = 30_000;
 const TERMINAL_COMPLETION_POLL_MS = 50;
@@ -135,13 +145,23 @@ const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
 const pullRequestDefinition = {
   name: CODE_PULL_REQUEST_TOOL_NAME,
   description:
-    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review), adds or removes labels the repository already has, or closes it (state closed) or reopens it (state open). comment posts a comment, or a reply in one review thread when reviewThreadId is given, and merge merges it with the method and the head commit the person saw; comment acts under the person's name: at Full access it posts without asking, and below it it asks the person first unless this Project lets agents comment; merge asks unless a stored choice allows it. watch lets Octant start a new turn in this thread when the pull request's checks finish, a review or comment arrives, or a merge conflict appears, instead of polling, and never asks; unwatch stops that. Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses everything but unwatch and help. This tool cannot create labels, approve or request changes, delete a branch, or change or watch any other branch's pull request. Call operation help for full usage.",
+    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review), adds or removes labels the repository already has, or closes it (state closed) or reopens it (state open). comment posts a comment, or a reply in one review thread when reviewThreadId is given, and merge merges it with the method and the head commit the person saw; comment acts under the person's name: at Full access it posts without asking, and below it it asks the person first unless this Project lets agents comment; merge asks unless a stored choice allows it. ci-logs reads the end of the failed jobs' logs on the pull request's current head (or of one named check), and never asks; ci-rerun reruns the failed jobs, or one named check, on the current head only, at most 3 times per check per head, and asks on an approval-gated thread. watch lets Octant start a new turn in this thread when the pull request's checks finish, a review or comment arrives, or a merge conflict appears, instead of polling, and never asks; unwatch stops that. Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses everything but unwatch and help. This tool cannot create labels, approve or request changes, delete a branch, or change or watch any other branch's pull request. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
       operation: {
         type: "string",
-        enum: ["create", "update", "comment", "merge", "watch", "unwatch", "help"],
+        enum: [
+          "create",
+          "update",
+          "comment",
+          "merge",
+          "ci-logs",
+          "ci-rerun",
+          "watch",
+          "unwatch",
+          "help",
+        ],
       },
       title: { type: "string" },
       body: { type: "string" },
@@ -153,6 +173,8 @@ const pullRequestDefinition = {
       reviewThreadId: { type: "string" },
       method: { type: "string", enum: ["merge", "squash", "rebase"] },
       headSha: { type: "string" },
+      check: { type: "string" },
+      tailLines: { type: "integer", minimum: 1, maximum: MAX_CI_LOG_LINES },
     },
     required: ["operation"],
   },
@@ -285,7 +307,7 @@ const androidDefinition = {
 const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   ...BROWSER_TOOL_HELP,
   [CODE_PULL_REQUEST_TOOL_NAME]:
-    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). update also takes addLabels and removeLabels (labels the repository already has; none are created) and state: closed closes the pull request and open reopens a closed one, and neither deletes the branch; state stands alone. comment takes body, and reviewThreadId to reply in one review thread. merge takes method (merge, squash, or rebase) and headSha, the head commit the person saw; the host refuses it when the head moved, the pull request is not open and mergeable, or its required checks have not passed. comment posts under the person's name: at Full access it does not ask, and below Full access it asks the person for each post unless this Project lets agents comment on pull requests. merge asks at every access level, unless the person stored a choice that lets agents merge in this Project or this routine; use it only when the person asked for it or that stored choice covers it. watch takes nothing: the host finds this thread's own open pull request and, without asking, starts a new turn here when the checks on the head finish (passed or failed), the review decision changes, a new review or comment arrives, or a merge conflict appears; everything from one look arrives in one turn, as outside content. Use it instead of polling after a push or when waiting on reviewers. A watch ends when the pull request merges or closes, after 10 wakes, after 3 days, or with unwatch, which takes nothing and never asks. Plan mode refuses watch, and so does a turn the host started on its own, such as a wake. Approving, requesting changes, creating labels, and deleting the branch are not available.",
+    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). update also takes addLabels and removeLabels (labels the repository already has; none are created) and state: closed closes the pull request and open reopens a closed one, and neither deletes the branch; state stands alone. comment takes body, and reviewThreadId to reply in one review thread. merge takes method (merge, squash, or rebase) and headSha, the head commit the person saw; the host refuses it when the head moved, the pull request is not open and mergeable, or its required checks have not passed. comment posts under the person's name: at Full access it does not ask, and below Full access it asks the person for each post unless this Project lets agents comment on pull requests. merge asks at every access level, unless the person stored a choice that lets agents merge in this Project or this routine; use it only when the person asked for it or that stored choice covers it. watch takes nothing: the host finds this thread's own open pull request and, without asking, starts a new turn here when the checks on the head finish (passed or failed), the review decision changes, a new review or comment arrives, or a merge conflict appears; everything from one look arrives in one turn, as outside content. Use it instead of polling after a push or when waiting on reviewers. A watch ends when the pull request merges or closes, after 10 wakes, after 3 days, or with unwatch, which takes nothing and never asks. Plan mode refuses watch, and so does a turn the host started on its own, such as a wake. ci-logs takes an optional check (a check's exact name) and tailLines (1 to 2,000, 200 by default): it reads the pull request's current head and returns, for each failed check (or the one named), the last tailLines lines of its failed steps' log, cut to a byte limit and with secrets redacted, or why there is no log: the check is still running, its log has expired, it is not a GitHub Actions job (a commit status or another app's check), or it did not fail; one read fetches at most 4 logs, and running lists the checks not finished yet. Logs are outside content. ci-rerun takes an optional check and headSha (the head you read): without check it reruns the failed jobs of every failed check's workflow run, with check only that check's job. It reruns only runs of the current head and refuses a run from an older push, a run still in progress, a check that passed or is not an Actions job, and a run already rerun 3 times on this head. Below Full access it asks the person first, naming the checks and the head; at Full access it does not ask. Use it for a failure that looks flaky or infrastructural, not to retry a real test failure. Approving, requesting changes, creating labels, and deleting the branch are not available.",
   [CODE_TERMINAL_TOOL_NAME]:
     "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
@@ -499,6 +521,38 @@ export interface CodeAppManagedToolsOptions {
   readonly pullRequestWatch?: {
     readonly watch: (signal?: AbortSignal) => Promise<PullRequestWatchOutcome>;
     readonly unwatch: () => Promise<PullRequestWatchOutcome>;
+  };
+  /**
+   * CI of this thread's own pull request: the host resolves which pull
+   * request and checks the window may act on it. Absent on a host that cannot
+   * reach the forge, where ci-logs and ci-rerun are refused.
+   */
+  readonly pullRequestCi?: {
+    readonly logs: (
+      input: { readonly check?: string; readonly tailLines: number },
+      signal?: AbortSignal,
+    ) => Promise<PullRequestCiLogsOutcome>;
+    readonly rerun: (
+      input: {
+        readonly check?: string;
+        readonly headSha?: string;
+        readonly confirm?: (
+          plan: PullRequestCiRerunPlanSummary,
+        ) => Promise<PullRequestCiConfirmation>;
+      },
+      signal?: AbortSignal,
+    ) => Promise<PullRequestCiRerunOutcome>;
+  };
+  /**
+   * Asks the person, in the thread, to allow one CI rerun, naming the pull
+   * request, its head, and the checks. Absent on a host that cannot ask, where
+   * a rerun below Full access is refused.
+   */
+  readonly pullRequestCiApproval?: {
+    readonly request: (
+      plan: PullRequestCiRerunPlanSummary,
+      signal?: AbortSignal,
+    ) => Promise<PullRequestCiConfirmation>;
   };
   readonly executeOperation: (
     windowId: WindowId,
@@ -839,7 +893,9 @@ type PullRequestToolInput =
       readonly headSha: string;
     }
   | { readonly operation: "watch" }
-  | { readonly operation: "unwatch" };
+  | { readonly operation: "unwatch" }
+  | { readonly operation: "ci-logs"; readonly check?: string; readonly tailLines: number }
+  | { readonly operation: "ci-rerun"; readonly check?: string; readonly headSha?: string };
 
 /**
  * Opens or changes the pull request of this thread's own delivery branch.
@@ -867,6 +923,8 @@ async function pullRequestTool(
   const posture = currentPosture(options);
   if (posture === "plan") return failure("plan-mode-read-only", postureRefusal("plan"));
   if (input.operation === "watch") return watchPullRequestTool(options, signal);
+  if (input.operation === "ci-logs") return pullRequestCiLogsTool(options, input, signal);
+  if (input.operation === "ci-rerun") return pullRequestCiRerunTool(options, input, signal);
   // Read once, before anything is asked: the answer to a prompt must not be
   // spent on a different rule than the one that raised it.
   const comment =
@@ -1025,6 +1083,190 @@ async function watchPullRequestTool(options: CodeAppManagedToolsOptions, signal?
     return failure("pull-request-watch-unavailable");
   }
   return pullRequestWatchResult(outcome);
+}
+
+/**
+ * Reads the end of the failed job logs on this thread's own pull request.
+ * Nobody is asked at any level: it changes nothing on the forge. The result
+ * is outside content, so the taint wrapper marks the thread before the model
+ * reads it.
+ */
+async function pullRequestCiLogsTool(
+  options: CodeAppManagedToolsOptions,
+  input: Extract<PullRequestToolInput, { operation: "ci-logs" }>,
+  signal?: AbortSignal,
+) {
+  const port = options.pullRequestCi;
+  if (port === undefined) return failure("pull-request-ci-unavailable");
+  let outcome: PullRequestCiLogsOutcome;
+  try {
+    outcome = await port.logs(
+      {
+        ...(input.check === undefined ? {} : { check: input.check }),
+        tailLines: input.tailLines,
+      },
+      signal,
+    );
+  } catch {
+    return failure("pull-request-ci-unavailable");
+  }
+  if (outcome.status === "refused") {
+    return failure(`pull-request-ci-${outcome.reason}`, pullRequestCiRefusal(outcome.reason));
+  }
+  if (outcome.status === "unavailable") return pullRequestCiUnavailable();
+  return {
+    result: {
+      status: "read",
+      number: outcome.target.number,
+      headSha: outcome.headSha,
+      logs: outcome.logs.map((entry) =>
+        entry.status === "log" ? entry : { ...entry, why: missingCiLogReason(entry.reason) },
+      ),
+      ...(outcome.running.length === 0 ? {} : { running: outcome.running }),
+      ...(outcome.logs.length === 0
+        ? {
+            note:
+              outcome.running.length === 0
+                ? "No check on the current head has failed."
+                : "No check on the current head has failed yet; some are still running.",
+          }
+        : {}),
+    },
+    isError: false,
+  };
+}
+
+/**
+ * Reruns failed CI on this thread's own pull request's current head. Plan
+ * refuses before this is reached; below Full access the person is asked
+ * about exactly the checks the host planned, and the forge refuses the rerun
+ * if a push moved the head while they answered.
+ */
+async function pullRequestCiRerunTool(
+  options: CodeAppManagedToolsOptions,
+  input: Extract<PullRequestToolInput, { operation: "ci-rerun" }>,
+  signal?: AbortSignal,
+) {
+  const port = options.pullRequestCi;
+  if (port === undefined) return failure("pull-request-ci-unavailable");
+  const asks = decidesCodeEffectsByApproval(currentPosture(options));
+  const approval = options.pullRequestCiApproval;
+  if (asks && approval === undefined) return failure("pull-request-ci-rerun-unavailable");
+  const confirm =
+    asks && approval !== undefined
+      ? async (plan: PullRequestCiRerunPlanSummary): Promise<PullRequestCiConfirmation> => {
+          const answer = await approval.request(plan, signal);
+          if (answer !== "approved") return answer;
+          // The person answered while the thread could have moved on.
+          if (
+            currentThreadIdentityFailure(options) !== undefined ||
+            currentPosture(options) === "plan" ||
+            signal?.aborted === true
+          ) {
+            return "cancelled";
+          }
+          return "approved";
+        }
+      : undefined;
+  let outcome: PullRequestCiRerunOutcome;
+  try {
+    outcome = await port.rerun(
+      {
+        ...(input.check === undefined ? {} : { check: input.check }),
+        ...(input.headSha === undefined ? {} : { headSha: input.headSha }),
+        ...(confirm === undefined ? {} : { confirm }),
+      },
+      signal,
+    );
+  } catch {
+    return failure("pull-request-ci-unavailable");
+  }
+  switch (outcome.status) {
+    case "rerun":
+      return {
+        result: {
+          status: "rerun",
+          number: outcome.target.number,
+          headSha: outcome.headSha,
+          checks: outcome.checks,
+          note: "The rerun has started. Watch the pull request rather than polling for the result.",
+        },
+        isError: false,
+      };
+    case "not-confirmed":
+      return failure(
+        `pull-request-ci-rerun-${outcome.answer}`,
+        outcome.answer === "denied"
+          ? "The person declined this rerun. Nothing was rerun."
+          : undefined,
+      );
+    case "refused":
+      return failure(`pull-request-ci-${outcome.reason}`, pullRequestCiRefusal(outcome.reason));
+    case "failed":
+      return failure(
+        "pull-request-ci-rerun-failed",
+        outcome.rerun.length === 0
+          ? "GitHub refused the rerun. Nothing was rerun."
+          : `GitHub refused part of the rerun. Rerun: ${outcome.rerun.join(", ")}.`,
+      );
+    case "unavailable":
+      return pullRequestCiUnavailable();
+  }
+}
+
+function pullRequestCiUnavailable() {
+  return failure(
+    "pull-request-ci-unavailable",
+    "GitHub could not be read, so nothing was read or rerun. Check that GitHub access is signed in.",
+  );
+}
+
+function missingCiLogReason(reason: GhCiMissingLogReason): string {
+  switch (reason) {
+    case "running":
+      return "This check is still running. Read again after it finishes, or watch the pull request.";
+    case "expired":
+      return "This job's log has expired under the repository's log retention.";
+    case "external":
+      return "This check is not a GitHub Actions job (a commit status or another app's check), so it has no log Octant can read. Its details live with that service.";
+    case "passed":
+      return "This check did not fail.";
+    case "unavailable":
+      return "GitHub returned no log for this job.";
+    case "not-read":
+      return "Not read: one read fetches at most 4 logs. Name this check to read its log.";
+  }
+}
+
+function pullRequestCiRefusal(
+  reason:
+    | Extract<PullRequestCiLogsOutcome, { status: "refused" }>["reason"]
+    | Extract<PullRequestCiRerunOutcome, { status: "refused" }>["reason"],
+): string {
+  switch (reason) {
+    case "no-pull-request":
+      return "This thread has no open pull request Octant knows of. Create one first.";
+    case "ambiguous-pull-request":
+      return "More than one open pull request is linked to this thread, so Octant cannot tell whose CI to use.";
+    case "not-authorized":
+      return "This Project does not connect that pull request's repository on this window.";
+    case "not-open":
+      return "That pull request is not open.";
+    case "no-such-check":
+      return "The current head has no check with that exact name. Call ci-logs without check to see the failing ones.";
+    case "superseded-head":
+      return "That run belongs to an older push, not the pull request's current head. Read the logs again and rerun the current head's checks.";
+    case "no-failed-checks":
+      return "No check on the current head has failed, so there is nothing to rerun.";
+    case "not-failed":
+      return "That check did not fail, so there is nothing to rerun.";
+    case "external-check":
+      return "That check is not a GitHub Actions job, so Octant cannot rerun it. Its own service reruns it.";
+    case "still-running":
+      return "That workflow run is still in progress. Wait until it finishes.";
+    case "rerun-limit":
+      return "That check's run has already been rerun 3 times on this head. Fix the cause or ask the person.";
+  }
 }
 
 async function unwatchPullRequestTool(options: CodeAppManagedToolsOptions) {
@@ -2874,6 +3116,8 @@ function parsePullRequestInput(value: string): PullRequestToolInput | undefined 
       "reviewThreadId",
       "method",
       "headSha",
+      "check",
+      "tailLines",
     ]),
     MAX_PULL_REQUEST_TOOL_INPUT_BYTES,
   );
@@ -2890,7 +3134,44 @@ function parsePullRequestInput(value: string): PullRequestToolInput | undefined 
     reviewThreadId,
     method,
     headSha,
+    check,
+    tailLines,
   } = parsed;
+  if (operation === "ci-logs" || operation === "ci-rerun") {
+    // The host names the pull request; CI operations carry only their own fields.
+    const allowed = operation === "ci-logs" ? ["check", "tailLines"] : ["check", "headSha"];
+    if (Object.keys(parsed).some((key) => key !== "operation" && !allowed.includes(key))) {
+      return undefined;
+    }
+    if (check !== undefined && (typeof check !== "string" || check.trim().length === 0)) {
+      return undefined;
+    }
+    if (operation === "ci-rerun") {
+      if (headSha !== undefined && (typeof headSha !== "string" || headSha.length === 0)) {
+        return undefined;
+      }
+      return {
+        operation,
+        ...(typeof check === "string" ? { check } : {}),
+        ...(typeof headSha === "string" ? { headSha } : {}),
+      };
+    }
+    if (
+      tailLines !== undefined &&
+      (typeof tailLines !== "number" ||
+        !Number.isInteger(tailLines) ||
+        tailLines < 1 ||
+        tailLines > MAX_CI_LOG_LINES)
+    ) {
+      return undefined;
+    }
+    return {
+      operation,
+      ...(typeof check === "string" ? { check } : {}),
+      tailLines: typeof tailLines === "number" ? tailLines : DEFAULT_CI_LOG_LINES,
+    };
+  }
+  if (check !== undefined || tailLines !== undefined) return undefined;
   if (title !== undefined && (typeof title !== "string" || title.trim().length === 0)) {
     return undefined;
   }

@@ -13,6 +13,7 @@ import {
   type GhCommandPort,
   type GhCommandResult,
 } from "./ghPullRequestPort";
+import { redactHostSecrets } from "../process/secretRedaction";
 
 /** Failed checks whose log Auto-fix fetches on one observation. */
 const MAX_LOGGED_CHECKS = 4;
@@ -112,6 +113,73 @@ export type GhPullRequestSwitchObservation =
       activity?: GhPullRequestActivity;
     }>
   | Readonly<{ status: "unavailable" }>;
+
+/**
+ * Why a check named in a CI read has no log to show. `running` has not
+ * finished, `expired` is past the repository's log retention, `external` is a
+ * commit status or another app's check that has no Actions log, `passed`
+ * did not fail, `unavailable` could not be read, and `not-read` is past the
+ * number of logs one read fetches.
+ */
+export type GhCiMissingLogReason =
+  | "running"
+  | "expired"
+  | "external"
+  | "passed"
+  | "unavailable"
+  | "not-read";
+
+export type GhCiLogEntry =
+  | Readonly<{ check: string; status: "log"; log: string; truncated: boolean }>
+  | Readonly<{ check: string; status: "no-log"; reason: GhCiMissingLogReason }>;
+
+export type GhCiLogsResult =
+  | Readonly<{
+      status: "read";
+      headSha: string;
+      logs: ReadonlyArray<GhCiLogEntry>;
+      /** Checks on the head that have not finished yet. */
+      running: ReadonlyArray<string>;
+    }>
+  | Readonly<{ status: "refused"; reason: "not-open" | "no-such-check" }>
+  | Readonly<{ status: "unavailable" }>;
+
+/** Why the forge will not rerun what the agent asked for. */
+export type GhCiRerunRefusal =
+  | "not-open"
+  | "superseded-head"
+  | "no-such-check"
+  | "no-failed-checks"
+  | "not-failed"
+  | "external-check"
+  | "still-running"
+  | "rerun-limit";
+
+/**
+ * What a rerun would start, read before anyone is asked: the head it is
+ * bound to, and each workflow run with the one job a named check reruns.
+ */
+export type GhCiRerunPlan =
+  | Readonly<{
+      status: "planned";
+      headSha: string;
+      runs: ReadonlyArray<
+        Readonly<{ runId: string; jobId?: string; checks: ReadonlyArray<string> }>
+      >;
+    }>
+  | Readonly<{ status: "refused"; reason: GhCiRerunRefusal }>
+  | Readonly<{ status: "unavailable" }>;
+
+export type GhCiRerunResult =
+  | Readonly<{ status: "rerun"; checks: ReadonlyArray<string> }>
+  | Readonly<{ status: "refused"; reason: "superseded-head" }>
+  | Readonly<{ status: "failed"; rerun: ReadonlyArray<string> }>
+  | Readonly<{ status: "unavailable" }>;
+
+/** Failed checks one CI read fetches a log for when no check is named. */
+const MAX_CI_LOGGED_CHECKS = 4;
+/** Check names a CI read reports as still running. */
+const MAX_CI_RUNNING_NAMES = 20;
 
 const VIEW_FIELDS =
   "id,url,state,headRefOid,headRefName,baseRefName,mergeable,autoMergeRequest,reviewDecision";
@@ -1097,19 +1165,291 @@ export class GhPullRequestSwitchPort {
     return isRecord(discussion) ? discussion : undefined;
   }
 
+  /**
+   * The ends of the failed jobs' logs on the pull request's current head, for
+   * the thread's agent. Only the head's checks are read, so a log from a
+   * superseded push never reaches it. Every log is redacted before it leaves.
+   */
+  async readCiLogs(
+    request: GhPullRequestSwitchRequest,
+    input: { readonly check?: string; readonly tailLines: number; readonly maxBytes: number },
+    signal: AbortSignal,
+  ): Promise<GhCiLogsResult> {
+    const repository = `${request.owner}/${request.name}`;
+    if (!validRepository(repository) || !validNumber(request.number)) {
+      return { status: "unavailable" };
+    }
+    const head = await this.#openHead(request, signal);
+    if (head.status !== "open") return head;
+    const checks = await this.#ciChecks(request, signal);
+    if (checks === undefined) return { status: "unavailable" };
+    const running = checks
+      .filter((check) => check.bucket === "pending")
+      .map((check) => check.name)
+      .slice(0, MAX_CI_RUNNING_NAMES);
+    let selected: ReadonlyArray<CiCheck>;
+    if (input.check !== undefined) {
+      const named = checks.filter((check) => check.name === input.check);
+      if (named.length === 0) return { status: "refused", reason: "no-such-check" };
+      selected = named;
+    } else {
+      selected = checks.filter((check) => check.bucket === "fail" || check.bucket === "cancel");
+    }
+    const failedWithLog = selected.filter(
+      (check) => (check.bucket === "fail" || check.bucket === "cancel") && check.jobId,
+    ).length;
+    const perLogBytes = Math.max(
+      1_024,
+      Math.floor(input.maxBytes / Math.max(1, Math.min(failedWithLog, MAX_CI_LOGGED_CHECKS))),
+    );
+    const logs: GhCiLogEntry[] = [];
+    let read = 0;
+    for (const check of selected) {
+      if (check.bucket === "pending") {
+        logs.push({ check: check.name, status: "no-log", reason: "running" });
+        continue;
+      }
+      if (check.bucket !== "fail" && check.bucket !== "cancel") {
+        logs.push({ check: check.name, status: "no-log", reason: "passed" });
+        continue;
+      }
+      if (check.jobId === undefined) {
+        logs.push({ check: check.name, status: "no-log", reason: "external" });
+        continue;
+      }
+      if (read >= MAX_CI_LOGGED_CHECKS) {
+        logs.push({ check: check.name, status: "no-log", reason: "not-read" });
+        continue;
+      }
+      read += 1;
+      const log = await this.#jobLog(repository, check.jobId, signal);
+      if (log.status !== "log") {
+        logs.push({ check: check.name, status: "no-log", reason: log.status });
+        continue;
+      }
+      const tail = tailLinesAndBytes(redactHostSecrets(log.text), input.tailLines, perLogBytes);
+      logs.push({ check: check.name, status: "log", log: tail.text, truncated: tail.truncated });
+    }
+    return { status: "read", headSha: head.headSha, logs, running };
+  }
+
+  /**
+   * Reads what a rerun would start, without starting it: every run must
+   * belong to the pull request's current head, have finished, and have fewer
+   * than `maxReruns` reruns already. GitHub's own run attempt counts the
+   * reruns, so the cap holds across restarts and counts reruns started
+   * elsewhere.
+   */
+  async planCiRerun(
+    request: GhPullRequestSwitchRequest,
+    input: { readonly check?: string; readonly headSha?: string; readonly maxReruns: number },
+    signal: AbortSignal,
+  ): Promise<GhCiRerunPlan> {
+    const repository = `${request.owner}/${request.name}`;
+    if (!validRepository(repository) || !validNumber(request.number)) {
+      return { status: "unavailable" };
+    }
+    const head = await this.#openHead(request, signal);
+    if (head.status !== "open") return head;
+    if (input.headSha !== undefined && input.headSha !== head.headSha) {
+      return { status: "refused", reason: "superseded-head" };
+    }
+    const checks = await this.#ciChecks(request, signal);
+    if (checks === undefined) return { status: "unavailable" };
+    let selected: ReadonlyArray<CiCheck>;
+    if (input.check !== undefined) {
+      const named = checks.filter((check) => check.name === input.check);
+      const [check] = named;
+      if (check === undefined) return { status: "refused", reason: "no-such-check" };
+      if (check.bucket === "pending") return { status: "refused", reason: "still-running" };
+      if (check.bucket !== "fail" && check.bucket !== "cancel") {
+        return { status: "refused", reason: "not-failed" };
+      }
+      if (check.runId === undefined || check.jobId === undefined) {
+        return { status: "refused", reason: "external-check" };
+      }
+      selected = [check];
+    } else {
+      const failed = checks.filter((check) => check.bucket === "fail" || check.bucket === "cancel");
+      if (failed.length === 0) return { status: "refused", reason: "no-failed-checks" };
+      selected = failed.filter((check) => check.runId !== undefined);
+      if (selected.length === 0) return { status: "refused", reason: "external-check" };
+    }
+    const byRun = new Map<string, { jobId?: string; checks: string[] }>();
+    for (const check of selected) {
+      if (check.runId === undefined) continue;
+      const entry = byRun.get(check.runId) ?? { checks: [] };
+      entry.checks.push(check.name);
+      if (input.check !== undefined && check.jobId !== undefined) entry.jobId = check.jobId;
+      byRun.set(check.runId, entry);
+    }
+    const runs: Array<{ runId: string; jobId?: string; checks: ReadonlyArray<string> }> = [];
+    for (const [runId, entry] of byRun) {
+      const run = await this.#run(
+        ["run", "view", runId, "--repo", repository, "--json", "headSha,attempt,status"],
+        signal,
+      );
+      if (run === undefined || run.exitCode !== 0) return { status: "unavailable" };
+      const value = parseJson(run.stdout);
+      if (!isRecord(value) || typeof value.headSha !== "string") return { status: "unavailable" };
+      if (value.headSha !== head.headSha) return { status: "refused", reason: "superseded-head" };
+      if (value.status !== "completed") return { status: "refused", reason: "still-running" };
+      const attempt = typeof value.attempt === "number" ? value.attempt : 1;
+      if (attempt - 1 >= input.maxReruns) return { status: "refused", reason: "rerun-limit" };
+      runs.push({
+        runId,
+        ...(entry.jobId === undefined ? {} : { jobId: entry.jobId }),
+        checks: entry.checks,
+      });
+    }
+    return { status: "planned", headSha: head.headSha, runs };
+  }
+
+  /**
+   * Starts a planned rerun, but only while the pull request's head is still
+   * the one the plan was read on: a push since then supersedes every run in it.
+   */
+  async rerunCi(
+    request: GhPullRequestSwitchRequest,
+    plan: Extract<GhCiRerunPlan, { status: "planned" }>,
+    signal: AbortSignal,
+  ): Promise<GhCiRerunResult> {
+    const repository = `${request.owner}/${request.name}`;
+    if (!validRepository(repository) || !validNumber(request.number)) {
+      return { status: "unavailable" };
+    }
+    const head = await this.#openHead(request, signal);
+    if (head.status === "unavailable") return head;
+    if (head.status !== "open" || head.headSha !== plan.headSha) {
+      return { status: "refused", reason: "superseded-head" };
+    }
+    const rerun: string[] = [];
+    for (const run of plan.runs) {
+      if (
+        !/^\d{1,20}$/.test(run.runId) ||
+        (run.jobId !== undefined && !/^\d{1,20}$/.test(run.jobId))
+      ) {
+        return { status: "failed", rerun };
+      }
+      const result = await this.#run(
+        run.jobId === undefined
+          ? ["run", "rerun", run.runId, "--failed", "--repo", repository]
+          : ["run", "rerun", "--job", run.jobId, "--repo", repository],
+        signal,
+      );
+      if (result === undefined || result.exitCode !== 0) return { status: "failed", rerun };
+      rerun.push(...run.checks);
+    }
+    return { status: "rerun", checks: rerun };
+  }
+
+  async #openHead(
+    request: GhPullRequestSwitchRequest,
+    signal: AbortSignal,
+  ): Promise<
+    | { readonly status: "open"; readonly headSha: string }
+    | { readonly status: "refused"; readonly reason: "not-open" }
+    | { readonly status: "unavailable" }
+  > {
+    const view = await this.#run(
+      [
+        "pr",
+        "view",
+        String(request.number),
+        "--repo",
+        `${request.owner}/${request.name}`,
+        "--json",
+        "state,headRefOid",
+      ],
+      signal,
+    );
+    if (view === undefined || view.exitCode !== 0) return { status: "unavailable" };
+    const value = parseJson(view.stdout);
+    if (!isRecord(value) || typeof value.headRefOid !== "string" || value.headRefOid === "") {
+      return { status: "unavailable" };
+    }
+    if (normalizeState(value.state) !== "open") return { status: "refused", reason: "not-open" };
+    return { status: "open", headSha: value.headRefOid };
+  }
+
+  /** Every check on the head, with the Actions run and job behind it when it has one. */
+  async #ciChecks(
+    request: GhPullRequestSwitchRequest,
+    signal: AbortSignal,
+  ): Promise<ReadonlyArray<CiCheck> | undefined> {
+    const result = await this.#run(
+      [
+        "pr",
+        "checks",
+        String(request.number),
+        "--repo",
+        `${request.owner}/${request.name}`,
+        "--json",
+        "name,bucket,link",
+      ],
+      signal,
+    );
+    if (result === undefined) return undefined;
+    const value = parseJson(result.stdout);
+    // `gh pr checks` exits non-zero while a check fails or runs, so only
+    // unreadable output is a failed read.
+    if (!Array.isArray(value)) {
+      return /no checks reported/i.test(`${result.stderr ?? ""}\n${result.stdout}`)
+        ? []
+        : undefined;
+    }
+    const checks: CiCheck[] = [];
+    for (const entry of value) {
+      if (!isRecord(entry) || typeof entry.name !== "string" || entry.name.trim() === "") continue;
+      const bucket = String(entry.bucket);
+      if (!["pass", "pending", "fail", "cancel", "skipping"].includes(bucket)) continue;
+      const ids =
+        typeof entry.link === "string"
+          ? /\/actions\/runs\/(\d+)\/job\/(\d+)/.exec(entry.link)
+          : null;
+      checks.push({
+        name: entry.name.trim().slice(0, 512),
+        bucket: bucket as CiCheck["bucket"],
+        ...(ids?.[1] === undefined ? {} : { runId: ids[1] }),
+        ...(ids?.[2] === undefined ? {} : { jobId: ids[2] }),
+      });
+    }
+    return checks;
+  }
+
   async #failedJobLog(
     repository: string,
     jobId: string,
     signal: AbortSignal,
   ): Promise<string | undefined> {
+    const log = await this.#jobLog(repository, jobId, signal);
+    return log.status === "log" ? tailBytes(log.text, this.#logBytes) : undefined;
+  }
+
+  /** The failed steps' log of one job, and why there is none when there is not. */
+  async #jobLog(
+    repository: string,
+    jobId: string,
+    signal: AbortSignal,
+  ): Promise<
+    | { readonly status: "log"; readonly text: string }
+    | { readonly status: "expired" | "unavailable" }
+  > {
     const result = await this.#run(
       ["run", "view", "--repo", repository, "--job", jobId, "--log-failed"],
       signal,
     );
-    if (result === undefined || result.exitCode !== 0 || result.stdout.trim() === "") {
-      return undefined;
+    if (result === undefined) return { status: "unavailable" };
+    if (result.exitCode !== 0) {
+      // GitHub answers 410 Gone once a log is past the repository's retention.
+      return /HTTP 410|log not found|expired|no longer available/i.test(
+        `${result.stderr ?? ""}\n${result.stdout}`,
+      )
+        ? { status: "expired" }
+        : { status: "unavailable" };
     }
-    return tailBytes(result.stdout, this.#logBytes);
+    if (result.stdout.trim() === "") return { status: "unavailable" };
+    return { status: "log", text: result.stdout };
   }
 
   async #run(arguments_: readonly string[], signal: AbortSignal) {
@@ -1379,6 +1719,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function clampBytes(value: string, maxBytes: number): string {
   const bytes = Buffer.from(value, "utf8");
   return bytes.byteLength <= maxBytes ? value : `${bytes.subarray(0, maxBytes).toString("utf8")}…`;
+}
+
+interface CiCheck {
+  readonly name: string;
+  readonly bucket: "pass" | "pending" | "fail" | "cancel" | "skipping";
+  readonly runId?: string;
+  readonly jobId?: string;
+}
+
+/** The last `lines` lines of a log, then at most `maxBytes` of their end. */
+function tailLinesAndBytes(
+  value: string,
+  lines: number,
+  maxBytes: number,
+): { readonly text: string; readonly truncated: boolean } {
+  const all = value.replace(/\n$/, "").split("\n");
+  const kept = all.length > lines ? all.slice(all.length - lines).join("\n") : all.join("\n");
+  const text = tailBytes(kept, maxBytes);
+  return { text, truncated: all.length > lines || text !== kept };
 }
 
 /** The end of a log is where a failure is reported, so the tail is kept. */

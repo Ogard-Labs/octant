@@ -22,6 +22,12 @@ import { BROWSER_OPERATION_EFFECT } from "../browser/browserToolOperations";
 import { BROWSER_CALL_OF_EACH_OPERATION } from "../browser/browserToolPlanCalls.test-support";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { PullRequestWatchOutcome } from "./pullRequestWatchPort";
+import type {
+  PullRequestCiConfirmation,
+  PullRequestCiLogsOutcome,
+  PullRequestCiRerunOutcome,
+  PullRequestCiRerunPlanSummary,
+} from "./pullRequestCiPort";
 import {
   CODE_BROWSER_TOOL_NAME,
   CODE_PULL_REQUEST_TOOL_NAME,
@@ -4810,6 +4816,164 @@ describe("watching the thread's own pull request as an agent tool", () => {
       });
     }
     expect(watch).not.toHaveBeenCalled();
+  });
+});
+
+describe("reading and rerunning the CI of the thread's own pull request as an agent tool", () => {
+  const target = {
+    projectId: "40000000-0000-4000-8000-000000000001",
+    repositoryOwner: "octant",
+    repositoryName: "octant",
+    number: 42,
+  } as unknown as CodeProjectPullRequestSwitchTarget;
+  const plan: PullRequestCiRerunPlanSummary = { number: 42, headSha: "h2", checks: ["test"] };
+
+  function ciTools(
+    threadOverrides: Partial<CodeThread> = {},
+    answer: PullRequestCiConfirmation = "approved",
+  ) {
+    const record = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["octant_pull_request"] },
+    }));
+    const logs = vi.fn(
+      async (): Promise<PullRequestCiLogsOutcome> => ({
+        status: "read",
+        target,
+        headSha: "h2",
+        running: [],
+        logs: [{ check: "test", status: "log", log: "FAIL src/a.test.ts", truncated: true }],
+      }),
+    );
+    const rerun = vi.fn(
+      async (input: {
+        readonly confirm?: (
+          plan: PullRequestCiRerunPlanSummary,
+        ) => Promise<PullRequestCiConfirmation>;
+      }): Promise<PullRequestCiRerunOutcome> => {
+        if (input.confirm !== undefined) {
+          const answered = await input.confirm(plan);
+          if (answered !== "approved") return { status: "not-confirmed", answer: answered };
+        }
+        return { status: "rerun", target, headSha: "h2", checks: ["test"] };
+      },
+    );
+    const ask = vi.fn(async () => answer);
+    const executeOperation = vi.fn();
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(threadOverrides),
+      readThread: () => thread(threadOverrides),
+      uuid: uuidFactory(),
+      recordExternalContentIngestion: record,
+      executeOperation,
+      terminal: { read: async () => ({}) as never },
+      pullRequestApproval: { request: vi.fn() },
+      pullRequestCi: { logs, rerun },
+      pullRequestCiApproval: { request: ask },
+    });
+    const run = (input: Record<string, unknown>) =>
+      tools.execute({ name: CODE_PULL_REQUEST_TOOL_NAME, inputJson: JSON.stringify(input) });
+    return { run, record, logs, rerun, ask, executeOperation };
+  }
+
+  it("reads the tail of a failing job's log on the thread's own pull request and marks the thread as having read outside content", async () => {
+    const { run, record, logs, ask } = ciTools({ executionPolicy: "approval-gated" });
+    const result = await run({ operation: "ci-logs", check: "test", tailLines: 50 });
+    expect(result).toMatchObject({
+      result: {
+        status: "read",
+        number: 42,
+        headSha: "h2",
+        logs: [{ check: "test", status: "log", log: "FAIL src/a.test.ts", truncated: true }],
+      },
+      isError: false,
+    });
+    expect(logs).toHaveBeenCalledWith({ check: "test", tailLines: 50 }, undefined);
+    expect(ask).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provenance: { origin: "tool-result", sourceLabel: CODE_PULL_REQUEST_TOOL_NAME },
+      }),
+    );
+    await run({ operation: "ci-logs" });
+    expect(logs).toHaveBeenLastCalledWith({ tailLines: 200 }, undefined);
+  });
+
+  it("refuses a log read that names a pull request or asks for more than 2,000 lines", async () => {
+    const { run, logs } = ciTools();
+    for (const input of [
+      { operation: "ci-logs", number: 7 },
+      { operation: "ci-logs", tailLines: 0 },
+      { operation: "ci-logs", tailLines: 2_001 },
+      { operation: "ci-rerun", tailLines: 10 },
+    ]) {
+      expect(await run(input)).toMatchObject({
+        result: { error: "invalid-pull-request-input" },
+        isError: true,
+      });
+    }
+    expect(logs).not.toHaveBeenCalled();
+  });
+
+  it("says why a failing check has no log", async () => {
+    const { run, logs } = ciTools();
+    logs.mockResolvedValueOnce({
+      status: "read",
+      target,
+      headSha: "h2",
+      running: ["build"],
+      logs: [
+        { check: "deploy", status: "no-log", reason: "external" },
+        { check: "lint", status: "no-log", reason: "expired" },
+      ],
+    });
+    const result = await run({ operation: "ci-logs" });
+    expect(result).toMatchObject({ isError: false });
+    const text = JSON.stringify(result);
+    expect(text).toContain("not a GitHub Actions job");
+    expect(text).toContain("expired");
+    expect(text).toContain("build");
+  });
+
+  it("refuses to rerun a run that belongs to a superseded head", async () => {
+    const { run, rerun } = ciTools();
+    rerun.mockResolvedValueOnce({ status: "refused", reason: "superseded-head" });
+    expect(await run({ operation: "ci-rerun", headSha: "h1" })).toMatchObject({
+      result: { error: "pull-request-ci-superseded-head" },
+      isError: true,
+    });
+    expect(rerun).toHaveBeenCalledWith({ headSha: "h1" }, undefined);
+  });
+
+  it("asks before rerunning on an approval-gated thread and refuses in Plan", async () => {
+    const gated = ciTools({ executionPolicy: "approval-gated" });
+    expect(await gated.run({ operation: "ci-rerun", check: "test" })).toMatchObject({
+      result: { status: "rerun", number: 42, headSha: "h2", checks: ["test"] },
+      isError: false,
+    });
+    expect(gated.ask).toHaveBeenCalledWith(plan, undefined);
+
+    const declined = ciTools({ executionPolicy: "approval-gated" }, "denied");
+    expect(await declined.run({ operation: "ci-rerun" })).toMatchObject({
+      result: { error: "pull-request-ci-rerun-denied" },
+      isError: true,
+    });
+
+    const full = ciTools({ executionPolicy: "full-access" });
+    expect(await full.run({ operation: "ci-rerun" })).toMatchObject({ isError: false });
+    expect(full.ask).not.toHaveBeenCalled();
+
+    const plan_ = ciTools({ executionPolicy: "plan" });
+    for (const operation of ["ci-logs", "ci-rerun"]) {
+      expect(await plan_.run({ operation })).toMatchObject({
+        result: { error: "plan-mode-read-only" },
+        isError: true,
+      });
+    }
+    expect(plan_.logs).not.toHaveBeenCalled();
+    expect(plan_.rerun).not.toHaveBeenCalled();
+    expect(plan_.ask).not.toHaveBeenCalled();
   });
 });
 

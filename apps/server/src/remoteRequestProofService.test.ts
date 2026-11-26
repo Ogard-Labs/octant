@@ -291,6 +291,9 @@ describe("RemoteRequestProofService", () => {
               readAutoMergeSettings: vi.fn(),
               enableAutoMerge: vi.fn(),
               disableAutoMerge: vi.fn(),
+              readCiLogs: vi.fn(),
+              planCiRerun: vi.fn(),
+              rerunCi: vi.fn(),
             },
             threads: {
               inspect: () => ({ status: "available", turnActive: false }),

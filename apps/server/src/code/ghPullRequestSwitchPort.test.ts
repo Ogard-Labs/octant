@@ -1712,3 +1712,182 @@ describe("forge switch port", () => {
     ).toEqual({ status: "observed", state: "open", requiredChecks: "unavailable" });
   });
 });
+
+describe("CI logs and reruns for a thread's agent", () => {
+  const head = (sha = "h2", state = "OPEN"): GhCommandResult => ({
+    exitCode: 0,
+    stdout: JSON.stringify({ state, headRefOid: sha }),
+  });
+  const checks = (entries: ReadonlyArray<Record<string, string>>): GhCommandResult => ({
+    exitCode: 1,
+    stdout: JSON.stringify(entries),
+  });
+  const actionsLink = (run: number, job: number) =>
+    `https://github.com/octant/octant/actions/runs/${run}/job/${job}`;
+
+  it("reads the tail of a failing job's log, cut to the asked lines and redacted", async () => {
+    const lines = Array.from({ length: 300 }, (_, index) => `line ${index + 1}`);
+    lines.push("token ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+    const { port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head();
+      if (arguments_[1] === "checks") {
+        return checks([{ name: "test", bucket: "fail", link: actionsLink(7, 70) }]);
+      }
+      if (arguments_.includes("--log-failed")) {
+        return { exitCode: 0, stdout: `${lines.join("\n")}\n` };
+      }
+      return { exitCode: 1, stdout: "" };
+    });
+    const result = await forge.readCiLogs(request, { tailLines: 3, maxBytes: 32_768 }, signal);
+    expect(result).toMatchObject({ status: "read", headSha: "h2" });
+    if (result.status !== "read") return;
+    const [entry] = result.logs;
+    expect(entry).toMatchObject({ check: "test", status: "log", truncated: true });
+    if (entry?.status !== "log") return;
+    expect(entry.log.split("\n")).toHaveLength(3);
+    expect(entry.log).toContain("line 300");
+    expect(entry.log).not.toContain("line 297");
+    expect(entry.log).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+  });
+
+  it("says why a failing check has no log", async () => {
+    const { port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head();
+      if (arguments_[1] === "checks") {
+        return checks([
+          { name: "build", bucket: "pending", link: actionsLink(5, 50) },
+          { name: "deploy-preview", bucket: "fail", link: "https://vercel.com/octant/x" },
+          { name: "lint", bucket: "fail", link: actionsLink(6, 60) },
+          { name: "docs", bucket: "pass", link: actionsLink(8, 80) },
+        ]);
+      }
+      if (arguments_.includes("--log-failed")) {
+        return { exitCode: 1, stdout: "", stderr: "failed to get run log: HTTP 410: Gone" };
+      }
+      return { exitCode: 1, stdout: "" };
+    });
+    const all = await forge.readCiLogs(request, { tailLines: 200, maxBytes: 32_768 }, signal);
+    expect(all).toEqual({
+      status: "read",
+      headSha: "h2",
+      running: ["build"],
+      logs: [
+        { check: "deploy-preview", status: "no-log", reason: "external" },
+        { check: "lint", status: "no-log", reason: "expired" },
+      ],
+    });
+    for (const [check, reason] of [
+      ["build", "running"],
+      ["docs", "passed"],
+    ] as const) {
+      expect(
+        await forge.readCiLogs(request, { check, tailLines: 200, maxBytes: 32_768 }, signal),
+      ).toMatchObject({ status: "read", logs: [{ check, status: "no-log", reason }] });
+    }
+    expect(
+      await forge.readCiLogs(
+        request,
+        { check: "missing", tailLines: 200, maxBytes: 32_768 },
+        signal,
+      ),
+    ).toEqual({ status: "refused", reason: "no-such-check" });
+  });
+
+  it("refuses to rerun a run that belongs to a superseded head", async () => {
+    const { run, port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head("h2");
+      if (arguments_[1] === "checks") {
+        return checks([{ name: "test", bucket: "fail", link: actionsLink(7, 70) }]);
+      }
+      if (arguments_[0] === "run" && arguments_[1] === "view") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ headSha: "h1", attempt: 1, status: "completed" }),
+        };
+      }
+      return { exitCode: 0, stdout: "" };
+    });
+    expect(await forge.planCiRerun(request, { maxReruns: 3 }, signal)).toEqual({
+      status: "refused",
+      reason: "superseded-head",
+    });
+    expect(await forge.planCiRerun(request, { headSha: "h1", maxReruns: 3 }, signal)).toEqual({
+      status: "refused",
+      reason: "superseded-head",
+    });
+    // A push between the plan and the rerun supersedes the plan too.
+    expect(
+      await forge.rerunCi(
+        request,
+        { status: "planned", headSha: "h1", runs: [{ runId: "7", checks: ["test"] }] },
+        signal,
+      ),
+    ).toEqual({ status: "refused", reason: "superseded-head" });
+    expect(run.mock.calls.some(([arguments_]) => arguments_[1] === "rerun")).toBe(false);
+  });
+
+  it("reruns only the failed jobs of the head's run, or one named job, and stops at the rerun limit", async () => {
+    let attempt = 1;
+    const { run, port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head("h2");
+      if (arguments_[1] === "checks") {
+        return checks([
+          { name: "test", bucket: "fail", link: actionsLink(7, 70) },
+          { name: "lint", bucket: "fail", link: actionsLink(7, 71) },
+          { name: "build", bucket: "pass", link: actionsLink(9, 90) },
+        ]);
+      }
+      if (arguments_[0] === "run" && arguments_[1] === "view") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ headSha: "h2", attempt, status: "completed" }),
+        };
+      }
+      return { exitCode: 0, stdout: "" };
+    });
+    const plan = await forge.planCiRerun(request, { maxReruns: 3 }, signal);
+    expect(plan).toEqual({
+      status: "planned",
+      headSha: "h2",
+      runs: [{ runId: "7", checks: ["test", "lint"] }],
+    });
+    if (plan.status !== "planned") return;
+    expect(await forge.rerunCi(request, plan, signal)).toEqual({
+      status: "rerun",
+      checks: ["test", "lint"],
+    });
+    expect(run.mock.calls.at(-1)?.[0]).toEqual([
+      "run",
+      "rerun",
+      "7",
+      "--failed",
+      "--repo",
+      "octant/octant",
+    ]);
+    const named = await forge.planCiRerun(request, { check: "lint", maxReruns: 3 }, signal);
+    expect(named).toEqual({
+      status: "planned",
+      headSha: "h2",
+      runs: [{ runId: "7", jobId: "71", checks: ["lint"] }],
+    });
+    if (named.status !== "planned") return;
+    await forge.rerunCi(request, named, signal);
+    expect(run.mock.calls.at(-1)?.[0]).toEqual([
+      "run",
+      "rerun",
+      "--job",
+      "71",
+      "--repo",
+      "octant/octant",
+    ]);
+    expect(await forge.planCiRerun(request, { check: "build", maxReruns: 3 }, signal)).toEqual({
+      status: "refused",
+      reason: "not-failed",
+    });
+    attempt = 4;
+    expect(await forge.planCiRerun(request, { maxReruns: 3 }, signal)).toEqual({
+      status: "refused",
+      reason: "rerun-limit",
+    });
+  });
+});

@@ -65,7 +65,7 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
   octant_propose_routine:
     "When something should run on a schedule, set up a routine with octant_propose_routine rather than a cron job or a loop.",
   octant_pull_request:
-    "When asked, use octant_pull_request to open or change this thread's pull request, or watch it for checks and reviews instead of polling.",
+    "When asked, use octant_pull_request to open or change this thread's pull request or watch it instead of polling; read failed CI with ci-logs.",
   octant_remember_person:
     "When the person asks you to remember something about themself or how they work, save their exact words with octant_remember_person.",
   octant_report_finished:

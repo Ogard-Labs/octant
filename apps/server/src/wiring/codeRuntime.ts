@@ -77,6 +77,7 @@ import {
 import { SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID } from "@octant/plugin-host/first-party-plugins";
 import { isFirstPartyIntegrationEffective } from "../github/githubIntegrationEffective";
 import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
+import type { PullRequestCiPort } from "../code/pullRequestCiPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -734,6 +735,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       }),
     );
     let pullRequestWatchService: PullRequestWatchPort | undefined;
+    let pullRequestCiService: PullRequestCiPort | undefined;
     // Areas built after this one add tools to a Code turn here, as they do to
     // a Chat thread, so the runtime never holds the services behind them.
     const codeToolContributors: Array<
@@ -2299,6 +2301,17 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               ? { status: "not-watching" }
               : pullRequestWatchService.unwatch(input),
         },
+        // Bound like the watch: the switch service is built after this runtime.
+        pullRequestCi: {
+          logs: async (input) =>
+            pullRequestCiService === undefined
+              ? { status: "unavailable", reason: "unavailable" }
+              : pullRequestCiService.logs(input),
+          rerun: async (input) =>
+            pullRequestCiService === undefined
+              ? { status: "unavailable", reason: "unavailable" }
+              : pullRequestCiService.rerun(input),
+        },
         reviewFiles: {
           resolve: (input) => {
             const reference = persistence.readCodeFileReference(input.fileId);
@@ -3093,6 +3106,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         enableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),
         disableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),
         observe: async () => ({ status: "unavailable" }),
+        readCiLogs: async () => ({ status: "unavailable" }),
+        planCiRerun: async () => ({ status: "unavailable" }),
+        rerunCi: async () => ({ status: "unavailable" }),
       },
       threads: {
         inspect: (threadId) => {
@@ -3176,6 +3192,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       uuid: randomUUID,
     });
     pullRequestWatchService = pullRequestSwitchService;
+    pullRequestCiService = {
+      logs: (input) => pullRequestSwitchService.ciLogs(input),
+      rerun: (input) => pullRequestSwitchService.ciRerun(input),
+    };
     bindPullRequestSwitchReconciler(pullRequestSwitchService);
     // Host-local and idle-free: the forge is read only while a switch or a watch is on.
     const pullRequestSwitchAbort = new AbortController();

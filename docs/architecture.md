@@ -4598,6 +4598,27 @@ CI or reviewers should be woken, not left polling; maintainer request,
   the thread through the runtime's follow-up path; an extracted GitHub package
   satisfies the same port, and moving the switch service behind it is
   separate extraction work.
+- **CI logs and reruns.** The pull-request tool's `ci-logs` and `ci-rerun`
+  reach only the thread's own linked pull request, resolved and authorized by
+  the host exactly as for a watch, through a second port (`PullRequestCiPort`)
+  the composition root binds to the switch service (maintainer decision,
+  2026-11-26). `ci-logs` reads every check on the current head with
+  `gh pr checks` and, for each failed GitHub Actions job (at most four per
+  read, or the one named), `gh run view --job <id> --log-failed`, keeping the
+  last `tailLines` lines (1 to 2,000, 200 by default) within 32 KB in all,
+  with the host's secret redaction applied. A check with no log says why:
+  still running, expired (GitHub's 410), not an Actions job, or passed. It
+  never asks; its result marks the thread as having read outside content.
+  `ci-rerun` first plans on the current head: every run must have that head's
+  SHA, have finished, and have fewer than three reruns (GitHub's own run
+  attempt counts them, so the cap survives a restart and counts reruns
+  started elsewhere; it applies to the check's workflow run). Below Full
+  access the person is then asked with the pull request, head and checks
+  named; Full access does not ask. The forge reads the head again and refuses
+  if a push superseded the plan, then runs `gh run rerun <run> --failed`, or
+  `gh run rerun --job <id>` for one named check. Plan refuses both. A rerun
+  adds no event of its own: the tool call and any approval are journaled on
+  the thread.
 - **Record.** Every switch change and every wake appends one event on the
   `code-project-pull-request-switches` aggregate type, each its own aggregate:
   `code.project-pull-request-merge-when-ready-recorded@1` (enabled with method
