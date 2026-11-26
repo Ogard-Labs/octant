@@ -50,6 +50,8 @@ import {
   SUBAGENT_TURN_STARTED_AT,
   subagentsRead,
   USAGE_LEDGER,
+  USAGE_LIMIT_ACCOUNTS,
+  usageLimitsClient,
   VISUAL_NOW,
 } from "./fixtures";
 import { ComposerInput } from "../composer/ComposerInput";
@@ -382,6 +384,8 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
       <SettingsView
         initialDeepLink={{ section: "usage" }}
         localUsageHistoryClient={{ load: async () => localUsageHistoryFixture() }}
+        providerController={{ instances: USAGE_LIMIT_ACCOUNTS } as never}
+        providerUsageLimitsClient={usageLimitsClient()}
         nativeBoundsAvailable
         onResetLayout={noop}
         onResetNativeBounds={noop}

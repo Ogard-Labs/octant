@@ -2892,6 +2892,8 @@ The Usage page reports what was measured and shows each provider with a bundled 
 
 - Local provider history and Octant records are separate sources; their totals are never added.
 - Unknown prices and missing quota measurements are unavailable, never zero, and a late read never renders.
+- Usage stays in Settings and reads like a dashboard (maintainer decision, 2026-11-26; built): each limit leads with the share left of its reading closest to running out, each bar carries an even-pace marker and a forecast, the daily chart is a filled area per provider with a keyboard readout, provider rows add their share and the other measure, tokens split into one bar, models are ranked with a share bar, and explanations wait behind an info mark.
+- A limit forecast comes only from the provider's own reading (used share, window length by name, reset time, time read). Whatever that leaves out stays unknown; no plan size, vendor usage endpoint or credential is read, and pooled accounts are never averaged.
 - Provider logos are bundled and licensed, never fetched at runtime.
 
 Status: Built. Detail: [Settings: Usage](settings.md#usage) and [DESIGN.md: Icons](../../DESIGN.md#icons).

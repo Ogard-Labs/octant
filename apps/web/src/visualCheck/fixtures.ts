@@ -502,6 +502,75 @@ export function planUsageClient(): ProviderUsageLimitsClient {
   return { list: async () => snapshot } as unknown as ProviderUsageLimitsClient;
 }
 
+/**
+ * Plan windows with reset times, so Usage draws its headline, pace markers and
+ * forecasts: two accounts of one service pooled (one spending slower than even,
+ * one faster) and a third provider on its own row.
+ */
+export const USAGE_LIMIT_ACCOUNTS = [
+  claudeAccount("20000000-0000-4000-8000-000000000001", "Claude Max"),
+  claudeAccount("20000000-0000-4000-8000-000000000002", "Claude Team"),
+  decodeProviderInstance({
+    id: "20000000-0000-4000-8000-000000000003",
+    displayName: "Codex",
+    driverKind: "codex",
+    configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: VISUAL_NOW,
+    updatedAt: VISUAL_NOW,
+  }),
+];
+
+export function usageLimitsClient(): ProviderUsageLimitsClient {
+  const after = (hours: number) =>
+    new Date(Date.parse(VISUAL_NOW) + hours * 3_600_000).toISOString();
+  /** Used share and hours to reset, for the five-hour and the seven-day window. */
+  const standings = [
+    [0.34, 2.5, 0.2, 70],
+    [0.82, 3, 0.55, 124],
+    [0.12, 4, 0.7, 25],
+  ] as const;
+  const snapshot = decodeProviderUsageLimitsSnapshot({
+    version: 1,
+    refreshedAt: VISUAL_NOW,
+    entries: USAGE_LIMIT_ACCOUNTS.map((account, index) => {
+      const [short, shortReset, week, weekReset] = standings[index] ?? standings[0];
+      const window = (name: string, utilization: number, hours: number) => ({
+        window: name,
+        status: "allowed",
+        utilization,
+        resetsAt: after(hours),
+        observedAt: VISUAL_NOW,
+      });
+      return {
+        providerInstanceId: account.id,
+        status: "available",
+        source: "provider-runtime",
+        observedAt: VISUAL_NOW,
+        limits: {
+          providerInstanceId: account.id,
+          scope: "account",
+          requests: { status: "unavailable" },
+          tokens: { status: "unavailable" },
+          concurrency: { status: "unavailable" },
+          retry: { status: "inactive" },
+          quota: "available",
+          source: "observed-evidence",
+          confidence: "high",
+          updatedAt: VISUAL_NOW,
+          rateLimitWindows: [
+            window("five_hour", short, shortReset),
+            window("seven_day", week, weekReset),
+          ],
+        },
+      };
+    }),
+  });
+  return { list: async () => snapshot } as unknown as ProviderUsageLimitsClient;
+}
+
 /** A list longer than the sidebar is tall, over running and settled threads. */
 export const SIDEBAR_THREADS = [
   ...Array.from({ length: 16 }, (_, index) => ({
@@ -670,6 +739,10 @@ export function localUsageHistoryFixture(): LocalUsageHistoryResponse {
     totals: totalsFor(sum(tokens), 10),
     cost: costFor(sum(tokens) / 100_000),
   });
+  const model = (providerKey: string, label: string, tokens: ReadonlyArray<number>) => ({
+    ...provider(providerKey, label, tokens),
+    key: `${providerKey}/${label}`,
+  });
   return decodeLocalUsageHistoryResponse({
     source: "local-provider-history",
     from: "2026-08-12T00:00:00.000Z",
@@ -678,9 +751,13 @@ export function localUsageHistoryFixture(): LocalUsageHistoryResponse {
     queryAt: VISUAL_NOW,
     totals: totalsFor(sum(codex) + sum(claude), 20),
     cost: costFor((sum(codex) + sum(claude)) / 100_000),
-    providers: [provider("codex", "Codex", codex), provider("claude", "Claude", claude)],
-    models: [],
-    days: [...dayRows("codex", codex), ...dayRows("claude", claude)],
+    providers: [provider("codex", "Codex", codex), provider("claude-code", "Claude Code", claude)],
+    models: [
+      model("codex", "gpt-5.6-sol", codex.slice(0, 3)),
+      model("claude-code", "claude-opus-5-5", claude),
+      model("codex", "gpt-5.6-luna", codex.slice(3)),
+    ],
+    days: [...dayRows("codex", codex), ...dayRows("claude-code", claude)],
     dailyTotals: days.map((day, index) => ({
       day,
       providerKey: "all",

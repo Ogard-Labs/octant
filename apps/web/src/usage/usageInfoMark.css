@@ -1,0 +1,12 @@
+.usage-info-mark {
+  flex-shrink: 0;
+  color: var(--oct-muted);
+}
+.usage-info-mark__popup {
+  max-width: min(320px, calc(100vw - 2 * var(--oct-space-4)));
+}
+.usage-info-mark__popup p {
+  margin: 0;
+  font-size: var(--oct-text-detail);
+  line-height: 1.5;
+}

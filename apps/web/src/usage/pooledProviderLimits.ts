@@ -1,5 +1,7 @@
+import { overageAllowsContinuedUse } from "@octant/domain/provider-availability-policy";
 import type {
   ProviderInstance,
+  ProviderRateLimitWindow,
   ProviderServiceLimits,
   ProviderUsageLimitsEntry,
 } from "@octant/contracts";
@@ -15,9 +17,13 @@ export type PooledSegment =
       readonly kind: "reading";
       readonly providerInstanceId: string;
       readonly account: string;
+      /** Unrounded; a surface rounds it where it shows it. */
       readonly remainingPercent?: number;
+      /** The limit stops work; a spent allowance with extra usage on does not. */
       readonly exhausted: boolean;
       readonly resetsAt?: string;
+      /** When the provider reported this share; a forecast is measured from it. */
+      readonly observedAt: string;
       /**
        * The reading's reset has passed, so it says nothing about what is left
        * now until a fresh reading arrives; never an assumed refill.
@@ -47,15 +53,46 @@ export interface PooledProvider {
   readonly windows: ReadonlyArray<PooledWindow>;
 }
 
-interface WindowReading {
+export interface WindowReading {
   readonly window: string;
+  /** Unrounded, so a forecast still sees the last fraction of a percent. */
   readonly remainingPercent?: number;
   readonly exhausted: boolean;
   readonly resetsAt?: string;
+  readonly observedAt: string;
+}
+
+/** The share left as a reader sees it: never rounded up past what was reported. */
+export function shownPercent(remainingPercent: number): number {
+  return Math.floor(remainingPercent + 1e-9);
+}
+
+/**
+ * The share a rate-limit window has left, and whether it stops work. A window
+ * the provider flags exhausted while extra usage is still allowed (Vibe's pay
+ * as you go, Claude's overage) is a spent allowance, not a stop: it reads as
+ * nothing left, whether or not the provider named a share.
+ */
+export function rateWindowShare(
+  window: ProviderRateLimitWindow,
+): Pick<WindowReading, "remainingPercent" | "exhausted"> {
+  const flagged = window.status === "exhausted";
+  const continues = flagged && overageAllowsContinuedUse(window.overage);
+  // A spent allowance that overage lets work go on past has nothing included
+  // left, whatever share the utilization still shows; it is not a stop.
+  const remaining = continues
+    ? 0
+    : window.utilization === undefined
+      ? undefined
+      : (1 - window.utilization) * 100;
+  return {
+    ...(remaining === undefined ? {} : { remainingPercent: remaining }),
+    exhausted: flagged && !continues,
+  };
 }
 
 /** The windows an account's limits name, in the order the account reported them. */
-function windowReadings(limits: ProviderServiceLimits): ReadonlyArray<WindowReading> {
+export function windowReadings(limits: ProviderServiceLimits): ReadonlyArray<WindowReading> {
   const buckets = (
     [
       ["requests", limits.requests],
@@ -67,8 +104,9 @@ function windowReadings(limits: ProviderServiceLimits): ReadonlyArray<WindowRead
     return [
       {
         window,
-        remainingPercent: Math.floor((bucket.remaining / bucket.limit) * 100),
+        remainingPercent: (bucket.remaining / bucket.limit) * 100,
         exhausted: bucket.remaining <= 0,
+        observedAt: limits.updatedAt,
         ...(bucket.resetsAt === undefined ? {} : { resetsAt: bucket.resetsAt }),
       },
     ];
@@ -76,10 +114,8 @@ function windowReadings(limits: ProviderServiceLimits): ReadonlyArray<WindowRead
   const windows = (limits.rateLimitWindows ?? []).map(
     (window): WindowReading => ({
       window: window.window,
-      ...(window.utilization === undefined
-        ? {}
-        : { remainingPercent: Math.floor((1 - window.utilization) * 100 + 1e-9) }),
-      exhausted: window.status === "exhausted",
+      ...rateWindowShare(window),
+      observedAt: window.observedAt,
       ...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt }),
     }),
   );
@@ -139,6 +175,8 @@ export function poolProviderLimits(input: {
   readonly entries: ReadonlyArray<ProviderUsageLimitsEntry>;
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly now: number;
+  /** The last refresh request itself failed, so every reading is a kept one. */
+  readonly refreshFailed?: boolean;
 }): ReadonlyArray<PooledProvider> {
   const byId = new Map(input.entries.map((entry) => [String(entry.providerInstanceId), entry]));
   const groups = new Map<string, ProviderInstance[]>();
@@ -182,9 +220,10 @@ export function poolProviderLimits(input: {
             ? {}
             : { remainingPercent: match.remainingPercent }),
           exhausted: match.exhausted && !expired,
+          observedAt: match.observedAt,
           ...(match.resetsAt === undefined || expired ? {} : { resetsAt: match.resetsAt }),
           awaitingUpdate: expired,
-          stale: reading.stale,
+          stale: reading.stale || input.refreshFailed === true,
         };
       });
       const ordered = [...segments].sort((a, b) => resetRank(a) - resetRank(b));
