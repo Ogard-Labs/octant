@@ -3233,9 +3233,14 @@ function AppearanceSection({
         ) : theme.draft === undefined ? (
           // A change made before the theme has been read has no draft to
           // join and would be dropped without a word, so the controls wait.
-          <p className="settings-view__empty" role="status">
-            Loading Background settings…
-          </p>
+          // A read that failed says so above and is not still "loading".
+          theme.status === "loading" ? (
+            <p className="settings-view__empty" role="status">
+              Loading Background settings…
+            </p>
+          ) : theme.error === undefined ? (
+            <SettingsState kind="empty">Background settings are unavailable.</SettingsState>
+          ) : null
         ) : (
           <SettingsSection className="settings-app-background" title="Source and effect">
             <AppBackgroundSettings

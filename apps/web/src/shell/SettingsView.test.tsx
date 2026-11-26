@@ -1743,10 +1743,32 @@ describe("SettingsView", () => {
   it("holds the Background controls until the theme has been read", () => {
     renderSettings({
       initialDeepLink: { section: "background" },
-      themeController: { draft: undefined, applyPatch: vi.fn(async () => false) } as never,
+      themeController: {
+        draft: undefined,
+        status: "loading",
+        applyPatch: vi.fn(async () => false),
+      } as never,
     });
     const page = within(screen.getByRole("main"));
     expect(page.getByRole("status")).toHaveTextContent("Loading Background settings…");
+    expect(
+      page.queryByRole("combobox", { name: "Application background" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says the theme could not be read on Background, and no longer that it is loading", () => {
+    renderSettings({
+      initialDeepLink: { section: "background" },
+      themeController: {
+        draft: undefined,
+        status: "unavailable",
+        error: "Appearance settings are unavailable.",
+        applyPatch: vi.fn(async () => false),
+      } as never,
+    });
+    const page = within(screen.getByRole("main"));
+    expect(page.getByRole("alert")).toHaveTextContent("Appearance settings are unavailable.");
+    expect(page.queryByText("Loading Background settings…")).not.toBeInTheDocument();
     expect(
       page.queryByRole("combobox", { name: "Application background" }),
     ).not.toBeInTheDocument();
