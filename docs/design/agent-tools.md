@@ -99,8 +99,8 @@ its asks appear on the parent's thread.
   confirmed, so one that refused or timed out is tried again at the next
   start. A Simulator the host's device list shows off is no longer listed, so
   a restart never shuts down one the person booted after a helper's build
-  failed; an emulator reported not booted stays listed while adb shows one it
-  cannot name, such as an offline emulator. Terminals, debug sessions and language servers are already reaped
+  failed; an emulator reported not booted stays listed while an offline
+  emulator may be that one (its console names that AVD or cannot say). Terminals, debug sessions and language servers are already reaped
   then. A child opens no device pane, and its results say none is shown.
 
 | Tool                                                                | Child run                                                                                                                                                                                                                                                                                                 |

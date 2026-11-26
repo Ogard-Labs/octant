@@ -469,7 +469,7 @@ type Android = Pick<
   | "snapshot"
   | "readScreenshotArtifact"
   | "readLogArtifact"
-  | "listsUnnamedEmulator"
+  | "mayStillRun"
 >;
 
 const androidHostContext = (
@@ -488,11 +488,11 @@ const androidHostContext = (
 /**
  * Shuts down an emulator a child run booted, as the host, and answers whether
  * it is now off: powered off, or not among the emulators adb sees running
- * while adb lists none it cannot name. Discovery calls an offline emulator
- * off, so "not booted" alone dropped the record of one that may still run.
+ * while no offline emulator may be this one. Discovery calls an offline
+ * emulator off, so "not booted" alone dropped the record of one that may still run.
  */
 export async function shutDownChildEmulator(
-  android: Pick<AndroidToolchainService, "discover" | "execute" | "listsUnnamedEmulator">,
+  android: Pick<AndroidToolchainService, "discover" | "execute" | "mayStillRun">,
   device: ChildBootedDevice,
   input: { readonly artifactRoot: string; readonly uuid: () => string },
 ): Promise<boolean> {
@@ -510,7 +510,7 @@ export async function shutDownChildEmulator(
   return (
     evidence?.outcome === "invalid-destination" &&
     evidence.diagnostics.some((note) => note.message === "destination-not-booted") &&
-    !(await android.listsUnnamedEmulator(context).catch(() => true))
+    !(await android.mayStillRun(device.deviceId as never, context).catch(() => true))
   );
 }
 

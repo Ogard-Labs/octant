@@ -13,6 +13,7 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
   discover(request: AndroidDiscoveryRequest, context: ExecutionContext): Promise<any>;
   execute(request: AndroidEmulatorRequest, context: ExecutionContext): Promise<any>;
   snapshot(context: ExecutionContext): any;
+  mayStillRun(emulatorId: never, context: ExecutionContext): Promise<boolean>;
   cancel(request: ToolActionCancellation, context: ExecutionContext): Promise<boolean>;
   requestPaneOpen(context: ExecutionContext, emulatorId: string): any;
   watchScreen(
@@ -149,6 +150,43 @@ function action(kind: AndroidEmulatorRequest["kind"], extra: Record<string, unkn
 }
 
 describe("AndroidToolchainService", () => {
+  it("counts an offline emulator as possibly the one a helper held only when it is that AVD, or cannot say", async () => {
+    // emulator-5556 is offline: adbd cannot name it, but its console can.
+    const offlineNamed = (name: string | undefined) =>
+      vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        const argv = input.argv.join(" ");
+        if (argv.includes("-list-avds")) return processResult("Pixel_8_API_34\nPixel_9\n");
+        if (argv.includes("devices"))
+          return processResult("List of devices attached\nemulator-5556          offline\n");
+        if (argv.includes("emu avd name"))
+          return name === undefined
+            ? { ...processResult(""), exitCode: 1 }
+            : processResult(`${name}\r\nOK\r\n`);
+        return processResult("");
+      });
+    const mayRun = async (name: string | undefined) => {
+      const service = new AndroidToolchainService({
+        execute: offlineNamed(name) as never,
+        access: async () => undefined,
+        realpath: async (path: string) => path,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async () => undefined,
+        now: () => "2026-09-18T10:00:00.000Z",
+        newId: () => ids.action,
+      });
+      try {
+        await service.discover(discoveryRequest, context);
+        return await service.mayStillRun("Pixel_8_API_34" as never, context);
+      } finally {
+        await service.close();
+      }
+    };
+    // Another AVD offline does not keep a stopped one's record.
+    expect(await mayRun("Pixel_9")).toBe(false);
+    expect(await mayRun("Pixel_8_API_34")).toBe(true);
+    expect(await mayRun(undefined)).toBe(true);
+  });
+
   it("names the AVD store, and a configured ANDROID_AVD_HOME, as state confined commands may write", () => {
     expect(androidToolchainStorePaths({})).toEqual([join(homedir(), ".android")]);
     expect(androidToolchainStorePaths({ ANDROID_AVD_HOME: "/store/avds" })).toEqual([

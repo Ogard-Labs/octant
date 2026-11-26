@@ -920,7 +920,7 @@ export class AppleToolchainService {
 
   /**
    * The Simulator's state as the host's device list says now, written into the
-   * cached lists, or undefined when the list cannot be read or does not name
+   * cached lists when it is settled, or undefined when the list cannot be read or does not name
    * it. Xcode boots a Simulator for a test without the cache seeing it, so a
    * helper's cleanup reads this rather than the cache before it decides a
    * Simulator it held is off.
@@ -944,7 +944,10 @@ export class AppleToolchainService {
     } catch {
       return undefined;
     }
-    if (state === undefined) return undefined;
+    // Only a settled state is written back. A passing one (booting, shutting
+    // down) cached here made the shutdown policy refuse the Simulator, and the
+    // pane's list refresh, which only adds Simulators, never cleared it.
+    if (state !== "booted" && state !== "shutdown") return state;
     const withState = (records: ReadonlyArray<AppleSimulatorRecord>) =>
       records.map((record) =>
         String(record.simulatorId) === String(simulatorId) ? { ...record, state } : record,

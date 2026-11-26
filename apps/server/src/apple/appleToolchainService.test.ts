@@ -36,6 +36,7 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
     simulatorId: AppleSimulatorRecord["simulatorId"],
   ): AppleRuntimeSnapshot;
   close(): Promise<void>;
+  simulatorStateNow(simulatorId: never, context: ExecutionContext): Promise<string | undefined>;
   reconcileAfterRestart(
     receipts: ReadonlyArray<Record<string, unknown>>,
     context: ExecutionContext,
@@ -227,6 +228,42 @@ function discoveryExecutor() {
 }
 
 describe("AppleToolchainService discovery", () => {
+  it("reads a Simulator's state from the host now, but keeps a passing state like booting out of its cache", async () => {
+    const base = discoveryExecutor();
+    let hostState = "Booted";
+    const execute = vi.fn(async (input: Parameters<typeof base>[0]) => {
+      if (input.argv.join(" ") === "xcrun simctl list devices available --json")
+        return processResult(
+          JSON.stringify({
+            devices: {
+              "com.apple.CoreSimulator.SimRuntime.iOS-18-5": [
+                { name: "iPhone 16", udid: ids.simulator, state: hostState, isAvailable: true },
+              ],
+            },
+          }),
+        );
+      return base(input);
+    });
+    const service = new AppleToolchainService({
+      execute,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const cached = () =>
+      (service.snapshot(context) as AppleRuntimeSnapshot).simulators.find(
+        (simulator) => String(simulator.simulatorId) === ids.simulator,
+      )?.state;
+    hostState = "Booting";
+    expect(await service.simulatorStateNow(ids.simulator as never, context)).toBe("booting");
+    // A cached "booting" would refuse every later shutdown, and nothing else would clear it.
+    expect(cached()).toBe("booted");
+    hostState = "Shutdown";
+    expect(await service.simulatorStateNow(ids.simulator as never, context)).toBe("shutdown");
+    expect(cached()).toBe("shutdown");
+  });
+
   it("discovers Xcode, SDKs, project metadata, and available Simulators truthfully", async () => {
     const execute = discoveryExecutor();
     const service = new AppleToolchainService({

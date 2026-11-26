@@ -336,7 +336,7 @@ describe("a Code child's emulators", () => {
       readScreenshotArtifact: vi.fn(),
       readLogArtifact: vi.fn(),
       // An offline emulator: discovery calls it off, while it may still be running.
-      listsUnnamedEmulator: vi.fn(async () => true),
+      mayStillRun: vi.fn(async () => true),
       execute: vi.fn(async (request: { kind: string }, _context: unknown) =>
         request.kind === "shutdown"
           ? {
