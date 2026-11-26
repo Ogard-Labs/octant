@@ -107,7 +107,6 @@ import {
   providerAnswerOutcome,
   providerRequestFromEvent,
   readConversationEvidence,
-  readForkConversation,
   readOperationText,
   refreshActiveThreadView,
   replaceById,
@@ -1716,6 +1715,7 @@ export function useCodeController(options: CodeControllerOptions) {
         }
         if (initial.thread.forkedFrom !== undefined && !readsConversationWindow(client)) {
           try {
+            const { readForkConversation } = await import("./forkConversation");
             const inherited = await readForkConversation(
               client,
               initial.thread.forkedFrom,
