@@ -49,6 +49,23 @@ function pullRequest(
 const identity12 = { projectId, repositoryOwner: "octant", repositoryName: "octant", number: 12 };
 
 /** The info card loads on the first approach to a row, so it can open a moment before its content. */
+function linkedIssue(identifier: string) {
+  return {
+    // The link store keys a Linear link by its node id, so each has its own.
+    issue: { forge: "linear", identifier, issueId: `node-${identifier}` },
+    source: "created-from",
+    linkedAt: "2026-11-24T08:00:00.000Z",
+  };
+}
+
+function linkedGithubIssue(number: number) {
+  return {
+    issue: { forge: "github", owner: "octant", repository: "octant", number },
+    source: "person",
+    linkedAt: "2026-11-24T08:00:00.000Z",
+  };
+}
+
 async function findThreadDetails(): Promise<HTMLElement> {
   const card = await screen.findByRole("group", { name: "Thread details" });
   await waitFor(() => expect(card).not.toBeEmptyDOMElement());
@@ -1475,6 +1492,106 @@ describe("ProjectThreadRows", () => {
     expect(screen.getByRole("button", { name: /Controller foundation/ })).not.toHaveTextContent(
       /issue/i,
     );
+  });
+
+  it("a thread created from an issue lists that issue in its details card before it writes to it", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[
+          { ...thread, linkedIssues: [linkedIssue("OCT-7"), linkedGithubIssue(3)] } as never,
+        ]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const group = within(await findThreadDetails()).getByRole("group", { name: "Issues" });
+
+    expect(
+      within(group).getByRole("img", { name: "Linear issue OCT-7, Linked" }),
+    ).toHaveTextContent(/^OCT-7Linked$/);
+    expect(
+      within(group).getByRole("img", { name: "GitHub issue #3, octant/octant, Linked" }),
+    ).toHaveTextContent(/^#3Linked$/);
+  });
+
+  it("an issue both linked and written to is listed once, with the written title", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            linkedIssues: [linkedGithubIssue(3)],
+            touchedIssues: {
+              items: [
+                {
+                  forge: "github",
+                  owner: "Octant",
+                  repository: "Octant",
+                  number: 4,
+                  title: "Another issue",
+                  observedAt: "2026-11-24T09:00:00.000Z",
+                },
+                {
+                  forge: "github",
+                  owner: "Octant",
+                  repository: "Octant",
+                  number: 3,
+                  title: "Wide tables",
+                  state: "closed",
+                  observedAt: "2026-11-24T09:00:00.000Z",
+                },
+              ],
+              hiddenCount: 0,
+            },
+          } as never,
+        ]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const group = within(await findThreadDetails()).getByRole("group", { name: "Issues" });
+
+    expect(
+      within(group)
+        .getAllByRole("img")
+        .map((line) => line.getAttribute("aria-label")),
+    ).toEqual([
+      "GitHub issue #3, Wide tables, Octant/Octant, closed, Linked",
+      "GitHub issue #4, Another issue, Octant/Octant",
+    ]);
+  });
+
+  it("counts linked issues toward the five its details card names", async () => {
+    const user = userEvent.setup();
+    // Written issues are counted as hidden only past the entry's bound of a
+    // hundred, so these seven all arrive as items.
+    const items = Array.from({ length: 7 }, (_, index) => ({
+      forge: "linear",
+      identifier: `OCT-${String(index + 10)}`,
+      observedAt: "2026-11-24T09:00:00.000Z",
+    }));
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            linkedIssues: [linkedIssue("OCT-1"), linkedIssue("OCT-2")],
+            touchedIssues: { items, hiddenCount: 0 },
+          } as never,
+        ]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const group = within(await findThreadDetails()).getByRole("group", { name: "Issues" });
+
+    expect(within(group).getAllByRole("img")).toHaveLength(5);
+    expect(group).toHaveTextContent("+4 more");
   });
 
   it("offers both pull-request destinations from the row menus for keyboard and coarse pointers", async () => {

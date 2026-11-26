@@ -157,7 +157,8 @@
   bottom: 0;
 }
 
-.thread-row-info-card__pr-stack {
+.thread-row-info-card__pr-stack,
+.thread-row-info-card__issue-linked {
   flex: 0 0 auto;
   color: var(--oct-meta);
   font-variant-numeric: tabular-nums;

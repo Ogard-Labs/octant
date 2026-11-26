@@ -1,11 +1,10 @@
 import "../styles/thread-row-info-card.css";
-import type { ThreadBoardPullRequestSummaries, ThreadTouchedIssues } from "@octant/contracts";
+import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import { pullRequestStateMark } from "../code/pullRequestState";
 import { stackJoin, stackPlaceWords } from "../code/stackPlace";
 import {
   touchedIssueIsFinished,
   touchedIssueKey,
-  touchedIssueName,
   touchedIssuePlace,
   touchedIssueReference,
 } from "../environment/touchedIssues";
@@ -21,7 +20,13 @@ import { ProjectMark } from "./ProjectMark";
 import { threadEngine } from "./threadEngine";
 import { threadRowState } from "./threadRowState";
 import type { ThreadRowActions } from "./ThreadRowMenu";
-import { pullRequestKey } from "./threadRowPullRequests";
+import {
+  linkedIssueKey,
+  linkedIssueReference,
+  pullRequestKey,
+  threadCardIssues,
+  type ThreadCardIssue,
+} from "./threadRowPullRequests";
 
 /**
  * The states worth naming at the top of the card, most actionable first. A row
@@ -303,46 +308,62 @@ function ThreadRowPullRequests(props: {
   );
 }
 
-/** At most this many touched issues are named in the card; the rest are counted. */
-const CARD_TOUCHED_ISSUES = 5;
+/** At most this many issues are named in the card; the rest are counted. */
+const CARD_ISSUES = 5;
 
 /**
- * The issues the thread's tool calls wrote to, after its pull requests, in the
- * same one-line recipe: open or finished mark, reference and title, with the
- * repository or Linear and the state in the tooltip and accessible name. They
- * are facts here, not links: every one is listed, with its page, in the
- * thread's Environment tool.
+ * The issues the thread is linked to and those its tool calls wrote to, after
+ * its pull requests, in the same one-line recipe: open or finished mark,
+ * reference and title, with the repository or Linear and the state in the
+ * tooltip and accessible name. A link no write has described says only
+ * "Linked", in the neutral mark, since its title and state are unknown here and
+ * the card asks no tracker. They are facts here, not links.
  */
-function ThreadRowIssues(props: { readonly issues: ThreadTouchedIssues }) {
-  const shown = props.issues.items.slice(0, CARD_TOUCHED_ISSUES);
-  const more = props.issues.items.length - shown.length + props.issues.hiddenCount;
+function ThreadRowIssueList(props: {
+  readonly issues: ReadonlyArray<ThreadCardIssue>;
+  /** Touched issues past the navigation entry's bound. */
+  readonly hiddenCount: number;
+}) {
+  const shown = props.issues.slice(0, CARD_ISSUES);
+  const more = props.issues.length - shown.length + props.hiddenCount;
   return (
     <span aria-label="Issues" className="thread-row-info-card__prs" role="group">
       <span className="thread-row-info-card__pr-list">
-        {shown.map((issue) => {
-          const finished = touchedIssueIsFinished(issue);
-          const Icon = finished ? CircleCheck : CircleDot;
-          const name = touchedIssueName(issue);
+        {shown.map((line) => {
+          const state =
+            line.kind === "linked"
+              ? "unknown"
+              : touchedIssueIsFinished(line.issue)
+                ? "merged"
+                : "open";
+          const Icon = state === "merged" ? CircleCheck : CircleDot;
+          const reference =
+            line.kind === "linked"
+              ? linkedIssueReference(line.link)
+              : touchedIssueReference(line.issue);
           return (
-            <span className="thread-row-info-card__pr" key={touchedIssueKey(issue)}>
+            <span
+              className="thread-row-info-card__pr"
+              key={line.kind === "linked" ? linkedIssueKey(line.link) : touchedIssueKey(line.issue)}
+            >
               <span
-                aria-label={name}
+                aria-label={line.name}
                 className="thread-row-info-card__pr-reference"
                 role="img"
-                title={name}
+                title={line.name}
               >
-                <span
-                  className="thread-row-info-card__pr-state"
-                  data-pr-state={finished ? "merged" : "open"}
-                >
+                <span className="thread-row-info-card__pr-state" data-pr-state={state}>
                   <Icon aria-hidden="true" size={14} />
                 </span>
-                <span className="thread-row-info-card__pr-number">
-                  {touchedIssueReference(issue)}
-                </span>
-                <span className="thread-row-info-card__pr-title">
-                  {issue.title ?? touchedIssuePlace(issue)}
-                </span>
+                <span className="thread-row-info-card__pr-number">{reference}</span>
+                {line.kind === "linked" ? null : (
+                  <span className="thread-row-info-card__pr-title">
+                    {line.issue.title ?? touchedIssuePlace(line.issue)}
+                  </span>
+                )}
+                {line.kind === "linked" || line.linked ? (
+                  <span className="thread-row-info-card__issue-linked">Linked</span>
+                ) : null}
               </span>
             </span>
           );
@@ -371,6 +392,7 @@ export function ThreadRowInfoCard(props: {
   readonly thread: ChatThreadNavigationItem;
 }) {
   const states = threadRowStates(props.thread);
+  const issues = threadCardIssues(props.thread);
   const age = threadRowAge(props.thread.updatedAt);
   const live = threadLiveFact(props.thread);
   const facts = threadRowFacts({
@@ -421,9 +443,11 @@ export function ThreadRowInfoCard(props: {
         props.thread.pullRequests.hiddenCount === 0) ? null : (
         <ThreadRowPullRequests actions={props.actions} summaries={props.thread.pullRequests} />
       )}
-      {props.thread.touchedIssues === undefined ||
-      props.thread.touchedIssues.items.length === 0 ? null : (
-        <ThreadRowIssues issues={props.thread.touchedIssues} />
+      {issues.length === 0 ? null : (
+        <ThreadRowIssueList
+          hiddenCount={props.thread.touchedIssues?.hiddenCount ?? 0}
+          issues={issues}
+        />
       )}
     </span>
   );

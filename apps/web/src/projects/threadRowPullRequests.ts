@@ -45,8 +45,20 @@ export interface ThreadRowIssues {
   readonly count: number;
 }
 
-function linkedIssueReference(link: ThreadLinkedIssue): string {
+export function linkedIssueReference(link: ThreadLinkedIssue): string {
   return link.issue.forge === "github" ? `#${String(link.issue.number)}` : link.issue.identifier;
+}
+
+/** One stable key per linked issue across both forges. */
+export function linkedIssueKey(link: ThreadLinkedIssue): string {
+  return link.issue.forge === "github"
+    ? `github:${link.issue.owner}/${link.issue.repository}#${String(link.issue.number)}`
+    : `linear:${link.issue.identifier}`;
+}
+
+/** A link in words, when no write has said anything more of its issue. */
+function unwrittenLinkName(link: ThreadLinkedIssue): string {
+  return `${link.issue.forge === "github" ? "GitHub" : "Linear"} issue ${linkedIssueReference(link)}`;
 }
 
 function sameIssue(link: ThreadLinkedIssue, touched: ThreadTouchedIssue): boolean {
@@ -62,6 +74,54 @@ function sameIssue(link: ThreadLinkedIssue, touched: ThreadTouchedIssue): boolea
     touched.forge === "linear" &&
     link.issue.identifier === touched.identifier
   );
+}
+
+/** One issue line of the details card: a link, a write, or both for the same issue. */
+export type ThreadCardIssue =
+  | { readonly kind: "linked"; readonly link: ThreadLinkedIssue; readonly name: string }
+  | {
+      readonly kind: "touched";
+      readonly issue: ThreadTouchedIssue;
+      readonly linked: boolean;
+      readonly name: string;
+    };
+
+/**
+ * The details card's issues: the linked ones first, then the others the
+ * thread's tool calls wrote to. An issue that is both is one line, said with
+ * what the write knew of it, since a link holds no title or state.
+ */
+export function threadCardIssues(input: {
+  readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue> | undefined;
+  readonly touchedIssues?: ThreadTouchedIssues | undefined;
+}): ReadonlyArray<ThreadCardIssue> {
+  const linked = input.linkedIssues ?? [];
+  const touched = input.touchedIssues?.items ?? [];
+  const linkedLines = linked.map((link): ThreadCardIssue => {
+    const issue = touched.find((candidate) => sameIssue(link, candidate));
+    if (issue !== undefined) {
+      return {
+        kind: "touched",
+        issue,
+        linked: true,
+        name: `${touchedIssueName(issue)}, Linked`,
+      };
+    }
+    const place =
+      link.issue.forge === "github" ? `, ${link.issue.owner}/${link.issue.repository}` : "";
+    return { kind: "linked", link, name: `${unwrittenLinkName(link)}${place}, Linked` };
+  });
+  const otherLines = touched
+    .filter((issue) => !linked.some((link) => sameIssue(link, issue)))
+    .map(
+      (issue): ThreadCardIssue => ({
+        kind: "touched",
+        issue,
+        linked: false,
+        name: touchedIssueName(issue),
+      }),
+    );
+  return [...linkedLines, ...otherLines];
 }
 
 /**
@@ -85,10 +145,7 @@ export function threadRowIssues(input: {
     return {
       key: {
         reference,
-        name:
-          described === undefined
-            ? `${soleLink.issue.forge === "github" ? "GitHub" : "Linear"} issue ${reference}`
-            : touchedIssueName(described),
+        name: described === undefined ? unwrittenLinkName(soleLink) : touchedIssueName(described),
       },
       count: touched.length - (described === undefined ? 0 : 1) + hidden,
     };
