@@ -15,6 +15,7 @@ import {
   type HubWebhookHandback,
   type RosterMember,
 } from "@octant/contracts";
+import { authorizeHubRequest } from "@octant/domain";
 import { listenerPinFromDigest, publicKeyFingerprint } from "./hubCrypto";
 import { HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import type { HubHostIdentity } from "./hubService";
@@ -43,6 +44,22 @@ export function servesPublicEntrance(input: {
     link.standIn !== undefined &&
     link.standIn.handingBack !== true &&
     input.state.publicEntrance?.serveWhileStandingIn === true
+  );
+}
+
+/**
+ * Whether this host may take deliveries for the endpoints it owns as a spoke:
+ * while its own hub's Public grant stands, which is what the spoke's own
+ * receipt checks. Turning this host's hub role on keeps that link, so a
+ * standby that did so still runs its own routines while it stands in; a host
+ * promoted to hub has no link left, so no routine would run them.
+ */
+export function servesOwnPublicEndpoints(state: HubState): boolean {
+  const link = state.link;
+  return (
+    link !== undefined &&
+    link.removed !== true &&
+    authorizeHubRequest({ grant: link.grant, item: "public" }).status === "allowed"
   );
 }
 

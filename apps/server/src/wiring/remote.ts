@@ -234,6 +234,7 @@ import { askVisitorSpoke, spokeVisitorHubPort } from "../hub/visitorLinks";
 import {
   handBackPublicQueue,
   holdsPublicCopies,
+  servesOwnPublicEndpoints,
   servesPublicEntrance,
   servingRosterMemberIds,
   servingRosterMembers,
@@ -1368,7 +1369,7 @@ export function wireRemote(deps: RemoteDependencies) {
     // The roster this host serves from: a standby standing in reads the one
     // it holds as a member, not a roster left from a time it was the hub.
     members: () => servingRosterMemberIds(hubStateStore.load()),
-    servesOwnEndpoints: () => !hubService.status().enabled,
+    servesOwnEndpoints: () => servesOwnPublicEndpoints(hubStateStore.load()),
     record: recordHubMembership,
     now: Date.now,
   });

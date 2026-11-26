@@ -63,9 +63,9 @@ export interface HubWebhookServiceOptions {
   readonly members?: () => ReadonlyArray<string> | undefined;
   /**
    * Whether this host may take deliveries for endpoints it owns as a spoke:
-   * only while it stands in. A standby promoted to hub is no one's spoke, so
-   * its own endpoints could never reach a routine; they answer 404 rather
-   * than acknowledge a delivery nothing will run.
+   * only while its own hub's Public grant stands. A standby promoted to hub is
+   * no one's spoke, so its own endpoints could never reach a routine; they
+   * answer 404 rather than acknowledge a delivery nothing will run.
    */
   readonly servesOwnEndpoints?: () => boolean;
   readonly record: (change: HubMembershipChangedPayload) => void;

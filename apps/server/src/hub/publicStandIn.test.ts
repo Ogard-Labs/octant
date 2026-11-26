@@ -4,6 +4,7 @@ import type { HubLinkState, HubState, HubStatePort } from "./hubStateStore";
 import {
   handBackPublicQueue,
   holdsPublicCopies,
+  servesOwnPublicEndpoints,
   servesPublicEntrance,
   servingRosterMemberIds,
   setServeWhileStandingIn,
@@ -55,6 +56,28 @@ describe("who serves the public entrance", () => {
     expect(
       servesPublicEntrance({ hubEnabled: false, state: standby({ handingBack: true }, true) }),
     ).toBe(false);
+  });
+
+  it("a standby that turned its own hub role on still takes deliveries for its own endpoints while its Public grant stands", () => {
+    const state = standby({}, true);
+    const link = { ...state.link, grant: { items: ["public"], actProjects: [] } } as HubLinkState;
+    expect(servesOwnPublicEndpoints({ ...state, hub: { enabled: true } as HubState["hub"] })).toBe(
+      false,
+    );
+    expect(
+      servesOwnPublicEndpoints({ ...state, link, hub: { enabled: true } as HubState["hub"] }),
+    ).toBe(true);
+  });
+
+  it("a host promoted to hub, which no longer has a hub of its own, refuses deliveries for the endpoints it owned as a spoke", () => {
+    expect(servesOwnPublicEndpoints({ hub: { enabled: true } as HubState["hub"] })).toBe(false);
+    const state = standby({}, true);
+    const removed = {
+      ...state.link,
+      removed: true,
+      grant: { items: ["public"], actProjects: [] },
+    } as HubLinkState;
+    expect(servesOwnPublicEndpoints({ ...state, link: removed })).toBe(false);
   });
 
   it("refuses the choice on a host the hub has not named a standby, and journals a change", () => {

@@ -471,4 +471,29 @@ describe("copies on a standby", () => {
     await service.look();
     expect(sends).toBe(before + 1);
   });
+
+  it("sends its endpoints again when the roster changes while a list is out, even if the recipients end up the same", async () => {
+    const key = makeSealingKeyPair();
+    let epoch = "10";
+    let sends = 0;
+    const hub: SpokeWebhookHubPort = {
+      targets: () => [{ memberId: HUB_ID, fingerprint: publicKeyFingerprint(SIGNER.publicKey) }],
+      copyEpoch: () => epoch,
+      sealingKey: async () => SIGNER.sealingKey(key.publicKey),
+      sendEndpoints: async () => {
+        sends += 1;
+        // A standby taken out of the order and put back while the first list is out.
+        if (sends === 1) epoch = "12";
+        return true;
+      },
+    };
+    const { service } = setup(true, { hub });
+    await service.create({ scheme: "github", label: "Pushes" });
+    expect(sends).toBe(1);
+    await service.look();
+    expect(sends).toBe(2);
+    // Taken under the roster it was sent under, the list now counts as published.
+    await service.look();
+    expect(sends).toBe(2);
+  });
 });

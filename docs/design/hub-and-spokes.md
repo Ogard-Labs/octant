@@ -3277,7 +3277,11 @@ Built, run only between three hosts on loopback (maintainer decision,
   sends a named standby an empty list so it keeps no copy; a standby the hub
   takes out of the order is no longer a copy target, and forgets every copy
   it holds at its next look. A roster with a new sequence sends the lists
-  again, so a standby put back in the order gets its copies back. A
+  again, so a standby put back in the order gets its copies back; the
+  sequence counted is the one the list was sent under, not one that arrived
+  while it was out. A host takes deliveries for its own endpoints only while
+  its own hub's Public grant stands: a standby that turned its own hub role
+  on keeps that link and still runs them while it stands in, while a
   standby promoted to hub is no one's spoke, so its own endpoints answer
   404 there rather than accept a delivery no routine will run. A standby that is a spoke too keeps its own endpoints and
   grants on itself, so it serves them while it stands in. Each recipient

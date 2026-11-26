@@ -54,7 +54,12 @@ import { sendWebhookDelivery, spokeWebhookHubPort } from "./webhookLinks";
 import { HubVisitorService } from "./hubVisitorService";
 import { SpokeVisitorService, type VisitorThreadSource } from "./spokeVisitorService";
 import { askVisitorSpoke, spokeVisitorHubPort } from "./visitorLinks";
-import { handBackPublicQueue, servesPublicEntrance, servingRosterMembers } from "./publicStandIn";
+import {
+  handBackPublicQueue,
+  servesOwnPublicEndpoints,
+  servesPublicEntrance,
+  servingRosterMembers,
+} from "./publicStandIn";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
 import { TestCredentialBroker, TestPostureHost, TestThreadWakeHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
@@ -750,6 +755,7 @@ export async function startHubTestHost(input: {
         envelope,
       ),
     wake: async (spokeMemberId) => void (await wake.wakeForDelivery(spokeMemberId)),
+    servesOwnEndpoints: () => servesOwnPublicEndpoints(state.load()),
     record: (change) => records.push(change),
     now: wakeNow,
   });

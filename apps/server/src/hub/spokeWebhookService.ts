@@ -254,6 +254,9 @@ export class SpokeWebhookService {
     const hub = this.#options.hub;
     const targets = hub?.targets() ?? [];
     if (hub === undefined || targets.length === 0) return false;
+    // The roster these targets came from, read before any send awaits: one
+    // that changes while the list is out must not count as published.
+    const epoch = hub.copyEpoch?.() ?? "";
     const revision = this.#revision;
     const held = this.#load();
     const endpoints = this.#options.publicGranted() ? held.endpoints : [];
@@ -317,7 +320,7 @@ export class SpokeWebhookService {
     // flag stays, and the next look sends the newer list.
     if (complete && revision === this.#revision) {
       this.#publishedGranted = granted;
-      this.#publishedRecipients = `${recipients.join(",")}@${hub.copyEpoch?.() ?? ""}`;
+      this.#publishedRecipients = `${recipients.join(",")}@${epoch}`;
       const { unpublished: _unpublished, ...rest } = this.#load();
       this.#save(rest);
     } else if (!complete) {
