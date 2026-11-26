@@ -1,4 +1,5 @@
-import { expect, it } from "vitest";
+import { decodeInputs, decision, sample } from "./coordinatorEvaluationCli";
+import { expect, it, vi } from "vitest";
 import { assembleCase } from "./coordinatorEvaluationInput.test-support";
 import { cases, compareSamples, score, summarize } from "./coordinatorEvaluation";
 
@@ -7,10 +8,10 @@ it("detects unnecessary starts, missing assignments, duplicate assignments and m
   const send = (recipients: string[]) => ({
     operation: "send",
     recipients,
-    message: "Use dark blue",
+    message: "Use dark blue for the primary button",
   });
   expect(score(cases.status, [start("status")], "One worker is working.")).toBe(false);
-  expect(score(cases.status, [], "One worker is working.")).toBe(true);
+  expect(score(cases.status, [{ operation: "help" }], "One worker is working.")).toBe(true);
   expect(score(cases.assign, [start("parser")], "I assigned both.")).toBe(false);
   expect(score(cases.assign, [start("parser"), start("parser")], "")).toBe(false);
   expect(score(cases.assign, [start("parser"), start("changelog")], "")).toBe(true);
@@ -18,11 +19,33 @@ it("detects unnecessary starts, missing assignments, duplicate assignments and m
     false,
   );
   expect(score(cases.revise, [send([cases.revise.workers[0].reference])], "")).toBe(true);
+  expect(
+    score(
+      cases.assign,
+      [
+        { ...start("parser"), prompt: "Fix CSV parsing. Leave the changelog to the other worker." },
+        start("changelog"),
+      ],
+      "",
+    ),
+  ).toBe(true);
+  expect(
+    score(
+      cases.revise,
+      [
+        {
+          ...send([cases.revise.workers[0].reference]),
+          message: "Use dark blue for the background.",
+        },
+      ],
+      "",
+    ),
+  ).toBe(false);
 });
 
-it("passes changed orchestration instructions, production roster and offered tool schema to the model", () => {
-  const first = assembleCase(cases.revise, "Answer status questions inline.");
-  const edited = assembleCase(cases.revise, "Start workers for status questions.");
+it("passes changed orchestration instructions, production roster and offered tool schema to the model", async () => {
+  const first = await assembleCase(cases.revise, "Answer status questions inline.");
+  const edited = await assembleCase(cases.revise, "Start workers for status questions.");
   expect(first.messages[0]?.content).toContain("Answer status questions inline.");
   expect(first.messages[0]?.content).toContain("The person's orchestration instructions");
   expect(edited.messages[0]?.content).toContain("Start workers for status questions.");
@@ -53,4 +76,96 @@ it("reports the changes in pass rate and retains the actions for each revision",
     passRateDelta: 1,
   });
   expect(compareSamples([], after).passRateDelta).toBeNull();
+});
+
+it("refuses delegation arguments containing fields from other operations", () => {
+  const attempt = (raw: object) =>
+    decision(
+      {
+        id: "call-1",
+        type: "function",
+        function: { name: "threads", arguments: JSON.stringify(raw) },
+      },
+      "threads",
+    );
+  expect(
+    attempt({ operation: "start", title: "CSV parser", prompt: "Fix parsing", message: "extra" }),
+  ).toEqual({ operation: "invalid arguments" });
+  expect(
+    attempt({
+      operation: "send",
+      recipients: [cases.revise.workers[0].reference],
+      message: "Revision",
+      title: "extra",
+    }),
+  ).toEqual({ operation: "invalid arguments" });
+});
+
+it("checks the model input emitted by each checkout", async () => {
+  const input = await assembleCase(cases.revise, "Use the roster.");
+  const bundle = { status: input, assign: input, revise: input };
+  expect(decodeInputs(bundle)).toEqual(bundle);
+  expect(() =>
+    decodeInputs({ ...bundle, revise: { ...input, tools: [{ function: {} }] } }),
+  ).toThrow();
+});
+
+it("returns production help and per-recipient send receipts to the model", async () => {
+  const assembled = await assembleCase(cases.revise, "Use the roster.");
+  const input = decodeInputs({ status: assembled, assign: assembled, revise: assembled }).revise;
+  const name = input.tools[0].function.name;
+  const recipient = cases.revise.workers[0].reference;
+  const response = (id: string, raw: object) =>
+    Response.json({
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            tool_calls: [
+              {
+                id,
+                type: "function",
+                function: { name, arguments: JSON.stringify(raw) },
+              },
+            ],
+          },
+        },
+      ],
+    });
+  const fetchModel = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response("help", { operation: "help" }))
+    .mockResolvedValueOnce(
+      response("send", {
+        operation: "send",
+        recipients: [recipient],
+        message: "Use dark blue for the primary button",
+      }),
+    )
+    .mockResolvedValueOnce(
+      Response.json({ choices: [{ finish_reason: "stop", message: { content: "Sent." } }] }),
+    );
+  vi.stubGlobal("fetch", fetchModel);
+  try {
+    const result = await sample(new URL("http://127.0.0.1"), "fixture", cases.revise, input);
+    expect(result).toMatchObject({ status: "completed", pass: true });
+    const body = fetchModel.mock.calls[2]?.[1]?.body;
+    expect(typeof body).toBe("string");
+    expect(String(body)).toContain(JSON.stringify(JSON.stringify(input.help)));
+    expect(String(body)).toContain(
+      JSON.stringify(
+        JSON.stringify([
+          {
+            status: "sent",
+            recipient,
+            messageId: "50000000-0000-4000-8000-000000010001",
+            message:
+              "Admitted. The recipient reads it as data at the start of its next turn; sending starts no turn there.",
+          },
+        ]),
+      ),
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

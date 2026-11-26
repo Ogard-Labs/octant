@@ -714,7 +714,8 @@ to the worker already assigned. Each checkout assembles its own roster,
 orchestration block, and registered threads tool through the production
 coordinator service, instruction store, and tool registration. This exercises
 the coordinator inputs through an OpenAI-compatible adapter. The runner
-simulates replies to list, start, and send inside the fixture.
+uses each checkout’s help response and simulates replies to list, start, and
+send inside the fixture, including per-recipient send receipts.
 
 Prepare two clean, separate Git checkouts and run `bun install --frozen-lockfile`
 in each. Copy `coordinatorEvaluation.ts` and `coordinatorEvaluationInput.test-support.ts` from
@@ -740,9 +741,11 @@ service requires explicit approval before use.
 
 The JSON report records both SHAs, SHA-256 digests of the assembled case inputs
 including tool metadata, model request settings, observations, and per-case
-pass rates. A start is matched to its assignment by a keyword in the title or
-brief. A send must name the exact recipient and include the requested change.
-A direct answer needs text and no decision tool calls. List calls are allowed
+pass rates. A start is matched to its assignment by a keyword in the title, falling back
+to the brief when the title has no unique match. A send must name the exact
+recipient and include the requested color and button. Refused calls fail the
+score.
+A direct answer needs text and no decision tool calls. List and help calls are allowed
 in all cases. The score measures delegation decisions. Pass rates count
 completed samples, and the delta is candidate minus baseline. Read errors and
 incomplete counts alongside the rate. Either makes the comparison command

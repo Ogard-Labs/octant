@@ -20,7 +20,7 @@ import { CoordinatorService } from "./coordinatorService";
 const coordinatorId = "20000000-0000-4000-8000-000000000001";
 const now = "2026-11-10T12:00:00.000Z";
 
-export function assembleCase(fixture: EvaluationCase, orchestration: string) {
+export async function assembleCase(fixture: EvaluationCase, orchestration: string) {
   const threads = [
     { id: coordinatorId, title: "Coordinator", coordinator: true },
     ...fixture.workers.map(({ id, title }) => ({ id, title, coordinatorThreadId: coordinatorId })),
@@ -80,7 +80,7 @@ export function assembleCase(fixture: EvaluationCase, orchestration: string) {
   const level = coordinator.levelOf(coordinatorId);
   if (roster === undefined || level === undefined)
     throw new Error("Coordinator fixture lost its roster or level.");
-  const { definitions } = createThreadsTools({
+  const { definitions, execute } = createThreadsTools({
     mode: "code",
     windowId: decodeWindowId("10000000-0000-4000-8000-000000000001"),
     service: { answer: unavailable },
@@ -129,7 +129,11 @@ export function assembleCase(fixture: EvaluationCase, orchestration: string) {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+  const tool = definitions[0]?.name;
+  if (tool === undefined) throw new Error("Coordinator fixture lost its threads tool.");
+  const help = await execute({ name: tool, inputJson: '{"operation":"help"}' });
   return {
+    help: help.result,
     messages: [
       ...instructions.map(({ text }) => ({ role: "system", content: text })),
       { role: "user", content: roster },
@@ -148,10 +152,12 @@ if (import.meta.main) {
   console.log(
     JSON.stringify(
       Object.fromEntries(
-        Object.entries(cases).map(([name, fixture]) => [
-          name,
-          assembleCase(fixture, orchestration),
-        ]),
+        await Promise.all(
+          Object.entries(cases).map(async ([name, fixture]) => [
+            name,
+            await assembleCase(fixture, orchestration),
+          ]),
+        ),
       ),
     ),
   );

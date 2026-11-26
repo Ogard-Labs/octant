@@ -1,15 +1,17 @@
+import { decodeCoordinatorStartInput } from "@octant/contracts";
+import { MAX_AGENT_MESSAGE_RECIPIENTS } from "@octant/domain";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { Schema } from "effect";
 import {
   cases,
+  fixtureProjectId,
   score,
   compareSamples,
   type Action,
   type EvaluationCase,
   type Sample,
 } from "./coordinatorEvaluation";
-import type { assembleCase } from "./coordinatorEvaluationInput.test-support";
 
 const callSchema = Schema.Struct({
   id: Schema.String,
@@ -29,13 +31,42 @@ const responseSchema = Schema.Struct({
   ),
 });
 
-const actionSchema = Schema.Struct({
-  operation: Schema.String,
-  title: Schema.optionalWith(Schema.String, { exact: true }),
-  prompt: Schema.optionalWith(Schema.String, { exact: true }),
-  recipients: Schema.optionalWith(Schema.Array(Schema.String), { exact: true }),
-  message: Schema.optionalWith(Schema.String, { exact: true }),
+const strict = { parseOptions: { onExcessProperty: "error" } } as const;
+const sendSchema = Schema.Struct({
+  operation: Schema.Literal("send"),
+  recipients: Schema.NonEmptyArray(Schema.String).pipe(
+    Schema.maxItems(MAX_AGENT_MESSAGE_RECIPIENTS),
+  ),
+  message: Schema.String.pipe(Schema.filter((message) => message.trim().length > 0)),
+}).annotations(strict);
+const operationSchema = Schema.Struct({ operation: Schema.String });
+
+const inputSchema = Schema.Struct({
+  messages: Schema.NonEmptyArray(
+    Schema.Struct({
+      role: Schema.Literal("system", "user"),
+      content: Schema.String,
+    }),
+  ),
+  tools: Schema.NonEmptyArray(
+    Schema.Struct({
+      type: Schema.Literal("function"),
+      function: Schema.Struct({
+        name: Schema.String,
+        description: Schema.String,
+        parameters: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+      }),
+    }),
+  ),
+  help: Schema.Struct({ tool: Schema.String, help: Schema.String }),
 });
+export const decodeInputs = Schema.decodeUnknownSync(
+  Schema.Struct({
+    status: inputSchema,
+    assign: inputSchema,
+    revise: inputSchema,
+  }),
+);
 
 const fixtureSource = "apps/server/src/coordinator";
 const defaultInstructions =
@@ -43,7 +74,7 @@ const defaultInstructions =
 const configuration = { temperature: 0, seed: 42, max_tokens: 768 };
 const maxRounds = 6;
 
-type Inputs = Record<keyof typeof cases, ReturnType<typeof assembleCase>>;
+type Inputs = ReturnType<typeof decodeInputs>;
 
 function run(cwd: string, command: string[]): string {
   const result = Bun.spawnSync(command, { cwd, stderr: "inherit" });
@@ -73,23 +104,30 @@ async function capture(checkout: string, instructions: string) {
   return {
     revision,
     digest: createHash("sha256").update(serialized).digest("hex"),
-    inputs: JSON.parse(serialized) as Inputs,
+    inputs: decodeInputs(JSON.parse(serialized)),
   };
 }
 
-function decision(
+export function decision(
   call: Schema.Schema.Type<typeof callSchema>,
   toolName: string | undefined,
 ): Action {
   if (call.function.name !== toolName) return { operation: `unknown tool: ${call.function.name}` };
   try {
-    return Schema.decodeUnknownSync(actionSchema)(JSON.parse(call.function.arguments));
+    const raw: unknown = JSON.parse(call.function.arguments);
+    const { operation } = Schema.decodeUnknownSync(operationSchema)(raw);
+    if (operation === "start") {
+      const { title, prompt } = decodeCoordinatorStartInput(raw);
+      return { operation, title, prompt };
+    }
+    if (operation === "send") return Schema.decodeUnknownSync(sendSchema)(raw);
+    return { operation };
   } catch {
     return { operation: "invalid arguments" };
   }
 }
 
-async function sample(
+export async function sample(
   endpoint: URL,
   model: string,
   fixture: EvaluationCase,
@@ -114,7 +152,6 @@ async function sample(
       ).choices;
       const calls = message.tool_calls ?? [];
       const returned = calls.map((call) => decision(call, toolName));
-      actions.push(...returned);
       if (finish_reason === "stop" && calls.length === 0) {
         return {
           status: "completed",
@@ -133,10 +170,12 @@ async function sample(
           status: "refused",
           message: "Operation unavailable in this fixture.",
         };
+        if (action.operation === "help") result = input.help;
         if (action.operation === "list") result = { status: "listed", threads: workers };
         if (action.operation === "start" && action.title?.trim() && action.prompt?.trim()) {
-          const reference = `simulation-worker-${workers.length + 1}`;
-          workers.push({ id: reference, reference, title: action.title, state: "working" });
+          const id = `20000000-0000-4000-8000-${String(workers.length + 10).padStart(12, "0")}`;
+          const reference = `${id}@${fixtureProjectId}`;
+          workers.push({ id, reference, title: action.title, state: "working" });
           result = { status: "started", reference };
         }
         if (
@@ -145,8 +184,19 @@ async function sample(
           action.recipients?.length &&
           action.recipients.every((ref) => workers.some((worker) => worker.reference === ref))
         ) {
-          result = { status: "sent" };
+          result = action.recipients.map((recipient, recipientIndex) => ({
+            status: "sent",
+            recipient,
+            messageId: `50000000-0000-4000-8000-${String(round * 10000 + index * MAX_AGENT_MESSAGE_RECIPIENTS + recipientIndex + 1).padStart(12, "0")}`,
+            message:
+              "Admitted. The recipient reads it as data at the start of its next turn; sending starts no turn there.",
+          }));
         }
+        actions.push(
+          "status" in result && result.status === "refused"
+            ? { ...action, operation: `refused: ${action.operation}` }
+            : action,
+        );
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
       }
     }

@@ -14,7 +14,7 @@ export interface EvaluationCase {
     readonly action: "answer" | "start" | "send";
     readonly targets: ReadonlyArray<string>;
     readonly workerCount: number;
-    readonly messageIncludes?: string;
+    readonly messageIncludes?: ReadonlyArray<string>;
   };
 }
 
@@ -37,7 +37,7 @@ export const cases = {
       action: "send",
       targets: [palette.reference],
       workerCount: 1,
-      messageIncludes: "dark blue",
+      messageIncludes: ["dark blue", "primary button"],
     },
   },
 } satisfies Record<string, EvaluationCase>;
@@ -55,7 +55,7 @@ export function score(
   actions: ReadonlyArray<Action>,
   answer: string,
 ): boolean {
-  const decisions = actions.filter(({ operation }) => operation !== "list");
+  const decisions = actions.filter(({ operation }) => operation !== "list" && operation !== "help");
   const { action, targets, workerCount, messageIncludes } = fixture.expected;
   if (action === "answer") return decisions.length === 0 && answer.trim().length > 0;
   if (decisions.some(({ operation }) => operation !== action)) return false;
@@ -65,12 +65,16 @@ export function score(
       decisions.length === 1 &&
       recipients.length === workerCount &&
       targets.every((target) => recipients.includes(target)) &&
-      decisions[0]?.message?.toLowerCase().includes(messageIncludes ?? "") === true
+      (messageIncludes ?? []).every((phrase) =>
+        decisions[0]?.message?.toLowerCase().includes(phrase),
+      )
     );
   }
   if (decisions.length !== workerCount) return false;
   const assignments = decisions.map(({ title, prompt }) => {
     if (!title?.trim() || !prompt?.trim()) return [];
+    const titleMatches = targets.filter((target) => title.toLowerCase().includes(target));
+    if (titleMatches.length === 1) return titleMatches;
     const brief = `${title} ${prompt}`.toLowerCase();
     return targets.filter((target) => brief.includes(target));
   });
