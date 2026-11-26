@@ -4,7 +4,7 @@ import { decodeChatBootstrap } from "@octant/contracts/chat";
 import { decodeTodoListHostView } from "@octant/contracts/todos";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { ProviderInstance, SettingsDeepLink } from "@octant/contracts";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -14,7 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import { settingsPastFirstRun } from "../App.test-fixtures";
 import { HostPlatformContext } from "../platform";
 import { SettingsView, type SettingsViewProps } from "./SettingsView";
-import { TodoListHostSettingsContext } from "../todos/TodoListHostSettings";
+import { TodoListHostSettingsContext } from "../todos/todoListHostSettingsContext";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -95,6 +95,20 @@ it("starts background Browser ownership off and saves only an explicit local cho
   await userEvent.setup().click(toggle);
   expect(props.onSettingsChange).toHaveBeenCalledWith({ persistentBrowserOwner: true });
 });
+
+/**
+ * Rows whose one sentence may run past the length below, each with its
+ * reason. A row is added here only when shortening it would hide what a
+ * person must read before choosing (a cost, data leaving this computer, an
+ * effect that cannot be undone). The Full access risk (139 characters) is
+ * one: it shows on the access row once Full access is chosen.
+ */
+const LONG_ROW_SENTENCES: ReadonlyMap<string, string> = new Map([
+  ["work-default-access", "the Full access risk is read before choosing Full access"],
+]);
+
+/** About 110 characters, with room for a number or a name filled in. */
+const ROW_SENTENCE_LIMIT = 125;
 
 /**
  * Render SettingsView with a controlled `search` prop so the search results
@@ -353,7 +367,7 @@ describe("SettingsView", () => {
       "true",
     );
     expect(screen.getByRole("group", { name: "Reply detail setting" })).toHaveAccessibleDescription(
-      "Where every thread starts unless it sets its own. Thinking stays folded, and a finished turn's tool calls fold behind one line.",
+      "Thinking stays folded, and a finished turn's tool calls fold behind one line.",
     );
     await user.click(within(replyDetail).getByRole("button", { name: "High" }));
 
@@ -1879,7 +1893,10 @@ describe("SettingsView", () => {
     );
     expect(screen.getByRole("heading", { name: "Host" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveFocus();
-    expect(screen.getByText(/Resets this mode's panes.*Threads and data are kept/i)).toBeVisible();
+    expect(
+      screen.getByText("Resets this mode's panes, sidebar, and dock to defaults."),
+    ).toBeVisible();
+    expect(screen.getByText("Threads and data are kept.")).toBeInTheDocument();
     expect(onDeepLinkApplied).toHaveBeenCalledOnce();
   });
 
@@ -2419,7 +2436,8 @@ describe("SettingsView", () => {
     expect(screen.getByRole("heading", { name: "Tool-call records" })).toBeInTheDocument();
     const control = screen.getByRole("switch", { name: "Keep tool inputs and outputs" });
     expect(control).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText(/removed when its thread is purged/)).toBeVisible();
+    expect(screen.getByText(/bounded copy of what each Chat and Work tool call/)).toBeVisible();
+    expect(screen.getByText(/removed when its thread is purged/)).toBeInTheDocument();
     await userEvent.setup().click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ keepToolCallRecords: false });
   });
@@ -2435,9 +2453,12 @@ describe("SettingsView", () => {
     });
     expect(fullAccess).toHaveValue(0);
     expect(screen.getByText(/0 means no limit/)).toBeVisible();
-    // The event stop follows the limit, and is said where the limit is set.
-    expect(screen.getByText(/stops after 64 runtime events for each step kept/)).toBeVisible();
-    expect(screen.getByText(/no event count stops the turn/)).toBeVisible();
+    // The event stop follows the limit, and is said where the limit is set,
+    // behind the row's More.
+    expect(
+      screen.getByText(/stops after 64 runtime events for each step kept/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/no event count stops the turn/)).toBeInTheDocument();
     const user = userEvent.setup();
     const belowFull = screen.getByRole("spinbutton", { name: "Tool steps kept per turn" });
     await user.clear(belowFull);
@@ -2908,5 +2929,72 @@ describe("SettingsView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Host" }));
     await user.click(screen.getByRole("button", { name: "Reset active mode layout" }));
     expect(onResetLayout).toHaveBeenCalledOnce();
+  });
+});
+
+describe("every Settings row at rest", () => {
+  // A row's detail is one sentence; the rest waits behind its More. Counted
+  // on 2026-11-25, about 240 rows ran to several sentences.
+  it("says what it does in one sentence on every page the window can draw", () => {
+    renderSettings();
+    const pages = within(screen.getByRole("navigation", { name: "Settings sections" }))
+      .getAllByRole("button")
+      .map((button) => button.textContent?.trim() ?? "")
+      .filter((label) => label !== "");
+    expect(pages.length).toBeGreaterThan(10);
+    const long: string[] = [];
+    let read = 0;
+    for (const page of pages) {
+      navigateTo(page);
+      for (const row of document.querySelectorAll<HTMLElement>("[data-testid='setting-row']")) {
+        const id = row.dataset.settingId ?? "";
+        const sentence =
+          row.querySelector(":scope > .setrow-hint > span")?.textContent?.trim() ?? "";
+        if (sentence !== "") read += 1;
+        if (LONG_ROW_SENTENCES.has(id)) continue;
+        const twoSentences = /[.!?]\s+[A-Z(]/.test(sentence);
+        if (twoSentences || sentence.length > ROW_SENTENCE_LIMIT) {
+          long.push(`${page} › ${id}: ${sentence}`);
+        }
+      }
+    }
+    expect(long).toEqual([]);
+    // It read the rows it says it read: a changed row structure would leave
+    // nothing to check and pass on its own.
+    expect(read).toBeGreaterThan(60);
+  });
+
+  // The pages above draw without the clients that Chat, Work, Code, the agent
+  // and remote sections need, so their rows are read here from the source: a
+  // written description on any SettingRow in the renderer.
+  it("says what it does in one sentence in every Settings source, the pages the test window cannot draw included", () => {
+    const root = resolve(__dirname, "..");
+    const files = readdirSync(root, { recursive: true, encoding: "utf8" }).filter(
+      (file) => file.endsWith(".tsx") && !file.includes(".test."),
+    );
+    const long: string[] = [];
+    let read = 0;
+    for (const file of files) {
+      const source = readFileSync(resolve(root, file), "utf8");
+      if (!source.includes("<SettingRow")) continue;
+      for (const row of source.matchAll(/<SettingRow\b([\s\S]*?)>/g)) {
+        const written =
+          /description=(?:"((?:[^"\\]|\\.)*)"|\{`((?:[^`\\]|\\.)*)`\}|\{\s*"((?:[^"\\]|\\.)*)"\s*\})/.exec(
+            row[1] ?? "",
+          );
+        if (written === null) continue;
+        const sentence = (written[1] ?? written[2] ?? written[3] ?? "")
+          .replace(/\$\{[^}]*\}/g, "N")
+          .trim();
+        const id = /settingId="([^"]+)"/.exec(row[1] ?? "")?.[1] ?? file;
+        read += 1;
+        if (LONG_ROW_SENTENCES.has(id)) continue;
+        if (/[.!?]\s+[A-Z(]/.test(sentence) || sentence.length > ROW_SENTENCE_LIMIT) {
+          long.push(`${file} › ${id}: ${sentence}`);
+        }
+      }
+    }
+    expect(long).toEqual([]);
+    expect(read).toBeGreaterThan(150);
   });
 });

@@ -66,8 +66,8 @@ export function ComputerUseSetup(
           label="Guided setup"
           description={
             props.settings.enabled
-              ? "Enabled. macOS permissions and a working test are checked separately."
-              : "Computer use is off. Set up enables it and saves your progress."
+              ? "Enabled; macOS permissions and a working test are checked separately."
+              : "Computer use is off; Set up enables it and saves your progress."
           }
           scope="host"
         >
@@ -143,7 +143,8 @@ export function ComputerUseSetup(
         <SettingRow
           settingId="computer-use-permission-actions"
           label="Permission setup"
-          description="If Octant is missing, add the installed app using + where available. Relaunch if macOS asks, then return here. Your setup progress is saved; permissions are rechecked when you return."
+          description="If Octant is missing, add the installed app using + where available."
+          more="Relaunch if macOS asks, then return here. Your setup progress is saved; permissions are rechecked when you return."
           scope="host"
         >
           <div className="settings-view__actions">
@@ -173,7 +174,8 @@ export function ComputerUseSetup(
         <SettingRow
           settingId="computer-use-test"
           label="Working test"
-          description="After you approve, Octant captures and clicks a temporary test window, then closes it. Each app a task uses still needs approval."
+          description="After you approve, Octant captures and clicks a temporary test window, then closes it."
+          more="Each app a task uses still needs approval."
           scope="host"
         >
           <div className="settings-view__actions">

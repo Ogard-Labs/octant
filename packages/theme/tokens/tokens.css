@@ -288,7 +288,8 @@
   --octant-shadow-lg: none;
   --octant-shadow-md: none;
   --octant-shadow-overlay: 0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%);
-  --octant-shadow-pop: 0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%);
+  --octant-shadow-pop:
+    var(--octant-float-rim), 0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%);
   --octant-shadow-primary: none;
   --octant-shadow-raised-glass: none;
   --octant-shadow-selected: none;
@@ -358,6 +359,7 @@
   --oct-tracking-sf-12: 0em;
   --oct-tracking-sf-14: -0.011em;
   --oct-tracking-sf-26: 0.008em;
+  --octant-float-rim: 0 0 transparent;
 }
 
 :root[data-theme="light"] {
@@ -429,7 +431,8 @@
   --octant-focus: #1f6f96;
   --octant-focus-ring: #1f6f96;
   --octant-shadow-overlay: 0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%);
-  --octant-shadow-pop: 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%);
+  --octant-shadow-pop:
+    var(--octant-float-rim), 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%);
   --oct-glass-highlight: rgba(255, 255, 255, 0.85);
   --oct-glass-regular: rgba(255, 255, 255, 0.42);
   --oct-glass-stroke: rgba(27, 27, 27, 0.1);
@@ -516,7 +519,8 @@
     --octant-focus: #1f6f96;
     --octant-focus-ring: #1f6f96;
     --octant-shadow-overlay: 0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%);
-    --octant-shadow-pop: 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%);
+    --octant-shadow-pop:
+      var(--octant-float-rim), 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%);
     --oct-glass-highlight: rgba(255, 255, 255, 0.85);
     --oct-glass-regular: rgba(255, 255, 255, 0.42);
     --oct-glass-stroke: rgba(27, 27, 27, 0.1);

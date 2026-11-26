@@ -18,13 +18,22 @@ import { SettingRow, SettingsState } from "./primitives";
 import "./octant-instructions.css";
 
 export const YOUR_INSTRUCTIONS_PURPOSE =
-  "Rules for working inside Octant, sent with every new turn on every provider: which provider or model takes which job, and when to use Work, Canvas, routines, or the board. A provider's own instruction files still apply and come first on how it works.";
+  "Rules for working inside Octant, sent with every new turn on every provider.";
+
+export const YOUR_INSTRUCTIONS_MORE =
+  "Which provider or model takes which job, and when to use Work, Canvas, routines, or the board. A provider's own instruction files still apply and come first on how it works.";
 
 export const ORCHESTRATION_PURPOSE =
-  "For coordinator threads and a Project's planner only, after your instructions: when to start a worker, which provider and model suits which task, how workers report back, and when to stop and ask. It grants nothing; a coordinator's start setting and bounds still apply.";
+  "Instructions for coordinator threads and a Project's planner only, sent after your instructions.";
+
+export const ORCHESTRATION_MORE =
+  "When to start a worker, which provider and model suits which task, how workers report back, and when to stop and ask. It grants nothing; a coordinator's start setting and bounds still apply.";
 
 export const PROJECT_INSTRUCTIONS_PURPOSE =
-  "Rules for this Project's threads in Octant, sent after your instructions with every new turn in this Project. A provider's own instruction files in the folder still apply and come first on how it works.";
+  "Rules for this Project's threads in Octant, sent after your instructions with every new turn here.";
+
+export const PROJECT_INSTRUCTIONS_MORE =
+  "A provider's own instruction files in the folder still apply and come first on how it works.";
 
 export const INSTRUCTIONS_READ_ONLY_NOTE =
   "Only you can change these, from a window on this computer or a device you paired.";
@@ -38,6 +47,8 @@ export interface InstructionsFieldProps {
   readonly settingId: string;
   readonly label: string;
   readonly purpose: string;
+  /** What the purpose has to say beyond its one sentence, behind the row's More. */
+  readonly purposeMore: string;
   readonly text: OctantInstructionsText;
   readonly value: string;
   readonly canChange: boolean;
@@ -86,6 +97,7 @@ export function InstructionsField(props: InstructionsFieldProps) {
     <div className="octant-instructions-row">
       <SettingRow
         description={props.purpose}
+        more={props.purposeMore}
         focused={props.focused === true}
         htmlFor={fieldId}
         label={props.label}
@@ -210,6 +222,7 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
     return (
       <SettingRow
         description={YOUR_INSTRUCTIONS_PURPOSE}
+        more={YOUR_INSTRUCTIONS_MORE}
         label="Your instructions"
         scope="host"
         settingId="your-instructions"
@@ -234,6 +247,7 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
         onSave={(value) => void save("instructions", value)}
         problem={problem?.field === "instructions" ? problem.message : undefined}
         purpose={YOUR_INSTRUCTIONS_PURPOSE}
+        purposeMore={YOUR_INSTRUCTIONS_MORE}
         scope="host"
         settingId="your-instructions"
         text="person"
@@ -247,6 +261,7 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
         onSave={(value) => void save("orchestration", value)}
         problem={problem?.field === "orchestration" ? problem.message : undefined}
         purpose={ORCHESTRATION_PURPOSE}
+        purposeMore={ORCHESTRATION_MORE}
         scope="host"
         settingId="orchestration-instructions"
         text="orchestration"
@@ -333,6 +348,7 @@ export function ProjectInstructionsSettings(props: ProjectInstructionsSettingsPr
       onSave={(value) => void save(value)}
       problem={problem}
       purpose={PROJECT_INSTRUCTIONS_PURPOSE}
+      purposeMore={PROJECT_INSTRUCTIONS_MORE}
       scope="project"
       settingId="project-instructions"
       text="project"

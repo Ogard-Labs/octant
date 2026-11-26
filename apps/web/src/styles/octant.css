@@ -5392,7 +5392,9 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
 .thread-column > .callout {
   width: fit-content;
   max-width: min(480px, 100%);
-  box-shadow: var(--oct-shadow-float);
+  /* A notice is a floating card, so its top edge catches the light under
+     Glass like every other float's (the rim slot is empty elsewhere). */
+  box-shadow: var(--octant-float-rim), var(--oct-shadow-float);
   animation: composer-notice-in var(--oct-motion-base) var(--oct-ease-standard) both;
 }
 /* The words take the room beside the icon and wrap there, instead of dropping

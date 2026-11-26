@@ -116,7 +116,7 @@ describe("SecretStoresSettingsSection", () => {
     render(<SecretStoresSettingsSection client={client} />);
 
     expect(
-      await screen.findByText("Not set. Commands get no AWS credentials from Octant."),
+      await screen.findByText("Not set, so commands get no AWS credentials from Octant."),
     ).toBeInTheDocument();
     await user.type(screen.getByLabelText("Access key ID item"), pointer.accessKeyIdReference);
     await user.type(
@@ -127,14 +127,14 @@ describe("SecretStoresSettingsSection", () => {
 
     expect(
       await screen.findByText(
-        `Set. The key ID comes from ${pointer.accessKeyIdReference} and the secret key from ${pointer.secretAccessKeyReference}.`,
+        `Set: the key ID comes from ${pointer.accessKeyIdReference} and the secret key from ${pointer.secretAccessKeyReference}.`,
       ),
     ).toBeInTheDocument();
     expect(commands).toContainEqual({ kind: "point-aws-cli-key", ...pointer });
 
     await user.click(screen.getByRole("button", { name: "Remove" }));
     expect(
-      await screen.findByText("Not set. Commands get no AWS credentials from Octant."),
+      await screen.findByText("Not set, so commands get no AWS credentials from Octant."),
     ).toBeInTheDocument();
   });
 

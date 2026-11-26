@@ -279,7 +279,7 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
                 <SettingRow
                   description={
                     approver.approvedThisComputer
-                      ? "Approved this computer. Confirm only if it showed this code."
+                      ? "Approved this computer; confirm only if it showed this code."
                       : "Shows this code when it approves this computer."
                   }
                   key={String(approver.instanceId)}
@@ -494,8 +494,8 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
             <SettingRow
               description={
                 member
-                  ? "Your other computers show this one as left. Afterwards you can choose another store."
-                  : "Nothing is written to the store. Afterwards you can choose another store."
+                  ? "Your other computers show this one as left, and afterwards you can choose another store."
+                  : "Nothing is written to the store, and afterwards you can choose another store."
               }
               label={member ? "Stop syncing here" : "Forget this replica"}
               scope="host"
@@ -516,8 +516,8 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
               <SettingRow
                 description={
                   here.kind === "founder"
-                    ? "For a store that is gone for good. Your other computers keep listing this one, and none of them can revoke it."
-                    : "For a store that is gone for good. Your other computers keep listing this one until one of them revokes it."
+                    ? "For a store gone for good; your other computers keep listing this one, and none of them can revoke it."
+                    : "For a store gone for good; your other computers keep listing this one until one of them revokes it."
                 }
                 label="Leave without telling them"
                 scope="host"
@@ -719,7 +719,7 @@ function StartSection(props: {
         {props.left ? null : (
           <SettingRow
             description={
-              offReason ?? "Makes this computer the one that set up sync. It can revoke any other."
+              offReason ?? "Makes this computer the one that set up sync, able to revoke any other."
             }
             label="Set up sync"
             scope="host"
@@ -742,7 +742,7 @@ function StartSection(props: {
         <SettingRow
           description={
             offReason ??
-            "Writes a request into the store. A computer that already syncs approves it after you compare codes."
+            "Writes a request into the store, which a computer that already syncs approves after you compare codes."
           }
           label="Join another computer"
           scope="host"

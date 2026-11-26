@@ -3,8 +3,12 @@ import { useState, type ReactNode } from "react";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
-export const FULL_ACCESS_WARNING =
-  "Agents can change any file and run any command without asking, with no sandbox, and can read protected files such as SSH and cloud keys. Secret values are redacted from what Octant records.";
+/** The risk itself, which a person reads before choosing Full access. */
+export const FULL_ACCESS_RISK =
+  "Agents can change any file and run any command without asking, with no sandbox, and can read protected files such as SSH and cloud keys.";
+/** What still holds at Full access; a Settings row keeps it behind More. */
+export const FULL_ACCESS_REDACTION = "Secret values are redacted from what Octant records.";
+export const FULL_ACCESS_WARNING = `${FULL_ACCESS_RISK} ${FULL_ACCESS_REDACTION}`;
 
 /**
  * Where the warning was seen: this machine (its Settings default and first

@@ -40,7 +40,9 @@ same stylesheets and described in
 1. **Quiet and flat.** A surface at rest is one flat fill one step from what it
    sits on and, where it needs an edge, one 1px hairline. No bevel, inner
    highlight, gradient, inset shadow or resting drop shadow. Pointing at a
-   surface or pressing it changes its fill and nothing else.
+   surface or pressing it changes its fill and nothing else. A floating surface
+   under window Glass is the one exception: its top inside edge catches the
+   light ([Translucency](#translucency)).
 2. **One tone, one frame.** The window reads as one tone. The sidebar and the
    stage sit in one framed panel whose single hairline starts and ends on
    itself; inside it, panes touch and share one line. Hierarchy comes from
@@ -295,20 +297,20 @@ on mid-grey glass) and never a blur (the packaged window does not frost
 page content over its native material: a backdrop filter there lays a sharp copy
 under the fill).
 
-| Surface                                                                | Opaque window                                                                                                        | Window glass                                    | Reduced transparency / increased contrast                       |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| Rail, band, sidebar, stage, tiles, bottom panel                        | frame ground; pane; sidebar fill                                                                                     | clear on the coat                               | opaque                                                          |
-| Card (`--octant-card`, `bg-card`), Code Home cards, approval card      | card colour + hairline                                                                                               | ink 4% + hairline                               | card colour + hairline (strong border under increased contrast) |
-| Settings group                                                         | ink 2% + hairline                                                                                                    | ink 2% + hairline                               | ink 2% + hairline                                               |
-| Dock card                                                              | ink 4% (oklab)                                                                                                       | ink 4% (oklab)                                  | same                                                            |
-| Control fill, chip, segmented track                                    | control roles                                                                                                        | ink 7%, 11% hover, 15% pressed; chosen ink 12%  | control roles                                                   |
-| Outline button                                                         | rests on the page colour                                                                                             | rests on the card step                          | page colour                                                     |
-| Composer box                                                           | card colour + faint hairline + float shadow                                                                          | ink 7% + faint hairline + float shadow, no blur | card colour                                                     |
-| Person's message (bubble)                                              | card colour, no hairline                                                                                             | ink 4%, no blur                                 | card colour; strong border under increased contrast             |
-| Composer notice card                                                   | callout ground                                                                                                       | ink 4% with its tone at 14% over it, no blur    | callout ground                                                  |
-| Menu, popover, select, combobox, hover card, palette, toast, tour card | float at 66% (dark) / 78% (light) over `--octant-float-blur` in a browser; float at 96%, no blur, in the desktop app | float at 96%, no blur                           | opaque float, no blur                                           |
-| Dialog, Settings sheet, narrow dock sheet, Settings' narrow drawer     | as menus                                                                                                             | float at 96%, no blur (Settings sheet: opaque)  | opaque float                                                    |
-| Tooltip                                                                | the float, opaque                                                                                                    | the same                                        | the same                                                        |
+| Surface                                                                | Opaque window                                                                                                        | Window glass                                                 | Reduced transparency / increased contrast                       |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------- |
+| Rail, band, sidebar, stage, tiles, bottom panel                        | frame ground; pane; sidebar fill                                                                                     | clear on the coat                                            | opaque                                                          |
+| Card (`--octant-card`, `bg-card`), Code Home cards, approval card      | card colour + hairline                                                                                               | ink 4% + hairline                                            | card colour + hairline (strong border under increased contrast) |
+| Settings group                                                         | ink 2% + hairline                                                                                                    | ink 2% + hairline                                            | ink 2% + hairline                                               |
+| Dock card                                                              | ink 4% (oklab)                                                                                                       | ink 4% (oklab)                                               | same                                                            |
+| Control fill, chip, segmented track                                    | control roles                                                                                                        | ink 7%, 11% hover, 15% pressed; chosen ink 12%               | control roles                                                   |
+| Outline button                                                         | rests on the page colour                                                                                             | rests on the card step                                       | page colour                                                     |
+| Composer box                                                           | card colour + faint hairline + float shadow                                                                          | ink 7% + faint hairline + float shadow, no blur              | card colour                                                     |
+| Person's message (bubble)                                              | card colour, no hairline                                                                                             | ink 4%, no blur                                              | card colour; strong border under increased contrast             |
+| Composer notice card                                                   | callout ground                                                                                                       | ink 4% with its tone at 14% over it, no blur                 | callout ground                                                  |
+| Menu, popover, select, combobox, hover card, palette, toast, tour card | float at 66% (dark) / 78% (light) over `--octant-float-blur` in a browser; float at 96%, no blur, in the desktop app | float at 96%, no blur, lit top edge                          | opaque float, no blur                                           |
+| Dialog, Settings sheet, narrow dock sheet, Settings' narrow drawer     | as menus                                                                                                             | float at 96%, no blur, lit top edge (Settings sheet: opaque) | opaque float                                                    |
+| Tooltip                                                                | the float, opaque                                                                                                    | the same                                                     | the same                                                        |
 
 - **Text keeps a calm ground.** Where the application ground runs behind the
   panes, every surface that holds running text (the thread's reading veil, the
@@ -323,6 +325,17 @@ under the fill).
   exception: only its stage stays open on the ground, and a pane opened beside
   it (a pull request in the dock, say) takes the same surface, the pane colour
   or, under Glass, the workspace colour, at 94%. letters and read as noise (maintainer request, 2026-11-15).
+- **A float's edge catches the light under Glass.** Every floating surface's
+  shadow (`--octant-shadow-pop`) starts with a rim slot, `--octant-float-rim`,
+  that is an empty shadow everywhere except under the host's Glass rule (a
+  composer notice card carries the same slot before its own soft shadow, and the
+  activity picture-in-picture drops its own highlight there so the line is not
+  drawn twice), which
+  lights it as a 1px inset line along the top inside edge (white at 22% in dark,
+  85% in light). It reads as the rim of a glass pane where a blur cannot be
+  used. Reduced transparency and increased contrast draw none, because the
+  Glass rule already excludes them (maintainer request, 2026-11-26: floating
+  glass should read as glass).
 - **Why floats are dense on glass.** A frosted menu works over an opaque
   window because the blur hides the page under it. On a translucent window it
   cannot, so at 66% the text behind a menu would read through it. At 96% the
@@ -624,12 +637,12 @@ fetched, never emoji.
 | 3 Well     | A segmented track, a history capsule, a command block, a stepper              | `--octant-well` or the field paint                         | one hairline at most                              |
 | 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet, the tour card | `--octant-float-glass` (see [Translucency](#translucency)) | `--octant-shadow-pop`                             |
 
-| Shadow token               | Dark                                                                   | Light                                                                  | Use                                             |
-| -------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------- |
-| `--octant-shadow-pop`      | `0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%)` | Every floating surface                          |
-| `--octant-shadow-overlay`  | `0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%)` | A small float drawn by a feature (tooltip card) |
-| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                    | `0 4px 18px -6px` ink 7%                                               | The composer and a picker pinned to it          |
-| `--octant-shadow-hairline` | `0 0 0 1px var(--octant-border)`                                       | the same                                                               | A ring where an outline cannot be used          |
+| Shadow token               | Dark                                                                                            | Light                                                                                           | Use                                                                                                 |
+| -------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `--octant-shadow-pop`      | `var(--octant-float-rim), 0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%)` | `var(--octant-float-rim), 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%)` | Every floating surface; the rim slot is lit only under window Glass ([Translucency](#translucency)) |
+| `--octant-shadow-overlay`  | `0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%)`                          | `0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%)`                          | A small float drawn by a feature (tooltip card)                                                     |
+| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                                             | `0 4px 18px -6px` ink 7%                                                                        | The composer and a picker pinned to it                                                              |
+| `--octant-shadow-hairline` | `0 0 0 1px var(--octant-border)`                                                                | the same                                                                                        | A ring where an outline cannot be used                                                              |
 
 The resting shadow tokens (`--octant-shadow-xs`, `-sm`, `-md`, `-lg`,
 `-control`, `-control-pressed`, `-selected`, `-well`, `-primary`,
@@ -1775,7 +1788,14 @@ The kit is `settings/primitives.tsx`; contents are in
 - **Row**: at least 52px, 12 by 16px inset, label 14px, detail 13px, control at
   the trailing edge at 28px (`--oct-settings-control-height`), its text 13px
   (`--oct-text-detail`) on every page, a field, a select and a button alike. A compact row is
-  36px, one line.
+  36px, one line. The detail is one sentence; what the row has to say beyond it
+  (the mechanism, an exception, the rest of a safety condition) waits behind
+  **More**, a quiet disclosure on a third line under the sentence, which opens
+  below it and moves nothing beside it. A value control (a stepper, a select)
+  whose setting has a default names it beside the control in meta ink,
+  "Default 8", once the value differs; while the value is the default the note
+  keeps its width, hidden, so the sentence never rewraps. A switch needs no
+  default note: its sentence says what on does.
 - **Long pages**: long lists draw as compact rows (the name opening the row's
   detail of paths, permissions and secondary actions, a short state in the
   meta ink, the one main control trailing), and only reference or empty
@@ -2114,5 +2134,6 @@ work, verify rendered at the relevant width and material.
 **Exceptions.** Feature styles position surfaces and adapters paint controls;
 when migrating an old control, delete the replaced paint. Blur is limited to the
 surfaces listed in [Translucency](#translucency). Zen's windows and the activity
-picture-in-picture keep an inset top highlight on their glass; no other surface
-draws one.
+picture-in-picture keep an inset top highlight on their glass, and under window
+Glass every floating surface draws one through `--octant-float-rim`; no other
+surface draws one.

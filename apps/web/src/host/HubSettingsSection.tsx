@@ -1379,7 +1379,8 @@ export function HubSettingsSection({
         ) : null}
         <div className="setgroup">
           <SettingRow
-            description="Make this computer the hub for your devices. It needs the remote listener on a Tailscale or private network address. Off by default."
+            description="Make this computer the hub for your devices."
+            more="It needs the remote listener on a Tailscale or private network address. Off by default."
             label="Act as hub"
             scope="host"
             settingId="hub-role"
@@ -1673,7 +1674,8 @@ export function HubSettingsSection({
         <SettingsSection title="Moved threads">
           <div className="setgroup">
             <SettingRow
-              description="Let your other computers move a thread to this hub before they shut down. Each move still needs Touch ID on an owner device. On by default."
+              description="Let your other computers move a thread to this hub before they shut down."
+              more="Each move still needs Touch ID on an owner device. On by default."
               label="Accept moved threads"
               scope="host"
               settingId="hub-accept-moved-threads"
@@ -1719,7 +1721,8 @@ export function HubSettingsSection({
         <SettingsSection title="Wake service">
           <div className="setgroup">
             <SettingRow
-              description="Wakes a computer just before one of its routines is due, if its owner allowed Wake. The hub learns only a time and an id for each routine, never what it does. Off by default."
+              description="Wakes a computer just before one of its routines is due, if its owner allowed Wake."
+              more="The hub learns only a time and an id for each routine, never what it does. Off by default."
               label="Wake service"
               scope="host"
               settingId="hub-wake-service"
@@ -1759,7 +1762,8 @@ export function HubSettingsSection({
         <SettingsSection title="Push sender">
           <div className="setgroup">
             <SettingRow
-              description="Send phone notifications for your spokes. A computer hands the hub notifications already sealed to your phone, signed by itself, and the hub passes them to the push gateway named in this computer's Notifications setting. The hub cannot read them or sign for a computer. A computer takes part only if its own person ticked Push in its hub grant. Off by default."
+              description="Send your spokes' sealed phone notifications on to the push gateway set in Notifications."
+              more="A computer hands the hub notifications already sealed to your phone, signed by itself, and the hub passes them to the push gateway named in this computer's Notifications setting. The hub cannot read them or sign for a computer. A computer takes part only if its own person ticked Push in its hub grant. Off by default."
               label="Push sender"
               scope="host"
               settingId="hub-push-sender"
@@ -1799,7 +1803,8 @@ export function HubSettingsSection({
         <SettingsSection title="Send notifications directly">
           <div className="setgroup">
             <SettingRow
-              description="Use this hub as the push gateway for a phone app you built yourself with your own Apple Developer and Firebase accounts, so nothing goes through an Octant-run service. The hub then sends sealed notifications to Apple and Google itself and answers on its private address only. It cannot read them. Off by default; a store build of the phone app is not served."
+              description="Send sealed notifications from this hub straight to Apple and Google, for a phone app you built yourself."
+              more="Use this hub as the push gateway for a phone app you built yourself with your own Apple Developer and Firebase accounts, so nothing goes through an Octant-run service. The hub then sends sealed notifications to Apple and Google itself and answers on its private address only. It cannot read them. Off by default; a store build of the phone app is not served."
               label="Send notifications directly"
               scope="host"
               settingId="hub-direct-push"
@@ -1812,7 +1817,8 @@ export function HubSettingsSection({
               />
             </SettingRow>
             <SettingRow
-              description="Turn on for a build installed straight from Xcode, which Apple's sandbox serves. Leave off for TestFlight and App Store builds."
+              description="Turn on for a build installed straight from Xcode, which Apple's sandbox serves."
+              more="Leave off for TestFlight and App Store builds."
               label="Development build"
               scope="host"
               settingId="hub-direct-push-environment"
@@ -1827,7 +1833,8 @@ export function HubSettingsSection({
           </div>
           <div className="settings-panel__stack">
             <SettingRow
-              description={`${status.directPush.ios ? "Stored" : "Not stored"}. The .p8 key from your Apple Developer account goes to this computer's credential store and is never shown again.`}
+              description={`${status.directPush.ios ? "Stored" : "Not stored"}: the .p8 key from your Apple Developer account.`}
+              more="The key goes to this computer's credential store and is never shown again."
               label="Apple push key"
               scope="host"
               settingId="hub-direct-push-apple"
@@ -1907,7 +1914,8 @@ export function HubSettingsSection({
           </div>
           <div className="settings-panel__stack">
             <SettingRow
-              description={`${status.directPush.android ? "Stored" : "Not stored"}. The service-account JSON file from your Firebase project goes to this computer's credential store and is never shown again.`}
+              description={`${status.directPush.android ? "Stored" : "Not stored"}: the service-account JSON file from your Firebase project.`}
+              more="The file goes to this computer's credential store and is never shown again."
               label="Google service account"
               scope="host"
               settingId="hub-direct-push-google"
@@ -1949,7 +1957,8 @@ export function HubSettingsSection({
         <SettingsSection title="Offers">
           <div className="setgroup">
             <SettingRow
-              description="Offer your spokes configuration: an update channel, a plugin from the catalog, an agent profile, a model endpoint, or a routine. Each lands on a computer as a proposal its own person applies or dismisses, and only on a computer whose person ticked Provision. An offer never installs trusted, switches anything on, or carries a key. Off by default."
+              description="Offer your spokes configuration that each computer's own person applies or dismisses."
+              more="An offer is an update channel, a plugin from the catalog, an agent profile, a model endpoint, or a routine. Each lands on a computer as a proposal its own person applies or dismisses, and only on a computer whose person ticked Provision. An offer never installs trusted, switches anything on, or carries a key. Off by default."
               label="Offers"
               scope="host"
               settingId="hub-offers"
@@ -2083,7 +2092,8 @@ export function HubSettingsSection({
             <SettingsSection title="Delegated work">
               <div className="setgroup">
                 <SettingRow
-                  description="Other members of the hub can ask this computer to run work in the Projects you open to them. Turning this off refuses every new request at once; work already running here carries on."
+                  description="Other members of the hub can ask this computer to run work in the Projects you open to them."
+                  more="Turning this off refuses every new request at once; work already running here carries on."
                   label="Take delegated work from other members"
                   scope="host"
                   settingId="hub-delegation-accepting"
@@ -2123,8 +2133,13 @@ export function HubSettingsSection({
             <SettingRow
               description={
                 hubOn || linked !== undefined
-                  ? "This computer has not reported whether it takes work from other members, so the switch is unavailable here. It appears once the computer reports it as a hub member."
-                  : "Join a hub to take work from its other members. Once this computer is a member, they can ask it to run work in the Projects you open to them, and this switch stops new requests."
+                  ? "This computer has not reported whether it takes work from other members, so the switch is unavailable here."
+                  : "Join a hub to take work from its other members."
+              }
+              more={
+                hubOn || linked !== undefined
+                  ? "It appears once the computer reports it as a hub member."
+                  : "Once this computer is a member, they can ask it to run work in the Projects you open to them, and this switch stops new requests."
               }
               label="Take delegated work from other members"
               scope="host"
@@ -2308,7 +2323,8 @@ export function HubSettingsSection({
                   <div className="setgroup">
                     {AUTO_APPLY_KINDS.map((entry) => (
                       <SettingRow
-                        description="Apply this kind of offer as soon as it arrives. Same as Apply, nothing more. Off by default. Routines and endpoints always ask."
+                        description="Apply this kind of offer as soon as it arrives."
+                        more="Same as Apply, nothing more. Off by default. Routines and endpoints always ask."
                         key={entry.kind}
                         label={entry.label}
                         scope="host"
@@ -2447,7 +2463,8 @@ export function HubSettingsSection({
         <SettingsSection title="Tailscale certificate">
           <div className="setgroup">
             <SettingRow
-              description="Lets a browser on your Tailscale network open this computer's web app without a warning. Off by default."
+              description="Lets a browser on your Tailscale network open this computer's web app without a warning."
+              more="Off by default."
               label="Use a Tailscale certificate"
               scope="host"
               settingId="hub-tailscale-certificate"

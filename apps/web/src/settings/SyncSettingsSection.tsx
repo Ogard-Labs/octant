@@ -321,7 +321,7 @@ function SyncStoreSections(
       >
         <div className="setgroup">
           <SettingRow
-            description="Once this computer has joined, sync copies artifact versions and comments to the store and brings in your other computers'."
+            description="Once joined, sync copies artifact versions and comments to the store and brings in your other computers'."
             focused={props.focusedSetting === "sync-enabled"}
             label="Sync artifacts"
             labelledBySection

@@ -2737,6 +2737,7 @@ Octant looks like a calm, colourful workbench. Colour is the default and grey is
 - The rail lists places only (the Inbox and the Board), with one plan usage ring per account above the account face, whose menu leads with Settings (maintainer request, 2026-11-25).
 - Icons are Lucide line icons from one module in four sizes, held by a contract test (maintainer decision, 2026-11-17). Radius is four tokens, and only what is round takes the pill token, held by a contract test (maintainer request, 2026-11-14).
 - The interface is soft and flat: only what floats casts a shadow, and pointing, focusing and pressing answer in the same frame. In the desktop app no text sits on a fill that only a blur makes readable. Over the application ground, running text keeps its own surface ([Application ground](application-ground.md)).
+- Under window Glass every floating surface draws a 1px lit line along its top inside edge; with Glass off, reduced transparency or increased contrast it draws none, and no pane, row, card or composer gains it (maintainer request, 2026-11-26).
 - Everything that opens over the window arrives and leaves one way; reduced motion removes the transition. A leaving dialog takes no press or key, and focus returns to its opener.
 - A placeholder holds its box until its content paints, and a later read keeps what is drawn until the fresh answer lands. There is one scrollbar and one picker-row recipe, declared once.
 - A sentence says what the person waits for, what happened or what to do next, never the mechanism, held by a contract test (maintainer request, 2026-11-25). Copy says "this Mac" only when the host reports macOS.
@@ -2789,6 +2790,7 @@ Every list, board, reader and preference page is one `Surface`. Settings groups 
 - A page holds the settings of one question, at most thirty, and a page of one to three folds into the page that asks the same question (maintainer decisions, 2026-11-25 and 2026-11-26).
 - In a wide window Settings is a sheet over the app, which stays mounted and blurred behind it, on every page and in every window (maintainer decision, 2026-11-26). In a narrow window it covers the window.
 - A destination page has one pinned header row and sibling pages end on one right edge (maintainer request, 2026-11-15); toolbars, Agents and Automations follow the page shell (maintainer requests, 2026-11-16 and 2026-11-17).
+- A Settings row says what it does in one sentence, with the rest behind its More; a cost, data leaving this computer or an effect that cannot be undone stays in the sentence, and a value control names its default once the value differs (maintainer decisions, 2026-11-25).
 - A page shows its own outline while it loads, and background refresh keeps loaded controls and drafts in place.
 
 Status: Built. Detail: [DESIGN.md: Page shell](../../DESIGN.md#page-shell), [Settings layout](../../DESIGN.md#settings-layout), [Empty, loading, and whole-window states](../../DESIGN.md#empty-loading-and-whole-window-states), [Settings: Settings sheet](settings.md#settings-sheet), [Groups and pages](settings.md#groups-and-pages) and [Settings stability](settings.md#settings-stability).

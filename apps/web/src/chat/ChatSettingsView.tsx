@@ -244,7 +244,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
         {/* The server already routes a turn to this model when the default
             provider cannot serve it, but nothing in Settings could set it. */}
         <SettingRow
-          description="Answers when the default provider cannot. Optional."
+          description="Optional: answers when the default provider cannot."
           label="Fallback model"
           scope="host"
           focused={props.focusedSetting === "chat-fallback-model"}
@@ -361,7 +361,8 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           />
         </SettingRow>
         <SettingRow
-          description="When Octant stops in the middle of an answer, from a crash, a quit, or a restart of this computer, the thread picks the answer up by itself when Octant opens again. This applies to every Chat thread, not only new ones. A thread can turn this off from its menu."
+          description="When Octant stops in the middle of an answer, the thread picks it up by itself when Octant opens again."
+          more="Octant may have stopped from a crash, a quit, or a restart of this computer. This applies to every Chat thread, not only new ones. A thread can turn this off from its menu."
           label="Continue after restart"
           scope="mode"
           focused={props.focusedSetting === "chat-restart-continuation"}

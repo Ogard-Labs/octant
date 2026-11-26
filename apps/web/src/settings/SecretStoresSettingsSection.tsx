@@ -300,8 +300,8 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
                   awsKey === undefined
                     ? "Reading…"
                     : awsKey === null
-                      ? "Not set. Commands get no AWS credentials from Octant."
-                      : `Set. The key ID comes from ${awsKey.accessKeyIdReference} and the secret key from ${awsKey.secretAccessKeyReference}.`
+                      ? "Not set, so commands get no AWS credentials from Octant."
+                      : `Set: the key ID comes from ${awsKey.accessKeyIdReference} and the secret key from ${awsKey.secretAccessKeyReference}.`
                 }
                 focused={props.focusedSetting === "secret-store-aws-cli"}
                 label="Key pair"

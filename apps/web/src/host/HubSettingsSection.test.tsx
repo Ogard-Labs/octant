@@ -1563,8 +1563,13 @@ describe("HubSettingsSection direct sending", () => {
       "direct-push-credential-remove": { status: 200, body: { status: "changed" } },
     });
 
-    expect(await screen.findByText(/^Stored\. The \.p8 key/)).toBeVisible();
-    expect(screen.getByText(/^Not stored\. The service-account JSON/)).toBeVisible();
+    expect(await screen.findByText(/^Stored: the \.p8 key/)).toBeVisible();
+    expect(screen.getByText(/^Not stored: the service-account JSON/)).toBeVisible();
+    expect(
+      screen.getByText(
+        "The key goes to this computer's credential store and is never shown again.",
+      ),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Remove" }));
 
     await waitFor(() =>

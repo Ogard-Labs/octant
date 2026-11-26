@@ -130,7 +130,7 @@ const CHARACTER_PATTERNS = [
   { id: "rings", label: "Rings" },
 ] as const satisfies ReadonlyArray<{ id: AppBackgroundCharacterPattern; label: string }>;
 
-const CHARACTERS_HINT = "Up to 64 characters. The field draws only these.";
+const CHARACTERS_HINT = "The field draws only these, up to 64 characters.";
 // Shorter than the hint, so swapping one for the other never wraps the row.
 const REFUSED_CHARACTERS = "Emoji and spaces are left out.";
 
@@ -716,7 +716,8 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
           ) : null}
           {(picture && effect === "dither") || field ? (
             <SettingRow
-              description="How many shades each colour keeps. Fewer looks bolder."
+              description="How many shades each colour keeps."
+              more="Fewer looks bolder."
               label="Colours"
               scope="app"
               settingId="app-background-effect-tones"
@@ -858,7 +859,8 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 />
               </SettingRow>
               <SettingRow
-                description="How fast it drifts and the characters change. Zero holds one frame."
+                description="How fast it drifts and the characters change."
+                more="Zero holds one frame."
                 label="Speed"
                 scope="app"
                 settingId="app-background-character-speed"
@@ -913,10 +915,10 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
             <SettingRow
               description={
                 printedPicture
-                  ? "Still keeps the print as it is. Wave sends a wave through its pixels when you click a start screen."
+                  ? "Still keeps the print as it is; Wave sends a wave through its pixels when you click a start screen."
                   : background.kind === "flowing"
-                    ? "Still holds one frame. Wave lets the colour field keep drifting."
-                    : "Still holds one frame. Wave lets it drift and sends a wave out when you click a start screen."
+                    ? "Still holds one frame; Wave lets the colour field keep drifting."
+                    : "Still holds one frame; Wave lets it drift and sends a wave out when you click a start screen."
               }
               label="Motion"
               scope="app"

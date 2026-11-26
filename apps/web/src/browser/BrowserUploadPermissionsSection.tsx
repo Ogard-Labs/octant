@@ -161,7 +161,8 @@ export function BrowserUploadPermissionsSection(props: {
         scope="host"
         settingId="browser-upload-permissions"
         focused={props.focusedSetting === "browser-upload-permissions"}
-        description="Permit exact file contents from an approved folder for one routine, profile and HTTPS site. Account access stays separate."
+        description="Permit exact file contents from an approved folder for one routine, profile and HTTPS site."
+        more="Account access stays separate."
       >
         <div className="host-settings__controls">
           <OctantButton

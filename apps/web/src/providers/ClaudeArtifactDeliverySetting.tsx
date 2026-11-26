@@ -26,6 +26,16 @@ export const CLAUDE_ARTIFACTS_TELEMETRY_WARNING =
  * with Claude Code's usage telemetry on, so the warning stays under the
  * switch and enabling asks again in a dialog that repeats it.
  */
+/** One sentence, so it can stand as the row's sentence and as the switch's reason. */
+const HOST_OPT_OUT =
+  "This computer’s own telemetry opt-out keeps Claude Code’s telemetry and Claude artifacts off.";
+const HOST_OPT_OUT_VARIABLES =
+  "The opt-out is any of CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, DISABLE_TELEMETRY or DO_NOT_TRACK turned on for this computer.";
+
+/** What the switch does, with the data that leaves this computer in the same sentence. */
+const PUBLISHES =
+  "Lets Work and Code threads publish to your claude.ai account instead of a Canvas; a page published leaves this computer.";
+
 export function ClaudeArtifactDeliverySetting(props: ClaudeArtifactDeliverySettingProps) {
   const [confirming, setConfirming] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
@@ -36,14 +46,16 @@ export function ClaudeArtifactDeliverySetting(props: ClaudeArtifactDeliverySetti
   return (
     <div className="claude-artifacts-setting">
       <SettingRow
-        description={
+        // A switch that cannot be turned on says why in words, not only on
+        // hover: the reason is then the row's sentence.
+        description={unsupportedReason ?? PUBLISHES}
+        more={
           <>
-            Lets this account’s Work and Code threads publish documents, reports, and pages to your
-            claude.ai account instead of making a Canvas. Canvas stays the default; each thread
-            chooses artifacts for itself. A published page leaves this computer, Claude asks before
-            every publish, and Plan never publishes.
-            {/* A switch that cannot be turned on says why in words, not only on hover. */}
-            {unsupportedReason === undefined ? null : <> {unsupportedReason}</>}
+            {unsupportedReason === HOST_OPT_OUT ? `${HOST_OPT_OUT_VARIABLES} ` : null}
+            {unsupportedReason === undefined ? null : `${PUBLISHES} `}
+            This account’s threads can publish documents, reports, and pages. Canvas stays the
+            default; each thread chooses artifacts for itself. Claude asks before every publish, and
+            Plan never publishes.
           </>
         }
         label="Enable Claude artifacts"
@@ -98,11 +110,11 @@ function artifactsUnsupportedReason(
 ): string | undefined {
   if (instance.configuration.authentication !== "subscription") {
     return instance.configuration.authentication === "gateway"
-      ? "Claude artifacts need a claude.ai sign-in. A gateway account has no claude.ai account to publish to."
-      : "Claude artifacts need a claude.ai sign-in. An API-key account has no claude.ai account to publish to.";
+      ? "Claude artifacts need a claude.ai sign-in, which a gateway account does not have."
+      : "Claude artifacts need a claude.ai sign-in, which an API-key account does not have.";
   }
   if (observed?.capabilities.nativeArtifacts?.unsupportedReason === "host-traffic-disabled") {
-    return "This computer’s own telemetry opt-out (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, DISABLE_TELEMETRY or DO_NOT_TRACK) keeps Claude Code’s telemetry and Claude artifacts off.";
+    return HOST_OPT_OUT;
   }
   return undefined;
 }

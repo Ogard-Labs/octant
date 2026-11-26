@@ -58,13 +58,13 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
           : "Plan stays read-only, and Chat never gets a folder or a shell.";
   return (
     <SettingRow
-      description={
+      description={`Lets this account’s threads use ${name}’s own setup, as in ${name} itself.`}
+      more={
         <>
-          Lets this account’s threads use {name}’s own setup, as in {name} itself: its own
-          subagents, web search and fetch, skills, and the MCP servers, plugins, settings, and hooks
-          in its home folder. On by default; each call still follows the thread’s level. Octant
-          still shows each subagent and marks each web read. Turned off, web search and fetch stay
-          off in every mode, and Full access still turns the rest on. {chatBoundaryClause} A
+          Its own subagents, web search and fetch, skills, and the MCP servers, plugins, settings,
+          and hooks in its home folder. On by default; each call still follows the thread’s level.
+          Octant still shows each subagent and marks each web read. Turned off, web search and fetch
+          stay off in every mode, and Full access still turns the rest on. {chatBoundaryClause} A
           Project’s own hooks, MCP servers, and plugins load only in a Project you trust for {name}.
           {props.instance.driverKind === "mistral-vibe" ? (
             <>
@@ -127,11 +127,11 @@ export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
   const settingId = `provider-${props.instance.id}-own-memory`;
   return (
     <SettingRow
-      description={
+      description={`Lets ${name} keep and use its own memory in this account’s Work and Code threads, as in ${name} itself.`}
+      more={
         <>
-          Lets {name} keep and use its own memory in this account’s Work and Code threads, as in{" "}
-          {name} itself. On by default. {name} decides what it remembers and carries it across
-          Projects; Octant does not show, journal, or clear it.{" "}
+          On by default. {name} decides what it remembers and carries it across Projects; Octant
+          does not show, journal, or clear it.{" "}
           {props.instance.driverKind === "claude"
             ? "In Plan and in Chat it reads its memory and cannot change it."
             : "Under Strict it stays off in Plan and in Chat, because it writes its memory in the background."}{" "}

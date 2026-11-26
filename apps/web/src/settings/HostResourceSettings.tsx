@@ -173,29 +173,31 @@ export function HostResourceSettings({
       | "memoryReservePercent";
     readonly label: string;
     readonly description: string;
+    readonly more: string;
     readonly min: number;
     readonly max: number;
   }> = [
     {
       key: "maxCommands",
       label: "Concurrent commands",
-      description:
-        "Maximum managed command groups across all Projects. The shared worker budget may allow fewer.",
+      description: "Maximum managed command groups across all Projects.",
+      more: "The shared worker budget may allow fewer.",
       min: 1,
       max: 16,
     },
     {
       key: "maxWorkers",
       label: "Total test workers",
-      description:
-        "Shared worker budget for managed commands. Supported Vitest versions inherit their allocation.",
+      description: "Shared worker budget for managed commands.",
+      more: "Supported Vitest versions inherit their allocation.",
       min: 1,
       max: 16,
     },
     {
       key: "maxAgents",
       label: "Helper agents",
-      description: "Maximum Octant-managed helpers across the host. Per-thread limits still apply.",
+      description: "Maximum Octant-managed helpers across the host.",
+      more: "Per-thread limits still apply.",
       min: 1,
       max: 16,
     },
@@ -203,7 +205,8 @@ export function HostResourceSettings({
       key: "cpuTargetPercent",
       label: "CPU limit for new work (%)",
       description:
-        "With Automatic limits on, Octant starts new work only while CPU use is under this share; work already running is not capped.",
+        "With Automatic limits on, Octant starts new work only while CPU use is under this share.",
+      more: "Work already running is not capped.",
       min: 20,
       max: 90,
     },
@@ -211,7 +214,8 @@ export function HostResourceSettings({
       key: "memoryReservePercent",
       label: "Memory reserve (%)",
       description:
-        "Reserves this share of available RAM where measured, with at least 1 GiB reserved. On macOS, kernel memory pressure controls admission and this share bounds the hardware estimate.",
+        "Reserves this share of available RAM where measured, with at least 1 GiB reserved.",
+      more: "On macOS, kernel memory pressure controls admission and this share bounds the hardware estimate.",
       min: 10,
       max: 50,
     },
@@ -230,7 +234,7 @@ export function HostResourceSettings({
       >
         <SettingRow
           label="Automatic limits"
-          description="Adjust to CPU load and free RAM, including other apps. Turn off to use your limits as set."
+          description="Adjust to CPU load and free RAM, including other apps; turn off to use your limits as set."
           scope="host"
           settingId="resource-limits"
           focused={focusedSetting === "resource-limits"}
@@ -243,11 +247,12 @@ export function HostResourceSettings({
             }
           />
         </SettingRow>
-        {limits.map(({ key, label, description, min, max }) => (
+        {limits.map(({ key, label, description, more, min, max }) => (
           <SettingRow
             key={key}
             label={label}
             description={description}
+            more={more}
             scope="host"
             settingId={`resource-${key}`}
             focused={focusedSetting === `resource-${key}`}
@@ -267,7 +272,7 @@ export function HostResourceSettings({
         ))}
         <SettingRow
           label="Apply limits"
-          description="Saved on this host. Applies to the next launch."
+          description="Saved on this host; applies to the next launch."
           scope="host"
           settingId="resource-save"
           focused={focusedSetting === "resource-save"}
@@ -288,7 +293,7 @@ export function HostResourceSettings({
         </SettingRow>
         <SettingRow
           label="New work"
-          description="Pause blocks new commands and helpers. Running ones keep going."
+          description="Pause blocks new commands and helpers; running ones keep going."
           scope="host"
           settingId="resource-pause"
           focused={focusedSetting === "resource-pause"}
@@ -308,7 +313,8 @@ export function HostResourceSettings({
         </SettingRow>
         <SettingRow
           label="Keep the computer awake while agents work"
-          description="Prevents idle system sleep while turns, child runs, workers, or a routine due within 5 minutes are active. Display sleep is not prevented."
+          description="Prevents idle system sleep while turns, child runs, workers, or a routine due within 5 minutes are active."
+          more="Display sleep is not prevented."
           scope="host"
           settingId="resource-keepAwake"
           focused={focusedSetting === "resource-keepAwake"}

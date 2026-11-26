@@ -52,8 +52,10 @@ const POLICY_DESCRIPTIONS: Readonly<Record<WebSearchDataPolicy, string>> = {
 // The policy covers Octant's own backends only: a provider's own search and a
 // vendor runtime's own web tools behave as they do on their own (maintainer
 // decision, 2026-11-15), so the page says so once rather than per policy.
-const PROVIDER_SEARCH =
-  "The policy covers only the backends below. A provider's own search, and a vendor runtime's own web search and fetch, run as they do on their own, under your agreement with that provider; the research route chooses between a provider's search and these backends.";
+const PROVIDER_SEARCH = "The policy covers only the backends below.";
+
+const PROVIDER_SEARCH_MORE =
+  "A provider's own search, and a vendor runtime's own web search and fetch, run as they do on their own, under your agreement with that provider; the research route chooses between a provider's search and these backends.";
 
 const INELIGIBLE: Readonly<Record<string, string>> = {
   disabled: "Turned off",
@@ -254,6 +256,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
           </SettingRow>
           <SettingRow
             description={PROVIDER_SEARCH}
+            more={PROVIDER_SEARCH_MORE}
             label="A provider's own search"
             scope="host"
             settingId="web-search-provider-search"

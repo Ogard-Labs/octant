@@ -38,7 +38,7 @@ describe("WorkSettingsView", () => {
         })}
       />,
     );
-    expect(screen.getByText(/Anything outside the folder is refused/)).toBeVisible();
+    expect(screen.getByText(/refuses anything outside the folder/)).toBeVisible();
   });
 
   it("offers Auto and Full access as the Work default, warning once before Full access", () => {

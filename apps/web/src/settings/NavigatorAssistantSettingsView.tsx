@@ -79,7 +79,7 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
       >
         <div className="setgroup">
           <SettingRow
-            description="The model Navigator uses. Without one, Navigator is off; it never picks a model for you."
+            description="The model Navigator uses; without one, Navigator is off, and it never picks a model for you."
             focused={props.focusedSetting === settingId("default-model")}
             label="Default model"
             scope="app"
@@ -118,7 +118,8 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
             )}
           </SettingRow>
           <SettingRow
-            description="Used only when the default model cannot read images. It describes the image in text for the default model, and never chats itself."
+            description="Used only when the default model cannot read images."
+            more="It describes the image in text for the default model, and never chats itself."
             focused={props.focusedSetting === settingId("vision-reviewer")}
             label="Vision reviewer"
             scope="app"

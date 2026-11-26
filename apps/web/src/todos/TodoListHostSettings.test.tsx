@@ -3,7 +3,8 @@ import { decodeTodoListHostView } from "@octant/contracts/todos";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { TodoListHostSettings, TodoListHostSettingsContext } from "./TodoListHostSettings";
+import { TodoListHostSettings } from "./TodoListHostSettings";
+import { TodoListHostSettingsContext } from "./todoListHostSettingsContext";
 
 const THIS = "11111111-1111-4111-8111-111111111111";
 const STUDIO = decodeStableHostId("22222222-2222-4222-8222-222222222222");

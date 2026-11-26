@@ -2,7 +2,7 @@ import type { TodoListHostClient } from "@octant/client-runtime/todo-client";
 import { decodeTodoListHostCommand, type TodoListHostChoice } from "@octant/contracts/todos";
 import { useCallback, useState } from "react";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
-import type { TodoListHostRead } from "./TodoListHostSettings";
+import type { TodoListHostRead } from "./todoListHostSettingsContext";
 
 /** The window's slow re-read; a change on this host also arrives through the change feed. */
 const REREAD_MS = 60_000;

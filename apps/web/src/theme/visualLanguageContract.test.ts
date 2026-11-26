@@ -490,14 +490,16 @@ describe("the public-block visual language", () => {
   it("gives a floating surface one hairline and one soft drop, and dims what shows through a dark menu", () => {
     const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
     // A float is the only thing that casts a shadow: one ring outside its edge
-    // and one soft drop, with no inset rim or sheen.
+    // and one soft drop, with no sheen. Its rim slot stays empty here; only
+    // window Glass lights it (see the translucency contract).
     for (const token of ["--octant-shadow-overlay", "--octant-shadow-pop"]) {
       for (const match of runtime.matchAll(new RegExp(`${token}:\\s*([^;]*);`, "g"))) {
-        const value = match[1] ?? "";
+        const value = (match[1] ?? "").replace("var(--octant-float-rim),", "");
         expect(value, token).not.toContain("inset");
         expect(value.split("),").length, token).toBeLessThanOrEqual(2);
       }
     }
+    expect(runtime).toMatch(/:root[^{]*\{[^}]*--octant-float-rim: 0 0 transparent;/);
     // The bottom panel's row has nothing of the frame's to subtract any more.
     expect(runtime).toMatch(/max\(0px, calc\(100% - 320px\)\)/);
     expect(runtime).not.toContain("sheet-inset");
@@ -596,11 +598,12 @@ describe("the public-block visual language", () => {
     expect(/\n\.callout > svg\s*\{([^}]*)\}/.exec(css)?.[1] ?? "").toMatch(
       /background:\s*color-mix\(in oklab, var\(--callout-tone\) 20%, transparent\)[^}]*color:\s*var\(--callout-tone\)/,
     );
-    // One soft float shadow and a short rise on entry (200ms), none under reduced motion.
+    // One soft float shadow after the float's rim slot (lit only under Glass),
+    // and a short rise on entry (200ms), none under reduced motion.
     expect(group).toMatch(/justify-items:\s*start/);
     expect(floating).toMatch(/width:\s*fit-content/);
     expect(floating).toMatch(/max-width:\s*min\(480px, 100%\)/);
-    expect(floating).toMatch(/box-shadow:\s*var\(--oct-shadow-float\)/);
+    expect(floating).toMatch(/box-shadow:\s*var\(--octant-float-rim\), var\(--oct-shadow-float\)/);
     expect(floating).toMatch(/animation:\s*composer-notice-in var\(--oct-motion-base\)/);
     expect(css).toMatch(/@keyframes composer-notice-in\s*\{\s*from\s*\{[^}]*translateY\(4px\)/);
     expect(css).toMatch(

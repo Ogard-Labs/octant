@@ -356,7 +356,7 @@ export function GitHubConnectionSettings({
         {credentialRemovable ? (
           <div className="setgroup">
             <SettingRow
-              description="Removes the sign-in from this host. It stays authorized on GitHub until you revoke it there."
+              description="Removes the sign-in from this host, which stays authorized on GitHub until you revoke it there."
               focused={focusedSetting === "github-logout"}
               label="Log out"
               labelledBySection

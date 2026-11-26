@@ -208,7 +208,8 @@ export function PairedMergeUnlockSwitch(props: {
   return (
     <div className="setgroup">
       <SettingRow
-        description="A phone or browser paired with this computer merges a pull request only after a fresh unlock on one of the owner devices above. A merge from this window needs none. Off by default."
+        description="Require a fresh unlock on an owner device above before a paired phone or browser merges a pull request."
+        more="A phone or browser paired with this computer then merges a pull request only after a fresh unlock on one of the owner devices above. A merge from this window needs none. Off by default."
         label="Owner unlock before a phone or browser merges"
         scope="host"
         settingId="hub-paired-merge-unlock"
@@ -237,7 +238,8 @@ export function OwnerApprovalAnswerUnlockSwitch(props: {
   return (
     <div className="setgroup">
       <SettingRow
-        description="An owner device can answer a waiting file or Shell approval here after one unlock, good for five minutes. Turn this on to ask for a fresh unlock before every Allow once or Deny. Off by default."
+        description="Ask an owner device for a fresh unlock before every Allow once or Deny it answers here."
+        more="Without it, an owner device can answer a waiting file or Shell approval here after one unlock, good for five minutes. Off by default."
         label="Owner unlock for each approval answer"
         scope="host"
         settingId="hub-owner-approval-answer-unlock"
@@ -270,7 +272,8 @@ export function NewMemberChecks(props: {
     <div className="settings-panel__stack">
       <div className="setgroup">
         <SettingRow
-          description="A member the hub adds later stays status-only here until you confirm it in this window or on an owner device. Off by default."
+          description="A member the hub adds later stays status-only here until you confirm it in this window or on an owner device."
+          more="Off by default."
           label="Confirm new members"
           scope="host"
           settingId="hub-confirm-new-members"

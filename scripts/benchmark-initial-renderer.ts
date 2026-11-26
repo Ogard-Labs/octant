@@ -6,7 +6,8 @@ import { build } from "vite";
 /**
  * The initial renderer budget lives in `scripts/initial-renderer-budget.json`.
  * `--check` fails when a change grows the main entry, the initial CSS or the
- * initial gzip graph past it. The sizes are exact bytes with no headroom: the
+ * initial gzip graph past it. The sizes are exact bytes with no margin for
+ * measurement noise: the
  * same source measured identically on an Apple M5 Max and a Linux runner with
  * Bun 1.4.4. A change that shrinks the graph should lower the recorded budget.
  */
