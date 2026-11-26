@@ -23,8 +23,8 @@ export interface OctantSheetProps {
 
 /**
  * A surface as large as a page that floats over the window instead of
- * replacing it: the window stays drawn behind a light scrim, so a change made
- * in the sheet can be seen where it lands. It is the dialog's behaviour
+ * replacing it: the window stays mounted behind a scrim, dimmed and (in the
+ * desktop app) blurred, and returns as it was. It is the dialog's behaviour
  * (focus kept inside, Escape and a press outside close it, focus returns) with
  * a sheet's size and no padding of its own, because what it holds lays itself
  * out to the edges.

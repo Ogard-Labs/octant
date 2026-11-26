@@ -1731,10 +1731,9 @@
 }
 
 /* A sheet is a surface as large as a page that floats over the window. Its
-   scrim is light, because the point of a sheet is that the window behind it
-   can still be seen: Settings changes how the app looks, and as a page that
-   replaced the app it showed none of what a change did. It has no padding of
-   its own; what it holds lays itself out to the edges. */
+   scrim is lighter than a dialog's: the window behind it stays in place and
+   recognisable, dimmed enough that the sheet is the one thing in front. It
+   has no padding of its own; what it holds lays itself out to the edges. */
 .octant-sheet__backdrop {
   position: fixed;
   z-index: var(--oct-z-floating);

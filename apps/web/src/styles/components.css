@@ -420,35 +420,27 @@ html[data-octant-increased-contrast="true"]
   transition-timing-function: var(--oct-ease-color);
 }
 
-/* Settings is a sheet so a person can watch the window change while they change
-   its appearance, so the window behind it stays exactly as it is: no blur, no
-   dim, and only a faint shade that sets the sheet apart. Blurring it past
-   reading hid what a person came to Settings to watch. Words never show
-   THROUGH the sheet: it is frosted (rule below), so the thread behind it
-   cannot be read through it, while everything beside it stays visible.
-   A dialog is a decision, not a view of the window: while one is open the
-   layers that hold content are blurred past reading and barely dimmed, a filter
-   on the layers themselves, which the desktop renderer does draw. Only paint
-   changes: the content stays in place and inert, keeps its focus target and
-   returns exactly as it was, and a screen reader loses nothing. A menu or
-   popover is not modal and keeps the dense float; reduced transparency and
-   increased contrast keep the opaque float and need neither. */
+/* While a dialog or the Settings sheet is open, the layers that hold content
+   are blurred past reading and barely dimmed: a filter on the layers
+   themselves, which the desktop renderer does draw. Settings was once left
+   over an untouched window, with only a 6% shade, so a change to the window's
+   look could be watched; the thread behind it then competed with Settings'
+   own text, so it is softened like any other modal, on every page (maintainer
+   decision, 2026-11-26). Its scrim is the sheet's own, lighter than a
+   dialog's. Words never show THROUGH the sheet: it is solid (rule below).
+   Only paint changes: the content stays in place and inert, keeps its focus
+   target and returns exactly as it was, and a screen reader loses nothing. A
+   menu or popover is not modal and keeps the dense float; reduced
+   transparency and increased contrast keep the opaque float and need
+   neither. */
 html[data-octant-native-host="true"]:not(
     [data-octant-reduced-transparency="true"],
     [data-octant-increased-contrast="true"]
-  ):has(.octant-dialog__popup[data-open])
+  ):has(:is(.octant-dialog__popup, .octant-sheet__popup)[data-open])
   .shell-frame
   > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
   opacity: 0.92;
   filter: blur(5px);
-}
-
-html[data-octant-native-host="true"]:not(
-    [data-octant-reduced-transparency="true"],
-    [data-octant-increased-contrast="true"]
-  )
-  .octant-sheet__backdrop {
-  background: color-mix(in srgb, var(--octant-scrim) 6%, transparent);
 }
 
 html[data-octant-native-host="true"]:not(

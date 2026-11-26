@@ -337,19 +337,18 @@ under the fill).
   follows the glass level and the ground shows through it; Increased contrast,
   Reduced transparency and a window with Glass off make it opaque. A browser keeps the frosted fills,
   where the blur is drawn over an opaque page.
-- **Settings leaves the window as it is; a dialog blurs it.** Settings is a
-  sheet so a person can watch the window change while they change its
-  appearance, so behind it nothing is blurred or dimmed: only a 6% shade sets
-  the sheet apart. In the desktop app the sheet itself is solid, the float with
-  no blur (maintainer request, 2026-11-15): under Glass the window lets the
-  apps behind it through, and no blur in the page can reach them. An 80% fill
-  over a 28px backdrop blur, then a 96% fill, both left another app's text
-  readable through Settings. Everything beside
-  it stays visible; blurring the whole window past reading hid exactly what
-  Settings is a sheet for. Behind a dialog, a
-  decision rather than a view, the layers that hold content (the rail, the
-  sidebar, the title band, the workspace and its docks) blur past reading (5px)
-  and stay at 92%. Where a ground is drawn (a picture, pixels or characters) a
+- **Settings and a dialog dim and soften the window behind them.** Behind
+  either, in the desktop app, the layers that hold content (the rail, the
+  sidebar, the title band, the workspace and its docks) blur past reading
+  (5px) and stay at 92%. Settings' scrim is the sheet's own, lighter than a
+  dialog's (the scrim colour at 34%, 20% in a light theme), and it is the same
+  on every Settings page, Appearance and Sidebar included (maintainer
+  decision, 2026-11-26: over an untouched window with a 6% shade, the thread
+  behind competed with Settings' own text). In the desktop app the sheet
+  itself is solid, the float with no blur (maintainer request, 2026-11-15):
+  under Glass the window lets the apps behind it through, and no blur in the
+  page can reach them. An 80% fill over a 28px backdrop blur, then a 96% fill,
+  both left another app's text readable through Settings. Where a ground is drawn (a picture, pixels or characters) a
   modal is the dense float with no blur. The ground stays one layer under the
   sidebar, the stage, the sheet and its scrim, never over any of them. Only
   paint changes: the content stays in place and inert, focus returns to its
