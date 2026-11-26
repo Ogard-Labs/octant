@@ -74,6 +74,12 @@ export interface SpokeWebhookHubPort {
   }>;
   /** Every member that could hold copies (the hub and each named standby), ticked or not. */
   readonly named?: () => ReadonlyArray<string>;
+  /**
+   * The sequence of the hub-signed roster the targets came from. A standby
+   * taken out of the order forgets its copies, and one put back gets the same
+   * member id, so a new roster sends the list again.
+   */
+  readonly copyEpoch?: () => string;
   readonly sealingKey: (memberId: string) => Promise<HubSealingKey | undefined>;
   readonly sendEndpoints: (memberId: string, update: HubWebhookEndpointsUpdate) => Promise<boolean>;
 }
@@ -311,7 +317,7 @@ export class SpokeWebhookService {
     // flag stays, and the next look sends the newer list.
     if (complete && revision === this.#revision) {
       this.#publishedGranted = granted;
-      this.#publishedRecipients = recipients.join(",");
+      this.#publishedRecipients = `${recipients.join(",")}@${hub.copyEpoch?.() ?? ""}`;
       const { unpublished: _unpublished, ...rest } = this.#load();
       this.#save(rest);
     } else if (!complete) {
@@ -327,7 +333,8 @@ export class SpokeWebhookService {
     if (
       this.#load().unpublished !== true &&
       granted === this.#publishedGranted &&
-      recipients.join(",") === this.#publishedRecipients
+      `${recipients.join(",")}@${this.#options.hub?.copyEpoch?.() ?? ""}` ===
+        this.#publishedRecipients
     )
       return;
     await this.publish();

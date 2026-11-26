@@ -17,6 +17,7 @@ import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
 import {
+  copyEpoch,
   isSelf,
   publicCopyTargets,
   servingRosterMembers,
@@ -50,10 +51,12 @@ export function spokeVisitorHubPort(
         ? undefined
         : { memberId: String(link.hubMemberId) };
     },
+    // The roster's sequence too: a standby put back in the order after it
+    // forgot its copies has the same member id and needs the list again.
     recipients: () =>
-      publicCopyTargets(deps.state.load().link, deps.standbyGranted())
+      `${publicCopyTargets(deps.state.load().link, deps.standbyGranted())
         .map((target) => target.memberId)
-        .join(","),
+        .join(",")}@${copyEpoch(deps.state.load().link)}`,
     sendGrants: async (update: HubVisitorGrantsUpdate) => {
       const link = deps.state.load().link;
       const targets = publicCopyTargets(link, deps.standbyGranted());

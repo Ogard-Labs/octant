@@ -3273,11 +3273,13 @@ Built, run only between three hosts on loopback (maintainer decision,
   endpoints, each secret sealed to that standby's own sealing key, and its
   spoke-signed link grants. A standby takes copies only from a spoke its
   hub-signed roster lists, with the key that roster fingerprints; a spoke
-  that ticked only Public hands the standby nothing, and unticking Standby,
-  or the standby leaving the order, sends it an empty list so it keeps no
-  copy, and a member the hub takes out of the order forgets every copy it
-  holds at its next look, since the spokes can no longer reach it to
-  withdraw them. A standby that is a spoke too keeps its own endpoints and
+  that ticked only Public hands the standby nothing. Unticking Standby
+  sends a named standby an empty list so it keeps no copy; a standby the hub
+  takes out of the order is no longer a copy target, and forgets every copy
+  it holds at its next look. A roster with a new sequence sends the lists
+  again, so a standby put back in the order gets its copies back. A
+  standby promoted to hub is no one's spoke, so its own endpoints answer
+  404 there rather than accept a delivery no routine will run. A standby that is a spoke too keeps its own endpoints and
   grants on itself, so it serves them while it stands in. Each recipient
   receives only the secret sealed to its own key. An
   endpoint made, rotated or removed while the hub is down reaches the

@@ -18,6 +18,7 @@ import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
 import {
+  copyEpoch,
   isSelf,
   publicCopyTargets,
   servingRosterMembers,
@@ -67,6 +68,7 @@ export function spokeWebhookHubPort(
   return {
     targets: () => targets().map(({ memberId, fingerprint }) => ({ memberId, fingerprint })),
     named: () => publicCopyTargets(deps.state.load().link, true).map((entry) => entry.memberId),
+    copyEpoch: () => copyEpoch(deps.state.load().link),
     sealingKey: async (memberId): Promise<HubSealingKey | undefined> => {
       const own = deps.own?.();
       if (own !== undefined && isSelf(deps.state.load(), memberId))

@@ -61,6 +61,13 @@ export interface HubWebhookServiceOptions {
   readonly wake?: (spokeMemberId: string) => Promise<void>;
   /** The member ids the roster this host serves lists; absent while it holds none. */
   readonly members?: () => ReadonlyArray<string> | undefined;
+  /**
+   * Whether this host may take deliveries for endpoints it owns as a spoke:
+   * only while it stands in. A standby promoted to hub is no one's spoke, so
+   * its own endpoints could never reach a routine; they answer 404 rather
+   * than acknowledge a delivery nothing will run.
+   */
+  readonly servesOwnEndpoints?: () => boolean;
   readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now: () => number;
 }
@@ -325,6 +332,12 @@ export class HubWebhookService {
     const hub = this.#options.state.load().webhookHub;
     const endpoint = hub?.endpoints.find((entry) => String(entry.endpointId) === endpointId);
     if (hub === undefined || endpoint === undefined) return NOT_FOUND;
+    if (
+      String(endpoint.spokeMemberId) === this.#options.hubMemberId() &&
+      this.#options.servesOwnEndpoints?.() === false
+    ) {
+      return NOT_FOUND;
+    }
     const headers = Object.fromEntries(
       WEBHOOK_FORWARDED_HEADERS.flatMap((name) => {
         const value = request.headers.get(name);

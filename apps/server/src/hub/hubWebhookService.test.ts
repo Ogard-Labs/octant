@@ -40,6 +40,7 @@ function setup(
     /** The endpoints whose spoke answers busy, when the rest are accepted. */
     readonly busyEndpoints?: ReadonlySet<string>;
     readonly members?: () => ReadonlyArray<string> | undefined;
+    readonly servesOwnEndpoints?: boolean;
   } = {},
 ) {
   const clock = { now: NOW };
@@ -62,6 +63,9 @@ function setup(
       return { status: "accepted" };
     },
     ...(options.members === undefined ? {} : { members: options.members }),
+    ...(options.servesOwnEndpoints === undefined
+      ? {}
+      : { servesOwnEndpoints: () => options.servesOwnEndpoints === true }),
     wake: async (memberId) => void woken.push(memberId),
     record: () => undefined,
     now: () => clock.now,
@@ -292,6 +296,17 @@ describe("webhook receipt on the hub", () => {
     expect((await service.handle(delivery({ secret, id: "msg_1", timestampMs: NOW }))).status).toBe(
       202,
     );
+  });
+
+  it("a promoted hub answers 404 for an endpoint it owned as a spoke, rather than take a delivery no routine will run", async () => {
+    const OWN = "DDDDDDDDDDDDDDDDDDDDDD" as WebhookEndpointId;
+    const { service, handEndpoints } = setup({ forward: "accepted", servesOwnEndpoints: false });
+    const own = mintWebhookSecret();
+    handEndpoints(HUB as HubMemberId, [[OWN, own]]);
+    expect(
+      (await service.handle(delivery({ secret: own, id: "m", timestampMs: NOW, endpointId: OWN })))
+        .status,
+    ).toBe(404);
   });
 
   describe("a standby's hand-back", () => {

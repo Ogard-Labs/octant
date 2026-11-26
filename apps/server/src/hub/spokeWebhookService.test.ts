@@ -449,4 +449,26 @@ describe("copies on a standby", () => {
     expect(standby.service.status().endpoints).toBe(0);
     expect(hub.service.status().endpoints).toBe(1);
   });
+
+  it("sends its endpoints again under a new roster, so a standby put back in the order gets its copies", async () => {
+    const key = makeSealingKeyPair();
+    let epoch = "1";
+    let sends = 0;
+    const hub: SpokeWebhookHubPort = {
+      targets: () => [{ memberId: HUB_ID, fingerprint: publicKeyFingerprint(SIGNER.publicKey) }],
+      copyEpoch: () => epoch,
+      sealingKey: async () => SIGNER.sealingKey(key.publicKey),
+      sendEndpoints: async () => {
+        sends += 1;
+        return true;
+      },
+    };
+    const { service } = setup(true, { hub });
+    await service.create({ scheme: "github", label: "Pushes" });
+    await service.look();
+    const before = sends;
+    epoch = "2";
+    await service.look();
+    expect(sends).toBe(before + 1);
+  });
 });

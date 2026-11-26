@@ -108,6 +108,12 @@ export interface OwnPublicServices {
   readonly spokeVisitors: Pick<SpokeVisitorService, "fetch">;
 }
 
+/** The sequence of the hub-signed roster copy targets come from; empty without one. */
+export function copyEpoch(link: HubLinkState | undefined): string {
+  const anchor = link === undefined ? undefined : hubSignedAnchor(link);
+  return anchor === undefined ? "" : String(anchor.roster.sequence);
+}
+
 /** Whether a member id names this host, as its hub link knows it. */
 export function isSelf(state: HubState, memberId: string): boolean {
   const self = state.link?.selfMemberId;
