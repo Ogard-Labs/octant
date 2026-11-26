@@ -58,3 +58,22 @@ it("lists this computer and each paired one over its own session, and gives none
   rerender();
   expect(result.current[1]?.client).toBe(before);
 });
+
+it("lists only the computers the Environments filter selects", () => {
+  const { result } = renderHook(() =>
+    useActiveWorkHosts({
+      localName: "Studio",
+      local,
+      localRevision: 1,
+      snapshots: [
+        snapshot(String(LOCAL_HOST_ID), "ready"),
+        snapshot("mini", "ready"),
+        snapshot("devbox", "unavailable"),
+      ],
+      transports: undefined,
+      pairedRevision: 1,
+      selection: { kind: "some", hostIds: new Set(["mini"]) },
+    }),
+  );
+  expect(result.current.map((host) => host.name)).toEqual(["mini"]);
+});

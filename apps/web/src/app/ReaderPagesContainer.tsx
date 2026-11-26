@@ -6,6 +6,7 @@ import { decodeUtcTimestamp, decodeWorkThreadId, type WorkThread } from "@octant
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { memo, useMemo, useSyncExternalStore } from "react";
 import type { RefreshTicks } from "../host/usePairedComputerReads";
+import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
 import type { ActiveWorkViewProps } from "../activeWork/ActiveWorkView";
 import { canOpenActiveWork, openActiveWork } from "../activeWork/openActiveWork";
@@ -141,6 +142,8 @@ export interface ReaderPagesContainerProps {
   readonly hostFederationTransports?: HostFederationTransports;
   /** Each start of the window's existing refresh of its paired computers. */
   readonly pairedRefreshTicks: RefreshTicks;
+  /** The sidebar's Environments filter, which Active work follows. */
+  readonly environmentSelection: EnvironmentSelection;
   readonly onOpenPairedComputerThread: (hostId: string, threadId: string) => void;
   readonly linearClient: WorkspaceRailLayersProps["linearClient"];
   readonly linearIssuesOpen: boolean;
@@ -276,6 +279,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     snapshots: props.computerSnapshots,
     transports: props.hostFederationTransports,
     pairedRevision,
+    selection: props.environmentSelection,
   });
   const activeWork = useMemo<ActiveWorkViewProps>(
     () => ({

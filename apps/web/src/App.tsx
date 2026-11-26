@@ -9567,6 +9567,7 @@ function LaunchedShell(
                             : { hostFederationTransports })}
                           onOpenPairedComputerThread={openPairedComputerThreadLatest}
                           pairedRefreshTicks={pairedRefreshTicks}
+                          environmentSelection={environmentSelection}
                           linearClient={linearClient}
                           linearIssuesOpen={linearIssuesOpen}
                           linearIssuesRead={linearIssuesRead}

@@ -3314,7 +3314,7 @@ The Agents page opens on everything that is not Done on every computer the windo
 
 - One host read lists threads, coordinators, subagents and routine runs with their computer, Project, repository, branch or own worktree and linked pull requests and issues by identifier, each only when the host already holds it. One builder makes every row, and its state is the thread board's derivation.
 - A host answers only for itself, with threads the asking window or device already lists there; a device only the hub introduced is not told of Code Projects outside the Act item, and an agent grant's session is refused. A subagent's task is named only where the window may read that run.
-- A client merges the answers. A computer that does not answer is named as unreachable with when it was last connected, and has no rows; no host or hub makes a row for another.
+- A client merges the answers. A computer that does not answer is named as unreachable with when it was last connected, and has no rows; no host or hub makes a row for another. The list follows the sidebar's Environments filter: narrowed to some computers, it reads, lists and names only those (maintainer decision, 2026-11-26).
 - A row opens as its sidebar row does. A paired computer's Work and Chat threads are listed but not opened from another window.
 - Reads run in parallel over sessions already held, follow the existing change feed (where a subagent's or routine run's state change now publishes the navigation topics) and each start of the paired-computer refresh, and add no timer and no journal event. A paired browser lists its one host; the phone has no list.
 

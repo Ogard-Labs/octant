@@ -8,6 +8,10 @@ import type {
   FederatedHostLifecycleState,
 } from "@octant/client-runtime/host-federation-lifecycle";
 import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
+import {
+  isEnvironmentSelected,
+  type EnvironmentSelection,
+} from "@octant/client-runtime/environment-selection";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { useMemo } from "react";
 import type { ActiveWorkHost } from "./useActiveWork";
@@ -40,36 +44,40 @@ export interface ActiveWorkHostsInput {
   readonly transports?: Pick<HostFederationTransports, "get"> | undefined;
   /** Moves with the window's existing refresh of its paired computers. */
   readonly pairedRevision: unknown;
+  /** The sidebar's Environments filter; a computer it leaves out is neither read nor named. */
+  readonly selection?: EnvironmentSelection;
 }
 
 /** This computer first, then every computer the window is paired with, each over its own session. */
 export function useActiveWorkHosts(input: ActiveWorkHostsInput): ReadonlyArray<ActiveWorkHost> {
-  const { localName, local, localRevision, snapshots, transports, pairedRevision } = input;
+  const { localName, local, localRevision, snapshots, transports, pairedRevision, selection } =
+    input;
   const localClient = useMemo(() => createActiveWorkClient(local), [local]);
   return useMemo(
-    () => [
-      {
-        hostId: String(LOCAL_HOST_ID),
-        name: localName,
-        reach: "ready" as const,
-        client: localClient,
-        revision: localRevision,
-      },
-      ...snapshots
-        .filter((snapshot) => String(snapshot.hostId) !== String(LOCAL_HOST_ID))
-        .map((snapshot) => {
-          const bridge = transports?.get(snapshot.hostId)?.bridge;
-          return {
-            hostId: String(snapshot.hostId),
-            name: snapshot.displayName,
-            reach: reachOf(snapshot.state),
-            ...(snapshot.lastReadyAt === undefined ? {} : { lastReadyAt: snapshot.lastReadyAt }),
-            ...(bridge === undefined ? {} : { client: pairedActiveWorkClient(bridge) }),
-            revision: pairedRevision,
-          };
-        }),
-    ],
-    [localName, localClient, localRevision, snapshots, transports, pairedRevision],
+    () =>
+      [
+        {
+          hostId: String(LOCAL_HOST_ID),
+          name: localName,
+          reach: "ready" as const,
+          client: localClient,
+          revision: localRevision,
+        },
+        ...snapshots
+          .filter((snapshot) => String(snapshot.hostId) !== String(LOCAL_HOST_ID))
+          .map((snapshot) => {
+            const bridge = transports?.get(snapshot.hostId)?.bridge;
+            return {
+              hostId: String(snapshot.hostId),
+              name: snapshot.displayName,
+              reach: reachOf(snapshot.state),
+              ...(snapshot.lastReadyAt === undefined ? {} : { lastReadyAt: snapshot.lastReadyAt }),
+              ...(bridge === undefined ? {} : { client: pairedActiveWorkClient(bridge) }),
+              revision: pairedRevision,
+            };
+          }),
+      ].filter((host) => selection === undefined || isEnvironmentSelected(selection, host.hostId)),
+    [localName, localClient, localRevision, snapshots, transports, pairedRevision, selection],
   );
 }
 

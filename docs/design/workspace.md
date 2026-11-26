@@ -2221,7 +2221,9 @@ Agents is already in the rail in every mode, cannot be switched off, and spans
 Projects. The Board is per mode and a plugin a person may turn off; Home's In
 progress holds five rows of one mode pair; the sidebar's Running list is one
 mode's threads; the Inbox holds only what asks for an answer. Those all keep
-working as they do.
+working as they do. Active work follows the sidebar's Environments filter: narrowed to
+some computers, it reads, lists and names only those (maintainer decision,
+2026-11-26).
 
 - **Rows** stand under the Board's own headings, Waiting, In progress and Ready,
   newest first, and say the Board's own state: the same derivation, and for a
