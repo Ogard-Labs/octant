@@ -28,14 +28,24 @@ export function browserAgentAvailability(facts: BrowserAgentFacts): BrowserAgent
 export interface AppToolThreadLevel {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean | undefined;
+  /**
+   * Whether Strict is on for the thread, as its launch resolves it; absent
+   * reads as Strict. Only `false` lets a runtime's outside-Strict report
+   * (`appManagedToolsOutsideStrict`) answer.
+   */
+  readonly strict?: boolean | undefined;
 }
 
-/** The level a Work or Code thread stores, as the tool gate reads it. */
+/**
+ * The level a Work or Code thread stores, as the tool gate reads it, with the
+ * thread's Strict value where the caller resolved it.
+ */
 export function appToolThreadLevel(
   thread: (
     | { readonly executionPolicy: ProviderExecutionPolicy }
     | { readonly access: WorkAccess }
   ) & { readonly fullAccessSandbox?: boolean | undefined },
+  strict?: boolean,
 ): AppToolThreadLevel {
   return {
     executionPolicy:
@@ -43,35 +53,54 @@ export function appToolThreadLevel(
         ? thread.executionPolicy
         : workThreadAccessOf(thread.access).executionPolicy,
     fullAccessSandbox: thread.fullAccessSandbox,
+    ...(strict === undefined ? {} : { strict }),
   };
 }
 
 /** The capabilities that decide what a thread gets of Octant's tools. */
 export type AppToolCapabilities = Pick<
   ProviderObservedState["capabilities"],
-  "appManagedTools" | "appManagedToolsAtFullAccess"
+  "appManagedTools" | "appManagedToolsAtFullAccess" | "appManagedToolsOutsideStrict"
 >;
 
 /**
  * What one thread gets of Octant's tools from what its runtime reports.
- * `mixed` exists only at Full access: the runtime could not prove Octant's
- * tools are the only ones entering it, and the same agent already holds an
- * unwrapped shell there, so the tools are offered and labelled rather than
- * withheld. A thread that keeps the sandbox at Full access is launched as the
- * guarded levels are, so a runtime that proves exclusivity there keeps it.
+ * `mixed` means the runtime could not prove Octant's tools are the only ones
+ * entering it, so the tools are offered and labelled rather than withheld. It
+ * exists at Full access, where the same agent already holds an unwrapped
+ * shell, and, for a runtime that reports it, on a thread outside Strict below
+ * Full access and outside Plan, whose launch runs with no Octant sandbox
+ * beside the person's own setup. A thread that keeps the sandbox at Full
+ * access is launched as the guarded levels are, so a runtime that proves
+ * exclusivity there keeps it. Under Strict, and in Plan, `appManagedTools`
+ * answers alone.
+ *
+ * Rationale: the level alone could not say whether a launch was Strict, so a
+ * runtime that carries the tools outside Strict reported `unsupported` for
+ * every guarded level and the host never offered them there.
  */
 export function threadAppToolSupport(
   capabilities: AppToolCapabilities,
   level: AppToolThreadLevel,
 ): ProviderCapabilitySupport | "mixed" {
   if (
-    level.executionPolicy !== "full-access" ||
-    capabilities.appManagedToolsAtFullAccess !== "mixed"
-  )
-    return capabilities.appManagedTools;
-  return level.fullAccessSandbox === true && capabilities.appManagedTools === "supported"
-    ? "supported"
-    : "mixed";
+    level.executionPolicy === "full-access" &&
+    capabilities.appManagedToolsAtFullAccess === "mixed"
+  ) {
+    return level.fullAccessSandbox === true && capabilities.appManagedTools === "supported"
+      ? "supported"
+      : "mixed";
+  }
+  if (
+    capabilities.appManagedTools !== "supported" &&
+    capabilities.appManagedToolsOutsideStrict === "mixed" &&
+    level.strict === false &&
+    level.executionPolicy !== "plan" &&
+    level.executionPolicy !== "full-access"
+  ) {
+    return "mixed";
+  }
+  return capabilities.appManagedTools;
 }
 
 /**

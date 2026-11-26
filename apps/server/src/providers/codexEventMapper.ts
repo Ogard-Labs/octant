@@ -34,6 +34,8 @@ const DIFF_MAX_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
 const SUMMARY_MAX_CHARACTERS = 1_024;
 const PATH_MAX_CHARACTERS = 4_096;
+/** How many changes outside the Project one finished step names before counting the rest. */
+const OUTSIDE_CHANGES_NAMED = 8;
 const LIVENESS_INTERVAL_MS = 5_000;
 
 export interface CodexEventContext {
@@ -74,6 +76,13 @@ export interface CodexEventContext {
    * session outside Strict, whose answer reaches Codex unrecorded.
    */
   readonly asksSecretQuestions?: true;
+  /**
+   * A file change outside the Project root is a finished step rather than
+   * the end of the turn: set only for a session outside Strict, where Codex
+   * writes anywhere at Full access and, below it, only where the person
+   * approved the write.
+   */
+  readonly recordsOutsideChanges?: true;
   readonly requestIds: Map<CodexRpcId, string>;
   readonly agentMessages: Map<string, CodexAgentMessageState>;
   readonly taskIds: Map<string, string>;
@@ -194,6 +203,15 @@ type ToolItem = Extract<
   { readonly type: "commandExecution" | "fileChange" | "mcpToolCall" | "dynamicToolCall" }
 >;
 
+/**
+ * Ends the turn. Kept for what guards authority: a request (approval,
+ * question, app tool) that cannot be tied to this turn or read safely, and,
+ * under Strict, a file change outside the Project root. A notification that
+ * merely surprises this mapper (a repeat, one for a tool it never saw, one
+ * for another turn, one after the turn ended) is dropped instead, because
+ * each Codex release reorders or adds some and every one of them used to fail
+ * the turn.
+ */
 function protocolFailure(message: string, category: ProviderFailure["category"] = "protocol") {
   return [{ kind: "protocol-failure", failure: { category, message } }] as const;
 }
@@ -275,10 +293,7 @@ function mapAgentMessageDelta(
   delta: string,
 ): ReadonlyArray<CodexMappedMessage> {
   const state = context.agentMessages.get(itemId);
-  if (state?.lifecycle === "terminal") {
-    return protocolFailure("Provider streamed text for a completed agent message.");
-  }
-  if (delta.length === 0) return [{ kind: "ignored" }];
+  if (state?.lifecycle === "terminal" || delta.length === 0) return [{ kind: "ignored" }];
   const separator = agentMessageSeparator(context, itemId);
   context.agentMessages.set(itemId, {
     lifecycle: "active",
@@ -292,14 +307,11 @@ function mapAgentMessageCompletion(
   item: Extract<ThreadItem, { readonly type: "agentMessage" }>,
 ): ReadonlyArray<CodexMappedMessage> {
   const state = context.agentMessages.get(item.id);
-  if (state?.lifecycle === "terminal") {
-    return protocolFailure("Provider completed an agent message more than once.");
-  }
+  if (state?.lifecycle === "terminal") return [{ kind: "ignored" }];
   const streamed = state?.text ?? "";
-  if (!item.text.startsWith(streamed)) {
-    return protocolFailure("Provider completed agent text that contradicted its streamed text.");
-  }
-  const suffix = item.text.slice(streamed.length);
+  // Text that does not continue what was streamed cannot be appended to it;
+  // the streamed text stands as what the person was shown.
+  const suffix = item.text.startsWith(streamed) ? item.text.slice(streamed.length) : "";
   const separator = suffix.length === 0 ? "" : agentMessageSeparator(context, item.id);
   context.agentMessages.set(item.id, { lifecycle: "terminal", text: item.text });
   return streamedEvents(context, "text-delta", `${separator}${suffix}`);
@@ -316,9 +328,7 @@ function mapProposedPlan(
   context: CodexEventContext,
   item: Extract<ThreadItem, { readonly type: "plan" }>,
 ): ReadonlyArray<CodexMappedMessage> {
-  if (context.agentMessages.get(item.id)?.lifecycle === "terminal") {
-    return protocolFailure("Provider completed a plan more than once.");
-  }
+  if (context.agentMessages.get(item.id)?.lifecycle === "terminal") return [{ kind: "ignored" }];
   const text = proposedPlanText(item.text);
   if (text === undefined) return [{ kind: "ignored" }];
   const separator = agentMessageSeparator(context, item.id);
@@ -338,9 +348,7 @@ function mapReviewFindings(
   context: CodexEventContext,
   item: Extract<ThreadItem, { readonly review: string }>,
 ): ReadonlyArray<CodexMappedMessage> {
-  if (context.agentMessages.get(item.id)?.lifecycle === "terminal") {
-    return protocolFailure("Provider completed a review more than once.");
-  }
+  if (context.agentMessages.get(item.id)?.lifecycle === "terminal") return [{ kind: "ignored" }];
   const findings = item.review.trim();
   const text = `${CODEX_REVIEW_HEADING}\n\n${findings.length === 0 ? "No findings." : findings}\n`;
   const separator = agentMessageSeparator(context, item.id);
@@ -367,8 +375,17 @@ export function mapCodexReviewNote(
   );
 }
 
+/** A request for another thread or turn is never answered from this one. */
 function correlationFailure(): ReadonlyArray<CodexMappedMessage> {
   return protocolFailure("Provider message did not match the active thread and turn.");
+}
+
+/**
+ * A notification for another thread or turn (a late one from the turn before,
+ * say) is dropped, never applied to this turn.
+ */
+function otherTurnNotification(): ReadonlyArray<CodexMappedMessage> {
+  return [{ kind: "ignored" }];
 }
 
 function matchesCorrelation(context: CodexEventContext, threadId: string, turnId: string): boolean {
@@ -460,12 +477,67 @@ function fileChangePathsAreConfined(
   });
 }
 
+/**
+ * What a finished file change did outside the Project, one entry per change:
+ * the file edited, created or deleted, and both ends of a move when either is
+ * outside. Paths are absolute, as Codex reported them; contents never cross.
+ */
+function outsideChangeEntries(
+  context: CodexEventContext,
+  item: Extract<ToolItem, { readonly type: "fileChange" }>,
+): ReadonlyArray<string> {
+  const shown = (path: string) =>
+    truncate(resolve(context.projectRoot, path), LABEL_MAX_CHARACTERS);
+  return item.changes.flatMap((change) => {
+    const inside = confinedRelativePath(context, change.path) !== undefined;
+    const movePath = change.kind.type === "update" ? change.kind.move_path : null;
+    if (movePath !== null) {
+      return inside && confinedRelativePath(context, movePath) !== undefined
+        ? []
+        : [`moved ${shown(change.path)} to ${shown(movePath)}`];
+    }
+    if (inside) return [];
+    const verb =
+      change.kind.type === "add"
+        ? "created"
+        : change.kind.type === "delete"
+          ? "deleted"
+          : "modified";
+    return [`${verb} ${shown(change.path)}`];
+  });
+}
+
+/**
+ * The finished step's summary for a change that reached outside the Project.
+ * The journal has no file-change record for such a file, so this text is the
+ * only place the thread says which files were written: it names up to
+ * `OUTSIDE_CHANGES_NAMED` of them within the summary bound and counts the rest.
+ */
+function outsideChangeSummary(entries: ReadonlyArray<string>): string {
+  const counted = (rest: number) => `; and ${rest} more outside the Project.`;
+  const room = SUMMARY_MAX_CHARACTERS - counted(entries.length).length;
+  let summary = "File change completed, including files outside the Project";
+  let named = 0;
+  for (const entry of entries.slice(0, OUTSIDE_CHANGES_NAMED)) {
+    const next = `${summary}${named === 0 ? ": " : "; "}${entry}`;
+    if (Array.from(next).length > room) break;
+    summary = next;
+    named += 1;
+  }
+  return named === entries.length ? `${summary}.` : `${summary}${counted(entries.length - named)}`;
+}
+
 function mapFileChangeCompletion(
   context: CodexEventContext,
   item: Extract<ToolItem, { readonly type: "fileChange" }>,
 ): ReadonlyArray<CodexMappedMessage> {
   const id = toolCallId(context, item.id);
-  if (item.status === "failed" || item.status === "declined") {
+  if (item.status === "inProgress") {
+    return [event(context, { kind: "tool-progress", toolCallId: id, message: "Tool is running." })];
+  }
+  // Only `completed` credits the files as changed; a status this build does
+  // not know reads as not done.
+  if (item.status !== "completed") {
     return [
       event(context, {
         kind: "tool-failure",
@@ -473,9 +545,6 @@ function mapFileChangeCompletion(
         message: item.status === "declined" ? "Tool was declined." : "Tool failed.",
       }),
     ];
-  }
-  if (item.status === "inProgress") {
-    return [event(context, { kind: "tool-progress", toolCallId: id, message: "Tool is running." })];
   }
 
   const changes = item.changes.map((change) => ({
@@ -487,11 +556,22 @@ function mapFileChangeCompletion(
           ? ("deleted" as const)
           : ("modified" as const),
   }));
+  // A file-change record names a Project-relative path, which a file outside
+  // the Project does not have. Such a file gets no record, as the thread's
+  // views of changed files stay on the Project, and the step names it instead:
+  // "including files outside the Project" alone left the journal unable to say
+  // which files were written, and a move out of the Project left no trace.
+  const inside = changes.flatMap(({ path, change }) =>
+    path === undefined ? [] : [event(context, { kind: "file-change", path, change })],
+  );
+  const outside = outsideChangeEntries(context, item);
   return [
-    ...changes.map(({ path, change }) =>
-      event(context, { kind: "file-change", path: path as string, change }),
-    ),
-    event(context, { kind: "tool-success", toolCallId: id, summary: "File change completed." }),
+    ...inside,
+    event(context, {
+      kind: "tool-success",
+      toolCallId: id,
+      summary: outside.length === 0 ? "File change completed." : outsideChangeSummary(outside),
+    }),
   ];
 }
 
@@ -526,10 +606,8 @@ function mapToolCompletion(
           }),
         ]
       : [];
-  if (item.status === "completed") {
-    if (item.type === "dynamicToolCall" && item.success === false) {
-      return protocolFailure("Provider returned a contradictory tool completion status.");
-    }
+  // An app tool that says both `completed` and unsuccessful reads as failed.
+  if (item.status === "completed" && !(item.type === "dynamicToolCall" && item.success === false)) {
     // The pull requests and issues a command wrote to, read from the command
     // and what it printed. Codex's MCP items reach this mapper without their
     // arguments or result, so only commands can report them.
@@ -681,7 +759,7 @@ function mapLifecycle(
   message: ItemLifecycleMessage,
 ): ReadonlyArray<CodexMappedMessage> {
   const { threadId, turnId, item } = message.params;
-  if (!matchesCorrelation(context, threadId, turnId)) return correlationFailure();
+  if (!matchesCorrelation(context, threadId, turnId)) return otherTurnNotification();
   if (isUnmodeledThreadItem(item)) {
     // An item kind Octant does not model. Authority is enforced through the
     // separate approval requests, not through item rendering, so an unknown
@@ -693,29 +771,28 @@ function mapLifecycle(
     case "fileChange":
     case "mcpToolCall":
     case "dynamicToolCall": {
-      if (item.type === "fileChange" && !fileChangePathsAreConfined(context, item)) {
+      // Under Strict nothing may write outside the Project, so a report of
+      // it ends the turn. Outside Strict the write was Codex's to make (Full
+      // access) or the person's to approve, and failing the turn after the
+      // fact undid nothing and lost the rest of the work.
+      if (
+        item.type === "fileChange" &&
+        context.recordsOutsideChanges !== true &&
+        !fileChangePathsAreConfined(context, item)
+      ) {
         return protocolFailure(
           "Provider reported a file change outside the authorized Project root.",
         );
       }
       const state = context.toolStates.get(item.id);
+      // A start for a tool already started, and a completion for one never
+      // started, already finished, or still reported as running, each settle
+      // nothing and are dropped. A start is a start whatever status it names.
       if (message.method === "item/started") {
-        if (item.status !== "inProgress") {
-          return protocolFailure("Provider started a tool item with a terminal status.");
-        }
-        if (state !== undefined) {
-          return protocolFailure("Provider started a tool item more than once.");
-        }
-        return mapToolStart(context, item);
+        return state === undefined ? mapToolStart(context, item) : [{ kind: "ignored" }];
       }
-      if (item.status === "inProgress") {
-        return protocolFailure("Provider completed a tool item with a non-terminal status.");
-      }
-      if (state === undefined) {
-        return protocolFailure("Provider completed a tool item that was not started.");
-      }
-      if (state.lifecycle === "terminal") {
-        return protocolFailure("Provider completed a terminal tool item.");
+      if (item.status === "inProgress" || state === undefined || state.lifecycle === "terminal") {
+        return [{ kind: "ignored" }];
       }
       const mapped = mapToolCompletion(context, item);
       state.lifecycle = "terminal";
@@ -724,9 +801,7 @@ function mapLifecycle(
     case "webSearch": {
       const state = context.toolStates.get(item.id);
       if (message.method === "item/started") {
-        if (state !== undefined) {
-          return protocolFailure("Provider started a tool item more than once.");
-        }
+        if (state !== undefined) return [{ kind: "ignored" }];
         const id = toolCallId(context, item.id);
         // Codex runs the search itself and hands the model what it found, so
         // the start is the last point at which the thread can be marked
@@ -745,12 +820,7 @@ function mapLifecycle(
           event(context, { kind: "tool-progress", toolCallId: id, message: "Searching the web." }),
         ];
       }
-      if (state === undefined) {
-        return protocolFailure("Provider completed a tool item that was not started.");
-      }
-      if (state.lifecycle === "terminal") {
-        return protocolFailure("Provider completed a terminal tool item.");
-      }
+      if (state === undefined || state.lifecycle === "terminal") return [{ kind: "ignored" }];
       state.lifecycle = "terminal";
       const query = item.query.trim();
       // The model already has the results; reading them now still labels the
@@ -1089,18 +1159,14 @@ function mapTerminal(
   context: CodexEventContext,
   turn: CodexTurnReference,
 ): ReadonlyArray<CodexMappedMessage> {
-  if (context.terminal) {
-    return protocolFailure("Provider emitted more than one terminal event.");
-  }
-  if (turn.status === "inProgress") {
-    return protocolFailure("Provider returned a non-terminal turn completion status.");
-  }
+  // The first completion ended the turn; a repeat ends nothing.
+  if (context.terminal) return [{ kind: "ignored" }];
+  // `turn/completed` is Codex saying the turn is over, so it always ends it:
+  // dropped, the turn would wait for an end that never comes. Tools Codex
+  // never reported finishing end with the turn.
   const activeTools = [...context.toolStates.values()].filter(
     ({ lifecycle }) => lifecycle === "active",
   );
-  if (turn.status === "completed" && activeTools.length > 0) {
-    return protocolFailure("Provider completed the turn while tool items were still active.");
-  }
   context.terminal = true;
   activeTools.forEach((tool) => {
     tool.lifecycle = "terminal";
@@ -1110,7 +1176,9 @@ function mapTerminal(
       event(context, { kind: "interrupted", message: "Provider execution was interrupted." }),
     ];
   }
-  if (turn.status === "failed") {
+  // A status this build does not know is a failure when Codex attached an
+  // error to it, and a plain completion otherwise.
+  if (turn.status === "failed" || (turn.status !== "completed" && turn.error !== undefined)) {
     const message =
       turn.error !== undefined && turn.error.message.trim() !== ""
         ? turn.error.message
@@ -1143,15 +1211,16 @@ function mapNotification(
 ): ReadonlyArray<CodexMappedMessage> {
   switch (message.method) {
     case "turn/started":
-      if (!matchesCorrelation(context, message.params.threadId, message.params.turn.id)) {
-        return correlationFailure();
-      }
-      return message.params.turn.status === "inProgress"
-        ? [{ kind: "ignored" }]
-        : protocolFailure("Provider returned a non-running turn start status.");
+      return [{ kind: "ignored" }];
     case "turn/completed":
-      if (!matchesCorrelation(context, message.params.threadId, message.params.turn.id)) {
-        return correlationFailure();
+      // A completion whose turn could not be read ends the turn this thread
+      // is running: it names no other, and left alone that turn never ends.
+      if (
+        message.turnUnreadable === true
+          ? message.params.threadId !== context.threadId
+          : !matchesCorrelation(context, message.params.threadId, message.params.turn.id)
+      ) {
+        return otherTurnNotification();
       }
       return mapTerminal(context, message.params.turn);
     case "item/started":
@@ -1160,22 +1229,22 @@ function mapNotification(
     case "item/autoApprovalReview/started":
       return matchesCorrelation(context, message.params.threadId, message.params.turnId)
         ? [{ kind: "ignored" }]
-        : correlationFailure();
+        : otherTurnNotification();
     case "item/autoApprovalReview/completed":
       if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
-        return correlationFailure();
+        return otherTurnNotification();
       }
       return reviewVerdictEvents(context, message.params);
     case "item/agentMessage/delta": {
       if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
-        return correlationFailure();
+        return otherTurnNotification();
       }
       return mapAgentMessageDelta(context, message.params.itemId, message.params.delta);
     }
     case "item/reasoning/summaryTextDelta":
     case "item/reasoning/textDelta": {
       if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
-        return correlationFailure();
+        return otherTurnNotification();
       }
       return streamedEvents(context, "reasoning-delta", message.params.delta);
     }
@@ -1187,23 +1256,24 @@ function mapNotification(
     case "item/mcpToolCall/progress":
     case "item/fileChange/patchUpdated": {
       if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
-        return correlationFailure();
+        return otherTurnNotification();
       }
       return livenessEvents(context);
     }
     case "turn/diff/updated": {
       if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
-        return correlationFailure();
+        return otherTurnNotification();
       }
       if (message.params.diff.length === 0) return [{ kind: "ignored" }];
+      // A diff past the bound is not shown; the next update replaces it.
       if (Array.from(message.params.diff).length > DIFF_MAX_CHARACTERS) {
-        return protocolFailure("Provider diff exceeded the supported size.");
+        return [{ kind: "ignored" }];
       }
       return [event(context, { kind: "diff", diff: message.params.diff })];
     }
     case "turn/plan/updated": {
       if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
-        return correlationFailure();
+        return otherTurnNotification();
       }
       const results: CodexMappedMessage[] = [];
       const taskIds: string[] = [];
@@ -1224,7 +1294,13 @@ function mapNotification(
           event(context, {
             kind: "task-progress",
             taskId,
-            status: step.status === "inProgress" ? "in-progress" : step.status,
+            // A step status this build does not know reads as not started.
+            status:
+              step.status === "inProgress"
+                ? "in-progress"
+                : step.status === "completed"
+                  ? "completed"
+                  : "pending",
             summary,
           }),
         );
@@ -1237,7 +1313,7 @@ function mapNotification(
       // The turn's terminal event has gone out, and the ledger keeps the last
       // report the turn sent before it; a later one has no turn to join.
       if (context.terminal) return [{ kind: "ignored" }];
-      if (message.params.threadId !== context.threadId) return correlationFailure();
+      if (message.params.threadId !== context.threadId) return otherTurnNotification();
       // Usage can arrive after a resumed thread has advanced to its next turn.
       // Stale telemetry neither belongs in the new totals nor fails that turn.
       if (message.params.turnId !== context.turnId) return [{ kind: "ignored" }];
@@ -1421,10 +1497,6 @@ function resetTimestamp(resetsAt: number | undefined): UtcTimestamp | undefined 
   return Number.isNaN(at.getTime()) ? undefined : (at.toISOString() as UtcTimestamp);
 }
 
-function isActiveRuntimeMethod(method: string): boolean {
-  return method.startsWith("turn/") || method.startsWith("item/") || method.startsWith("thread/");
-}
-
 /**
  * A request one of Codex's own subagents sent on its own thread, mapped into
  * the turn of the parent session that owns it. The caller has already found
@@ -1453,19 +1525,20 @@ export function mapCodexMessage(
   context: CodexEventContext,
   message: CodexServerMessage,
 ): ReadonlyArray<CodexMappedMessage> {
-  // Account usage is not turn activity: it may land after the turn ended
-  // and still describes the account truthfully. A token report is telemetry
-  // too, not activity; one that lands late is ignored below rather than
-  // failing a turn that already ended.
+  // A request after the turn ended has no turn to be answered in, so it is
+  // never mapped into one.
+  if (context.terminal && message.kind === "request") {
+    return protocolFailure("Provider emitted runtime activity after the terminal event.");
+  }
+  // A notification that lands after the turn ended is dropped. Account usage
+  // is not turn activity and still describes the account truthfully, so it
+  // is read whenever it lands.
   if (
     context.terminal &&
-    (message.kind === "request" ||
-      (message.kind === "notification" &&
-        message.method !== "turn/completed" &&
-        message.method !== "account/rateLimits/updated" &&
-        message.method !== "thread/tokenUsage/updated"))
+    message.kind === "notification" &&
+    message.method !== "account/rateLimits/updated"
   ) {
-    return protocolFailure("Provider emitted runtime activity after the terminal event.");
+    return [{ kind: "ignored" }];
   }
   switch (message.kind) {
     case "notification":
@@ -1476,10 +1549,10 @@ export function mapCodexMessage(
         return userInputRequest(context, message);
       }
       return approval(context, message);
+    // A notification this build does not know, or cannot read, changes
+    // nothing it shows.
     case "unknown-notification":
-      return isActiveRuntimeMethod(message.method)
-        ? protocolFailure("Provider emitted an unsupported active runtime notification.")
-        : [{ kind: "ignored" }];
+      return [{ kind: "ignored" }];
     case "response":
     case "unsupported-request":
       return protocolFailure(

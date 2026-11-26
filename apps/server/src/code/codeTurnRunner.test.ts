@@ -1048,6 +1048,35 @@ describe("CodeTurnRunner", () => {
     expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
   });
 
+  it("marks the thread and keeps the turn running outside Strict when the runtime reads outside content under its own reviewer", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([webRead("call-1"), event({ kind: "completed" })]),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+    const journal = markJournal();
+
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            harnessAutoReviewEnabled: true,
+            strict: false,
+            outsideContentMarks: journal.marks,
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(exit._tag).toBe("Success");
+    expect(journal.recorded).toHaveLength(1);
+    expect(outcomes).not.toContain("interrupted");
+    expect(connection.interrupt).not.toHaveBeenCalled();
+  });
+
   it("stops the turn when the runtime read outside content the thread cannot be marked with", async () => {
     for (const marks of [undefined, markJournal({ refuse: true }).marks]) {
       const connection = fakeConnection({
@@ -1268,6 +1297,36 @@ describe("CodeTurnRunner", () => {
     );
     expect(outcomes.at(-1)).toBe("failed");
     expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+  });
+
+  it("lets a turn outside Strict run past the event budget", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "ok" }),
+          event({ kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "ok" }),
+          event({ kind: "task-progress", taskId: "task-1", status: "completed", summary: "over" }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner({ maxEvents: 2 }).run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            strict: false,
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(exit._tag).toBe("Success");
+    expect(outcomes).not.toContain("failed");
+    expect(connection.interrupt).not.toHaveBeenCalled();
   });
 
   it("lets a Full access turn with the tool-step limit off run past any event count, and stops one below it at the person's limit", async () => {

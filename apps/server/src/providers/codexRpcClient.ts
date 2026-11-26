@@ -273,10 +273,10 @@ export function makeCodexRpcClient(options: CodexRpcClientOptions): CodexRpcClie
     },
   ) => {
     const request = pending.get(id);
-    if (request === undefined) {
-      failProtocol("Codex sent an unknown or duplicate response ID.");
-      return;
-    }
+    // A response no request is waiting for (one that already timed out, or a
+    // repeat) settles nothing. It is dropped: closing here ended every thread
+    // on the process for one late answer.
+    if (request === undefined) return;
     pending.delete(id);
     clearTimeout(request.timeout);
 
@@ -333,6 +333,12 @@ export function makeCodexRpcClient(options: CodexRpcClientOptions): CodexRpcClie
           break;
       }
     } catch {
+      // Only a broken envelope reaches here (not an object, an unusable id or
+      // method, a response that is neither a result nor an error): the stream
+      // itself cannot be trusted. A known message with params this build
+      // cannot read is decoded as unknown above and never closes it, except
+      // a turn's end that names no thread: no turn can be ended for it, and
+      // dropping it would leave one running.
       failProtocol("Codex sent invalid JSON-RPC.");
     }
   };

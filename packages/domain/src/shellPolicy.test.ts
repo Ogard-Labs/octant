@@ -231,7 +231,7 @@ describe("shell settings policy", () => {
       providerSelfUpdate: false,
       providerCredentialPassThrough: {},
       threadWakeupsWaitingLimit: 8,
-      threadWakeupsRunMissedOnReturn: false,
+      threadWakeupsRunMissedOnReturn: true,
       messageWakesPerHour: 30,
       messageWakeRounds: 10,
       coordinatorsPerProject: 4,
@@ -247,7 +247,7 @@ describe("shell settings policy", () => {
       shieldDenialsPerThread: 20,
       followUpLatenessLimitHours: 24,
       toolingCommandConfirmMinutes: 10,
-      agentRoutinesStartActiveAtFullAccess: false,
+      agentRoutinesStartActiveAtFullAccess: true,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
       // Voice starts unconfigured: no transcription or synthesis endpoint.

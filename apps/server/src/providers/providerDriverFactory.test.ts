@@ -8,9 +8,6 @@ import { DISCOVERY_DESCRIPTORS } from "@octant/provider-sdk/discovery";
 import { isAcpHostProfileDriver } from "@octant/provider-sdk/driver-plugins";
 import { providerKeepsConversation } from "@octant/domain";
 import { Effect } from "effect";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
@@ -880,47 +877,40 @@ function runProbe(driver: ReturnType<typeof makeProviderDriver>): Promise<unknow
   return Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
 }
 
-describe("Codex's open launch environment and its Bedrock sign-in", () => {
+describe("Codex's open launch environment", () => {
   const hostEnvironment = {
     PATH: "/usr/bin",
     AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
     AWS_SECRET_ACCESS_KEY: "aws-secret",
+    AWS_BEARER_TOKEN_BEDROCK: "bedrock-token",
     OPENAI_API_KEY: "codex-own",
-  };
-  const launchWithConfig = (config: string | undefined) => {
-    const codexHome = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
-    try {
-      if (config !== undefined) writeFileSync(join(codexHome, "config.toml"), config);
-      return openCodexAccountEnvironment({
-        binaryPath: "/opt/homebrew/bin/codex",
-        hostEnvironment,
-        codexHome,
-        inheritHostAuth: true,
-        credentialPassThrough: [],
-      });
-    } finally {
-      rmSync(codexHome, { recursive: true, force: true });
-    }
+    GEMINI_API_KEY: "other-provider-key",
+    OCTANT_HOST_PORT: "4100",
   };
 
-  it.each([
-    ['model_provider = "amazon-bedrock"\n'],
-    ['"model_provider" = "amazon-bedrock"\n'],
-    ["'model_provider' = 'amazon-bedrock-runtime'\n"],
-  ])("keeps the AWS keys for an account whose config.toml reads %j", (config) => {
-    expect(launchWithConfig(config)).toMatchObject({
-      AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
-      AWS_SECRET_ACCESS_KEY: "aws-secret",
+  it("keeps the person's AWS keys, Bedrock key and another model provider's key outside Strict for the account on the host profile, and none of Octant's variables", () => {
+    const { OCTANT_HOST_PORT: _octant, ...kept } = hostEnvironment;
+    const environment = openCodexAccountEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/provider-user/.codex",
+      inheritHostAuth: true,
     });
+    expect(environment).toMatchObject({ ...kept, PATH: "/opt/homebrew/bin:/usr/bin" });
+    expect(environment).not.toHaveProperty("OCTANT_HOST_PORT");
   });
 
-  it.each([['model_provider = "openai"\n'], ['model = "gpt-5"\n'], [undefined]])(
-    "an OpenAI-backed Codex launch outside Strict gets no exported AWS keys (config %j)",
-    (config) => {
-      const environment = launchWithConfig(config);
-      expect(environment.AWS_ACCESS_KEY_ID).toBeUndefined();
-      expect(environment.AWS_SECRET_ACCESS_KEY).toBeUndefined();
-      expect(environment.OPENAI_API_KEY).toBe("codex-own");
-    },
-  );
+  it("keeps the host's Codex sign-in variables from an extra account outside Strict, and still hands it another model provider's key", () => {
+    const environment = openCodexAccountEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/provider-user/.codex-work",
+    });
+    expect(environment).not.toHaveProperty("OPENAI_API_KEY");
+    expect(environment).not.toHaveProperty("AWS_BEARER_TOKEN_BEDROCK");
+    expect(environment).toMatchObject({
+      AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+      GEMINI_API_KEY: "other-provider-key",
+    });
+  });
 });

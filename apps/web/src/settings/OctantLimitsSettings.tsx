@@ -323,8 +323,8 @@ export function OctantLimitsSettings(props: {
       <SettingsSection title="Routines">
         <div className="setgroup">
           <SettingRow
-            description="A routine an agent creates while its thread runs at Full access starts enabled instead of paused."
-            more="Off, every routine an agent creates waits for you to turn it on."
+            description="A routine an agent suggests while its thread runs at Full access starts enabled, with no card."
+            more="Off, it is created paused and waits for you to turn it on. A routine you asked for starts enabled at every level, and below Full access a suggested one waits for you to confirm its card."
             focused={props.focusedSetting === settingId("agent-routines-start-active")}
             label="Start agent-created routines active at Full access"
             scope="host"

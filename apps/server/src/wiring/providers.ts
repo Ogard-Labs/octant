@@ -1447,8 +1447,11 @@ export function wireProviders(deps: ProvidersDependencies) {
       carriesAppManagedTools: (thread) => {
         const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
         return (
-          browserToolTransport(observed, String(thread.modelId), appToolThreadLevel(thread)) ===
-          true
+          browserToolTransport(
+            observed,
+            String(thread.modelId),
+            appToolThreadLevel(thread, deps.resolveThreadStrict(String(thread.id))),
+          ) === true
         );
       },
     });

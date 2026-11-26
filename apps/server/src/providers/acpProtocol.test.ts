@@ -508,7 +508,7 @@ describe("ACP protocol boundary", () => {
     },
   );
 
-  it("fails closed for duplicate IDs, malformed JSON, incomplete lines, and oversized frames", async () => {
+  it("fails closed for malformed JSON, incomplete lines, and oversized frames", async () => {
     for (const write of [
       (stdout: PassThrough) => stdout.write('{"private":"prompt"\n'),
       (stdout: PassThrough) => stdout.end('{"jsonrpc":"2.0"'),
@@ -521,14 +521,38 @@ describe("ACP protocol boundary", () => {
       expect(failure.kind).toBe("protocol");
       expect(failure.message).not.toContain("prompt");
     }
+  });
 
+  it("keeps the transport open past a repeated response and a session update it cannot read", async () => {
     const { client, stdout } = transport();
+    const notifications: unknown[] = [];
+    client.onNotification((message) => notifications.push(message));
     const pending = client.initialize(noClientCapabilities);
     stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initializeResult })}\n`);
     await expect(pending).resolves.toEqual(initializeResult);
-    const exited = client.exited;
     stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initializeResult })}\n`);
-    expect((await failureOf(exited)).kind).toBe("protocol");
+    stdout.write(
+      `${JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { update: 7 } })}\n`,
+    );
+    stdout.write(
+      `${JSON.stringify({ jsonrpc: "2.0", method: "session/future", params: { any: "thing" } })}\n`,
+    );
+    stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: { sessionId: "session-1", update: { sessionUpdate: "future_update" } },
+      })}\n`,
+    );
+    await tick();
+    expect(notifications).toEqual([
+      {
+        kind: "notification",
+        method: "session/update",
+        params: { sessionId: "session-1", update: { sessionUpdate: "future_update" } },
+      },
+    ]);
+    await client.close();
   });
 
   it("times out without exposing the method or params", async () => {

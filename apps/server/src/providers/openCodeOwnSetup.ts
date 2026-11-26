@@ -13,7 +13,30 @@ import { parseRoutingConfig, routingConfigCandidates } from "./openCodeProcess";
 export interface OpenCodeOwnSetup {
   /** In OpenCode 2 action names, in the order the person wrote them. */
   readonly rules: ReadonlyArray<PermissionV2Rule>;
+  /**
+   * The person's rules for loading their own skills, kept apart from `rules`
+   * because skills follow their own switch: only a session whose skills are
+   * on applies them, in place of the level's ask for every skill.
+   */
+  readonly skillRules?: ReadonlyArray<PermissionV2Rule>;
+  /**
+   * The person's rules that decide a folder outside the Project, in the order
+   * they wrote them: their `external_directory` rules and any rule whose
+   * action is a wildcard that covers it. Present only when one of them
+   * denies. The level owns what an outside folder is allowed or asked, so a
+   * session restates only the denials (`ownOutsideFolderDenials` in the
+   * driver): the person's choice to refuse a folder holds at every level,
+   * and their allow never opens one.
+   */
+  readonly outsideFolderRules?: ReadonlyArray<PermissionV2Rule>;
   readonly mcp: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /**
+   * The person's file carries a policy that allows an MCP server. OpenCode 2
+   * ranks a policy in that file above one in the inline configuration, so a
+   * launch on the person's own configuration cannot hold that server off
+   * when their tool servers are off (`createOwnOpenCodeProfile`).
+   */
+  readonly allowsToolServerByPolicy?: true;
 }
 
 export const NO_OPENCODE_OWN_SETUP: OpenCodeOwnSetup = { rules: [], mcp: {} };
@@ -28,14 +51,26 @@ const CREDENTIAL_TEXT =
   /(?:api[_-]?key|access[_-]?token|auth(?:entication)?[_-]?(?:key|token)|token|secret|password|credential|authorization|bearer|\b(?:sk|ghp|gho|xox[bp])[-_][A-Za-z0-9])/iu;
 const SENSITIVE_KEY =
   /(?:api[_-]?key|access[_-]?token|auth(?:entication)?[_-]?(?:key|token)|token|secret|password|credential|authorization|bearer)/iu;
-/** Whatever the posture owns: the person's rules never reach these. */
+/**
+ * What the level owns, which the person's allow and ask rules never reach:
+ * folders outside the Project, where the level's own ask or refusal must
+ * hold; the question tool, allowed at every level; and every namespaced tool
+ * at once, which is a catch-all for tool servers. Skills are read apart
+ * (`skillRules`). A person's deny of an outside folder or of every namespaced
+ * tool is kept, since a deny only narrows; the question tool stays the
+ * level's either way.
+ */
 const OCTANT_OWNED_ACTIONS: ReadonlySet<string> = new Set([
   "external_directory",
   "question",
-  "skill",
   "*_*",
 ]);
-/** OpenCode 1 and OpenCode 2 name the shell and delegation differently. */
+const OUTSIDE_FOLDER_ACTION = "external_directory";
+/**
+ * The shell and delegation each have two names in a person's rules: the ones
+ * OpenCode's permission events use (`shell`, `subagent`) and the ones its
+ * `permission` configuration key has always used (`bash`, `task`).
+ */
 const ACTION_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
   bash: ["bash", "shell"],
   shell: ["bash", "shell"],
@@ -59,8 +94,14 @@ function effectOf(value: unknown): PermissionV2Rule["effect"] | undefined {
   return value === "allow" || value === "ask" || value === "deny" ? value : undefined;
 }
 
+interface ProjectedRules {
+  readonly rules: PermissionV2Rule[];
+  readonly skillRules: PermissionV2Rule[];
+  readonly outsideFolderRules: PermissionV2Rule[];
+}
+
 function pushRule(
-  rules: PermissionV2Rule[],
+  { rules, skillRules, outsideFolderRules }: ProjectedRules,
   action: string,
   resource: string,
   effect: PermissionV2Rule["effect"],
@@ -68,17 +109,43 @@ function pushRule(
   // `**` matches what `*` does, so a run of stars is one.
   action = action.replace(/\*+/gu, "*");
   resource = resource.replace(/\*+/gu, "*");
-  // A catch-all rule would lift the whole thread above its guardrail level,
-  // which only the level itself may do.
-  if (action === "*" && resource === "*") return;
-  if (OCTANT_OWNED_ACTIONS.has(action)) return;
+  if (wildcardMatches(action, OUTSIDE_FOLDER_ACTION) && outsideFolderRules.length < MAX_RULES) {
+    outsideFolderRules.push({ action: OUTSIDE_FOLDER_ACTION, resource, effect });
+  }
+  if (action === "*" && resource === "*") {
+    // A catch-all allow or ask would lift the whole thread above its
+    // guardrail level, which only the level itself may do. A catch-all deny
+    // only narrows, and an allowlist-style configuration starts with one: it
+    // is kept where the person wrote it, so the rules after it still open
+    // what they open in OpenCode itself. Dropped, everything the person had
+    // not allowed followed the level instead of being refused.
+    if (effect !== "deny") return;
+    // Among the skill rules it is restated for skills alone: they are applied
+    // after the level's rules, where a catch-all would refuse everything.
+    if (skillRules.length < MAX_RULES) skillRules.push({ action: "skill", resource, effect });
+    if (rules.length < MAX_RULES) rules.push({ action, resource, effect });
+    return;
+  }
+  if (action === "skill") {
+    if (skillRules.length < MAX_RULES) skillRules.push({ action, resource, effect });
+    return;
+  }
+  if (OCTANT_OWNED_ACTIONS.has(action)) {
+    // The session restates an outside-folder deny after the level's own
+    // outside-folder rules (`outsideFolderRules`); a deny of every namespaced
+    // tool sits with the person's other rules.
+    if (action === "*_*" && effect === "deny" && rules.length < MAX_RULES) {
+      rules.push({ action, resource, effect });
+    }
+    return;
+  }
   for (const name of ACTION_ALIASES[action] ?? [action]) {
     if (rules.length < MAX_RULES) rules.push({ action: name, resource, effect });
   }
 }
 
-function projectRules(config: JsonRecord): PermissionV2Rule[] {
-  const rules: PermissionV2Rule[] = [];
+function projectRules(config: JsonRecord): ProjectedRules {
+  const projected: ProjectedRules = { rules: [], skillRules: [], outsideFolderRules: [] };
   const written = config.permission;
   if (isRecord(written)) {
     for (const [tool, setting] of Object.entries(written)) {
@@ -86,12 +153,14 @@ function projectRules(config: JsonRecord): PermissionV2Rule[] {
       if (action === undefined) continue;
       const whole = effectOf(setting);
       if (whole !== undefined) {
-        pushRule(rules, action, "*", whole);
+        pushRule(projected, action, "*", whole);
       } else if (isRecord(setting)) {
         for (const [pattern, effect] of Object.entries(setting)) {
           const resource = boundedText(pattern, 512);
           const next = effectOf(effect);
-          if (resource !== undefined && next !== undefined) pushRule(rules, action, resource, next);
+          if (resource !== undefined && next !== undefined) {
+            pushRule(projected, action, resource, next);
+          }
         }
       }
     }
@@ -104,11 +173,11 @@ function projectRules(config: JsonRecord): PermissionV2Rule[] {
       const resource = boundedText(entry.resource, 512);
       const effect = effectOf(entry.effect);
       if (action !== undefined && resource !== undefined && effect !== undefined) {
-        pushRule(rules, action, resource, effect);
+        pushRule(projected, action, resource, effect);
       }
     }
   }
-  return rules;
+  return projected;
 }
 
 function projectStringRecord(
@@ -195,6 +264,60 @@ function projectServer(
   return server;
 }
 
+function isServerEntry(value: unknown): boolean {
+  return isRecord(value) && (value.type === "local" || value.type === "remote");
+}
+
+/**
+ * The MCP servers a configuration names, in the shape OpenCode 1 wrote them
+ * (`mcp.<name>`, switched off with `enabled: false`). OpenCode 2 writes them
+ * under `mcp.servers.<name>` and switches one off with `disabled: true`
+ * (`opencode mcp add` in the opencode v2.4.1 binary); read only as the older
+ * shape, a person's OpenCode 2 servers never reached a launch on the private
+ * configuration. That release still reads the older shape and, like this,
+ * takes `mcp.servers` for a server of that name only when it is one, and lets
+ * the newer entry win where both name a server (`Config` normalization).
+ */
+function writtenServers(mcp: JsonRecord): ReadonlyArray<readonly [string, unknown]> {
+  const current = isServerEntry(mcp.servers) ? undefined : mcp.servers;
+  const entries: (readonly [string, unknown])[] = Object.entries(mcp).filter(
+    ([name]) => name !== "servers" || current === undefined,
+  );
+  if (!isRecord(current)) return entries;
+  for (const [name, entry] of Object.entries(current)) {
+    entries.push([
+      name,
+      isRecord(entry) && typeof entry.disabled === "boolean"
+        ? { ...entry, enabled: !entry.disabled }
+        : entry,
+    ]);
+  }
+  return entries;
+}
+
+/**
+ * Whether a configuration's policies allow an MCP server: `mcp.use`, or the
+ * older `integration.use` on an `mcp:` resource, which OpenCode 2 reads as
+ * the same (opencode v2.4.1 policy schema). Its deprecated place under
+ * `experimental` counts too.
+ */
+function policiesAllowToolServer(config: JsonRecord): boolean {
+  const experimental = isRecord(config.experimental) ? config.experimental.policies : undefined;
+  return [config.policies, experimental].some(
+    (policies) =>
+      Array.isArray(policies) &&
+      policies.some(
+        (policy) =>
+          isRecord(policy) &&
+          policy.effect === "allow" &&
+          (policy.action === "mcp.use" ||
+            (policy.action === "integration.use" &&
+              typeof policy.resource === "string" &&
+              policy.resource.startsWith("mcp:"))),
+      ),
+  );
+}
+
 /** The permission rules and MCP servers of a parsed OpenCode configuration. */
 export function projectOpenCodeOwnSetup(
   config: unknown,
@@ -203,14 +326,21 @@ export function projectOpenCodeOwnSetup(
   if (!isRecord(config)) return NO_OPENCODE_OWN_SETUP;
   const mcp: Record<string, Record<string, unknown>> = {};
   if (isRecord(config.mcp)) {
-    for (const [name, entry] of Object.entries(config.mcp)) {
-      if (Object.keys(mcp).length >= MAX_SERVERS) break;
+    for (const [name, entry] of writtenServers(config.mcp)) {
+      if (!Object.hasOwn(mcp, name) && Object.keys(mcp).length >= MAX_SERVERS) continue;
       if (!SERVER_NAME.test(name)) continue;
       const server = projectServer(entry, environmentNames);
       if (server !== undefined) mcp[name] = server;
     }
   }
-  return { rules: projectRules(config), mcp };
+  const { rules, skillRules, outsideFolderRules } = projectRules(config);
+  return {
+    rules,
+    ...(skillRules.length === 0 ? {} : { skillRules }),
+    ...(outsideFolderRules.some((rule) => rule.effect === "deny") ? { outsideFolderRules } : {}),
+    mcp,
+    ...(policiesAllowToolServer(config) ? { allowsToolServerByPolicy: true as const } : {}),
+  };
 }
 
 /** Reads the person's own OpenCode configuration; unreadable or invalid reads as none. */

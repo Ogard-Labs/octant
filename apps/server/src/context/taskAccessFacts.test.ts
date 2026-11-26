@@ -36,6 +36,7 @@ function fixture() {
   let observed = true;
   let providerReview = false;
   let mixedTools = false;
+  let strict: boolean | undefined;
   let chosen: { providerInstanceId: typeof account; modelId: typeof model } | undefined;
   let chosenUnavailable = false;
   const connect = vi.fn(() => {
@@ -83,7 +84,9 @@ function fixture() {
             capabilities: {
               approvals: "supported",
               appManagedTools: mixedTools ? "unsupported" : "supported",
-              ...(mixedTools ? { appManagedToolsAtFullAccess: "mixed" } : {}),
+              ...(mixedTools
+                ? { appManagedToolsAtFullAccess: "mixed", appManagedToolsOutsideStrict: "mixed" }
+                : {}),
               nativeWebResearch: "unsupported",
               nativeChildAgents: "unsupported",
             },
@@ -92,6 +95,7 @@ function fixture() {
             diagnostic: { private: true },
           } as unknown as ProviderObservedState)
         : undefined,
+    strict: () => strict ?? true,
     reviewer: shield.describe,
     clock,
   });
@@ -112,6 +116,9 @@ function fixture() {
     },
     setMixedTools: () => {
       mixedTools = true;
+    },
+    setStrict: (value: boolean) => {
+      strict = value;
     },
     unavailableJudge: () => {
       chosen = {
@@ -222,6 +229,17 @@ describe("host task access facts", () => {
       selected: { executionPolicy: "full-access" },
       effective: { executionPolicy: "approval-gated", autoApprove: false },
     });
+    expect(tools()).toEqual({ id: "appManagedTools", support: "unsupported" });
+  });
+  it("labels Octant's tools mixed below Full access for a thread outside Strict, and keeps Strict's answer", () => {
+    const f = fixture();
+    f.setMixedTools();
+    const tools = () =>
+      f.read()?.runtime.capabilities.find((capability) => capability.id === "appManagedTools");
+    expect(tools()).toEqual({ id: "appManagedTools", support: "unsupported" });
+    f.setStrict(false);
+    expect(tools()).toEqual({ id: "appManagedTools", support: "mixed" });
+    f.setStrict(true);
     expect(tools()).toEqual({ id: "appManagedTools", support: "unsupported" });
   });
   it("distinguishes disabled and unknown observations, preserves current default uncertainty", () => {

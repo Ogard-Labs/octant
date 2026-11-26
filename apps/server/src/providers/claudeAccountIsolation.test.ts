@@ -64,7 +64,7 @@ describe("isolatedClaudeAccountEnvironment", () => {
     );
   });
 
-  it("outside Strict passes the host's environment less Octant's variables, other providers' keys, unrelated credentials and host Claude credentials, and keeps provider telemetry off until the person turns it on", () => {
+  it("outside Strict passes the host's environment, the person's own tool credentials included, another model provider's key included, less Octant's variables and host Claude credentials, and keeps provider telemetry off until the person turns it on", () => {
     const environment = isolatedClaudeAccountEnvironment({
       hostEnvironment: {
         ...hostileHostEnvironment,
@@ -72,8 +72,9 @@ describe("isolatedClaudeAccountEnvironment", () => {
         NODE_EXTRA_CA_CERTS: "/etc/company-ca.pem",
         CLAUDE_CODE_USE_BEDROCK: "1",
         AWS_ACCESS_KEY_ID: "bedrock-key-sentinel",
-        GH_TOKEN: "ambient-gh-token",
-        NPM_TOKEN: "ambient-npm-token",
+        GH_TOKEN: "gh-token-sentinel",
+        NPM_TOKEN: "npm-token-sentinel",
+        SOME_SERVICE_API_KEY: "service-key-sentinel",
         OPENAI_API_KEY: "other-provider-key-sentinel",
         OCTANT_PI_TOOL_BRIDGE_TOKEN: "octant-secret-sentinel",
         DISABLE_ERROR_REPORTING: "0",
@@ -91,8 +92,11 @@ describe("isolatedClaudeAccountEnvironment", () => {
       HTTPS_PROXY: "http://proxy.invalid:8080",
       NODE_EXTRA_CA_CERTS: "/etc/company-ca.pem",
       CLAUDE_CODE_USE_BEDROCK: "1",
-      // Bedrock signs Claude in with the host's AWS keys, so they are its own.
       AWS_ACCESS_KEY_ID: "bedrock-key-sentinel",
+      GH_TOKEN: "gh-token-sentinel",
+      NPM_TOKEN: "npm-token-sentinel",
+      SOME_SERVICE_API_KEY: "service-key-sentinel",
+      OPENAI_API_KEY: "other-provider-key-sentinel",
       UNRELATED_TEST_SECRET: "unrelated-secret-sentinel",
       // The person chose nothing, so Octant's telemetry guards win over the
       // host's own value, as they did before the switch existed.
@@ -103,28 +107,43 @@ describe("isolatedClaudeAccountEnvironment", () => {
     });
     expect(environment).not.toHaveProperty("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL");
     expect(JSON.stringify(environment)).not.toMatch(
-      /ambient-|other-account|other-secure|other-provider-key|octant-secret/,
+      /ambient-|other-account|other-secure|octant-secret/,
     );
   });
 
-  it("a Claude launch outside Strict does not receive GH_TOKEN or AWS keys unless its pass-through list names them or Bedrock signs it in", () => {
-    const hostEnvironment = {
-      PATH: "/usr/bin",
-      GH_TOKEN: "gh-token-sentinel",
-      AWS_ACCESS_KEY_ID: "aws-key-sentinel",
-    };
-    const launch = (credentialPassThrough: ReadonlyArray<string>) =>
-      isolatedClaudeAccountEnvironment({
-        hostEnvironment,
-        configDirectory: "/Users/provider-user/.claude-accounts/work",
-        authentication: "subscription",
-        strict: false,
-        ownChannels: { telemetry: false, selfUpdate: false, credentialPassThrough },
+  it("a Claude launch outside Strict receives the host's Bedrock API key whether or not the host routes Claude through Bedrock", () => {
+    for (const routing of [
+      { CLAUDE_CODE_USE_BEDROCK: "1" },
+      {},
+      { CLAUDE_CODE_USE_BEDROCK: "0" },
+    ]) {
+      expect(
+        isolatedClaudeAccountEnvironment({
+          hostEnvironment: {
+            PATH: "/usr/bin",
+            AWS_BEARER_TOKEN_BEDROCK: "bedrock-token-sentinel",
+            AWS_ACCESS_KEY_ID: "aws-key-sentinel",
+            ...routing,
+          },
+          configDirectory: "/Users/provider-user/.claude-accounts/work",
+          authentication: "subscription",
+          strict: false,
+        }),
+      ).toMatchObject({
+        AWS_BEARER_TOKEN_BEDROCK: "bedrock-token-sentinel",
+        AWS_ACCESS_KEY_ID: "aws-key-sentinel",
       });
-    expect(launch([])).not.toHaveProperty("GH_TOKEN");
-    expect(launch([])).not.toHaveProperty("AWS_ACCESS_KEY_ID");
-    expect(launch(["GH_TOKEN"])).toMatchObject({ GH_TOKEN: "gh-token-sentinel" });
-    expect(launch(["GH_TOKEN"])).not.toHaveProperty("AWS_ACCESS_KEY_ID");
+    }
+  });
+
+  it("a Claude launch outside Strict receives the person's AWS keys whether or not Bedrock signs it in", () => {
+    const environment = isolatedClaudeAccountEnvironment({
+      hostEnvironment: { PATH: "/usr/bin", AWS_ACCESS_KEY_ID: "aws-key-sentinel" },
+      configDirectory: "/Users/provider-user/.claude-accounts/work",
+      authentication: "subscription",
+      strict: false,
+    });
+    expect(environment).toMatchObject({ AWS_ACCESS_KEY_ID: "aws-key-sentinel" });
   });
 
   const openLaunch = (ownChannels: { telemetry: boolean; selfUpdate: boolean }) =>
@@ -295,15 +314,64 @@ describe("isolatedClaudeAccountEnvironment", () => {
 
   it("under Strict keeps the fixed list and every channel off", () => {
     const environment = isolatedClaudeAccountEnvironment({
-      hostEnvironment: { ...hostileHostEnvironment, GH_TOKEN: "gh-token-sentinel" },
+      hostEnvironment: {
+        ...hostileHostEnvironment,
+        GH_TOKEN: "gh-token-sentinel",
+        NPM_TOKEN: "npm-token-sentinel",
+        AWS_ACCESS_KEY_ID: "aws-key-sentinel",
+        SOME_SERVICE_API_KEY: "service-key-sentinel",
+      },
       configDirectory: "/Users/provider-user/.claude-accounts/work",
       authentication: "subscription",
       strict: true,
     });
 
     expect(environment).toMatchObject(ISOLATED_CLAUDE_LAUNCH_GUARDS);
-    expect(environment).not.toHaveProperty("GH_TOKEN");
+    expect(JSON.stringify(environment)).not.toMatch(/-sentinel/);
     expect(environment).not.toHaveProperty("ANTHROPIC_BASE_URL");
+  });
+
+  it("under Strict adds the names the person let through to the fixed list, never a model provider's key, and outside Strict the list changes nothing", () => {
+    const hostEnvironment = {
+      PATH: "/usr/bin",
+      GH_TOKEN: "gh-token",
+      NPM_TOKEN: "npm-token",
+      OPENAI_API_KEY: "another-provider",
+      ANTHROPIC_API_KEY: "host-anthropic",
+      DISABLE_TELEMETRY: "0",
+    };
+    const launch = (strict: boolean, credentialPassThrough: ReadonlyArray<string>) =>
+      isolatedClaudeAccountEnvironment({
+        hostEnvironment,
+        configDirectory: "/Users/provider-user/.claude-accounts/work",
+        authentication: "subscription",
+        strict,
+        ownChannels: { telemetry: false, selfUpdate: false, credentialPassThrough },
+      });
+
+    const strict = launch(true, [
+      "GH_TOKEN",
+      "OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "DISABLE_TELEMETRY",
+    ]);
+    expect(strict.GH_TOKEN).toBe("gh-token");
+    expect(strict.NPM_TOKEN).toBeUndefined();
+    expect(strict.OPENAI_API_KEY).toBeUndefined();
+    expect(strict.ANTHROPIC_API_KEY).toBeUndefined();
+    // A let-through name never replaces a guard the Strict launch sets.
+    expect(strict).toMatchObject(ISOLATED_CLAUDE_LAUNCH_GUARDS);
+    expect(launch(true, [])).toEqual(
+      isolatedClaudeAccountEnvironment({
+        hostEnvironment,
+        configDirectory: "/Users/provider-user/.claude-accounts/work",
+        authentication: "subscription",
+        strict: true,
+      }),
+    );
+
+    expect(launch(false, ["GH_TOKEN"])).toEqual(launch(false, []));
+    expect(launch(false, [])).toMatchObject({ GH_TOKEN: "gh-token", NPM_TOKEN: "npm-token" });
   });
 
   it("keeps an explicit API-key account on the broker key and the same isolated directory", () => {
@@ -319,7 +387,7 @@ describe("isolatedClaudeAccountEnvironment", () => {
     expect(environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
-  it("gives a gateway account only its own address and token, in its own directory, with every ambient credential stripped", () => {
+  it("gives a gateway account only its own address and token, in its own directory, with every ambient Claude credential stripped", () => {
     for (const strict of [true, false]) {
       const environment = isolatedClaudeAccountEnvironment({
         hostEnvironment: { ...hostileHostEnvironment, OPENAI_API_KEY: "other-provider-key" },
@@ -339,8 +407,11 @@ describe("isolatedClaudeAccountEnvironment", () => {
       expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
       expect(environment).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
       expect(JSON.stringify(environment)).not.toMatch(
-        /ambient-|other-account|other-secure|routing\.invalid|other-provider-key/,
+        /ambient-|other-account|other-secure|routing\.invalid/,
       );
+      // Another model provider's key is the person's own outside Strict;
+      // under Strict it stays out with the rest of the environment.
+      expect(environment.OPENAI_API_KEY).toBe(strict ? undefined : "other-provider-key");
     }
   });
 

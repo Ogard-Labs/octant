@@ -18,6 +18,7 @@ import type {
   ProviderFailure,
   ProviderNativeSetup,
 } from "@octant/contracts";
+import { decodeProviderInstance } from "@octant/contracts";
 import { Effect, Either } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -26,6 +27,7 @@ import {
   makeAcpConfinementLive,
   makeAcpProcessLive,
   probeAcpBinary,
+  acpRunsOnOwnHome,
   sanitizeAcpEnvironment,
   type AcpConfinementPort,
   type AcpProbeOptions,
@@ -46,6 +48,7 @@ import {
 import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
 import { applyProtectedFilesChoice } from "../process/secretGuard";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
+import { addedAcpAgentProfile } from "./addedAcpAgent";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
 const directories: string[] = [];
@@ -246,16 +249,16 @@ afterAll(() => {
 });
 
 describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
-  it("outside Strict passes the host's environment less Octant's variables, other providers' keys, unrelated credentials and the host names the profile withholds, and lifts only channel guards once the person turns provider telemetry on", () => {
+  it("outside Strict passes the host's environment, the person's own tool credentials and another model provider's key included, less Octant's variables and the host names the profile withholds, and lifts only channel guards once the person turns provider telemetry on", () => {
     const host = {
       PATH: "/usr/bin",
       HOME: "/Users/test",
       HTTPS_PROXY: "http://proxy.invalid",
-      GH_TOKEN: "must-not-cross",
-      AWS_SECRET_ACCESS_KEY: "must-not-cross",
-      STRIPE_API_KEY: "must-not-cross",
-      MISTRAL_API_KEY: "must-not-cross",
-      ANTHROPIC_API_KEY: "must-not-cross",
+      GH_TOKEN: "gh-token",
+      NPM_TOKEN: "npm-token",
+      AWS_SECRET_ACCESS_KEY: "aws-secret",
+      SOME_SERVICE_API_KEY: "service-key",
+      ANTHROPIC_API_KEY: "another-provider-key",
       OCTANT_SECRET: "must-not-cross",
     };
     // Provider telemetry is off by default, so a launch whose person chose
@@ -275,6 +278,11 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     expect(environment).toMatchObject({
       PATH: "/usr/bin",
       HTTPS_PROXY: "http://proxy.invalid",
+      GH_TOKEN: "gh-token",
+      NPM_TOKEN: "npm-token",
+      AWS_SECRET_ACCESS_KEY: "aws-secret",
+      SOME_SERVICE_API_KEY: "service-key",
+      ANTHROPIC_API_KEY: "another-provider-key",
       ...Object.fromEntries(
         Object.entries(profile.process.guards).filter(([name]) => !channels.has(name)),
       ),
@@ -288,27 +296,69 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     expect(JSON.stringify(environment)).not.toContain("must-not-cross");
   });
 
-  it("a provider launched outside Strict does not receive GH_TOKEN unless its pass-through list names it, and Strict ignores the list", () => {
-    const host = { PATH: "/usr/bin", GH_TOKEN: "gh-token", NPM_TOKEN: "npm-token" };
-    const base = { managedHome: "/private/tmp/octant-acp-home" };
-    const passThrough = {
-      telemetry: false,
-      selfUpdate: false,
-      credentialPassThrough: ["GH_TOKEN"],
+  it("under Strict passes only the tool credentials the person let through to the agent, never a model provider's key, and keeps every guard whatever the person's switches say", () => {
+    const host = {
+      PATH: "/usr/bin",
+      GH_TOKEN: "gh-token",
+      NPM_TOKEN: "npm-token",
+      AWS_SECRET_ACCESS_KEY: "aws-secret",
+      SOME_SERVICE_API_KEY: "service-key",
+      OPENAI_API_KEY: "another-provider",
     };
-    expect(
-      sanitizeAcpEnvironment(profile, host, { ...base, strict: false }).GH_TOKEN,
-    ).toBeUndefined();
-    const named = sanitizeAcpEnvironment(profile, host, {
-      ...base,
+    const launch = (credentialPassThrough: ReadonlyArray<string>, strict = true) =>
+      sanitizeAcpEnvironment(profile, host, {
+        managedHome: "/private/tmp/octant-acp-home",
+        ...(strict ? {} : { strict: false }),
+        ownChannels: { telemetry: true, selfUpdate: true, credentialPassThrough },
+      });
+    const environment = launch(["GH_TOKEN", "OPENAI_API_KEY"]);
+    expect(environment.PATH).toBe("/usr/bin");
+    expect(environment.GH_TOKEN).toBe("gh-token");
+    for (const name of [
+      "NPM_TOKEN",
+      "AWS_SECRET_ACCESS_KEY",
+      "SOME_SERVICE_API_KEY",
+      "OPENAI_API_KEY",
+    ]) {
+      expect(environment[name], name).toBeUndefined();
+    }
+    expect(environment).toMatchObject(profile.process.guards);
+    expect(launch([]).GH_TOKEN).toBeUndefined();
+    // Outside Strict the list changes nothing: the host's environment crosses either way.
+    expect(launch(["GH_TOKEN"], false)).toEqual(launch([], false));
+    expect(launch([], false)).toMatchObject({ GH_TOKEN: "gh-token", NPM_TOKEN: "npm-token" });
+  });
+
+  it("keeps the person's own home outside Strict only for a launch that runs on it, and the managed home under Strict", () => {
+    const managedHome = "/private/tmp/octant-acp-home";
+    const host = {
+      PATH: "/usr/bin",
+      HOME: "/Users/test",
+      XDG_CONFIG_HOME: "/Users/test/.config",
+      XDG_DATA_HOME: "/Users/test/.local/share",
+    };
+    const managed = profile.process.environment({ managedHome, executionPolicy: "approval-gated" });
+    const own = sanitizeAcpEnvironment(profile, host, {
+      managedHome,
       strict: false,
-      ownChannels: passThrough,
+      ownHome: true,
     });
-    expect(named.GH_TOKEN).toBe("gh-token");
-    expect(named.NPM_TOKEN).toBeUndefined();
-    expect(
-      sanitizeAcpEnvironment(profile, host, { ...base, ownChannels: passThrough }).GH_TOKEN,
-    ).toBeUndefined();
+    expect(own).toMatchObject(host);
+    for (const [name, value] of Object.entries(managed)) {
+      // Every other variable of the profile, the agent's own key and data
+      // folder among them, still applies.
+      if (name !== "HOME" && !name.startsWith("XDG_")) expect(own[name], name).toBe(value);
+      else if (!(name in host)) expect(own[name], name).toBeUndefined();
+    }
+    // Without it, and under Strict whatever the launch asks, the profile's
+    // managed home stays.
+    for (const environment of [
+      sanitizeAcpEnvironment(profile, host, { managedHome, strict: false }),
+      sanitizeAcpEnvironment(profile, host, { managedHome, ownHome: true }),
+    ]) {
+      expect(environment).toMatchObject(managed);
+      if (managed.HOME !== undefined) expect(environment.HOME).toBe(managedHome);
+    }
   });
 
   it("outside Strict keeps its telemetry guards when the person turned provider telemetry off and drops its self-update guards when the person lets providers update themselves", () => {
@@ -518,7 +568,72 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
   });
 });
 
+describe("an ACP agent's own account key outside Strict", () => {
+  const launch = (profile: AcpProviderProfile, apiKey?: string) =>
+    sanitizeAcpEnvironment(
+      profile,
+      { PATH: "/usr/bin", MISTRAL_API_KEY: "host-key" },
+      {
+        managedHome: "/private/tmp/octant-acp-home",
+        strict: false,
+        ...(apiKey === undefined ? {} : { apiKey }),
+      },
+    );
+
+  it("never takes the key of the agent's own account from the host, so the account chosen in Octant decides who a turn is billed to", () => {
+    expect(launch(vibe)).not.toHaveProperty("MISTRAL_API_KEY");
+    expect(launch(vibe, "account-key").MISTRAL_API_KEY).toBe("account-key");
+  });
+
+  it("hands the same host key to an agent whose account does not sign in with it", () => {
+    expect(launch(gemini).MISTRAL_API_KEY).toBe("host-key");
+  });
+});
+
 describe("ACP process lifecycle", () => {
+  it("starts an agent outside Strict on the person's own home when the session carries their setup, and on the managed home when it does not or when its sessions follow the home", async () => {
+    const setup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: true,
+    } as const;
+    const homeOf = async (profile: AcpProviderProfile, nativeSetup: typeof setup | undefined) => {
+      const target = fixture(profile);
+      const processPort = port({
+        inheritedEnvironment: { PATH: process.env.PATH, HOME: "/Users/person" },
+      });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            yield* processPort.start({
+              profile,
+              binaryPath: target.binaryPath,
+              root: target.root,
+              managedHome: target.root,
+              mode: "code",
+              executionPolicy: "approval-gated",
+              strict: false,
+              ...(nativeSetup === undefined ? {} : { nativeSetup }),
+            });
+            yield* Effect.promise(() =>
+              expect.poll(() => spawnRecord(target.root) !== undefined).toBe(true),
+            );
+          }),
+        ),
+      );
+      return { home: spawnRecord(target.root)?.environment.HOME, managedHome: target.root };
+    };
+    expect((await homeOf(gemini, setup)).home).toBe("/Users/person");
+    const off = await homeOf(gemini, undefined);
+    expect(off.home).toBe(off.managedHome);
+    // Goose keeps its sessions under its home, so it never leaves the managed one.
+    const following = await homeOf(goose, setup);
+    expect(following.home).toBe(following.managedHome);
+  });
+
   it("reports a bounded classified diagnostic when the provider rejects startup arguments", async () => {
     const target = fixture(devin, "startup-argument-error");
     const result = await failureOf(
@@ -594,6 +709,19 @@ describe("ACP process lifecycle", () => {
       copilot: false,
       agents_standard: false,
     });
+  });
+
+  it("keeps Devin from updating itself unless the launch lets providers update themselves", () => {
+    const managedHome = "/private/tmp/octant-devin-home";
+    const configuration = (selfUpdate: boolean) =>
+      JSON.parse(
+        devin.process
+          .managedFiles({ managedHome, executionPolicy: "approval-gated", selfUpdate })
+          .find((file) => file.path === join(managedHome, ".config/devin/config.json"))?.content ??
+          "{}",
+      ) as Readonly<Record<string, unknown>>;
+    expect(configuration(false).auto_update).toBe(false);
+    expect(configuration(true)).not.toHaveProperty("auto_update");
   });
 
   it("does not send the unsupported session close method to Devin", () => {
@@ -799,8 +927,6 @@ describe("ACP child-server profiles", () => {
       OPENCODE_CONFIG: expectedConfig,
       OPENCODE_CONFIG_DIR: "/tmp/managed/config",
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
-      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
-      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
       OPENCODE_DISABLE_PROJECT_CONFIG: "1",
       OPENCODE_PURE: "1",
     });
@@ -1659,6 +1785,42 @@ describe("Grok Build consumed configuration", () => {
       },
     });
     expect(existsSync(join(managedHome, "config.toml"))).toBe(false);
+  });
+
+  it("leaves Grok's telemetry and feedback to the person's own Grok settings once the person turns provider telemetry on, and forces both off otherwise", () => {
+    const launch = (input: Parameters<typeof sanitizeAcpEnvironment>[2]) =>
+      sanitizeAcpEnvironment(grok, { PATH: "/usr/bin" }, input);
+    const telemetryVariables = [
+      "GROK_TELEMETRY_ENABLED",
+      "GROK_TELEMETRY_TRACE_UPLOAD",
+      "GROK_TELEMETRY_MIXPANEL_ENABLED",
+      "GROK_FEEDBACK_ENABLED",
+    ];
+    const closed = { telemetry: false, feedback: false };
+    const kept = { codebase_indexing: false, remote_fetch: false };
+    const on = { telemetry: true, selfUpdate: false };
+
+    const open = launch({ managedHome: "/x", strict: false, ownChannels: on });
+    // The overlay outranks the person's config.toml, so neither it nor a
+    // variable may name telemetry or feedback here.
+    expect(JSON.parse(open.GROK_CONFIG ?? "{}")).toEqual({ features: kept });
+    for (const name of telemetryVariables) expect(open, name).not.toHaveProperty(name);
+
+    for (const environment of [
+      launch({ managedHome: "/x", strict: false }),
+      launch({
+        managedHome: "/x",
+        strict: false,
+        ownChannels: { telemetry: false, selfUpdate: true },
+      }),
+      launch({ managedHome: "/x", ownChannels: on }),
+      launch({ managedHome: "/x", strict: true, ownChannels: on }),
+    ]) {
+      expect(JSON.parse(environment.GROK_CONFIG ?? "{}")).toEqual({
+        features: { ...closed, ...kept },
+      });
+      for (const name of telemetryVariables) expect(environment[name], name).toBe("0");
+    }
   });
 
   it.each(["approval-gated"] as const)(
@@ -3174,6 +3336,48 @@ describe("System Keychain read for fx", () => {
   });
 });
 
+describe("an ACP agent's own telemetry and self-update", () => {
+  it.each([
+    [goose, "telemetry", "GOOSE_TELEMETRY_ENABLED", "false"],
+    [qwen, "telemetry", "QWEN_USAGE_STATISTICS_ENABLED", "false"],
+    [copilot, "selfUpdate", "COPILOT_AUTO_UPDATE", "false"],
+    [cline, "selfUpdate", "CLINE_NO_AUTO_UPDATE", "1"],
+  ] as const)(
+    "closes $0.displayName's own %s by default and under Strict, and leaves it to the agent once the person turns that switch on outside Strict",
+    (profile, channel, name, value) => {
+      const closed = { telemetry: false, selfUpdate: false };
+      const launch = (input: Parameters<typeof sanitizeAcpEnvironment>[2]) =>
+        sanitizeAcpEnvironment(profile, { PATH: "/usr/bin" }, input)[name];
+      const opened = { ...closed, [channel]: true };
+      const otherOpened = { telemetry: true, selfUpdate: true, [channel]: false };
+
+      expect(launch({ managedHome: "/x", strict: false })).toBe(value);
+      expect(launch({ managedHome: "/x", strict: false, ownChannels: closed })).toBe(value);
+      expect(launch({ managedHome: "/x", strict: false, ownChannels: otherOpened })).toBe(value);
+      expect(launch({ managedHome: "/x", strict: false, ownChannels: opened })).toBeUndefined();
+      expect(launch({ managedHome: "/x", strict: true, ownChannels: opened })).toBe(value);
+      expect(launch({ managedHome: "/x", ownChannels: opened })).toBe(value);
+    },
+  );
+
+  it("turns off GitHub Copilot's client telemetry on the releases that accept the switch, unless the launch opens provider telemetry", () => {
+    const args = (version: string | undefined, telemetry: boolean | undefined) =>
+      copilot.process.args({
+        root: "/tmp/project",
+        managedHome: "/tmp/managed",
+        ...(version === undefined ? {} : { version }),
+        ...(telemetry === undefined ? {} : { ownChannels: { telemetry, selfUpdate: false } }),
+      });
+    const guarded = ["--acp", "--disable-client-telemetry"];
+    expect(args("1.0.100", undefined)).toEqual(guarded);
+    expect(args("1.0.116", false)).toEqual(guarded);
+    expect(args("1.0.116", true)).toEqual(["--acp"]);
+    // A release before the option exists would refuse to start with it.
+    expect(args("1.0.99", false)).toEqual(["--acp"]);
+    expect(args(undefined, false)).toEqual(["--acp"]);
+  });
+});
+
 describe("Mistral Vibe running as itself", () => {
   const everything = {
     subagents: true,
@@ -3355,6 +3559,37 @@ describe("ACP agents running as themselves", () => {
     }
   });
 
+  it("runs an agent on the person's own home in Work and Code outside Strict with their setup on, and on the managed home under Strict, with the setup off, or inside Octant's sandbox", () => {
+    for (const profile of Object.values(acpProviderProfiles)) {
+      if (profile.shellWithoutRequest === true) continue;
+      // An agent whose sessions follow its home never leaves the managed one.
+      if (profile.process.sessionsFollowHome === true) continue;
+      const open = {
+        profile,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        strict: false,
+        nativeSetup: everything,
+      } as const;
+      expect(acpRunsOnOwnHome(open), profile.kind).toBe(true);
+      expect(acpRunsOnOwnHome({ ...open, mode: "work", executionPolicy: "full-access" })).toBe(
+        true,
+      );
+      expect(acpRunsOnOwnHome({ ...open, strict: true }), profile.kind).toBe(false);
+      expect(
+        acpRunsOnOwnHome({ profile, mode: "code", executionPolicy: "full-access" }),
+        profile.kind,
+      ).toBe(false);
+      const { nativeSetup: _off, ...setupOff } = open;
+      expect(acpRunsOnOwnHome(setupOff), profile.kind).toBe(false);
+      expect(acpRunsOnOwnHome({ ...open, executionPolicy: "plan" }), profile.kind).toBe(false);
+      expect(acpRunsOnOwnHome({ ...open, mode: "chat" }), profile.kind).toBe(false);
+      expect(acpRunsOnOwnHome({ ...open, fullAccessSandbox: true }), profile.kind).toBe(false);
+      expect(acpRunsOnOwnHome({ ...open, sandboxPolicySelected: true }), profile.kind).toBe(false);
+      expect(acpRunsOnOwnHome({ ...open, purpose: "probe" }), profile.kind).toBe(false);
+    }
+  });
+
   it("leaves every agent a Project's instruction files to read with no setup at all, Strict and Plan included", () => {
     const instructionFiles = ["AGENTS.md", "CLAUDE.md", "GEMINI.md", "QWEN.md", "AGENT.md"];
     for (const profile of Object.values(acpProviderProfiles)) {
@@ -3506,4 +3741,215 @@ describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins, 
       expect(launch.environment.QWEN_SANDBOX).toBeUndefined();
     },
   );
+});
+
+/**
+ * Where each agent keeps a thread's sessions, worked out from a launch's
+ * environment by the rule read for that agent (the source is named beside the
+ * profile, or in Provider runtimes). An agent in `followHome` has no variable
+ * of its own for the place, so it follows `HOME` or `XDG_DATA_HOME`.
+ */
+const sessionStores: Record<
+  Exclude<AcpProviderProfile["kind"], "acp-agent">,
+  (environment: NodeJS.ProcessEnv) => string | undefined
+> = {
+  opencode: (environment) => join(dataHome(environment), "opencode"),
+  kilo: (environment) => join(dataHome(environment), "kilo"),
+  devin: (environment) => join(dataHome(environment), "devin", "cli"),
+  "mistral-vibe": (environment) => under(environment.VIBE_HOME, "logs", "session"),
+  "kimi-code": (environment) => under(environment.KIMI_CODE_HOME, "sessions"),
+  grok: (environment) => under(environment.GROK_HOME, "sessions"),
+  goose: (environment) => join(dataHome(environment), "goose", "sessions"),
+  glm: (environment) => environment.ACP_GLM_SESSION_DIR,
+  gemini: (environment) => under(environment.GEMINI_CLI_HOME, ".gemini"),
+  copilot: (environment) => under(environment.COPILOT_HOME, "session-state"),
+  cline: (environment) => under(environment.CLINE_DATA_DIR, "sessions"),
+  qwen: (environment) => under(environment.QWEN_RUNTIME_DIR ?? environment.QWEN_HOME, "projects"),
+  fx: (environment) => under(environment.HOME, ".fx"),
+  antigravity: (environment) => environment.GEMINI_HOME,
+};
+const followHome: ReadonlyArray<AcpProviderProfile["kind"]> = ["devin", "goose", "fx"];
+
+function under(base: string | undefined, ...segments: ReadonlyArray<string>): string | undefined {
+  return base === undefined ? undefined : join(base, ...segments);
+}
+
+function dataHome(environment: NodeJS.ProcessEnv): string {
+  return environment.XDG_DATA_HOME ?? join(environment.HOME ?? "", ".local", "share");
+}
+
+describe("where an ACP thread's sessions live across its launches", () => {
+  const everything = {
+    subagents: true,
+    webTools: true,
+    skills: true,
+    toolServers: true,
+    hooks: true,
+    projectCode: true,
+  } as const;
+  const storedProfiles = Object.values(acpProviderProfiles);
+
+  /** One launch of a Code thread, built as the process port builds it. */
+  async function launch(
+    profile: AcpProviderProfile,
+    target: ReturnType<typeof fixture>,
+    posture: { readonly strict?: false; readonly nativeSetup?: ProviderNativeSetup },
+    forcedOwnHome = false,
+  ) {
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const personHome = join(target.canonicalRoot, "person-home");
+    const thread = { mode: "code", executionPolicy: "approval-gated", ...posture } as const;
+    // The agent's own folder sits in the person's home where the profile
+    // names it, so a store that follows the home meets it as on a real host.
+    const hostAuthentication = profile.process.hostAuthentication;
+    const hostAuth = join(
+      personHome,
+      hostAuthentication === undefined
+        ? "none"
+        : relative(homedir(), hostAuthentication.defaultPath),
+    );
+    mkdirSync(dirname(hostAuth), { recursive: true });
+    if (hostAuthentication?.kind === "credential-file") {
+      writeFileSync(hostAuth, "fixture-only\n", { mode: 0o600 });
+    }
+    const environment = sanitizeAcpEnvironment(
+      profile,
+      { PATH: "/usr/bin", HOME: personHome },
+      {
+        managedHome,
+        ...thread,
+        ...(forcedOwnHome || acpRunsOnOwnHome({ profile, ...thread }) ? { ownHome: true } : {}),
+      },
+    );
+    const prepared = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: hostAuth,
+      }).prepare({
+        profile,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome,
+        ...thread,
+        environment,
+      }),
+    );
+    return { prepared, managedHome, hostAuth };
+  }
+
+  it.each(storedProfiles)(
+    "keeps $displayName's sessions in one place the sandbox opens for writing, whether a launch is confined or runs as the agent does on its own",
+    async (profile) => {
+      if (profile.kind === "acp-agent") throw new Error("an added agent has no stored profile");
+      const store = sessionStores[profile.kind];
+      const target = fixture(profile);
+      // Under Strict, as in Plan and for every thread older than the own-home
+      // rule, the launch is confined and on the managed home.
+      const confined = await launch(profile, target, {});
+      const open = await launch(profile, target, { strict: false, nativeSetup: everything });
+      expect(confined.prepared.command).toBe(target.sandboxPath);
+      expect(open.prepared.command).toBe(target.binaryPath);
+      const place = store(confined.prepared.environment);
+      expect(place).toBeDefined();
+      expect(store(open.prepared.environment)).toBe(place);
+      const seatbelt = confined.prepared.args[1]!;
+      const writable = [confined.managedHome, confined.hostAuth].filter((folder) =>
+        seatbelt.includes(`(allow file-write* (subpath "${folder}"))`),
+      );
+      expect(writable.some((folder) => place === folder || place?.startsWith(`${folder}/`))).toBe(
+        true,
+      );
+    },
+  );
+
+  it.each(storedProfiles.filter((profile) => followHome.includes(profile.kind)))(
+    "keeps $displayName on the managed home outside Strict, because its sessions would move with the home",
+    async (profile) => {
+      if (profile.kind === "acp-agent") throw new Error("an added agent has no stored profile");
+      const store = sessionStores[profile.kind];
+      const target = fixture(profile);
+      const posture = { strict: false, nativeSetup: everything } as const;
+      expect(profile.process.sessionsFollowHome).toBe(true);
+      expect(
+        acpRunsOnOwnHome({ profile, mode: "code", executionPolicy: "approval-gated", ...posture }),
+      ).toBe(false);
+      const open = await launch(profile, target, posture);
+      expect(open.prepared.environment.HOME).toBe(open.managedHome);
+      // What the flag prevents: on the person's home the same thread's
+      // sessions would be looked for somewhere else.
+      const moved = await launch(profile, target, posture, true);
+      expect(store(moved.prepared.environment)).not.toBe(store(open.prepared.environment));
+    },
+  );
+
+  it("runs every other agent on the person's own home outside Strict", () => {
+    for (const profile of storedProfiles) {
+      expect(profile.process.sessionsFollowHome === true, profile.kind).toBe(
+        followHome.includes(profile.kind),
+      );
+    }
+    const home = "/Users/test";
+    for (const profile of storedProfiles.filter((each) => !followHome.includes(each.kind))) {
+      const environment = sanitizeAcpEnvironment(
+        profile,
+        { PATH: "/usr/bin", HOME: home },
+        { managedHome: "/private/tmp/octant-acp-home", strict: false, ownHome: true },
+      );
+      expect(environment.HOME, profile.kind).toBe(home);
+    }
+  });
+
+  it("leaves an added agent's home variables as the person configured them on every launch", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-0000000000d7",
+      displayName: "My agent",
+      driverKind: "acp-agent",
+      configuration: {
+        kind: "acp-agent",
+        source: { kind: "local", command: "/opt/agent" },
+        args: ["acp"],
+        install: { executable: "/opt/agent", integrity: "local-command" },
+        trusted: true,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-11-25T09:00:00.000Z",
+      updatedAt: "2026-11-25T09:00:00.000Z",
+    });
+    if (instance.driverKind !== "acp-agent") throw new Error("not an added agent");
+    // Only a registry entry carries variables; the profile hands them on as given.
+    const added = addedAcpAgentProfile(instance);
+    const profile = {
+      ...added,
+      process: {
+        ...added.process,
+        environment: () => ({ XDG_DATA_HOME: "/Users/test/agent-data" }),
+      },
+    };
+    expect(added.process.sessionsFollowHome).toBe(true);
+    const thread = {
+      profile,
+      mode: "code",
+      executionPolicy: "approval-gated",
+      strict: false,
+      nativeSetup: everything,
+    } as const;
+    expect(acpRunsOnOwnHome(thread)).toBe(false);
+    expect(acpRunsOnOwnHome({ ...thread, executionPolicy: "full-access" })).toBe(false);
+    const host = { PATH: "/usr/bin", HOME: "/Users/test" };
+    const open = sanitizeAcpEnvironment(profile, host, {
+      managedHome: "/private/tmp/octant-acp-home",
+      strict: false,
+      ...(acpRunsOnOwnHome(thread) ? { ownHome: true } : {}),
+    });
+    const strict = sanitizeAcpEnvironment(profile, host, {
+      managedHome: "/private/tmp/octant-acp-home",
+    });
+    expect(open.XDG_DATA_HOME).toBe("/Users/test/agent-data");
+    expect(strict.XDG_DATA_HOME).toBe("/Users/test/agent-data");
+    expect(open.HOME).toBe(strict.HOME);
+  });
 });

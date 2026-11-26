@@ -595,13 +595,74 @@ describe("createAgentRunSessionRuntime", () => {
     await expect(outcome).resolves.toMatchObject({ kind: "completed" });
   });
 
-  it("tells the provider a child's approvals each hold for one call", async () => {
+  it("starts a child of a Strict thread under Strict, with approvals that each hold for one call", async () => {
+    for (const strict of [() => true, undefined]) {
+      const provider = fakeProvider();
+      const runtime = createAgentRunSessionRuntime(
+        runtimeOptions(provider, {
+          ...(strict === undefined ? {} : { strict }),
+          interactions: { approve: async () => true },
+        }),
+      );
+      const outcome = settled(runtime.start(agentRun()));
+      await vi.waitFor(() => expect(provider.turns.length).toBe(1));
+      expect(provider.starts[0]).toMatchObject({ strict: true, answersOncePerCall: true });
+      await provider.emit({
+        kind: "approval-request",
+        sessionId,
+        requestId: "permission-1",
+        action: "shell",
+        description: "Run tests",
+      });
+      await vi.waitFor(() => expect(provider.answeredApprovals).toHaveLength(1));
+      expect(provider.answeredApprovals).toMatchObject([{ approved: true, scope: "once" }]);
+      await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+      await provider.emit({ kind: "completed", sessionId });
+      await expect(outcome).resolves.toMatchObject({ kind: "completed" });
+    }
+  });
+
+  it("starts a child of a thread outside Strict with Strict off, keeping the person's answer as their setting says and a reviewer's for one call", async () => {
+    for (const answer of [true, "approved-by-reviewer"] as const) {
+      const provider = fakeProvider();
+      const strictFor = vi.fn(() => false);
+      const runtime = createAgentRunSessionRuntime(
+        runtimeOptions(provider, {
+          strict: strictFor,
+          interactions: { approve: async () => answer },
+        }),
+      );
+      const run = agentRun();
+      const outcome = settled(runtime.start(run));
+      await vi.waitFor(() => expect(provider.turns.length).toBe(1));
+      expect(strictFor).toHaveBeenCalledWith(expect.objectContaining({ id: run.id }));
+      expect(provider.starts[0]).toMatchObject({ strict: false });
+      expect(provider.starts[0]).not.toHaveProperty("answersOncePerCall");
+      await provider.emit({
+        kind: "approval-request",
+        sessionId,
+        requestId: "permission-1",
+        action: "shell",
+        description: "Run tests",
+      });
+      await vi.waitFor(() => expect(provider.answeredApprovals).toHaveLength(1));
+      expect(provider.answeredApprovals[0]).toMatchObject({ approved: true });
+      if (answer === true) expect(provider.answeredApprovals[0]).not.toHaveProperty("scope");
+      else expect(provider.answeredApprovals[0]).toMatchObject({ scope: "once" });
+      await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+      await provider.emit({ kind: "completed", sessionId });
+      await expect(outcome).resolves.toMatchObject({ kind: "completed" });
+    }
+  });
+
+  it("lets a child's turn run through more than 256 events to its end", async () => {
     const provider = fakeProvider();
     const runtime = createAgentRunSessionRuntime(runtimeOptions(provider));
     const outcome = settled(runtime.start(agentRun()));
     await vi.waitFor(() => expect(provider.turns.length).toBe(1));
-    expect(provider.starts[0]?.answersOncePerCall).toBe(true);
-    await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+    for (let index = 0; index < 300; index += 1) {
+      await provider.emit({ kind: "text-delta", sessionId, text: "word " });
+    }
     await provider.emit({ kind: "completed", sessionId });
     await expect(outcome).resolves.toMatchObject({ kind: "completed" });
   });
@@ -2603,6 +2664,7 @@ describe("durable child provider identity", () => {
           sessionId,
           resumeCursor: recorded?.resumeCursor,
           modelOptionValues,
+          strict: true,
           answersOncePerCall: true,
         }),
       ]);
@@ -2844,8 +2906,9 @@ it("lets a child outside Strict be asked a secret, hands it the answer and keeps
     );
     const result = settled(runtime.start(agentRun()));
     await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
-    // Strict is not loosened for the child: only the secret question is.
-    expect(provider.starts[0]).not.toHaveProperty("strict");
+    // The secret question follows its own option; with no Strict value
+    // resolved for the child, its session is Strict.
+    expect(provider.starts[0]).toMatchObject({ strict: true });
     if (!parentOutsideStrict) {
       expect(provider.starts[0]).not.toHaveProperty("asksSecretQuestions");
       await provider.emit({ kind: "completed", sessionId });

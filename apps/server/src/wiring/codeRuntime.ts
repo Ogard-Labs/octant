@@ -30,6 +30,7 @@ import {
   decodeCodeFailure,
   decodeCodeOperationId,
   decodeProviderSessionId,
+  PLAN_APPROVED_TURN_PROMPT,
   RUNTIME_STARTED_TURN_PROMPT,
   decodeCodeRelativePath,
   decodeCodeOperationEventFrame,
@@ -180,7 +181,7 @@ import type { HarnessStateWiring } from "./harnessState";
 import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
-import { sessionNativeSetup } from "../providers/providerNativeSetup";
+import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import {
   launchCredentialsKey,
   providerOwnChannelsFromSettings,
@@ -1285,6 +1286,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             executionPolicy: thread.executionPolicy,
             fullAccessSandbox: thread.fullAccessSandbox,
             sandboxPolicySelected,
+            // As a turn of the thread resolves it, so an ACP agent's CLI
+            // opens on the home its turns run on.
+            ...nativeSetupOption(
+              sessionNativeSetup(
+                { ...persistence, readStrict: () => strict },
+                {
+                  providerInstanceId: thread.providerInstanceId,
+                  projectId: thread.projectId,
+                  threadId: String(thread.id),
+                  mode: "code",
+                  executionPolicy: thread.executionPolicy,
+                },
+              ),
+            ),
             ...(configuredDriverOptions.acpHome === undefined
               ? {}
               : { acpHome: configuredDriverOptions.acpHome }),
@@ -1308,7 +1323,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               ...(destination === undefined ? {} : { leaseId: destination.leaseId }),
             }),
             ask,
-            appToolThreadLevel(thread),
+            appToolThreadLevel(thread, resolveThreadStrict(String(thread.id))),
           ),
         spendCeiling,
         terminalProcessPort,
@@ -1567,6 +1582,42 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         onProviderStop: async (threadId, availability, stopped) => {
           await continueWorkerOnFallback.current?.(threadId, availability, stopped);
         },
+        // The turn that carries an approved plan out is the host's own send
+        // through the ordinary turn admission, as a restart continuation's
+        // is. It does not go through a wake-up's start: the planning turn
+        // ended interrupted, which that path reads as a thread waiting on the
+        // person, and would never start.
+        // A message the person queued may start first. Their message then
+        // runs at the level the thread returned to, in the session that
+        // already holds the approved plan, so the host starts nothing: a
+        // start sent beside it was accepted and journaled, then never
+        // launched, and stayed in the thread as a turn that never ends.
+        // The result is not read either: a provider account that takes no
+        // unattended turn refuses this one, and the thread waits for the
+        // person's next message as it did before plans continued.
+        onPlanApproved: async (threadId) => {
+          const thread = persistence.readCodeThread(threadId);
+          if (
+            thread === undefined ||
+            baseRouteCodeService.stageEvidence === undefined ||
+            baseRouteCodeService.executeOperation === undefined ||
+            codeOperationRuntime?.turnInProgress?.(String(threadId)) === true
+          )
+            return;
+          const staged = await baseRouteCodeService.stageEvidence(
+            ROUTINE_HOST_SCOPE_ID,
+            threadId,
+            PLAN_APPROVED_TURN_PROMPT,
+          );
+          await baseRouteCodeService.executeOperation(ROUTINE_HOST_SCOPE_ID, {
+            kind: "start-provider-turn",
+            operationId: decodeCodeOperationId(randomUUID()),
+            threadId,
+            checkoutId: thread.checkoutId,
+            sessionId: decodeProviderSessionId(randomUUID()),
+            prompt: staged,
+          });
+        },
         // The agent's ask to plan, or to leave Plan, changes the level the way
         // the person's own level menu does, for the window that approved it.
         changeThreadLevel: async ({ windowId, threadId, executionPolicy, planReturnPolicy }) => {
@@ -1587,8 +1638,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           return (
-            browserToolTransport(observed, String(thread.modelId), appToolThreadLevel(thread)) ===
-            true
+            browserToolTransport(
+              observed,
+              String(thread.modelId),
+              appToolThreadLevel(thread, resolveThreadStrict(String(thread.id))),
+            ) === true
           );
         },
         supportsAcpClientCapabilities: (thread) =>
@@ -1686,7 +1740,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         routineBrowserTools: ({ thread, readThread, routineRun }) =>
           routineBrowserTools({
             routineRun,
-            turnLevel: appToolThreadLevel(thread),
+            turnLevel: appToolThreadLevel(thread, resolveThreadStrict(String(thread.id))),
             threadId: decodeBrowserThreadId(String(thread.id)),
             currentAuthority: () =>
               readThread() === undefined
@@ -2522,6 +2576,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         codePlannerService.isPlannerThread(decodeCodeThreadId(threadId)),
       isMarked: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+      isStrict: (threadId) => resolveThreadStrict(threadId),
       threadState: (threadId) => {
         const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
         if (thread === undefined) return undefined;

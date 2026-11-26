@@ -1886,6 +1886,31 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       expect(starts[0]).toMatchObject({ executionPolicy: "full-access", fullAccessSandbox: true });
     });
 
+    it("hands a Strict launch the names the person let through to the agent", async () => {
+      const { driver, starts } = fixture(profile, { runtimeVersion: "2.25.0" });
+      const ownChannels = {
+        telemetry: false,
+        selfUpdate: false,
+        credentialPassThrough: ["GH_TOKEN"],
+      };
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              ownChannels,
+            });
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+      expect(starts[0]).toMatchObject({ ownChannels });
+      expect(starts[0]).not.toHaveProperty("strict");
+    });
+
     it.each(["approval-gated", "full-access"] as const)(
       "resumes a settled native conversation under %s without concurrent writers",
       async (nextPolicy) => {
@@ -4521,6 +4546,47 @@ it("refuses a provider that replaces the native identity during resume", async (
       }),
     ),
   );
+});
+
+it("fails a resume as stale, and opens no empty session in its place, when the agent cannot find a session it wrote under another home", async () => {
+  const first = fixture(vibe);
+  const cursor = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* first.driver.acquire({ instanceId, projectRoot, mode: "code" });
+        return (yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }))
+          .resumeCursor;
+      }),
+    ),
+  );
+  if (cursor === undefined) throw new Error("missing cursor");
+  // A later launch of the same thread whose home differs (Strict or the
+  // person's setup toggled, or the level moved between a confined launch and
+  // an open one): the agent's session store follows its home, so the load
+  // answers not found.
+  const moved = fixture(vibe);
+  moved.client.loadSession.mockRejectedValueOnce(
+    new AcpFailure("remote", "Resource not found: session agent-session-1"),
+  );
+  moved.client.resumeSession.mockRejectedValueOnce(
+    new AcpFailure("remote", "Resource not found: session agent-session-1"),
+  );
+  const refused = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* moved.driver.acquire({ instanceId, projectRoot, mode: "code" });
+        return yield* Effect.flip(
+          connection.resume({ sessionId, resumeCursor: cursor, executionPolicy: "full-access" }),
+        );
+      }),
+    ),
+  );
+  expect(refused.category).toBe("stale-resume");
+  // The thread's conversation is not swapped for a session that knows none
+  // of it: nothing new is opened and nothing is sent.
+  expect(moved.client.newSession).not.toHaveBeenCalled();
+  expect(moved.client.prompt).not.toHaveBeenCalled();
+  expect(moved.active()).toBe(0);
 });
 
 describe("Devin model configuration", () => {

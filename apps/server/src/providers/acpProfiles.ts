@@ -106,8 +106,8 @@ export interface AcpProcessProfile {
   /**
    * The guards that close one of the agent's own telemetry channels to its
    * vendor (usage metrics, trace uploads, feedback). Under Strict they are
-   * set; outside Strict they are left out while the person lets providers
-   * send their own telemetry, the default, and set otherwise.
+   * set; outside Strict they are set unless the person lets providers send
+   * their own telemetry.
    */
   readonly channelGuards?: ReadonlyArray<string>;
   /**
@@ -141,24 +141,52 @@ export interface AcpProcessProfile {
    * exactly 1, the version every other profile speaks.
    */
   readonly protocolVersions?: ReadonlyArray<number>;
+  /**
+   * The agent keeps its sessions under `HOME` or an XDG folder and nothing
+   * confirmed pins them elsewhere, or where it keeps them was never
+   * confirmed. Every launch then keeps the managed home
+   * (`acpRunsOnOwnHome`): a thread's launches alternate between a confined
+   * one, which must use the managed home, and an unconfined one, and an
+   * agent started on the other home answers `session/load` as if the session
+   * never existed, which parks the thread for good. A profile without this
+   * states the opposite as a confirmed fact: its sessions sit in one place
+   * whichever home the launch uses, and a confined launch may write there.
+   */
+  readonly sessionsFollowHome?: true;
   readonly environment: (input: {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
     readonly apiKey?: string;
     /** The Google Cloud project an `agent-platform` instance signs in to. */
     readonly googleCloud?: AcpAgentGoogleCloud;
+    /**
+     * The provider's own channels this launch opens; absent opens none. For a
+     * profile whose telemetry switch is part of a variable that carries other
+     * settings too, so no guard name can stand for it.
+     */
+    readonly ownChannels?: ProviderOwnChannels;
   }) => Readonly<Record<string, string>>;
   readonly args: (input: {
     readonly root: string;
     readonly managedHome: string;
     /** The provider's own channels this launch opens; absent opens none. */
     readonly ownChannels?: ProviderOwnChannels;
+    /**
+     * The release the launch read from the binary, for a switch that only
+     * some releases accept; absent where no release was read.
+     */
+    readonly version?: string;
   }) => ReadonlyArray<string>;
   readonly managedFiles: (input: {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
     /** The agent's own subagents run in this launch (`acpSubagentsRun`). */
     readonly ownSubagents?: boolean;
+    /**
+     * The launch lets the agent update itself (the person's switch, outside
+     * Strict), for a profile whose self-update guard is a managed setting.
+     */
+    readonly selfUpdate?: boolean;
   }) => ReadonlyArray<AcpManagedFile>;
   readonly hostAuthentication?: AcpHostAuthentication;
   /**
@@ -630,10 +658,7 @@ const opencodeProfile: AcpProviderProfile = {
     guards: {
       NO_COLOR: "1",
       OPENCODE_DISABLE_AUTOUPDATE: "1",
-      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
-      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
-      OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
       // OPENCODE_PURE does not cover the Project: `opencode acp` 2.0.27 still
       // started an `mcp` server from <project>/opencode.json and imported a
       // plugin from <project>/.opencode/plugin. With this switch it did
@@ -777,6 +802,11 @@ const DEVIN_CONFIGURATION = {
   attribution: false,
 } as const;
 
+function devinConfigurationWithoutUpdateGuard() {
+  const { auto_update: _guard, ...configuration } = DEVIN_CONFIGURATION;
+  return configuration;
+}
+
 function devinConfigPath(managedHome: string): string {
   return join(managedHome, ".config/devin/config.json");
 }
@@ -842,6 +872,14 @@ const devinProfile: AcpProviderProfile = {
     minimumVersion: [3000, 1, 27],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: { DEVIN_PERMISSION_MODE: "auto", NO_COLOR: "1" },
+    // Devin keeps its session history under `$XDG_DATA_HOME/devin/cli`, by
+    // default `~/.local/share/devin/cli/sessions.db` (its `acp --help` and
+    // the installed data folder, 3000.14.30821), so it follows `HOME`. Its
+    // changelog adds `DEVIN_SESSIONS_DIR`, which "moves the session history
+    // database to another directory", in 3000.11.92, later than this
+    // profile's minimum release, and no vendor page says how the folder is
+    // laid out under it, so nothing confirmed pins the store yet.
+    sessionsFollowHome: true,
     environment: ({ managedHome }) => ({ HOME: managedHome }),
     // Devin 3000.4.x removed the standalone --agent-config flag. Passing it
     // makes the CLI exit with usage status before writing an ACP response.
@@ -857,11 +895,17 @@ const devinProfile: AcpProviderProfile = {
     // Its own subagents follow the person's setup in Work and Code outside
     // Plan (`acpSubagentsRun`); everywhere else the managed configuration
     // keeps `subagents_enabled` false.
-    managedFiles: ({ managedHome, ownSubagents }) => [
+    // `auto_update: false` is Devin's self-update guard. A launch that lets
+    // providers update themselves leaves the key out, so Devin's own default
+    // decides, as the other agents' guards are left out.
+    managedFiles: ({ managedHome, ownSubagents, selfUpdate }) => [
       {
         path: devinConfigPath(managedHome),
         content: `${JSON.stringify(
-          { ...DEVIN_CONFIGURATION, subagents_enabled: ownSubagents === true },
+          {
+            ...(selfUpdate === true ? devinConfigurationWithoutUpdateGuard() : DEVIN_CONFIGURATION),
+            subagents_enabled: ownSubagents === true,
+          },
           null,
           2,
         )}\n`,
@@ -1114,15 +1158,24 @@ const vibeProfile: AcpProviderProfile = {
  * Allowlisted `GROK_CONFIG` overlay. `grok inspect --json` on 1.0.30 accepts a
  * `features` section and ignores `cli` / `session` overlays. Auto-update is
  * suppressed with `GROK_DISABLE_AUTOUPDATER` instead of writing `config.toml`.
+ *
+ * The overlay outranks the person's `config.toml` (Grok's bundled
+ * configuration guide, 1.0.92: environment variables, then the overlay, then
+ * `config.toml`). With `telemetry` and `feedback` forced off here, a launch
+ * that left the four telemetry variables out still ran with both off whatever
+ * the person's own Grok settings said, so the person's telemetry switch
+ * opened nothing. A launch that opens the telemetry channel therefore leaves
+ * both keys out of the overlay as well, and the person's own settings decide.
  */
-const GROK_FEATURE_OVERLAY = {
-  features: {
-    telemetry: false,
-    feedback: false,
-    codebase_indexing: false,
-    remote_fetch: false,
-  },
-} as const;
+function grokFeatureOverlay(ownChannels: ProviderOwnChannels | undefined) {
+  return {
+    features: {
+      ...(ownChannels?.telemetry === true ? {} : { telemetry: false, feedback: false }),
+      codebase_indexing: false,
+      remote_fetch: false,
+    },
+  } as const;
+}
 
 /**
  * Grok Build publishes each model's reasoning levels in the session metadata
@@ -1216,8 +1269,8 @@ const grokProfile: AcpProviderProfile = {
     },
     // GROK_HOME is the native profile via hostAuthentication. A managed
     // config.toml is not read once GROK_HOME points at ~/.grok.
-    environment: ({ apiKey }) => ({
-      GROK_CONFIG: JSON.stringify(GROK_FEATURE_OVERLAY),
+    environment: ({ apiKey, ownChannels }) => ({
+      GROK_CONFIG: JSON.stringify(grokFeatureOverlay(ownChannels)),
       ...(apiKey === undefined ? {} : { XAI_API_KEY: apiKey }),
     }),
     // `[cli] use_leader` in config.toml makes `grok agent stdio` hand the
@@ -1282,7 +1335,21 @@ const gooseProfile: AcpProviderProfile = {
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
     minimumVersion: [1, 48, 0],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
-    guards: { NO_COLOR: "1" },
+    // Goose's anonymous usage data is opt-in, kept as `GOOSE_TELEMETRY_ENABLED`
+    // in the person's own config.yaml, which this launch reads. Its
+    // documentation (environment variables and usage data guides, read
+    // 2026-11-25) names the same key as an environment variable that sets the
+    // choice for one session, and its configuration reads the environment
+    // before the file, so "false" here holds whatever the file says.
+    channelGuards: ["GOOSE_TELEMETRY_ENABLED"],
+    guards: { NO_COLOR: "1", GOOSE_TELEMETRY_ENABLED: "false" },
+    // Goose keeps its sessions in `sessions/sessions.db` under its data
+    // folder, `$XDG_DATA_HOME/goose` or `~/.local/share/goose` (its
+    // `config/paths.rs` and `session/session_manager.rs` on `main`, read
+    // 2026-11-25). The only variable that moves it is `GOOSE_PATH_ROOT`,
+    // which moves Goose's configuration and state with it and so would take
+    // the person's own `~/.config/goose` sign-in away.
+    sessionsFollowHome: true,
     environment: ({ managedHome }) => ({
       HOME: managedHome,
       XDG_CONFIG_HOME: join(managedHome, ".config"),
@@ -1494,6 +1561,9 @@ const COPILOT_PROJECT_ENTRIES: ReadonlyArray<string> = [
   ".mcp.json",
 ];
 
+/** The first GitHub Copilot CLI release that accepts `--disable-client-telemetry`. */
+const COPILOT_CLIENT_TELEMETRY_SWITCH_RELEASE = "1.0.100";
+
 const copilotProfile: AcpProviderProfile = {
   kind: "copilot",
   displayName: "GitHub Copilot",
@@ -1512,12 +1582,29 @@ const copilotProfile: AcpProviderProfile = {
     versionPattern: /^GitHub Copilot CLI (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.?\r?\n?$/,
     minimumVersion: [1, 0, 82],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
-    guards: { NO_COLOR: "1" },
+    // GitHub's CLI reference (read 2026-11-25): `COPILOT_AUTO_UPDATE=false`
+    // disables automatic updates of the CLI and its first-party plugins.
+    selfUpdateGuards: ["COPILOT_AUTO_UPDATE"],
+    guards: { NO_COLOR: "1", COPILOT_AUTO_UPDATE: "false" },
     environment: ({ managedHome }) => ({
       HOME: managedHome,
       XDG_CONFIG_HOME: join(managedHome, ".config"),
     }),
-    args: () => ["--acp"],
+    // `--disable-client-telemetry` turns off the telemetry the CLI itself
+    // sends, for one invocation, and is the only switch for it: no variable
+    // or setting does the same (GitHub's "Configuring Copilot CLI", read
+    // 2026-11-25). GitHub's server-side collection is not affected. The CLI's
+    // changelog adds the option in 1.0.100; no earlier release was checked to
+    // start with an option it does not know, so those start without it and
+    // have no switch for their client telemetry.
+    args: ({ ownChannels, version }) => [
+      "--acp",
+      ...(ownChannels?.telemetry !== true &&
+      version !== undefined &&
+      releaseAtLeast(version, COPILOT_CLIENT_TELEMETRY_SWITCH_RELEASE)
+        ? ["--disable-client-telemetry"]
+        : []),
+    ],
     managedFiles: () => [],
     // The ACP session is created without enableConfigDiscovery, which
     // defaults to on (CLI 1.0.90), so Copilot loads these Project skill
@@ -1585,6 +1672,7 @@ const clineProfile: AcpProviderProfile = {
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
     minimumVersion: [3, 0, 61],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    selfUpdateGuards: ["CLINE_NO_AUTO_UPDATE"],
     guards: {
       NO_COLOR: "1",
       // Left on "auto", Cline hands the ACP session to a compatible Cline hub
@@ -1594,6 +1682,10 @@ const clineProfile: AcpProviderProfile = {
       // (`resolveConfiguredBackendMode` in its source, 3.0.61 and 3.0.71;
       // its ACP agent sets no mode of its own).
       CLINE_SESSION_BACKEND_MODE: "local",
+      // Cline checks for a newer release at start and installs it on exit;
+      // "1" skips that (`autoUpdateOnStartup` in its CLI source, read
+      // 2026-11-25).
+      CLINE_NO_AUTO_UPDATE: "1",
     },
     environment: ({ managedHome, apiKey }) => ({
       HOME: managedHome,
@@ -1656,7 +1748,13 @@ const qwenProfile: AcpProviderProfile = {
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
     minimumVersion: [0, 23, 0],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
-    guards: { NO_COLOR: "1" },
+    // Qwen Code's settings guide (0.23.0 and `main`, read 2026-11-25): any
+    // value but `true` or `1` turns its usage statistics off and outranks
+    // `privacy.usageStatisticsEnabled` in the person's settings. On `main`
+    // the guide also says turning them off stops the models.dev catalogue
+    // refresh.
+    channelGuards: ["QWEN_USAGE_STATISTICS_ENABLED"],
+    guards: { NO_COLOR: "1", QWEN_USAGE_STATISTICS_ENABLED: "false" },
     environment: ({ managedHome, apiKey }) => ({
       HOME: managedHome,
       XDG_CONFIG_HOME: join(managedHome, ".config"),
@@ -1741,6 +1839,9 @@ const fxProfile: AcpProviderProfile = {
       FX_DISABLE_KEYCHAIN: "1",
       NO_COLOR: "1",
     },
+    // Its sessions resolve through `$HOME/.fx` with no variable of their own
+    // (see the profile's note above, probed on 0.0.10 and 0.0.13).
+    sessionsFollowHome: true,
     environment: ({ managedHome, apiKey }) => ({
       HOME: managedHome,
       XDG_CONFIG_HOME: join(managedHome, ".config"),

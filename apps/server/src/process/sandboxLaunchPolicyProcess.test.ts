@@ -219,7 +219,7 @@ server.serve_forever()
 import sys, os, signal, http.server, base64
 signal.alarm(20)
 if sys.argv[1:] == ["--version"]:
- print("1.18.21"); sys.exit(0)
+ print("opencode v2.4.1"); sys.exit(0)
 port=int(sys.argv[-1])
 expected="Basic " + base64.b64encode((os.environ["OPENCODE_SERVER_USERNAME"] + ":" + os.environ["OPENCODE_SERVER_PASSWORD"]).encode()).decode()
 class Handler(http.server.BaseHTTPRequestHandler):

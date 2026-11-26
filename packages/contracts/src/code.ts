@@ -411,8 +411,9 @@ export const CodeThread = Schema.Struct({
   browserTaskProfile: Schema.optional(BrowserProfileChoice),
   /**
    * Present on a coordinator thread (docs/design/coordinator-threads.md): only
-   * a person sets or clears it, and while it is present the thread's own
-   * actions run under Plan's read-only gate and its agent may start workers.
+   * a person sets or clears it, and while it is present its agent may start
+   * workers. Under Strict the thread's own actions run under Plan's read-only
+   * gate; outside Strict they follow the thread's level.
    * Absent on every thread written before coordinators existed.
    */
   coordinator: Schema.optional(Schema.Literal(true)),

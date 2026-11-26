@@ -63,6 +63,10 @@ export function addedAcpAgentProfile(instance: AddedAcpAgentProviderInstance): A
       versionProbe: "best-effort",
       passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
       guards: { NO_COLOR: "1" },
+      // Where an added agent keeps its sessions is not known, so its home
+      // variables are the same on every launch: the host's, or the ones the
+      // person configured for it.
+      sessionsFollowHome: true,
       environment: () => environment,
       args: () => configuration.args,
       managedFiles: () => [],

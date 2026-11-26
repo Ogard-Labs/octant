@@ -22,7 +22,7 @@ describe("Octant's own limits in Settings", () => {
       screen.getByRole("switch", { name: "Start agent-created routines active at Full access" }),
     );
     expect(onSettingsChange).toHaveBeenLastCalledWith({
-      agentRoutinesStartActiveAtFullAccess: true,
+      agentRoutinesStartActiveAtFullAccess: false,
     });
     // The default is named beside the stepper, not in the sentence, and hidden
     // while the value is the default.
@@ -30,6 +30,11 @@ describe("Octant's own limits in Settings", () => {
     expect(waiting.querySelector(".setrow-default")).toHaveTextContent("Default 8");
     expect(waiting.querySelector(".setrow-default")).toHaveAttribute("data-at-default", "true");
     expect(screen.getByText(/A recurring wake-up may fire as often as every minute/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        /A routine you asked for starts enabled at every level, and below Full access a suggested one waits for you to confirm its card\./,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("names the default beside a limit once it has been changed from it", () => {

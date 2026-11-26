@@ -5,12 +5,13 @@ How Settings is organised and what its particular pages hold. The kit every Sett
 ## Settings sheet
 
 Settings opens as a sheet over the app (`OctantSheet`): a floating surface
-at most 1040 by 760px, on the float fill with the pop shadow, over a light
-scrim through which the window stays drawn. The app behind it is mounted and
-live, so a change to the theme, the accent, the type or the sidebar shows
-where it lands while the control is still under the pointer. As a page that
-replaced the window, Settings showed none of what a change did until a person
-went back. The sheet holds the Settings rail and the page, divided by one
+at most 1040 by 760px, on the float fill with the pop shadow, over the sheet's
+own scrim. The app behind it stays mounted and live, and returns exactly as it
+was when Settings closes. The window behind is dimmed and blurred while
+Settings is open, the same on every page and in every window that shows the
+sheet, so Settings is the one thing in front
+([Translucency](../../DESIGN.md#translucency)); a change to the theme or the
+accent shows on the sheet itself and, softened, behind it. The sheet holds the Settings rail and the page, divided by one
 line; the rail is 232px wide there and is not resized (the saved sidebar
 width is the full-window page's). A section's card steps up from the sheet's
 own fill. A native Browser page leaves the window while the sheet is up, as it
@@ -144,7 +145,7 @@ outside Strict behind its More
 wakes per hour, 30; Rounds of replies that wake, 10; Thread messages per turn,
 3, up to 20, under Strict only; Sibling thread reads per turn, 8, up to 64,
 under Strict only; Sibling thread waits per turn, 4, up to 32, under Strict
-only; and the switch **Run missed wake-ups on return**, off),
+only; and the switch **Run missed wake-ups on return**, on),
 **Octant Shield** (Denials in a row before you decide, 3, up to 50; Denials
 per thread before you decide, 20, up to 500),
 **Coordinators** (Coordinators per Project, 4, up to 32), **Pull requests**
@@ -157,7 +158,11 @@ Browser wait, in minutes, 10, up to 60, under Strict only, whose description
 says outside Strict there is no wait limit and a Claude Code
 thread still ends one tool call at eleven minutes; Longest wait for a helper,
 in seconds, 120, up to 3,600), then **Routines** with the switch **Start
-agent-created routines active at Full access**, off. Each change is the
+agent-created routines active at Full access**, on, whose description reads
+"A routine an agent suggests while its thread runs at Full access starts
+enabled, with no card. Off, it is created paused and waits for you to turn it
+on. A routine you asked for starts enabled at every level, and below Full
+access a suggested one waits for you to confirm its card." Each change is the
 ordinary journaled settings replacement a local window or a device the host's
 own person paired makes; the server reads each value where it applies.
 
@@ -338,34 +343,41 @@ See [Thread titles](model-endpoints.md#thread-titles) for routing and fallback.
 
 Providers & Models carries a **Provider channels** section after Stalled
 turns with two host switches, each read at the next provider launch:
-**Let providers send their own telemetry** (off by default, for every provider
-and for a store saved before the switch existed: Octant sets the provider's
-telemetry guards, as every launch did before the switch; on, each provider's
+**Let providers send their own telemetry** (off by default, including for a
+store saved before the switch existed: Octant sets the provider's telemetry
+guards wherever the provider has one a launch can set; on, each provider's
 own settings decide its usage metrics, error reports and feedback uploads) and **Let providers update
 themselves** (off by default: Octant keeps each provider's self-update guard
 set, since it installs and updates provider CLIs itself; **Update CLI** is
 unaffected). Strict keeps every telemetry and self-update guard set whatever
-the switches say, and so does a thread that keeps or chose a sandbox. Which guards each provider takes is in
-[Provider runtimes](provider-runtimes.md#provider-channel-switches) and the rule
+the switches say, and so does a thread that keeps or chose a sandbox. Off
+does not mean telemetry is off for every provider: some have no switch
+Octant can set. Which guards each provider takes, which providers have none,
+what Octant cannot stop and what a person can do themselves are in the table
+in [Provider runtimes](provider-runtimes.md#provider-channel-switches), and the rule
 in [Decisions and requirements](decisions.md#provider-telemetry-and-self-update-are-the-persons-switches).
 
-Below them, **Credentials let through** lists, per provider, the host
-environment variables the person lets through to that provider outside
-Strict. Outside Strict a provider does not inherit well-known credentials that
-are not its own (`GH_TOKEN`, `GITHUB_TOKEN`, `NPM_TOKEN`, AWS keys, another
-service's `*_API_KEY`); naming one here lets it through to that provider's
-turns and its provider terminal from the next turn. The list is empty by
+Below them, **Let through under Strict** lists, per provider, the host
+environment variables the person adds to that provider's fixed list under
+Strict (maintainer decision, 2026-11-25).
+Its description reads "Outside Strict, a provider already gets your
+environment. Under Strict it gets a short fixed list. Name a variable here,
+such as GH_TOKEN, to add it to that list for one provider. A model provider's
+key can never be added. Applies from the next turn. A provider terminal also
+runs your shell's startup files, which may set credentials again." Outside
+Strict the list is not read. The empty state reads "Nothing is added. Under
+Strict, each provider gets only its fixed list." The list is empty by
 default, holds names only, never values, at most 64 per provider, and offers
-Claude Code, Codex, Pi, each ACP agent and the added ACP agents together. Each
+Claude Code, Codex, OpenCode, Pi, each ACP agent and the added ACP agents together. Each
 row reads "`NAME` · Provider · Let through" with **Remove**; the add row is a
-provider picker, a name field and **Let through**. A name the launch would
-still keep out is refused under the field with its reason, the field marked
+provider picker, a name field and **Let through**. A name that can never be
+added is refused under the field with its reason, the field marked
 invalid and the draft kept: one that is not an environment variable name, one
 of Octant's own (`OCTANT_*`), a model provider's key (a provider already gets
 its own and never another's), or a 65th name. A search result for the list
 lands on its first row, or on the add row while the list is empty. The section
 says that a provider terminal also runs the person's shell startup files,
-which may set credentials again. Strict ignores the list. The rule is in
+which may set credentials again. The rule is in
 [Architecture: Security and authority](../architecture.md#security-and-authority)
 and [Decisions and requirements](decisions.md#octant-adds-no-restrictions-of-its-own-unless-strict-is-on).
 

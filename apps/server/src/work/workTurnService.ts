@@ -586,6 +586,16 @@ export interface WorkTurnServiceDependencies {
    * rejection is ignored: the stop has happened and stays recorded.
    */
   readonly onUsageLimitStop?: (threadId: WorkThreadId) => Promise<void>;
+  /**
+   * The person approved the plan the thread's turn handed over, and the thread
+   * left Plan. Fires once that turn has ended, so the host can start the turn
+   * that carries the plan out, at the level the thread returned to: approving
+   * a plan starts the work in the provider's own app, and here the person had
+   * to send another message first. A rejection is ignored: the level change
+   * has happened and the person's next message carries the plan out. Never
+   * fires for a Strict thread, or one whose Strict cannot be resolved.
+   */
+  readonly onPlanApproved?: (threadId: WorkThreadId) => Promise<void>;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
@@ -822,6 +832,9 @@ export class WorkTurnService {
   readonly #onTurnRequested: WorkTurnServiceDependencies["onTurnRequested"];
   readonly #onReportAdmitted: WorkTurnServiceDependencies["onReportAdmitted"];
   readonly #onUsageLimitStop: WorkTurnServiceDependencies["onUsageLimitStop"];
+  readonly #onPlanApproved: WorkTurnServiceDependencies["onPlanApproved"];
+  /** Turns, by request, that ended because the person approved leaving Plan. */
+  readonly #planApprovedTurns = new Set<string>();
   readonly #onTurnCancelled: WorkTurnServiceDependencies["onTurnCancelled"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #projectStatusFiles: WorkProjectStatusFiles | undefined;
@@ -899,6 +912,7 @@ export class WorkTurnService {
     this.#onTurnRequested = dependencies.onTurnRequested;
     this.#onReportAdmitted = dependencies.onReportAdmitted;
     this.#onUsageLimitStop = dependencies.onUsageLimitStop;
+    this.#onPlanApproved = dependencies.onPlanApproved;
     this.#onTurnCancelled = dependencies.onTurnCancelled;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#projectStatusFiles = dependencies.projectStatusFiles;
@@ -2800,6 +2814,14 @@ export class WorkTurnService {
         this.#liveTasks.delete(String(command.requestId));
         this.#liveToolSteps.delete(String(command.requestId));
         this.#liveReasoningMs.delete(String(command.requestId));
+        // Under Strict the host starts no turn of its own here: the thread
+        // waits for the person's next message, as before plans continued.
+        if (
+          this.#planApprovedTurns.delete(String(command.requestId)) &&
+          (this.#resolveStrict?.(String(command.threadId)) ?? true) === false
+        ) {
+          void this.#onPlanApproved?.(command.threadId).catch(() => undefined);
+        }
       });
       this.#inflight.set(String(command.requestId), launch);
       toolsLaunched = true;
@@ -3196,7 +3218,11 @@ export class WorkTurnService {
    */
   endTurnForLevelChange(threadId: WorkThreadId): void {
     const running = this.#runningAccess.get(String(threadId));
-    if (running !== undefined) this.#controllers.get(running.requestId)?.abort();
+    if (running === undefined) return;
+    // A turn that ran in Plan ends here only because the person approved
+    // leaving it; an approved ask to plan first ends a turn at another level.
+    if (running.access === "plan") this.#planApprovedTurns.add(running.requestId);
+    this.#controllers.get(running.requestId)?.abort();
   }
 
   /**

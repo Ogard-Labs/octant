@@ -10,8 +10,12 @@ describe("ProviderCredentialPassThroughSettings", () => {
   it("starts with nothing let through and says what the list does", () => {
     render(<ProviderCredentialPassThroughSettings onChange={vi.fn()} value={{}} />);
     expect(
-      screen.getByText("Nothing is let through. Each provider keeps only its own credentials."),
+      screen.getByText("Nothing is added. Under Strict, each provider gets only its fixed list."),
     ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Let through under Strict" })).toBeVisible();
+    expect(PROVIDER_CREDENTIAL_PASS_THROUGH_FACT).toBe(
+      "Outside Strict, a provider already gets your environment. Under Strict it gets a short fixed list. Name a variable here, such as GH_TOKEN, to add it to that list for one provider. A model provider's key can never be added. Applies from the next turn. A provider terminal also runs your shell's startup files, which may set credentials again.",
+    );
     expect(screen.getByText(PROVIDER_CREDENTIAL_PASS_THROUGH_FACT)).toBeVisible();
   });
 
@@ -40,6 +44,19 @@ describe("ProviderCredentialPassThroughSettings", () => {
     expect(onChange).toHaveBeenCalledWith({ codex: ["NPM_TOKEN"] });
   });
 
+  it("offers OpenCode among the providers, whose Strict launch reads the list too", () => {
+    render(
+      <ProviderCredentialPassThroughSettings
+        onChange={vi.fn()}
+        value={{ opencode: ["GH_TOKEN"] }}
+      />,
+    );
+    expect(screen.getByText("OpenCode · Let through")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Stop letting GH_TOKEN through to OpenCode" }),
+    ).toBeVisible();
+  });
+
   it("refuses a name that is not an environment variable or is one of Octant's own, and keeps the draft", async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
@@ -62,7 +79,7 @@ describe("ProviderCredentialPassThroughSettings", () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(
       screen.getByText(
-        "This is a model provider's key. A provider already gets its own and never gets another provider's.",
+        "This is a model provider's key. Under Strict a provider gets its own and no other provider's.",
       ),
     ).toBeVisible();
     expect(field).toHaveValue("OPENAI_API_KEY");

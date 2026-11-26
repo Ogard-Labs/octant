@@ -13,6 +13,14 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const RUNTIME_STARTED_TURN_PROMPT =
   "The agent started this turn by itself after background work it was running reported.";
 
+/**
+ * What the host sends, as itself, to start the turn after the person approved
+ * a plan. Fixed text: it tells the agent to go on and records in the thread
+ * why a turn nobody typed exists. A Code and a Work thread send the same one.
+ */
+export const PLAN_APPROVED_TURN_PROMPT =
+  "Octant started this turn: the person approved your plan and the thread has left Plan. Carry the plan out now.";
+
 /** One background task a thread's kept session still runs. */
 export const CodeLiveTask = Schema.Struct({
   taskId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),

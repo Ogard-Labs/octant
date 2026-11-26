@@ -345,8 +345,7 @@ already requires of a feature reported supported:
 - Codex starts and resumes every thread with `web_search = "disabled"` in the
   thread's config, which removes its hosted and standalone search tools
   (read from the codex-cli 0.169.0 source).
-- OpenCode denies `websearch` and `webfetch` after the person's own rules, on
-  1.x and 2.x.
+- OpenCode denies `websearch` and `webfetch` after the person's own rules.
 - Mistral Vibe launches with `VIBE_DISABLED_TOOLS` naming `web_search` and
   `web_fetch` (read from the 3.0.3 source).
 

@@ -420,35 +420,63 @@ html[data-octant-increased-contrast="true"]
   transition-timing-function: var(--oct-ease-color);
 }
 
-/* Settings is a sheet so a person can watch the window change while they change
-   its appearance, so the window behind it stays exactly as it is: no blur, no
-   dim, and only a faint shade that sets the sheet apart. Blurring it past
-   reading hid what a person came to Settings to watch. Words never show
-   THROUGH the sheet: it is frosted (rule below), so the thread behind it
-   cannot be read through it, while everything beside it stays visible.
-   A dialog is a decision, not a view of the window: while one is open the
-   layers that hold content are blurred past reading and barely dimmed, a filter
-   on the layers themselves, which the desktop renderer does draw. Only paint
-   changes: the content stays in place and inert, keeps its focus target and
-   returns exactly as it was, and a screen reader loses nothing. A menu or
-   popover is not modal and keeps the dense float; reduced transparency and
-   increased contrast keep the opaque float and need neither. */
-html[data-octant-native-host="true"]:not(
-    [data-octant-reduced-transparency="true"],
-    [data-octant-increased-contrast="true"]
-  ):has(.octant-dialog__popup[data-open])
+/* While the Settings sheet or a dialog is open, the layers that hold content
+   are blurred past reading and barely dimmed: a filter on the layers
+   themselves, which the desktop renderer does draw where a backdrop filter
+   would not. Settings was once left over an untouched window, with only a 6%
+   shade in the Mac window, so a change to the window's look could be
+   watched; the thread behind it then competed with Settings' own text, so it
+   is softened on every page (maintainer decision, 2026-11-26). The sheet's
+   rule does not ask for the Mac window's mark: that mark is absent in full
+   screen, on Windows and Linux and in a browser, where Settings is a sheet
+   all the same. A dialog keeps the mark, as before. Settings' scrim is the
+   sheet's own, lighter than a dialog's. Words never show THROUGH the sheet:
+   it is solid (rule below). Only paint changes: the content stays in place
+   and inert, keeps its focus target and returns exactly as it was, and a
+   screen reader loses nothing. A menu or popover is not modal and keeps the
+   dense float; reduced transparency and increased contrast keep the opaque
+   float and need neither. */
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"]):is(
+    :has(.octant-sheet__popup[data-open]),
+    [data-octant-native-host="true"]:has(.octant-dialog__popup[data-open])
+  )
   .shell-frame
   > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
   opacity: 0.92;
   filter: blur(5px);
 }
 
-html[data-octant-native-host="true"]:not(
-    [data-octant-reduced-transparency="true"],
-    [data-octant-increased-contrast="true"]
-  )
-  .octant-sheet__backdrop {
-  background: color-mix(in srgb, var(--octant-scrim) 6%, transparent);
+/* The system's own Reduce transparency asks for the same as the app's
+   setting, and does not set the app's mark: with only the system's on, the
+   window was still blurred behind a dialog. */
+@media (prefers-reduced-transparency: reduce) {
+  html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"]):is(
+      :has(.octant-sheet__popup[data-open]),
+      [data-octant-native-host="true"]:has(.octant-dialog__popup[data-open])
+    )
+    .shell-frame
+    > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+/* Outside the Mac window the layers have no transition of their own (rule
+   below), so the blur behind Settings would snap in while its scrim fades.
+   The sheet's presence carries one for as long as it is mounted, which
+   covers its way in and its way out. */
+@media (prefers-reduced-motion: no-preference) {
+  html:not(
+      [data-octant-reduced-transparency="true"],
+      [data-octant-increased-contrast="true"],
+      [data-octant-reduced-motion="true"]
+    ):has(.octant-sheet__popup)
+    .shell-frame
+    > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
+    transition:
+      opacity var(--oct-motion-fast) var(--oct-ease-motion),
+      filter var(--oct-motion-fast) var(--oct-ease-motion);
+  }
 }
 
 html[data-octant-native-host="true"]:not(

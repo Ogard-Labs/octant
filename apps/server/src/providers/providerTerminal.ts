@@ -1,12 +1,16 @@
 import { mkdirSync, realpathSync } from "node:fs";
 import { win32 } from "node:path";
-import type { ProviderExecutionPolicy, ProviderInstance } from "@octant/contracts";
+import type {
+  ProviderExecutionPolicy,
+  ProviderInstance,
+  ProviderNativeSetup,
+} from "@octant/contracts";
 import { acpAgentProfile } from "@octant/contracts/acp-agent-profiles";
 import { isAcpAgentInstance, providerTerminalName } from "@octant/domain";
-import { sanitizeAcpEnvironment } from "./acpProcess";
+import { acpRunsOnOwnHome, sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpSessionMode } from "./acpProfiles";
 import type { ProviderOwnChannels } from "@octant/provider-sdk";
-import { credentialPassThroughApplies, DEFAULT_PROVIDER_OWN_CHANNELS } from "./providerOwnChannels";
+import { launchOwnChannels, providerSwitchesApply } from "./providerOwnChannels";
 import { resolveProviderToolingAccount } from "./providerToolingAccount";
 
 /**
@@ -47,12 +51,18 @@ export function resolveProviderTerminal(input: {
   readonly fullAccessSandbox?: boolean | undefined;
   /** A turn of the thread holds a chosen sandbox policy. */
   readonly sandboxPolicySelected?: boolean;
+  /**
+   * The person's own setup a turn of the thread carries (`sessionNativeSetup`);
+   * absent when it carries none. An ACP agent's home follows it, as its turns do.
+   */
+  readonly nativeSetup?: ProviderNativeSetup;
   /** Where an ACP agent instance keeps its managed home, as its driver is given. */
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
   /**
-   * The person's provider telemetry and self-update switches, and the host
-   * credentials they let through, by driver kind; read only outside Strict.
-   * Absent keeps both channels closed and lets nothing through.
+   * The person's provider telemetry and self-update switches, read only
+   * outside Strict, and the host variables they let through, read only under
+   * it, by driver kind. Absent keeps both channels closed and lets nothing
+   * through.
    */
   readonly ownChannels?: (driverKind: ProviderInstance["driverKind"]) => ProviderOwnChannels;
 }): ProviderTerminalLaunch {
@@ -87,18 +97,19 @@ interface Program {
 }
 
 /**
- * The channels this thread's terminal opens outside Strict. Where the
- * thread's turns close the telemetry and self-update switches for a kept or
- * chosen sandbox, the terminal closes them too; the pass-through list is
- * carried either way.
+ * The channels this thread's terminal opens, as its turns do. Under Strict
+ * both stay closed and the names the person let through join the fixed
+ * list. Outside Strict the list is dropped, and where the thread's turns
+ * close the telemetry and self-update switches for a kept or chosen sandbox,
+ * the terminal closes them too.
  */
 function terminalOwnChannels(
   driverKind: ProviderInstance["driverKind"],
   input: Parameters<typeof resolveProviderTerminal>[0],
 ): ProviderOwnChannels {
-  const chosen = input.ownChannels?.(driverKind) ?? DEFAULT_PROVIDER_OWN_CHANNELS;
-  const turnsReadSwitches = credentialPassThroughApplies(driverKind, {
-    strict: false,
+  const chosen = launchOwnChannels(input.strict, input.ownChannels?.(driverKind));
+  const turnsReadSwitches = providerSwitchesApply(driverKind, {
+    strict: input.strict,
     executionPolicy: input.executionPolicy ?? "approval-gated",
     fullAccessSandbox: input.fullAccessSandbox === true,
     sandboxPolicy: input.sandboxPolicySelected === true,
@@ -127,8 +138,11 @@ function toolingProgram(
  * arguments its descriptor names in place of the `acp` ones, and the
  * environment the ACP driver builds for a launch of this thread. That is the
  * same sanitized host environment (Strict's passthrough list and guards, or
- * the person's own outside Strict), the instance's managed home, and the
- * variables that point the CLI at the person's own sign-in folder. Only the
+ * the person's own outside Strict), the home a turn of this thread runs on
+ * (`acpRunsOnOwnHome`: the person's own or the instance's managed one), and
+ * the variables that point the CLI at the person's own sign-in folder. The
+ * home is the turn's because an agent whose sessions follow it would
+ * otherwise list and resume other sessions here than the thread's. Only the
  * guards that keep the piped ACP stream clean (`NO_COLOR`) are left out, since
  * the terminal is a TTY. No API key is passed: an api-key account's CLI asks
  * for its own sign-in.
@@ -147,16 +161,32 @@ function acpProgram(
   } catch {
     return undefined;
   }
+  const executionPolicy = input.executionPolicy ?? "approval-gated";
+  const mode = input.mode ?? "code";
+  // As the driver's launch, which is told of a kept sandbox only at Full
+  // access: the open environment only outside Strict for a thread that
+  // neither kept nor chose a sandbox there.
+  const fullAccessSandbox = executionPolicy === "full-access" && input.fullAccessSandbox === true;
+  const sandboxPolicySelected = input.sandboxPolicySelected === true;
+  const open = input.strict === false && !fullAccessSandbox && !sandboxPolicySelected;
+  const ownHome = acpRunsOnOwnHome({
+    profile,
+    mode,
+    executionPolicy,
+    strict: input.strict,
+    fullAccessSandbox,
+    sandboxPolicySelected,
+    ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
+  });
   const environment = sanitizeAcpEnvironment(profile, input.hostEnvironment, {
     managedHome,
     ownChannels: terminalOwnChannels(instance.driverKind, input),
-    executionPolicy: input.executionPolicy ?? "approval-gated",
-    mode: input.mode ?? "code",
+    executionPolicy,
+    mode,
     // A TTY, not the ACP stream: the CLI keeps its colour.
     interactive: true,
-    // As the driver's launch: the open environment only outside Strict for a
-    // thread that did not keep its sandbox.
-    ...(input.strict === false && input.fullAccessSandbox !== true ? { strict: false } : {}),
+    ...(open ? { strict: false } : {}),
+    ...(ownHome ? { ownHome: true } : {}),
   });
   return {
     binary: instance.configuration.binaryPath,

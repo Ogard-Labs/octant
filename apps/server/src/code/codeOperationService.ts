@@ -1673,8 +1673,9 @@ export interface CodeOperationServiceOptions {
    * data. Reading them delivers nothing by itself.
    */
   /**
-   * Whether a thread is a coordinator now, so its turn runs under Plan's
-   * read-only gate (docs/design/coordinator-threads.md).
+   * Whether a thread is a coordinator now. Under Strict its turn runs under
+   * Plan's read-only gate; outside Strict it runs at the thread's level
+   * (docs/design/coordinator-threads.md).
    */
   readonly isCoordinatorThread?: (threadId: string) => boolean;
   /**
@@ -7020,7 +7021,8 @@ export class CodeOperationService {
     includeProductFeedback = false,
   ): Promise<CodeOperationResult> {
     // `thread` carries the level this turn runs at: the composer's, a
-    // recorded start's, or a coordinator's Plan, clamped to the thread's own.
+    // recorded start's, or a Strict coordinator's Plan, clamped to the
+    // thread's own.
     // Checked before the worktree is prepared or any runtime starts. Below
     // Full access on a host without Octant's sandbox the provider's own
     // approvals hold the turn, so only Strict and a kept sandbox refuse there.
@@ -8218,9 +8220,9 @@ function turnAccessPosture(
     thread: thread.executionPolicy,
     ...(requested === undefined ? {} : { requested }),
   });
-  // A coordinator reads and its workers write: below Full access, and at every
-  // level under Strict, its turns run under Plan's read-only gate, whatever
-  // level the person gave the thread.
+  // Under Strict a coordinator reads and its workers write: its turns run
+  // under Plan's read-only gate, whatever level the person gave the thread.
+  // Outside Strict its turns run at that level, like any thread's.
   return coordinator ? coordinatorTurnPosture(posture, strict()) : posture;
 }
 

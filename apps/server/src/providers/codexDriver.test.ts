@@ -1042,15 +1042,16 @@ describe("Codex driver probe and runtime lifecycle", () => {
     expect(probed.readiness).toBe("ready");
   });
 
-  it("a Codex session outside Strict launches with only the host credentials its pass-through list names, and a Strict one with its fixed list", async () => {
+  it("a Strict Codex session launches with its fixed list plus the names the person let through, relaunching when they change, and one outside Strict never reads the list", async () => {
     const f = fixture();
     const driver = makeCodexDriver(
       f.options({
         environment: { PATH: "/usr/bin" },
-        openEnvironment: (credentialPassThrough) => ({
+        strictEnvironment: (credentialPassThrough) => ({
           PATH: "/usr/bin",
           LET_THROUGH: credentialPassThrough.join(","),
         }),
+        openEnvironment: () => ({ PATH: "/usr/bin", OPEN: "1" }),
       }),
     );
     const open = (
@@ -1076,12 +1077,68 @@ describe("Codex driver probe and runtime lifecycle", () => {
           ),
         ),
       );
-    await open(sessionId, { strict: false, credentialPassThrough: ["NPM_TOKEN", "GH_TOKEN"] });
-    await open(secondSessionId, { credentialPassThrough: ["GH_TOKEN"] });
-    expect(f.environments()).toEqual([
-      { PATH: "/usr/bin", LET_THROUGH: "GH_TOKEN,NPM_TOKEN" },
-      { PATH: "/usr/bin" },
-    ]);
+    await open(sessionId, { credentialPassThrough: ["NPM_TOKEN", "GH_TOKEN"] });
+    // The same list in another order is the same launch: the process is reused.
+    await open(secondSessionId, { credentialPassThrough: ["GH_TOKEN", "NPM_TOKEN"] });
+    expect(f.environments()).toEqual([{ PATH: "/usr/bin", LET_THROUGH: "GH_TOKEN,NPM_TOKEN" }]);
+    // A changed list is a new Strict process.
+    await open(sessionId, { credentialPassThrough: ["GH_TOKEN"] });
+    expect(f.environments()).toHaveLength(2);
+    expect(f.environments()[1]).toEqual({ PATH: "/usr/bin", LET_THROUGH: "GH_TOKEN" });
+    // Outside Strict the list is neither read nor a reason to relaunch.
+    await open(sessionId, { strict: false, credentialPassThrough: ["GH_TOKEN"] });
+    await open(secondSessionId, { strict: false, credentialPassThrough: [] });
+    expect(f.environments().slice(2)).toEqual([{ PATH: "/usr/bin", OPEN: "1" }]);
+  });
+
+  it("leaves Codex's analytics to the person's configuration only outside Strict with their telemetry switch on, and starts a new process when the switch changes", async () => {
+    const f = fixture();
+    const driver = makeCodexDriver(f.options());
+    const open = (
+      id: typeof sessionId,
+      launch: { readonly strict?: false; readonly telemetry: boolean },
+    ) =>
+      Effect.runPromise(
+        Effect.scoped(
+          driver.acquire({ instanceId, projectRoot }).pipe(
+            Effect.flatMap((connection) =>
+              connection.start({
+                sessionId: id,
+                modelId: "gpt-5.4" as never,
+                executionPolicy: "approval-gated",
+                ...(launch.strict === false ? { strict: false } : {}),
+                ownChannels: { telemetry: launch.telemetry, selfUpdate: false },
+              }),
+            ),
+          ),
+        ),
+      );
+    // The arguments the process port builds for a lease's authority.
+    const args = (index: number) => {
+      const authority = f.authorities()[index];
+      if (authority?.kind !== "thread") throw new Error("expected a thread lease");
+      return codexAppServerArgs(
+        "0.164.0",
+        authority.ownTelemetry === true ? { ownTelemetry: true } : {},
+      );
+    };
+    const override = "analytics.enabled=false";
+    await open(sessionId, { strict: false, telemetry: true });
+    // The same choice is the same launch: the idle process is reused.
+    await open(secondSessionId, { strict: false, telemetry: true });
+    expect(f.authorities()).toHaveLength(1);
+    expect(args(0)).not.toContain(override);
+    // The switch turned off is a new process, with the override back.
+    await open(sessionId, { strict: false, telemetry: false });
+    expect(f.authorities()).toHaveLength(2);
+    expect(args(1)).toContain(override);
+    // Strict closes the channel whatever the person chose.
+    await open(sessionId, { telemetry: true });
+    expect(f.authorities()).toHaveLength(3);
+    expect(f.authorities()[2]).not.toHaveProperty("ownTelemetry");
+    expect(args(2)).toContain(override);
+    await open(secondSessionId, { telemetry: false });
+    expect(f.authorities()).toHaveLength(3);
   });
 
   it("shares one process per root and posture, separates postures and instances, and idles for 30 seconds", async () => {
@@ -3637,10 +3694,12 @@ describe("Codex execution authority and approvals", () => {
     },
   );
 
-  it("keeps an escalation from Codex's own sandbox to one command even on a thread that keeps answers for the session", async () => {
+  // Under Strict such an escalation stays one command; see "answers an
+  // approval ... in Codex's own sandbox" and the Windows Strict tests.
+  it("keeps an escalation from Codex's own sandbox for the session outside Strict when the thread keeps answers, as Codex itself does", async () => {
     await expect(
       runApprovalAnswerConformance({
-        remembersForSession: false,
+        remembersForSession: true,
         pending: async (hostDefault) => {
           const f = fixture();
           const acquired = await acquireConnection(
@@ -3671,7 +3730,7 @@ describe("Codex execution authority and approvals", () => {
           };
         },
       }),
-    ).resolves.toMatchObject({ sessionAnswerRemembered: false });
+    ).resolves.toMatchObject({ sessionAnswerRemembered: true });
   });
 
   it("never gives a thread that keeps no answers the idle process that remembers the session's", async () => {
@@ -4145,32 +4204,43 @@ describe("Codex execution authority and approvals", () => {
     });
   });
 
-  it("approves an escalation from Codex's own sandbox for that one command, never for the session", async () => {
-    const f = fixture();
-    const acquired = await acquireConnection(
-      makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
-      "code",
-    );
-    await Effect.runPromise(
-      acquired.connection.start({
-        sessionId,
-        modelId: "gpt-5.4" as never,
-        executionPolicy: "approval-gated",
-        strict: false,
-      }),
-    );
-    await Effect.runPromise(
-      acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
-    );
-    const event = takeEvents(acquired.connection, 1);
-    f.emit(commandApproval());
-    await expect(event).resolves.toMatchObject([{ kind: "approval-request" }]);
-    await Effect.runPromise(
-      acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
-    );
-    expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
-    await acquired.close();
-  });
+  it.each([
+    ["kept for the session", undefined, "acceptForSession"],
+    ["given for one call", "once", "accept"],
+  ] as const)(
+    "answers an approval %s in Codex's own sandbox with Codex's own decision for it",
+    async (_answer, scope, decision) => {
+      const f = fixture();
+      const acquired = await acquireConnection(
+        makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
+        "code",
+      );
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
+      );
+      const event = takeEvents(acquired.connection, 1);
+      f.emit(commandApproval());
+      await expect(event).resolves.toMatchObject([{ kind: "approval-request" }]);
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: "request-1",
+          approved: true,
+          ...(scope === undefined ? {} : { scope }),
+        }),
+      );
+      expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision } });
+      await acquired.close();
+    },
+  );
 
   it("never shares one Codex process between a Strict and a non-Strict session", async () => {
     const registry = new ProviderRuntimeRegistry();
@@ -4932,6 +5002,77 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
+  it("accepts a provider approval at Full access outside Strict and lets the turn go on", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "full", attachments: [], tools: [] }),
+    );
+    f.emit(commandApproval({ cwd: "/private/outside" }));
+    await vi.waitFor(() =>
+      expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(1),
+    );
+    expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
+    // The turn is still running: a later request is answered too.
+    f.emit(fileApproval({ id: "provider-file-request-2" }));
+    await vi.waitFor(() =>
+      expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(2),
+    );
+    expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
+    await acquired.close();
+  });
+
+  it.each([
+    ["a command in a folder outside the Project", commandApproval({ cwd: "/private/outside" })],
+    ["a file change outside the Project", fileApproval({ grantRoot: "/private/outside" })],
+  ] as const)(
+    "shows %s to the person outside Strict and answers Codex with their decision for that one request",
+    async (_kind, requestMessage) => {
+      for (const approved of [true, false]) {
+        const f = fixture();
+        const acquired = await acquireConnection(
+          makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
+          "code",
+        );
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId: "gpt-5.4" as never,
+            executionPolicy: "auto-accept-edits",
+            strict: false,
+          }),
+        );
+        await Effect.runPromise(
+          acquired.connection.send({ sessionId, prompt: "outside", attachments: [], tools: [] }),
+        );
+        const event = takeEvents(acquired.connection, 1);
+        f.emit(requestMessage);
+        const [raised] = await event;
+        expect(raised).toMatchObject({ kind: "approval-request", requestId: "request-1" });
+        expect(raised?.kind === "approval-request" ? raised.description : "").toContain(
+          "/private/outside",
+        );
+        expect(f.calls.some(({ method }) => method === "approval/respond")).toBe(false);
+        await Effect.runPromise(
+          acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved }),
+        );
+        // Kept per request even though the person keeps approvals for the session.
+        expect(f.calls.at(-1)?.input).toMatchObject({
+          result: { decision: approved ? "accept" : "decline" },
+        });
+        await acquired.close();
+      }
+    },
+  );
+
   it("removes a pending approval before writing its response", async () => {
     let release!: () => void;
     const pendingResponse = new Promise<void>((resolve) => {
@@ -5346,6 +5487,76 @@ describe("Codex execution authority and approvals", () => {
       );
       await held.acquired.close();
     }
+  });
+
+  it("keeps a Full access turn whose file change lands outside the Project outside Strict, and ends it under Strict", async () => {
+    const outsideChange = (method: "item/started" | "item/completed"): CodexServerMessage =>
+      ({
+        kind: "notification",
+        method,
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "fileChange",
+            id: "file-1",
+            status: method === "item/started" ? "inProgress" : "completed",
+            changes: [
+              {
+                path: "/Users/person/notes/todo.md",
+                kind: { type: "update", move_path: null },
+                diff: "+done",
+              },
+            ],
+          },
+          ...(method === "item/started" ? { startedAtMs: 10 } : { completedAtMs: 20 }),
+        },
+      }) as CodexServerMessage;
+    const open = async (strict: boolean) => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()));
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "full-access",
+          strict,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "note it", attachments: [], tools: [] }),
+      );
+      return { f, acquired };
+    };
+
+    const kept = await open(false);
+    const recorded = takeEvents(kept.acquired.connection, 3);
+    kept.f.emit(outsideChange("item/started"));
+    kept.f.emit(outsideChange("item/completed"));
+    expect(await recorded).toMatchObject([
+      { kind: "tool-start" },
+      { kind: "tool-progress" },
+      {
+        kind: "tool-success",
+        summary:
+          "File change completed, including files outside the Project: modified /Users/person/notes/todo.md.",
+      },
+    ]);
+    await kept.acquired.close();
+
+    const strict = await open(true);
+    const ended = takeEvents(strict.acquired.connection, 1);
+    strict.f.emit(outsideChange("item/started"));
+    expect(await ended).toMatchObject([
+      {
+        kind: "failed",
+        failure: {
+          category: "protocol",
+          message: "Provider reported a file change outside the authorized Project root.",
+        },
+      },
+    ]);
+    await strict.acquired.close();
   });
 
   it("runs a Plan session in Codex's own Plan mode and returns a thread that recorded it to the default mode", async () => {
@@ -5810,6 +6021,8 @@ describe("Codex running as itself", () => {
       "stdio://",
       "-c",
       "features.memories=false",
+      "-c",
+      "analytics.enabled=false",
     ]);
     expect(codexAppServerArgs("0.164.0")).toContain("agents.enabled=false");
   });

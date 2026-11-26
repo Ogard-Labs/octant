@@ -172,10 +172,10 @@ export interface ProviderOwnChannels {
   /** The provider replacing or checking for a newer version of itself. */
   readonly selfUpdate: boolean;
   /**
-   * Well-known host credentials unrelated to the provider (`GH_TOKEN`, AWS
-   * keys, another service's `*_API_KEY`) the person lets through to it, by
-   * name. Absent or empty, every such credential that is not the provider's
-   * own stays out of its launch.
+   * Host variables (`GH_TOKEN`, an npm token) the person lets through to the
+   * provider under Strict, by name: a Strict launch adds them to its fixed
+   * environment list. Outside Strict the launch already receives the
+   * person's environment and ignores this list.
    */
   readonly credentialPassThrough?: ReadonlyArray<string>;
 }
@@ -213,11 +213,11 @@ export interface ProviderSessionStart {
   readonly strict?: boolean;
   /**
    * The session's surface asks a question that wants a secret (a password or
-   * key) masked and keeps the typed answer out of every record, for a session
-   * that is not Strict but carries no `strict` of its own (a subagent, whose
-   * parent thread is outside Strict). A session with `strict: false` asks
-   * such questions already; `strict: true` never does. Absent, a driver that
-   * can tell such a question refuses it unseen.
+   * key) masked and keeps the typed answer out of every record. It decides
+   * only for a session that carries no `strict` of its own: a session with
+   * `strict: false` asks such questions already, and `strict: true` never
+   * does. A helper run states both, from its parent thread's Strict. Absent,
+   * a driver that can tell such a question refuses it unseen.
    */
   readonly asksSecretQuestions?: true;
   /**
@@ -293,8 +293,10 @@ export interface ProviderSessionStart {
   readonly levelChanges?: boolean;
   /**
    * Every approval this session's host answers holds for that one call only,
-   * as a helper run's do. A driver refuses on arrival a request it could only
-   * approve for longer (an agent offering `allow_always` with no
+   * as a helper run's do under Strict. Outside Strict a helper does not
+   * carry this: its answers are kept as the person's persistence setting
+   * says, as on its parent thread. A driver refuses on arrival a request it
+   * could only approve for longer (an agent offering `allow_always` with no
    * `allow_once`), answering the runtime's reject and asking no one, since no
    * answer the host can give would approve it. Absent, such a request is
    * asked as usual.

@@ -185,9 +185,9 @@ export interface SeatbeltProfileInput {
    * Which protected files the launch is refused. Absent is every one on the
    * list. `provider-sign-ins` refuses only other providers' sign-ins: a
    * provider runtime outside Strict reads and writes the rest with its own
-   * tools, as it does on its own, and one provider never receives another's
-   * credentials (Architecture: "Octant adds no restrictions of its own
-   * unless Strict is on").
+   * tools, as it does on its own, and a confined launch never reads another
+   * provider's stored sign-in (Architecture: "Octant adds no restrictions of
+   * its own unless Strict is on").
    */
   readonly protectedFiles?: "provider-sign-ins";
   readonly extraRules?: ReadonlyArray<string>;

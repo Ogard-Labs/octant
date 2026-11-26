@@ -683,6 +683,8 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     readonly configuredDriverOptions: () => ConfiguredProviderDriverOptions;
     /** The level a Work thread's running turn holds; wired later, read per call. */
     readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
+    /** Whether that turn started with the kept sandbox; wired later, read per call. */
+    readonly runningWorkTurnSandbox: (threadId: string) => boolean | undefined;
   };
 
 export function wireAgentRuns(deps: AgentRunsDependencies) {
@@ -708,6 +710,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     providerRuntimeRegistry,
     selectCodeConversation,
     runningWorkTurnAccess,
+    runningWorkTurnSandbox,
     windowAuthorityStore,
     workThreadProjection,
     workTurnProjection,
@@ -906,6 +909,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     if (
       browserToolTransport(observed, String(target.modelId), {
         executionPolicy: authority.executionPolicy,
+        // A child's session launches with its parent thread's Strict value.
+        strict: resolveThreadStrict(String(run.parentThreadId)),
       }) !== true
     ) {
       return undefined;
@@ -937,6 +942,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   // the run rather than inherited from the parent thread at execution time.
   const agentRunSessionSupervisor = new AgentRunSessionSupervisor({
     port: createAgentRunSessionRuntime({
+      // A helper's session is as Strict as its parent thread: outside Strict
+      // it runs as that thread's own provider does.
+      strict: (run) => resolveThreadStrict(String(run.parentThreadId)),
       // A child's provider asks a secret question only while its parent
       // thread is outside Strict, the same parent Strict every child policy
       // reads; the answer reaches the child in memory and is kept nowhere.
@@ -956,6 +964,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
             workThreadProjection,
             run,
           ),
+          strict: resolveThreadStrict(String(run.parentThreadId)),
         });
         return minutes === "none" ? "none" : minutes * 60_000;
       },
@@ -1316,6 +1325,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         codeSessionAuthority,
         activeTurn: codeParentActiveTurn,
         liveTurnProvider: (threadId) => liveTurns.connection(threadId)?.providerInstanceId,
+        strict: resolveThreadStrict,
+        runningWorkTurnAccess,
+        runningWorkTurnSandbox,
       }),
     poolRouting: ({ request }) => {
       if (request.pool === undefined) return undefined;

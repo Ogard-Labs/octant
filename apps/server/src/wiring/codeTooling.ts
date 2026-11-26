@@ -127,6 +127,7 @@ import type { IntegrationsWiring } from "./integrations";
 import type { ProvidersWiring } from "./providers";
 import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 import { providerOwnChannelsFromSettings } from "../providers/providerOwnChannels";
+import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import { resolveProviderTerminal } from "../providers/providerTerminal";
 import { homedir } from "node:os";
 
@@ -393,6 +394,25 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 ...(access === undefined ? {} : { executionPolicy: access.executionPolicy }),
                 fullAccessSandbox: thread?.fullAccessSandbox,
                 sandboxPolicySelected,
+                // As a Work turn of the thread resolves it, so an ACP agent's
+                // CLI opens on the home its turns run on.
+                ...(thread === undefined
+                  ? {}
+                  : nativeSetupOption(
+                      sessionNativeSetup(
+                        { ...persistence, readStrict: () => strict },
+                        {
+                          providerInstanceId: thread.providerInstanceId,
+                          projectId: thread.projectId,
+                          threadId: String(workThreadId),
+                          mode: "work",
+                          executionPolicy:
+                            access?.executionPolicy === "auto-accept-edits"
+                              ? "auto-accept-edits"
+                              : "approval-gated",
+                        },
+                      ),
+                    )),
                 ...(deps.configuredDriverOptions.acpHome === undefined
                   ? {}
                   : { acpHome: deps.configuredDriverOptions.acpHome }),

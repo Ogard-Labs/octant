@@ -493,7 +493,7 @@ describe("mapClaudeMessage", () => {
     expect(eventValues(completed).map((item) => item.kind)).toEqual(["usage", "completed"]);
   });
 
-  it.each(["success", "missing", "changed correlation"])(
+  it.each(["success", "missing", "success after a changed correlation"])(
     "fails closed when a disabled tool has %s refusal evidence",
     (scenario) => {
       const ctx = context();
@@ -526,20 +526,29 @@ describe("mapClaudeMessage", () => {
                 permissionDenials: [],
                 usage,
               })
-            : mapped(ctx, {
-                kind: "stream-event",
-                sessionId: claudeSessionId,
-                event: {
-                  kind: "content-start",
-                  index: 0,
-                  content: {
-                    kind: "tool-use",
-                    toolUseId: "disabled-1",
-                    toolName: "Write",
-                    input: {},
+            : // A later report of the same call as an enabled one is dropped,
+              // so the call stays the withheld write it was first reported as.
+              [
+                ...mapped(ctx, {
+                  kind: "stream-event",
+                  sessionId: claudeSessionId,
+                  event: {
+                    kind: "content-start",
+                    index: 0,
+                    content: {
+                      kind: "tool-use",
+                      toolUseId: "disabled-1",
+                      toolName: "Write",
+                      input: {},
+                    },
                   },
-                },
-              });
+                }),
+                ...mapped(ctx, {
+                  kind: "tool-results",
+                  sessionId: claudeSessionId,
+                  results: [{ toolUseId: "disabled-1", isError: false }],
+                }),
+              ].filter((item) => item.kind !== "ignored");
       expect(result).toMatchObject([{ kind: "failure", failure: { category: "protocol" } }]);
     },
   );
@@ -1021,15 +1030,16 @@ describe("mapClaudeMessage", () => {
     });
     expect(JSON.stringify([started, childRead, finished])).not.toContain("private prompt");
 
-    // A subagent reply that names no running subagent is not one Octant opened.
+    // A subagent reply that names no running subagent is not one Octant
+    // opened: it is dropped, and the turn goes on.
     expect(
       mapped(ctx, {
         kind: "child-assistant",
         sessionId: claudeSessionId,
         parentToolUseId: "sdk-agent",
-        toolUses: [],
+        toolUses: [{ toolUseId: "sdk-child-late", toolName: "WebFetch", input: {} }],
       }),
-    ).toMatchObject([{ kind: "failure" }]);
+    ).toEqual([{ kind: "ignored" }]);
   });
 
   it("shows a workflow as a child run under its Workflow call and each agent it starts as a child of the workflow", () => {
@@ -1129,7 +1139,8 @@ describe("mapClaudeMessage", () => {
     ]);
     expect(JSON.stringify([started, opened, ended])).not.toContain("private script");
 
-    // A workflow task that names no Workflow call of this session is not one Octant opened.
+    // A workflow task that names no Workflow call of this session is not one
+    // Octant opened: it is dropped, and the turn goes on.
     expect(
       mapped(context(), {
         kind: "task",
@@ -1141,7 +1152,7 @@ describe("mapClaudeMessage", () => {
         workflow: {},
         description: "Unknown",
       }),
-    ).toMatchObject([{ kind: "failure" }]);
+    ).toEqual([{ kind: "ignored" }]);
   });
 
   it("shows a wake-up call Octant answered in place of the runtime as done, not failed", () => {
@@ -1871,10 +1882,10 @@ describe("mapClaudeMessage", () => {
       toolName,
       elapsedSeconds: 30,
     });
-    expect(unknown.some((item) => item.kind === "failure")).toBe(true);
+    expect(unknown).toEqual([{ kind: "ignored" }]);
   });
 
-  it("protocol-fails unknown tool progress without synthesizing tool state or start", () => {
+  it("drops progress for a tool this turn never saw, without inventing its row", () => {
     const ctx = context();
 
     const results = mapped(ctx, {
@@ -1885,15 +1896,7 @@ describe("mapClaudeMessage", () => {
       elapsedSeconds: 1,
     });
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude tool progress did not match an active tool.",
-        },
-      },
-    ]);
+    expect(results).toEqual([{ kind: "ignored" }]);
     expect(ctx.toolStates).toHaveLength(0);
     expect(ctx.sequence).toBe(41);
   });
@@ -1913,7 +1916,7 @@ describe("mapClaudeMessage", () => {
         { toolUseId: "sdk-tool-duplicate", isError: true },
       ],
     },
-  ])("rejects $name atomically before tool state or sequence mutation", ({ results }) => {
+  ])("settles a call once when one message holds $name", ({ results }) => {
     const ctx = context();
     mapped(ctx, {
       kind: "stream-event",
@@ -1929,25 +1932,15 @@ describe("mapClaudeMessage", () => {
         },
       },
     });
-    const sequenceBefore = ctx.sequence;
-
     const mappedResults = mapped(ctx, {
       kind: "tool-results",
       sessionId: claudeSessionId,
       results,
     });
 
-    expect(mappedResults).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned duplicate or contradictory tool results.",
-        },
-      },
-    ]);
-    expect(ctx.sequence).toBe(sequenceBefore);
-    expect(ctx.toolStates.get("sdk-tool-duplicate")?.lifecycle).toBe("active");
+    // The first entry settles the call; the repeat settles nothing.
+    expect(eventValues(mappedResults).map((item) => item.kind)).toEqual(["tool-success"]);
+    expect(ctx.toolStates.get("sdk-tool-duplicate")?.lifecycle).toBe("terminal");
   });
 
   it("emits authoritative confined Edit and Write changes only after successful results", () => {
@@ -2052,7 +2045,7 @@ describe("mapClaudeMessage", () => {
       },
     },
   ])(
-    "rejects $name duplicate authoritative metadata within one assistant message atomically",
+    "keeps the first of $name duplicate file edits within one assistant message",
     ({ repeatedInput }) => {
       const checkedPaths: string[] = [];
       const ctx = context({
@@ -2087,18 +2080,16 @@ describe("mapClaudeMessage", () => {
         usage,
       });
 
-      expect(results).toEqual([
-        {
-          kind: "failure",
-          failure: {
-            category: "protocol",
-            message: "Claude returned duplicate authoritative file metadata.",
-          },
-        },
+      expect(eventValues(results).map((item) => item.kind)).toEqual([
+        "tool-start",
+        "tool-call-content",
+        "usage",
       ]);
-      expect(checkedPaths).toHaveLength(0);
-      expect(ctx.sequence).toBe(41);
-      expect(ctx.toolStates).toHaveLength(0);
+      expect(checkedPaths).toEqual(["/repo/src/app.ts"]);
+      expect(ctx.toolStates).toHaveLength(1);
+      expect(ctx.toolStates.get("sdk-edit-duplicate")?.fileChange).toMatchObject({
+        path: "src/app.ts",
+      });
     },
   );
 
@@ -2120,7 +2111,7 @@ describe("mapClaudeMessage", () => {
       },
     },
   ])(
-    "rejects $name authoritative metadata repeated across assistant messages without overwrite",
+    "keeps the first file edit when $name metadata is repeated across assistant messages",
     ({ repeatedInput }) => {
       const checkedPaths: string[] = [];
       const ctx = context({
@@ -2149,8 +2140,6 @@ describe("mapClaudeMessage", () => {
       });
       const acceptedState = ctx.toolStates.get("sdk-edit-repeated");
       const acceptedMetadata = acceptedState?.fileChange;
-      const sequenceBefore = ctx.sequence;
-
       const results = mapped(ctx, {
         kind: "assistant",
         sessionId: claudeSessionId,
@@ -2166,17 +2155,9 @@ describe("mapClaudeMessage", () => {
         usage,
       });
 
-      expect(results).toEqual([
-        {
-          kind: "failure",
-          failure: {
-            category: "protocol",
-            message: "Claude returned duplicate authoritative file metadata.",
-          },
-        },
-      ]);
+      // Only the message's usage is reported; the repeated call adds nothing.
+      expect(eventValues(results).map((item) => item.kind)).toEqual(["usage"]);
       expect(checkedPaths).toEqual(["/repo/src/app.ts"]);
-      expect(ctx.sequence).toBe(sequenceBefore);
       expect(ctx.toolStates.get("sdk-edit-repeated")).toBe(acceptedState);
       expect(ctx.toolStates.get("sdk-edit-repeated")?.fileChange).toBe(acceptedMetadata);
       expect(ctx.toolStates.get("sdk-edit-repeated")?.lifecycle).toBe("active");
@@ -2335,7 +2316,7 @@ describe("mapClaudeMessage", () => {
     ]);
   });
 
-  it("fails closed on contradictory tool correlation without emitting partial events", () => {
+  it("drops a call that contradicts the tool this turn knows under its id, without showing it", () => {
     const ctx = context();
     mapped(ctx, {
       kind: "stream-event",
@@ -2367,15 +2348,8 @@ describe("mapClaudeMessage", () => {
       usage,
     });
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned invalid tool correlation metadata.",
-        },
-      },
-    ]);
+    expect(eventValues(results).map((item) => item.kind)).toEqual(["usage"]);
+    expect(ctx.toolStates.get("sdk-tool-conflict")?.toolName).toBe("Read");
     expect(JSON.stringify(results)).not.toMatch(/private command|sdk-tool-conflict/);
   });
 
@@ -2397,7 +2371,7 @@ describe("mapClaudeMessage", () => {
       field: "cacheReadInputTokens" as const,
       value: Number.MAX_SAFE_INTEGER + 1,
     },
-  ])("rejects $name usage before assistant tool state or event mutation", ({ field, value }) => {
+  ])("shows an assistant message's tools and reports no usage for $name", ({ field, value }) => {
     const ctx = context();
 
     const results = mapped(ctx, {
@@ -2415,14 +2389,9 @@ describe("mapClaudeMessage", () => {
       usage: { ...usage, [field]: value },
     });
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: { category: "protocol", message: "Claude returned invalid usage metadata." },
-      },
-    ]);
-    expect(ctx.sequence).toBe(41);
-    expect(ctx.toolStates).toHaveLength(0);
+    expect(results.some((item) => item.kind === "failure")).toBe(false);
+    expect(eventValues(results).map((item) => item.kind)).not.toContain("usage");
+    expect(ctx.toolStates.get("sdk-tool-unsafe-usage")?.lifecycle).toBe("active");
   });
 
   it("normalizes task progress with provider-neutral task IDs and bounded summaries", () => {
@@ -2671,44 +2640,50 @@ describe("mapClaudeMessage", () => {
         description: "future",
       } as unknown as ClaudeDecodedMessage,
     },
-    {
-      name: "unknown status",
-      before: [
-        {
-          kind: "task",
-          sessionId: claudeSessionId,
-          subtype: "task_started",
-          taskId: "sdk-task-invalid",
-          description: "started",
-        } satisfies ClaudeDecodedMessage,
-      ],
-      invalid: {
-        kind: "task",
-        sessionId: claudeSessionId,
-        subtype: "task_updated",
-        taskId: "sdk-task-invalid",
-        status: "future",
-      } as unknown as ClaudeDecodedMessage,
+  ])(
+    "drops a task frame that does not follow from the task's state: $name",
+    ({ before, invalid }) => {
+      const ctx = context();
+      for (const message of before) mapped(ctx, message);
+      const sequenceBefore = ctx.sequence;
+      const stateBefore = ctx.taskIds.get("sdk-task-invalid");
+
+      const results = mapped(ctx, invalid);
+
+      expect(results).toEqual([{ kind: "ignored" }]);
+      expect(ctx.sequence).toBe(sequenceBefore);
+      expect(ctx.taskIds.get("sdk-task-invalid")).toEqual(stateBefore);
     },
-  ])("protocol-fails invalid task lifecycle: $name", ({ before, invalid }) => {
+  );
+
+  it("keeps a task as it was when its update names a status this build does not know, and ends it on any notification", () => {
     const ctx = context();
-    for (const message of before) mapped(ctx, message);
-    const sequenceBefore = ctx.sequence;
-    const stateBefore = ctx.taskIds.get("sdk-task-invalid");
+    mapped(ctx, {
+      kind: "task",
+      sessionId: claudeSessionId,
+      subtype: "task_started",
+      taskId: "sdk-task-future",
+      description: "started",
+    });
 
-    const results = mapped(ctx, invalid);
+    const updated = mapped(ctx, {
+      kind: "task",
+      sessionId: claudeSessionId,
+      subtype: "task_updated",
+      taskId: "sdk-task-future",
+      status: "future",
+    });
+    expect(eventValues(updated)).toMatchObject([{ kind: "task-progress", status: "in-progress" }]);
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned an invalid task lifecycle transition.",
-        },
-      },
-    ]);
-    expect(ctx.sequence).toBe(sequenceBefore);
-    expect(ctx.taskIds.get("sdk-task-invalid")).toEqual(stateBefore);
+    const ended = mapped(ctx, {
+      kind: "task",
+      sessionId: claudeSessionId,
+      subtype: "task_notification",
+      taskId: "sdk-task-future",
+      status: "future_end",
+      summary: "ended",
+    });
+    expect(eventValues(ended)).toMatchObject([{ kind: "task-progress", status: "failed" }]);
   });
 
   it("maps rejected rate limits with bounded retry timing and terminates once", () => {
@@ -2909,20 +2884,23 @@ describe("mapClaudeMessage", () => {
     ]);
   });
 
+  it("ends the turn on a result whose usage it cannot count, reporting no usage for it", () => {
+    const ctx = context();
+    const results = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      terminalReason: "completed",
+      usage: { ...usage, outputTokens: Number.MAX_SAFE_INTEGER + 1 },
+      permissionDenials: [],
+    });
+    expect(eventValues(results).map((item) => item.kind)).toEqual(["completed"]);
+    expect(ctx.terminal).toBe(true);
+  });
+
   it.each([
-    {
-      name: "result usage",
-      message: {
-        kind: "result",
-        sessionId: claudeSessionId,
-        outcome: "success",
-        subtype: "success",
-        stopReason: "end_turn",
-        terminalReason: "completed",
-        usage: { ...usage, outputTokens: Number.MAX_SAFE_INTEGER + 1 },
-        permissionDenials: [],
-      } satisfies ClaudeDecodedMessage,
-    },
     {
       name: "stream-start usage",
       message: {
@@ -2948,22 +2926,17 @@ describe("mapClaudeMessage", () => {
         },
       } satisfies ClaudeDecodedMessage,
     },
-  ])("protocol-fails unsafe $name without terminal or sequence mutation", ({ message }) => {
+  ])("reads nothing from unsafe $name and keeps the turn running", ({ message }) => {
     const ctx = context();
 
     const results = mapped(ctx, message);
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: { category: "protocol", message: "Claude returned invalid usage metadata." },
-      },
-    ]);
+    expect(results).toEqual([{ kind: "ignored" }]);
     expect(ctx.sequence).toBe(41);
     expect(ctx.terminal).toBe(false);
   });
 
-  it("protocol-fails unsafe task usage without advancing task state", () => {
+  it("shows a task's progress without the usage it cannot count", () => {
     const ctx = context();
     mapped(ctx, {
       kind: "task",
@@ -2972,9 +2945,6 @@ describe("mapClaudeMessage", () => {
       taskId: "sdk-task-unsafe-usage",
       description: "Started",
     });
-    const sequenceBefore = ctx.sequence;
-    const stateBefore = ctx.taskIds.get("sdk-task-unsafe-usage");
-
     const results = mapped(ctx, {
       kind: "task",
       sessionId: claudeSessionId,
@@ -2984,14 +2954,9 @@ describe("mapClaudeMessage", () => {
       usage: { totalTokens: Number.MAX_SAFE_INTEGER + 1, toolUses: 1, durationMs: 1 },
     });
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: { category: "protocol", message: "Claude returned invalid usage metadata." },
-      },
+    expect(eventValues(results)).toMatchObject([
+      { kind: "task-progress", status: "in-progress", summary: "Unsafe" },
     ]);
-    expect(ctx.sequence).toBe(sequenceBefore);
-    expect(ctx.taskIds.get("sdk-task-unsafe-usage")).toEqual(stateBefore);
   });
 
   it("reports the turn's usage so far after each model call, counting a split call once", () => {
@@ -3056,6 +3021,69 @@ describe("mapClaudeMessage", () => {
       kind: "event",
       event: { kind: "usage", inputTokens: 17, outputTokens: 7, costUsd: 0.0421 },
     });
+  });
+
+  it("keeps Claude's own turn cost when the result's usage cannot be counted, on the figures the turn already reported", () => {
+    for (const unreadable of [
+      { usage: { ...usage, outputTokens: Number.MAX_SAFE_INTEGER + 1 } },
+      {},
+    ]) {
+      const ctx = context();
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-1",
+        content: [{ kind: "text", text: "Done." }],
+        usage,
+      });
+      const results = eventValues(
+        mapped(ctx, {
+          kind: "result",
+          sessionId: claudeSessionId,
+          outcome: "success",
+          subtype: "success",
+          stopReason: "end_turn",
+          ...unreadable,
+          durationMs: 1200,
+          costUsd: 0.0421,
+          permissionDenials: [],
+        }),
+      );
+      expect(results.map((item) => item.kind)).toEqual(["usage", "completed"]);
+      // The turn's own total as its calls reported it, never a zero.
+      expect(results[0]).toMatchObject({
+        kind: "usage",
+        inputTokens: 17,
+        outputTokens: 7,
+        costUsd: 0.0421,
+        providerExecutionDurationMs: 1200,
+      });
+    }
+  });
+
+  it("reports no usage for a result it cannot count when no cost came with it, or the cost is unreadable", () => {
+    for (const costUsd of [undefined, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const ctx = context();
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-1",
+        content: [{ kind: "text", text: "Done." }],
+        usage,
+      });
+      const results = eventValues(
+        mapped(ctx, {
+          kind: "result",
+          sessionId: claudeSessionId,
+          outcome: "success",
+          subtype: "success",
+          stopReason: "end_turn",
+          ...(costUsd === undefined ? {} : { costUsd }),
+          permissionDenials: [],
+        }),
+      );
+      expect(results.map((item) => item.kind)).toEqual(["completed"]);
+    }
   });
 
   it("does not expose a cumulative session total when the turn baseline is unknown", () => {
@@ -3303,15 +3331,30 @@ describe("mapClaudeMessage", () => {
         },
       },
     ]);
-    expect(duplicate).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned a duplicate terminal message.",
-        },
-      },
-    ]);
+    // The first result ended the turn; a repeat ends nothing and fails nothing.
+    expect(duplicate).toEqual([{ kind: "ignored" }]);
+  });
+
+  it("drops activity that follows the turn's end", () => {
+    const ctx = context();
+    mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage,
+      permissionDenials: [],
+    });
+    const sequenceBefore = ctx.sequence;
+    expect(
+      mapped(ctx, {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: { kind: "text-delta", index: 0, text: "late" },
+      }),
+    ).toEqual([{ kind: "ignored" }]);
+    expect(ctx.sequence).toBe(sequenceBefore);
   });
 
   it("completes a turn in which a tool was denied instead of calling it contradictory", () => {
@@ -3370,7 +3413,7 @@ describe("mapClaudeMessage", () => {
       terminalReason: "budget_exhausted",
       permissionDenials: [{ toolName: "Bash", toolUseId: "sdk-denied" }],
     },
-  ])("rejects contradictory terminal metadata: $name", (invalid) => {
+  ])("ends the turn by the result's own outcome despite $name", (invalid) => {
     const ctx = context();
 
     const results = mapped(ctx, {
@@ -3384,17 +3427,11 @@ describe("mapClaudeMessage", () => {
       permissionDenials: invalid.permissionDenials,
     });
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned contradictory result metadata.",
-        },
-      },
+    expect(eventValues(results).map((item) => item.kind)).toEqual([
+      "usage",
+      invalid.outcome === "success" ? "completed" : "failed",
     ]);
-    expect(ctx.sequence).toBe(41);
-    expect(ctx.terminal).toBe(false);
+    expect(ctx.terminal).toBe(true);
   });
 
   it("preserves partial output but maps a later provider error to failed, never completed", () => {
@@ -3434,7 +3471,7 @@ describe("mapClaudeMessage", () => {
     expect(eventValues(failure).some((event) => event.kind === "completed")).toBe(false);
   });
 
-  it("classifies mismatched and unknown active decoded messages as sanitized protocol failures", () => {
+  it("keeps the turn running when the runtime sends a message type this build does not know, and never applies another session's message", () => {
     const mismatched = mapped(context(), {
       kind: "status",
       sessionId: "wrong-private-session",
@@ -3445,25 +3482,34 @@ describe("mapClaudeMessage", () => {
       rawMessage: { secret: "raw-sdk-object-must-not-cross" },
     } as unknown as ClaudeDecodedMessage);
 
-    expect(mismatched).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude message did not match the active session.",
-        },
-      },
-    ]);
-    expect(unknown).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned an unsupported decoded message.",
-        },
-      },
-    ]);
+    expect(mismatched).toEqual([{ kind: "ignored" }]);
+    expect(unknown).toEqual([{ kind: "ignored" }]);
     expect(JSON.stringify([mismatched, unknown])).not.toMatch(/wrong-private|raw-sdk-object/);
+  });
+
+  it("still ends the turn when the runtime initialized in another folder than the Project", () => {
+    const initialized = (projectRoot: string) =>
+      mapped(context(), {
+        kind: "initialized",
+        sessionId: claudeSessionId,
+        projectRoot,
+        model: "claude-sonnet",
+        requestedModel: "claude-sonnet",
+        permissionMode: "default",
+        tools: [],
+        capabilities: [],
+        runtimeVersion: "2.1.308",
+      });
+    expect(initialized("/elsewhere")).toEqual([
+      {
+        kind: "failure",
+        failure: {
+          category: "protocol",
+          message: "Claude initialization did not match the active Project.",
+        },
+      },
+    ]);
+    expect(initialized("/repo")).toEqual([{ kind: "ignored" }]);
   });
 
   it("ignores only Task 4's validated ignored decoded message", () => {

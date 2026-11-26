@@ -13,6 +13,7 @@ import {
   type ClaudeAgentSdkBridge,
   type ClaudeAgentSdkQueryInvocation,
   type ClaudeAgentSdkQueryLike,
+  type ClaudeToolRequest,
 } from "./claudeAgentSdkPort";
 import type { ClaudeRuntimeConfinement } from "./claudeProcess";
 
@@ -220,6 +221,11 @@ async function collectMessages(output: readonly unknown[]) {
     ),
   );
   return Chunk.toReadonlyArray(messages);
+}
+
+/** What the stream carries for one frame sent after the runtime initialized. */
+async function afterInitialization(message: unknown) {
+  return (await collectMessages([safeRuntimeInitialization, message])).slice(1);
 }
 
 describe("Claude Agent SDK port", () => {
@@ -1525,6 +1531,54 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
+  test("hands the runtime's suggested allow rules to the gate at session scope and returns the ones it keeps", async () => {
+    const sessionRule = {
+      type: "addRules" as const,
+      rules: [{ toolName: "Read", ruleContent: "/repo/**" }],
+      behavior: "allow" as const,
+      destination: "session" as const,
+    };
+    const canUseTool = vi.fn(async (request: ClaudeToolRequest) => ({
+      behavior: "allow" as const,
+      ...(request.sessionPermissions === undefined
+        ? {}
+        : { updatedPermissions: request.sessionPermissions }),
+    }));
+    const preToolUse = vi.fn(async () => ({ behavior: "ask" as const }));
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          yield* Stream.runHead(query.messages);
+          const permission = harness.invocation?.options.canUseTool;
+          if (permission === undefined) throw new Error("Expected the permission callback.");
+          const decision = yield* Effect.promise(() =>
+            permission(
+              "Read",
+              { path: "/repo/file.ts" },
+              {
+                signal: new AbortController().signal,
+                toolUseID: "tool-1",
+                requestId: "request-1",
+                // A settings-file destination never goes back to the runtime,
+                // and neither does a mode switch or an added directory.
+                suggestions: [
+                  { ...sessionRule, destination: "localSettings" },
+                  { type: "setMode", mode: "acceptEdits", destination: "session" },
+                  { type: "addDirectories", directories: ["/elsewhere"], destination: "session" },
+                  { ...sessionRule, behavior: "deny" },
+                ],
+              },
+            ),
+          );
+          expect(decision).toEqual({ behavior: "allow", updatedPermissions: [sessionRule] });
+        }),
+      ),
+    );
+  });
+
   test("passes a pre-tool ask through to Claude Code so the permission callback is consulted", async () => {
     const canUseTool = vi.fn(async () => ({ behavior: "deny" as const, message: "denied" }));
     const preToolUse = vi.fn(async () => ({ behavior: "ask" as const }));
@@ -1676,6 +1730,23 @@ describe("Claude Agent SDK port", () => {
         }),
       ),
     );
+  });
+
+  test("gives MCP tool calls Octant's timeout unless the person's own environment sets one", async () => {
+    const timeoutFor = async (authEnvironment: Readonly<Record<string, string>>) => {
+      const harness = makeHarness([safeRuntimeInitialization]);
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery({ ...openInput, authEnvironment });
+            yield* Stream.runHead(query.messages);
+          }),
+        ),
+      );
+      return harness.invocation?.options.env.MCP_TOOL_TIMEOUT;
+    };
+    expect(await timeoutFor({ PATH: "/usr/bin" })).toBe("660000");
+    expect(await timeoutFor({ PATH: "/usr/bin", MCP_TOOL_TIMEOUT: "120000" })).toBe("120000");
   });
 
   test("lets background commands reach the gate and refuses a watch or a remote workflow Octant cannot hold", async () => {
@@ -1868,31 +1939,18 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
-  test("protocol-fails tool progress for an unlisted tool", async () => {
-    const failed = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const harness = makeHarness([
-            safeRuntimeInitialization,
-            {
-              type: "tool_progress",
-              session_id: "session-1",
-              parent_tool_use_id: null,
-              tool_use_id: "tool-unlisted",
-              tool_name: "Bash",
-              elapsed_time_seconds: 1,
-              uuid: "tool-progress-unlisted",
-            },
-          ]);
-          const query = yield* harness.port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-    expect(failed).toEqual({
-      category: "protocol",
-      message: "Claude returned an unsupported runtime message.",
-    });
+  test("drops tool progress for an unlisted tool and keeps the stream open", async () => {
+    expect(
+      await afterInitialization({
+        type: "tool_progress",
+        session_id: "session-1",
+        parent_tool_use_id: null,
+        tool_use_id: "tool-unlisted",
+        tool_name: "Bash",
+        elapsed_time_seconds: 1,
+        uuid: "tool-progress-unlisted",
+      }),
+    ).toEqual([{ kind: "ignored" }]);
   });
 
   test("ignores only schema-validated harmless informational messages", async () => {
@@ -1972,10 +2030,7 @@ describe("Claude Agent SDK port", () => {
   });
 
   test.each([
-    [
-      { type: "future_information", detail: "not allowlisted" },
-      "Claude returned an unsupported runtime message.",
-    ],
+    [{ type: "future_information", detail: "not allowlisted" }],
     [
       {
         type: "system",
@@ -1986,7 +2041,6 @@ describe("Claude Agent SDK port", () => {
         uuid: "5",
         session_id: "session-1",
       },
-      "Claude returned an unsupported system message.",
     ],
     [
       {
@@ -1996,7 +2050,6 @@ describe("Claude Agent SDK port", () => {
         uuid: "6",
         session_id: "session-1",
       },
-      "Claude returned an unsupported system message.",
     ],
     [
       {
@@ -2008,11 +2061,8 @@ describe("Claude Agent SDK port", () => {
         uuid: "7",
         session_id: "session-1",
       },
-      "Claude returned an unsupported runtime message.",
     ],
-    // A retry note whose counters are not whole non-negative numbers is not
-    // the frame this allowlist recognizes, so it is reported rather than
-    // silently dropped.
+    // A retry note is never read, whatever its counters hold.
     [
       {
         type: "system",
@@ -2023,21 +2073,11 @@ describe("Claude Agent SDK port", () => {
         uuid: "8",
         session_id: "session-1",
       },
-      "Claude returned an unsupported runtime message.",
     ],
   ])(
-    "protocol-fails every non-allowlisted message after initialization",
-    async (message, reason) => {
-      const failed = await failureOf(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const harness = makeHarness([safeRuntimeInitialization, message]);
-            const query = yield* harness.port.openQuery(openInput);
-            return yield* Stream.runDrain(query.messages);
-          }),
-        ),
-      );
-      expect(failed).toEqual({ category: "protocol", message: reason });
+    "drops a message it does not read after initialization and keeps the stream open",
+    async (message) => {
+      expect(await afterInitialization(message)).toEqual([{ kind: "ignored" }]);
     },
   );
 
@@ -2171,46 +2211,33 @@ describe("Claude Agent SDK port", () => {
     });
   });
 
-  test("rejects an assistant envelope with a non-assistant role", async () => {
-    const failed = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const harness = makeHarness([
-            safeRuntimeInitialization,
-            {
-              type: "assistant",
-              session_id: "session-1",
-              parent_tool_use_id: null,
-              message: {
-                id: "assistant-1",
-                type: "message",
-                role: "user",
-                model: "claude-sonnet",
-                content: [],
-                container: null,
-                context_management: null,
-                diagnostics: null,
-                stop_details: null,
-                stop_reason: "end_turn",
-                stop_sequence: null,
-                usage: {
-                  input_tokens: 1,
-                  output_tokens: 1,
-                  cache_creation_input_tokens: null,
-                  cache_read_input_tokens: null,
-                },
-              },
-            },
-          ]);
-          const query = yield* harness.port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-    expect(failed).toEqual({
-      category: "protocol",
-      message: "Claude returned an unsupported runtime message.",
-    });
+  test("drops an assistant envelope with a non-assistant role", async () => {
+    expect(
+      await afterInitialization({
+        type: "assistant",
+        session_id: "session-1",
+        parent_tool_use_id: null,
+        message: {
+          id: "assistant-1",
+          type: "message",
+          role: "user",
+          model: "claude-sonnet",
+          content: [],
+          container: null,
+          context_management: null,
+          diagnostics: null,
+          stop_details: null,
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_creation_input_tokens: null,
+            cache_read_input_tokens: null,
+          },
+        },
+      }),
+    ).toEqual([{ kind: "ignored" }]);
   });
 
   test("does not emit replayed prompts, and carries of a tool result only its text for the thread's record", async () => {
@@ -2254,48 +2281,34 @@ describe("Claude Agent SDK port", () => {
     expect(JSON.stringify(messages)).not.toContain("private structured output");
   });
 
-  test("protocol-fails unsupported assistant payload variants without reflecting payload content", async () => {
-    const failed = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const harness = makeHarness([
-            safeRuntimeInitialization,
-            {
-              type: "assistant",
-              session_id: "session-1",
-              parent_tool_use_id: null,
-              message: {
-                id: "assistant-1",
-                type: "message",
-                role: "assistant",
-                model: "claude-sonnet",
-                container: null,
-                context_management: null,
-                diagnostics: null,
-                stop_details: null,
-                stop_reason: "end_turn",
-                stop_sequence: null,
-                content: [{ type: "future_payload", secret: "private-payload" }],
-                usage: {
-                  input_tokens: 1,
-                  output_tokens: 1,
-                  cache_creation_input_tokens: 0,
-                  cache_read_input_tokens: 0,
-                },
-              },
-            },
-          ]);
-          const query = yield* harness.port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-
-    expect(failed).toEqual({
-      category: "protocol",
-      message: "Claude returned an unsupported runtime message.",
+  test("skips an assistant content block it does not know without reflecting its payload", async () => {
+    const messages = await afterInitialization({
+      type: "assistant",
+      session_id: "session-1",
+      parent_tool_use_id: null,
+      message: {
+        id: "assistant-1",
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet",
+        container: null,
+        context_management: null,
+        diagnostics: null,
+        stop_details: null,
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        content: [{ type: "future_payload", secret: "private-payload" }],
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
     });
-    expect(JSON.stringify(failed)).not.toContain("private-payload");
+
+    expect(messages).toMatchObject([{ kind: "assistant", messageId: "assistant-1", content: [] }]);
+    expect(JSON.stringify(messages)).not.toContain("private-payload");
   });
 
   const validResult = {
@@ -2589,28 +2602,16 @@ describe("Claude Agent SDK port", () => {
         session_id: "session-1",
       },
     ],
-  ])("protocol-fails %s provenance without reflecting it", async (_label, message) => {
-    const harness = makeHarness([safeRuntimeInitialization, message]);
+  ])("drops a frame with %s provenance without reflecting it", async (_label, message) => {
+    // The `Agent` call that would start a subagent is refused where the
+    // session does not hold the tool, so these frames are only noise.
+    const messages = await afterInitialization(message);
 
-    const failed = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const query = yield* harness.port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-
-    expect(failed).toEqual({
-      category: "protocol",
-      message: "Claude returned an unsupported runtime message.",
-    });
-    expect(JSON.stringify(failed)).not.toContain("secret-subagent");
-    expect(harness.query.close).toHaveBeenCalledOnce();
+    expect(messages).toEqual([{ kind: "ignored" }]);
+    expect(JSON.stringify(messages)).not.toContain("secret-subagent");
   });
 
   test.each([
-    ["a background terminal", { ...validResult, terminal_reason: "background_requested" }],
     [
       "a hidden task start",
       {
@@ -2658,24 +2659,11 @@ describe("Claude Agent SDK port", () => {
         session_id: "session-1",
       },
     ],
-  ])("protocol-fails %s without reflecting background payloads", async (_label, message) => {
-    const harness = makeHarness([safeRuntimeInitialization, message]);
+  ])("drops %s without reflecting background payloads", async (_label, message) => {
+    const messages = await afterInitialization(message);
 
-    const failed = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const query = yield* harness.port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-
-    expect(failed).toEqual({
-      category: "protocol",
-      message: "Claude returned an unsupported runtime message.",
-    });
-    expect(JSON.stringify(failed)).not.toContain("secret-background");
-    expect(harness.query.close).toHaveBeenCalledOnce();
+    expect(messages).toEqual([{ kind: "ignored" }]);
+    expect(JSON.stringify(messages)).not.toContain("secret-background");
   });
 
   test.each([
@@ -2715,20 +2703,8 @@ describe("Claude Agent SDK port", () => {
         session_id: "other-session",
       },
     ],
-  ])("protocol-fails a post-init %s frame from another session", async (_label, message) => {
-    const failed = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const harness = makeHarness([safeRuntimeInitialization, message]);
-          const query = yield* harness.port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-    expect(failed).toEqual({
-      category: "protocol",
-      message: "Claude returned an unsupported runtime message.",
-    });
+  ])("never applies a post-init %s frame from another session", async (_label, message) => {
+    expect(await afterInitialization(message)).toEqual([{ kind: "ignored" }]);
   });
 
   test.each([
@@ -2832,6 +2808,7 @@ describe("Claude Agent SDK port", () => {
   test.each([
     { ...validResult, subtype: "future_result" },
     { ...validResult, terminal_reason: "future_terminal" },
+    { ...validResult, terminal_reason: "background_requested" },
     { ...validResult, usage: { ...validResult.usage, output_tokens: Number.NaN } },
     {
       ...validResult,
@@ -2839,14 +2816,13 @@ describe("Claude Agent SDK port", () => {
         { tool_name: "Bash", tool_use_id: "tool-unlisted", tool_input: { command: "pwd" } },
       ],
     },
-    {
-      type: "system",
-      subtype: "status",
-      status: "requesting",
-      permissionMode: "acceptEdits",
-      uuid: "status-1",
-      session_id: "session-1",
-    },
+  ])("always carries a result through, whatever values it does not know", async (message) => {
+    expect(await afterInitialization(message)).toMatchObject([
+      { kind: "result", sessionId: "session-1", outcome: "success", subtype: "success" },
+    ]);
+  });
+
+  test.each([
     {
       type: "system",
       subtype: "task_started",
@@ -2863,7 +2839,12 @@ describe("Claude Agent SDK port", () => {
       uuid: "task-2",
       session_id: "session-1",
     },
-    {
+  ])("drops a task frame whose fields it cannot read", async (message) => {
+    expect(await afterInitialization(message)).toEqual([{ kind: "ignored" }]);
+  });
+
+  test("reads a task notification with a status it does not know as the task's end", async () => {
+    const messages = await afterInitialization({
       type: "system",
       subtype: "task_notification",
       task_id: "task-1",
@@ -2872,21 +2853,11 @@ describe("Claude Agent SDK port", () => {
       summary: "done",
       uuid: "task-3",
       session_id: "session-1",
-    },
-  ])("strictly rejects malformed active message fields", async (message) => {
-    const failed = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const harness = makeHarness([safeRuntimeInitialization, message]);
-          const query = yield* harness.port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-    expect(failed).toEqual({
-      category: "protocol",
-      message: "Claude returned an unsupported runtime message.",
     });
+    expect(messages).toMatchObject([
+      { kind: "task", subtype: "task_notification", taskId: "task-1", status: "future_status" },
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("/private/output");
   });
 
   test.each([
@@ -2896,23 +2867,12 @@ describe("Claude Agent SDK port", () => {
     [{ type: "input_future", payload: "secret" }, "input"],
     [{ type: "terminal_future", payload: "secret" }, "terminal"],
   ])(
-    "fails unknown active message %s after initialization without reflecting payloads",
+    "keeps the stream open when the runtime sends message type %s, which this build does not know",
     async (message, _label) => {
-      const harness = makeHarness([safeRuntimeInitialization, message]);
-      const failed = await failureOf(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const query = yield* harness.port.openQuery(openInput);
-            return yield* Stream.runDrain(query.messages);
-          }),
-        ),
-      );
+      const messages = await afterInitialization(message);
 
-      expect(failed).toEqual({
-        category: "protocol",
-        message: "Claude returned an unsupported runtime message.",
-      });
-      expect(JSON.stringify(failed)).not.toContain("secret");
+      expect(messages).toEqual([{ kind: "ignored" }]);
+      expect(JSON.stringify(messages)).not.toContain("secret");
     },
   );
 
@@ -3107,8 +3067,8 @@ describe("Claude Agent SDK port", () => {
     expect(failed).toMatchObject({ category: "protocol" });
   });
 
-  test("still refuses a message the runtime only sends once initialized", async () => {
-    const failed = await refusalOf([
+  test("drops a message the runtime only sends once initialized when it comes earlier", async () => {
+    const messages = await collectMessages([
       {
         type: "system",
         subtype: "compact_boundary",
@@ -3119,7 +3079,7 @@ describe("Claude Agent SDK port", () => {
       safeRuntimeInitialization,
     ]);
 
-    expect(failed).toMatchObject({ category: "protocol" });
+    expect(messages.map((message) => message.kind)).toEqual(["initialized"]);
   });
 
   test.each([
@@ -3746,17 +3706,9 @@ describe("Claude running as itself", () => {
     });
     expect(JSON.stringify(messages)).not.toContain("child text");
 
-    const failed = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const query = yield* makeHarness([safeRuntimeInitialization, childReply]).port.openQuery(
-            openInput,
-          );
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-    expect(failed).toMatchObject({ category: "protocol" });
+    // Where subagents are off the session holds no tool that starts one, so
+    // a reply naming one is dropped and read for nothing.
+    expect(await afterInitialization(childReply)).toEqual([{ kind: "ignored" }]);
   });
 
   test("reads a background command's task lifecycle and the runtime's idle state in any session", async () => {
@@ -3878,15 +3830,11 @@ describe("Claude running as itself", () => {
     ]);
     expect(JSON.stringify(messages)).not.toContain("private subagent prompt");
 
-    const refused = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const query = yield* makeHarness(lifecycle).port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-    expect(refused).toMatchObject({ category: "protocol" });
+    // Where subagents are off the session holds no tool that starts one, so
+    // the frame that names one is dropped and its prompt never crosses.
+    const withoutSubagents = await collectMessages(lifecycle);
+    expect(withoutSubagents[1]).toEqual({ kind: "ignored" });
+    expect(JSON.stringify(withoutSubagents)).not.toContain("private");
   });
 
   test("reads a workflow's task and where each of its agents stands only when subagents are on, keeping its script out", async () => {
@@ -3971,15 +3919,11 @@ describe("Claude running as itself", () => {
     ]);
     expect(JSON.stringify(messages)).not.toContain("private");
 
-    const refused = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const query = yield* makeHarness(lifecycle).port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-    expect(refused).toMatchObject({ category: "protocol" });
+    // Where subagents are off the session holds no tool that starts one, so
+    // the frame that names one is dropped and its prompt never crosses.
+    const withoutSubagents = await collectMessages(lifecycle);
+    expect(withoutSubagents[1]).toEqual({ kind: "ignored" });
+    expect(JSON.stringify(withoutSubagents)).not.toContain("private");
   });
 
   test("holds a person's or a trusted Project's MCP servers only in a session that loads the Project's code", async () => {

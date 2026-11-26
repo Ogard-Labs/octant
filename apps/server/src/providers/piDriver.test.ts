@@ -513,6 +513,35 @@ describe("Pi provider driver", () => {
     expect(await Effect.runPromise(forkSession({ ...request, anchor: "e2" }))).toBeUndefined();
   });
 
+  it("hands a Strict Pi launch the names the person let through", async () => {
+    const f = fixture();
+    const ownChannels = {
+      telemetry: false,
+      selfUpdate: false,
+      credentialPassThrough: ["GH_TOKEN"],
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({
+            instanceId,
+            projectRoot: root,
+            mode: "code",
+          });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            ownChannels,
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+    expect(f.starts[0]).toMatchObject({ ownChannels });
+    expect(f.starts[0]).not.toHaveProperty("strict");
+  });
+
   it("refuses concurrent owners of one native history and releases ownership after stop", async () => {
     const f = fixture();
     await Effect.runPromise(

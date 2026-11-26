@@ -1,63 +1,60 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, normalize, sep } from "node:path";
-import { MODEL_PROVIDER_CREDENTIAL_VARIABLES, hostCredentialCrosses } from "@octant/domain";
-
 /**
  * The host environment a provider runtime receives outside Strict.
  *
  * Outside Strict a provider launches with the host's environment, as it does
  * when the person runs it in their own shell: proxies, custom certificate
  * authorities, routing such as `ANTHROPIC_BASE_URL` or Bedrock and Vertex,
- * and the rest. Two kinds of variable never cross: Octant's own (`OCTANT_*`,
- * which name the host's internal bridges, ports and switches), and another
- * model provider's credential, since one provider never receives another's
- * credentials (Architecture: "Octant adds no restrictions of its own unless
- * Strict is on"). A well-known credential unrelated to the provider
- * (`GH_TOKEN`, AWS keys, another service's `*_API_KEY`) crosses only when it
- * is the provider's own or the person lets it through for that provider
- * (`hostCredentialCrosses`). Under Strict each runtime keeps its own fixed
- * list instead.
+ * and every credential their own tools sign in with (`GH_TOKEN`, an npm
+ * token, AWS keys, their own services' keys, and the keys of other model
+ * providers, which a script or a test the agent runs may call). Two kinds of
+ * variable never cross. Octant's own (`OCTANT_*`) name the host's internal
+ * bridges, ports and switches. And where the person chose an account for the
+ * provider in Octant, the variables that would sign the provider itself in
+ * as a different account stay out (`accountCredentials`): a host
+ * `ANTHROPIC_API_KEY` would move a Claude Code thread from the chosen
+ * subscription to metered API billing without a word in the thread. That
+ * protects the hard line that the host, not the environment a launch happens
+ * to inherit, decides which account a turn spends from (maintainer decision,
+ * 2026-11-26; Architecture: "Octant adds no restrictions of its own unless
+ * Strict is on"). Under Strict each runtime keeps its own fixed list instead.
  */
 
 const OCTANT_PREFIX = "OCTANT_";
 
 /**
- * The host environment less Octant's own variables, every model-provider
- * credential the provider does not name in `ownCredentials`, and every other
- * well-known credential neither named there nor in `passThrough`, the names
- * the person lets through for this provider. A model provider's key stays out
- * even when the person names it: one provider never receives another's.
+ * The host environment less Octant's own variables and the provider's
+ * `accountCredentials`: the names that would replace the sign-in of the
+ * account chosen for it in Octant. A provider that takes its sign-in from the
+ * host environment names none.
  */
 export function providerHostEnvironment(
   hostEnvironment: NodeJS.ProcessEnv,
-  ownCredentials: ReadonlySet<string> = new Set(),
-  passThrough: ReadonlyArray<string> = [],
+  accountCredentials: ReadonlySet<string> = new Set(),
 ): NodeJS.ProcessEnv {
-  const lists = {
-    own: ownCredentials,
-    passThrough: new Set(passThrough.map((name) => name.toUpperCase())),
-  };
   return Object.fromEntries(
     Object.entries(hostEnvironment).filter(([key, value]) => {
       const name = key.toUpperCase();
-      if (value === undefined || name.startsWith(OCTANT_PREFIX)) return false;
-      if (MODEL_PROVIDER_CREDENTIAL_VARIABLES.has(name)) return ownCredentials.has(name);
-      return hostCredentialCrosses(name, lists);
+      return (
+        value !== undefined && !name.startsWith(OCTANT_PREFIX) && !accountCredentials.has(name)
+      );
     }),
   );
 }
 
 /**
- * The AWS credentials a provider that signs in to Amazon Bedrock reads from
- * the host, as its own CLI does. Its own, so never stripped for it.
+ * The variables Claude Code signs itself in with. No launch takes them from
+ * the host: the account chosen in Octant decides which account a turn runs
+ * as and is billed to, and a host `ANTHROPIC_API_KEY` would move a
+ * subscription thread to metered API billing without a word in the thread.
  */
-export const AWS_BEDROCK_CREDENTIAL_VARIABLES: ReadonlyArray<string> = [
-  "AWS_ACCESS_KEY_ID",
-  "AWS_BEARER_TOKEN_BEDROCK",
-  "AWS_SECRET_ACCESS_KEY",
-  "AWS_SECURITY_TOKEN",
-  "AWS_SESSION_TOKEN",
-];
+export const CLAUDE_ACCOUNT_CREDENTIALS: ReadonlySet<string> = new Set([
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_OAUTH_TOKEN",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+]);
 
 const AWS_PROFILE_FILE_VARIABLES = [
   "AWS_CONFIG_FILE",

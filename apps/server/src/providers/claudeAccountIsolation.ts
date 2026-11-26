@@ -6,14 +6,12 @@ import type { ClaudeAuthentication } from "@octant/contracts";
 
 import type { ProviderOwnChannels } from "@octant/provider-sdk";
 
-import {
-  AWS_BEDROCK_CREDENTIAL_VARIABLES,
-  providerHostEnvironment,
-} from "./providerHostEnvironment";
+import { CLAUDE_ACCOUNT_CREDENTIALS, providerHostEnvironment } from "./providerHostEnvironment";
 import {
   DEFAULT_PROVIDER_OWN_CHANNELS,
   guardsForOwnChannels,
   launchOwnChannels,
+  strictLetThroughEnvironment,
 } from "./providerOwnChannels";
 
 /**
@@ -250,11 +248,16 @@ export interface IsolatedClaudeAccountEnvironmentInput {
   readonly gatewayBaseUrl?: string;
   /**
    * Whether the launch is Strict. Absent is Strict: the fixed passthrough list
-   * and every channel guard. Off, the launch gets the host's environment less
-   * Octant's own variables and other providers' keys.
+   * plus the names the person let through, and every channel guard. Off, the
+   * launch gets the host's environment less Octant's own variables and the
+   * variables Claude Code signs itself in with.
    */
   readonly strict?: boolean;
-  /** The person's provider telemetry and self-update switches; read only outside Strict. */
+  /**
+   * The person's provider telemetry and self-update switches, read only
+   * outside Strict, and the host variables they let through, read only under
+   * it.
+   */
   readonly ownChannels?: ProviderOwnChannels;
 }
 
@@ -278,20 +281,32 @@ function applyAccountCredential(
   }
 }
 
-function passthroughHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(hostEnvironment).filter(
-      ([key, value]) =>
-        value !== undefined && (PASSTHROUGH_VARIABLES.has(key) || key.startsWith("LC_")),
+/**
+ * The host variables a Strict Claude launch starts from: the fixed list, and
+ * the names the person let through to Claude Code (Settings › Providers &
+ * Models), so a person who runs Strict can still hand an agent their
+ * `GH_TOKEN` (maintainer decision, 2026-11-25).
+ */
+export function strictClaudeHostEnvironment(
+  hostEnvironment: NodeJS.ProcessEnv,
+  ownChannels?: ProviderOwnChannels,
+): NodeJS.ProcessEnv {
+  return {
+    ...strictLetThroughEnvironment(hostEnvironment, ownChannels?.credentialPassThrough),
+    ...Object.fromEntries(
+      Object.entries(hostEnvironment).filter(
+        ([key, value]) =>
+          value !== undefined && (PASSTHROUGH_VARIABLES.has(key) || key.startsWith("LC_")),
+      ),
     ),
-  );
+  };
 }
 
 /**
  * Build the launch environment for one Claude account.
  *
- * Inherited Anthropic and Claude credential and routing variables are dropped
- * by the passthrough list. The account directory is applied as both
+ * Inherited Anthropic and Claude credential variables are dropped by the
+ * passthrough list, which a let-through model-provider key never joins. The account directory is applied as both
  * `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` so the Claude
  * binary keys macOS Keychain the way it expects. An explicit API-key account
  * still receives only the broker-resolved key, and a gateway account only its
@@ -301,7 +316,7 @@ export function isolatedClaudeAccountEnvironment(
   input: IsolatedClaudeAccountEnvironmentInput,
 ): NodeJS.ProcessEnv {
   if (input.strict === false) return openClaudeAccountEnvironment(input);
-  const environment = passthroughHostEnvironment(input.hostEnvironment);
+  const environment = strictClaudeHostEnvironment(input.hostEnvironment, input.ownChannels);
   environment.CLAUDE_CONFIG_DIR = input.configDirectory;
   environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = input.configDirectory;
   applyAccountCredential(environment, input);
@@ -313,23 +328,15 @@ export function isolatedClaudeAccountEnvironment(
 }
 
 /**
- * The host environment a Claude launch outside Strict starts from. AWS keys
- * are Claude's own only while the host routes Claude through Amazon Bedrock
- * (`CLAUDE_CODE_USE_BEDROCK`), which signs in with them; otherwise they are
- * unrelated credentials and cross only when the person lets them through.
+ * The host environment a Claude launch outside Strict starts from: the
+ * person's own, with the credentials for their other tools and for other
+ * model providers, less Octant's variables and the variables Claude Code
+ * signs itself in with. The Bedrock API key stays: Claude Code reads it only
+ * when the host routes it through Amazon Bedrock, which is the person's own
+ * routing.
  */
-export function openClaudeHostEnvironment(
-  hostEnvironment: NodeJS.ProcessEnv,
-  ownChannels: ProviderOwnChannels | undefined,
-): NodeJS.ProcessEnv {
-  const bedrock = hostEnvironment.CLAUDE_CODE_USE_BEDROCK?.trim().toLowerCase();
-  const routesThroughBedrock =
-    bedrock !== undefined && bedrock !== "" && bedrock !== "0" && bedrock !== "false";
-  return providerHostEnvironment(
-    hostEnvironment,
-    new Set(routesThroughBedrock ? AWS_BEDROCK_CREDENTIAL_VARIABLES : []),
-    launchOwnChannels(false, ownChannels).credentialPassThrough,
-  );
+export function openClaudeHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return providerHostEnvironment(hostEnvironment, CLAUDE_ACCOUNT_CREDENTIALS);
 }
 
 /**
@@ -338,13 +345,13 @@ export function openClaudeHostEnvironment(
  * directory and an API-key or gateway account's own credential applied and only
  * {@link openClaudeLaunchGuards} set. An Octant account's own sign-in
  * decides which account a turn runs as, so no host Anthropic key or token
- * crosses (`providerHostEnvironment` names none of them as Claude's own) and
- * the host's account directories are replaced by the account's.
+ * crosses (`CLAUDE_ACCOUNT_CREDENTIALS`) and the host's account directories
+ * are replaced by the account's.
  */
 function openClaudeAccountEnvironment(
   input: IsolatedClaudeAccountEnvironmentInput,
 ): NodeJS.ProcessEnv {
-  const environment = openClaudeHostEnvironment(input.hostEnvironment, input.ownChannels);
+  const environment = openClaudeHostEnvironment(input.hostEnvironment);
   environment.CLAUDE_CONFIG_DIR = input.configDirectory;
   environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = input.configDirectory;
   if (input.authentication === "gateway") {

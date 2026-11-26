@@ -107,7 +107,7 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     | "workThreadProjection"
     | "workTurnProjection"
   > &
-  Pick<FoundationsWiring, "browserAuthority"> & {
+  Pick<FoundationsWiring, "browserAuthority" | "resolveThreadStrict"> & {
     /** The member's Act item for its hub, bound by the hub side after this is built. */
     readonly hubActScopeSlot: HubActScopeSlot;
   };
@@ -646,9 +646,9 @@ export function wireContext(deps: ContextDependencies) {
         String(effective?.modelId ?? thread.modelId),
         // Chat has no Full access, so only a Work or Code thread has a level.
         effective !== undefined
-          ? appToolThreadLevel(effective)
+          ? appToolThreadLevel(effective, deps.resolveThreadStrict(String(effective.id)))
           : work !== undefined
-            ? appToolThreadLevel(work)
+            ? appToolThreadLevel(work, deps.resolveThreadStrict(String(work.id)))
             : undefined,
       ),
       hostLendsBrowser:
@@ -678,6 +678,7 @@ export function wireContext(deps: ContextDependencies) {
     }),
     instance: (id) => persistence.readProviderInstance(id),
     observed: (id) => providerRuntimeRegistry.observedState(id),
+    strict: (subject) => deps.resolveThreadStrict(String(subject.aggregateId)),
     reviewer: hostShield.describe,
     clock: () => new Date().toISOString(),
   });
@@ -733,7 +734,7 @@ export function wireContext(deps: ContextDependencies) {
       browserToolTransport(
         providerRuntimeRegistry.observedState(thread.providerInstanceId),
         String(thread.modelId),
-        appToolThreadLevel(thread),
+        appToolThreadLevel(thread, deps.resolveThreadStrict(String(thread.id))),
       ) !== true
     )
       return undefined;

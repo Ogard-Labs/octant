@@ -95,6 +95,8 @@ interface Harness {
   readonly threads: Map<string, CodeThread>;
   readonly states: Map<string, "working" | "waiting-for-person" | "idle">;
   readonly marked: Set<string>;
+  /** Threads the host resolves as outside Strict; every other thread is Strict. */
+  readonly outsideStrict: Set<string>;
   readonly executed: Array<{ readonly command: CodeCommand; readonly context: unknown }>;
   readonly hostTurns: Array<{ readonly threadId: string; readonly prompt: string }>;
   readonly planners: Set<string>;
@@ -122,6 +124,7 @@ function harness(): Harness {
   ]);
   const states = new Map<string, "working" | "waiting-for-person" | "idle">();
   const marked = new Set<string>();
+  const outsideStrict = new Set<string>();
   const executed: Harness["executed"] = [];
   const branchNames: string[] = [];
   const hostTurns: Harness["hostTurns"] = [];
@@ -144,6 +147,7 @@ function harness(): Harness {
     readSettings: () => self.settings,
     isDesignatedPlanner: (id) => planners.has(id),
     isMarked: (id) => marked.has(id),
+    isStrict: (id) => !outsideStrict.has(id),
     threadState: (id) => states.get(id) ?? "idle",
     latestTurnId: (id) =>
       turnIds.get(id) ?? (hostTurns.findLast((turn) => turn.threadId === id) && `turn-${id}`),
@@ -227,6 +231,7 @@ function harness(): Harness {
     threads,
     states,
     marked,
+    outsideStrict,
     executed,
     branchNames,
     hostTurns,
@@ -295,7 +300,25 @@ describe("starting workers", () => {
     expect(h.hostTurns).toEqual([{ threadId: NEW_WORKER, prompt: "Find and fix it." }]);
   });
 
-  it("starts a marked coordinator's worker marked and never at Full access", async () => {
+  it("starts a marked coordinator's worker marked and at the coordinator's Full access outside Strict", async () => {
+    const h = harness();
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, { coordinator: true, executionPolicy: "full-access" }),
+    );
+    h.marked.add(COORDINATOR);
+    h.outsideStrict.add(COORDINATOR);
+    await h.service.start(startCall({}));
+    const creation = h.executed.find(
+      (entry) => entry.command.kind === "create-managed-code-thread",
+    );
+    expect(creation?.command).toMatchObject({ executionPolicy: "full-access" });
+    expect(creation?.context).toMatchObject({
+      inheritedMark: { sourceLabel: "coordinator-start" },
+    });
+  });
+
+  it("starts a marked coordinator's worker marked and never at Full access under Strict", async () => {
     const h = harness();
     h.threads.set(
       COORDINATOR,

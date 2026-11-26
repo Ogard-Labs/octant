@@ -1781,8 +1781,7 @@ terminal, and opens it as a Project terminal for that task, in the task's
 folder. It opens a terminal tab named for the program,
 which starts that program interactively, in its own interface, in the thread's
 folder: the binary, account folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) and
-environment the thread's own turns launch with (for an ACP agent, the
-environment its ACP driver builds, its managed home and its sign-in folder),
+environment the thread's own turns launch with (for an ACP agent, the environment its ACP driver builds, the home a turn of that thread runs on, which outside Strict is the person's real home for most agents ([Provider runtimes](provider-runtimes.md#the-home-an-acp-agent-runs-on)), and its sign-in folder),
 resolved by the host from the thread's provider (maintainer decision,
 2026-11-21). Only the person opens one or types
 into it, from their own window or a device they paired; the host refuses
@@ -2148,9 +2147,7 @@ prefilled, for what to check. A pending follow-up reads "Follows up tomorrow
 at 9:00".
 
 An agent's proposal, a routine or a follow-up, waits as a suggestion chip at
-the foot of the thread, in the same card as the reply's suggested tasks (a
-routine the agent suggests in a turn running at Full access is not a chip: it
-is created paused and shown as the **Created automation** card,
+the foot of the thread, in the same card as the reply's suggested tasks (a routine the agent suggests in a turn running at Full access is not a chip: it is created, active unless the person's Settings keep it paused, and shown as the **Created automation** card,
 [Architecture: modes](../architecture.md#modes-chat-work-and-code)). It is
 labelled "Routine · suggested" or "Follow-up here · suggested" and states the
 name, the schedule and its time zone, the first run, the missed-run policy,

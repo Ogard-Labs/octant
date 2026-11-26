@@ -264,10 +264,9 @@ context.usage-reconciled` with no protocol-error payloads.
 - Released OpenCode 2 installs `opencode`; `opencode2` is the earlier beta kept as fallback.
   Discovery prefers `opencode` labeled "OpenCode"; the beta name shows "OpenCode 2 preview".
   `isOpenCode2BinaryPath` accepts both names → both route to the OpenCode 2 driver.
-- `brew install opencode` works on this host (formula ships only the 1.x line — no real 2.x
-  install exists on brew or npm `opencode-ai`). A 1.x binary under the new routing hits the
-  OpenCode 2 catalog probe, which refuses `category:"incompatible"` +
-  "OpenCode 2 binary did not report the beta runtime." — the UI shows badge "Incompatible" +
+- An OpenCode 1 binary (or an OpenCode 2 release older than 2.0.22) is refused by the launch's
+  version read with `category:"incompatible"` (`version-mismatch`), which the provider card
+  reports as "Provider runtime 2.0.22 or later is required." — the UI shows badge "Incompatible" +
   "Provider configuration is incompatible" + Binary/Version detail; the raw message is NOT in
   the card (check "Connection details" → Process/Stopped, Version/Unavailable, Models/0).
   That incompatible state IS the e2e signature the refusal fired through the new path.

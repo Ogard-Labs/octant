@@ -12,10 +12,9 @@ import type { AgentRunAuthority, OctantMode } from "@octant/contracts";
  *
  * - Chat is research-only: no implicit filesystem, shell, git, or network
  *   authority, and execution stays plan-only.
- * - Work stays inside its OS-confined Project root: filesystem is
- *   available but shell/git are not implicitly granted.
- * - Code is the widest mode but is never full-access by default; it starts
- *   approval-gated like every other mode ceiling here.
+ * - Work and Code share one capability set, so both ceilings are the widest:
+ *   shell, Git, network and Full access, each reached only when the parent
+ *   thread's live grant holds it.
  *
  * None of these ceilings persist permission grants across sessions
  * (`permissionPersistence` is always `current-session`), so a child never
@@ -36,16 +35,6 @@ export function defaultAgentRunAuthorityCeilingForMode(mode: OctantMode): AgentR
         permissionPersistence: "current-session",
       };
     case "work":
-      return {
-        filesystem: true,
-        shell: false,
-        git: false,
-        network: false,
-        tools: true,
-        subagents: true,
-        executionPolicy: "approval-gated",
-        permissionPersistence: "current-session",
-      };
     case "code":
       return {
         filesystem: true,
