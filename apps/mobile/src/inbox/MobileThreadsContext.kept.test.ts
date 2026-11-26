@@ -187,8 +187,13 @@ describe("the thread list after a restart", () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };
     const first = await launch();
+    const before = [...phone.files.values()].join("");
     await act(async () => first.threads().noteStanding(studio, { actsAsHostPerson: true }));
-    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    // The list is sealed and written after the standing lands; on a busy
+    // machine that takes more than one turn, so wait for the write itself.
+    for (let turn = 0; turn < 200 && [...phone.files.values()].join("") === before; turn += 1)
+      await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 5)));
+    expect([...phone.files.values()].join("")).not.toBe(before);
     first.quit();
 
     phone.inbox = { rows: [], reachable: false, offline: [] };
