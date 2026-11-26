@@ -90,16 +90,15 @@ const HIDDEN_TASKS_DISCLOSURE = "quiet:hidden-tasks";
  */
 export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
   const { tasks, running } = props.tasks;
-  // Answers only leaves a transcript's tasks out but for one that failed or
-  // waits on the person; a finished turn's others wait behind "N tasks
-  // hidden", and Find shows them all. The choice is one of the turn's
-  // disclosures, so a change of level forgets it. The Tasks dock panel, which
-  // a person opened to see the list, always shows it whole.
+  // Answers only draws a transcript's tasks its own way (below); the choice
+  // to open its hidden tasks is one of the turn's disclosures, so a change of
+  // level forgets it. The Tasks dock panel, which a person opened to see the
+  // list, always shows it whole.
   const level = useContext(ReplyDetailContext);
   const findOpen = useContext(RevealHiddenStepsContext);
   const disclosures = useReplyDisclosures();
   const tasksOpened = disclosures.isOpen(HIDDEN_TASKS_DISCLOSURE, false);
-  const answersOnly = props.alwaysOpen !== true && level === "answers" && !findOpen;
+  const answersOnly = props.alwaysOpen !== true && level === "answers";
   // The list stays open while the agent works through it, so the step in
   // hand is readable without a click, and folds to its summary once the turn
   // settles. Opening or folding it by hand wins over both.
@@ -154,42 +153,47 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
     </li>
   );
   if (answersOnly) {
-    const hidden = tasks.length - failed - waiting;
-    // A running turn's Working line names its step, so it offers no line.
-    const offersLine = !running && hidden > 0;
-    const line = offersLine ? (
-      <OctantButton
-        aria-expanded={tasksOpened}
-        className="turn-activity__hidden-steps"
-        onClick={() => disclosures.choose(HIDDEN_TASKS_DISCLOSURE, !tasksOpened)}
-        size="sm"
-        type="button"
-        variant="link"
-      >
-        {tasksOpened ? "Hide tasks" : hidden === 1 ? "1 task hidden" : `${hidden} tasks hidden`}
-      </OctantButton>
-    ) : null;
-    if (!tasksOpened || !offersLine) {
-      const kept = tasks.flatMap((task, index) =>
-        task.state === "failed" || task.state === "waiting" ? [item(task, index)] : [],
-      );
-      if (kept.length === 0 && line === null) return null;
-      return (
-        <section aria-label="Agent tasks" className="thread-tasks" data-state={state}>
-          {line}
-          {kept.length === 0 ? null : (
-            <ol aria-label="Task list" className="thread-tasks__list">
-              {kept}
-            </ol>
-          )}
-        </section>
-      );
-    }
+    // Kept in sight: a task that failed or waits on the person, and, while the
+    // turn runs, the task in hand, which the Working line cannot name (it
+    // names only a running tool). The rest of a finished turn's list waits
+    // behind one line. Find shows the whole list open, since it searches only
+    // what is drawn. The list is drawn here directly, so this line is its one
+    // disclosure.
+    const keeps = (task: ThreadTaskRow) =>
+      task.state === "failed" || task.state === "waiting" || (running && task.state === "running");
+    const hidden = tasks.filter((task) => !keeps(task)).length;
+    // A running turn's Working line stands for its routine tasks.
+    const offersLine = !findOpen && !running && hidden > 0;
+    const showsAll = findOpen || (offersLine && tasksOpened);
+    const shown = tasks.flatMap((task, index) =>
+      showsAll || keeps(task) ? [item(task, index)] : [],
+    );
+    if (shown.length === 0 && !offersLine) return null;
     return (
-      <>
-        {line}
-        <ThreadTasksPanel tasks={props.tasks} alwaysOpen />
-      </>
+      <section
+        aria-label="Agent tasks"
+        className="thread-tasks"
+        data-running={running ? "true" : undefined}
+        data-state={state}
+      >
+        {offersLine ? (
+          <OctantButton
+            aria-expanded={tasksOpened}
+            className="turn-activity__hidden-steps"
+            onClick={() => disclosures.choose(HIDDEN_TASKS_DISCLOSURE, !tasksOpened)}
+            size="sm"
+            type="button"
+            variant="link"
+          >
+            {tasksOpened ? "Hide tasks" : hidden === 1 ? "1 task hidden" : `${hidden} tasks hidden`}
+          </OctantButton>
+        ) : null}
+        {shown.length === 0 ? null : (
+          <ol aria-label="Task list" className="thread-tasks__list">
+            {shown}
+          </ol>
+        )}
+      </section>
     );
   }
 

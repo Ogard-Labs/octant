@@ -6,7 +6,11 @@ import {
   TOOL_SUMMARY_PREVIEW_LIMIT,
   TurnActivityRows,
 } from "./TurnActivityRows";
-import type { TurnActivity } from "./turnActivity";
+import { NO_TURN_ACTIVITY, type TurnActivity } from "./turnActivity";
+import { ThreadSubagentsContext } from "../agents/threadSubagents";
+import type { ChildRunStatusController } from "../agents/useChildRunStatus";
+import { buildChildRunStatusSummary } from "../agents/buildChildRunStatusSummary";
+import { observedChildFixture } from "../agents/agentActivityFixtures";
 import { MarkdownLinkActionsContext } from "../markdown/markdownLinkActions";
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
 import type { ReactNode } from "react";
@@ -1319,6 +1323,55 @@ describe("the quiet Reply detail levels", () => {
       expect(screen.getByText("Worked for 1m 5s")).toBeVisible();
       view.unmount();
     }
+  });
+
+  it("Answers only keeps a waiting subagent of a turn with no tool rows and hides a finished one", async () => {
+    const user = userEvent.setup();
+    const controller: ChildRunStatusController = {
+      observations: [
+        observedChildFixture({
+          observationId: "done",
+          childAgentId: "child-done",
+          task: "Inspect parser",
+          lifecycleStatus: "completed",
+        }),
+        observedChildFixture({
+          observationId: "asks",
+          childAgentId: "child-asks",
+          task: "Pick a fixture",
+          lifecycleStatus: "waiting",
+        }),
+      ],
+      observationsTruncated: false,
+      entries: [],
+      summary: buildChildRunStatusSummary([]),
+      status: "ready",
+      reconnecting: false,
+      busy: false,
+      errorMessage: undefined,
+      stopAll: async () => true,
+      cancelRun: async () => true,
+      acknowledge: async () => {},
+      refresh: () => {},
+    };
+    render(
+      <ThreadSubagentsContext.Provider value={controller}>
+        {atLevel(
+          "answers",
+          <TurnActivityRows
+            activity={NO_TURN_ACTIVITY}
+            running={false}
+            settled
+            subagents={{ from: "2026-09-26T09:00:00.000Z" }}
+          />,
+        )}
+      </ThreadSubagentsContext.Provider>,
+    );
+    const list = screen.getByRole("list", { name: "Subagents" });
+    expect(within(list).getByText("Pick a fixture")).toBeVisible();
+    expect(within(list).queryByText("Inspect parser")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "1 step hidden" }));
+    expect(screen.getByText("Inspect parser")).toBeVisible();
   });
 
   it("Find reveals hidden steps", () => {

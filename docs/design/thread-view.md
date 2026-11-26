@@ -232,8 +232,9 @@ binding):
   or a task that failed or waits on the person; a finished turn shows one "N
   steps hidden" line that opens them in place, with **Hide steps** to put them
   away again. A turn's task list, drawn apart from its steps, has its own "N
-  tasks hidden" line and **Hide tasks** the same way; the Tasks dock panel
-  always shows the whole list. A turn whose subagents left no tool row is
+  tasks hidden" line and **Hide tasks** the same way, and while the turn runs
+  it keeps the task in hand in sight, which the Working line, naming only a
+  running tool, cannot say; the Tasks dock panel always shows the whole list. A turn whose subagents left no tool row is
   drawn the same way. A running turn shows
   no rows at all: its "Working · 12s · step" line already names the current
   step. Every mode draws a turn's reply as one body beside its activity rows,
@@ -256,7 +257,8 @@ the rows always keep a failed call, a call that never finished, every Octant
 Shield or provider-review decision, and a task that failed or waits on the
 person. A published page or a created automation, which the turn delivered,
 stays in view. While the transcript's Find is open, every hidden step shows,
-folded as at Low, so a search reaches all of a turn and nothing hidden is lost.
+folded as at Low, and a turn's whole task list is drawn open, so a search
+reaches all of a turn and nothing hidden is lost.
 
 - **Low** (default): "Thinking stays folded, and a finished turn's tool calls
   fold behind one line." Thinking is shut, tool rows are listed while the turn

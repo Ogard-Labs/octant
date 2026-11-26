@@ -990,10 +990,10 @@ function subagentFailedOrWaiting(row: { readonly lifecycleStatus: string }): boo
   return row.lifecycleStatus === "failed" || row.lifecycleStatus === "waiting";
 }
 
-/** The subagents a turn started, as its rows list them; none without a window. */
 /** The disclosure id of a quiet level's "N steps hidden" line. */
 const HIDDEN_STEPS_DISCLOSURE = "quiet:hidden-steps";
 
+/** The subagents a turn started, as its rows list them; none without a window. */
 function useTurnSubagentRows(window: TurnSubagentWindow | undefined) {
   const subagents = useContext(ThreadSubagentsContext);
   const providers = useSubagentProviders();
