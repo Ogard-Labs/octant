@@ -149,18 +149,21 @@ async function main(): Promise<void> {
     (operation: "register" | "renew" | "revoke") =>
     (handle: string, generation: number): Promise<unknown> =>
       new Promise((resolve) => {
+        // Logged before any refusal, so a failed smoke tells a request that was
+        // refused here apart from one that was never made.
+        const id = nextId++;
+        emit("native", { operation, id });
+        const answer = (reply: unknown) => {
+          const value = reply as { readonly kind?: unknown; readonly reason?: unknown } | null;
+          emit("native-reply", { operation, id, kind: value?.kind, reason: value?.reason });
+          resolve(reply);
+        };
         if (socket === undefined || socket.destroyed) {
-          resolve({ kind: "refused", reason: "unavailable" });
+          answer({ kind: "refused", reason: "unavailable" });
           return;
         }
-        const id = nextId++;
-        waiting.set(id, (reply) => {
-          const answer = reply as { readonly kind?: unknown; readonly reason?: unknown } | null;
-          emit("native-reply", { operation, id, kind: answer?.kind, reason: answer?.reason });
-          resolve(reply);
-        });
+        waiting.set(id, answer);
         socket.write(`${JSON.stringify({ id, operation, handle, generation })}\n`);
-        emit("native", { operation, id });
       });
 
   const harnessNative = {

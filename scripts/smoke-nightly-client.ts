@@ -353,7 +353,10 @@ async function startStable(input: {
     0,
     90_000,
   );
-  if (ready.event !== "ready") throw new Error(`${input.name} did not start.`);
+  if (ready.event !== "ready")
+    throw new Error(
+      `${input.name} did not start${typeof ready.message === "string" ? `: ${ready.message}` : "."}`,
+    );
   return harness;
 }
 
@@ -565,6 +568,11 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function printLogs(failed: string): void {
+  for (const { name, log } of logs)
+    console.error(`--- ${name} after "${failed}" failed ---\n${log.describe()}`);
+}
+
 async function scenario(name: string, run: () => Promise<string | void>): Promise<boolean> {
   const started = performance.now();
   try {
@@ -583,8 +591,7 @@ async function scenario(name: string, run: () => Promise<string | void>): Promis
       ms: Math.round(performance.now() - started),
       detail: error instanceof Error ? error.message : String(error),
     });
-    for (const { name: process, log } of logs)
-      console.error(`--- ${process} after "${name}" failed ---\n${log.describe()}`);
+    printLogs(name);
     return false;
   }
 }
@@ -1277,6 +1284,8 @@ try {
     status: "fail",
     detail: error instanceof Error ? error.message : String(error),
   });
+  // A harness that fails to start never reaches a scenario.
+  printLogs("harness");
 } finally {
   await finish();
 }
