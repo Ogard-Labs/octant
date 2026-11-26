@@ -29,6 +29,7 @@ export function QueuedMessages(props: {
   readonly allowChanges: boolean;
   readonly onEdit: (messageId: string, prompt: string, typedByPerson: boolean) => Promise<boolean>;
   readonly onRemove: (messageId: string) => Promise<boolean>;
+  readonly onSendNow: (messageId: string) => Promise<boolean>;
 }) {
   const { colors } = useTheme();
   const [editing, setEditing] = useState<{ readonly messageId: string; readonly text: string }>();
@@ -130,6 +131,12 @@ export function QueuedMessages(props: {
                     () => setEditing({ messageId: row.messageId, text: row.text }),
                     props.changing || !row.changeable,
                     "mobile-thread-queue-edit",
+                  )}
+                  {action(
+                    "Send now",
+                    () => void props.onSendNow(row.messageId),
+                    props.changing || !row.changeable,
+                    "mobile-thread-queue-send-now",
                   )}
                   {action(
                     "Remove",

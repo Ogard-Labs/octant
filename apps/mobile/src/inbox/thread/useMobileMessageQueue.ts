@@ -4,6 +4,7 @@ import {
   queueMobileFollowUp,
   readMobileThreadMessageQueue,
   removeMobileQueuedMessage,
+  sendMobileQueuedMessageNow,
   type MobileQueueScope,
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
@@ -133,6 +134,10 @@ export function useMobileMessageQueue(input: {
           prompt,
           ...(typedByPerson ? { typedByPerson: true as const } : {}),
         }),
+      ),
+    sendNow: (messageId: string) =>
+      change((transport, scope, expectedVersion) =>
+        sendMobileQueuedMessageNow({ transport, scope, expectedVersion, messageId }),
       ),
     remove: (messageId: string) =>
       change((transport, scope, expectedVersion) =>

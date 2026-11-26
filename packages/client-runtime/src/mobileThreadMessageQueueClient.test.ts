@@ -5,6 +5,7 @@ import {
   queueMobileFollowUp,
   readMobileThreadMessageQueue,
   removeMobileQueuedMessage,
+  sendMobileQueuedMessageNow,
 } from "./mobileThreadMessageQueueClient";
 
 const hostId = "11111111-1111-4111-8111-111111111111";
@@ -111,5 +112,14 @@ describe("the thread message queue from a phone", () => {
         messageId,
       }),
     ).rejects.toThrow("That message is already on its way and can no longer change.");
+  });
+  it("asks the host to send a queued message now", async () => {
+    const { transport, sent } = transportAnswering((body) => ({
+      status: "applied",
+      requestId: (body as { requestId: string }).requestId,
+      snapshot: snapshot(),
+    }));
+    await sendMobileQueuedMessageNow({ transport, scope, expectedVersion: 4, messageId });
+    expect(sent[0]?.body).toMatchObject({ kind: "send-now", messageId, expectedVersion: 4 });
   });
 });
