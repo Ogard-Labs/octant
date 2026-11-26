@@ -1,0 +1,14 @@
+/* What each start a composer stayed on reached, one row per model. */
+.code-start-results {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.code-start-results__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  overflow-wrap: anywhere;
+}

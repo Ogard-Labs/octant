@@ -51,8 +51,18 @@ import {
   draftThreadModePresentation,
   findPickerModel,
   type CreateHostViewScope,
+  type ModelPickerSelection,
   type PickerGroup,
 } from "@octant/domain";
+import { lazyOr } from "../../lib/lazyOr";
+import {
+  MAX_FAN_OUT_MODELS,
+  startEachModel,
+  toggleFanOutModel,
+  type CodeDraftStartOutcome,
+  type CodeFanOutResult,
+} from "./codeFanOut";
+import type { CodeStartResultsProps } from "./CodeStartResults";
 import {
   branchNameTaken,
   deriveDeliveryBranch,
@@ -316,6 +326,14 @@ export interface CodeComposerSubmitInput {
   readonly terminalSession?: TerminalSessionImportRequest;
   /** Local draft identity used only to anchor a native approval view. */
   readonly presentation?: { readonly composerId: string };
+  /**
+   * Start the thread and stay on this draft (⌘↩, or a start on several
+   * models): the window does not open the new thread, and what the start
+   * reached is reported here rather than on the draft.
+   */
+  readonly stay?: { readonly report: (outcome: CodeDraftStartOutcome) => void };
+  /** This one thread's provider and model, when one prompt starts on several. */
+  readonly providerSelection?: ModelPickerSelection;
 }
 
 /**
@@ -324,6 +342,20 @@ export interface CodeComposerSubmitInput {
  * have.
  */
 const LAST_RESORT_BASE_BRANCH = "development";
+const LazyCodeStartResults = lazyOr<CodeStartResultsProps>(
+  async () => (await import("./CodeStartResults")).CodeStartResults,
+  ({ results, label }) => (
+    <>
+      {results
+        .map((result) =>
+          result.outcome.status === "started"
+            ? `${label(result)}: started.`
+            : `${label(result)}: ${result.outcome.reason}`,
+        )
+        .join(" ")}
+    </>
+  ),
+);
 const WorktreeLaunchProgress = lazy(() =>
   import("../WorktreeLaunchProgress").then(({ WorktreeLaunchProgress }) => ({
     default: WorktreeLaunchProgress,
@@ -612,6 +644,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // A send refused before the host saw it explains itself beside the composer,
   // since no thread exists to carry a reason.
   const [sendNotice, setSendNotice] = useState<string>();
+  // The models besides the chosen one that a Shift-click in the picker added:
+  // one prompt then starts a thread on each, each in a new worktree.
+  const [fanOutModels, setFanOutModels] = useState<ReadonlyArray<ModelPickerSelection>>([]);
+  // What the starts this composer stayed on reached, until the person dismisses it.
+  const [startResults, setStartResults] = useState<ReadonlyArray<CodeFanOutResult>>([]);
   // A notice about the Project no longer applies once another is chosen.
   useEffect(() => setSendNotice(undefined), [props.projectId]);
   // Whether the chosen model is one the server runs. Neither this nor the
@@ -993,81 +1030,158 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const latestQuestion = useRef(currentQuestion);
   latestQuestion.current = currentQuestion;
 
-  const submit = useCallback(() => {
-    if (!canSubmit) return;
-    const typedClaim = typedClaimFor(typedScope, trimmed);
-    // A Code thread belongs to a Project, so the first turn cannot start until
-    // one is chosen. Send stays live and says so: a Send greyed out for this
-    // alone left people guessing why nothing happened.
-    if (props.projectId === undefined) {
-      setSendNotice("Choose a Project first. A Code task works in a folder.");
-      return;
-    }
-    const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
-      receipt.selection === undefined ? [] : [receipt.selection],
-    );
-    setSendNotice(undefined);
-    setSubmitting(true);
-    const staged = images.filesForSend();
-    void threadMentions
-      .resolveForSend()
-      .then(async (threadMentionIds) => {
-        const created = await props.onCreateThread({
-          prompt: trimmed,
-          ...typedClaim,
-          modelOptionValues,
-          ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
-          executionPolicy,
-          // Nothing about a thread on a server is remembered for the Project.
-          permissionPersistence: isServer ? "current-session" : permissionPersistence,
-          ...(autoApprove ? { autoApprove: true } : {}),
-          deliveryTarget: {
-            branchIntent: worktreeBranch,
-            remoteName: resolvedWorktreeRemote,
-            proposedBaseRepository: baseRepository,
-            proposedBaseBranch: submittedBaseBranch,
-            outcomeKind,
-          },
-          ...(resolvedBaseBranch === undefined ? { baseBranchAssumed: true as const } : {}),
-          workspace,
-          worktreeSource: {
-            startFromOrigin,
-            remoteName: resolvedWorktreeRemote,
-          },
-          presentation: { composerId: composerIdRef.current },
-          ...(staged.length === 0 ? {} : { images: staged }),
-          ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
-        });
-        if (created !== false) images.clearAfterAccepted();
-        // A refused creation may be because the name was taken meanwhile; the
-        // names are read again so the name shown is the one that would be tried.
-        else loadBranchNames();
-        return created;
-      })
-      .finally(() => {
-        setSubmitting(false);
+  const primaryModel: ModelPickerSelection | undefined =
+    props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+      ? undefined
+      : { providerInstanceId: props.selectedProviderInstanceId, modelId: props.selectedModelId };
+  // A model chosen as the main one is no longer an extra.
+  const extraModels = fanOutModels.filter(
+    (each) =>
+      primaryModel === undefined ||
+      String(each.providerInstanceId) !== String(primaryModel.providerInstanceId) ||
+      String(each.modelId) !== String(primaryModel.modelId),
+  );
+  // A reviewed proposal is one exact thread, so it starts on one model.
+  const fanOutOffered = props.fixedPrompt === undefined;
+  const fanningOut = fanOutOffered && extraModels.length > 0;
+  const modelLabel = (selection: ModelPickerSelection | undefined): string => {
+    const found = findPickerModel(providerGroups, selection)?.model.displayName;
+    return found ?? (selection === undefined ? "The chosen model" : String(selection.modelId));
+  };
+
+  const submit = useCallback(
+    (how: "open" | "stay" = "open") => {
+      if (!canSubmit) return;
+      const typedClaim = typedClaimFor(typedScope, trimmed);
+      // A Code thread belongs to a Project, so the first turn cannot start until
+      // one is chosen. Send stays live and says so: a Send greyed out for this
+      // alone left people guessing why nothing happened.
+      if (props.projectId === undefined) {
+        setSendNotice("Choose a Project first. A Code task works in a folder.");
+        return;
+      }
+      const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
+        receipt.selection === undefined ? [] : [receipt.selection],
+      );
+      setSendNotice(undefined);
+      const staged = images.filesForSend();
+      const stays = how === "stay" || fanningOut;
+      const sentPrompt = trimmed;
+      const input = (
+        threadMentionIds: ReadonlyArray<MentionableThreadId>,
+      ): CodeComposerSubmitInput => ({
+        prompt: sentPrompt,
+        ...typedClaim,
+        modelOptionValues,
+        ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
+        executionPolicy,
+        // Nothing about a thread on a server is remembered for the Project.
+        permissionPersistence: isServer ? "current-session" : permissionPersistence,
+        ...(autoApprove ? { autoApprove: true } : {}),
+        deliveryTarget: {
+          branchIntent: worktreeBranch,
+          remoteName: resolvedWorktreeRemote,
+          proposedBaseRepository: baseRepository,
+          proposedBaseBranch: submittedBaseBranch,
+          outcomeKind,
+        },
+        ...(resolvedBaseBranch === undefined ? { baseBranchAssumed: true as const } : {}),
+        workspace,
+        worktreeSource: {
+          startFromOrigin,
+          remoteName: resolvedWorktreeRemote,
+        },
+        // A start the composer stays on shows no launch progress in it: the
+        // composer is already the next draft.
+        ...(stays ? {} : { presentation: { composerId: composerIdRef.current } }),
+        ...(staged.length === 0 ? {} : { images: staged }),
+        ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
       });
-  }, [
-    extensionDraft,
-    canSubmit,
-    trimmed,
-    modelOptionValues,
-    executionPolicy,
-    autoApprove,
-    permissionPersistence,
-    isServer,
-    workspace,
-    baseRepository,
-    baseBranch,
-    worktreeBranch,
-    outcomeKind,
-    startFromOrigin,
-    resolvedWorktreeRemote,
-    images,
-    loadBranchNames,
-    threadMentions,
-    props,
-  ]);
+      if (!stays) {
+        setSubmitting(true);
+        void threadMentions
+          .resolveForSend()
+          .then(async (threadMentionIds) => {
+            const created = await props.onCreateThread(input(threadMentionIds));
+            if (created !== false) images.clearAfterAccepted();
+            // A refused creation may be because the name was taken meanwhile; the
+            // names are read again so the name shown is the one that would be tried.
+            else loadBranchNames();
+            return created;
+          })
+          .finally(() => {
+            setSubmitting(false);
+          });
+        return;
+      }
+      // Start and stay: the prompt is handed over and the composer is the next
+      // draft at once, keeping its Project, workspace and base branch.
+      const models: ReadonlyArray<ModelPickerSelection | undefined> = fanningOut
+        ? [primaryModel, ...extraModels]
+        : [primaryModel];
+      setPrompt("");
+      images.clearAfterAccepted();
+      setStartResults([]);
+      void threadMentions.resolveForSend().then(async (threadMentionIds) => {
+        const base = input(threadMentionIds);
+        const startOne = async (
+          selection: ModelPickerSelection | undefined,
+          branch: string,
+        ): Promise<CodeDraftStartOutcome> => {
+          let reported: CodeDraftStartOutcome | undefined;
+          const created = await props.onCreateThread({
+            ...base,
+            ...(fanningOut ? { workspace: "managed-worktree" as const } : {}),
+            deliveryTarget: { ...base.deliveryTarget, branchIntent: branch },
+            ...(selection === undefined ? {} : { providerSelection: selection }),
+            stay: {
+              report: (outcome) => {
+                reported = outcome;
+              },
+            },
+          });
+          return (
+            reported ??
+            (created === false
+              ? { status: "refused", reason: "The thread could not be started." }
+              : { status: "started" })
+          );
+        };
+        const results = await startEachModel(models, worktreeBranch, startOne);
+        setStartResults(results);
+        loadBranchNames();
+        // Nothing started: the prompt comes back, unless the person already
+        // began the next one.
+        if (results.every((result) => result.outcome.status === "refused")) {
+          setPrompt((current) => (current === "" ? sentPrompt : current));
+        }
+      });
+    },
+    [
+      extensionDraft,
+      canSubmit,
+      trimmed,
+      modelOptionValues,
+      executionPolicy,
+      autoApprove,
+      permissionPersistence,
+      isServer,
+      workspace,
+      baseRepository,
+      baseBranch,
+      worktreeBranch,
+      outcomeKind,
+      startFromOrigin,
+      resolvedWorktreeRemote,
+      images,
+      loadBranchNames,
+      threadMentions,
+      fanningOut,
+      primaryModel,
+      extraModels,
+      props,
+    ],
+  );
 
   const folderDrops = useDroppedFolderMentions({
     scope:
@@ -1110,7 +1224,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      submit();
+      // ⌘↩ (Ctrl+↩) starts the thread and leaves a fresh draft here.
+      submit(event.metaKey || event.ctrlKey ? "stay" : "open");
     }
     if (event.key === "Escape") {
       event.preventDefault();
@@ -1271,6 +1386,60 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     },
                   ]
                 : []),
+              ...(fanningOut
+                ? [
+                    {
+                      key: "fan-out",
+                      tone: "neutral" as const,
+                      role: "status" as const,
+                      text: `Starts ${String(extraModels.length + 1)} threads, each in a new worktree: ${[
+                        primaryModel,
+                        ...extraModels,
+                      ]
+                        .map(modelLabel)
+                        .join(", ")}. Shift-click a model to add or remove it (up to ${String(
+                        MAX_FAN_OUT_MODELS,
+                      )}).`,
+                      action: (
+                        <OctantButton
+                          onClick={() => setFanOutModels([])}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          Use one model
+                        </OctantButton>
+                      ),
+                    },
+                  ]
+                : []),
+              ...(startResults.length === 0
+                ? []
+                : [
+                    {
+                      key: "start-results",
+                      tone: startResults.some((result) => result.outcome.status === "refused")
+                        ? ("warning" as const)
+                        : ("neutral" as const),
+                      role: "status" as const,
+                      text: (
+                        <LazyCodeStartResults
+                          label={(result) => modelLabel(result.selection ?? primaryModel)}
+                          results={startResults}
+                        />
+                      ),
+                      action: (
+                        <OctantButton
+                          onClick={() => setStartResults([])}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          Dismiss
+                        </OctantButton>
+                      ),
+                    },
+                  ]),
               // A refusal answers the Send just pressed, so it is the card
               // directly above the composer, not a line below the start screen.
               ...(props.errorMessage !== undefined || sendNotice !== undefined
@@ -1516,6 +1685,15 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       }}
                       menuSide="bottom"
                       onSelect={props.onSelectProvider}
+                      {...(fanOutOffered
+                        ? {
+                            alsoSelected: extraModels,
+                            onShiftSelect: (selection: ModelPickerSelection) =>
+                              setFanOutModels(
+                                toggleFanOutModel(primaryModel, extraModels, selection),
+                              ),
+                          }
+                        : {})}
                       {...(props.onOpenSettings === undefined
                         ? {}
                         : { onOpenSettings: props.onOpenSettings })}
@@ -1563,11 +1741,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               actions: {
                 kind: "send",
                 send: {
-                  ariaLabel:
-                    props.createLabel ??
-                    (props.errorMessage === undefined ? "Create thread" : "Retry creating thread"),
+                  ariaLabel: fanningOut
+                    ? `Start ${String(extraModels.length + 1)} threads`
+                    : (props.createLabel ??
+                      (props.errorMessage === undefined
+                        ? "Create thread"
+                        : "Retry creating thread")),
                   disabled: !canSubmit,
-                  onSend: submit,
+                  onSend: () => submit(),
                 },
               },
             }}

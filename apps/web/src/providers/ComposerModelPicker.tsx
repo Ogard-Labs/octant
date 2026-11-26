@@ -76,6 +76,12 @@ export interface ComposerModelPickerProps {
   readonly unselectedLabel?: string;
   /** Existing threads return the promise that confirms or refuses the model change. */
   readonly onSelect: (selection: ModelPickerSelection) => void | Promise<void>;
+  /**
+   * Shift-click adds a model to, or takes it out of, the models a start
+   * composer also starts the prompt on; they show checked beside the chosen one.
+   */
+  readonly onShiftSelect?: (selection: ModelPickerSelection) => void;
+  readonly alsoSelected?: ReadonlyArray<ModelPickerSelection>;
   readonly onOpenSettings?: () => void;
   /**
    * Empty `groups` can mean no instance is ready, or a Project policy hid
@@ -567,7 +573,13 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     const favoriteKey = modelFavoriteKey(group.instance.id, modelId);
     const favorited = favorites.has(favoriteKey);
     const selected =
-      props.selectedProviderInstanceId === group.instance.id && props.selectedModelId === modelId;
+      (props.selectedProviderInstanceId === group.instance.id &&
+        props.selectedModelId === modelId) ||
+      (props.alsoSelected ?? []).some(
+        (each) =>
+          String(each.providerInstanceId) === String(group.instance.id) &&
+          String(each.modelId) === String(modelId),
+      );
     const unavailable = picker.unavailableReason !== undefined;
     // The generic "all models" section adds nothing next to the provider name;
     // only informative sections get a suffix. The catalog is left out when a
@@ -604,7 +616,14 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           aria-selected={selected}
           className={`composer-model-picker__model${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
           disabled={unavailable || controlsDisabled}
-          onClick={() => chooseRow(row)}
+          onClick={(event) => {
+            const addTo = props.onShiftSelect;
+            if (event.shiftKey && addTo !== undefined && !unavailable && !controlsDisabled) {
+              addTo({ providerInstanceId: group.instance.id, modelId });
+              return;
+            }
+            chooseRow(row);
+          }}
           role="option"
           title={picker.unavailableReason}
           type="button"

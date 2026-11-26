@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CodeComposerAdapter } from "./CodeComposerAdapter";
+import { CodeComposerAdapter, type CodeComposerSubmitInput } from "./CodeComposerAdapter";
 import { BookOpen } from "../../ui/icons";
 import type { ProjectId } from "@octant/contracts/projects";
 import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
@@ -57,6 +57,48 @@ const defaultProps = {
   onCancel: () => {},
 };
 
+function twoModelGroup(): PickerGroup {
+  const instance = decodeProviderInstance({
+    id: "80000000-0000-4000-8000-0000000000b1",
+    displayName: "Local Codex",
+    driverKind: "codex",
+    configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: "2026-09-15T10:00:00.000Z",
+    updatedAt: "2026-09-15T10:00:00.000Z",
+  });
+  const entry = (id: string, displayName: string) => ({
+    model: {
+      id: decodeProviderModelId(id),
+      displayName,
+      reasoning: "unsupported" as const,
+      inputModalities: ["text" as const],
+      source: "discovered" as const,
+      verification: "verified" as const,
+      options: [],
+    },
+    badges: [],
+    toolCapable: true,
+  });
+  return {
+    instance,
+    runtime: "provider",
+    readiness: "ready",
+    driverLabel: "Codex",
+    endpointHost: undefined,
+    executionHost: "Local host",
+    sections: [
+      {
+        id: "all-models",
+        label: "Models",
+        models: [entry("model-one", "Model One"), entry("model-two", "Model Two")],
+      },
+    ],
+  };
+}
+
 describe("CodeComposerAdapter", () => {
   it("attaches a 40 KiB paste on the Code start screen as a text file", async () => {
     render(<CodeComposerAdapter {...defaultProps} />);
@@ -73,6 +115,68 @@ describe("CodeComposerAdapter", () => {
     // A start needs words, so the prompt points at the file instead of staying empty.
     expect(prompt).toHaveValue("See the attached pasted-text-1.txt.");
     expect(await screen.findByText("pasted-text-1.txt")).toBeInTheDocument();
+  });
+
+  it("⌘↩ on a start composer creates the thread and leaves a fresh draft", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn(
+      (input: { readonly stay?: { readonly report: (outcome: never) => void } }) => {
+        input.stay?.report({ status: "started", threadId: "thread-1" } as never);
+        return true;
+      },
+    );
+    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
+    const prompt = screen.getByRole("textbox", { name: "First message" });
+    await user.type(prompt, "Fix the login bug");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
+      prompt: "Fix the login bug",
+      stay: expect.anything(),
+    });
+    expect(onCreateThread.mock.calls[0]?.[0]).not.toHaveProperty("presentation");
+    expect(prompt).toHaveValue("");
+    // The fresh draft keeps its Project and base branch.
+    expect(screen.getAllByText("My Repo").length).toBeGreaterThan(0);
+    expect(await screen.findByText(/started\./)).toBeInTheDocument();
+  });
+
+  it("two selected models start two threads in two new worktrees", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn((_input: CodeComposerSubmitInput) => true);
+    const group = twoModelGroup();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        providerGroups={[group]}
+        selectedProviderInstanceId={group.instance.id}
+        selectedModelId={decodeProviderModelId("model-one")}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.keyboard("{Shift>}");
+    await user.click(screen.getByRole("option", { name: "Model Two" }));
+    await user.keyboard("{/Shift}{Escape}");
+    expect(screen.getByText(/Starts 2 threads, each in a new worktree/)).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: "Start 2 threads" }));
+
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(2));
+    const [first, second] = onCreateThread.mock.calls.map(([input]) => input);
+    expect(first).toMatchObject({
+      workspace: "managed-worktree",
+      providerSelection: { modelId: "model-one" },
+    });
+    expect(second).toMatchObject({
+      workspace: "managed-worktree",
+      providerSelection: { modelId: "model-two" },
+    });
+    expect(second?.deliveryTarget.branchIntent).toBe(
+      `${String(first?.deliveryTarget.branchIntent)}-model-two`,
+    );
   });
 
   it("keeps a reviewed proposal exact and names the create-and-start decision", async () => {
