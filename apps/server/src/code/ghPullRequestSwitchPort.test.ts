@@ -1728,9 +1728,16 @@ describe("CI logs and reruns for a thread's agent", () => {
   const actionsLink = (run: number, job: number) =>
     `https://github.com/octant/octant/actions/runs/${run}/job/${job}`;
 
-  const runOn = (sha: string, attempt = 1, status = "completed"): GhCommandResult => ({
+  /** Every job id the links below name, unless a test says the run holds fewer. */
+  const allJobs = [50, 60, 70, 71, 80, 90].map((databaseId) => ({ databaseId }));
+  const runOn = (
+    sha: string,
+    attempt = 1,
+    status = "completed",
+    jobs: ReadonlyArray<{ readonly databaseId: number }> = allJobs,
+  ): GhCommandResult => ({
     exitCode: 0,
-    stdout: JSON.stringify({ headSha: sha, attempt, status }),
+    stdout: JSON.stringify({ headSha: sha, attempt, status, jobs }),
   });
   const temporary: string[] = [];
   afterEach(() => {
@@ -1858,10 +1865,7 @@ describe("CI logs and reruns for a thread's agent", () => {
         ]);
       }
       if (arguments_[0] === "run" && arguments_[1] === "view") {
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify({ headSha: "h2", attempt, status: "completed" }),
-        };
+        return runOn("h2", attempt);
       }
       return { exitCode: 0, stdout: "" };
     });
@@ -1870,7 +1874,7 @@ describe("CI logs and reruns for a thread's agent", () => {
       status: "planned",
       headSha: "h2",
       maxReruns: 3,
-      runs: [{ runId: "7", checks: ["test", "lint"] }],
+      runs: [{ runId: "7", checks: ["test", "lint"], attempt: 1 }],
     });
     if (plan.status !== "planned") return;
     expect(await forge.rerunCi(request, plan, signal)).toEqual({
@@ -1890,7 +1894,7 @@ describe("CI logs and reruns for a thread's agent", () => {
       status: "planned",
       headSha: "h2",
       maxReruns: 3,
-      runs: [{ runId: "7", jobId: "71", checks: ["lint"] }],
+      runs: [{ runId: "7", jobId: "71", checks: ["lint"], attempt: 1 }],
     });
     if (named.status !== "planned") return;
     await forge.rerunCi(request, named, signal);
@@ -1927,7 +1931,7 @@ describe("CI logs and reruns for a thread's agent", () => {
         '  "run view")',
         '    case "$*" in',
         '      *--log-failed*) head -c 1300000 /dev/zero | tr "\\0" a; printf "\\nLAST LINE\\n" ;;',
-        '      *) printf \'{"headSha":"h2","attempt":1,"status":"completed"}\' ;;',
+        '      *) printf \'{"headSha":"h2","attempt":1,"status":"completed","jobs":[{"databaseId":70}]}\' ;;',
         "    esac ;;",
         "esac",
         "",
@@ -2015,6 +2019,111 @@ describe("CI logs and reruns for a thread's agent", () => {
       status: "refused",
       reason: "still-running",
     });
+  });
+
+  it("reruns each failed job that shares a name, not whichever GitHub listed first", async () => {
+    const { run, port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head("h2");
+      if (arguments_[1] === "checks") {
+        return checks([
+          { name: "test", bucket: "pass", link: actionsLink(5, 50) },
+          { name: "test", bucket: "fail", link: actionsLink(7, 70) },
+        ]);
+      }
+      if (arguments_[0] === "run" && arguments_[1] === "view") return runOn("h2");
+      return { exitCode: 0, stdout: "" };
+    });
+    const plan = await forge.planCiRerun(request, { check: "test", maxReruns: 3 }, signal);
+    expect(plan).toEqual({
+      status: "planned",
+      headSha: "h2",
+      maxReruns: 3,
+      runs: [{ runId: "7", jobId: "70", checks: ["test"], attempt: 1 }],
+    });
+    if (plan.status !== "planned") return;
+    await forge.rerunCi(request, plan, signal);
+    expect(run.mock.calls.at(-1)?.[0]).toEqual([
+      "run",
+      "rerun",
+      "--job",
+      "70",
+      "--repo",
+      "octant/octant",
+    ]);
+  });
+
+  it("neither reads nor reruns a job a link pairs with a run that does not hold it", async () => {
+    const { run, port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head("h2");
+      if (arguments_[1] === "checks") {
+        return checks([{ name: "test", bucket: "fail", link: actionsLink(7, 90) }]);
+      }
+      if (arguments_.includes("--log-failed")) return { exitCode: 0, stdout: "other job\n" };
+      if (arguments_[0] === "run" && arguments_[1] === "view") {
+        return runOn("h2", 1, "completed", [{ databaseId: 70 }]);
+      }
+      return { exitCode: 0, stdout: "" };
+    });
+    expect(await forge.readCiLogs(request, { tailLines: 200, maxBytes: 32_768 }, signal)).toEqual({
+      status: "read",
+      headSha: "h2",
+      running: [],
+      logs: [{ check: "test", status: "no-log", reason: "external" }],
+    });
+    expect(await forge.planCiRerun(request, { check: "test", maxReruns: 3 }, signal)).toEqual({
+      status: "refused",
+      reason: "external-check",
+    });
+    expect(run.mock.calls.some(([arguments_]) => arguments_.includes("--log-failed"))).toBe(false);
+  });
+
+  it("refuses a rerun approved for an attempt someone else has rerun since", async () => {
+    let attempt = 1;
+    const { run, port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head("h2");
+      if (arguments_[1] === "checks") {
+        return checks([{ name: "test", bucket: "fail", link: actionsLink(7, 70) }]);
+      }
+      if (arguments_[0] === "run" && arguments_[1] === "view") return runOn("h2", attempt);
+      return { exitCode: 0, stdout: "" };
+    });
+    const plan = await forge.planCiRerun(request, { maxReruns: 3 }, signal);
+    if (plan.status !== "planned") throw new Error("not planned");
+    attempt = 2;
+    expect(await forge.rerunCi(request, plan, signal)).toEqual({
+      status: "refused",
+      reason: "run-changed",
+    });
+    expect(run.mock.calls.some(([arguments_]) => arguments_[1] === "rerun")).toBe(false);
+  });
+
+  it("gives a cancelled job's whole log, and says a job of a running workflow is still running", async () => {
+    let running = false;
+    const { port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head("h2");
+      if (arguments_[1] === "checks") {
+        return checks([{ name: "deploy", bucket: "cancel", link: actionsLink(7, 70) }]);
+      }
+      if (arguments_.includes("--log-failed")) {
+        return running
+          ? {
+              exitCode: 1,
+              stdout: "",
+              stderr: "run 7 is still in progress; logs will be available when it is complete",
+            }
+          : { exitCode: 0, stdout: "" };
+      }
+      if (arguments_.includes("--log")) return { exitCode: 0, stdout: "cancelled while waiting\n" };
+      if (arguments_[0] === "run" && arguments_[1] === "view") return runOn("h2");
+      return { exitCode: 0, stdout: "" };
+    });
+    expect(
+      await forge.readCiLogs(request, { tailLines: 200, maxBytes: 32_768 }, signal),
+    ).toMatchObject({ logs: [{ check: "deploy", status: "log", log: "cancelled while waiting" }] });
+    running = true;
+    expect(
+      await forge.readCiLogs(request, { tailLines: 200, maxBytes: 32_768 }, signal),
+    ).toMatchObject({ logs: [{ check: "deploy", status: "no-log", reason: "running" }] });
   });
 
   it("refuses to read or rerun when the pull request at that number is not the linked one", async () => {

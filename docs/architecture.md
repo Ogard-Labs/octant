@@ -4607,13 +4607,16 @@ CI or reviewers should be woken, not left polling; maintainer request,
   that now names another pull request. `ci-logs` reads every check on the
   current head with `gh pr checks`; only a check whose link is a job in the
   same repository's Actions counts as one, and only when its run's head is
-  the current head (anything else is reported as an outside service's check
-  or another commit's). For each such failed job (at most four per read, or
+  the current head and the run lists that job (anything else is reported as
+  an outside service's check or another commit's: a commit status may pair
+  the head's run with any job of the repository). For each such failed job (at most four per read, or
   the one named) it reads `gh run view --job <id> --log-failed`, keeping a
   rolling 256 KB tail, so a log past `gh`'s 1 MiB output limit still yields
-  its end, then the last `tailLines` lines (1 to 2,000, 200 by default)
+  its end (a cancelled job with no failed step gives its whole log instead),
+  then the last `tailLines` lines (1 to 2,000, 200 by default)
   within 32 KB in all, with the host's secret redaction applied. A check with
-  no log says why: still running, expired (GitHub's 410), not an Actions
+  no log says why: still running (`gh` gives no job's log until its whole
+  run finishes), expired (GitHub's 410), not an Actions
   job, another commit's, or passed. Check names are flattened to one line.
   `ci-logs` never asks; its result marks the thread as having read outside
   content. `ci-rerun` first plans on the current head: every run must have
@@ -4628,10 +4631,13 @@ CI or reviewers should be woken, not left polling; maintainer request,
   Full access the person is then asked with the pull request, head and
   checks named; Full access does not ask. After the answer the forge reads
   the pull request and every planned run again and refuses a superseded
-  head, a run that has started meanwhile, or one that reached the limit, so
-  two approvals asked at once start at most one rerun past it; then it runs
+  head, a run that has started meanwhile, one that reached the limit, or
+  one whose attempt changed since the plan (someone else reran it, so the
+  jobs `--failed` would rerun are not the ones the approval named), so two
+  approvals asked at once start at most one rerun past it; then it runs
   `gh run rerun <run> --failed`, or `gh run rerun --job <id>` for one named
-  check. Plan refuses both. A rerun adds no event of its own: the tool call
+  check. A named check that two workflows share reruns each failed job of
+  that name, never whichever GitHub listed first. Plan refuses both. A rerun adds no event of its own: the tool call
   and any approval are journaled on the thread.
 - **Record.** Every switch change and every wake appends one event on the
   `code-project-pull-request-switches` aggregate type, each its own aggregate:
