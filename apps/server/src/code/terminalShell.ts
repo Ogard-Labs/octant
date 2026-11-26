@@ -63,3 +63,33 @@ export function windowsShellArguments(
       return undefined;
   }
 }
+
+/**
+ * The line typed after an agent's command so the terminal says it finished
+ * and with what exit code, in the syntax of the shell it runs in, and the
+ * pattern that reads it back. Windows PowerShell has no POSIX `printf` and
+ * its `$?` is a Boolean, so a POSIX marker never printed there and every
+ * command timed out. Command Prompt cannot print an escape character, so its
+ * marker is plain text. The shell's echo of the typed line never matches:
+ * there the exit code is still a variable, not digits.
+ */
+export function terminalCompletion(
+  shell: string,
+  marker: string,
+): { readonly command: string; readonly pattern: RegExp } {
+  const pattern = new RegExp(`(?:\\u001b\\]777;)?octant=${marker};exit=(\\d+)\\u0007?`, "g");
+  switch (win32.basename(shell).toLowerCase()) {
+    case "powershell.exe":
+    case "pwsh.exe":
+      // `$?` first, before anything else resets it; a failed native program
+      // leaves its code in `$LASTEXITCODE`, a failed cmdlet leaves none.
+      return {
+        command: `$octantOk = $?; $octantExit = if ($octantOk) { 0 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }; [Console]::Write("$([char]27)]777;octant=${marker};exit=$octantExit$([char]7)")`,
+        pattern,
+      };
+    case "cmd.exe":
+      return { command: `echo octant=${marker};exit=%ERRORLEVEL%`, pattern };
+    default:
+      return { command: `printf '\\033]777;octant=${marker};exit=%s\\007' "$?"`, pattern };
+  }
+}

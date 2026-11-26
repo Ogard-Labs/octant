@@ -114,6 +114,7 @@ import { isRoutineHostScope } from "../routineHostScope";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 import type { PullRequestWatchOutcome } from "./pullRequestWatchPort";
+import { terminalCompletion } from "./terminalShell";
 import type {
   PullRequestCiConfirmation,
   PullRequestCiLogsOutcome,
@@ -1561,6 +1562,8 @@ export interface AgentTerminalToolOptions {
   /** Marks what a command returned as outside content; help is the host's own text and is not. */
   readonly markResults?: ((tools: AppManagedToolSet) => AppManagedToolSet) | undefined;
   readonly wait?: ((milliseconds: number) => Promise<void>) | undefined;
+  /** The shell the terminal runs, so its completion line is in that shell's syntax; POSIX when absent. */
+  readonly shell?: (() => string) | undefined;
 }
 
 /** `octant_terminal` over one agent's terminal, with the same approvals and bounds everywhere. */
@@ -1699,15 +1702,14 @@ async function terminalTool(
     if (command === undefined) return failure("terminal-command-required");
     const marker =
       input.operation === "run" ? `oo${options.uuid().replaceAll("-", "")}` : undefined;
-    const data =
-      marker === undefined
-        ? command
-        : `${command}\rprintf '\\033]777;octant=${marker};exit=%s\\007' "$?"\r`;
+    const completion =
+      marker === undefined ? undefined : terminalCompletion(options.shell?.() ?? "/bin/sh", marker);
+    const data = completion === undefined ? command : `${command}\r${completion.command}\r`;
     const refused = await terminal.write(data);
     if (refused !== undefined) return refused;
-    if (marker !== undefined) {
+    if (completion !== undefined) {
       try {
-        return await waitForTerminalCommand(options, marker, signal);
+        return await waitForTerminalCommand(options, completion.pattern, signal);
       } finally {
         if (!signal?.aborted && options.authorityFailure() === undefined) options.onActivity?.();
       }
@@ -1720,15 +1722,14 @@ async function terminalTool(
 
 async function waitForTerminalCommand(
   options: AgentTerminalToolOptions,
-  marker: string,
+  completion: RegExp,
   signal?: AbortSignal,
 ) {
   const deadline = Date.now() + TERMINAL_COMMAND_TIMEOUT_MS;
-  const completion = new RegExp(`\\u001b\\]777;octant=${marker};exit=(\\d+)\\u0007`, "g");
   for (;;) {
     const authorityFailure = options.authorityFailure();
     if (signal?.aborted || authorityFailure !== undefined) {
-      await interruptTerminalCommand(options, marker);
+      await interruptTerminalCommand(options, completion);
       return signal?.aborted || authorityFailure === undefined
         ? failure("tool-interrupted")
         : failure(authorityFailure, postureRefusal(authorityFailure));
@@ -1736,7 +1737,7 @@ async function waitForTerminalCommand(
     await (options.wait ?? defaultWait)(TERMINAL_COMPLETION_POLL_MS);
     const postWaitAuthorityFailure = options.authorityFailure();
     if (signal?.aborted || postWaitAuthorityFailure !== undefined) {
-      await interruptTerminalCommand(options, marker);
+      await interruptTerminalCommand(options, completion);
       return signal?.aborted || postWaitAuthorityFailure === undefined
         ? failure("tool-interrupted")
         : failure(postWaitAuthorityFailure, postureRefusal(postWaitAuthorityFailure));
@@ -1761,7 +1762,7 @@ async function waitForTerminalCommand(
       return terminalSnapshot(snapshot, { commandCompleted: false });
     }
     if (Date.now() >= deadline) {
-      await interruptTerminalCommand(options, marker);
+      await interruptTerminalCommand(options, completion);
       const partial = terminalSnapshot(snapshot, { commandCompleted: false });
       return {
         result: { ...partial.result, error: "terminal-command-timeout" },
@@ -1773,14 +1774,15 @@ async function waitForTerminalCommand(
 
 async function interruptTerminalCommand(
   options: AgentTerminalToolOptions,
-  marker: string,
+  completion: RegExp,
 ): Promise<void> {
   const { interrupt, terminate, read } = options.terminal;
   try {
     if (interrupt === undefined) return;
     let snapshot = await interrupt();
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      if (snapshot.status !== "running" || terminalHasCompletionMarker(snapshot, marker)) return;
+      if (snapshot.status !== "running" || terminalHasCompletionMarker(snapshot, completion))
+        return;
       await (options.wait ?? defaultWait)(TERMINAL_COMPLETION_POLL_MS);
       snapshot = await read();
     }
@@ -1796,10 +1798,12 @@ async function interruptTerminalCommand(
 
 function terminalHasCompletionMarker(
   snapshot: CodeOperationTerminalSnapshot,
-  marker: string,
+  completion: RegExp,
 ): boolean {
-  return terminalTranscriptTail(snapshot, MAX_TERMINAL_SCAN_BYTES).value.includes(
-    `\u001b]777;octant=${marker};exit=`,
+  // matchAll copies the pattern, so its global lastIndex is never left behind.
+  return (
+    [...terminalTranscriptTail(snapshot, MAX_TERMINAL_SCAN_BYTES).value.matchAll(completion)]
+      .length > 0
   );
 }
 
