@@ -68,12 +68,12 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 4         | 2       | 2            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
-| [Hubs and Nightly](#hubs-and-nightly)                                                 | 8         | 2       | 6            | 0                   |
+| [Hubs and Nightly](#hubs-and-nightly)                                                 | 9         | 2       | 6            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 1       | 0            | 0                   |
-| **All areas**                                                                         | **322**   | **216** | **102**      | **4**               |
+| **All areas**                                                                         | **323**   | **216** | **102**      | **5**               |
 
 ## Principles and hard lines
 
@@ -130,7 +130,7 @@ Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Security and aut
 
 Everything a person cares about stays on the host. Octant makes only a short, switchable list of host-initiated calls.
 
-- No Octant account, relay or telemetry is required; there is no Octant relay (maintainer decision, 2026-11-14).
+- No Octant account, relay or telemetry is required; there is no Octant relay (maintainer decision, 2026-11-14). The person's own hub may act as their relay through its [public entrance](#hub-public-entrance), which takes inbound requests through a front the person controls and adds no outbound call (maintainer decision, 2026-11-26; designed, not built).
 - The outside calls (signed update checks, managed device-tool update checks, marketplace fetches the person starts, public Canvas link calls, a hub's push delivery) each have an off switch. Optional [thread titles](model-endpoints.md#thread-titles) go only to the endpoint the person selects.
 - Traffic among a person's own devices is not a third-party call, and is always authenticated and encrypted.
 - A new outside call, credential exposure or cloud dependency needs an explicit request and a documented boundary in the owner.
@@ -590,6 +590,7 @@ The first release is the technical preview for Apple-silicon Macs, with the prov
 - `octant server install|upgrade` refuses an unverified headless build unless the person passes `--self-built` (maintainer decision, 2026-11-19).
 - The minimum is macOS 15.0, which the bundled Simulator tools need (maintainer decision, 2026-11-22).
 - In scope: connectors, Code's Git and pull-request work, a person's merge from any client, host-local routines, the levels, key providers' native features, Shield, [provider terminals](#provider-terminals) (maintainer decision, 2026-11-21), and public Canvas links through the self-hostable `apps/share`, with no Ogard Labs instance (maintainer decision, 2026-11-07).
+- A narrow public entrance on the person's own hub is in scope: visitor links, webhook triggers, and an end-to-end encrypted channel for the person's own paired devices, through the hub's Tailscale Funnel switch or a front the person runs, with failover and no Octant-run service (maintainer decision, 2026-11-26; designed, not built; [Hub public entrance](#hub-public-entrance)).
 - An agent merges only as [Pull-request merge](#pull-request-merge) allows, never on its own initiative.
 - Out of scope: cloud scheduling, an Octant-operated hosted service, physical phones and tablets, and store upload, submission and release (maintainer decision, 2026-10-29).
 - An unauthenticated download of the latest link, and the first release run that signs a headless build, are maintainer checks still owed.
@@ -1342,6 +1343,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary thre
 - A Work or Code routine may target a Project on a registered server at the same levels and approvals; only the host's own person sets that up. (maintainer decision, 2026-11-14)
 - A Chat routine keeps Chat's authority and finishes when its turn settles.
 - File and integration-event triggers deliver their input as framed external data, never as grants; held changes need the person's Review or Re-arm, and nothing re-arms by itself. Event triggers are set at a local window or a host-person-paired device. (maintainer decision, 2026-11-13)
+- A `webhook` trigger through the person's own hub is designed, not built (maintainer decision, 2026-11-26; [Hub public entrance](#hub-public-entrance)): the spoke mints and keeps the endpoint secret, the hub and spoke both verify each delivery, the spoke's journal dedupes by delivery id, the payload is framed outside content, and a webhook run never reaches Full access.
 - Native watcher, filesystem and live provider acceptance evidence is owed; controlled fixtures prove the rest.
 
 Status: Built. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -2457,6 +2459,7 @@ Pairing issues a revocable device key; the private listener serves HTTPS on one 
 - **Pause remote access** refuses every device and outside agent until resumed, keeping records, keys and grants; a local window or `octant auth resume` turns it on or off, a Full device only on (maintainer decision, 2026-11-22). **Sign out all other devices** keeps only the asking device (maintainer decision, 2026-11-22).
 - A party the host already trusts approves every new device (maintainer decision, 2026-11-12).
 - The listener binds only a person-selected private address and port after the person confirms it, every state-changing request carries a device-key proof, and nothing authority-bearing queues offline.
+- The hub's public entrance is a separate listener with its own closed route table and never relaxes the listener's rule; Pause remote access closes it too (maintainer decision, 2026-11-26; designed, not built; [Hub public entrance](#hub-public-entrance)).
 - An agent's debug session (`octant_debug`) runs unasked at Full access, with one approval per session below it, and is refused in Plan (maintainer decisions, 2026-11-12 and 2026-11-13); a Full device drives one as a window does, other devices are refused.
 
 Not built yet:
@@ -3852,7 +3855,7 @@ Status: Partly built. Since: 2026-10-26. Detail: [Mobile maturity: Android](mobi
 A person's own devices form a hub-and-spoke topology: a hub is an ordinary Octant host with a role, spokes are the person's other computers, and phones and browsers join as guests. Each host stays its own authority.
 
 - A spoke's hub grant is a closed list chosen and changed only on that spoke. The hub cannot read credentials, loosen sandbox or approval policy, or decide a risky action, and never acts on an owner's behalf.
-- Authority checks and the journal stay per host. Members are the person's own devices over a private network only; there is no public internet path.
+- Authority checks and the journal stay per host. Members are the person's own devices over a private network only; joining, pairing and member-to-member requests have no public internet path. The hub's [public entrance](#hub-public-entrance) is the one narrow exception, for its closed routes only (designed, not built).
 - A spoke accepts new members as full members by default and every spoke and owner device alerts on each; a setting holds them until an owner confirms.
 - Browser guests reach each spoke directly, so the hub never sees spoke traffic.
 - Work and Code turns on Windows follow [Windows below Full access](#windows-below-full-access).
@@ -3905,6 +3908,22 @@ One hub is active at a time, with a named standby that stands in only while the 
 - Owner recovery of a runtime approval is one-use, bound to exact digests, and refuses a changed target or replay before effect. It never covers Plan or Full access callbacks, credentials, Browser, publishing or remembered grants.
 
 Status: Built. Since: 2026-10-28. Detail: [Hub and spokes: failover](hub-and-spokes.md#failover), [owner devices](hub-and-spokes.md#owner-devices) and [owner runtime approval recovery](hub-and-spokes.md#owner-runtime-approval-recovery).
+
+### Hub public entrance
+
+A person's hub may open one narrow public entrance, through a front the person controls, so visitors, outside services and the person's own devices reach their work without any service Octant runs (maintainer decision, 2026-11-26).
+
+- The front is the hub's built-in Tailscale Funnel switch (TLS ends on the hub; Funnel listens publicly only on 443, 8443 or 10000) or a tunnel or proxy the person runs themselves; a router port forward and a live relay in `apps/share` are rejected (decision H29). Octant runs no Tailscale or tunnel command the person did not turn on.
+- The entrance is a separate listener, bound to loopback or to the hub's Tailscale address for one named front, with a closed route table: the visitor page, stream and comments, webhook receipt, the device relay, and health. Every other path answers 404, it shares no port, session, cookie or principal with the private listener, and a request on it is never loopback administration. HEAD and GET never start a run.
+- It is off at three levels: the hub's own switch, each spoke's Public (or Relay) hub-grant item, and each link, endpoint or device. Pause remote access closes it.
+- Every member's entrance forwards to the acting hub, and only the acting hub serves (decision H30). A standby serves only while it stands in and its own person ticked it; hand-back carries the undelivered queue, and the spoke's dedupe keeps each delivery to one run.
+- The outside person is a visitor, with a visitor link (decision H31). The spoke that owns the thread signs each link with its host identity key and checks revocation on every fetch (decision H32). A visitor reads a redacted live projection from one browser and, where the link allows, comments as a Request the person sends or dismisses; a visitor never acts on the thread or answers an approval.
+- The spoke mints and keeps each webhook secret, sealed to the hub and standbys; the acting hub drops forged requests before queueing and the spoke verifies the original bytes again (decision H33). A webhook run never reaches Full access (decision H34).
+- Limits: a webhook endpoint takes 60 requests a minute and a 256 KiB body and holds at most 500 deliveries or 32 MiB for 24 hours; a visitor link expires after 24 hours by default and 7 days at most (decision H35).
+- The person's own paired phone or computer reaches its hosts through the entrance on a channel pinned to the host key and certificate from pairing, so the hub and the front see only ciphertext; pairing stays on the private network or QR, and the relay is off by default (decision H36). Phone push for the store build still goes through the minimal Octant push gateway.
+- Visitor text and webhook payloads are outside content and never instructions or grants.
+
+Status: Designed, not built. Since: 2026-11-26. Detail: [Hub and spokes: public entrance](hub-and-spokes.md#public-entrance), [failover](hub-and-spokes.md#the-public-entrance-during-failover) and [decisions](hub-and-spokes.md#decisions).
 
 ### Shared sign-ins, delegation and provisioning
 
