@@ -194,6 +194,12 @@ export const PullRequestViewedCommand = Schema.Struct({
   target: PullRequestGuideTarget,
   path: CodeRelativePath,
   viewed: Schema.Boolean,
+  /**
+   * The head the person reviewed. GitHub marks the file at whatever head it
+   * has now, so a push since then refuses the mark instead of claiming the
+   * newer changes were seen.
+   */
+  headSha: Schema.optional(GitObjectId),
 }).annotations(strict);
 export type PullRequestViewedCommand = typeof PullRequestViewedCommand.Type;
 

@@ -15,7 +15,10 @@ import { WINDOW_CAPABILITY_HEADER, createRemoteDevicePrincipal } from "../client
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createBundledPullRequestGuideWriter } from "./bundledPullRequestGuideWriter";
-import { createPullRequestGuideRouteHandler } from "./pullRequestGuideRoutes";
+import {
+  createPullRequestGuideRouteHandler,
+  pullRequestViewedViewOf,
+} from "./pullRequestGuideRoutes";
 import { PullRequestGuideService } from "./pullRequestGuideService";
 
 const SCOPE_WINDOW = decodeWindowId("73000000-0000-4000-8000-000000000001");
@@ -129,5 +132,17 @@ describe("pull request guide routes", () => {
     const write = await handler(local("/write", { target: TARGET }));
     expect(write?.status).toBe(409);
     expect(await write?.json()).toMatchObject({ reason: "no-model" });
+  });
+});
+
+describe("pullRequestViewedViewOf", () => {
+  it("keeps every other file's Viewed state when GitHub returns one path not in NFC", () => {
+    const decomposed = "docs/cafe\u0301.md";
+    expect(
+      pullRequestViewedViewOf([
+        { path: "src/auth.ts", state: "viewed" },
+        { path: decomposed, state: "unviewed" },
+      ]),
+    ).toEqual({ files: [{ path: "src/auth.ts", state: "viewed" }] });
   });
 });

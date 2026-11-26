@@ -3,6 +3,7 @@ import {
   decodePullRequestGuideWriteCommand,
   decodePullRequestViewedCommand,
   decodePullRequestViewedQuery,
+  decodePullRequestViewedView,
   type PullRequestViewedView,
 } from "@octant/contracts/pull-request-guide";
 import type { PullRequestReviewTarget, WindowId } from "@octant/contracts";
@@ -38,9 +39,33 @@ export interface PullRequestViewedPort {
       readonly target: PullRequestReviewTarget;
       readonly path: string;
       readonly viewed: boolean;
+      readonly headSha?: string;
     },
     signal: AbortSignal,
-  ): Promise<{ readonly status: "done" | "refused" | "unavailable" }>;
+  ): Promise<{ readonly status: "done" | "refused" | "head-moved" | "unavailable" }>;
+}
+
+/**
+ * GitHub's Viewed list as the route answers it. A path the host cannot carry
+ * (GitHub may return one not in NFC) drops that file alone, never every
+ * file's checkbox; an unreadable list answers undefined.
+ */
+export function pullRequestViewedViewOf(
+  files: ReadonlyArray<{ readonly path: string; readonly state: string }>,
+): PullRequestViewedView | undefined {
+  const carried = files.filter((file) => {
+    try {
+      decodePullRequestViewedView({ files: [file] });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  try {
+    return decodePullRequestViewedView({ files: carried });
+  } catch {
+    return undefined;
+  }
 }
 
 export interface PullRequestGuideRouteDependencies {
@@ -177,10 +202,24 @@ export function createPullRequestGuideRouteHandler(
       }
       const written = await dependencies.viewed.write(
         scopeId,
-        { target: command.target, path: String(command.path), viewed: command.viewed },
+        {
+          target: command.target,
+          path: String(command.path),
+          viewed: command.viewed,
+          ...(command.headSha === undefined ? {} : { headSha: String(command.headSha) }),
+        },
         signal,
       );
       if (written.status === "done") return json({ status: "done" }, 200);
+      if (written.status === "head-moved") {
+        return json(
+          {
+            error: "A new push changed this pull request. Refresh it and review the file again.",
+            reason: "head-moved",
+          },
+          409,
+        );
+      }
       return written.status === "refused"
         ? json({ error: REFUSAL_COPY["not-authorized"][1], reason: "not-authorized" }, 403)
         : json({ error: "GitHub did not take the change.", reason: "unavailable" }, 503);

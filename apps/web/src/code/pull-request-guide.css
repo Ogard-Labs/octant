@@ -37,7 +37,6 @@
   padding: var(--oct-space-3);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-  outline: none;
 }
 
 .pr-guide__stop[data-active] {

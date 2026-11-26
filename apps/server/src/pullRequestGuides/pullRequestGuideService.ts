@@ -571,6 +571,10 @@ export class PullRequestGuideService {
     if (currentHead === undefined) return { status: "failed", reason: "unavailable" };
     if (currentHead !== headSha) return { status: "failed", reason: "head-stale" };
     const stops = validateGuideStops(outcome.stops, diff ?? { files: [] });
+    // A guide with no stop says nothing, and recording it would replace the
+    // saved one: a diff GitHub failed to give, or a reply whose every stop was
+    // malformed, keeps what the person had.
+    if (stops.length === 0) return { status: "failed", reason: "invalid-output" };
     const linkId = pullRequestReviewTargetKey(target);
     this.#append(linkId, PULL_REQUEST_GUIDE_EVENT_NAMES.recorded, {
       kind: "pull-request-guide-recorded",

@@ -78,16 +78,29 @@ export function parseGuideStops(
   text: string,
 ): ReadonlyArray<PullRequestGuideStopProposal> | undefined {
   const trimmed = text.trim();
+  // The bare reply first, then one fence around all of it, then the reply's
+  // only fence: a stop may quote a fenced snippet inside its JSON, and that
+  // snippet is not the reply.
   const fenced = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)];
-  const candidate = fenced.length === 1 && fenced[0]?.[1] !== undefined ? fenced[0][1] : trimmed;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(candidate);
-  } catch {
-    return undefined;
+  const candidates = [
+    trimmed,
+    /^```(?:json)?\s*([\s\S]*)```$/i.exec(trimmed)?.[1],
+    fenced.length === 1 ? fenced[0]?.[1] : undefined,
+  ];
+  let stops: ReadonlyArray<unknown> | undefined;
+  for (const candidate of candidates) {
+    if (candidate === undefined) continue;
+    try {
+      const value = record(JSON.parse(candidate))?.stops;
+      if (Array.isArray(value)) {
+        stops = value;
+        break;
+      }
+    } catch {
+      // Not this candidate.
+    }
   }
-  const stops = record(parsed)?.stops;
-  if (!Array.isArray(stops)) return undefined;
+  if (stops === undefined) return undefined;
   const proposals: PullRequestGuideStopProposal[] = [];
   for (const raw of stops) {
     const stop = record(raw);

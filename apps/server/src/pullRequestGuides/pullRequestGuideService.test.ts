@@ -124,6 +124,8 @@ function harness(options: {
   readonly admit?: "admitted" | "refused";
   readonly head?: { current: string };
   readonly reply?: string;
+  /** Read at each turn, so a second run can answer differently. */
+  readonly replies?: { current: string };
   readonly captureThrows?: boolean;
   readonly turnWaitsForAbort?: boolean;
 }) {
@@ -169,7 +171,11 @@ function harness(options: {
         );
         return { status: "cancelled" } as never;
       }
-      return { status: "completed", sessionId: "fake", text: options.reply ?? GUIDE_REPLY };
+      return {
+        status: "completed",
+        sessionId: "fake",
+        text: options.replies?.current ?? options.reply ?? GUIDE_REPLY,
+      };
     },
     spendCeiling: {
       admit: () => {
@@ -275,6 +281,39 @@ describe("review guides", () => {
     // The projection is rebuilt from the journal alone.
     const reloaded = await make().read(WINDOW_ID, TARGET, HEAD_1);
     expect(reloaded.status === "read" && reloaded.view.guide?.stops.length).toBe(2);
+  });
+
+  it("keeps the saved guide when a Rewrite yields no usable stop", async () => {
+    const replies = { current: GUIDE_REPLY };
+    const { make } = harness({ route: ROUTE, replies });
+    const service = make();
+    const first = await service.writeForPerson(WINDOW_ID, TARGET);
+    if (first.status !== "started") throw new Error("expected a started run");
+    expect((await first.done).status).toBe("recorded");
+
+    replies.current = JSON.stringify({ stops: [{ why: "no title" }] });
+    const rewrite = await service.writeForPerson(WINDOW_ID, TARGET);
+    if (rewrite.status !== "started") throw new Error("expected a started run");
+    expect(await rewrite.done).toEqual({ status: "failed", reason: "invalid-output" });
+    const read = await service.read(WINDOW_ID, TARGET, HEAD_1);
+    expect(read.status === "read" && read.view.guide?.stops.length).toBe(2);
+  });
+
+  it("reads a reply whose stop quotes a fenced snippet", async () => {
+    const reply = JSON.stringify({
+      stops: [
+        {
+          title: "Guests are let in",
+          why: "It now reads:\n```ts\nreturn true;\n```",
+          needsDecision: false,
+          anchors: [{ path: "src/auth.ts", startLine: 2, endLine: 2 }],
+        },
+      ],
+    });
+    const { make } = harness({ route: ROUTE, reply });
+    const started = await make().writeForPerson(WINDOW_ID, TARGET);
+    if (started.status !== "started") throw new Error("expected a started run");
+    expect((await started.done).status).toBe("recorded");
   });
 
   it("refuses a guide run when no model is picked", async () => {

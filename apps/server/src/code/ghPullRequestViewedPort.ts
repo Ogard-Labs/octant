@@ -10,7 +10,13 @@ const FILES_PAGE = 100;
 const MAX_FILE_PAGES = Math.ceil(MAX_PULL_REQUEST_VIEWED_FILES / FILES_PAGE);
 const FILES_QUERY = `query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){id files(first:${FILES_PAGE},after:$after){pageInfo{hasNextPage endCursor} nodes{path viewerViewedState}}}}}`;
 const NODE_ID_QUERY =
-  "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id}}}";
+  "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id headRefOid}}}";
+/**
+ * Every call names github.com: a `GH_HOST` set for an Enterprise login
+ * would otherwise send a github.com pull request's query, and its Viewed
+ * mark, to a pull request of the same name there.
+ */
+const GITHUB_HOST = ["--hostname", "github.com"] as const;
 const MARK_MUTATION =
   "mutation($id:ID!,$path:String!){markFileAsViewed(input:{pullRequestId:$id,path:$path}){clientMutationId}}";
 const UNMARK_MUTATION =
@@ -32,7 +38,11 @@ export type GhViewedRead =
     }
   | { readonly status: "unavailable" };
 
-export type GhViewedWrite = { readonly status: "done" } | { readonly status: "unavailable" };
+export type GhViewedWrite =
+  | { readonly status: "done" }
+  /** The pull request's head is no longer the one the person reviewed. */
+  | { readonly status: "head-moved" }
+  | { readonly status: "unavailable" };
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -74,6 +84,7 @@ export class GhPullRequestViewedPort {
         [
           "api",
           "graphql",
+          ...GITHUB_HOST,
           "-f",
           `owner=${request.owner}`,
           "-f",
@@ -112,9 +123,16 @@ export class GhPullRequestViewedPort {
     return found ? { status: "read", files } : { status: "unavailable" };
   }
 
-  /** Marks or unmarks one file, on the pull request GitHub names at this number now. */
+  /**
+   * Marks or unmarks one file, on the pull request GitHub names at this
+   * number now, and only while its head is the one the person reviewed.
+   */
   async write(
-    request: GhPullRequestIdentity & { readonly path: string; readonly viewed: boolean },
+    request: GhPullRequestIdentity & {
+      readonly path: string;
+      readonly viewed: boolean;
+      readonly headSha?: string;
+    },
     signal: AbortSignal,
   ): Promise<GhViewedWrite> {
     if (!validRepository(`${request.owner}/${request.name}`)) return { status: "unavailable" };
@@ -122,6 +140,7 @@ export class GhPullRequestViewedPort {
       [
         "api",
         "graphql",
+        ...GITHUB_HOST,
         "-f",
         `owner=${request.owner}`,
         "-f",
@@ -131,16 +150,21 @@ export class GhPullRequestViewedPort {
         "-f",
         `query=${NODE_ID_QUERY}`,
         "--jq",
-        ".data.repository.pullRequest.id",
+        '.data.repository.pullRequest | "\\(.id) \\(.headRefOid)"',
       ],
       signal,
     );
-    const nodeId = lookup?.exitCode === 0 ? lookup.stdout.trim() : "";
+    const [nodeId = "", head = ""] = lookup?.exitCode === 0 ? lookup.stdout.trim().split(" ") : [];
     if (!/^[A-Za-z0-9+/=_-]{1,128}$/.test(nodeId)) return { status: "unavailable" };
+    // Unmarking claims nothing was seen, so only a mark waits on the head.
+    if (request.viewed && request.headSha !== undefined && head !== request.headSha) {
+      return { status: "head-moved" };
+    }
     const result = await this.#run(
       [
         "api",
         "graphql",
+        ...GITHUB_HOST,
         "-f",
         `id=${nodeId}`,
         "-f",

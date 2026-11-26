@@ -77,10 +77,12 @@ import { createPullRequestReviewHostRuntime } from "../pullRequestReviewers/pull
 import { createPullRequestReviewRouteHandler } from "../pullRequestReviewers/pullRequestReviewRoutes";
 import { PullRequestReviewService } from "../pullRequestReviewers/pullRequestReviewService";
 import { createBundledPullRequestGuideWriter } from "../pullRequestGuides/bundledPullRequestGuideWriter";
-import { createPullRequestGuideRouteHandler } from "../pullRequestGuides/pullRequestGuideRoutes";
+import {
+  createPullRequestGuideRouteHandler,
+  pullRequestViewedViewOf,
+} from "../pullRequestGuides/pullRequestGuideRoutes";
 import { PullRequestGuideService } from "../pullRequestGuides/pullRequestGuideService";
 import { GhPullRequestViewedPort } from "../code/ghPullRequestViewedPort";
-import { decodePullRequestViewedView } from "@octant/contracts/pull-request-guide";
 import {
   SECOND_MODEL_PULL_REQUEST_REVIEWER_DISPLAY_NAME,
   SECOND_MODEL_PULL_REQUEST_REVIEWER_ID,
@@ -3766,11 +3768,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             signal,
           );
           if (read.status !== "read") return { status: "unavailable" };
-          try {
-            return { status: "read", view: decodePullRequestViewedView({ files: read.files }) };
-          } catch {
-            return { status: "unavailable" };
-          }
+          const view = pullRequestViewedViewOf(read.files);
+          return view === undefined ? { status: "unavailable" } : { status: "read", view };
         },
         write: async (windowId, input, signal) => {
           const authority = await projectPullRequestService.authorizePullRequest(
@@ -3788,6 +3787,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               number: input.target.number,
               path: input.path,
               viewed: input.viewed,
+              ...(input.headSha === undefined ? {} : { headSha: input.headSha }),
             },
             signal,
           );

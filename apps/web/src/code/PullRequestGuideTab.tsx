@@ -30,6 +30,11 @@ export interface PullRequestGuideTabProps {
   readonly target: PullRequestReviewTarget;
   /** The head the pane shows; a guide written for another head reads as stale. */
   readonly headSha: string;
+  /**
+   * False on a closed or merged pull request: the host reads no head for one
+   * and refuses the run, so nothing offers to write a guide there.
+   */
+  readonly writable?: boolean;
   readonly onOpenAnchor: (anchor: PullRequestGuideAnchor) => void;
 }
 
@@ -130,15 +135,20 @@ export default function PullRequestGuideTab(props: PullRequestGuideTabProps) {
 
   const guide = view.guide;
   const writeLabel = guide === undefined ? "Write guide" : "Rewrite";
+  const writable = props.writable !== false;
 
   return (
     <section aria-label="Review guide" className="pr-guide">
-      {!view.modelPicked ? (
+      {!writable ? (
+        <p className="pr-detail__quiet" role="status">
+          Guides are written while a pull request is open.
+        </p>
+      ) : !view.modelPicked ? (
         <p className="pr-detail__quiet" role="status">
           Pick a model to write guides: Project settings › Pull request reviews › Guide model.
         </p>
       ) : null}
-      {view.stale ? (
+      {view.stale && writable ? (
         <OctantAlert
           action={
             <OctantButton
@@ -176,7 +186,7 @@ export default function PullRequestGuideTab(props: PullRequestGuideTabProps) {
           <p className="pr-detail__quiet">
             No guide for this push yet. A guide walks through the change stop by stop.
           </p>
-          {view.modelPicked ? (
+          {view.modelPicked && writable ? (
             <OctantButton disabled={pending || running} onClick={() => void write()} size="sm">
               {writeLabel}
             </OctantButton>
@@ -188,7 +198,7 @@ export default function PullRequestGuideTab(props: PullRequestGuideTabProps) {
             {stops.length} {stops.length === 1 ? "stop" : "stops"} · {String(guide.modelId)} on{" "}
             <code>{guide.headSha.slice(0, 7)}</code> · <OctantKbd>J</OctantKbd>{" "}
             <OctantKbd>K</OctantKbd> step between stops
-            {view.stale ? null : (
+            {view.stale || !writable ? null : (
               <OctantButton
                 className="pr-guide__rewrite"
                 disabled={pending || running || !view.modelPicked}

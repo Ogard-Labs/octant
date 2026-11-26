@@ -18,7 +18,7 @@ function fakeGitHub(initial: Record<string, "VIEWED" | "UNVIEWED" | "DISMISSED">
         states.set(path, query.includes("unmarkFileAsViewed") ? "UNVIEWED" : "VIEWED");
         return { exitCode: 0, stdout: "{}" };
       }
-      if (args.includes("--jq")) return { exitCode: 0, stdout: "PR_node42\n" };
+      if (args.includes("--jq")) return { exitCode: 0, stdout: `PR_node42 ${HEAD}\n` };
       return {
         exitCode: 0,
         stdout: JSON.stringify({
@@ -44,6 +44,7 @@ function fakeGitHub(initial: Record<string, "VIEWED" | "UNVIEWED" | "DISMISSED">
 }
 
 const PULL_REQUEST = { owner: "ogard-labs", name: "octant", number: 42 };
+const HEAD = "a".repeat(40);
 
 describe("Viewed files on GitHub", () => {
   it("Viewed survives a reload, and a file GitHub dismissed shows Changed", async () => {
@@ -70,6 +71,40 @@ describe("Viewed files on GitHub", () => {
         { path: "src/session.ts", state: "changed" },
       ],
     });
+  });
+
+  it("refuses to mark a file viewed once a push moved the head the person reviewed", async () => {
+    const github = fakeGitHub({ "src/auth.ts": "UNVIEWED" });
+    const port = new GhPullRequestViewedPort({ command: github.command });
+    const signal = new AbortController().signal;
+    expect(
+      await port.write(
+        { ...PULL_REQUEST, path: "src/auth.ts", viewed: true, headSha: "b".repeat(40) },
+        signal,
+      ),
+    ).toEqual({ status: "head-moved" });
+    expect(github.calls.some((args) => args.some((arg) => arg.includes("mutation")))).toBe(false);
+    expect(
+      await port.write(
+        { ...PULL_REQUEST, path: "src/auth.ts", viewed: true, headSha: HEAD },
+        signal,
+      ),
+    ).toEqual({ status: "done" });
+  });
+
+  it("asks github.com whatever GH_HOST names", async () => {
+    const github = fakeGitHub({ "src/auth.ts": "UNVIEWED" });
+    const port = new GhPullRequestViewedPort({
+      command: github.command,
+      inheritedEnvironment: { GH_HOST: "github.example.com" },
+    });
+    const signal = new AbortController().signal;
+    await port.read(PULL_REQUEST, signal);
+    await port.write({ ...PULL_REQUEST, path: "src/auth.ts", viewed: true }, signal);
+    expect(github.calls.length).toBeGreaterThan(0);
+    for (const args of github.calls) {
+      expect(args.slice(0, 4)).toEqual(["api", "graphql", "--hostname", "github.com"]);
+    }
   });
 
   it("unmarks a file with GitHub's own mutation", async () => {

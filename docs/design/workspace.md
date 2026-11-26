@@ -1580,7 +1580,9 @@ files and the diff (with clickable line numbers and window-local line notes sent
 to a linked Code thread). In a local window each changed file has a Viewed
 checkbox that reads and writes GitHub's own viewed state for the person, a file
 GitHub reset after a new push shows "Changed" in warning ink, and the list opens
-with "n of m viewed"; on a paired device the list stays plain. Guide lists the
+with "n of m viewed"; on a paired device the list stays plain. A mark made
+after a push moved the head is refused and asks the person to refresh and
+look again. Guide lists the
 review guide written for this push: numbered stops, each a bordered row with its
 title, a "Needs your decision" warning badge where it applies, why it matters,
 and its anchors as quiet `path:start–end` buttons that open Changes at that
@@ -1590,7 +1592,9 @@ names the stop count, the model and the head, with Rewrite at its end. A guide
 written for an older push sits under a warning row, "Written for an older push.",
 with Rewrite; with no guide yet the tab offers Write guide, and with no guide
 model picked it says where to pick one (Project settings, Pull request reviews,
-Guide model) and runs nothing. While a run is going it says "Writing a guide for
+Guide model) and runs nothing. A closed or merged pull request keeps its guide
+to read and offers neither Write guide nor Rewrite: "Guides are written while
+a pull request is open." While a run is going it says "Writing a guide for
 this push…" and looks again every few seconds. The Guide tab and the Viewed
 checkboxes load with their own module the first time they are shown. Timeline lists the reviews and comments, newest last, then
 the labels, review-thread replies, the comment form and the review form

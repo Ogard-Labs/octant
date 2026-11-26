@@ -55,7 +55,12 @@ export default function PullRequestViewedFiles(props: PullRequestViewedFilesProp
     setSaving(path);
     setStates(new Map(states).set(path, viewed ? "viewed" : "unviewed"));
     try {
-      await guides.setViewed({ target, path, viewed });
+      await guides.setViewed({
+        target,
+        path,
+        viewed,
+        ...(props.headSha === undefined ? {} : { headSha: props.headSha }),
+      });
       setNote(undefined);
     } catch (caught: unknown) {
       setStates(before);

@@ -673,7 +673,9 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                   <p className="pr-detail__quiet" role="status">
                     No changed files observed.
                   </p>
-                ) : guideClient === undefined || guideTarget === undefined ? (
+                ) : // Mounted with Changes open only: the panel stays in the tree on
+                // the other tabs, and Viewed asks GitHub as soon as it mounts.
+                guideClient === undefined || guideTarget === undefined || tab !== "changes" ? (
                   <ChangedFiles files={detail.files} />
                 ) : (
                   <Suspense fallback={<ChangedFiles files={detail.files} />}>
@@ -718,6 +720,9 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                       setTab("changes");
                     }}
                     target={guideTarget}
+                    writable={
+                      detail.pullRequestState !== "closed" && detail.pullRequestState !== "merged"
+                    }
                   />
                 </Suspense>
               </OctantTabsPanel>

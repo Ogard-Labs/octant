@@ -73,6 +73,7 @@ export interface PullRequestGuideClient {
       readonly target: PullRequestReviewTarget;
       readonly path: string;
       readonly viewed: boolean;
+      readonly headSha?: string;
     },
     signal?: AbortSignal,
   ): Promise<void>;

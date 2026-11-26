@@ -145,6 +145,24 @@ describe("the pull request Guide tab", () => {
     expect(await screen.findByText(/Pick a model to write guides/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Write guide" })).toBeNull();
   });
+
+  it("offers no Write guide or Rewrite on a closed or merged pull request", async () => {
+    const client = fakeClient({});
+    render(
+      <PullRequestGuideTab
+        client={client}
+        headSha={NEW_HEAD}
+        onOpenAnchor={vi.fn()}
+        target={TARGET}
+        writable={false}
+      />,
+    );
+    expect(
+      await screen.findByText("Guides are written while a pull request is open."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Rewrite" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write guide" })).toBeNull();
+  });
 });
 
 describe("Viewed files", () => {

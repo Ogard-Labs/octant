@@ -4804,7 +4804,10 @@ Guide tab and Viewed checkboxes (maintainer decision, 2026-11-26).
   reservation back however it ends, a writer that throws included, and
   stopping the agent's turn cancels the run its `guide-write` started. A
   failure shows only for the head it was for. A run cut off by a restart is
-  not repeated.
+  not repeated. A run that leaves no stop (every proposed stop malformed, or
+  a diff GitHub did not give) is `invalid-output` and keeps the saved guide.
+  The bundled writer reads the bare reply first, then one fence around all
+  of it, so a stop that quotes a fenced snippet still parses.
 - **Who starts a run.** The person, from a local window
   (`POST /api/code/pull-request-guides/write`). The agent, through the
   pull-request tool's `guide-write` on its own linked pull request: Plan refuses
@@ -4819,7 +4822,12 @@ Guide tab and Viewed checkboxes (maintainer decision, 2026-11-26).
   (`/viewed/query`, `/viewed`), after the same pull-request authorization the
   review uses. `DISMISSED` reads as `changed`. Octant stores and journals
   nothing for it: GitHub holds the state, and a write acts under the person's
-  GitHub login.
+  GitHub login. Every call names `--hostname github.com`, whatever `GH_HOST`
+  says. A mark carries the head the person reviewed and is refused (409,
+  `head-moved`) once a push moved it, since GitHub would mark the newer
+  file; an unmark is not. A path the host cannot carry (one not in NFC)
+  drops that file alone from the list. The Changes panel asks for Viewed
+  only once it is open.
 
 **The GitHub plugin switch.** GitHub is a bundled first-party plugin
 (component `github-integration`) a person can switch off; it is on by default,
