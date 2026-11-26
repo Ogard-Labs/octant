@@ -1023,12 +1023,15 @@ row in addition to the ordinary viewport. This trades incremental first-search
 latency for responsive input and bounded mounted content in long histories.
 
 In a Work or Code thread, selecting text inside one assistant reply offers
-"New thread from selection" as a small action under the reply and in the
-reply's right-click menu. It opens the new-thread draft in the same Project and
+"Add to chat" and "New thread from selection" as small actions under the reply
+and in the reply's right-click menu. Add to chat puts the selection in this
+thread's composer as a quote chip, as Chat's Add to chat does
+([Thread view](thread-view.md#quotes-recalled-prompts-and-large-pastes)).
+New thread from selection opens the new-thread draft in the same Project and
 mode with the selection prefilled as a Markdown block quote. It is a draft
 only: nothing is sent until the person sends it, and the new thread has exactly
 the authority a new thread in that Project has. A Project that is archived or
-unknown opens nothing. Chat keeps its own "Add to chat" quote chips.
+unknown opens nothing.
 
 ## File editing
 
@@ -1141,7 +1144,8 @@ but cannot save it. Nothing runs a language-server command or writes without the
 ordinary authoritative file-save route.
 
 Send selection to agent quotes the exact selected text, path and line range in
-the current conversation draft; only the person sends it. The editor retains
+the current conversation draft as a quote chip, followed by the request for one
+replacement block; only the person sends it. The editor retains
 that selection's complete draft baseline. The person may load the latest
 completed same-thread/same-checkout agent reply when it contains exactly one
 fenced code block, or paste a proposed replacement. Preview replacement shows a

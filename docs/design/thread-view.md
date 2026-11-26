@@ -761,6 +761,47 @@ while the file-type glyph loads. An available image thumbnail takes the glyph's
 place. Long filenames truncate within the chip so its remove control stays
 reachable.
 
+### Quotes, recalled prompts and large pastes
+
+A quote is words taken from somewhere else, put in the prompt as one chip
+with the person's optional note (maintainer decision, 2026-11-26). Selecting
+text in a finished reply offers **Add to chat** in Chat, Work and Code (in
+Work and Code beside New thread from selection, under the reply and in its
+right-click menu). A terminal's **Add selection to chat** and the editor's
+**Send selection to agent** add the same chip, naming the terminal, or the
+file and its lines; the editor's request for one replacement block follows the
+chip as ordinary text.
+
+- The quote is the prompt's own text: a line that names its source and says
+  the words are for reference only, not instructions, then the words in a
+  fence longer than any backtick run inside them, then the person's note on a
+  line of its own that says it is theirs. The prompt shows that text as one
+  chip wherever it finds it, so copy, paste, stash and restore carry the quote,
+  and the host receives plain text. There is no quote type in any contract.
+- Pressing the chip shows the whole quote, a **Your note** field with **Save
+  note**, and **Remove quote**. Text typed right against a chip moves to its
+  own line, so the fence always closes.
+- Quoted words are another party's text, so a draft that holds a quote is
+  never counted as typed by the person, whatever is typed around it.
+- A draft stashed while Chat kept quotes beside the prompt restores them as
+  chips ahead of its text.
+
+In a thread's empty composer with no attachments or selected context, ArrowUp
+brings back the prompts the person sent in this thread, newest first, and
+ArrowDown walks forward again to an empty prompt. The arrows recall only while
+the recalled text is unedited and the caret is on its first line (ArrowUp) or
+last line (ArrowDown); once the person edits it, the arrows move the caret
+again. The prompts come from the loaded transcript; reports the host delivered
+are not the person's and are not recalled. A recalled prompt is not counted as
+typed until the person edits it.
+
+A paste of 32 KiB or more, or one that would take the prompt past the 200,000
+characters a message may hold, attaches as `pasted-text-<n>.txt` instead of
+filling the prompt, in the composers that take files: a Chat thread, the Chat
+start screen and a Code thread. ⌘⇧V (Ctrl+Shift+V) pastes it inline anyway.
+Composers that take only images (Work, and the Work and Code start screens)
+keep every paste as text.
+
 ### Saved drafts
 
 The desktop and web composer in Chat, Work, and Code offers **Stash draft** and
