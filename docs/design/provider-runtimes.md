@@ -4039,7 +4039,10 @@ permission rules are updated before each prompt; the deprecated tool toggle
 payload is omitted because it replaces those rules. App tools require a process
 receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime. Ordinary inherited configuration does not supply that attestation and,
-below Full access, continues to report app tools as unsupported. At Full access
+under Strict below Full access, continues to report app tools as unsupported.
+Outside Strict a Work or Code thread below Full access and outside Plan is
+offered them labelled as mixed (`appManagedToolsOutsideStrict: "mixed"`;
+[Octant's tools outside Strict](#octants-tools-outside-strict)). At Full access
 such a runtime is still offered Octant's tools, labelled as mixed with tools
 Octant did not supply (maintainer request, 2026-11-12). The adapter reports
 this as a separate capability, `appManagedToolsAtFullAccess: "mixed"`, beside

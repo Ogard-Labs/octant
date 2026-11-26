@@ -93,7 +93,7 @@ row has one control where it had a name and an icon. Elsewhere it is a small
 icon after the Project (or in the leading cell). Its name is its tooltip and
 its accessible name. It opens one menu above the row from its leading edge,
 drawn as every other menu the row opens: the same edge, corner and
-4px inset, 288px wide and never wider than the line, with rows 28px tall that
+4px inset, 288px wide and never wider than the line, with rows 30px tall that
 answer the pointer across their whole width. A row is its name leading, and at
 the trailing edge its current value in muted ink and its arrow. The level in
 force heads the menu, its name over where it came from ("Matches your

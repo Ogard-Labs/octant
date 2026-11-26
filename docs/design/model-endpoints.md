@@ -120,15 +120,18 @@ needs no picker, the action is also available in a browser.
 
 ### Claude API-key profiles on a headless host
 
-A browser can create a named Claude API-key profile without a credential.
+A browser without credential authority can create a named Claude API-key
+profile without a credential.
 The key input remains disabled, with guidance to run
 `octant provider key set "Profile name"` on the Linux host, then check the
 connection. For a macOS host, the guidance directs the person to open the
 profile in Octant desktop to add its key. This guidance remains in the created
 profile’s Setup section, including after returning to Settings. Creation stores only the configuration and uses the existing
 per-instance account-directory allocation. Desktop creation still requires
-a key and saves it through native IPC. A browser-supplied secret is refused
-before profile creation; host-local credential authority is unchanged.
+a key and saves it through native IPC. A secret from a browser without
+credential authority is refused before profile creation. A device the host's
+own person paired, a paired browser included, sets the key itself
+([Architecture: Security and authority](../architecture.md#security-and-authority)).
 
 ### Claude gateway accounts
 

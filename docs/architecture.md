@@ -2064,8 +2064,9 @@ the host opens for its launch
 ([Octant Shield](#octant-shield), servers as built). No mode bans them: in
 Work as in Code they are commands at the thread's level. At Guarded, the
 first connection to each host in a thread asks the person, naming the host,
-even where a remembered approval would cover the command otherwise. Network egress for shell commands follows the level: at Guarded
-and Reviewed it follows the Project's egress rules, so a host those
+even where a remembered approval would cover the command otherwise. Network egress for shell commands follows
+[Network limits](#provider-runtime-network), which ship off: with them on,
+Guarded and Reviewed follow the Project's egress rules, so a host those
 rules do not allow is refused; at Full access the network is open.
 
 Chat's missing filesystem and shell authority is withheld, and by rule, not
@@ -4553,7 +4554,7 @@ CI or reviewers should be woken, not left polling; maintainer request,
   thread's own open pull request, the one linked to it on the board, to that
   thread; one thread watches a pull request at a time
   (`watched-by-another-thread`). The host checks the Project and the link,
-  asks the person, checks both again after the answer, then reads the pull
+  asks nobody at any level, then reads the pull
   request once and journals what is already true (settled checks, the review
   decision, a conflict) as the baseline it never wakes for. It shares Auto-fix's
   pass, its pauses (a turn running or ambiguous, compaction, a minute after the
@@ -5137,8 +5138,7 @@ Chat still take no app-managed tools.
   is refused at the route, and a routine an agent proposes never has it. It
   lets the run's agent merge the pull request its own thread opened under the
   merge rules in [Git and pull requests](#modes-chat-work-and-code), with the
-  head and required checks enforced, while the live routine is enabled. A routine never runs at a level lower than the one
-  its creator chose. Work runs bind the Project's confined root like an
+  head and required checks enforced, while the live routine is enabled. Work runs bind the Project's confined root like an
   interactive Work thread. A Code first turn runs with
   the `agent` initiator, so approvals wait for a person.
 - **Revalidation at every occurrence.** Before creating a thread the dispatcher
@@ -5433,8 +5433,9 @@ retry or resume resolves nothing from them. A Chat branch's and a Work fork's
 copies of the message keep them. In Chat, an explicit mention of a Chat thread also grants the source
 provider the bounded `octant_ask_thread` tool for that turn: it may send one of
 the user's instructions to the mentioned Chat thread and receive its completed
-reply, at most three times a turn by default, a count the person can change
-(maintainer request, 2026-11-12; not built yet: today it is a constant). The target's own Chat turn, provider,
+reply. Under Strict it may do so at most three times a turn, a count the
+person changes in Settings › Limits; outside Strict there is no limit
+(maintainer decision, 2026-11-19; built, `decideThreadDialogueAsk`). The target's own Chat turn, provider,
 Project, and authority remain authoritative; an active target returns Waiting
 rather than being interrupted or duplicated. Coordination is one hop (the
 target's turn is offered no ask) and unavailable, unauthorized, or deleted
@@ -5489,9 +5490,9 @@ thread's too (maintainer decision, 2026-11-16, under
 built): the host refuses no turn for opening with `/name`, because the runtime
 was launched under the level's tool rules, which decide what the command may
 then do, so a command in Plan still cannot write and one in Chat still has no
-folder or shell. An ACP agent with a reviewed command inventory (Kimi Code)
-keeps its probe check and, in every mode, runs only a reviewed command its
-session listed. Codex lists only `/review`, which starts Codex's own review
+folder or shell. Kimi Code runs, in every mode, only a command its session
+listed, or its readiness check listed until the session lists any
+(`listedCommandsOnly`); no reviewed command inventory refuses a release. Codex lists only `/review`, which starts Codex's own review
 run ([Provider runtimes: Codex](design/provider-runtimes.md#codex)): its
 app-server (rust-v0.162.1) lists skills, which are invoked by `$name`, and no
 prompts, and its other slash commands are its terminal client's own. Side Chat is a Chat-mode sidecar about
@@ -6849,9 +6850,8 @@ flowchart LR
     while a turn is running or messages are queued. Every refusal
     is shown as its own sentence, and a `stale` one reloads the list. A client
     that is not on a loopback host (`externalContentAvailable`) neither
-    reads nor draws it. Approval prompts do not yet say that the mark is why
-    they ask: neither the MCP tool approval view nor the harness approval
-    carries that reason.
+    reads nor draws it. An approval on a marked thread says that the mark is
+    why it asks, as **Untrusted-content taint** above describes.
 - **Browser captures.** Only a screenshot the agent asks for with the browser
   tool, or the person takes with the Browser pane's Screenshot control (or
   Draw on page, which takes the same capture to draw on), is kept
@@ -7736,8 +7736,9 @@ ls-remote` against the thread's remote and the GitHub reads they already
   Settings changes need the current `expectedVersion`. An external edit comes
   back only through an explicit re-import that appends a version. The
   `/api/artifacts/mirror` route answers a local window or a paired device
-  (maintainer decision, 2026-11-12; not built yet: today it is loopback-only and
-  refuses a paired device).
+  (maintainer decision, 2026-11-12): the server admits a device the host's own
+  person paired and refuses a hub-introduced or restricted one; the paired
+  clients do not offer it yet.
 - **Artifact replicas.** A replica is an append-only log in a store the user
   owns — a synced folder, or an S3-compatible bucket. Each host writes only
   its own write-once entries, one per committed artifact version or deletion,
@@ -11855,7 +11856,9 @@ the model at another size.
   credential. Only a harness tool result that brings in outside content taints
   the thread: `web-fetch` and `web-search`. A finished child's reply taints
   its parent only when the child itself was tainted (maintainer request,
-  2026-11-12; not built yet: today every child reply taints its parent),
+  2026-11-12, scoped to Strict 2026-11-22; built for a reply `wait` hands
+  back under Strict, `recordWaitedResultIngestion`; outside Strict, and for a
+  delivered reply, every child reply taints its parent),
   however it arrives (it may relay what the child fetched): handed
   back by an `octant_agents` `wait`, which records the mark before it returns
   the reply, or delivered as a new turn, journaled before the turn is
@@ -17984,13 +17987,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
     an agent grant may turn it on, never off. Built for Codex (the
     provider's own sandbox outside Strict, per runtime, below) and for Claude
     Code (outside Strict Claude's own sandbox runs as the person's settings
-    configure it). Not built yet for the other providers, which still run in
-    the sandbox the table below shows whether Strict is on or off.
+    configure it). Outside Strict OpenCode, Pi and every ACP agent run in
+    Work and Code below Full access with no Octant sandbox, on their own
+    approvals (`providerHoldsLevelWithoutSandbox`); under Strict they run in
+    the sandbox the table below shows. Not built yet: Octant configuring the
+    native sandbox of a provider other than Codex.
   - **Octant's sandbox stays the default** for providers with no sandbox of
-    their own: OpenCode, Mistral Vibe and Pi. For OpenCode and Pi that
-    default now holds only in Chat, Plan and under Strict: in Work and Code
-    outside Strict their own approvals hold the level with no Octant sandbox
-    (maintainer decision, 2026-11-21; below).
+    their own: OpenCode, Mistral Vibe and Pi. That default holds only in
+    Chat, Plan and under Strict: in Work and Code outside Strict their own
+    approvals hold the level with no Octant sandbox (maintainer decision,
+    2026-11-21; Mistral Vibe as an ACP agent; below).
   - **Per provider.** Codex runs its native workspace-write sandbox and its
     own escalation; macOS refuses a Seatbelt profile inside another, so the
     native sandbox replaces Octant's profile rather than running in it.
@@ -19671,7 +19677,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
     from the journal's own start record. The Browser routes hand the same
     actor to the profile, extension, flow and capture services, so each
     journals a person-paired device's change as the device's. A device-code or cloud sign-in
-    begins only at the host's terminal, so it is the local person's. A device
+    begins only on the host, at its terminal or a local desktop window, so it
+    is the local person's. A device
     is named by its own id in every record, a restricted device's included;
     a second test refuses a module that writes a device's actor under any
     other id. A Code operation's own events name whoever started it, a local

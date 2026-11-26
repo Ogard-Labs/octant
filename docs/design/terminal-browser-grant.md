@@ -225,10 +225,10 @@ the app can point a CLI at `octant mcp`.
 - **Switch off** sends `revoke-terminal-browser-grant` and leaves the shell
   running. The notice that follows says a CLI that used the Browser stops at its
   next call and has to be started again after the Browser is switched back on.
-- **A paired device has no switch yet.** Not built yet: today the paired-device
-  client renders no thread
-  terminal, and the host refuses its start with a grant (`not-local-window`)
-  before any terminal starts.
+- **A paired device has no switch yet.** Not built yet: the paired-device
+  client renders no thread terminal. The host admits a start with a grant from
+  a device the host's own person paired at Full, as from a window, and refuses
+  every other device's (`not-local-window`) before any terminal starts.
 - **The approval card.** The Code thread column lists the host's Browser
   approvals for that thread (mode `code`) and shows the first as an approval
   card labelled **Browser request from a terminal**: it names the origin and the

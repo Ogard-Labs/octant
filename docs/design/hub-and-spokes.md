@@ -367,27 +367,10 @@ the CLI. The hub depends on that:
     past the application connection's lifetime.
     This boundary does not protect from other unconfined programs running as
     the same owner. Admitted remote clients, provider replies and plugins must
-    have no store-path mutation route. Work and Code at Full access on
-    Windows are tracked separately and need Windows forms of the confined
-    launches first; the guarded levels stay refused until their native
-    confinement also denies the entire private profile (maintainer decision,
-    2026-11-12). Not built yet: today the authoritative
-    Work-turn and Code-command/operation entry points refuse Windows before
-    launch or journal mutation, including background routine calls and Full
-    access, and provider process preparation refuses Windows before
-    its unconfined Full-access branch. Lifting those gates for Full access is
-    not enough to run a turn, so they stay as they are until the launches
-    behind them have Windows forms: at every level the host's Git reads and
-    mutations, thread terminals, language servers, debug adapters, and
-    provider version and readiness probes launch through the shared
-    confinement port, which supports macOS and Linux only and has no
-    unconfined fallback; the harness's command port, Full access included,
-    and every provider process need an owned process group and a
-    process-identity receipt, which the server has for macOS and Linux only;
-    and the provider driver factory admits Ollama alone. The host's own file
-    tools' path checks, which keep them out of the private profile at every
-    level, have not been exercised under Windows path rules either. Native
-    experiments do not admit foreground or desktop startup.
+    have no store-path mutation route. Work and Code turns on Windows follow
+    [Windows below Full access](../architecture.md#current-release-boundary):
+    outside Strict every level below Full access runs with the provider's own
+    approvals, and Strict below Full access is refused.
     The Windows foreground entry resolves the fixed native artifacts from the
     actual portable resources layout, claims the selected native profile before
     server/persistence imports, and composes its journal, usage cache, private
@@ -427,13 +410,10 @@ the CLI. The hub depends on that:
     identity, credential and storage boundaries compose the foreground host
     described above. Desktop and Nightly consumers require their own actual
     bootstrap evidence. Boot-service installation and encrypted-disk setup
-    remain separate from this foreground implementation. Work and Code below
-    Full access, and executable extensions, remain unavailable until native
-    confinement denies the private profile and proves its filesystem, network
-    and process-lifecycle boundaries; Work and Code at Full access are not
-    built yet either. The [platform release boundary](../architecture.md#current-release-boundary)
-    owns those admission requirements; storage or packaging evidence alone
-    does not grant them.
+    remain separate from this foreground implementation. Work and Code on
+    Windows follow [Windows below Full access](../architecture.md#current-release-boundary),
+    which owns their admission; storage or packaging evidence alone does not
+    grant it.
 
 - **Serves the web app.** The hub's private listener, on its Tailscale or LAN
   address, serves the same web app the desktop window shows. A phone or

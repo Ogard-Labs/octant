@@ -50,9 +50,9 @@ moved into this repository for one-command deploys (see
 - A link is published only through the Canvas export flow, destination
   `public-link`, format `share-document`, and only after the person approves
   the export approval card, in a local window or on a paired device (maintainer
-  decision, 2026-11-12). Not built yet: today only a local window approves; a
-  paired device may see the links and copy one, but prepare, approve, update,
-  and revoke are refused for it, as minting an authenticated share already is.
+  decision, 2026-11-12). A device the host's own person paired prepares and
+  approves as a local window does, and a hub-introduced or restricted device is
+  refused (`resolvePersonCanvasContext` in `apps/server/src/canvasRoutes.ts`).
   Paired Chat, Work and Code threads use the same Canvas reader and link list
   as the host. Opening a Canvas exposes its existing public links and Copy link
   through the authenticated device session and current Canvas read grant. Its
