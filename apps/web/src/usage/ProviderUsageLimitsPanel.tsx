@@ -572,12 +572,15 @@ function PooledWindowBar(props: { readonly window: PooledWindow; readonly now: n
       </div>
       <div className="provider-limits__segments">
         {props.window.segments.map((segment) =>
-          // A spent account is an empty meter, not the dashed outline of an
-          // account with no reading: the two must never look alike.
+          // A spent account is a meter in its exhausted state, holding what
+          // share its window still reports (empty when none), never the dashed
+          // outline of an account with no reading: the two must never look
+          // alike. Its name carries the warning the legend shows, since a
+          // screen reader can reach the meter on its own.
           segment.kind === "reading" &&
           (segment.remainingPercent !== undefined || segment.exhausted) ? (
             <meter
-              aria-label={`${segment.account}, ${label} remaining`}
+              aria-label={`${segment.account}, ${label} remaining${segment.exhausted ? ", limit reached" : ""}`}
               data-state={segment.exhausted ? "exhausted" : "reading"}
               key={segment.providerInstanceId}
               max={100}

@@ -912,6 +912,9 @@ describe("ProviderUsageLimitsPanel", () => {
       // Codex's flag does not say which window ran out.
       const spent = bar.querySelector('meter[data-state="exhausted"]');
       expect(spent?.getAttribute("value")).toBe("60");
+      expect(spent?.getAttribute("aria-label")).toBe(
+        "Spent account, 5-hour window remaining, limit reached",
+      );
       const spentLegend = [...bar.querySelectorAll('[data-segment="reading"]')].find((row) =>
         row.textContent?.startsWith("Spent account"),
       );
