@@ -47,6 +47,7 @@ function shellActions() {
         markedDone?: boolean;
         workDone?: boolean;
         completedAt?: string;
+        pinned?: boolean;
       } => ({
         title: "Controller foundation",
       }),
@@ -146,6 +147,15 @@ describe("Undo after a sidebar state change", () => {
     expect(shell.reopenCodeThread.mock.invocationCallOrder[0]).toBeLessThan(
       shell.completeCodeThread.mock.invocationCallOrder[0] ?? 0,
     );
+  });
+
+  it("puts back the pin of a settled, pinned thread when Mark done is undone", () => {
+    const before = { title: "T", completedAt: "2026-11-25T10:00:00.000Z", pinned: true };
+    expect(inverseThreadRestChange({ kind: "mark-done" }, before, new Date())).toEqual([
+      { kind: "reopen" },
+      { kind: "settle" },
+      { kind: "pin" },
+    ]);
   });
 
   it("does not settle again after Undo's reopen is refused", async () => {

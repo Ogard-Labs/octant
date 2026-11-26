@@ -693,8 +693,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     setUploadingAttachments((current) => [...current, { id: attachmentId, displayName, file }]);
     const settleUpload = () =>
       setUploadingAttachments((current) => current.filter((upload) => upload.id !== attachmentId));
-    // Answers, once known, why the file was not attached, so a large
-    // paste only names a file that Chat took.
     return (async (): Promise<string | undefined> => {
       try {
         const buffer = await file.arrayBuffer();

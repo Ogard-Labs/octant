@@ -22,7 +22,7 @@ export type ThreadRestChange =
 /** The row a change was made from, read before the change is sent. */
 export type ThreadRestRow = Pick<
   ChatThreadNavigationItem,
-  "title" | "markedDone" | "workDone" | "completedAt" | "snooze"
+  "title" | "markedDone" | "workDone" | "completedAt" | "snooze" | "pinned"
 >;
 
 /** A five-second offer to take back the change the host just accepted. */

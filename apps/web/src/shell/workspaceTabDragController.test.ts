@@ -74,6 +74,18 @@ describe("WorkspaceSurfaceDragController", () => {
     expect(onDrop).toHaveBeenCalledWith(source, destination);
   });
 
+  it("drops on the target under the point of release, not the last move", () => {
+    const onDrop = vi.fn();
+    const controller = new WorkspaceSurfaceDragController({
+      onDrop,
+      resolveDestination: (point) => (point.x > 100 ? destination : null),
+    });
+    controller.start(7, source, { x: 10, y: 10 });
+    controller.move(7, { x: 16, y: 10 });
+    controller.drop(7, { x: 120, y: 10 });
+    expect(onDrop).toHaveBeenCalledWith(source, destination);
+  });
+
   it("cancels without committing on Escape-equivalent cancellation or a foreign pointer", () => {
     const onDrop = vi.fn();
     const controller = new WorkspaceSurfaceDragController({

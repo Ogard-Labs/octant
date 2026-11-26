@@ -729,6 +729,39 @@ describe("Chat host queue", () => {
     );
   });
 
+  it("names a dropped file whose upload failed after a later file of the drop was added", async () => {
+    const upload = vi.fn<ChatController["upload"]>(async (input) => {
+      if (input.displayName === "broken.png") throw new Error("upload failed");
+      return decodeChatAttachment({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+        status: "finalized",
+        createdAt: now,
+      });
+    });
+    render(
+      <ChatWorkspace
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ upload })}
+      />,
+    );
+    const { offerFilesToThread } = await import("../composer/threadImageOffers");
+    const say = vi.fn();
+    const files = ["broken.png", "fine.png"].map(
+      (name) => new File(["x"], name, { type: "image/png" }),
+    );
+    await offerFilesToThread("chat", threadId, files, say);
+    await waitFor(() =>
+      expect(say).toHaveBeenCalledWith(
+        "broken.png was not added. broken.png could not be attached. Paste or choose it again to retry.",
+      ),
+    );
+  });
+
   it("keeps an uncertain enqueue separate from normal sending after the active turn finishes", async () => {
     const host = queueTestHost();
     const user = userEvent.setup();

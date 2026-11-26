@@ -30,7 +30,8 @@ const DONE_TITLES: Readonly<Record<ThreadRestChange["kind"], string>> = {
  * old wake time. A wake time already past leaves the thread awake, so nothing
  * is sent. Reopen is the host's only way to clear a Code thread's Done mark
  * and it clears the settlement too, so Mark done on a thread that was already
- * settled is undone by reopening and then settling it again.
+ * settled is undone by reopening and then settling it again. Settle also
+ * drops a list pin, which a settled row may carry, so a pin it had is put back.
  */
 export function inverseThreadRestChange(
   change: ThreadRestChange,
@@ -45,8 +46,9 @@ export function inverseThreadRestChange(
     case "settle":
       return [{ kind: "reopen" }];
     case "mark-done":
-      return before?.completedAt === undefined
-        ? [{ kind: "reopen" }]
+      if (before?.completedAt === undefined) return [{ kind: "reopen" }];
+      return before.pinned === true
+        ? [{ kind: "reopen" }, { kind: "settle" }, { kind: "pin" }]
         : [{ kind: "reopen" }, { kind: "settle" }];
     case "reopen":
       return before?.markedDone === true || before?.workDone === true

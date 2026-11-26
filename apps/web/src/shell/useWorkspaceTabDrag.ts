@@ -191,7 +191,7 @@ export function useWorkspaceSurfaceDrag(options: {
         controller.current?.move(event.pointerId, { x: event.clientX, y: event.clientY });
       },
       onPointerUp(event) {
-        controller.current?.drop(event.pointerId);
+        controller.current?.drop(event.pointerId, { x: event.clientX, y: event.clientY });
         releaseCapture(captured.current);
         captured.current = null;
       },
