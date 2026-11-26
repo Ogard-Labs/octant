@@ -1592,7 +1592,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const images = useWorkComposerImages();
   // A model that cannot read images may still take one when Sees images can
   // describe it; the host decides again when the turn starts.
-  const imageSupport = useSeesImages({
+  const seesImages = useSeesImages({
     readsImages: selectedModelReadsImages(props.providerGroups ?? [], {
       ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
       ...(thread === undefined ? {} : { modelId: thread.modelId }),
@@ -1602,7 +1602,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     projectId: thread === undefined ? undefined : String(thread.projectId),
     providerInstanceId: thread === undefined ? undefined : String(thread.providerInstanceId),
     modelId: thread === undefined ? undefined : String(thread.modelId),
-  }).takesImages;
+  });
+  const imageSupport = seesImages.takesImages;
   const threadMentions = useThreadMentions({
     ...(props.threadMentionClient === undefined ? {} : { client: props.threadMentionClient }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -2606,9 +2607,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   });
   // A picture marked up in this thread's Browser arrives here as a file and
   // meets the same checks as one dropped on the composer.
-  // Offers wait until this thread is read, so its model's image check applies.
+  // Offers wait until this thread is read, so its model's image check applies,
+  // and while the host is asked whether Sees images can describe a picture.
   useThreadImageOffers(
-    thread === undefined || String(thread.id) !== String(props.threadId)
+    thread === undefined ||
+      String(thread.id) !== String(props.threadId) ||
+      seesImages.pending === true
       ? undefined
       : threadImageOfferKey("work", String(props.threadId)),
     (file, arrival): ThreadImageVerdict => {

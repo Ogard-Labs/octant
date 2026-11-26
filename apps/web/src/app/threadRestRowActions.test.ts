@@ -46,6 +46,7 @@ function shellActions() {
         snooze?: { until: string; at: string };
         markedDone?: boolean;
         workDone?: boolean;
+        completedAt?: string;
       } => ({
         title: "Controller foundation",
       }),
@@ -109,25 +110,53 @@ describe("Undo after a sidebar state change", () => {
   it("re-snoozes a woken thread only while its old wake time is still ahead", () => {
     const now = new Date("2026-11-26T10:00:00.000Z");
     const asleep = { title: "T", snooze: { until: "2026-11-26T12:00:00.000Z", at: "x" } };
-    expect(inverseThreadRestChange({ kind: "wake" }, asleep, now)).toEqual({
-      kind: "snooze",
-      until: "2026-11-26T12:00:00.000Z",
-    });
+    expect(inverseThreadRestChange({ kind: "wake" }, asleep, now)).toEqual([
+      { kind: "snooze", until: "2026-11-26T12:00:00.000Z" },
+    ]);
     const passed = { title: "T", snooze: { until: "2026-11-26T09:00:00.000Z", at: "x" } };
-    expect(inverseThreadRestChange({ kind: "wake" }, passed, now).kind).toBe("none");
+    expect(inverseThreadRestChange({ kind: "wake" }, passed, now)).toMatchObject({ kind: "none" });
   });
 
   it("marks a reopened thread Done again when it was marked Done", () => {
     const now = new Date();
     expect(
       inverseThreadRestChange({ kind: "reopen" }, { title: "T", markedDone: true }, now),
-    ).toEqual({ kind: "mark-done" });
-    expect(inverseThreadRestChange({ kind: "reopen" }, { title: "T" }, now)).toEqual({
-      kind: "settle",
+    ).toEqual([{ kind: "mark-done" }]);
+    expect(inverseThreadRestChange({ kind: "reopen" }, { title: "T" }, now)).toEqual([
+      { kind: "settle" },
+    ]);
+    expect(inverseThreadRestChange({ kind: "mark-done" }, undefined, now)).toEqual([
+      { kind: "reopen" },
+    ]);
+  });
+
+  it("keeps an earlier settlement when Mark done on a settled thread is undone", async () => {
+    const shell = shellActions();
+    shell.threadRestRow.mockReturnValue({
+      title: "Controller foundation",
+      completedAt: "2026-11-25T10:00:00.000Z",
     });
-    expect(inverseThreadRestChange({ kind: "mark-done" }, undefined, now)).toEqual({
-      kind: "reopen",
-    });
+    threadRestRowActions(shell).code.onMarkThreadDone?.(CODE_ID);
+    await vi.waitFor(() => expect(shell.offered).toHaveLength(1));
+    shell.offered[0]?.undo();
+    // Reopen is the host's only way to clear the Done mark, and it clears the
+    // settlement too, so Undo settles the thread again after it.
+    await vi.waitFor(() => expect(shell.completeCodeThread).toHaveBeenCalledWith(CODE_ID));
+    expect(shell.reopenCodeThread).toHaveBeenCalledWith(CODE_ID);
+    expect(shell.reopenCodeThread.mock.invocationCallOrder[0]).toBeLessThan(
+      shell.completeCodeThread.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("does not settle again after Undo's reopen is refused", async () => {
+    const shell = shellActions();
+    shell.threadRestRow.mockReturnValue({ title: "T", completedAt: "2026-11-25T10:00:00.000Z" });
+    shell.reopenCodeThread.mockResolvedValueOnce({ status: "refused", message: "Not now." });
+    threadRestRowActions(shell).code.onMarkThreadDone?.(CODE_ID);
+    await vi.waitFor(() => expect(shell.offered).toHaveLength(1));
+    shell.offered[0]?.undo();
+    await vi.waitFor(() => expect(shell.setThreadExportNotice).toHaveBeenCalledWith("Not now."));
+    expect(shell.completeCodeThread).not.toHaveBeenCalled();
   });
 
   it("shows the host's sentence when a pin is refused, and offers no Undo", async () => {

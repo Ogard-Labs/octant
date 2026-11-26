@@ -22,4 +22,26 @@ describe("a part of the window that loads on first use", () => {
     expect(screen.getByText("Sidebar")).toBeVisible();
     expect(say).toHaveBeenCalledTimes(1);
   });
+
+  it("says so again each time the person asks for a part that failed to load", async () => {
+    const say = vi.fn();
+    const Missing = lazy(() => Promise.reject(new Error("chunk failed")));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const menu = (asked: number) => (
+      <WindowNoticeContext.Provider value={say}>
+        <LazyPartBoundary asked={asked} what="this Project's menu">
+          <Suspense fallback={null}>
+            <Missing />
+          </Suspense>
+        </LazyPartBoundary>
+      </WindowNoticeContext.Provider>
+    );
+    const { rerender } = render(menu(1));
+    await vi.waitFor(() => expect(say).toHaveBeenCalledTimes(1));
+    rerender(menu(1));
+    expect(say).toHaveBeenCalledTimes(1);
+    rerender(menu(2));
+    expect(say).toHaveBeenCalledTimes(2);
+    expect(say).toHaveBeenLastCalledWith(couldNotLoad("this Project's menu"));
+  });
 });

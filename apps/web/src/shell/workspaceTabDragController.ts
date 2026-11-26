@@ -70,9 +70,12 @@ export class WorkspaceSurfaceDragController {
     const dropped = this.#snapshot.phase === "dragging" ? this.#snapshot : null;
     if (dropped !== null) this.#suppressedClickKey = dropped.source.dragKey;
     this.#reset();
-    if (dropped !== null && dropped.destination !== null) {
-      this.#options.onDrop(dropped.source, dropped.destination);
-    }
+    if (dropped === null) return;
+    // The target is found again where the pointer let go: what decides it can
+    // change after the last move, as when the sidebar's drop rules finish
+    // loading during the first row drag.
+    const destination = this.#options.resolveDestination(dropped.point, dropped.source);
+    if (destination !== null) this.#options.onDrop(dropped.source, destination);
   }
 
   cancel(): void {

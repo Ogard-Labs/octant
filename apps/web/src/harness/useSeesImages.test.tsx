@@ -13,8 +13,9 @@ describe("a composer's image gate", () => {
     const { result } = renderHook(() =>
       useSeesImages({ readsImages: false, ...scope, client: { seesImages } }),
     );
-    expect(result.current.takesImages).toBe(false);
+    expect(result.current).toEqual({ takesImages: false, pending: true });
     await waitFor(() => expect(result.current.takesImages).toBe(true));
+    expect(result.current.pending).toBeUndefined();
     expect(seesImages).toHaveBeenCalledWith(scope, expect.anything());
   });
 
@@ -29,6 +30,18 @@ describe("a composer's image gate", () => {
     );
     await waitFor(() => expect(result.current.refusal).toBe(reason));
     expect(result.current.takesImages).toBe(false);
+  });
+
+  it("stops waiting and refuses when the host cannot be asked", async () => {
+    const { result } = renderHook(() =>
+      useSeesImages({
+        readsImages: false,
+        ...scope,
+        client: { seesImages: async () => Promise.reject(new Error("offline")) },
+      }),
+    );
+    expect(result.current.pending).toBe(true);
+    await waitFor(() => expect(result.current).toEqual({ takesImages: false }));
   });
 
   it("asks nothing for a model that reads images", () => {

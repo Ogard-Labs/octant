@@ -65,17 +65,53 @@ export function resolveSidebarRowDropZone(
   return (under.find((entry) => entry.zone !== "list") ?? under[0])?.zone ?? null;
 }
 
+type DropRect = Pick<DOMRectReadOnly, "left" | "top" | "width" | "height">;
+
+/**
+ * The part of a zone the person can see: its box cut to every box that clips
+ * it, or null when none of it shows. A bounding box ignores overflow, so a
+ * Pinned group taller than the scrolling list reached under the dock below
+ * and took a drop meant for the visible Settled shelf there.
+ */
+export function visibleSidebarRowDropRect(
+  rect: DropRect,
+  clips: ReadonlyArray<DropRect>,
+): DropRect | null {
+  let left = rect.left;
+  let top = rect.top;
+  let right = rect.left + rect.width;
+  let bottom = rect.top + rect.height;
+  for (const clip of clips) {
+    left = Math.max(left, clip.left);
+    top = Math.max(top, clip.top);
+    right = Math.min(right, clip.left + clip.width);
+    bottom = Math.min(bottom, clip.top + clip.height);
+  }
+  if (right <= left || bottom <= top) return null;
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+function clippingBoxes(element: HTMLElement): ReadonlyArray<DropRect> {
+  const boxes: Array<DropRect> = [];
+  for (let ancestor = element.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
+    const style = getComputedStyle(ancestor);
+    if (style.overflowX !== "visible" || style.overflowY !== "visible") {
+      boxes.push(ancestor.getBoundingClientRect());
+    }
+  }
+  return boxes;
+}
+
 export function measureSidebarRowDropZones(
   root: ParentNode = document,
-): ReadonlyArray<{ readonly zone: SidebarRowDropZone; readonly rect: DOMRectReadOnly }> {
+): ReadonlyArray<{ readonly zone: SidebarRowDropZone; readonly rect: DropRect }> {
   return [...root.querySelectorAll<HTMLElement>("[data-sidebar-row-drop]")].flatMap((element) => {
     const zone = element.dataset.sidebarRowDrop;
     if (zone !== "pinned" && zone !== "snoozed" && zone !== "completed" && zone !== "list") {
       return [];
     }
-    const rect = element.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return [];
-    return [{ zone, rect }];
+    const rect = visibleSidebarRowDropRect(element.getBoundingClientRect(), clippingBoxes(element));
+    return rect === null ? [] : [{ zone, rect }];
   });
 }
 

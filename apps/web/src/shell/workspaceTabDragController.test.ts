@@ -57,6 +57,23 @@ describe("WorkspaceSurfaceDragController", () => {
     expect(controller.consumeClickSuppression(source.dragKey)).toBe(false);
   });
 
+  it("drops on the target under the pointer at release, found by rules that loaded mid-drag", () => {
+    const onDrop = vi.fn();
+    // The sidebar's drop rules load during the first drag: the pointer's last
+    // move found no target, and the release comes after they arrive.
+    let rulesLoaded = false;
+    const controller = new WorkspaceSurfaceDragController({
+      onDrop,
+      resolveDestination: () => (rulesLoaded ? destination : null),
+    });
+    controller.start(7, source, { x: 10, y: 10 });
+    controller.move(7, { x: 16, y: 10 });
+    expect(controller.getSnapshot()).toMatchObject({ destination: null });
+    rulesLoaded = true;
+    controller.drop(7);
+    expect(onDrop).toHaveBeenCalledWith(source, destination);
+  });
+
   it("cancels without committing on Escape-equivalent cancellation or a foreign pointer", () => {
     const onDrop = vi.fn();
     const controller = new WorkspaceSurfaceDragController({

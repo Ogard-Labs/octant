@@ -4,6 +4,7 @@ import {
   MAX_WAITING_OFFERS_IN_ALL,
   createThreadImageOffers,
   offerFilesToThread,
+  THREAD_FILE_OFFERS_FULL,
   type ThreadImageVerdict,
 } from "./threadImageOffers";
 
@@ -161,18 +162,49 @@ describe("pictures offered to a thread's message", () => {
   it("keeps files dropped on a sidebar row for the thread's composer, in order", async () => {
     const offers = createThreadImageOffers();
     const notes = new File(["n"], "notes.md", { type: "text/markdown" });
-    await expect(offerFilesToThread("chat", "t1", [file("a.png"), notes], offers)).resolves.toBe(
-      false,
-    );
+    const say = vi.fn();
+    await offerFilesToThread("chat", "t1", [file("a.png"), notes], say, offers);
     const taker = vi.fn((_taken: File) => accepted);
     offers.subscribe("chat:t1", taker);
     await vi.waitFor(() => expect(taker).toHaveBeenCalledTimes(2));
     expect(taker.mock.calls.map(([taken]) => taken.name)).toEqual(["a.png", "notes.md"]);
+    expect(say).not.toHaveBeenCalled();
   });
 
   it("says when a row's dropped files find no room to wait", async () => {
     const offers = createThreadImageOffers();
     const many = Array.from({ length: MAX_WAITING_OFFERS + 1 }, (_, index) => file(`${index}.png`));
-    await expect(offerFilesToThread("work", "t1", many, offers)).resolves.toBe(true);
+    const say = vi.fn();
+    await offerFilesToThread("work", "t1", many, say, offers);
+    expect(say).toHaveBeenCalledWith(THREAD_FILE_OFFERS_FULL);
+  });
+
+  it("keeps a refused file's reason when a later file of the same drop is added", async () => {
+    const offers = createThreadImageOffers();
+    offers.subscribe("code:t1", (taken) =>
+      taken.name.endsWith(".png")
+        ? { status: "refused", reason: "Choose a vision model to attach images." }
+        : accepted,
+    );
+    const notes = new File(["n"], "notes.md", { type: "text/markdown" });
+    const say = vi.fn();
+    await offerFilesToThread("code", "t1", [file("mockup.png"), notes], say, offers);
+    expect(say).toHaveBeenLastCalledWith(
+      "mockup.png was not added. Choose a vision model to attach images.",
+    );
+  });
+
+  it("says why a waiting file was refused once the composer opens and takes the rest", async () => {
+    const offers = createThreadImageOffers();
+    const notes = new File(["n"], "notes.md", { type: "text/markdown" });
+    const say = vi.fn();
+    await offerFilesToThread("code", "t1", [file("mockup.png"), notes], say, offers);
+    expect(say).not.toHaveBeenCalled();
+    offers.subscribe("code:t1", (taken) =>
+      taken.name.endsWith(".png") ? { status: "refused", reason: "No vision model." } : accepted,
+    );
+    await vi.waitFor(() =>
+      expect(say).toHaveBeenLastCalledWith("mockup.png was not added. No vision model."),
+    );
   });
 });

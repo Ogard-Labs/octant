@@ -47,19 +47,36 @@ export type ThreadImageOfferResult =
   | { readonly status: "full" };
 
 export interface ThreadImageOffers {
-  readonly offer: (key: ThreadImageOfferKey, file: File) => Promise<ThreadImageOfferResult>;
+  /**
+   * `onLateRefusal` hears a waiting file's refusal once a composer opens and
+   * refuses it; an open composer's refusal is the returned result instead.
+   */
+  readonly offer: (
+    key: ThreadImageOfferKey,
+    file: File,
+    onLateRefusal?: (reason: string) => void,
+  ) => Promise<ThreadImageOfferResult>;
   /** Take this thread's pictures: the waiting ones now, later ones as they come. */
   readonly subscribe: (key: ThreadImageOfferKey, taker: Taker) => () => void;
 }
 
 export function createThreadImageOffers(): ThreadImageOffers {
   // Oldest first, across every thread.
-  let waiting: ReadonlyArray<{ readonly key: ThreadImageOfferKey; readonly file: File }> = [];
+  let waiting: ReadonlyArray<{
+    readonly key: ThreadImageOfferKey;
+    readonly file: File;
+    readonly onLateRefusal?: ((reason: string) => void) | undefined;
+  }> = [];
   const takers = new Map<ThreadImageOfferKey, Set<Taker>>();
   // One composer takes a picture: two open on the same thread would attach it twice.
   const takerOf = (key: ThreadImageOfferKey) => takers.get(key)?.values().next().value;
-  const keep = (key: ThreadImageOfferKey, file: File) => {
-    waiting = [...waiting, { key, file }].slice(-MAX_WAITING_OFFERS_IN_ALL);
+  const keep = (
+    key: ThreadImageOfferKey,
+    file: File,
+    onLateRefusal: ((reason: string) => void) | undefined,
+  ): undefined => {
+    waiting = [...waiting, { key, file, onLateRefusal }].slice(-MAX_WAITING_OFFERS_IN_ALL);
+    return undefined;
   };
   // A thread's pictures are handed over one at a time. The Code composer
   // uploads each picture and reads as busy only until one upload ends, so
@@ -82,7 +99,7 @@ export function createThreadImageOffers(): ThreadImageOffers {
     return delivered;
   }
   return {
-    async offer(key, file) {
+    async offer(key, file, onLateRefusal) {
       if (takerOf(key) !== undefined) {
         try {
           // The composer may have closed while earlier pictures were handed over.
@@ -97,7 +114,7 @@ export function createThreadImageOffers(): ThreadImageOffers {
       if (waiting.filter((entry) => entry.key === key).length >= MAX_WAITING_OFFERS) {
         return { status: "full" };
       }
-      keep(key, file);
+      keep(key, file, onLateRefusal);
       return { status: "waiting" };
     },
     subscribe(key, taker) {
@@ -108,15 +125,21 @@ export function createThreadImageOffers(): ThreadImageOffers {
       if (first) {
         const queued = waiting.filter((entry) => entry.key === key);
         waiting = waiting.filter((entry) => entry.key !== key);
-        // A refusal of a waiting picture is the composer's to show: it says so
-        // itself where the person is, so the verdict is not needed here.
+        // The composer shows its own refusal of a waiting picture, and the
+        // offer's maker hears it too: a later file of the same drop that the
+        // composer takes clears the composer's warning.
         for (const entry of queued) {
           void inTurn(key, () => {
             // A composer that closed before a picture's turn leaves it waiting.
             const current = takerOf(key);
-            if (current === undefined) return keep(key, entry.file);
+            if (current === undefined) return keep(key, entry.file, entry.onLateRefusal);
             return current(entry.file, "waiting");
-          }).catch(() => undefined);
+          }).then(
+            (verdict) => {
+              if (verdict?.status === "refused") entry.onLateRefusal?.(verdict.reason);
+            },
+            () => entry.onLateRefusal?.("The file could not be added."),
+          );
         }
       }
       return () => {
@@ -137,19 +160,35 @@ export const THREAD_FILE_OFFERS_FULL = `A thread holds at most ${MAX_WAITING_OFF
 
 /**
  * Files dropped on a sidebar row, handed to that thread's composer in order.
- * The composer applies its own limits and says what it refused; the answer
- * here is only whether some files found no room to wait.
+ * The composer applies its own limits and says what it refused, but the next
+ * file it takes clears that warning, so a drop of several files also says
+ * here which were not added and why: at once for an open composer, and as
+ * each waiting file is refused once the composer opens. `say` hears the whole
+ * drop's summary each time, so the newest sentence is complete. A single file
+ * leaves its refusal to the composer alone. Files with no room to wait are
+ * named the same way.
  */
 export async function offerFilesToThread(
   mode: "chat" | "work" | "code",
   threadId: string,
   files: ReadonlyArray<File>,
+  say: (sentence: string) => void,
   offers: ThreadImageOffers = threadImageOffers,
-): Promise<boolean> {
+): Promise<void> {
   let full = false;
+  const refused: Array<string> = [];
+  const summary = (): string => [...refused, ...(full ? [THREAD_FILE_OFFERS_FULL] : [])].join(" ");
+  const refuse = (file: File, reason: string): void => {
+    if (files.length < 2) return;
+    refused.push(`${file.name} was not added. ${reason}`);
+  };
   for (const file of files) {
-    const result = await offers.offer(threadImageOfferKey(mode, threadId), file);
+    const result = await offers.offer(threadImageOfferKey(mode, threadId), file, (reason) => {
+      refuse(file, reason);
+      if (files.length > 1) say(summary());
+    });
     if (result.status === "full") full = true;
+    if (result.status === "refused") refuse(file, result.reason);
   }
-  return full;
+  if (full || refused.length > 0) say(summary());
 }

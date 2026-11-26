@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveSidebarRowDropZone, sidebarRowDropAction } from "./sidebarRowDropRules";
+import {
+  resolveSidebarRowDropZone,
+  sidebarRowDropAction,
+  visibleSidebarRowDropRect,
+} from "./sidebarRowDropRules";
 
 const rect = (top: number, height: number) => ({ left: 0, top, width: 240, height });
 
@@ -47,5 +51,19 @@ describe("a thread row dropped within the sidebar", () => {
     expect(resolveSidebarRowDropZone({ x: 20, y: 520 }, zones)).toBe("completed");
     expect(resolveSidebarRowDropZone({ x: 20, y: 100 }, zones)).toBe("list");
     expect(resolveSidebarRowDropZone({ x: 400, y: 100 }, zones)).toBe(null);
+  });
+
+  it("lets Settled take a drop where a Pinned group runs on hidden below the list", () => {
+    // The list scrolls between 0 and 400; the dock with Settled sits below it.
+    const list = rect(0, 400);
+    const pinned = visibleSidebarRowDropRect(rect(300, 300), [list]);
+    expect(pinned).toEqual(rect(300, 100));
+    const zones = [
+      { zone: "list" as const, rect: list },
+      ...(pinned === null ? [] : [{ zone: "pinned" as const, rect: pinned }]),
+      { zone: "completed" as const, rect: rect(420, 40) },
+    ];
+    expect(resolveSidebarRowDropZone({ x: 10, y: 430 }, zones)).toBe("completed");
+    expect(visibleSidebarRowDropRect(rect(500, 40), [list])).toBeNull();
   });
 });

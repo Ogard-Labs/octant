@@ -602,8 +602,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // A failed load says nothing here: a drop loads the same module first and
   // says so itself when it cannot, so a failure here, with nothing dropped,
   // would only warn on every Chat thread opened.
-  const takeOfferedFile = useRef<(file: File) => void>(() => {});
-  const offeredThreadId = view === undefined ? undefined : String(view.thread.id);
+  const takeOfferedFile = useRef<(file: File) => Promise<string | undefined>>(
+    async () => undefined,
+  );
+  // Offers also wait while the host is asked whether Sees images can describe
+  // a picture, so one is not refused on the picker's word alone.
+  const offeredThreadId =
+    view === undefined || seesImages.pending === true ? undefined : String(view.thread.id);
   useEffect(() => {
     if (offeredThreadId === undefined) return;
     let stop: (() => void) | undefined;
@@ -643,6 +648,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     );
   }
   const thread = view.thread;
+  // Resolves with the reason a file was not attached, at once or while it
+  // uploaded, so a row drop can name it after a later file clears the
+  // composer's warning and a large paste only names a file that Chat took.
   const attachChatFile = (file: File): Promise<string | undefined> => {
     // A pasted image usually has no file name; name it once so the chip,
     // its remove control, and any failure message all agree.
@@ -660,11 +668,28 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       setAttachmentStatus({ kind: "failed", message });
       return Promise.resolve(message);
     }
+    // A turn takes at most MAX_CHAT_TURN_ATTACHMENTS files and the host
+    // refuses a send with more, so a draft past it could not go out until the
+    // person removed some. Files still uploading count, and the uploading ref
+    // is kept current here: a drop hands its files over in one tick, before
+    // the state that renders their chips does.
+    if (
+      pendingAttachmentsRef.current.length + uploadingAttachmentsRef.current.length >=
+      MAX_CHAT_TURN_ATTACHMENTS
+    ) {
+      const message = `A message can hold ${MAX_CHAT_TURN_ATTACHMENTS} attachments.`;
+      setAttachmentStatus({ kind: "failed", message });
+      return Promise.resolve(message);
+    }
     const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
     // A new attempt supersedes whatever an earlier one reported; a
     // sibling upload's failure in this batch is set after this point and
     // therefore survives until the batch drains.
     setAttachmentStatus({ kind: "idle" });
+    uploadingAttachmentsRef.current = [
+      ...uploadingAttachmentsRef.current,
+      { id: attachmentId, displayName, file },
+    ];
     setUploadingAttachments((current) => [...current, { id: attachmentId, displayName, file }]);
     const settleUpload = () =>
       setUploadingAttachments((current) => current.filter((upload) => upload.id !== attachmentId));

@@ -1,7 +1,7 @@
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import { composerQuoteText, REPLY_QUOTE_SOURCE } from "../composer/composerQuote";
 import { automationFollowUpTurnPrompt } from "@octant/contracts/automation";
-import { decodeChatAttachment } from "@octant/contracts/chat";
+import { decodeChatAttachment, MAX_CHAT_TURN_ATTACHMENTS } from "@octant/contracts/chat";
 import type { ThreadMessageQueueResult } from "@octant/contracts";
 import {
   decodeChatBootstrap,
@@ -680,6 +680,52 @@ describe("Chat host queue", () => {
     expect(base.discard).toHaveBeenCalledTimes(1);
     expect(base.discard).toHaveBeenCalledWith(
       expect.objectContaining({ attachmentId: upload.mock.calls[1]?.[0].attachmentId }),
+    );
+  });
+
+  it("adds at most one message's worth of files dropped on an open thread's row", async () => {
+    const upload = vi.fn<ChatController["upload"]>(async (input) =>
+      decodeChatAttachment({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+        status: "finalized",
+        createdAt: now,
+      }),
+    );
+    render(
+      <ChatWorkspace
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ upload })}
+      />,
+    );
+    const { threadImageOffers, offerFilesToThread, threadImageOfferKey } =
+      await import("../composer/threadImageOffers");
+    // The composer subscribes once its offer store has loaded.
+    await waitFor(async () => {
+      const probe = await threadImageOffers.offer(
+        threadImageOfferKey("chat", threadId),
+        new File(["x"], "0.png", { type: "image/png" }),
+      );
+      expect(probe.status).toBe("added");
+    });
+    const say = vi.fn();
+    const files = Array.from(
+      { length: MAX_CHAT_TURN_ATTACHMENTS },
+      (_, index) => new File(["x"], `${index + 1}.png`, { type: "image/png" }),
+    );
+    await offerFilesToThread("chat", threadId, files, say);
+    // The probe files took a place each, so the last of the drop finds none.
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(MAX_CHAT_TURN_ATTACHMENTS));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(upload).toHaveBeenCalledTimes(MAX_CHAT_TURN_ATTACHMENTS);
+    expect(say).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `${MAX_CHAT_TURN_ATTACHMENTS}.png was not added. A message can hold ${MAX_CHAT_TURN_ATTACHMENTS} attachments.`,
+      ),
     );
   });
 

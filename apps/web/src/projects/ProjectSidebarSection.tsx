@@ -1398,9 +1398,17 @@ function ProjectActionsMenu(props: ProjectActionsMenuProps) {
   // The items load when the menu first opens and stay drawn after, so the
   // menu's close animation runs as it always has.
   const [wanted, setWanted] = useState(false);
+  // Each opening, so a menu that failed to load says so again when reopened.
+  const [asked, setAsked] = useState(0);
   const onAddToAnotherComputer = useContext(AddRepositoryToComputerContext);
   return (
-    <OctantMenuRoot onOpenChange={(next) => next && setWanted(true)}>
+    <OctantMenuRoot
+      onOpenChange={(next) => {
+        if (!next) return;
+        setWanted(true);
+        setAsked((count) => count + 1);
+      }}
+    >
       <OctantMenuTrigger
         aria-label={`Project actions for ${props.project.name}`}
         className="project-row__action project-row__action--icon inline-flex items-center justify-center window-no-drag"
@@ -1410,7 +1418,7 @@ function ProjectActionsMenu(props: ProjectActionsMenuProps) {
       </OctantMenuTrigger>
       {/* The items load when the menu first opens, not with the sidebar. */}
       {wanted ? (
-        <LazyPartBoundary what="this Project's menu">
+        <LazyPartBoundary asked={asked} what="this Project's menu">
           <Suspense fallback={null}>
             <ProjectActionsMenuItems
               {...props}

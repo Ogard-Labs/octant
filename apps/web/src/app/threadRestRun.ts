@@ -24,36 +24,42 @@ const DONE_TITLES: Readonly<Record<ThreadRestChange["kind"], string>> = {
 };
 
 /**
- * The change that takes another back. It reads the row as it was before the
- * change: a reopened thread marked Done is marked Done again rather than only
- * settled, and a woken thread goes back to sleep until its old wake time. A
- * wake time already past leaves the thread awake, so nothing is sent.
+ * The changes that take another back, sent in order. They read the row as it
+ * was before the change: a reopened thread marked Done is marked Done again
+ * rather than only settled, and a woken thread goes back to sleep until its
+ * old wake time. A wake time already past leaves the thread awake, so nothing
+ * is sent. Reopen is the host's only way to clear a Code thread's Done mark
+ * and it clears the settlement too, so Mark done on a thread that was already
+ * settled is undone by reopening and then settling it again.
  */
 export function inverseThreadRestChange(
   change: ThreadRestChange,
   before: ThreadRestRow | undefined,
   now: Date,
-): ThreadRestChange | { readonly kind: "none"; readonly reason: string } {
+): ReadonlyArray<ThreadRestChange> | { readonly kind: "none"; readonly reason: string } {
   switch (change.kind) {
     case "pin":
-      return { kind: "unpin" };
+      return [{ kind: "unpin" }];
     case "unpin":
-      return { kind: "pin" };
+      return [{ kind: "pin" }];
     case "settle":
+      return [{ kind: "reopen" }];
     case "mark-done":
-      return { kind: "reopen" };
+      return before?.completedAt === undefined
+        ? [{ kind: "reopen" }]
+        : [{ kind: "reopen" }, { kind: "settle" }];
     case "reopen":
       return before?.markedDone === true || before?.workDone === true
-        ? { kind: "mark-done" }
-        : { kind: "settle" };
+        ? [{ kind: "mark-done" }]
+        : [{ kind: "settle" }];
     case "snooze":
-      return { kind: "wake" };
+      return [{ kind: "wake" }];
     case "wake": {
       const until = before?.snooze?.until;
       if (until === undefined || Date.parse(until) <= now.getTime()) {
         return { kind: "none", reason: "Its snooze has already ended, so it stays awake." };
       }
-      return { kind: "snooze", until };
+      return [{ kind: "snooze", until }];
     }
   }
 }
@@ -173,11 +179,20 @@ export function runThreadRestChange(input: {
       detail: before?.title ?? "The thread",
       undo: () => {
         const inverse = inverseThreadRestChange(change, before, new Date());
-        if (inverse.kind === "none") {
+        if ("kind" in inverse) {
           actions.setThreadExportNotice(inverse.reason);
           return;
         }
-        void send(threadId, inverse).then(noteRefusal);
+        // Each step waits for the one before, and a refusal stops the rest.
+        void inverse
+          .reduce<Promise<RestOutcome>>(
+            (previous, step) =>
+              previous.then((outcome) =>
+                outcome.status === "ok" ? send(threadId, step) : outcome,
+              ),
+            Promise.resolve({ status: "ok" }),
+          )
+          .then(noteRefusal);
       },
     });
   });

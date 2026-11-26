@@ -16,10 +16,13 @@ export function couldNotLoad(what: string): string {
 /**
  * Holds a part that loads on first use, such as a menu's items or the Undo
  * notice. If it cannot load or draw, it draws nothing in place and says so
- * once, where thread notices appear; the rest of the window stays usable.
+ * where thread notices appear; the rest of the window stays usable. `asked`
+ * counts the times the person asked for the part (a menu opened): each new
+ * ask after a failure says so again, or a reopened menu would show nothing
+ * and say nothing once the first notice was dismissed.
  */
 export class LazyPartBoundary extends Component<
-  { readonly children: ReactNode; readonly what: string },
+  { readonly children: ReactNode; readonly what: string; readonly asked?: number },
   { readonly failed: boolean }
 > {
   static override contextType = WindowNoticeContext;
@@ -30,6 +33,11 @@ export class LazyPartBoundary extends Component<
   }
   override componentDidCatch() {
     this.context?.(couldNotLoad(this.props.what));
+  }
+  override componentDidUpdate(previous: { readonly asked?: number }) {
+    if (this.state.failed && previous.asked !== this.props.asked) {
+      this.context?.(couldNotLoad(this.props.what));
+    }
   }
   override render() {
     return this.state.failed ? null : this.props.children;

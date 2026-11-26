@@ -791,7 +791,9 @@ done, Un-settle or Reopen, snooze and wake, whether it came from the row menu,
 a drag or the palette. Undo is a new person command, never a rewrite: it sends
 the inverse command (Un-settle for a Settle or Mark done; Mark done again for a
 reopened thread that was marked Done; Wake for a snooze), and the host may
-refuse it like any other, its sentence then showing. Undoing a wake snoozes the
+refuse it like any other, its sentence then showing. Mark done on a thread that
+was already settled is undone by Reopen and then Settle, since Reopen also
+clears the settlement; a refused Reopen stops there. Undoing a wake snoozes the
 thread again only while its old wake time is still ahead; otherwise the thread
 stays awake and the notice says so. A newer change replaces the notice.
 Archive has no Undo, because no command takes it back. While the notice shows,
@@ -1032,8 +1034,14 @@ its composer once it is open, through the composer's own attach path, so every
 limit, model check and message a drop on the composer has applies. Until the
 composer opens they wait in this window's memory only (a reload drops them, as
 a draft keeps no attachments), at most eight for a thread; past that the
-person is told to drop the rest on the composer. A drag that carries no files
-passes over the row.
+person is told to drop the rest on the composer. A composer that is asking the
+host whether Sees images can describe a picture takes the waiting files once
+it has the answer, so a picture is not refused on the model picker's word
+alone. A Chat composer holds at most one message's attachments (16) and says so
+for each file past that, however the files arrive. When a drop of several
+files has some refused, the window's notice names each refused file and its
+reason, since the composer's own warning clears when it takes the next file.
+A drag that carries no files passes over the row.
 
 ### Find in a thread, and a new thread from a selection
 

@@ -987,13 +987,18 @@ export function ThreadRowContextMenu(props: {
   // The items load when the menu first opens and stay drawn after, so the
   // menu's close animation runs as it always has.
   const [wanted, setWanted] = useState(false);
+  // Each opening, so a menu that failed to load says so again when reopened.
+  const [asked, setAsked] = useState(0);
   return (
     <div className={["sidebar-navigation__thread-row", props.className].filter(Boolean).join(" ")}>
       {props.leading}
       <OctantContextMenuRoot
         onOpenChange={(next) => {
           setOpen(next);
-          if (next) setWanted(true);
+          if (next) {
+            setWanted(true);
+            setAsked((count) => count + 1);
+          }
         }}
       >
         <ThreadRowInfoPopup
@@ -1010,7 +1015,7 @@ export function ThreadRowContextMenu(props: {
           <ThreadRowActionsGutter actions={props.actions} thread={props.thread} />
         ) : null}
         {wanted ? (
-          <LazyPartBoundary what="this thread's menu">
+          <LazyPartBoundary asked={asked} what="this thread's menu">
             <Suspense fallback={null}>
               <DeferredThreadRowMenu
                 actions={props.actions}
