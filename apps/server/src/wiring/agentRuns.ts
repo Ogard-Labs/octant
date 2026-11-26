@@ -980,7 +980,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
             ? {
                 toolConstraints: [],
                 inPlan: (runningWorkTurnAccess(id) ?? thread.access) === "plan",
-                carriesTools: carries(thread, appToolThreadLevel(thread)),
+                // The level the lead's own gate judges, Strict included.
+                carriesTools: carries(thread, appToolThreadLevel(thread, resolveThreadStrict(id))),
               }
             : undefined;
         }
@@ -990,7 +991,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
             ? {
                 toolConstraints: thread.toolConstraints ?? [],
                 inPlan: codeParentActiveTurn(thread).executionPolicy === "plan",
-                carriesTools: carries(thread, appToolThreadLevel(thread)),
+                // The level the lead's own gate judges, Strict included.
+                carriesTools: carries(thread, appToolThreadLevel(thread, resolveThreadStrict(id))),
               }
             : undefined;
         }
