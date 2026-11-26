@@ -1041,7 +1041,7 @@ export class VideoJobService {
             answer.status !== "running" &&
             (answer.status !== "failed" || answer.billed === true)
           ) {
-            await this.#conclude(job, answer, true);
+            await this.#conclude(job, answer, true, reported);
             return;
           }
         } else {
@@ -1085,7 +1085,7 @@ export class VideoJobService {
           pollFailureLeavesJobUnconfirmed(poll.providerFailure)
         )
       ) {
-        await this.#conclude(job, poll, running.stopRequested);
+        await this.#conclude(job, poll, running.stopRequested, reported);
         return;
       }
       // A provider that answered with a retry-after wait is honoured before
@@ -1148,6 +1148,7 @@ export class VideoJobService {
     job: VideoJob,
     answer: Exclude<VideoAdapterPoll, { readonly status: "running" }>,
     stopped: boolean,
+    reported?: VideoAdapterUsage,
   ): Promise<void> {
     const current = this.#current(job);
     switch (answer.status) {
@@ -1217,10 +1218,12 @@ export class VideoJobService {
           safetyRefusal: answer.safetyRefusal,
           ...(answer.billed === true || reportedCharge !== undefined
             ? {
+                // A reported charge goes through the same settlement as every
+                // other answer, so a broken amount settles at the estimate.
                 settledCostUsdMicros:
                   reportedCharge === undefined
                     ? estimateOrZero(current)
-                    : Math.max(0, Math.round(reportedCharge)),
+                    : this.#settled(current, answer.usage),
                 billed: true,
                 ...(answer.usage === undefined ? {} : { usage: answer.usage }),
               }
@@ -1228,18 +1231,27 @@ export class VideoJobService {
         });
         break;
       }
-      case "failed":
+      case "failed": {
+        // Usage an earlier status check reported means the provider already
+        // billed the clip: a later check that answers 404 or 400 (Gemini does
+        // once the interaction is gone) settles at that usage, never at zero.
+        const keepsReportedCharge =
+          answer.billed !== true &&
+          reported !== undefined &&
+          (answer.httpStatus === 404 || answer.httpStatus === 400);
+        const usage = keepsReportedCharge ? reported : answer.usage;
         this.#finish(current, stopped ? "cancelled" : "failed", {
           ...(stopped ? {} : { failure: answer.providerFailure }),
-          ...(answer.billed === true
+          ...(answer.billed === true || keepsReportedCharge
             ? {
                 billed: true,
-                settledCostUsdMicros: this.#settled(current, answer.usage),
-                ...(answer.usage === undefined ? {} : { usage: answer.usage }),
+                settledCostUsdMicros: this.#settled(current, usage),
+                ...(usage === undefined ? {} : { usage }),
               }
             : {}),
         });
         break;
+      }
       case "cancelled":
         this.#finish(current, "cancelled", {
           settledCostUsdMicros: this.#settled(current, answer.usage),
