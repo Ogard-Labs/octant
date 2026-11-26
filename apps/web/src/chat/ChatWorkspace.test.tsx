@@ -762,9 +762,11 @@ describe("Chat host queue", () => {
     );
   });
 
-  it("hands a drop's next file over without waiting for a refused file's discard", async () => {
+  it("keeps Send closed while a drop moves past a refused file to the next", async () => {
+    const small = Promise.withResolvers<void>();
     const upload = vi.fn<ChatController["upload"]>(async (input) => {
       if (input.displayName === "huge.png") throw new Error("too large");
+      await small.promise;
       return decodeChatAttachment({
         id: input.attachmentId,
         threadId: input.threadId,
@@ -776,7 +778,7 @@ describe("Chat host queue", () => {
         createdAt: now,
       });
     });
-    // The host's discard never answers here; Send must not open in that wait.
+    // The host's discard never answers here, so the drop must not wait on it.
     const discard = vi.fn<ChatController["discard"]>(() => new Promise(() => {}));
     render(
       <ChatWorkspace
@@ -796,6 +798,11 @@ describe("Chat host queue", () => {
         "small.png",
       ]),
     );
+    // The draft has text, so only the drop's upload in flight keeps Send shut.
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    await act(async () => small.resolve());
+    await screen.findByText("small.png");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled());
   });
 
   it("keeps an uncertain enqueue separate from normal sending after the active turn finishes", async () => {
