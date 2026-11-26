@@ -1523,8 +1523,17 @@ export class AndroidToolchainService {
       // The console answers while adbd does not; it needs the console token,
       // which a confined launch may not have, and then this cannot say.
       const named = await this.#command([adb, "-s", serial, "emu", "avd", "name"], context, 5_000);
+      // Only a console that names an AVD and says OK rules this one out. adb
+      // exits 0 on a refused console too ("KO: authentication required"),
+      // which read as another AVD and dropped the record of one still running.
       if (!succeeded(named)) return true;
-      if (text(named.stdout).split(/\r?\n/)[0]?.trim() === String(emulatorId)) return true;
+      const lines = text(named.stdout)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      const avd = lines[0];
+      if (avd === undefined || lines[1] !== "OK" || !/^[A-Za-z0-9._-]+$/.test(avd)) return true;
+      if (avd === String(emulatorId)) return true;
     }
     return false;
   }

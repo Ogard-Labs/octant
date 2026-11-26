@@ -161,7 +161,9 @@ describe("AndroidToolchainService", () => {
         if (argv.includes("emu avd name"))
           return name === undefined
             ? { ...processResult(""), exitCode: 1 }
-            : processResult(`${name}\r\nOK\r\n`);
+            : name.startsWith("KO") || name === ""
+              ? processResult(`${name}\r\n`)
+              : processResult(`${name}\r\nOK\r\n`);
         return processResult("");
       });
     const mayRun = async (name: string | undefined) => {
@@ -185,6 +187,9 @@ describe("AndroidToolchainService", () => {
     expect(await mayRun("Pixel_9")).toBe(false);
     expect(await mayRun("Pixel_8_API_34")).toBe(true);
     expect(await mayRun(undefined)).toBe(true);
+    // A refused console says nothing about which AVD it is, however adb exits.
+    expect(await mayRun("KO: authentication required")).toBe(true);
+    expect(await mayRun("")).toBe(true);
   });
 
   it("names the AVD store, and a configured ANDROID_AVD_HOME, as state confined commands may write", () => {

@@ -72,7 +72,7 @@ function appleService(
   initial: "shutdown" | "booted" = "shutdown",
   fails: ReadonlyArray<string> = [],
   // What the host's device list says now, which Xcode can change without the cache seeing it.
-  host: { state: "shutdown" | "booted" | undefined } = { state: undefined },
+  host: { state: "shutdown" | "booted" | "booting" | undefined } = { state: undefined },
 ) {
   let state = initial;
   const executed: Array<{ kind: string; context: Record<string, unknown> }> = [];
@@ -86,8 +86,9 @@ function appleService(
     })),
     readScreenshotArtifact: vi.fn(),
     readLogArtifact: vi.fn(),
+    // As the service does: the host's answer, with only a settled state cached.
     simulatorStateNow: vi.fn(async () => {
-      if (host.state !== undefined) state = host.state;
+      if (host.state === "booted" || host.state === "shutdown") state = host.state;
       return host.state ?? state;
     }),
     execute: vi.fn(async (request: { kind: string }, context: Record<string, unknown>) => {
@@ -224,6 +225,26 @@ describe("a Code child's Simulators", () => {
     expect(await new ChildBootedDeviceLedger(join(directory, "devices.json")).leftOver()).toEqual(
       [],
     );
+  });
+
+  it("stay on disk for a restart when the run ends while Xcode is still booting one the cache calls off", async () => {
+    const service = appleService("shutdown", ["test"], { state: "booting" });
+    const child = input({ policy: "full-access" });
+    const tools = apple(child, service);
+    await tools?.execute(
+      call("octant_apple", {
+        operation: "test",
+        projectPath: "App.xcodeproj",
+        scheme: "App",
+        simulatorId: DEVICE,
+      }),
+    );
+    await tools?.close?.();
+    // The cache still says off, so the shutdown is refused; a restart tries again.
+    expect(service.executed.map((entry) => entry.kind)).toEqual(["test", "shutdown"]);
+    expect(
+      await new ChildBootedDeviceLedger(join(directory, "devices.json")).leftOver(),
+    ).toMatchObject([{ platform: "apple", deviceId: DEVICE }]);
   });
 
   it("say no pane shows a running one, since a child opens none", async () => {
