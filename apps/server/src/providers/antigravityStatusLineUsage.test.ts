@@ -339,7 +339,7 @@ describe("antigravity status-line usage", () => {
     mkdirSync(dotfilesDir, { recursive: true });
     mkdirSync(configDir, { recursive: true });
     const targetSettings = join(dotfilesDir, "settings.json");
-    writeFileSync(targetSettings, JSON.stringify({ theme: "light" }));
+    writeFileSync(targetSettings, JSON.stringify({ theme: "light" }), { mode: 0o644 });
     const linkSettings = join(configDir, "settings.json");
     symlinkSync(targetSettings, linkSettings);
 
@@ -350,14 +350,21 @@ describe("antigravity status-line usage", () => {
     });
     expect(primaryBridge.connect().connected).toBe(true);
     expect(lstatSync(linkSettings).isSymbolicLink()).toBe(true);
+    expect(statSync(targetSettings).mode & 0o777).toBe(0o644);
 
-    // Second host profile refuses to wrap the first host's bridge as an original command.
+    // Second host profile refuses to wrap the first host's bridge and does not write a script.
     const secondaryBridge = new AntigravityStatusLineBridge({
       dataDirectory: join(root, "secondary-data"),
       configDirectory: configDir,
       nodeExecutable: process.execPath,
     });
     expect(() => secondaryBridge.connect()).toThrow(/another Octant host profile/i);
+    expect(() => statSync(secondaryBridge.scriptPath)).toThrow();
+
+    // Deleting this host's own data (simulated reinstall) still allows clean reconnect + disconnect.
+    rmSync(join(root, "primary-data"), { recursive: true, force: true });
+    expect(primaryBridge.connect().connected).toBe(true);
+    expect(primaryBridge.status().connected).toBe(true);
 
     // Installed bridge script falls back to reset_in_seconds on malformed nonblank reset_time.
     const runMalformedReset = spawnSync(process.execPath, [primaryBridge.scriptPath], {
@@ -384,10 +391,24 @@ describe("antigravity status-line usage", () => {
     expect(switchedFacts.limitsCapture?.status().connected).toBe(true);
     expect(switchedFacts.limitsCapture?.triggerRefresh).toBeUndefined();
 
-    // Disconnect restores target file and preserves the symlink itself.
+    // Disconnect restores target file, preserves its mode, and keeps the symlink itself.
     expect(primaryBridge.disconnect().restored).toBe(true);
     expect(lstatSync(linkSettings).isSymbolicLink()).toBe(true);
+    expect(statSync(targetSettings).mode & 0o777).toBe(0o644);
     expect(JSON.parse(readFileSync(targetSettings, "utf8"))).toEqual({ theme: "light" });
+
+    // Dangling symlinks are refused instead of being replaced by a regular file.
+    const danglingDir = join(root, "dangling-cli");
+    mkdirSync(danglingDir, { recursive: true });
+    const danglingLink = join(danglingDir, "settings.json");
+    symlinkSync(join(root, "does-not-exist.json"), danglingLink);
+    const danglingBridge = new AntigravityStatusLineBridge({
+      dataDirectory: join(root, "dangling-data"),
+      configDirectory: danglingDir,
+      nodeExecutable: process.execPath,
+    });
+    expect(() => danglingBridge.connect()).toThrow(/dangling symlink/i);
+    expect(lstatSync(danglingLink).isSymbolicLink()).toBe(true);
   });
 
   it("builds an interactive agy launch script without headless print flags", () => {

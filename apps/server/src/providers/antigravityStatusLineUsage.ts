@@ -513,24 +513,41 @@ function writeAtomicPrivate(filePath: string, content: string, mode = 0o600): vo
 }
 
 /**
- * Resolves the target file path for `settings.json` without replacing an
- * existing symlink. When `settingsPath` is a symlink, writes update the
- * resolved target file atomically so dotfiles symlinks stay intact.
+ * Resolves the target file path and POSIX mode for `settings.json` without
+ * replacing an existing symlink or narrowing existing file permissions.
+ * Refuses dangling symlinks and non-file symlink targets.
  */
-function resolveSettingsWritePath(settingsPath: string): string {
+function resolveSettingsWriteTarget(settingsPath: string): {
+  readonly path: string;
+  readonly mode: number;
+} {
+  let info: ReturnType<typeof lstatSync>;
   try {
-    const info = lstatSync(settingsPath);
-    if (!info.isSymbolicLink()) return settingsPath;
-    const target = realpathSync(settingsPath);
-    const targetInfo = statSync(target);
-    if (!targetInfo.isFile()) {
-      throw new Error("Antigravity CLI settings.json symlink target is not a regular file.");
-    }
-    return target;
+    info = lstatSync(settingsPath);
   } catch (error) {
-    if (isEnoent(error)) return settingsPath;
+    if (isEnoent(error)) return { path: settingsPath, mode: 0o600 };
     throw error;
   }
+  if (!info.isSymbolicLink()) {
+    if (!info.isFile()) {
+      throw new Error("Antigravity CLI settings.json is not a regular file.");
+    }
+    return { path: settingsPath, mode: info.mode & 0o777 };
+  }
+  let target: string;
+  try {
+    target = realpathSync(settingsPath);
+  } catch (error) {
+    if (isEnoent(error)) {
+      throw new Error("Antigravity CLI settings.json is a dangling symlink.");
+    }
+    throw error;
+  }
+  const targetInfo = statSync(target);
+  if (!targetInfo.isFile()) {
+    throw new Error("Antigravity CLI settings.json symlink target is not a regular file.");
+  }
+  return { path: target, mode: targetInfo.mode & 0o777 };
 }
 
 function readBoundedFile(filePath: string): string {
@@ -687,21 +704,43 @@ export class AntigravityStatusLineBridge {
       throw new Error("Antigravity CLI statusLine type is not supported.");
     }
 
-    // Write the self-contained helper script before editing settings.json.
+    const settingsTarget = resolveSettingsWriteTarget(this.settingsPath);
+
+    // Check for an existing Octant bridge owned by another host profile BEFORE
+    // writing any helper script. If the command points to this same host's
+    // scriptPath without metadata (e.g. reinstall after data removal), repair
+    // the connection cleanly without chaining the orphaned bridge onto itself.
+    const isExistingOwnMatch =
+      existingMetadata !== undefined &&
+      isRecord(currentStatusLine) &&
+      currentStatusLine.command === existingMetadata.installedCommand;
+    const isOrphanedOwnBridge =
+      !isExistingOwnMatch &&
+      isRecord(currentStatusLine) &&
+      typeof currentStatusLine.command === "string" &&
+      currentStatusLine.command.includes(this.scriptPath);
+
+    if (
+      !isExistingOwnMatch &&
+      !isOrphanedOwnBridge &&
+      isRecord(currentStatusLine) &&
+      typeof currentStatusLine.command === "string" &&
+      currentStatusLine.command.includes(BRIDGE_SCRIPT_NAME)
+    ) {
+      throw new Error(
+        "Antigravity status-line capture is already connected by another Octant host profile. Disconnect it there first.",
+      );
+    }
+
+    // Write the self-contained helper script only after all checks succeed.
     writeAtomicPrivate(
       this.scriptPath,
       buildBridgeScriptSource(this.readingPath, this.metadataPath),
       0o700,
     );
 
-    const settingsWritePath = resolveSettingsWritePath(this.settingsPath);
-
     // Already installed: keep existing originalStatusLine metadata intact.
-    if (
-      existingMetadata !== undefined &&
-      isRecord(currentStatusLine) &&
-      currentStatusLine.command === existingMetadata.installedCommand
-    ) {
+    if (isExistingOwnMatch && existingMetadata !== undefined && isRecord(currentStatusLine)) {
       if (existingMetadata.installedCommand !== command || currentStatusLine.enabled === false) {
         const updatedMetadata: BridgeMetadata = {
           ...existingMetadata,
@@ -716,24 +755,17 @@ export class AntigravityStatusLineBridge {
           enabled: true,
         };
         settings.statusLine = nextStatusLine;
-        writeAtomicPrivate(settingsWritePath, `${JSON.stringify(settings, null, 2)}\n`, 0o600);
+        writeAtomicPrivate(
+          settingsTarget.path,
+          `${JSON.stringify(settings, null, 2)}\n`,
+          settingsTarget.mode,
+        );
       }
       return this.status();
     }
 
-    // Never save another Octant host profile's bridge as the user's original
-    // command: disconnecting in connection order would lose the true backup.
-    if (
-      isRecord(currentStatusLine) &&
-      typeof currentStatusLine.command === "string" &&
-      currentStatusLine.command.includes(BRIDGE_SCRIPT_NAME)
-    ) {
-      throw new Error(
-        "Antigravity status-line capture is already connected by another Octant host profile. Disconnect it there first.",
-      );
-    }
-
-    const originalStatusLine = isRecord(currentStatusLine) ? { ...currentStatusLine } : null;
+    const originalStatusLine =
+      !isOrphanedOwnBridge && isRecord(currentStatusLine) ? { ...currentStatusLine } : null;
     const hadActiveCommand =
       originalStatusLine !== null &&
       originalStatusLine.enabled !== false &&
@@ -758,7 +790,11 @@ export class AntigravityStatusLineBridge {
       ...(hadActiveCommand ? {} : { stack_with_default: true }),
     };
     settings.statusLine = nextStatusLine;
-    writeAtomicPrivate(settingsWritePath, `${JSON.stringify(settings, null, 2)}\n`, 0o600);
+    writeAtomicPrivate(
+      settingsTarget.path,
+      `${JSON.stringify(settings, null, 2)}\n`,
+      settingsTarget.mode,
+    );
     return this.status();
   }
 
@@ -785,6 +821,7 @@ export class AntigravityStatusLineBridge {
 
     let restored = false;
     try {
+      const settingsTarget = resolveSettingsWriteTarget(metadata.settingsPath);
       const parsed: unknown = JSON.parse(readBoundedFile(metadata.settingsPath));
       if (
         isRecord(parsed) &&
@@ -798,9 +835,9 @@ export class AntigravityStatusLineBridge {
           nextSettings.statusLine = { ...metadata.originalStatusLine };
         }
         writeAtomicPrivate(
-          resolveSettingsWritePath(metadata.settingsPath),
+          settingsTarget.path,
           `${JSON.stringify(nextSettings, null, 2)}\n`,
-          0o600,
+          settingsTarget.mode,
         );
         restored = true;
       }
