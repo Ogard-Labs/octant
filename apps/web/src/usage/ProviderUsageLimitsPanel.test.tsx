@@ -713,10 +713,16 @@ describe("ProviderUsageLimitsPanel", () => {
             },
           ],
         });
-      const initial = makeSnapshot("2026-08-23T12:00:00.000Z", 0.04);
+      const initial = makeSnapshot("2026-08-23T11:59:00.000Z", 0.04);
+      const preLaunch = makeSnapshot("2026-08-23T11:59:30.000Z", 0.07);
       const updated = makeSnapshot("2026-08-23T12:00:03.000Z", 0.1);
       let listCalls = 0;
-      const list = vi.fn(async () => (++listCalls >= 2 ? updated : initial));
+      const list = vi.fn(async () => {
+        listCalls += 1;
+        if (listCalls === 1) return initial;
+        if (listCalls === 2) return preLaunch;
+        return updated;
+      });
       const triggerRefresh = vi.fn(async () => ({ launched: true }));
       const captureStatus = {
         connected: true,
@@ -756,7 +762,13 @@ describe("ProviderUsageLimitsPanel", () => {
       });
       expect(triggerRefresh).toHaveBeenCalledExactlyOnceWith(String(agyId));
 
-      // Advance past the 2s poll interval so the panel automatically picks up the fresh snapshot.
+      // First poll returns a pre-launch reading: keep polling until a post-launch reading arrives.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_100);
+      });
+      expect(screen.getByText("93% left")).toBeVisible();
+      expect(screen.getByText(/Waiting for fresh limits/)).toBeVisible();
+
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2_100);
       });

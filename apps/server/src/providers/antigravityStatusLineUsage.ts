@@ -489,9 +489,14 @@ if (reading !== null) {
 
 const chained = originalCommand();
 if (chained !== null) {
+  const childEnv = { ...process.env };
+  if (childEnv.OCTANT_BRIDGE_FORCED_NODE === "1") {
+    delete childEnv.ELECTRON_RUN_AS_NODE;
+    delete childEnv.OCTANT_BRIDGE_FORCED_NODE;
+  }
   const result = process.platform === "win32"
-    ? spawnSync("cmd.exe", ["/d", "/s", "/c", chained], { input, timeout: 4500, encoding: "buffer" })
-    : spawnSync("/bin/sh", ["-c", chained], { input, timeout: 4500, encoding: "buffer" });
+    ? spawnSync("cmd.exe", ["/d", "/s", "/c", chained], { input, env: childEnv, timeout: 4500, encoding: "buffer" })
+    : spawnSync("/bin/sh", ["-c", chained], { input, env: childEnv, timeout: 4500, encoding: "buffer" });
   if (result.stdout && result.stdout.length > 0) {
     process.stdout.write(result.stdout);
   }
@@ -579,11 +584,12 @@ export class AntigravityStatusLineBridge {
   #installedCommand(): string {
     // Packaged desktop builds run the server through the Electron executable
     // with ELECTRON_RUN_AS_NODE=1; preserve Node mode explicitly so interactive
-    // `agy` executes the helper script instead of launching the desktop app.
+    // `agy` executes the helper script instead of launching the desktop app,
+    // and mark it so the bridge strips it before running any chained command.
     if (process.platform === "win32") {
-      return `set ELECTRON_RUN_AS_NODE=1&& "${this.#nodeExecutable}" "${this.scriptPath}"`;
+      return `set ELECTRON_RUN_AS_NODE=1&& set OCTANT_BRIDGE_FORCED_NODE=1&& "${this.#nodeExecutable}" "${this.scriptPath}"`;
     }
-    return `env ELECTRON_RUN_AS_NODE=1 ${shellQuotePosix(this.#nodeExecutable)} ${shellQuotePosix(this.scriptPath)}`;
+    return `env ELECTRON_RUN_AS_NODE=1 OCTANT_BRIDGE_FORCED_NODE=1 ${shellQuotePosix(this.#nodeExecutable)} ${shellQuotePosix(this.scriptPath)}`;
   }
 
   #readMetadata(): BridgeMetadata | undefined {

@@ -150,9 +150,11 @@ describe("antigravity status-line usage", () => {
     });
 
     // Seed an existing active statusLine (e.g., a user-configured script) and unrelated settings.
-    writeFileSync(join(root, "chained.sh"), "#!/bin/sh\ncat >/dev/null\nprintf 'CHAINED_OK'\n", {
-      mode: 0o755,
-    });
+    writeFileSync(
+      join(root, "chained.sh"),
+      "#!/bin/sh\ncat >/dev/null\nprintf 'CHAINED_OK:%s' \"${ELECTRON_RUN_AS_NODE:-unset}\"\n",
+      { mode: 0o755 },
+    );
     const chainedCommand = `'${join(root, "chained.sh")}'`;
     const seedSettings = {
       theme: "dark",
@@ -178,7 +180,8 @@ describe("antigravity status-line usage", () => {
     expect(edited.statusLine.command).toContain("ELECTRON_RUN_AS_NODE=1");
     expect(edited.statusLine.command).toContain("antigravity-statusline-bridge.mjs");
 
-    // Execute the installed bridge script directly, simulating `agy` piping statusLine JSON.
+    // Execute the installed command via shell (matching how `agy` invokes statusLine)
+    // and verify ELECTRON_RUN_AS_NODE is stripped before running the chained script.
     const samplePayload = JSON.stringify({
       cwd: "/private/should-not-save",
       plan_tier: "Google AI Ultra",
@@ -186,12 +189,12 @@ describe("antigravity status-line usage", () => {
         "gemini-5h": { remaining_fraction: 0.91, reset_time: "2026-11-26T15:00:00Z" },
       },
     });
-    const run = spawnSync(process.execPath, [bridge2.scriptPath], {
+    const run = spawnSync("/bin/sh", ["-c", String(edited.statusLine.command)], {
       input: samplePayload,
       encoding: "utf8",
     });
     expect(run.status).toBe(0);
-    expect(run.stdout).toBe("CHAINED_OK");
+    expect(run.stdout).toBe("CHAINED_OK:unset");
 
     const stored = bridge2.readReading();
     expect(stored?.planTier).toBe("Google AI Ultra");

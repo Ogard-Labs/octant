@@ -22,11 +22,17 @@ import "../styles/usage.css";
 const CAPTURE_POLL_INTERVAL_MS = 2_000;
 const CAPTURE_POLL_DURATION_MS = 60_000;
 
-function entryReadingMarker(entry: ProviderUsageLimitsEntry | undefined): string | undefined {
+function entryReadingTimestampMs(entry: ProviderUsageLimitsEntry | undefined): number | undefined {
   if (entry === undefined) return undefined;
-  if (entry.status === "available") return `available:${entry.limits.updatedAt}`;
-  if (entry.status === "failed") return `failed:${entry.lastSuccessfulAt ?? entry.observedAt}`;
-  return undefined;
+  const iso =
+    entry.status === "available"
+      ? entry.limits.updatedAt
+      : entry.status === "failed"
+        ? (entry.lastSuccessfulAt ?? entry.observedAt)
+        : undefined;
+  if (iso === undefined) return undefined;
+  const parsed = Date.parse(iso);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 export function ProviderUsageLimitsPanel(props: {
@@ -104,12 +110,16 @@ export function ProviderUsageLimitsPanel(props: {
     [loadCaptures, props.client],
   );
   const startCapturePoll = useCallback(
-    (instanceId: string, baselineMarker: string | undefined) => {
+    (instanceId: string, watermarkMs: number) => {
       stopCapturePoll();
       const deadline = Date.now() + CAPTURE_POLL_DURATION_MS;
       pollTimer.current = setInterval(() => {
         if (Date.now() >= deadline) {
           stopCapturePoll();
+          setCaptureNotices((prev) => ({
+            ...prev,
+            [instanceId]: "No new reading arrived yet. Press Refresh after the CLI updates.",
+          }));
           return;
         }
         const request = ++sequence.current;
@@ -123,8 +133,12 @@ export function ProviderUsageLimitsPanel(props: {
             const updatedEntry = next.entries.find(
               (entry) => String(entry.providerInstanceId) === instanceId,
             );
-            const nextMarker = entryReadingMarker(updatedEntry);
-            if (nextMarker !== undefined && nextMarker !== baselineMarker) {
+            const updatedMs = entryReadingTimestampMs(updatedEntry);
+            if (
+              updatedEntry?.status === "available" &&
+              updatedMs !== undefined &&
+              updatedMs >= watermarkMs
+            ) {
               stopCapturePoll();
               setCaptureNotices((prev) => ({
                 ...prev,
@@ -203,13 +217,17 @@ export function ProviderUsageLimitsPanel(props: {
         return rest;
       });
       try {
+        const launchMs = Date.now();
+        const baselineMs = entryReadingTimestampMs(entry);
+        const watermarkMs =
+          baselineMs === undefined ? launchMs : Math.max(launchMs, baselineMs + 1);
         const result = await props.client.triggerLimitsCaptureRefresh(instanceId);
         if (result.launched) {
           setCaptureNotices((prev) => ({
             ...prev,
             [instanceId]: "Opened interactive terminal. Waiting for fresh limits…",
           }));
-          startCapturePoll(instanceId, entryReadingMarker(entry));
+          startCapturePoll(instanceId, watermarkMs);
         } else {
           setCaptureNotices((prev) => ({
             ...prev,
