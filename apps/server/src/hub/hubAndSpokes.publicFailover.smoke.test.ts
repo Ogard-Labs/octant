@@ -316,4 +316,56 @@ describe("the public entrance during failover", () => {
     expect(standby.webhooks.status()).toMatchObject({ queued: 0, forwarded: 1 });
     expect((await openLink(standby, own.linkId, own.secret, browser())).status).toBe(200);
   });
+
+  it("on a split network, a delivery the spoke refuses from a standing-in standby waits there and runs once after hand-back", async () => {
+    const network = new HubTestNetwork();
+    const hub = await start(network, "Mac mini", 40);
+    const standby = await start(network, "Standby", 41);
+    const spoke = await start(network, "Laptop", 42);
+    expect(hub.hub.enable(window).status).toBe("enabled");
+    await join(hub, standby);
+    await join(hub, spoke);
+    standby.spoke.setGrant(standbyGrant, window);
+    spoke.spoke.setGrant(spokeGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    await vi.waitFor(() =>
+      expect(spoke.state.load().link?.roster.roster.standbyOrder ?? []).toHaveLength(1),
+    );
+    setServeWhileStandingIn({
+      state: standby.state,
+      enabled: true,
+      principal: window,
+      record: (change) => standby.records.push(change),
+    });
+    await standby.failover.tick();
+    await spoke.failover.tick();
+    const created = await spoke.spokeWebhooks.create({ scheme: "standard-webhooks", label: "CI" });
+    if (created.status !== "created") throw new Error(created.status);
+    expect(standby.webhooks.status().endpoints).toBe(1);
+
+    // Only the standby loses the hub; the spoke still reaches it.
+    network.split(hub.address, standby.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    expect(
+      (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "s1"))).status,
+    ).toBe(202);
+    await standby.webhooks.tick();
+    // The spoke can reach its hub, so it refuses the standby, and nothing runs yet.
+    expect(standby.webhooks.status()).toMatchObject({ queued: 1, forwarded: 0 });
+    expect(spoke.spokeWebhooks.view().endpoints[0]?.deliveries ?? 0).toBe(0);
+
+    // The split heals: the standby steps down and hands the delivery to the hub.
+    network.heal(hub.address, standby.address);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(false);
+    expect(standby.webhooks.status().queued).toBe(0);
+    expect(hub.webhooks.status().queued).toBe(1);
+    await hub.webhooks.tick();
+    const view = spoke.spokeWebhooks.view();
+    expect(view.endpoints[0]?.deliveries).toBe(1);
+    expect(view.log.filter((entry) => entry.outcome === "accepted")).toHaveLength(1);
+  });
 });

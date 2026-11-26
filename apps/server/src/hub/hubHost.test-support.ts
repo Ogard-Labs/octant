@@ -163,6 +163,29 @@ export class HubTestNetwork {
     this.#stopped.delete(address);
   }
 
+  readonly #split = new Set<string>();
+
+  /** Makes two hosts unreachable to each other only, as a split network does; others reach both. */
+  split(a: string, b: string): void {
+    this.#split.add(`${a}|${b}`).add(`${b}|${a}`);
+  }
+
+  heal(a: string, b: string): void {
+    this.#split.delete(`${a}|${b}`);
+    this.#split.delete(`${b}|${a}`);
+  }
+
+  /** The network as the host at `from` sees it, so a split between two hosts holds. */
+  networkFor(from: string): HubNetwork {
+    return {
+      resolve: this.network.resolve,
+      dial: (address, port) =>
+        this.#split.has(`${from}|${address}`)
+          ? Promise.reject(new Error(`${address} is split from ${from}.`))
+          : this.network.dial(address, port),
+    };
+  }
+
   readonly network: HubNetwork = {
     resolve: async (hostname) => [hostname],
     dial: (address) =>
@@ -419,7 +442,7 @@ export async function startHubTestHost(input: {
 
   const state = createHubStateStore(directory);
   const records: HubMembershipChangedPayload[] = [];
-  const transport = createPinnedHubTransport(input.network.network);
+  const transport = createPinnedHubTransport(input.network.networkFor(input.address));
   let gateway: RemoteGateway | undefined;
   const hubPairing = (): HubPairingPort | undefined => {
     const administration = gateway?.localDeviceAdministration();
