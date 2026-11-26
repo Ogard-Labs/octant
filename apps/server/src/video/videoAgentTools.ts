@@ -143,7 +143,12 @@ export function createVideoAgentTools(options: {
 }
 
 /** One line per ready model with what it declares, so the agent asks only for what can run. */
-export function describeReadyModels(ready: ReadonlyArray<ReadyProfile>): string {
+export function describeReadyModels(
+  ready: ReadonlyArray<{
+    readonly instance: Pick<ReadyProfile["instance"], "id" | "displayName">;
+    readonly models: ReadyProfile["models"];
+  }>,
+): string {
   return ready
     .flatMap(({ instance, models }) =>
       models.map((model) => {

@@ -58,7 +58,7 @@ export const githubReadDefinition = {
  * The same tool on a turn that may update its thread's linked issues: a
  * comment, and close as completed, on a linked issue of this repository only.
  */
-const githubUpdateDefinition = {
+export const githubUpdateDefinition = {
   ...githubReadDefinition,
   description: githubReadDefinition.description.replace(
     "and it changes nothing on GitHub.",

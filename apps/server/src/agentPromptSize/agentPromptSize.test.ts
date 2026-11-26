@@ -3,6 +3,8 @@ import {
   CANVAS_DELIVERY_INSTRUCTIONS,
   nativeArtifactDeliveryInstructions,
 } from "../canvas/canvasDeliveryInstructions";
+import { WindowsTerminalShell } from "@octant/contracts";
+import { windowsShellInstruction } from "../harness/nativeHarnessInstructions";
 import { nativeHarnessToolDefinitionsFor } from "../harness/nativeHarnessTools";
 import { appToolHostLines } from "../providers/appToolHostLines";
 import { firstPartyToolNames } from "../providers/firstPartyToolNames.test-support";
@@ -65,6 +67,30 @@ describe("agent prompt size", () => {
       expect(promptInstructionTexts("codex", context)).toContain(CANVAS_DELIVERY_INSTRUCTIONS);
     }
     expect(promptInstructionTexts("claude", "chat")).toContain(CANVAS_DELIVERY_INSTRUCTIONS);
+  });
+
+  it("measures the widest form of a tool whose definition depends on the turn", () => {
+    const schemaOf = (context: "chat" | "work" | "code", name: string) =>
+      JSON.stringify(promptTools(context).find((tool) => tool.name === name));
+    // A Code thread with linked issues may update them.
+    expect(schemaOf("code", "octant_github")).toContain('"close"');
+    expect(schemaOf("code", "octant_linear")).toContain('"set-state"');
+    // A Code thread on its Project's shared checkout may ask to move off it.
+    expect(schemaOf("code", "octant_threads")).toContain('"move-to-worktree"');
+    // A ready video model is described in the tool.
+    expect(schemaOf("work", "octant_create_video")).toContain("gemini-omni-1.2-flash");
+    // A Zen space's assistant is a Chat thread carrying its own tool too.
+    expect(schemaOf("chat", "octant_zen")).not.toBe(undefined);
+  });
+
+  it("measures the longest Windows shell paragraph a Harness Work or Code turn can carry", () => {
+    const paragraphs = WindowsTerminalShell.literals.map(windowsShellInstruction);
+    const longest = paragraphs.reduce((a, b) => (b.length > a.length ? b : a));
+    for (const context of ["work", "code"] as const)
+      expect(promptInstructionTexts("harness", context)).toContain(longest);
+    // Chat's harness has no shell.
+    const chat = promptInstructionTexts("harness", "chat");
+    expect(paragraphs.filter((paragraph) => chat.includes(paragraph))).toEqual([]);
   });
 
   it("measures every guided first-party tool, or says why a turn never carries it", () => {

@@ -66,7 +66,7 @@ export const linearReadDefinition = {
  * operations, each reaching only those issues and asking where the guardrail
  * level says to.
  */
-const linearUpdateDefinition = {
+export const linearUpdateDefinition = {
   ...linearReadDefinition,
   description: linearReadDefinition.description.replace(
     "this tool cannot read another team or change anything in Linear.",

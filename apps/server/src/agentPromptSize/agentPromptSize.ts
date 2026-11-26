@@ -5,7 +5,10 @@ import {
   NATIVE_HARNESS_TOOL_DEFINITIONS,
   nativeHarnessToolCapabilityId,
   NativeHarnessToolName,
+  ProviderInstanceId,
+  ToolCapabilityId,
   WEB_SEARCH_TOOL_DEFINITION,
+  WindowsTerminalShell,
   type OctantMode,
   type ProviderContextBlock,
   type ProviderToolDefinition,
@@ -56,25 +59,28 @@ import {
 } from "../code/codeAppManagedTools";
 import { REPORT_FINISHED_TOOL_DEFINITION } from "../finishedReceipts/finishedReceiptTools";
 import { followUpSuggestionInstructionsFor } from "../followUps/followUpSuggestionInstructions";
-import { githubReadDefinition } from "../github/githubReadToolService";
+import { githubUpdateDefinition } from "../github/githubReadToolService";
 import {
   harnessTodayInstruction,
   nativeHarnessInstructions,
 } from "../harness/nativeHarnessInstructions";
-import { composeSystem } from "../harness/nativeHarnessLoop";
+import { composeSystem, splitInstructions } from "../harness/nativeHarnessLoop";
 import { octantOrientation } from "../orientation/octantOrientation";
 import { DESKTOP_TOOL, MAC_TOOL } from "../plugins/computerUse/computerUsePlugin";
-import { linearReadDefinition } from "../plugins/linear/linearReadToolService";
+import { linearUpdateDefinition } from "../plugins/linear/linearReadToolService";
 import { projectMemoryDefinition } from "../projectMemory/projectMemoryTools";
 import { appToolHostLines } from "../providers/appToolHostLines";
 import { CLAUDE_ARTIFACT_TOOL } from "../providers/claudeDriver";
 import { codexDynamicTools } from "../providers/codexDriver";
-import { encodeChatCompletionsTools } from "../providers/openAiToolEncoding";
+import { encodeChatCompletionsTools, encodeResponsesTools } from "../providers/openAiToolEncoding";
 import { threadsToolDefinition } from "../siblingThreads/siblingThreadTools";
 import { sideTaskDefinition } from "../sideTasks/sideTaskTools";
 import { WORK_ARTIFACT_INSTRUCTIONS } from "../work/workTurnContext";
 import { STATUS_UPKEEP_INSTRUCTION } from "../work/workTurnService";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
+import { GEMINI_OMNI_FLASH } from "../video/geminiVideoAdapter";
+import { describeReadyModels } from "../video/videoAgentTools";
+import { ZEN_ASSISTANT_TOOL_DEFINITION } from "../zen/zenAssistantTools";
 
 /**
  * How much Octant itself puts in front of a model: the widest tool list and
@@ -113,7 +119,6 @@ export type AgentPromptContext = (typeof AGENT_PROMPT_CONTEXTS)[number];
 
 /** Guided tools the widest turn of no measured context carries, each with why. */
 export const NOT_MEASURED_TOOLS: Readonly<Record<string, string>> = {
-  octant_zen: "only the assistant of an active Zen space carries it",
   octant_side_chat_list_files: "a Side Chat's only tools, beside no other",
   octant_side_chat_read_file: "a Side Chat's only tools, beside no other",
   octant_side_chat_search_files: "a Side Chat's only tools, beside no other",
@@ -180,7 +185,18 @@ function widestMediaPort(mode: OctantMode): MediaToolHostPort {
     },
     videoGeneration: {
       isAvailable,
-      describeModels: () => "",
+      // One ready profile with a shipped model, so the formatter's own text
+      // is counted; how many profiles a person adds is theirs.
+      describeModels: () =>
+        describeReadyModels([
+          {
+            instance: {
+              id: ProviderInstanceId.make("00000000-0000-4000-8000-000000000000"),
+              displayName: "Video",
+            },
+            models: [GEMINI_OMNI_FLASH],
+          },
+        ]),
       generate: refusedWith,
       ...(mode === "chat" ? {} : { save: refusedWith }),
     },
@@ -225,7 +241,7 @@ function harnessTools(mode: OctantMode, child: boolean): ReadonlyArray<ProviderT
   return NATIVE_HARNESS_TOOL_DEFINITIONS.filter((definition) => {
     if (!isHarnessToolName(definition.name)) return false;
     const entry = lookupClosedToolCatalogEntry({
-      id: nativeHarnessToolCapabilityId(definition.name) as never,
+      id: ToolCapabilityId.make(nativeHarnessToolCapabilityId(definition.name)),
       version: 1,
     });
     if (entry?.modes.includes(mode) !== true) return false;
@@ -271,6 +287,8 @@ function octantTools(context: AgentPromptContext): ReadonlyArray<ProviderToolDef
         sideTaskDefinition(false, false),
         chatRoutineProposalDefinition,
         THREAD_DIALOGUE_TOOL_DEFINITION,
+        // A Zen space's assistant is a Chat thread with this beside the rest.
+        ZEN_ASSISTANT_TOOL_DEFINITION,
       ];
     case "work":
       return [
@@ -297,8 +315,9 @@ function octantTools(context: AgentPromptContext): ReadonlyArray<ProviderToolDef
         appleDefinition,
         androidDefinition,
         pullRequestDefinition,
-        githubReadDefinition,
-        linearReadDefinition,
+        // A thread with linked issues may update them, which widens both.
+        githubUpdateDefinition,
+        linearUpdateDefinition,
         CODE_LANGUAGE_TOOL_DEFINITION,
         threadsToolDefinition([
           "list",
@@ -309,6 +328,7 @@ function octantTools(context: AgentPromptContext): ReadonlyArray<ProviderToolDef
           "receipts",
           "board",
           "start",
+          "move-to-worktree",
           "help",
         ]),
         sideTaskDefinition(true, true),
@@ -363,6 +383,19 @@ function runtimeTools(
   return [...harness, ...promptTools(context).filter((tool) => !named.has(tool.name))];
 }
 
+const textBytes = (blocks: ReadonlyArray<ProviderContextBlock>): number =>
+  bytes(blocks.map((block) => block.text).join(""));
+
+/** A Windows host adds its shell's paragraph in Work and Code; the longest one bounds every host. */
+function widestHarnessInstructions(mode: OctantMode): ReadonlyArray<ProviderContextBlock> {
+  return WindowsTerminalShell.literals
+    .map((windowsShell) => nativeHarnessInstructions(mode, { platform: "win32", windowsShell }))
+    .reduce(
+      (widest, next) => (textBytes(next) > textBytes(widest) ? next : widest),
+      nativeHarnessInstructions(mode, { platform: "darwin" }),
+    );
+}
+
 /** Octant's own instruction blocks for a context, in the order a turn sends them. */
 function promptInstructions(
   runtime: AgentPromptRuntime,
@@ -383,7 +416,7 @@ function promptInstructions(
   });
   return [
     octantOrientation(mode),
-    ...(runtime === "harness" ? nativeHarnessInstructions(mode, { platform: "darwin" }) : []),
+    ...(runtime === "harness" ? widestHarnessInstructions(mode) : []),
     ...(runtime === "harness"
       ? [
           {
@@ -420,13 +453,16 @@ function renderedInstructions(
   blocks: ReadonlyArray<ProviderContextBlock>,
   tools: ReadonlyArray<ProviderToolDefinition>,
 ): number {
-  if (runtime === "harness")
-    return bytes(
-      composeSystem(
-        blocks.map((block) => block.text),
-        tools,
-      ) ?? "",
+  if (runtime === "harness") {
+    // The harness splits a turn as it sends it: standing instructions become
+    // the system prompt, and one-turn ones such as the date ride, tagged, in
+    // the user message.
+    const { system, rest } = splitInstructions(blocks);
+    return (
+      bytes(composeSystem(system, tools) ?? "") +
+      (rest.length === 0 ? 0 : bytes(renderProviderTurnPrompt({ context: rest, prompt: "" })))
     );
+  }
   if (blocks.length === 0) return 0;
   if (runtime === "claude") return bytes(renderContextBesideRequest(blocks));
   if (runtime === "codex") return bytes(renderOctantInstructions(blocks));
@@ -439,7 +475,12 @@ function renderedTools(
   tools: ReadonlyArray<ProviderToolDefinition>,
 ): number {
   if (runtime === "codex") return bytes(JSON.stringify(codexDynamicTools(tools) ?? []));
-  if (runtime === "harness") return bytes(JSON.stringify(encodeChatCompletionsTools(tools)));
+  // An endpoint speaks Chat Completions or Responses; the larger encoding bounds both.
+  if (runtime === "harness")
+    return Math.max(
+      bytes(JSON.stringify(encodeChatCompletionsTools(tools))),
+      bytes(JSON.stringify(encodeResponsesTools(tools))),
+    );
   return bytes(JSON.stringify(tools));
 }
 
