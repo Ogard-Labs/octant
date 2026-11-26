@@ -1232,7 +1232,11 @@ describe("the quiet Reply detail levels", () => {
     expect(screen.getByRole("button", { name: "Thinking" })).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "2 steps hidden" }));
-    expect(screen.getByRole("button", { name: /^Bash/ })).toBeInTheDocument();
+    // Opened, every step is in sight, and what was in sight stays there.
+    expect(screen.getByRole("button", { name: /^Bash/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Write/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Read, failed/ })).toBeVisible();
+    expect(screen.getByRole("note")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Hide steps" }));
     expect(screen.queryByRole("button", { name: /^Bash/ })).toBeNull();
   });
@@ -1250,7 +1254,7 @@ describe("the quiet Reply detail levels", () => {
     expect(screen.queryByRole("button", { name: /^Bash/ })).toBeNull();
   });
 
-  it("Answers only keeps approvals, questions and errors", () => {
+  it("Answers only keeps reviewer decisions, failed calls and a task waiting on the person", () => {
     render(atLevel("answers", <TurnActivityRows activity={turn} running={false} settled />));
 
     // A reviewer's decision, a failed call, and a task waiting on the person stay.
@@ -1266,15 +1270,23 @@ describe("the quiet Reply detail levels", () => {
     );
   });
 
-  it("Answers only leaves a running turn to its Working line", () => {
-    const running: TurnActivity = {
-      reasoning: "Looking.",
-      rows: [{ kind: "tool", id: "call-1", toolName: "Read", state: "running", summary: "a.ts" }],
+  it("keeps a failed call and a decision in sight at a quiet level when nothing else is hidden", () => {
+    const onlyFailures: TurnActivity = {
+      reasoning: "",
+      rows: [
+        { kind: "tool", id: "call-2", toolName: "Read", state: "failed", summary: "Denied." },
+        shieldDenial,
+      ],
     };
-    const { container } = render(
-      atLevel("answers", <TurnActivityRows activity={running} running />),
-    );
-    expect(container).toBeEmptyDOMElement();
+    for (const level of ["failures", "answers"] as const) {
+      const view = render(
+        atLevel(level, <TurnActivityRows activity={onlyFailures} running={false} settled />),
+      );
+      expect(screen.getByRole("button", { name: /^Read, failed/ })).toBeVisible();
+      expect(screen.getByRole("note")).toBeVisible();
+      expect(screen.queryByRole("button", { name: /steps hidden/ })).toBeNull();
+      view.unmount();
+    }
   });
 
   it("Find reveals hidden steps", () => {
@@ -1284,5 +1296,6 @@ describe("the quiet Reply detail levels", () => {
     expect(screen.queryByRole("button", { name: /steps hidden/ })).toBeNull();
     // The rows are in the document for Find to match, folded as at Low.
     expect(screen.getByText("exit 0")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Bash/ })).toBeVisible();
   });
 });

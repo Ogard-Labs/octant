@@ -1,5 +1,10 @@
 import type { ThreadCanvasPreviewReceipt, ThreadToolCallRecord } from "@octant/contracts";
-import { TurnSubagentRows, type TurnSubagentWindow } from "../agents/threadSubagents";
+import {
+  subagentNeedsAttention,
+  TurnSubagentRows,
+  useTurnSubagentRows,
+  type TurnSubagentWindow,
+} from "../agents/threadSubagents";
 import type { ToolOutsideContentMark } from "@octant/contracts/shield";
 import { SHIELD_WATCHER_LABEL_WORDS } from "@octant/domain/shield-watcher-policy";
 import { ChatRichText } from "../chat/ChatRichText";
@@ -269,6 +274,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   // the turn's "N steps hidden" line; the line's choice stays with this turn.
   const findOpen = useContext(RevealHiddenStepsContext);
   const [stepsOpened, setStepsOpened] = useState(false);
+  const subagentRows = useTurnSubagentRows(props.subagents);
   const [revealedSummaryIds, setRevealedSummaryIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -298,17 +304,33 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const hasReasoningTiming = !hasReasoning && activity.reasoningMs !== undefined;
   // A turn whose subagents left no tool row (a provider's own child seen only
   // through its observations) still lists them.
-  if (!hasRows && !hasReasoning && !hasReasoningTiming) {
+  const hides = disclosures.opening.hides;
+  if (!hasRows && !hasReasoning && !hasReasoningTiming && hides === "nothing") {
     return props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />;
   }
 
-  const hides = disclosures.opening.hides;
+  // At a quiet level the rows are drawn flat, never inside the settled fold,
+  // so a kept failure or decision is always in sight. What the level hides is
+  // counted into one line; opening it, or Find, shows every step flat too.
   const quiet = (() => {
-    if (hides === "nothing" || findOpen || stepsOpened) return undefined;
-    const kept = quietActivityRows(activity.rows, hides, settled && !running);
-    const thinkingHidden = hides === "steps" && (hasReasoning || hasReasoningTiming);
-    const hidden = activity.rows.length - kept.length + (thinkingHidden ? 1 : 0);
-    return hidden === 0 ? undefined : { kept, hidden };
+    if (hides === "nothing") return undefined;
+    const closedRows = quietActivityRows(activity.rows, hides, settled && !running);
+    const thinkingHides = hides === "steps" && (hasReasoning || hasReasoningTiming);
+    const attentionSubagents = subagentRows.filter(subagentNeedsAttention).length;
+    const hiddenWhenClosed =
+      activity.rows.length -
+      closedRows.length +
+      (thinkingHides ? 1 : 0) +
+      (hides === "steps" ? subagentRows.length - attentionSubagents : 0);
+    const open = findOpen || stepsOpened || hiddenWhenClosed === 0;
+    return {
+      open,
+      rows: open ? activity.rows : closedRows,
+      showThinking: open || !thinkingHides,
+      subagents: !open && hides === "steps" ? ("attention" as const) : ("all" as const),
+      hiddenWhenClosed,
+      attentionSubagents,
+    };
   })();
 
   const pinnedRows = alwaysVisibleActivityRows(activity);
@@ -486,10 +508,18 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
 
   if (quiet !== undefined) {
     // A running turn at Answers only says what it does in its Working line.
-    const offerHidden = !(hides === "steps" && running);
+    const offerHidden = !quiet.open && !(hides === "steps" && running);
+    const offerHide = quiet.open && stepsOpened && !findOpen && quiet.hiddenWhenClosed > 0;
+    const showSubagents =
+      props.subagents !== undefined &&
+      (quiet.subagents === "all" ? subagentRows.length > 0 : quiet.attentionSubagents > 0);
+    const thinking = quiet.showThinking ? thinkingDisclosure : null;
     if (
       !offerHidden &&
-      quiet.kept.length === 0 &&
+      !offerHide &&
+      quiet.rows.length === 0 &&
+      thinking === null &&
+      !showSubagents &&
       routineRows.length === 0 &&
       publishedPages.length === 0
     ) {
@@ -497,23 +527,33 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     }
     return (
       <div className="turn-activity" {...(running ? { "data-live": "true" } : {})}>
-        {offerHidden ? (
+        {offerHidden || offerHide ? (
           <OctantButton
-            aria-expanded="false"
+            aria-expanded={offerHide}
             className="turn-activity__hidden-steps"
-            onClick={() => setStepsOpened(true)}
+            onClick={() => setStepsOpened(offerHidden)}
             size="sm"
             type="button"
             variant="link"
           >
-            {quiet.hidden === 1 ? "1 step hidden" : `${quiet.hidden} steps hidden`}
+            {offerHide
+              ? "Hide steps"
+              : quiet.hiddenWhenClosed === 1
+                ? "1 step hidden"
+                : `${quiet.hiddenWhenClosed} steps hidden`}
           </OctantButton>
         ) : null}
-        {hides === "steps" ? null : thinkingDisclosure}
-        {renderRows(quiet.kept)}
-        {hides === "steps" || props.subagents === undefined ? null : (
-          <TurnSubagentRows window={props.subagents} />
-        )}
+        {activity.truncated === true && quiet.open ? (
+          <p className="turn-activity__truncated">Earliest steps kept</p>
+        ) : null}
+        {thinking}
+        {quiet.rows.map(renderDisclosure)}
+        {showSubagents && props.subagents !== undefined ? (
+          <TurnSubagentRows
+            onlyNeedingAttention={quiet.subagents === "attention"}
+            window={props.subagents}
+          />
+        ) : null}
         {deliverables}
       </div>
     );
@@ -524,18 +564,6 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   // pinned/foldable split only applies once the outer settled fold is active.
   return (
     <div className="turn-activity" {...(running ? { "data-live": "true" } : {})}>
-      {hides !== "nothing" && stepsOpened && !findOpen ? (
-        <OctantButton
-          aria-expanded="true"
-          className="turn-activity__hidden-steps"
-          onClick={() => setStepsOpened(false)}
-          size="sm"
-          type="button"
-          variant="link"
-        >
-          Hide steps
-        </OctantButton>
-      ) : null}
       {activity.truncated === true ? (
         <p className="turn-activity__truncated">Earliest steps kept</p>
       ) : null}

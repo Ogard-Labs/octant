@@ -433,6 +433,70 @@ describe("ChatTranscript", () => {
     expect(screen.getByRole("button", { name: "1 step hidden" })).toBeVisible();
   });
 
+  it("at Answers only keeps an open question in the transcript and its prompt", () => {
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...viewFixture().turns[0]!.attempts[1]!,
+              outcome: "waiting",
+              toolSteps: [{ toolCallId: "call-1", toolName: "Web search", state: "completed" }],
+              pendingQuestion: {
+                requestId: "q1",
+                prompt: "Proceed?",
+                options: [{ label: "Yes" }, { label: "No" }],
+                questionIndex: 1,
+                questionCount: 1,
+              },
+            },
+          ],
+        },
+      ],
+    });
+    render(
+      <ReplyDetailContext.Provider value="answers">
+        <ChatTranscript view={view} />
+        <ChatPendingQuestions onAnswerQuestion={vi.fn()} view={view} />
+      </ReplyDetailContext.Provider>,
+    );
+    expect(screen.getByText("Waiting for your answer")).toBeVisible();
+    expect(screen.getByLabelText("Provider question")).toHaveTextContent("Proceed?");
+    expect(screen.queryByRole("button", { name: /Web search/ })).not.toBeInTheDocument();
+  });
+
+  it("at Answers only leaves a running turn to its Working line, which names the current step", () => {
+    const current = viewFixture();
+    render(
+      <ReplyDetailContext.Provider value="answers">
+        <ChatTranscript
+          view={viewFixture({
+            turns: [
+              {
+                ...current.turns[0]!,
+                attempts: [
+                  {
+                    ...current.turns[0]!.attempts[1]!,
+                    outcome: "streaming",
+                    toolSteps: [
+                      { toolCallId: "call-1", toolName: "Web search", state: "completed" },
+                      { toolCallId: "call-2", toolName: "Read", state: "running" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          })}
+        />
+      </ReplyDetailContext.Provider>,
+    );
+    expect(screen.getByText("Working")).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent("Read");
+    expect(screen.queryByRole("button", { name: /^Read/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /steps hidden/ })).not.toBeInTheDocument();
+  });
+
   it("shows no tool group for an attempt that called no tool", () => {
     render(<ChatTranscript view={viewFixture()} />);
     expect(screen.queryByText(/tool call/)).not.toBeInTheDocument();

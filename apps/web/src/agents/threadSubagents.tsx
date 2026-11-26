@@ -141,21 +141,37 @@ function subagentName(row: SubagentRow): string {
  * from the pane's shared read, so a turn outside a pane that has one draws
  * nothing.
  */
-export function TurnSubagentRows(props: { readonly window: TurnSubagentWindow }) {
+/** The subagents a turn started, as its rows list them. Empty with no window. */
+export function useTurnSubagentRows(
+  window: TurnSubagentWindow | undefined,
+): ReadonlyArray<SubagentRow> {
   const subagents = useContext(ThreadSubagentsContext);
-  const onOpen = useContext(ThreadSubagentOpenContext);
   const providers = useSubagentProviders();
-  const rows =
-    subagents === undefined || subagents.status !== "ready"
-      ? []
-      : subagentRowsInWindow(
-          buildSubagentRows({
-            entries: subagents.entries,
-            observations: subagents.observations,
-            ...(providers === undefined ? {} : { providers }),
-          }),
-          props.window,
-        );
+  return window === undefined || subagents === undefined || subagents.status !== "ready"
+    ? []
+    : subagentRowsInWindow(
+        buildSubagentRows({
+          entries: subagents.entries,
+          observations: subagents.observations,
+          ...(providers === undefined ? {} : { providers }),
+        }),
+        window,
+      );
+}
+
+/** A subagent that failed or waits on the person: Answers only still lists it. */
+export function subagentNeedsAttention(row: Pick<SubagentRow, "lifecycleStatus">): boolean {
+  return row.lifecycleStatus === "failed" || row.lifecycleStatus === "waiting";
+}
+
+export function TurnSubagentRows(props: {
+  readonly window: TurnSubagentWindow;
+  /** Lists only the subagents that failed or wait on the person. */
+  readonly onlyNeedingAttention?: boolean;
+}) {
+  const onOpen = useContext(ThreadSubagentOpenContext);
+  const all = useTurnSubagentRows(props.window);
+  const rows = props.onlyNeedingAttention === true ? all.filter(subagentNeedsAttention) : all;
   const live = rows.some((row) => isActiveAgentHierarchyStatus(row.lifecycleStatus));
   const now = useNow(live);
   if (rows.length === 0) return null;
