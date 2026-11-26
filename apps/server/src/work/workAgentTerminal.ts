@@ -10,6 +10,18 @@ import type {
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 
+/** Where a Work thread's shell was started, and which shell, kept between turns. */
+export interface WorkTerminalStart {
+  readonly folder: string;
+  /**
+   * The shell the terminal runs. Its completion line follows this one, never
+   * the shell setting now: a Windows person who switched from PowerShell to
+   * Command Prompt left a running PowerShell that a Command Prompt line never
+   * answered, so every later command timed out.
+   */
+  readonly shell: string;
+}
+
 /** The one terminal id of a Work thread's agent terminal, so every turn reaches the same shell. */
 export function workAgentTerminalId(threadId: string): string {
   const digest = createHash("sha256").update(`octant.work-terminal.v1\0${threadId}`).digest("hex");
@@ -34,8 +46,10 @@ export function createWorkTerminalTools(input: {
   readonly posture: () => ProviderExecutionPolicy;
   /** Whether the turn still speaks for the thread. */
   readonly current: () => boolean;
+  /** Asks the person, with the command apart so its own length is what is bounded. */
   readonly ask?: (
     summary: string,
+    command: string,
     signal?: AbortSignal,
   ) => Promise<"approved" | "denied" | "cancelled">;
   /** A chosen sandbox policy and its network, as a person's terminal for the task starts under. */
@@ -59,10 +73,10 @@ export function createWorkTerminalTools(input: {
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
   readonly uuid: () => string;
-  /** Where the thread's shell was started, kept between turns; nothing while none runs. */
+  /** Where and in which shell the thread's terminal started; nothing while none runs. */
   readonly startedIn: {
-    readonly get: () => string | undefined;
-    readonly set: (folder: string | undefined) => void;
+    readonly get: () => WorkTerminalStart | undefined;
+    readonly set: (start: WorkTerminalStart | undefined) => void;
   };
 }): AppManagedToolSet {
   const stale = () =>
@@ -81,12 +95,13 @@ export function createWorkTerminalTools(input: {
       const executionPolicy = input.posture();
       const prepared = await input.protections(folder, executionPolicy);
       if ("refused" in prepared) return prepared;
-      input.startedIn.set(folder);
+      const shell = input.shell();
+      input.startedIn.set({ folder, shell });
       return {
         // Checked again as the shell spawns: an archive or a move to Plan
         // while the sandbox was prepared starts nothing.
         admit: () => stale() === undefined,
-        shell: input.shell(),
+        shell,
         cwd: folder,
         stateScope: `work:${input.threadId}`,
         executionPolicy,
@@ -100,15 +115,15 @@ export function createWorkTerminalTools(input: {
   const { ask } = input;
   const tools = createAgentTerminalTools({
     terminal: terminal.port,
-    // The completion line is typed in the syntax of the shell the terminal opens.
-    shell: input.shell,
+    // The completion line is typed in the syntax of the shell the terminal runs.
+    shell: () => input.startedIn.get()?.shell ?? input.shell(),
     uuid: input.uuid,
     authorityFailure: stale,
     posture: input.posture,
     approve:
       ask === undefined
         ? undefined
-        : ({ text }, signal) => ask(`Run this in the task's terminal?\n${text}`, signal),
+        : ({ text }, signal) => ask(`Run this in the task's terminal?\n${text}`, text, signal),
     markResults: (tools) =>
       taintAppManagedToolResults({
         tools,
@@ -124,7 +139,7 @@ export function createWorkTerminalTools(input: {
       // Project moved) is ended rather than reused: the turn's commands now
       // run elsewhere, and so must this one.
       const started = input.startedIn.get();
-      if (started !== undefined && started !== (await input.folder())) {
+      if (started !== undefined && started.folder !== (await input.folder())) {
         await terminal.close();
         input.startedIn.set(undefined);
         return {
@@ -144,21 +159,50 @@ export function createWorkTerminalTools(input: {
 /**
  * Ends each Work thread's shell whose thread is no longer active in the folder
  * it started in: archived, deleted, its Project unbound, or moved to another
- * folder. Run on each committed change, so a dev server left in the old
- * folder stops then rather than at the agent's next terminal call.
+ * folder, as the change is committed, rather than at the agent's next
+ * terminal call. Returns the unsubscribe.
  */
-export async function endWorkTerminalsLeftBehind(input: {
+export function watchWorkTerminalsLeftBehind(input: {
+  readonly subscribeCommitted: (
+    listener: (append: {
+      readonly events: ReadonlyArray<{
+        readonly aggregateType: string;
+        readonly eventName: string;
+      }>;
+    }) => void,
+  ) => () => void;
+  /** Event names besides work-thread and Project changes that may leave a shell behind. */
+  readonly alsoOn: ReadonlyArray<string>;
   /** Where each thread's shell was started, by thread id; ended ones are removed. */
-  readonly started: Map<string, string>;
+  readonly started: Map<string, WorkTerminalStart>;
   /** The thread's active folder now; undefined when it has none. */
   readonly folderNow: (threadId: string) => Promise<string | undefined>;
   readonly terminate: (threadId: string) => Promise<void>;
-}): Promise<void> {
-  for (const [threadId, folder] of [...input.started]) {
-    if ((await input.folderNow(threadId)) === folder) continue;
-    // A start since this check began owns the entry now.
-    if (input.started.get(threadId) !== folder) continue;
-    input.started.delete(threadId);
-    await input.terminate(threadId);
-  }
+  readonly onError: (error: unknown) => void;
+}): () => void {
+  const sweep = async () => {
+    for (const [threadId, start] of [...input.started]) {
+      if ((await input.folderNow(threadId)) === start.folder) continue;
+      // A start since this check began owns the entry now.
+      if (input.started.get(threadId) !== start) continue;
+      input.started.delete(threadId);
+      await input.terminate(threadId);
+    }
+  };
+  return input.subscribeCommitted((append) => {
+    if (
+      input.started.size === 0 ||
+      !append.events.some(
+        (event) =>
+          event.aggregateType === "work-thread" ||
+          event.aggregateType === "project" ||
+          input.alsoOn.includes(event.eventName),
+      )
+    )
+      return;
+    // The journal tells its listeners before the service that appended has
+    // applied the change to its projection, so a sweep run here read the old
+    // folder and kept a shell the move had just left behind.
+    queueMicrotask(() => void sweep().catch(input.onError));
+  });
 }

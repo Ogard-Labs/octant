@@ -277,7 +277,7 @@ export class NativeHarnessApprovalStore {
       ...(input.source === undefined ? {} : { source: input.source }),
       summary,
       // Only where the card's summary does not already show all of it.
-      ...(whole === undefined || whole.length === 0 || whole === summary.trim()
+      ...(whole === undefined || whole.length === 0 || summary.includes(whole)
         ? {}
         : { detail: whole }),
       approvalClass: input.approvalClass,

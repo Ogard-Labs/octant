@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createWorkTerminalTools, endWorkTerminalsLeftBehind } from "./workAgentTerminal";
+import {
+  createWorkTerminalTools,
+  watchWorkTerminalsLeftBehind,
+  type WorkTerminalStart,
+} from "./workAgentTerminal";
 
 const WORK_THREAD = "33333333-3333-4333-8333-333333333333";
 const call = (body: unknown) => ({ name: "octant_terminal", inputJson: JSON.stringify(body) });
@@ -38,12 +42,13 @@ function terminals() {
 }
 
 const folder = { current: "/work/folder" };
-const started: { current: string | undefined } = { current: undefined };
+const started: { current: WorkTerminalStart | undefined } = { current: undefined };
+const shell = { current: "/bin/zsh" };
 
 function tools(
   overrides: {
     readonly posture?: "plan" | "approval-gated" | "auto-accept-edits" | "full-access";
-    readonly ask?: (summary: string) => Promise<"approved" | "denied">;
+    readonly ask?: (summary: string, command: string) => Promise<"approved" | "denied">;
     readonly service?: ReturnType<typeof terminals>;
     readonly end?: () => Promise<void>;
   } = {},
@@ -60,13 +65,13 @@ function tools(
     protections: async () => ({ launch: {}, end: overrides.end ?? (async () => undefined) }),
     platform: "darwin",
     strict: () => true,
-    shell: () => "/bin/zsh",
+    shell: () => shell.current,
     recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }) as never,
     uuid: () => crypto.randomUUID(),
     folder: async () => folder.current,
     startedIn: {
       get: () => started.current,
-      set: (value: string | undefined) => {
+      set: (value: WorkTerminalStart | undefined) => {
         started.current = value;
       },
     },
@@ -84,6 +89,7 @@ describe("a Work thread's terminal", () => {
   beforeEach(() => {
     folder.current = "/work/folder";
     started.current = undefined;
+    shell.current = "/bin/zsh";
   });
 
   it("asks before each command below Full access, and runs it in the thread's folder at its level", async () => {
@@ -196,26 +202,66 @@ describe("a Work thread's terminal", () => {
   });
 
   it("ends a shell as soon as its thread is archived or moves to another folder, and keeps one still in place", async () => {
-    const started = new Map([
+    const started = new Map<string, WorkTerminalStart>([
+      ["archived", { folder: "/work/a", shell: "/bin/zsh" }],
+      ["moved", { folder: "/work/b", shell: "/bin/zsh" }],
+      ["kept", { folder: "/work/c", shell: "/bin/zsh" }],
+    ]);
+    // The projection the sweep reads, still as it was when the journal tells its listeners.
+    const now = new Map<string, string | undefined>([
       ["archived", "/work/a"],
       ["moved", "/work/b"],
       ["kept", "/work/c"],
     ]);
-    const now = new Map<string, string | undefined>([
-      ["archived", undefined],
-      ["moved", "/work/b/docs"],
-      ["kept", "/work/c"],
-    ]);
+    const listeners: Array<(append: { readonly events: ReadonlyArray<never> }) => void> = [];
     const terminate = vi.fn(async (_threadId: string) => undefined);
-    await endWorkTerminalsLeftBehind({
+    watchWorkTerminalsLeftBehind({
+      subscribeCommitted: (listener) => {
+        listeners.push(listener as never);
+        return () => undefined;
+      },
+      alsoOn: [],
       started,
       folderNow: async (threadId) => now.get(threadId),
       terminate,
+      onError: (error) => {
+        throw error;
+      },
     });
+    // A service appends, the journal tells its listeners, and only then does
+    // the service apply the change to its projection.
+    for (const listener of listeners)
+      listener({
+        events: [{ aggregateType: "work-thread", eventName: "work.thread-updated@1" } as never],
+      });
+    now.set("archived", undefined);
+    now.set("moved", "/work/b/docs");
+    await vi.waitFor(() => expect(terminate).toHaveBeenCalledTimes(2));
     expect(terminate.mock.calls.map(([threadId]) => threadId).sort()).toEqual([
       "archived",
       "moved",
     ]);
     expect([...started.keys()]).toEqual(["kept"]);
+  });
+
+  it("types the completion line for the shell the terminal started in, not the one Settings names now", async () => {
+    const service = terminals();
+    await tools({ posture: "full-access", service }).set.execute(
+      call({ operation: "run", command: "npm run dev" }),
+    );
+    shell.current = "C:\\Windows\\System32\\cmd.exe";
+    await tools({ posture: "full-access", service }).set.execute(
+      call({ operation: "run", command: "ls" }),
+    );
+    const typed = service.write.mock.calls.map(([, data]) => data).at(-1);
+    expect(typed).toContain("printf");
+    expect(typed).not.toContain("%ERRORLEVEL%");
+  });
+
+  it("hands the approval the whole command apart from its question", async () => {
+    const ask = vi.fn(async (_summary: string, _command: string) => "approved" as const);
+    const command = "x".repeat(8_192);
+    await tools({ ask }).set.execute(call({ operation: "run", command }));
+    expect(ask.mock.calls[0]?.[1]).toBe(command);
   });
 });

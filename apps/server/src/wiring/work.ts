@@ -166,8 +166,9 @@ import { terminalShellFor } from "../code/terminalShell";
 import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
 import {
   createWorkTerminalTools,
-  endWorkTerminalsLeftBehind,
+  watchWorkTerminalsLeftBehind,
   workAgentTerminalId,
+  type WorkTerminalStart,
 } from "../work/workAgentTerminal";
 import { providerTakesFileNatively, supportsConversationInput } from "./conversationInputs";
 import { modelLabelOf } from "./imageDescriber";
@@ -346,7 +347,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
 export function wireWork(deps: WorkDependencies) {
   // Where each Work thread's agent shell was started, so a later turn in
   // another folder ends it instead of reusing it.
-  const workTerminalFolders = new Map<string, string>();
+  const workTerminalFolders = new Map<string, WorkTerminalStart>();
   const imageDescriber = deps.imageDescriber;
   const {
     threadSecretFacts,
@@ -539,34 +540,23 @@ export function wireWork(deps: WorkDependencies) {
     // A Work thread's agent shell ends as the change that leaves it behind is
     // committed (an archive, a deletion, a move to another folder, the
     // Project's relink or archive), not at the agent's next terminal call.
-    const unsubscribeWorkTerminalFolders = persistence.journal.subscribeCommitted((append) => {
-      if (
-        workTerminalFolders.size === 0 ||
-        !append.events.some(
-          (event) =>
-            event.aggregateType === "work-thread" ||
-            event.aggregateType === "project" ||
-            event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged,
-        )
-      )
-        return;
-      void endWorkTerminalsLeftBehind({
-        started: workTerminalFolders,
-        folderNow: async (threadId) => {
-          try {
-            return await workThreadFolderNow(decodeWorkThreadId(threadId));
-          } catch {
-            return undefined;
-          }
-        },
-        terminate: async (threadId) => {
-          await deps.codeOperationRuntime?.terminals
-            ?.terminate(workAgentTerminalId(threadId))
-            .catch(() => undefined);
-        },
-      }).catch((error: unknown) =>
-        console.error("[work terminal] A shell left behind did not stop.", error),
-      );
+    const unsubscribeWorkTerminalFolders = watchWorkTerminalsLeftBehind({
+      subscribeCommitted: (listener) => persistence.journal.subscribeCommitted(listener),
+      alsoOn: [THREAD_RETENTION_EVENT_NAMES.threadPurged],
+      started: workTerminalFolders,
+      folderNow: async (threadId) => {
+        try {
+          return await workThreadFolderNow(decodeWorkThreadId(threadId));
+        } catch {
+          return undefined;
+        }
+      },
+      terminate: async (threadId) => {
+        await deps.codeOperationRuntime?.terminals
+          ?.terminate(workAgentTerminalId(threadId))
+          .catch(() => undefined);
+      },
+      onError: (error) => console.error("[work terminal] A shell left behind did not stop.", error),
     });
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
@@ -1350,7 +1340,7 @@ export function wireWork(deps: WorkDependencies) {
                     runningWorkTurns.get(String(input.thread.id))?.access ?? input.thread.access,
                   ).executionPolicy,
                 current: () => workThreadProjection.read(input.thread.id)?.lifecycle === "active",
-                ask: async (summary, signal) => {
+                ask: async (summary, command, signal) => {
                   const outcome = await nativeHarnessApprovals.ask({
                     threadId: String(input.thread.id),
                     mode: "work",
@@ -1362,8 +1352,9 @@ export function wireWork(deps: WorkDependencies) {
                     },
                     toolName: "provider-action",
                     summary,
-                    // The card shows the command whole, not the summary's first 240 characters.
-                    detail: summary,
+                    // The card shows the command whole, not the summary's first 240
+                    // characters, and the 8,192-character bound is the command's own.
+                    detail: command,
                     approvalClass: "terminal",
                     // Each command is its own answer, as in a Code thread's terminal.
                     singleUse: true,

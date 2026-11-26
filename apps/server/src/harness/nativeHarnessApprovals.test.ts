@@ -49,4 +49,11 @@ describe("an approval that names what it approves", () => {
     expect(await ask({ summary: command, detail: command })).toBe("denied");
     expect(asked).toEqual([]);
   });
+
+  it("bounds the command itself at 8,192 characters, not the question asked with it", async () => {
+    const { asked, ask } = store();
+    const command = "y".repeat(8_192);
+    void ask({ summary: `Run this in the task's terminal?\n${command}`, detail: command });
+    expect(asked[0]?.detail).toBe(command);
+  });
 });
