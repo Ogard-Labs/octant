@@ -2007,18 +2007,12 @@ export function useCodeController(options: CodeControllerOptions) {
         if (conversationOperationId !== undefined) {
           startConversationOperationStream(conversationOperationId);
         }
-        // Until a read succeeds there is nothing shown to compare the newest
-        // turn with, so a look reads the thread.
-        let unread = openingReadFailed;
         // A read of the thread that succeeds settles its history, whichever
         // path started it: the warning a failed read put up comes down with
         // the state it stood for. A read an older activation finishes
         // settles nothing here.
         const historyRead = () => {
           if (!isActive(request, threadGeneration, mounted)) return;
-          // It may be the first read of the thread to succeed.
-          if (unread) void readFirstInheritedPage();
-          unread = false;
           setConversationHistory("loaded");
           setTurnError((current) =>
             current === HISTORY_UNAVAILABLE_MESSAGE || current === HISTORY_UNREFRESHED_MESSAGE
@@ -2113,6 +2107,10 @@ export function useCodeController(options: CodeControllerOptions) {
         // A first read that failed covered nothing, so its activity is still
         // to be looked at.
         let triedActivity = openingReadFailed ? -1 : activityAtOpen;
+        // Until a read that follows the turn succeeds, a look reads the
+        // thread: a read for a change to the thread does not replay a turn
+        // waiting on the person, and its approval comes only with that replay.
+        let unread = openingReadFailed;
         let following = false;
         let retryPending = false;
         const followTurn = async () => {
@@ -2121,6 +2119,9 @@ export function useCodeController(options: CodeControllerOptions) {
           if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
             return true;
           conversationCursor = hydrated.nextCursor ?? conversationCursor;
+          // It may be the first read of the thread to succeed.
+          if (unread) void readFirstInheritedPage();
+          unread = false;
           historyRead();
           if (hydrated.incomplete) startConversationPoll();
           if (hydrated.activeOperationId !== undefined) {
