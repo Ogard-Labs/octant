@@ -1402,6 +1402,37 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByLabelText("Follow-up message")).toBeEnabled();
   });
 
+  it("keeps the transcript and a streaming reply under the notice when reading the thread again fails", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "a:user", role: "user", text: "Earlier prompt" },
+            { id: "a:assistant", role: "assistant", text: "Earlier reply" },
+            { id: "b:user", role: "user", text: "Add the index" },
+            { id: "b:assistant", role: "assistant", text: "First half", status: "incomplete" },
+          ] as never,
+          conversationHistory: "loaded",
+          turnStatus: "running",
+          turnError: "Conversation history could not be refreshed.",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    for (const text of ["Earlier prompt", "Earlier reply", "Add the index", "First half"]) {
+      expect(screen.getByText(text)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("Send a prompt to begin")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Conversation history could not be refreshed.",
+    );
+    // The view reads the thread again on its own; Retry is for a history
+    // that never loaded.
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
   it("keeps a failed turn's reason out of the callout once the transcript carries it", () => {
     render(
       <CodeThreadWorkspace
