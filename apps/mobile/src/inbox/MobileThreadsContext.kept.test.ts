@@ -12,8 +12,6 @@ const phone = vi.hoisted(() => {
     /** Reads the key store refuses next, as it may while the phone is locked. */
     secureFailures: 0,
     files: new Map<string, string>(),
-    /** How many times the app has written a file. */
-    writes: 0,
     session: undefined as unknown,
     inbox: {
       rows: [] as ReadonlyArray<unknown>,
@@ -45,10 +43,7 @@ vi.mock("../hosts/expoSecureStorage", () => ({
 vi.mock("../outbox/sealedFile", () => ({
   sealedFile: (name: string) => ({
     read: () => phone.files.get(name) ?? null,
-    write: (sealed: string) => {
-      phone.writes += 1;
-      phone.files.set(name, sealed);
-    },
+    write: (sealed: string) => void phone.files.set(name, sealed),
     remove: () => void phone.files.delete(name),
   }),
 }));
@@ -192,18 +187,26 @@ describe("the thread list after a restart", () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };
     const first = await launch();
-    const writesBefore = phone.writes;
     await act(async () => first.threads().noteStanding(studio, { actsAsHostPerson: true }));
-    // A write still pending from the launch may land first; whichever order
-    // they land in, the standing's write comes after it, so the list is kept
-    // once a write has landed since and none follows for a while.
-    for (let idle = 0, seen = phone.writes, turn = 0; turn < 800; turn += 1) {
+    // Read the kept list as the app does, and wait until it holds the
+    // standing: which of the app's writes landed last cannot be told apart
+    // from outside, but what was kept can.
+    const keptText = async () => {
+      const { createSealedText } = await import("../outbox/sealedText");
+      const { createExpoSecureStringStorage } = await import("../hosts/expoSecureStorage");
+      const { sealedFile } = await import("../outbox/sealedFile");
+      return createSealedText({
+        storage: createExpoSecureStringStorage(),
+        file: sealedFile("threads.v1.sealed"),
+        keyName: "octant.threads.key.v1",
+        crypto: globalThis.crypto,
+      }).load();
+    };
+    for (let turn = 0; turn < 400; turn += 1) {
+      if ((await keptText())?.includes("actsAsHostPerson") === true) break;
       await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 5)));
-      idle = phone.writes === seen ? idle + 1 : 0;
-      seen = phone.writes;
-      if (seen > writesBefore && idle >= 60) break;
     }
-    expect(phone.writes).toBeGreaterThan(writesBefore);
+    expect(await keptText()).toContain("actsAsHostPerson");
     first.quit();
 
     phone.inbox = { rows: [], reachable: false, offline: [] };
