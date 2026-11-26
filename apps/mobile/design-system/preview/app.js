@@ -1956,7 +1956,7 @@ function buildScreen(routeStr) {
   const { name, arg } = parseRoute(routeStr);
   const builder = SCREEN_BUILDERS.get(name);
   // An address naming no screen opens Home, built like any other screen.
-  if (!builder) return buildScreen("home");
+  if (typeof builder !== "function") return buildScreen("home");
   const html = ["thread", "bot", "computer", "list"].includes(name) ? builder(arg) : builder();
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
