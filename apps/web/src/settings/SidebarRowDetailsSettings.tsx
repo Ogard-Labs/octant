@@ -26,7 +26,7 @@ const DETAILS: ReadonlyArray<Detail> = [
   {
     key: "pullRequest",
     label: "Pull request",
-    hint: "Its pull request and state",
+    hint: "Its pull requests, stack and issues",
     settingSlug: "pull-request",
   },
   {

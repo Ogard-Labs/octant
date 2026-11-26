@@ -2858,7 +2858,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     // The row names the request whether or not it can also open it. It used to
     // leave the number to a separate control that never rendered once the row
     // had a menu, so a feed with GitHub authority showed no pull requests.
-    expect(within(row).getByText("#12 open")).toBeVisible();
+    expect(within(row).getByText("#12")).toBeVisible();
     await user.hover(row);
     const details = await findThreadDetails();
     expect(details).toHaveTextContent("Planning");
@@ -2971,14 +2971,14 @@ describe("ProjectSidebarSection row property visibility", () => {
     renderSidebar();
 
     const treeRow = screen.getByRole("button", { name: /Planning/ });
-    expect(within(treeRow).getByText("#12 open")).toBeVisible();
+    expect(within(treeRow).getByText("#12")).toBeVisible();
     expect(within(treeRow).getByText("feature/sidebar")).toBeVisible();
     expect(within(treeRow).getByText("2h")).toBeVisible();
 
     await chooseArrangement(user, "Activity feed");
     const feedRow = screen.getByRole("button", { name: /Planning/ });
     expect(within(feedRow).getByText("octant")).toBeVisible();
-    expect(within(feedRow).queryByText("#12 open")).toBeNull();
+    expect(within(feedRow).queryByText("#12")).toBeNull();
     expect(within(feedRow).queryByText("feature/sidebar")).toBeNull();
     expect(within(feedRow).getByText("2h")).toBeVisible();
   });
@@ -2994,7 +2994,7 @@ describe("ProjectSidebarSection row property visibility", () => {
 
     await waitFor(() =>
       expect(
-        within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12 open"),
+        within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12"),
       ).toBeNull(),
     );
     expect(
@@ -3006,9 +3006,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(
       within(screen.getByRole("button", { name: /Planning/ })).getByText("octant"),
     ).toBeVisible();
-    expect(
-      within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12 open"),
-    ).toBeNull();
+    expect(within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12")).toBeNull();
 
     await openPropertyMenu(user);
     expect(await screen.findByText("Shown on Activity rows")).toBeVisible();
@@ -3018,16 +3016,14 @@ describe("ProjectSidebarSection row property visibility", () => {
 
     await waitFor(() => {
       const feedRow = screen.getByRole("button", { name: /Planning/ });
-      expect(within(feedRow).getByText("#12 open")).toBeVisible();
+      expect(within(feedRow).getByText("#12")).toBeVisible();
       expect(within(feedRow).queryByText("octant")).toBeNull();
     });
 
     // Back in the tree the pull request is still hidden: one view's choice
     // never rewrites the other's.
     await chooseArrangement(user, "Project tree");
-    expect(
-      within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12 open"),
-    ).toBeNull();
+    expect(within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12")).toBeNull();
     expect(
       within(screen.getByRole("button", { name: /Planning/ })).getByText("feature/sidebar"),
     ).toBeVisible();
@@ -3042,7 +3038,7 @@ describe("ProjectSidebarSection row property visibility", () => {
 
     await waitFor(() =>
       expect(
-        within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12 open"),
+        within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12"),
       ).toBeNull(),
     );
     const stripped = screen.getByRole("button", { name: /Planning/ });
@@ -3053,7 +3049,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Show all" }));
     await waitFor(() =>
       expect(
-        within(screen.getByRole("button", { name: /Planning/ })).getByText("#12 open"),
+        within(screen.getByRole("button", { name: /Planning/ })).getByText("#12"),
       ).toBeVisible(),
     );
     expect(

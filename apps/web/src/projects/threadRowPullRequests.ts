@@ -1,7 +1,12 @@
 import type {
+  PullRequestStackPlace,
   ThreadBoardPullRequestIdentity,
   ThreadBoardPullRequestSummaries,
+  ThreadLinkedIssue,
+  ThreadTouchedIssue,
+  ThreadTouchedIssues,
 } from "@octant/contracts";
+import { touchedIssueName, touchedIssueReference } from "../environment/touchedIssues";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import type { ThreadRowActions } from "./ThreadRowMenu";
 
@@ -15,6 +20,110 @@ export function morePullRequestsThanTheFirst(
 ): number {
   if (summaries === undefined || summaries.items.length === 0) return 0;
   return summaries.items.length - 1 + summaries.hiddenCount;
+}
+
+/**
+ * The stack place a row counts: the first of the thread's pull requests that
+ * stands in a stack, in the host's order, which puts the ones in flight first.
+ */
+export function threadRowStack(
+  summaries: ThreadBoardPullRequestSummaries | undefined,
+): PullRequestStackPlace | undefined {
+  return summaries?.items.find((summary) => summary.stack !== undefined)?.stack;
+}
+
+/** An issue a row names by its key: a Linear key or a GitHub "#3", with its words for a tooltip. */
+export interface ThreadRowIssueKey {
+  readonly reference: string;
+  readonly name: string;
+}
+
+/** What a row says of a thread's issues: the one it belongs to, and how many others it wrote to. */
+export interface ThreadRowIssues {
+  readonly key?: ThreadRowIssueKey;
+  /** Touched issues other than the keyed one; 0 when there are none. */
+  readonly count: number;
+}
+
+function linkedIssueReference(link: ThreadLinkedIssue): string {
+  return link.issue.forge === "github" ? `#${String(link.issue.number)}` : link.issue.identifier;
+}
+
+function sameIssue(link: ThreadLinkedIssue, touched: ThreadTouchedIssue): boolean {
+  if (link.issue.forge === "github" && touched.forge === "github") {
+    return (
+      link.issue.number === touched.number &&
+      link.issue.owner.toLowerCase() === touched.owner.toLowerCase() &&
+      link.issue.repository.toLowerCase() === touched.repository.toLowerCase()
+    );
+  }
+  return (
+    link.issue.forge === "linear" &&
+    touched.forge === "linear" &&
+    link.issue.identifier === touched.identifier
+  );
+}
+
+/**
+ * A row names the issue a thread belongs to by its key, and counts the other
+ * issues its tool calls wrote to. A thread belongs to an issue when it is
+ * linked to exactly one, or, linked to none, when it wrote to exactly one.
+ * Both come from the navigation entry the host already sent; drawing a row
+ * asks no tracker anything.
+ */
+export function threadRowIssues(input: {
+  readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue> | undefined;
+  readonly touchedIssues?: ThreadTouchedIssues | undefined;
+}): ThreadRowIssues {
+  const linked = input.linkedIssues ?? [];
+  const touched = input.touchedIssues?.items ?? [];
+  const hidden = input.touchedIssues?.hiddenCount ?? 0;
+  const soleLink = linked.length === 1 ? linked[0] : undefined;
+  if (soleLink !== undefined) {
+    const described = touched.find((issue) => sameIssue(soleLink, issue));
+    const reference = linkedIssueReference(soleLink);
+    return {
+      key: {
+        reference,
+        name:
+          described === undefined
+            ? `${soleLink.issue.forge === "github" ? "GitHub" : "Linear"} issue ${reference}`
+            : touchedIssueName(described),
+      },
+      count: touched.length - (described === undefined ? 0 : 1) + hidden,
+    };
+  }
+  const soleTouched =
+    linked.length === 0 && hidden === 0 && touched.length === 1 ? touched[0] : undefined;
+  if (soleTouched !== undefined) {
+    return {
+      key: { reference: touchedIssueReference(soleTouched), name: touchedIssueName(soleTouched) },
+      count: 0,
+    };
+  }
+  return { count: touched.length + hidden };
+}
+
+/** The counted marks a row passes on beside its first pull request. */
+export interface ThreadRowCounts {
+  readonly stack?: PullRequestStackPlace;
+  readonly issueKey?: ThreadRowIssueKey;
+  readonly issueCount?: number;
+}
+
+export const NO_THREAD_ROW_COUNTS: ThreadRowCounts = {};
+
+/** A row's stack and issue marks, from its navigation entry alone. */
+export function threadRowCounts(
+  thread: Pick<ChatThreadNavigationItem, "pullRequests" | "touchedIssues" | "linkedIssues">,
+): ThreadRowCounts {
+  const stack = threadRowStack(thread.pullRequests);
+  const issues = threadRowIssues(thread);
+  return {
+    ...(stack === undefined ? {} : { stack }),
+    ...(issues.key === undefined ? {} : { issueKey: issues.key }),
+    ...(issues.count > 0 ? { issueCount: issues.count } : {}),
+  };
 }
 
 export function pullRequestKey(identity: ThreadBoardPullRequestIdentity): string {

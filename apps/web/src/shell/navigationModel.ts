@@ -1,6 +1,7 @@
 import type {
   CoordinatorWorkerChoice,
   ThreadBoardPullRequestSummaries,
+  ThreadLinkedIssue,
   ThreadLiveStep,
   ThreadTouchedIssues,
 } from "@octant/contracts";
@@ -205,6 +206,8 @@ export interface ChatThreadNavigationItem {
   readonly pullRequests?: ThreadBoardPullRequestSummaries;
   /** The issues the thread's tool calls wrote to (Code only); absent when none. */
   readonly touchedIssues?: ThreadTouchedIssues;
+  /** The issues the thread works on, oldest link first (Code only); absent when none. */
+  readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
   readonly threadId: string;
   readonly title: string;
   readonly unread?: boolean;
