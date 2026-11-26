@@ -132,7 +132,7 @@ another ground and back keeps what the person set.
 
 ### Scenario walkthroughs
 
-1. **Shape the field.** Person opens Settings › Appearance › Background, Characters,
+1. **Shape the field.** Person opens Settings › Background, Characters,
    Customize, types `·•●` (Settings) → theme draft updates → `AppBackdrop` passes the
    values to the field → policy cleans the text → the field repaints its glyph layer
    and measures coverage → next frame draws the new set (FR-1, FR-5, FR-6) → the

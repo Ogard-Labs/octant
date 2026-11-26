@@ -4,6 +4,8 @@ import type { SettingsSectionEntry } from "./registry";
 export const octantSettingsNavigation = {
   general: { id: "general", label: "General", scope: "app" },
   appearance: { id: "appearance", label: "Appearance", scope: "app" },
+  background: { id: "background", label: "Background", scope: "app" },
+  text: { id: "text", label: "Text", scope: "app" },
   sidebar: { id: "sidebar", label: "Sidebar", scope: "app" },
   keybindings: { id: "keybindings", label: "Keybindings", scope: "app" },
   "chat-work": { id: "chat-work", label: "Chat & Work", scope: "app" },
@@ -12,7 +14,6 @@ export const octantSettingsNavigation = {
   harness: { id: "harness", label: "Octant Harness", scope: "app" },
   voice: { id: "voice", label: "Voice & images", scope: "app" },
   skills: { id: "skills", label: "Skills & Extensions", scope: "host" },
-  "web-search": { id: "web-search", label: "Web search", scope: "host" },
   "computer-use": { id: "computer-use", label: "Computer use", scope: "host" },
   integrations: { id: "integrations", label: "Integrations", scope: "host" },
   permissions: { id: "permissions", label: "Permissions", scope: "host" },
@@ -48,14 +49,12 @@ const PAGES_TAKEN_IN: Readonly<
   "chat-work": [{ label: "Chat" }, { label: "Work" }],
   "computer-use": [{ label: "Device tools" }],
   integrations: [
+    { label: "Web search" },
     { label: "GitHub", contributedSection: "github" },
     { label: "Linear", contributedSection: "linear" },
   ],
   data: [{ label: "To-dos" }],
 };
-
-/** Pages made only of what plugins contribute: there while one of them is on. */
-const PLUGIN_ONLY_PAGES: ReadonlySet<SettingsPageId> = new Set(["integrations"]);
 
 export interface SettingsCommandPage extends Pick<
   SettingsSectionEntry,
@@ -67,21 +66,19 @@ export interface SettingsCommandPage extends Pick<
 
 /**
  * The Settings pages the command palette offers. A switched-off plugin's page
- * name is not offered, and a page made only of plugins' sections is left out
- * once none is on, so the palette never opens a page that is not there.
+ * name is not offered, so the palette never names a section that is not there.
  */
 export function settingsCommandPages(
   isContributedSectionPresent: (contributedSection: string) => boolean,
 ): ReadonlyArray<SettingsCommandPage> {
-  return Object.values(octantSettingsNavigation).flatMap((page) => {
-    const alsoFoundAs = (PAGES_TAKEN_IN[page.id] ?? [])
+  return Object.values(octantSettingsNavigation).map((page) => ({
+    ...page,
+    alsoFoundAs: (PAGES_TAKEN_IN[page.id] ?? [])
       .filter(
         (taken) =>
           taken.contributedSection === undefined ||
           isContributedSectionPresent(taken.contributedSection),
       )
-      .map((taken) => taken.label);
-    if (PLUGIN_ONLY_PAGES.has(page.id) && alsoFoundAs.length === 0) return [];
-    return [{ ...page, alsoFoundAs }];
-  });
+      .map((taken) => taken.label),
+  }));
 }

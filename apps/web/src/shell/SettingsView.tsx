@@ -53,6 +53,7 @@ import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
 import { ProviderCatalogView } from "../providers/catalog/ProviderCatalogView";
 import { ProviderSettingsList } from "../providers/ProviderSettingsList";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -415,9 +416,10 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   providers: "Connect providers, sign in, and pick default models.",
   harness: "Models you add by key or run locally.",
   skills: "Review skills, then trust and enable only what you want.",
-  "web-search": "Where web search may send queries.",
-  integrations: "The accounts Octant connects to on the selected host.",
-  host: "Octant's background service.",
+  background: "What Octant draws behind your work.",
+  text: "Fonts and sizes for the interface, code, terminals and transcripts.",
+  integrations: "The services Octant connects to on the selected host.",
+  host: "Octant's background service, and how much of this computer it may use.",
   permissions: "Files agents may not touch, places they may reach, and what you have allowed.",
   limits: "How far an agent runs on its own before Octant stops it or asks you.",
   memory: "What Octant remembers about you, and how to keep things out.",
@@ -426,8 +428,6 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   sync: "Where artifact versions go when sync is on.",
 };
 
-const APPEARANCE_SECTION = (): SettingsSectionEntry =>
-  findSection(octantSettingsRegistry, "appearance")!;
 const SIDEBAR_SECTION = (): SettingsSectionEntry => findSection(octantSettingsRegistry, "sidebar")!;
 const HOST_SECTION = (): SettingsSectionEntry => findSection(octantSettingsRegistry, "host")!;
 
@@ -819,7 +819,7 @@ export function SettingsView(props: SettingsViewProps) {
                     type="button"
                     variant="ghost"
                   >
-                    Reset to default
+                    Reset theme
                   </OctantButton>
                 ) : null}
               </header>
@@ -1006,10 +1006,18 @@ function ActiveSectionContent({
     case "notifications":
       return <GeneralSection focusedSetting={focusedSetting} props={props} />;
     case "integrations":
+    case "web-search":
     case "github":
     case "linear":
       return (
         <div className="settings-section-stack" id="settings-integrations">
+          <WebSearchSettingsView
+            {...(props.hostControlClient === undefined ? {} : { client: props.hostControlClient })}
+            {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            onOpenResearchRoute={() =>
+              onApplyDeepLink({ section: "chat-work", setting: settingId("chat-research-backend") })
+            }
+          />
           {integrationEntryPoints.map((entryPoint) => (
             <PluginSettingsSection
               entryPoint={entryPoint}
@@ -1024,10 +1032,13 @@ function ActiveSectionContent({
         </div>
       );
     case "appearance":
+    case "background":
+    case "text":
       return (
         <AppearanceSection
           capabilities={capabilities}
           focusedSetting={focusedSetting}
+          page={activeSection}
           props={props}
         />
       );
@@ -1578,6 +1589,14 @@ function ActiveSectionContent({
       );
     }
     case "host": {
+      const resources =
+        props.agentRunSettingsClient === undefined ? undefined : (
+          <HostResourceSettings
+            client={props.agentRunSettingsClient}
+            focusedSetting={String(focusedSetting ?? "")}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          />
+        );
       const maintenance = (
         <MaintenanceSection
           capabilities={capabilities}
@@ -1595,10 +1614,12 @@ function ActiveSectionContent({
             ? {}
             : { hostFederationLifecycle: props.hostFederationLifecycle })}
           maintenance={maintenance}
+          {...(resources === undefined ? {} : { resources })}
           {...(focusedSetting === undefined ? {} : { focusedSetting })}
         />
       ) : (
         <section aria-label="Host" className="settings-section-stack" id="settings-host">
+          {resources}
           <p>Host lifecycle controls are available on the host machine only.</p>
           {props.hostFederationLifecycle === undefined ? null : (
             <FederatedHostsLifecyclePanel lifecycle={props.hostFederationLifecycle} />
@@ -1992,16 +2013,6 @@ function ActiveSectionContent({
           )}
           <TodoListHostSettings focusedSetting={focusedSetting} />
         </div>
-      );
-    case "web-search":
-      return (
-        <WebSearchSettingsView
-          {...(props.hostControlClient === undefined ? {} : { client: props.hostControlClient })}
-          {...(focusedSetting === undefined ? {} : { focusedSetting })}
-          onOpenResearchRoute={() =>
-            onApplyDeepLink({ section: "chat-work", setting: settingId("chat-research-backend") })
-          }
-        />
       );
     case "skills":
       // Marketplace fetches is this host's own switch, so it stays reachable
@@ -2604,13 +2615,6 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
   const hostPlatform = useHostPlatform();
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
-      {props.agentRunSettingsClient === undefined ? null : (
-        <HostResourceSettings
-          client={props.agentRunSettingsClient}
-          focusedSetting={String(focusedSetting ?? "")}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        />
-      )}
       <SettingsSection
         description={`Everything is optional and kept on ${thisComputerName(hostPlatform)}.`}
         title="Your identity"
@@ -3020,9 +3024,22 @@ interface AppearanceSectionProps extends SectionProps {
   readonly capabilities: SettingsNativeCapabilities;
 }
 
-function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSectionProps) {
+/**
+ * Appearance, Background and Text: one page held all three until it reached
+ * forty settings. Appearance is the colours and the material, Background is
+ * what is drawn behind the window's content, and Text is how type is set.
+ */
+function AppearanceSection({
+  focusedSetting,
+  props,
+  capabilities,
+  page,
+}: AppearanceSectionProps & { readonly page: "appearance" | "background" | "text" }) {
   const isAvailable = (id: string) =>
-    isSettingAvailable(findSetting(APPEARANCE_SECTION(), settingId(id))!, capabilities);
+    isSettingAvailable(
+      findSetting(findSection(octantSettingsRegistry, page)!, settingId(id))!,
+      capabilities,
+    );
   const sidebarBackground =
     props.themeController?.draft?.sidebarBackground ?? props.settings.sidebarBackground;
   // One control for what used to be two: a Translucent sidebar switch and a
@@ -3042,7 +3059,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               window.matchMedia?.("(prefers-color-scheme: dark)").matches === true,
           )
     ][glass === "strong" ? "strong" : "subtle"];
-  const windowSection = (
+  const windowSection = () => (
     <SettingsSection title="Window">
       <div className="setgroup">
         {isAvailable("sidebar-material") ? (
@@ -3113,7 +3130,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
       </div>
     </SettingsSection>
   );
-  const readingSection = (
+  const readingSection = () => (
     <SettingsSection title="Reading">
       <div className="setgroup">
         {isAvailable("transcript-text-size") ? (
@@ -3188,51 +3205,72 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
       </div>
     </SettingsSection>
   );
+  if (page === "background") {
+    const theme = props.themeController;
+    return (
+      <section aria-label="Background" className="settings-section-stack" id="settings-background">
+        {/* A refused save answers here: the theme editor that showed it is on
+            Appearance and Text, not on this page. */}
+        <div aria-live="polite" className="settings-feedback-slot">
+          {theme?.error === undefined ? null : (
+            <OctantAlert className="settings-view__error" tone="danger">
+              {theme.error}
+            </OctantAlert>
+          )}
+        </div>
+        {theme === undefined || !isAvailable("app-background") ? (
+          <SettingsSection title="Source and effect">
+            <SettingsState kind="empty">
+              The background cannot be changed in this window.
+            </SettingsState>
+          </SettingsSection>
+        ) : (
+          <SettingsSection className="settings-app-background" title="Source and effect">
+            <AppBackgroundSettings
+              background={(theme.draft ?? theme.settings)?.appBackground ?? DEFAULT_APP_BACKGROUND}
+              focused={focusedSetting === settingId("app-background")}
+              increasedContrast={(theme.draft ?? theme.settings)?.increasedContrast === true}
+              library={props.backgroundImageLibrary}
+              onChange={(appBackground) => {
+                void theme.applyPatch({ appBackground });
+              }}
+              onPreview={(appBackground) => {
+                theme.updateDraft({ appBackground });
+              }}
+            />
+          </SettingsSection>
+        )}
+      </section>
+    );
+  }
+  if (page === "text") {
+    return (
+      <section aria-label="Text" className="settings-section-stack" id="settings-text">
+        {props.themeController === undefined ? (
+          readingSection()
+        ) : (
+          <ThemeAppearanceEditor
+            afterTypography={readingSection()}
+            controller={props.themeController}
+            part="text"
+            {...(focusedSetting === undefined ? {} : { focusedSetting })}
+          />
+        )}
+      </section>
+    );
+  }
   return (
     <section aria-label="Appearance" className="settings-section-stack" id="settings-appearance">
-      {props.themeController !== undefined ? (
+      {props.themeController === undefined ? (
+        windowSection()
+      ) : (
         <ThemeAppearanceEditor
-          photoLibrary={props.backgroundImageLibrary}
-          afterScheme={
-            <>
-              {windowSection}
-              {isAvailable("app-background") && props.themeController !== undefined ? (
-                <SettingsSection className="settings-app-background" title="Background">
-                  {isAvailable("app-background") && props.themeController !== undefined ? (
-                    <>
-                      <AppBackgroundSettings
-                        background={
-                          (props.themeController.draft ?? props.themeController.settings)
-                            ?.appBackground ?? DEFAULT_APP_BACKGROUND
-                        }
-                        focused={focusedSetting === settingId("app-background")}
-                        increasedContrast={
-                          (props.themeController.draft ?? props.themeController.settings)
-                            ?.increasedContrast === true
-                        }
-                        library={props.backgroundImageLibrary}
-                        onChange={(appBackground) => {
-                          void props.themeController?.applyPatch({ appBackground });
-                        }}
-                        onPreview={(appBackground) => {
-                          props.themeController?.updateDraft({ appBackground });
-                        }}
-                      />
-                    </>
-                  ) : null}
-                </SettingsSection>
-              ) : null}
-            </>
-          }
-          afterTypography={readingSection}
+          afterScheme={windowSection()}
           controller={props.themeController}
+          part="look"
+          photoLibrary={props.backgroundImageLibrary}
           {...(focusedSetting === undefined ? {} : { focusedSetting })}
         />
-      ) : (
-        <>
-          {windowSection}
-          {readingSection}
-        </>
       )}
     </section>
   );

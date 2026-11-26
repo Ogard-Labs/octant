@@ -181,7 +181,7 @@ const EFFECTS = [
 ] as const satisfies ReadonlyArray<{ id: AppBackgroundEffect; label: string }>;
 
 /**
- * Settings › Appearance › Background as an open section of shared setting
+ * Settings › Background as an open section of shared setting
  * rows: the source, scope, effect, and photo controls each place a label and
  * one-line description on the left and their control on the right, and the
  * built-in catalog is the one compound block, spanning the column under its

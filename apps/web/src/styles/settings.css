@@ -3511,7 +3511,7 @@ html[data-octant-increased-contrast="true"]
   display: none;
 }
 
-/* A fieldset inside a row list (Appearance's typography) holds rows of its
+/* A fieldset inside a row list (Text's typography) holds rows of its
    own; they are divided the same way, and its hidden legend is not a row. */
 .settings-view .settings-card-section--open > .setgroup > .settings-view__theme-group {
   padding: 0;

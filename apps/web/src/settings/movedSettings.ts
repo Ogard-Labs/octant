@@ -15,7 +15,7 @@ const MOVED_SETTINGS: ReadonlyArray<{
     (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
   ),
   { from: "general", setting: "marketplace-fetches", to: "skills" },
-  { from: "chat", setting: "chat-searxng-url", to: "web-search" },
+  { from: "chat", setting: "chat-searxng-url", to: "integrations" },
   { from: "appearance", setting: "stream-replies", to: "chat-work" },
   { from: "appearance", setting: "project-view-switcher", to: "code" },
   ...[
@@ -62,6 +62,53 @@ const MOVED_SETTINGS: ReadonlyArray<{
     "tooling-command-confirm",
     "agent-routines-start-active",
   ].map((setting) => ({ from: "permissions" as const, setting, to: "limits" as const })),
+  // General opened on ten rows about the computer's load, ahead of who you
+  // are; they sit with the host's other limits now.
+  ...[
+    "resource-limits",
+    "resource-maxCommands",
+    "resource-maxWorkers",
+    "resource-maxAgents",
+    "resource-cpuTargetPercent",
+    "resource-memoryReservePercent",
+    "resource-save",
+    "resource-pause",
+    "resource-keepAwake",
+    "resource-refresh",
+  ].map((setting) => ({ from: "general" as const, setting, to: "host" as const })),
+  // Appearance held forty settings answering three questions: which colours
+  // and material, what is drawn behind the window, and how text is set.
+  ...[
+    "app-background",
+    "app-background-motion",
+    "app-background-effect",
+    "app-background-effect-cell",
+    "app-background-scene",
+    "app-background-effect-tones",
+    "app-background-characters",
+    "app-background-character-pattern",
+    "app-background-character-density",
+    "app-background-character-speed",
+    "app-background-photo",
+    "app-background-photo-opacity",
+    "app-background-scope",
+  ].map((setting) => ({ from: "appearance" as const, setting, to: "background" as const })),
+  ...[
+    "transcript-text-size",
+    "transcript-width",
+    "reply-detail",
+    "appearance.typography.smoothing",
+    "appearance.typography.ui.family",
+    "appearance.typography.ui.size",
+    "appearance.typography.editor.family",
+    "appearance.typography.editor.size",
+    "appearance.typography.editor.line-height",
+    "appearance.typography.editor.ligatures",
+    "appearance.typography.terminal.family",
+    "appearance.typography.terminal.size",
+    "appearance.typography.terminal.line-height",
+    "appearance.typography.terminal.ligatures",
+  ].map((setting) => ({ from: "appearance" as const, setting, to: "text" as const })),
 ];
 
 /**
@@ -69,8 +116,8 @@ const MOVED_SETTINGS: ReadonlyArray<{
  * or without a setting. Profile and Notifications each held one or two
  * controls and Access was the other half of what an agent may touch and
  * reach, so the sidebar listed three pages a person rarely needed alone.
- * Device tools, GitHub, Linear and To-dos held one to three settings each,
- * and Chat and Work each held a single section of defaults.
+ * Device tools, GitHub, Linear, To-dos and Web search held one to three
+ * settings each, and Chat and Work each held a single section of defaults.
  */
 const MERGED_PAGES: Readonly<Partial<Record<SettingsSectionId, SettingsSectionId>>> = {
   profile: "general",
@@ -81,6 +128,7 @@ const MERGED_PAGES: Readonly<Partial<Record<SettingsSectionId, SettingsSectionId
   "device-tools": "computer-use",
   github: "integrations",
   linear: "integrations",
+  "web-search": "integrations",
   todos: "data",
 };
 

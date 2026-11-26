@@ -264,6 +264,36 @@ describe("HostSettingsSection", () => {
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toBeVisible();
   });
 
+  it("opens on Computer resources and keeps them while the host loads, answers, or cannot be reached", async () => {
+    const resources = <button type="button">Pause new work</button>;
+    // The first thing drawn, after the slot a refresh failure is announced in.
+    const first = () => document.querySelector("#settings-host > :not(.settings-feedback-slot)");
+    const loading = render(
+      <HostSettingsSection
+        client={makeClient({ status: () => new Promise<HostControlStatus>(() => undefined) })}
+        resources={resources}
+      />,
+    );
+    expect(first()).toHaveTextContent("Pause new work");
+    loading.unmount();
+    const unreachable = render(
+      <HostSettingsSection
+        client={makeClient({
+          status: async () => {
+            throw new Error("The host control service is unreachable.");
+          },
+        })}
+        resources={resources}
+      />,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("unreachable");
+    expect(first()).toHaveTextContent("Pause new work");
+    unreachable.unmount();
+    render(<HostSettingsSection client={makeClient()} resources={resources} />);
+    expect(await screen.findByRole("heading", { name: "Identity" })).toBeVisible();
+    expect(first()).toHaveTextContent("Pause new work");
+  });
+
   it("lands a link to thread retention on the retention controls", async () => {
     render(<HostDataSettingsSection client={makeClient()} focusedSetting="thread-retention" />);
     const retention = await screen.findByRole("region", { name: "Thread retention" });

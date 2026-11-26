@@ -18,8 +18,9 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { SettingRow, SettingsCompactRow, SettingsSection, SettingsState } from "./primitives";
 
 /**
- * Settings › Web search: where Octant's own `web-search` may send a query.
- * The host decides everything here: this page shows the list it holds, sends
+ * Web search on Settings › Integrations: where Octant's own `web-search` may
+ * send a query. Its headings name it, since the page also holds GitHub and
+ * Linear. The host decides everything here: this shows the list it holds, sends
  * the person's changes, and shows the host's answer, a refusal included, as it
  * arrived. A key goes to the host's credential store and is never shown back.
  */
@@ -230,7 +231,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
     <>
       <SettingsSection
         description="Where Octant's web search may send a query. Octant cannot read your contracts, so it relies on what you say about each vendor."
-        title="Data policy"
+        title="Web search"
       >
         <div className="setgroup">
           <SettingRow
@@ -272,7 +273,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
       </SettingsSection>
       <SettingsSection
         description="A query goes to the first backend that may receive it, and moves to the next only when one does not answer."
-        title="Backends"
+        title="Web search backends"
       >
         {draft.backends.length === 0 ? (
           <SettingsState kind="empty">

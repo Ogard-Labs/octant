@@ -342,10 +342,10 @@ describe("SettingsView", () => {
     expect(content.scrollTop).toBe(0);
   });
 
-  it("shows replies at low detail until another level is chosen in Appearance", async () => {
+  it("shows replies at low detail until another level is chosen on Text", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings();
-    navigateTo("Appearance");
+    navigateTo("Text");
 
     const replyDetail = screen.getByRole("group", { name: "Reply detail" });
     expect(within(replyDetail).getByRole("button", { name: "Low" })).toHaveAttribute(
@@ -1698,7 +1698,8 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "appearance", setting: "reset-appearance" },
       themeController,
     });
-    expect(screen.getByRole("button", { name: "Reset to default" })).toHaveFocus();
+    // Named for the theme, not the page: it also resets Background and Text.
+    expect(screen.getByRole("button", { name: "Reset theme" })).toHaveFocus();
   });
 
   it("sends a link to a setting's old page to the page it moved to", () => {
@@ -1710,7 +1711,7 @@ describe("SettingsView", () => {
     expect(screen.getByRole("switch", { name: /marketplace/i })).toHaveFocus();
   });
 
-  it("deep-links to the Background setting and focuses its source control", () => {
+  it("opens Background for a link written when Appearance held it, and focuses its source control", () => {
     renderSettings({
       initialDeepLink: { section: "appearance", setting: "app-background" },
       themeController: {
@@ -1719,8 +1720,82 @@ describe("SettingsView", () => {
       } as never,
     });
 
-    expect(screen.getByRole("heading", { name: "Background" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Background" })).toBeVisible();
+    // The page's one section is not named for the page a second time.
+    expect(screen.getAllByRole("heading", { name: "Background" })).toHaveLength(1);
     expect(screen.getByRole("combobox", { name: "Application background" })).toHaveFocus();
+  });
+
+  it("says on Background why a background change was not saved", () => {
+    renderSettings({
+      initialDeepLink: { section: "background" },
+      themeController: {
+        draft: DEFAULT_THEME_SETTINGS,
+        applyPatch: vi.fn(async () => false),
+        error: "Appearance settings changed; reload before applying your draft.",
+      } as never,
+    });
+    expect(within(screen.getByRole("main")).getByRole("alert")).toHaveTextContent(
+      "Appearance settings changed; reload before applying your draft.",
+    );
+  });
+
+  it("draws the look on Appearance, the fonts and reading on Text, and neither on the other", () => {
+    renderSettings({
+      themeController: {
+        draft: DEFAULT_THEME_SETTINGS,
+        applyPatch: vi.fn(async () => true),
+      } as never,
+    });
+    const headings = () =>
+      within(screen.getByRole("main"))
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent);
+    navigateTo("Appearance");
+    expect(headings()).toEqual(["Colour scheme", "Window", "Accessibility"]);
+    navigateTo("Text");
+    expect(headings()).toEqual(["Typography", "Reading"]);
+  });
+
+  it("opens Text on the row of a font link written when Appearance held it", () => {
+    renderSettings({
+      initialDeepLink: { section: "appearance", setting: "appearance.typography.ui.size" },
+      themeController: {
+        draft: DEFAULT_THEME_SETTINGS,
+        applyPatch: vi.fn(async () => true),
+      } as never,
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "Text" })).toBeVisible();
+    expect(
+      document.querySelector('[data-setting-id="appearance.typography.ui.size"]'),
+    ).toHaveAttribute("data-focused", "true");
+  });
+
+  it("opens Host on Computer resources for a link written when General held them", async () => {
+    const agentRunSettingsClient = {
+      current: vi.fn(async () => ({
+        creationPosture: "automatic" as const,
+        version: 1 as never,
+        updatedAt: now as never,
+      })),
+      update: vi.fn(),
+    };
+    renderSettings({
+      agentRunSettingsClient,
+      initialDeepLink: { section: "general", setting: "resource-pause" },
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Host" })).toBeVisible();
+    const page = within(screen.getByRole("main"));
+    expect(page.getAllByRole("heading", { level: 2 })[0]).toHaveTextContent("Computer resources");
+    await waitFor(() =>
+      expect(document.querySelector('[data-setting-id="resource-pause"]')).toHaveAttribute(
+        "data-focused",
+        "true",
+      ),
+    );
+    navigateTo("General");
+    expect(page.queryByRole("heading", { name: "Computer resources" })).not.toBeInTheDocument();
+    expect(page.getAllByRole("heading", { level: 2 })[0]).toHaveTextContent("Your identity");
   });
 
   it("previews character ground edits in the draft and saves once when the slider is released", () => {
@@ -2578,7 +2653,7 @@ describe("SettingsView", () => {
     );
   });
 
-  it("opens General for a link to an integration whose plugin is off everywhere", async () => {
+  it("opens Integrations on web search alone for a link to an integration whose plugin is off", async () => {
     renderSettings({
       effectivePlugins: new Map([
         ["github-integration", false],
@@ -2586,7 +2661,45 @@ describe("SettingsView", () => {
       ]),
       initialDeepLink: { section: "linear", setting: "linear-connection" },
     });
-    expect(await screen.findByRole("heading", { level: 1, name: "General" })).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Integrations" })).toBeVisible();
+    expect(
+      within(screen.getByRole("main"))
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual(["Web search"]);
+  });
+
+  it("opens Integrations on the backend row for a link written when Web search was a page", async () => {
+    const hostControlClient = {
+      readWebSearch: vi.fn(async () => ({
+        source: "saved",
+        settings: { policy: "any", backends: [] },
+        states: [],
+      })),
+      setWebSearch: vi.fn(),
+      setWebSearchKey: vi.fn(),
+    };
+    renderSettings({
+      effectivePlugins: new Map([
+        ["github-integration", false],
+        ["linear-integration", false],
+      ]),
+      hostControlClient: hostControlClient as never,
+      initialDeepLink: { section: "web-search", setting: "web-search-add" },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "Integrations" })).toBeVisible();
+    const page = within(screen.getByRole("main"));
+    // Each heading names web search, since GitHub and Linear share the page.
+    expect(await page.findByRole("heading", { name: "Web search backends" })).toBeVisible();
+    expect(
+      page.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual(["Web search", "Web search backends"]);
+    await waitFor(() =>
+      expect(document.querySelector('[data-setting-id="web-search-add"]')).toHaveAttribute(
+        "data-focused",
+        "true",
+      ),
+    );
   });
 
   it("shows Linear through the plugin Settings contribution when effective", async () => {
@@ -2665,6 +2778,9 @@ describe("SettingsView", () => {
     );
 
     navigateTo("Chat & Work");
+    expect(screen.queryByRole("navigation", { name: "On this page" })).toBeNull();
+    // Appearance kept three sections when Background and Text left it.
+    navigateTo("Appearance");
     expect(screen.queryByRole("navigation", { name: "On this page" })).toBeNull();
   });
 

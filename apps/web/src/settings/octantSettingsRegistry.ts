@@ -24,68 +24,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "general enabled modes startup default chat work updates version release threads completed settle settled put away archive snooze compact compaction context window profile name email avatar gravatar initials colour color picture identity notifications notify alerts push phone waiting approval failure completion automation routines",
       settings: [
         {
-          id: settingId("resource-limits"),
-          label: "Computer resources",
-          scope: "host",
-          keywords:
-            "cpu ram memory load hardware automatic resource limits throttle vitest testing workers processes helpers pause concurrency",
-        },
-        {
-          id: settingId("resource-maxCommands"),
-          label: "Concurrent commands",
-          scope: "host",
-          keywords: "commands process concurrent limit",
-        },
-        {
-          id: settingId("resource-maxWorkers"),
-          label: "Total test workers",
-          scope: "host",
-          keywords: "vitest test workers processes parallel",
-        },
-        {
-          id: settingId("resource-maxAgents"),
-          label: "Helper agent limit",
-          scope: "host",
-          keywords: "subagent helper concurrency",
-        },
-        {
-          id: settingId("resource-cpuTargetPercent"),
-          label: "CPU limit for new work",
-          scope: "host",
-          keywords: "cpu utilization load headroom target",
-        },
-        {
-          id: settingId("resource-memoryReservePercent"),
-          label: "Memory reserve",
-          scope: "host",
-          keywords: "ram memory available reserve pressure",
-        },
-        {
-          id: settingId("resource-save"),
-          label: "Save resource limits",
-          scope: "host",
-          keywords: "save resource limits apply",
-        },
-        {
-          id: settingId("resource-pause"),
-          label: "Pause new work",
-          scope: "host",
-          keywords: "pause throttle testing helper agents commands",
-        },
-        {
-          id: settingId("resource-keepAwake"),
-          label: "Keep the computer awake while agents work",
-          scope: "host",
-          keywords:
-            "keep awake sleep prevent idle battery power ac suspend routines turns computer awake",
-        },
-        {
-          id: settingId("resource-refresh"),
-          label: "Refresh host load",
-          scope: "host",
-          keywords: "refresh resources hardware cpu memory load",
-        },
-        {
           id: settingId("enable-chat"),
           label: "Enable Chat",
           scope: "app",
@@ -273,7 +211,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     {
       ...octantSettingsNavigation.appearance,
       keywords:
-        "appearance theme glass translucency material background typography font reading transcript accessibility",
+        "appearance theme colour color scheme preset accent density style glass translucency material tint accessibility contrast motion transparency",
       settings: [
         {
           id: settingId("sidebar-material"),
@@ -287,32 +225,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Glass tint",
           scope: "app",
           keywords: "glass tint opacity transparency see-through darkness window vibrancy",
-        },
-        {
-          id: settingId("transcript-text-size"),
-          label: "Transcript text size",
-          scope: "app",
-          keywords: "transcript conversation text font size small medium large",
-        },
-        {
-          id: settingId("transcript-width"),
-          label: "Transcript width",
-          scope: "app",
-          keywords: "transcript conversation composer width narrow medium wide centered",
-        },
-        {
-          id: settingId("reply-detail"),
-          label: "Reply detail",
-          scope: "app",
-          keywords:
-            "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
-        },
-        {
-          id: settingId("app-background"),
-          label: "Background",
-          scope: "app",
-          keywords:
-            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity flowing colour none",
         },
         {
           id: settingId("appearance.scheme.light-preset"),
@@ -340,34 +252,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "density compact comfortable rows spacing room tight",
         },
         {
-          id: settingId("appearance.typography.smoothing"),
-          label: "Smooth text",
-          scope: "app",
-          keywords: "smooth text smoothing antialiasing grayscale font rendering mac",
-        },
-        {
           id: settingId("appearance.scheme.style"),
           label: "Style",
           scope: "app",
           keywords: "style colour color colourful mono monochrome grey vivid tiles accent",
-        },
-        {
-          id: settingId("appearance.typography.ui.family"),
-          label: "Interface font",
-          scope: "app",
-          keywords: "interface typography font family size prose ui",
-        },
-        {
-          id: settingId("appearance.typography.editor.family"),
-          label: "Code font",
-          scope: "app",
-          keywords: "code editor typography font line height ligatures",
-        },
-        {
-          id: settingId("appearance.typography.terminal.family"),
-          label: "Terminal font",
-          scope: "app",
-          keywords: "terminal typography font line height ligatures",
         },
         {
           id: settingId("appearance.accessibility.increased-contrast"),
@@ -383,9 +271,9 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("reset-appearance"),
-          label: "Reset appearance",
+          label: "Reset theme",
           scope: "app",
-          keywords: "reset appearance defaults theme restore",
+          keywords: "reset appearance defaults theme restore background text fonts",
         },
         {
           id: settingId("appearance.scheme.accent"),
@@ -404,6 +292,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Reduce transparency",
           scope: "app",
           keywords: "reduce reduced transparency glass opaque accessibility",
+        },
+      ],
+    },
+    {
+      ...octantSettingsNavigation.background,
+      keywords:
+        "background wallpaper backdrop photo picture image scene effect pixels characters motion colours behind",
+      settings: [
+        {
+          id: settingId("app-background"),
+          label: "Background",
+          scope: "app",
+          keywords:
+            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity flowing colour none",
         },
         {
           id: settingId("app-background-motion"),
@@ -481,6 +383,37 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "background show behind start screens every page everywhere",
         },
+      ],
+    },
+    {
+      ...octantSettingsNavigation.text,
+      keywords:
+        "text typography font fonts size reading transcript width reply detail ligatures line height interface code terminal smoothing",
+      settings: [
+        {
+          id: settingId("appearance.typography.smoothing"),
+          label: "Smooth text",
+          scope: "app",
+          keywords: "smooth text smoothing antialiasing grayscale font rendering mac",
+        },
+        {
+          id: settingId("appearance.typography.ui.family"),
+          label: "Interface font",
+          scope: "app",
+          keywords: "interface typography font family size prose ui",
+        },
+        {
+          id: settingId("appearance.typography.editor.family"),
+          label: "Code font",
+          scope: "app",
+          keywords: "code editor typography font line height ligatures",
+        },
+        {
+          id: settingId("appearance.typography.terminal.family"),
+          label: "Terminal font",
+          scope: "app",
+          keywords: "terminal typography font line height ligatures",
+        },
         {
           id: settingId("appearance.typography.ui.size"),
           label: "Interface text size",
@@ -522,6 +455,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Terminal ligatures",
           scope: "app",
           keywords: "terminal ligatures typography",
+        },
+        {
+          id: settingId("transcript-text-size"),
+          label: "Transcript text size",
+          scope: "app",
+          keywords: "transcript conversation text font size small medium large",
+        },
+        {
+          id: settingId("transcript-width"),
+          label: "Transcript width",
+          scope: "app",
+          keywords: "transcript conversation composer width narrow medium wide centered",
+        },
+        {
+          id: settingId("reply-detail"),
+          label: "Reply detail",
+          scope: "app",
+          keywords:
+            "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
         },
       ],
     },
@@ -1330,31 +1282,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      ...octantSettingsNavigation["web-search"],
-      keywords:
-        "web search backends data policy zdr eu searxng staan mojeek linkup brave exa api key fallback provider search",
-      settings: [
-        {
-          id: settingId("web-search-policy"),
-          label: "Data policy",
-          scope: "host",
-          keywords: "policy zdr eu processing region any",
-        },
-        {
-          id: settingId("web-search-provider-search"),
-          label: "A provider's own search",
-          scope: "host",
-          keywords: "provider native search anthropic openai web tools locked",
-        },
-        {
-          id: settingId("web-search-add"),
-          label: "Add backend",
-          scope: "host",
-          keywords: "add backend searxng staan mojeek linkup brave exa key",
-        },
-      ],
-    },
-    {
       ...octantSettingsNavigation["computer-use"],
       keywords:
         "computer use computer automation cua driver permissions accessibility screen recording plugin updates upgrade device tools simulator emulator serve-sim serve-avd ios android stream updates upgrade bundled",
@@ -1466,8 +1393,27 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     },
     {
       ...octantSettingsNavigation.integrations,
-      keywords: "integrations connections accounts services issues trackers",
+      keywords:
+        "integrations connections accounts services issues trackers web search backends data policy zdr eu searxng staan mojeek linkup brave exa api key fallback provider search",
       settings: [
+        {
+          id: settingId("web-search-policy"),
+          label: "Web search data policy",
+          scope: "host",
+          keywords: "policy zdr eu processing region any",
+        },
+        {
+          id: settingId("web-search-provider-search"),
+          label: "A provider's own search",
+          scope: "host",
+          keywords: "provider native search anthropic openai web tools locked",
+        },
+        {
+          id: settingId("web-search-add"),
+          label: "Add a web search backend",
+          scope: "host",
+          keywords: "add backend searxng staan mojeek linkup brave exa key",
+        },
         {
           id: settingId("github-connection"),
           label: "GitHub connection",
@@ -2283,8 +2229,70 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     {
       ...octantSettingsNavigation.host,
       keywords:
-        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities headless automation notifications push waiting approval failure completion apns fcm federated hosts maintenance reset layout window bounds diagnostics export support",
+        "host service lifecycle cpu ram memory load hardware resource limits pause keep awake stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities headless automation notifications push waiting approval failure completion apns fcm federated hosts maintenance reset layout window bounds diagnostics export support",
       settings: [
+        {
+          id: settingId("resource-limits"),
+          label: "Computer resources",
+          scope: "host",
+          keywords:
+            "cpu ram memory load hardware automatic resource limits throttle vitest testing workers processes helpers pause concurrency",
+        },
+        {
+          id: settingId("resource-maxCommands"),
+          label: "Concurrent commands",
+          scope: "host",
+          keywords: "commands process concurrent limit",
+        },
+        {
+          id: settingId("resource-maxWorkers"),
+          label: "Total test workers",
+          scope: "host",
+          keywords: "vitest test workers processes parallel",
+        },
+        {
+          id: settingId("resource-maxAgents"),
+          label: "Helper agent limit",
+          scope: "host",
+          keywords: "subagent helper concurrency",
+        },
+        {
+          id: settingId("resource-cpuTargetPercent"),
+          label: "CPU limit for new work",
+          scope: "host",
+          keywords: "cpu utilization load headroom target",
+        },
+        {
+          id: settingId("resource-memoryReservePercent"),
+          label: "Memory reserve",
+          scope: "host",
+          keywords: "ram memory available reserve pressure",
+        },
+        {
+          id: settingId("resource-save"),
+          label: "Save resource limits",
+          scope: "host",
+          keywords: "save resource limits apply",
+        },
+        {
+          id: settingId("resource-pause"),
+          label: "Pause new work",
+          scope: "host",
+          keywords: "pause throttle testing helper agents commands",
+        },
+        {
+          id: settingId("resource-keepAwake"),
+          label: "Keep the computer awake while agents work",
+          scope: "host",
+          keywords:
+            "keep awake sleep prevent idle battery power ac suspend routines turns computer awake",
+        },
+        {
+          id: settingId("resource-refresh"),
+          label: "Refresh host load",
+          scope: "host",
+          keywords: "refresh resources hardware cpu memory load",
+        },
         {
           id: settingId("reset-layout"),
           label: "Reset active mode layout",

@@ -160,7 +160,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       return;
     }
     setFormError(undefined);
-    // The SearXNG address moved to Settings › Web search. Until a backend list
+    // The SearXNG address moved to web search on Settings › Integrations. Until a backend list
     // is saved there, the host reads its first entry from this stored address,
     // so a Chat save carries it unchanged rather than clearing it.
     const searxngBaseUrl = next.searxngBaseUrl.trim();

@@ -28,6 +28,89 @@ const PAGES_BEFORE_THE_REGROUPING: Readonly<
   github: ["github-connection", "github-logout"],
   linear: ["linear-connection", "linear-projects", "linear-disconnect"],
   todos: ["todo-list-host"],
+  "web-search": ["web-search-policy", "web-search-provider-search", "web-search-add"],
+  general: [
+    "resource-limits",
+    "resource-maxCommands",
+    "resource-maxWorkers",
+    "resource-maxAgents",
+    "resource-cpuTargetPercent",
+    "resource-memoryReservePercent",
+    "resource-save",
+    "resource-pause",
+    "resource-keepAwake",
+    "resource-refresh",
+    "enable-chat",
+    "enable-work",
+    "next-message-suggestions",
+    "next-message-suggestions-chat",
+    "next-message-suggestions-work",
+    "next-message-suggestions-code",
+    "background-host",
+    "open-at-login",
+    "app-updates",
+    "quit-shortcut-second-press",
+    "default-folder",
+    "put-away-when-done",
+    "completed-thread-archive",
+    "auto-compact-octant",
+    "auto-compact-runtime",
+    "auto-compact-idle",
+    "auto-compact-limit",
+    "app-update-automatic-checks",
+    "app-update-ring",
+    "app-update-nightly",
+    "app-nightly-data",
+    "app-nightly-test-data",
+    "user-profile",
+    "your-instructions",
+    "orchestration-instructions",
+    "host-phone-notifications",
+    "host-push-gateway",
+    "host-automation-notifications",
+  ],
+  appearance: [
+    "sidebar-material",
+    "glass-tint",
+    "transcript-text-size",
+    "transcript-width",
+    "reply-detail",
+    "app-background",
+    "appearance.scheme.light-preset",
+    "appearance.scheme.dark-preset",
+    "appearance.custom",
+    "appearance.density",
+    "appearance.typography.smoothing",
+    "appearance.scheme.style",
+    "appearance.typography.ui.family",
+    "appearance.typography.editor.family",
+    "appearance.typography.terminal.family",
+    "appearance.accessibility.increased-contrast",
+    "appearance.theme-import-export",
+    "reset-appearance",
+    "appearance.scheme.accent",
+    "appearance.accessibility.reduced-motion",
+    "appearance.accessibility.reduced-transparency",
+    "app-background-motion",
+    "app-background-effect",
+    "app-background-effect-cell",
+    "app-background-scene",
+    "app-background-effect-tones",
+    "app-background-characters",
+    "app-background-character-pattern",
+    "app-background-character-density",
+    "app-background-character-speed",
+    "app-background-photo",
+    "app-background-photo-opacity",
+    "app-background-scope",
+    "appearance.typography.ui.size",
+    "appearance.typography.editor.size",
+    "appearance.typography.editor.line-height",
+    "appearance.typography.editor.ligatures",
+    "appearance.typography.terminal.size",
+    "appearance.typography.terminal.line-height",
+    "appearance.typography.terminal.ligatures",
+  ],
   permissions: [
     "sandbox-restrictions",
     "sandbox-policy-summary",
@@ -104,6 +187,7 @@ describe("a link written for an earlier Settings layout", () => {
     ["device-tools", "computer-use"],
     ["github", "integrations"],
     ["linear", "integrations"],
+    ["web-search", "integrations"],
     ["todos", "data"],
   ] as const)("opens the page that took %s in when it names no setting", (page, holder) => {
     expect(currentSettingsLink({ section: page })).toEqual({ section: holder });
@@ -119,6 +203,27 @@ describe("a link written for an earlier Settings layout", () => {
     ).toEqual({ section: "limits", setting: "tool-steps-per-turn" });
     const stays = { section: "permissions", setting: settingId("protected-files") } as const;
     expect(currentSettingsLink(stays)).toBe(stays);
+  });
+
+  it.each([
+    ["general", "resource-pause", "host"],
+    ["appearance", "app-background-photo", "background"],
+    ["appearance", "appearance.typography.ui.size", "text"],
+    ["appearance", "reply-detail", "text"],
+  ] as const)("sends %s's %s to the page that holds it now", (page, setting, holder) => {
+    expect(currentSettingsLink({ section: page, setting: settingId(setting) })).toEqual({
+      section: holder,
+      setting,
+    });
+  });
+
+  it("leaves a link to a setting General and Appearance kept where it was", () => {
+    for (const link of [
+      { section: "general", setting: settingId("user-profile") },
+      { section: "appearance", setting: settingId("glass-tint") },
+    ] as const) {
+      expect(currentSettingsLink(link)).toBe(link);
+    }
   });
 
   it("keeps a sandbox scope the link carried", () => {

@@ -15,6 +15,8 @@ describe("SettingsSectionId", () => {
       "profile",
       "notifications",
       "appearance",
+      "background",
+      "text",
       "sidebar",
       "keybindings",
       "chat",

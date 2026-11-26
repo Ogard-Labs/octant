@@ -46,7 +46,7 @@ const LEGACY_DEFAULT_UI_FAMILY =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
 
 /**
- * The platform face, as Appearance's System interface choice saves it. It is
+ * The platform face, as Settings › Text's System interface choice saves it. It is
  * deliberately not the legacy stack above: that string means "the default",
  * so a person who picked System would otherwise be given Geist.
  */
@@ -68,7 +68,7 @@ export function savedUiFamily(family: string): string {
     : family;
 }
 /**
- * What Appearance's old "Geist" entry saved. It named a family Octant does not
+ * What the font picker's old "Geist" entry saved. It named a family Octant does not
  * bundle (the bundled face is Geist Variable), so a person who picked Geist got
  * the system face instead; they asked for Geist, so they get the bundled one.
  */
@@ -76,7 +76,7 @@ const UNBUNDLED_GEIST_FAMILY = "Geist, system-ui, sans-serif";
 /**
  * The interface stack saved while bundled Geist was the default. Like the
  * stack before it, it meant "the default", so it follows the default to the
- * platform face. Appearance's Geist entry now saves `GEIST_UI_FAMILY`, so a
+ * platform face. The picker's Geist entry now saves `GEIST_UI_FAMILY`, so a
  * person who picks Geist from here on keeps it.
  */
 const GEIST_DEFAULT_UI_FAMILY =

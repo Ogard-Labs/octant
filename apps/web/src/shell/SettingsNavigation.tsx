@@ -1,6 +1,5 @@
 import type { SettingsSectionId } from "@octant/contracts";
 import {
-  Search,
   Blocks,
   Brain,
   ChartNoAxesColumnIncreasing,
@@ -9,6 +8,7 @@ import {
   FolderSync,
   Gauge,
   Hexagon,
+  Image,
   Keyboard,
   Link2,
   MessagesSquare,
@@ -22,6 +22,7 @@ import {
   Settings2,
   KeyRound,
   ShieldCheck,
+  Type,
   type IconComponent,
 } from "../ui/icons";
 import { useEffect, useRef } from "react";
@@ -71,6 +72,8 @@ interface SettingsPagePlace {
 const SETTINGS_PAGE_PLACES = {
   general: { group: "General", icon: Settings2 },
   appearance: { group: "Look & feel", icon: Palette },
+  background: { group: "Look & feel", icon: Image },
+  text: { group: "Look & feel", icon: Type },
   sidebar: { group: "Look & feel", icon: PanelLeft },
   keybindings: { group: "Look & feel", icon: Keyboard },
   providers: { group: "AI", icon: Plug },
@@ -79,7 +82,6 @@ const SETTINGS_PAGE_PLACES = {
   "chat-work": { group: "AI", icon: MessagesSquare },
   code: { group: "AI", icon: Code2 },
   skills: { group: "Tools", icon: Blocks },
-  "web-search": { group: "Tools", icon: Search },
   "computer-use": { group: "Tools", icon: Monitor },
   integrations: { group: "Tools", icon: Link2 },
   permissions: { group: "Safety", icon: ShieldCheck },

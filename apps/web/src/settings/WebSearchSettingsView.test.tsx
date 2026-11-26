@@ -62,7 +62,7 @@ function client(view: WebSearchSettingsViewValue = saved()) {
   };
 }
 
-describe("Settings › Web search", () => {
+describe("Web search on Settings › Integrations", () => {
   it("shows the policy and each backend's state as the host reports it, in the person's order", async () => {
     render(<WebSearchSettingsView client={client()} />);
     expect(await screen.findByRole("combobox", { name: "Data policy" })).toHaveTextContent(

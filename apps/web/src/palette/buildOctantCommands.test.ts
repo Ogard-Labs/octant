@@ -219,8 +219,9 @@ describe("the destination, sidebar and dock commands", () => {
     expect(keybindingActionForCommand("workspace:toggle-sidebar")).toBe("toggle-sidebar");
   });
 
-  // Chat, Work, GitHub, Linear, Device tools and To-dos were Settings pages a
-  // person could type into the palette; their settings now sit on another page.
+  // Chat, Work, GitHub, Linear, Web search, Device tools and To-dos were
+  // Settings pages a person could type into the palette; their settings now
+  // sit on another page.
   it("finds a Settings page by the command of a page it took in, typed whole or by name", () => {
     const commands = buildOctantCommands(
       sources({
@@ -237,6 +238,8 @@ describe("the destination, sidebar and dock commands", () => {
       filterOctantCommands(commands, query).map((command) => command.title);
     expect(found("settings: github")[0]).toBe("Settings: Integrations");
     expect(found("settings: linear")[0]).toBe("Settings: Integrations");
+    expect(found("settings: web search")[0]).toBe("Settings: Integrations");
+    expect(found("web search")[0]).toBe("Settings: Integrations");
     expect(found("settings: work")[0]).toBe("Settings: Chat & Work");
     expect(found("settings: chat")[0]).toBe("Settings: Chat & Work");
     expect(found("settings: device tools")[0]).toBe("Settings: Computer use");
@@ -268,7 +271,9 @@ describe("the destination, sidebar and dock commands", () => {
       filterOctantCommands(commands, query).map((command) => command.title);
     expect(found(pages("github"), "settings: github")).toEqual([]);
     expect(found(pages("github"), "settings: linear")).toEqual(["Settings: Integrations"]);
-    expect(found(pages("github", "linear"), "integrations")).toEqual([]);
+    // Web search is the host's own, so Integrations is offered with both off.
+    expect(found(pages("github", "linear"), "settings: linear")).toEqual([]);
+    expect(found(pages("github", "linear"), "integrations")).toEqual(["Settings: Integrations"]);
   });
 
   it("offers no dock tool when the host cannot open one", () => {

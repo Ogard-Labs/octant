@@ -180,7 +180,7 @@ boundary and a compact tab row without a second horizontal divider.
 ## Reply detail
 
 **Reply detail** chooses how much of a turn's work the transcript shows open.
-Settings › Appearance › Reading › Reply detail (`replyDetail`) is the default
+Settings › Text › Reading › Reply detail (`replyDetail`) is the default
 every thread starts at: one `OctantToggleGroup` of three levels whose
 description reads "Where every thread starts unless it sets its own." followed
 by the chosen level's sentence. A thread may set its own level, which then

@@ -135,6 +135,8 @@ describe("octantSettingsRegistry", () => {
     expect(octantSettingsRegistry.sections.map((s) => s.id)).toEqual([
       "general",
       "appearance",
+      "background",
+      "text",
       "sidebar",
       "keybindings",
       "chat-work",
@@ -143,7 +145,6 @@ describe("octantSettingsRegistry", () => {
       "harness",
       "voice",
       "skills",
-      "web-search",
       "computer-use",
       "integrations",
       "permissions",
@@ -174,33 +175,62 @@ describe("octantSettingsRegistry", () => {
       settingsCommandPages((section) => !off.includes(section)).find(
         (page) => page.id === "integrations",
       )?.alsoFoundAs;
-    expect(names()).toEqual(["GitHub", "Linear"]);
-    expect(names("github")).toEqual(["Linear"]);
-    expect(names("github", "linear")).toBeUndefined();
+    expect(names()).toEqual(["Web search", "GitHub", "Linear"]);
+    expect(names("github")).toEqual(["Web search", "Linear"]);
+    // Web search is the host's own, so the page outlives both plugins.
+    expect(names("github", "linear")).toEqual(["Web search"]);
   });
 
-  // Permissions had grown to fifty settings while GitHub, Linear, Device tools
-  // and To-dos held one to three each (counted 2026-11-25). General and
-  // Appearance are over the size and Web search under it: none of the three
-  // was regrouped, and they are named here so a fourth page cannot join them
-  // unnoticed.
+  // Permissions had grown to fifty settings, Appearance to forty and General
+  // to thirty-eight, while GitHub, Linear, Web search, Device tools and To-dos
+  // held one to three each (counted 2026-11-25).
   it("keeps a page between four and thirty settings, but for the pages that are one tool", () => {
     const ONE_TOOL = new Set(["keybindings", "usage"]);
-    const NOT_YET_REGROUPED = new Set(["general", "appearance", "web-search"]);
     const outside = octantSettingsRegistry.sections
-      .filter((section) => !ONE_TOOL.has(section.id) && !NOT_YET_REGROUPED.has(section.id))
+      .filter((section) => !ONE_TOOL.has(section.id))
       .filter((section) => section.settings.length < 4 || section.settings.length > 30)
       .map((section) => `${section.label}: ${section.settings.length}`);
     expect(outside).toEqual([]);
   });
 
-  it("registers Integrations as a host-scoped page of the rows each plugin contributes", () => {
+  it("splits what Appearance held into the look, what is drawn behind it, and how text is set", () => {
+    const ids = (id: string) =>
+      octantSettingsRegistry.sections.find((s) => s.id === id)?.settings.map((s) => String(s.id));
+    expect(ids("appearance")).toEqual([
+      "sidebar-material",
+      "glass-tint",
+      "appearance.scheme.light-preset",
+      "appearance.scheme.dark-preset",
+      "appearance.custom",
+      "appearance.density",
+      "appearance.scheme.style",
+      "appearance.accessibility.increased-contrast",
+      "appearance.theme-import-export",
+      "reset-appearance",
+      "appearance.scheme.accent",
+      "appearance.accessibility.reduced-motion",
+      "appearance.accessibility.reduced-transparency",
+    ]);
+    expect(ids("background")?.every((id) => id.startsWith("app-background"))).toBe(true);
+    expect(ids("background")).toHaveLength(13);
+    expect(ids("text")?.filter((id) => !id.startsWith("appearance.typography."))).toEqual([
+      "transcript-text-size",
+      "transcript-width",
+      "reply-detail",
+    ]);
+    expect(ids("text")).toHaveLength(14);
+  });
+
+  it("registers Integrations as a host-scoped page of web search and the rows each plugin contributes", () => {
     const integrations = octantSettingsRegistry.sections.find((s) => s.id === "integrations");
     expect(integrations?.label).toBe("Integrations");
     expect(integrations?.scope).toBe("host");
     expect(
       integrations?.settings.map((setting) => [setting.id, setting.contributedSection]),
     ).toEqual([
+      ["web-search-policy", undefined],
+      ["web-search-provider-search", undefined],
+      ["web-search-add", undefined],
       ["github-connection", "github"],
       ["github-logout", "github"],
       ["linear-connection", "linear"],
@@ -209,19 +239,21 @@ describe("octantSettingsRegistry", () => {
     ]);
   });
 
-  it("offers no row of a plugin that is switched off, and no page once none is left", () => {
+  it("offers no row of a plugin that is switched off, and keeps web search when both are", () => {
     const sections = listAvailableSections(octantSettingsRegistry, capabilities);
     const rowsWithout = (...off: ReadonlyArray<string>) =>
       withoutAbsentContributions(sections, (section) => !off.includes(section))
         .find((section) => section.id === "integrations")
         ?.settings.map((setting) => setting.id);
+    const webSearch = ["web-search-policy", "web-search-provider-search", "web-search-add"];
     expect(rowsWithout("github")).toEqual([
+      ...webSearch,
       "linear-connection",
       "linear-projects",
       "linear-disconnect",
     ]);
-    expect(rowsWithout("linear")).toEqual(["github-connection", "github-logout"]);
-    expect(rowsWithout("github", "linear")).toBeUndefined();
+    expect(rowsWithout("linear")).toEqual([...webSearch, "github-connection", "github-logout"]);
+    expect(rowsWithout("github", "linear")).toEqual(webSearch);
     const found = (query: string, ...off: ReadonlyArray<string>) =>
       searchSettings(
         withoutAbsentContributions(sections, (section) => !off.includes(section)),
@@ -247,6 +279,16 @@ describe("octantSettingsRegistry", () => {
     const ids = (id: string) => section(id)?.settings.map((setting) => setting.id);
     expect(section("host")?.scope).toBe("host");
     expect(ids("host")).toEqual([
+      "resource-limits",
+      "resource-maxCommands",
+      "resource-maxWorkers",
+      "resource-maxAgents",
+      "resource-cpuTargetPercent",
+      "resource-memoryReservePercent",
+      "resource-save",
+      "resource-pause",
+      "resource-keepAwake",
+      "resource-refresh",
       "reset-layout",
       "reset-window-bounds",
       "save-diagnostics",

@@ -17,7 +17,7 @@ eligibility policy, the research route's "Octant web search" label, the migratio
 the credential broker namespace `/v1/web-search-credentials/*` with its
 `/api/host-control/web-search/key` route, the Staan, Mojeek, Linkup, Brave, and
 Exa backends, the fallback with its 20-second budget, the journaled record of
-where each query went, Settings › Web search, Claude Code, Codex, OpenCode, and
+where each query went, Settings › Integrations, Claude Code, Codex, OpenCode, and
 Mistral Vibe each launched with its own search off wherever the session's setup
 has `webTools` off, and a provider's own search in
 the native harness on Anthropic's and OpenAI's own APIs, with the one-search
@@ -60,7 +60,7 @@ the person, not returned to the model.
 
 ## Backends
 
-A person keeps an ordered list of backends in Settings › Web search. Each entry
+A person keeps an ordered list of backends in Settings › Integrations. Each entry
 has:
 
 - a kind, from the list below;
@@ -113,7 +113,7 @@ whose results are an answer rather than a list of pages does not fit
 
 ## Data policy
 
-Settings › Web search sets one data policy for the host:
+Settings › Integrations sets one data policy for the host:
 
 | Policy     | A backend may receive a query when                |
 | ---------- | ------------------------------------------------- |
@@ -361,8 +361,9 @@ These tools already mark the thread as having read outside content.
 
 ## Settings
 
-Settings › Web search is a page in the Tools group, after Skills &
-Extensions ([Settings](settings.md#groups-and-pages)). It shows:
+Web search opens Settings › Integrations, in the Tools group
+([Settings](settings.md#groups-and-pages)), under two headings that name it,
+**Web search** and **Web search backends**. It shows:
 
 - the data policy, as a choice of the four policies;
 - the backend list, reorderable, each row with its kind, region, the two
@@ -398,7 +399,7 @@ next one:
 2. The credential broker namespace for search keys, and the Staan, Mojeek,
    Linkup, Brave, and Exa backends with the fallback budget and the journaled
    answer.
-3. Settings › Web search, and each vendor runtime launched with its own
+3. Settings › Integrations, and each vendor runtime launched with its own
    search off wherever `webTools` is off.
 4. A provider's own search in the native harness: the Anthropic and OpenAI
    request builders, the one-search cap and its stream enforcement, the

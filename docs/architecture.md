@@ -956,7 +956,7 @@ after five seconds, and does not poll in the background.
 
 ### Local work resource limits
 
-Settings > General > Computer resources controls admission of new local work
+Settings > Host > Computer resources controls admission of new local work
 on this host. It is separate from the host-process Memory limits relief setting.
 Automatic is the default; Manual uses the person's ceilings without load-based
 adjustment; Pause holds new managed commands and helper agents. Running processes
@@ -1041,7 +1041,7 @@ sleep, and the renderer holds no assertion of its own (maintainer decision,
   switches to battery power under While on power.
 - **Setting and authority:** The choice (`While on power` default, `Always`,
   `Never`) lives in the host resource policy inside the journaled
-  `agent-run-settings` aggregate (`Settings > General > Computer resources >
+  `agent-run-settings` aggregate (`Settings > Host > Computer resources >
 Keep the computer awake while agents work`). Changes are journaled with who,
   when, and the old and new values, and are admitted only from a local window or
   a device the host's own person paired (`actsAsHostPerson`); a hub-introduced
@@ -1096,7 +1096,7 @@ Leaving the demo discards its sample state and returns to the explicit connectio
 choice. This is review preparation, not evidence of native or store acceptance.
 
 Its background shares the desktop's three Gradient pictures and
-Pixelate/Dither/ASCII print effect (Appearance › Background), drawn once
+Pixelate/Dither/ASCII print effect (Settings › Background), drawn once
 through a GL shader that uses the same ordered threshold and the same glyph
 table. The phone keeps its own effect choice on the device; it never follows
 the desktop's.

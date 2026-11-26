@@ -157,9 +157,10 @@ export function listAvailableSections(
 }
 
 /**
- * The pages without the rows a switched-off plugin contributed. A page made
- * only of such rows (Integrations) is absent once none is left, so the rail,
- * search and links never offer a plugin's settings while it is off.
+ * The pages without the rows a switched-off plugin contributed, so the rail,
+ * search and links never offer a plugin's settings while it is off. A page
+ * made only of such rows is absent once none is left; Integrations also
+ * holds web search, which is the host's own, so it stays.
  */
 export function withoutAbsentContributions(
   sections: ReadonlyArray<SettingsSectionEntry>,

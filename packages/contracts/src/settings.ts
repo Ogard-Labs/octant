@@ -11,7 +11,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * enumerates the full IA so any app surface can request a deep link by name.
  *
  * A page that was folded into another keeps its identifier here (`profile`,
- * `chat`, `github`, `todos` and the like), so a link an earlier build wrote
+ * `chat`, `github`, `todos`, `web-search` and the like), so a link an earlier build wrote
  * still decodes; the renderer opens the page that holds its settings now.
  */
 export const SETTINGS_SECTION_IDS = [
@@ -19,6 +19,8 @@ export const SETTINGS_SECTION_IDS = [
   "profile",
   "notifications",
   "appearance",
+  "background",
+  "text",
   "sidebar",
   "keybindings",
   "chat",
