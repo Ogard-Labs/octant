@@ -6,6 +6,35 @@ import {
 } from "./terminalService";
 
 describe("TerminalService", () => {
+  it("keeps the shell a terminal launched with and a run's command still running, until it is launched again", async () => {
+    const first = fakeProcess();
+    const second = fakeProcess();
+    const port = { start: vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second) };
+    const service = new TerminalService({
+      port,
+      inheritedEnvironment: {},
+      credentials: { resolve: async () => "unused" },
+    });
+    const request = {
+      terminalId: "agent-terminal",
+      shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      cwd: "/repo",
+      stateScope: "work:test",
+      columns: 80,
+      rows: 24,
+      credentialReferences: [],
+    } as const;
+    await service.launch(request);
+    service.noteAgentCommand("agent-terminal", "oo1234");
+    expect(service.agentCommand("agent-terminal")).toEqual({
+      shell: request.shell,
+      pending: "oo1234",
+    });
+    first.emitExit({ exitCode: 0 });
+    await service.launch({ ...request, shell: "/bin/zsh" });
+    expect(service.agentCommand("agent-terminal")).toEqual({ shell: "/bin/zsh" });
+  });
+
   it("refuses to replace an exited terminal until its protection cleanup succeeds", async () => {
     const process = fakeProcess();
     const port = { start: vi.fn(() => process) };

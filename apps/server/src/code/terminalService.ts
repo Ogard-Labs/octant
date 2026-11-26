@@ -155,6 +155,15 @@ interface TerminalServiceOptions {
 interface TerminalRecord {
   protectionCleanup?: () => Promise<void>;
   readonly terminalId: string;
+  /** The shell it was launched with; a restored record has none. */
+  readonly shell?: string;
+  /**
+   * The completion marker of an agent's command still running in it: one a
+   * run's wait gave up on, such as a dev server. Kept with the terminal so a
+   * later turn's run refuses rather than typing into that command, and a
+   * later read reports its exit code.
+   */
+  agentCommand?: string;
   readonly transcript: TranscriptBuffer;
   readonly process?: TerminalProcessHandle;
   readonly secrets: readonly string[];
@@ -300,6 +309,7 @@ export class TerminalService {
     const record: TerminalRecord = {
       ...(request.onClosed === undefined ? {} : { protectionCleanup: request.onClosed }),
       terminalId: request.terminalId,
+      ...(request.server === undefined ? { shell: request.shell } : {}),
       transcript: new TranscriptBuffer(),
       process,
       secrets,
@@ -346,6 +356,21 @@ export class TerminalService {
     record.baseline.status = record.status;
     record.baseline.exitCode = record.exitCode;
     return snapshot;
+  }
+
+  /** The shell a terminal started in, and an agent's command still running in it. */
+  agentCommand(terminalId: string): { readonly shell?: string; readonly pending?: string } {
+    const record = this.#require(terminalId);
+    return {
+      ...(record.shell === undefined ? {} : { shell: record.shell }),
+      ...(record.agentCommand === undefined ? {} : { pending: record.agentCommand }),
+    };
+  }
+
+  noteAgentCommand(terminalId: string, pending: string | undefined): void {
+    const record = this.#require(terminalId);
+    if (pending === undefined) delete record.agentCommand;
+    else record.agentCommand = pending;
   }
 
   attach(terminalId: string): TerminalSnapshot {

@@ -603,6 +603,24 @@ export interface CodeAppManagedToolsOptions {
         readonly terminalId: CodeTerminalId;
       },
     ) => Promise<CodeOperationTerminalSnapshot>;
+    /** The shell the thread's terminal started in, and a run's command still running in it. */
+    readonly readAgentCommand?: (
+      windowId: WindowId,
+      input: {
+        readonly threadId: CodeThread["id"];
+        readonly checkoutId: CodeThread["checkoutId"];
+        readonly terminalId: CodeTerminalId;
+      },
+    ) => Promise<{ readonly shell?: string; readonly pending?: string }>;
+    readonly noteAgentCommand?: (
+      windowId: WindowId,
+      input: {
+        readonly threadId: CodeThread["id"];
+        readonly checkoutId: CodeThread["checkoutId"];
+        readonly terminalId: CodeTerminalId;
+      },
+      pending: string | undefined,
+    ) => Promise<void>;
     readonly terminate?: (
       windowId: WindowId,
       input: {
@@ -1534,6 +1552,15 @@ export interface AgentTerminalPort {
   readonly stop: () => Promise<TerminalToolAnswer>;
   readonly interrupt?: () => Promise<CodeOperationTerminalSnapshot>;
   readonly terminate?: () => Promise<unknown>;
+  /**
+   * Kept with the terminal across turns: the shell it started in, which the
+   * completion line is written for, and the marker of a run's command still
+   * running in it. Absent reads as a POSIX shell with nothing running.
+   */
+  readonly agentCommand?: {
+    readonly read: () => Promise<{ readonly shell?: string; readonly pending?: string }>;
+    readonly note: (pending: string | undefined) => Promise<void>;
+  };
 }
 
 export interface TerminalToolAnswer {
@@ -1562,8 +1589,6 @@ export interface AgentTerminalToolOptions {
   /** Marks what a command returned as outside content; help is the host's own text and is not. */
   readonly markResults?: ((tools: AppManagedToolSet) => AppManagedToolSet) | undefined;
   readonly wait?: ((milliseconds: number) => Promise<void>) | undefined;
-  /** The shell the terminal runs, so its completion line is in that shell's syntax; POSIX when absent. */
-  readonly shell?: (() => string) | undefined;
 }
 
 /** `octant_terminal` over one agent's terminal, with the same approvals and bounds everywhere. */
@@ -1598,7 +1623,7 @@ function codeTerminalOptions(options: CodeAppManagedToolsOptions): AgentTerminal
   });
   // An approval that starts the terminal is minted for exactly this command.
   let approvedStart: CodeOperationCommand | undefined;
-  const { interrupt, terminate } = options.terminal;
+  const { interrupt, terminate, readAgentCommand, noteAgentCommand } = options.terminal;
   const { terminalApproval } = options;
   return {
     terminal: {
@@ -1634,6 +1659,15 @@ function codeTerminalOptions(options: CodeAppManagedToolsOptions): AgentTerminal
         ),
       ...(interrupt === undefined ? {} : { interrupt: () => interrupt(options.windowId, scope) }),
       ...(terminate === undefined ? {} : { terminate: () => terminate(options.windowId, scope) }),
+      ...(readAgentCommand === undefined || noteAgentCommand === undefined
+        ? {}
+        : {
+            agentCommand: {
+              read: () => readAgentCommand(options.windowId, scope),
+              note: (pending: string | undefined) =>
+                noteAgentCommand(options.windowId, scope, pending),
+            },
+          }),
     },
     uuid: options.uuid,
     authorityFailure: () => terminalAuthorityFailure(options),
@@ -1669,6 +1703,30 @@ async function terminalTool(
     // A missing terminal is an ordinary first-run state. Starting it remains a
     // server-authorized operation, while reads never replace a UI observer.
   }
+  const commandState = async () =>
+    (await terminal.agentCommand?.read().catch(() => undefined)) ?? {};
+  // A command an earlier run left running, such as a dev server, still owns
+  // the terminal's input: a new run typed then went to it, not to the shell.
+  // Its exit code, once it ends, is reported on the next read.
+  const earlier = snapshot === undefined ? {} : await commandState();
+  if (snapshot !== undefined && earlier.pending !== undefined) {
+    const finished =
+      snapshot.status === "running"
+        ? completedCommand(
+            snapshot,
+            terminalCompletion(earlier.shell ?? "/bin/sh", earlier.pending).pattern,
+          )
+        : undefined;
+    if (finished !== undefined || snapshot.status !== "running")
+      await terminal.agentCommand?.note(undefined).catch(() => undefined);
+    else if (input.operation === "run")
+      return failure(
+        "terminal-busy",
+        "A command an earlier run started is still running in this terminal, so a new command would go to it rather than to the shell. Use read to check it, write to send it input, or stop to end it.",
+      );
+    if (input.operation === "read")
+      return finished ?? terminalSnapshot(snapshot, { commandCompleted: false });
+  }
   // Below Full access each command the agent types asks the person first,
   // naming it, as a provider's own shell asks per command at that level. A
   // terminal the agent starts is covered by the same answer.
@@ -1703,13 +1761,19 @@ async function terminalTool(
     const marker =
       input.operation === "run" ? `oo${options.uuid().replaceAll("-", "")}` : undefined;
     const completion =
-      marker === undefined ? undefined : terminalCompletion(options.shell?.() ?? "/bin/sh", marker);
+      marker === undefined
+        ? undefined
+        : terminalCompletion((await commandState()).shell ?? "/bin/sh", marker);
     const data =
       completion === undefined
         ? command
         : `${completion.before === undefined ? "" : `${completion.before}\r`}${command}\r${completion.command}\r`;
+    if (marker !== undefined) await terminal.agentCommand?.note(marker).catch(() => undefined);
     const refused = await terminal.write(data);
-    if (refused !== undefined) return refused;
+    if (refused !== undefined) {
+      await terminal.agentCommand?.note(undefined).catch(() => undefined);
+      return refused;
+    }
     if (completion !== undefined) {
       try {
         return await waitForTerminalCommand(options, completion.pattern, signal);
@@ -1746,30 +1810,36 @@ async function waitForTerminalCommand(
         : failure(postWaitAuthorityFailure, postureRefusal(postWaitAuthorityFailure));
     }
     const snapshot = await options.terminal.read();
-    const transcript = terminalTranscriptTail(snapshot, MAX_TERMINAL_SCAN_BYTES).value;
-    const matches = [...transcript.matchAll(completion)];
-    const exitCode = matches.at(-1)?.[1];
-    if (exitCode !== undefined) {
-      return terminalSnapshot(
-        {
-          ...snapshot,
-          transcript: {
-            ...snapshot.transcript,
-            chunks: [transcript.replace(completion, "")],
-          },
-        },
-        { commandCompleted: true, commandExitCode: Number(exitCode) },
-      );
-    }
-    if (snapshot.status !== "running") {
-      return terminalSnapshot(snapshot, { commandCompleted: false });
+    const finished = completedCommand(snapshot, completion);
+    if (finished !== undefined || snapshot.status !== "running") {
+      await options.terminal.agentCommand?.note(undefined).catch(() => undefined);
+      return finished ?? terminalSnapshot(snapshot, { commandCompleted: false });
     }
     // A command still running at the bound, such as a dev server started in
     // the foreground, is left running and its output so far returned. Ending
     // it here stopped every foreground server after 30 seconds (maintainer
-    // decision, 2026-11-26); the agent reads it later or stops it.
+    // decision, 2026-11-26); the agent reads it later or stops it, and the
+    // terminal keeps its marker so a later read reports its exit code.
     if (Date.now() >= deadline) return terminalSnapshot(snapshot, { commandCompleted: false });
   }
+}
+
+/** The command's completion in the transcript, with its marker taken out, or undefined. */
+function completedCommand(
+  snapshot: CodeOperationTerminalSnapshot,
+  completion: RegExp,
+): TerminalToolAnswer | undefined {
+  const transcript = terminalTranscriptTail(snapshot, MAX_TERMINAL_SCAN_BYTES).value;
+  const exitCode = [...transcript.matchAll(completion)].at(-1)?.[1];
+  return exitCode === undefined
+    ? undefined
+    : terminalSnapshot(
+        {
+          ...snapshot,
+          transcript: { ...snapshot.transcript, chunks: [transcript.replace(completion, "")] },
+        },
+        { commandCompleted: true, commandExitCode: Number(exitCode) },
+      );
 }
 
 async function interruptTerminalCommand(

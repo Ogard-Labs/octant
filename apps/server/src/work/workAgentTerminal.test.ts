@@ -11,6 +11,9 @@ const call = (body: unknown) => ({ name: "octant_terminal", inputJson: JSON.stri
 function terminals() {
   let running = false;
   let marker = "";
+  // What the host keeps with the terminal: the shell it launched, and a run's command.
+  let launchedShell: string | undefined;
+  let pending: string | undefined;
   const snapshot = () => ({
     terminalId: "t",
     status: running ? ("running" as const) : ("interrupted" as const),
@@ -23,9 +26,18 @@ function terminals() {
     },
   });
   return {
-    launch: vi.fn(async (_request: Record<string, unknown>) => {
+    launch: vi.fn(async (request: Record<string, unknown>) => {
       running = true;
+      launchedShell = typeof request["shell"] === "string" ? request["shell"] : undefined;
+      pending = undefined;
       return snapshot();
+    }),
+    agentCommand: vi.fn(() => ({
+      ...(launchedShell === undefined ? {} : { shell: launchedShell }),
+      ...(pending === undefined ? {} : { pending }),
+    })),
+    noteAgentCommand: vi.fn((_id: string, next: string | undefined) => {
+      pending = next;
     }),
     attach: vi.fn(() => {
       if (!running) throw new Error("No terminal.");
@@ -203,9 +215,9 @@ describe("a Work thread's terminal", () => {
 
   it("ends a shell as soon as its thread is archived or moves to another folder, and keeps one still in place", async () => {
     const started = new Map<string, WorkTerminalStart>([
-      ["archived", { folder: "/work/a", shell: "/bin/zsh" }],
-      ["moved", { folder: "/work/b", shell: "/bin/zsh" }],
-      ["kept", { folder: "/work/c", shell: "/bin/zsh" }],
+      ["archived", { folder: "/work/a" }],
+      ["moved", { folder: "/work/b" }],
+      ["kept", { folder: "/work/c" }],
     ]);
     // The projection the sweep reads, still as it was when the journal tells its listeners.
     const now = new Map<string, string | undefined>([

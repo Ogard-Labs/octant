@@ -1877,8 +1877,11 @@ command; one too long to show whole (over 8,192 characters) is refused. `run`
 waits up to 30 seconds for its command to finish; one still running then,
 such as a dev server started in the foreground, is left running, and `run`
 returns its output so far with `commandCompleted: false`, in Code, Work and a
-helper's terminal alike (maintainer decision, 2026-11-26). The completion line
-follows the shell the terminal started in. In
+helper's terminal alike (maintainer decision, 2026-11-26). While that command
+still owns the terminal, a new `run` is refused as busy rather than typed into
+it, and `read`, `write` and `stop` still work; the next `read` after it ends
+reports its exit code. The terminal keeps that command, and the shell it
+started in, across turns; the completion line follows that shell. In
 Work it is one shell per thread in the thread's folder, at the thread's level
 and confined as its own commands are; a routine's run is offered none. It
 outlives the turn that started it, under Strict too, and ends when the agent

@@ -10,16 +10,9 @@ import type {
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 
-/** Where a Work thread's shell was started, and which shell, kept between turns. */
+/** Where a Work thread's shell was started, kept between turns. */
 export interface WorkTerminalStart {
   readonly folder: string;
-  /**
-   * The shell the terminal runs. Its completion line follows this one, never
-   * the shell setting now: a Windows person who switched from PowerShell to
-   * Command Prompt left a running PowerShell that a Command Prompt line never
-   * answered, so every later command timed out.
-   */
-  readonly shell: string;
 }
 
 /** The one terminal id of a Work thread's agent terminal, so every turn reaches the same shell. */
@@ -39,7 +32,10 @@ export function workAgentTerminalId(threadId: string): string {
 export function createWorkTerminalTools(input: {
   readonly threadId: string;
   readonly projectId: string;
-  readonly terminals: Pick<TerminalService, "launch" | "attach" | "write" | "terminate">;
+  readonly terminals: Pick<
+    TerminalService,
+    "launch" | "attach" | "write" | "terminate" | "agentCommand" | "noteAgentCommand"
+  >;
   /** The thread's folder now, proven as its turn's is; undefined refuses a start. */
   readonly folder: () => Promise<string | undefined>;
   /** The level the thread's running turn holds now. */
@@ -95,13 +91,12 @@ export function createWorkTerminalTools(input: {
       const executionPolicy = input.posture();
       const prepared = await input.protections(folder, executionPolicy);
       if ("refused" in prepared) return prepared;
-      const shell = input.shell();
-      input.startedIn.set({ folder, shell });
+      input.startedIn.set({ folder });
       return {
         // Checked again as the shell spawns: an archive or a move to Plan
         // while the sandbox was prepared starts nothing.
         admit: () => stale() === undefined,
-        shell,
+        shell: input.shell(),
         cwd: folder,
         stateScope: `work:${input.threadId}`,
         executionPolicy,
@@ -115,8 +110,6 @@ export function createWorkTerminalTools(input: {
   const { ask } = input;
   const tools = createAgentTerminalTools({
     terminal: terminal.port,
-    // The completion line is typed in the syntax of the shell the terminal runs.
-    shell: () => input.startedIn.get()?.shell ?? input.shell(),
     uuid: input.uuid,
     authorityFailure: stale,
     posture: input.posture,

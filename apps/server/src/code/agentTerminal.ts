@@ -15,7 +15,10 @@ export type AgentTerminalLaunch = Omit<
  * longer make starts nothing. It carries no credentials.
  */
 export function createAgentTerminal(options: {
-  readonly terminals: Pick<TerminalService, "launch" | "attach" | "write" | "terminate">;
+  readonly terminals: Pick<
+    TerminalService,
+    "launch" | "attach" | "write" | "terminate" | "agentCommand" | "noteAgentCommand"
+  >;
   readonly terminalId: string;
   /** The launch as it may start now, or why it may not. */
   readonly launch: () => Promise<AgentTerminalLaunch | { readonly refused: string }>;
@@ -97,6 +100,12 @@ export function createAgentTerminal(options: {
         return read();
       },
       terminate,
+      // Kept with the terminal, so a later turn's tools see the shell it
+      // started in and a command an earlier run left running.
+      agentCommand: {
+        read: async () => terminals.agentCommand(terminalId),
+        note: async (pending) => terminals.noteAgentCommand(terminalId, pending),
+      },
     },
     close: async () => {
       closed = true;
