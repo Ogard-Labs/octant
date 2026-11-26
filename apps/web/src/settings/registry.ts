@@ -33,6 +33,11 @@ export interface SettingsSettingEntry {
   readonly scope: SettingsScope;
   readonly keywords: string;
   readonly nativeRequired?: SettingsNativeCapabilityKey;
+  /**
+   * The Settings section a plugin contributes that this row belongs to, by the
+   * id the plugin declares. The row is absent while that plugin is off.
+   */
+  readonly contributedSection?: string;
 }
 
 export interface SettingsSectionEntry {
@@ -149,6 +154,29 @@ export function listAvailableSections(
   capabilities: SettingsNativeCapabilities,
 ): ReadonlyArray<SettingsSectionEntry> {
   return registry.sections.filter((section) => isSectionAvailable(section, capabilities));
+}
+
+/**
+ * The pages without the rows a switched-off plugin contributed, so the rail,
+ * search and links never offer a plugin's settings while it is off. A page
+ * made only of such rows is absent once none is left; Integrations also
+ * holds web search, which is the host's own, so it stays.
+ */
+export function withoutAbsentContributions(
+  sections: ReadonlyArray<SettingsSectionEntry>,
+  isContributedSectionPresent: (contributedSection: string) => boolean,
+): ReadonlyArray<SettingsSectionEntry> {
+  return sections.flatMap((section) => {
+    if (section.settings.every((setting) => setting.contributedSection === undefined)) {
+      return [section];
+    }
+    const settings = section.settings.filter(
+      (setting) =>
+        setting.contributedSection === undefined ||
+        isContributedSectionPresent(setting.contributedSection),
+    );
+    return settings.length === 0 ? [] : [{ ...section, settings }];
+  });
 }
 
 /**

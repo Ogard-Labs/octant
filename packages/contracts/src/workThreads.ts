@@ -56,7 +56,7 @@ export const WorkThreadCompletionEvidence = Schema.Struct({
 export type WorkThreadCompletionEvidence = typeof WorkThreadCompletionEvidence.Type;
 
 /**
- * The levels Work's defaults (Settings › Work, and a Work Project's start
+ * The levels Work's defaults (Settings › Chat & Work, and a Work Project's start
  * mode) offer: every Work level, Plan included (maintainer decision,
  * 2026-11-21), so a new thread may start read-only.
  */
@@ -482,7 +482,7 @@ export const WorkSettings = Schema.Struct({
   /** Strict for Work threads whose thread and Project did not choose. Absent is off. */
   defaultStrict: Schema.optional(Schema.Boolean),
   /**
-   * Settings › Work › Continue after restart: whether the host continues, by
+   * Settings › Chat & Work › Continue after restart: whether the host continues, by
    * itself, a Work turn a restart cut off. Absent is on, which is also what a
    * store persisted before the switch existed reads as.
    */

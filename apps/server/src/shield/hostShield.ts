@@ -117,7 +117,7 @@ export interface HostShieldDependencies {
   readonly safePlaces?: (projectId: string | undefined) => ReadonlyArray<SafeNetworkPlace>;
   /** A folder outside every Project, where Shield's one-shot sessions start. */
   readonly scratchRoot: string;
-  /** Settings › Permissions' Shield brake counts, read at each review. */
+  /** Settings › Limits' Shield brake counts, read at each review. */
   readonly brakeLimits?: () => ShieldBrakeLimits;
   readonly clock?: () => string;
 }

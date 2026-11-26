@@ -854,7 +854,7 @@ runs, not when it was recorded.
 - Every wait names `timeoutMs`, or uses 10 seconds when it names none, on both
   Browsers. Outside Strict there is no wait limit: any positive integer
   `timeoutMs` is admitted (maintainer decision, 2026-11-19; built). Under
-  Strict, a wait is capped by Settings › Permissions › Longest Browser wait
+  Strict, a wait is capped by Settings › Limits › Longest Browser wait
   (10 minutes by default, 1 to 60; built under
   [Octant's own limits become settings](../architecture.md#security-and-authority)),
   and the browser service refuses one past the person's ceiling as

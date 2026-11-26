@@ -10,15 +10,16 @@ import { revealSettingsAncestors, type SettingsOutlineEntry } from "../settings/
  */
 export const SETTINGS_OUTLINE_PAGES: ReadonlySet<string> = new Set([
   "general",
-  "appearance",
   "providers",
   "harness",
   "code",
   "computer-use",
-  "github",
+  "integrations",
   "permissions",
+  "limits",
   "data",
   "sync",
+  "host",
 ]);
 
 /** A section's top edge counts as reached once it is this far below the page's top. */

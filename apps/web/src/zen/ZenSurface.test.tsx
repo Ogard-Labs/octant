@@ -47,7 +47,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The application ground as Settings › Appearance › Background resolved it. */
+/** The application ground as Settings › Background resolved it. */
 const APP_GROUND: ResolvedAppBackground = {
   kind: "builtin",
   backgroundId: "perspective-dot-plane-animated",

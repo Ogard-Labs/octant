@@ -53,6 +53,7 @@ import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
 import { ProviderCatalogView } from "../providers/catalog/ProviderCatalogView";
 import { ProviderSettingsList } from "../providers/ProviderSettingsList";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -169,10 +170,12 @@ import {
   findSetting,
   isSettingAvailable,
   listAvailableSections,
+  withoutAbsentContributions,
   searchSettings,
   settingId,
 } from "../settings/registry";
 import { octantSettingsRegistry } from "../settings/octantSettingsRegistry";
+import { currentSettingsLink } from "../settings/movedSettings";
 import { OctantLimitsSettings } from "../settings/OctantLimitsSettings";
 import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
@@ -408,87 +411,26 @@ const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Obj
 
 const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>> = {
   general: "Your profile, defaults, updates, and alerts.",
-  work: "What new Work threads start with.",
+  "chat-work": "What new Chat and Work threads start with.",
   voice: "Speech, text-to-speech, and image providers.",
-  "computer-use": "Let agents use apps on this Mac.",
-  "device-tools": "Simulator and emulator tools, and their updates.",
+  "computer-use": "Let agents use apps on this Mac, and keep the simulator tools current.",
   providers: "Connect providers, sign in, and pick default models.",
   harness: "Models you add by key or run locally.",
   skills: "Review skills, then trust and enable only what you want.",
-  "web-search": "Where web search may send queries.",
-  github: "GitHub connection on the selected host.",
-  host: "Octant's background service.",
+  background: "What Octant draws behind your work.",
+  text: "Fonts and sizes for the interface, code, terminals and transcripts.",
+  integrations: "The services Octant connects to on the selected host.",
+  host: "Octant's background service, and how much of this computer it may use.",
   permissions: "Files agents may not touch, places they may reach, and what you have allowed.",
+  limits: "How far an agent runs on its own before Octant stops it or asks you.",
   memory: "What Octant remembers about you, and how to keep things out.",
   data: "What this host stores and how to back it up.",
   "secret-stores": "Use a password manager for API keys.",
   sync: "Where artifact versions go when sync is on.",
 };
 
-const APPEARANCE_SECTION = (): SettingsSectionEntry =>
-  findSection(octantSettingsRegistry, "appearance")!;
 const SIDEBAR_SECTION = (): SettingsSectionEntry => findSection(octantSettingsRegistry, "sidebar")!;
 const HOST_SECTION = (): SettingsSectionEntry => findSection(octantSettingsRegistry, "host")!;
-
-/**
- * Settings that moved to another page keep answering the links that name
- * their old one: an empty state, a doc, or a remote client built against the
- * earlier layout still lands on the control.
- */
-const MOVED_SETTINGS: ReadonlyArray<{
-  readonly from: SettingsSectionId;
-  readonly setting: string;
-  readonly to: SettingsSectionId;
-}> = [
-  { from: "host", setting: "host-automation-notifications", to: "general" },
-  ...["public-links", "public-link-service", "browser-site-approvals", "tool-approvals"].map(
-    (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
-  ),
-  { from: "general", setting: "marketplace-fetches", to: "skills" },
-  { from: "chat", setting: "chat-searxng-url", to: "web-search" },
-  { from: "appearance", setting: "stream-replies", to: "chat" },
-  { from: "appearance", setting: "project-view-switcher", to: "code" },
-  ...[
-    "sidebar-width",
-    "sidebar-destinations",
-    "sidebar-more",
-    "mode-switcher",
-    "thread-provider-icons",
-    "sidebar-background",
-    "sidebar-projects-branch",
-    "sidebar-projects-pull-request",
-    "sidebar-projects-last-updated",
-    "sidebar-projects-status",
-    "sidebar-activity-project",
-    "sidebar-activity-branch",
-    "sidebar-activity-pull-request",
-    "sidebar-activity-last-updated",
-    "sidebar-activity-status",
-  ].map((setting) => ({ from: "appearance" as const, setting, to: "sidebar" as const })),
-  { from: "host", setting: "data-map", to: "data" },
-  { from: "host", setting: "thread-retention", to: "data" },
-];
-
-/**
- * Pages that were folded into another keep answering their own links, with
- * or without a setting. Profile and Notifications each held one or two
- * controls and Access was the other half of what an agent may touch and
- * reach, so the sidebar listed three pages a person rarely needed alone.
- */
-const MERGED_PAGES: Readonly<Partial<Record<SettingsSectionId, SettingsSectionId>>> = {
-  profile: "general",
-  notifications: "general",
-  access: "permissions",
-};
-
-function currentSettingsLink(link: SettingsDeepLink): SettingsDeepLink {
-  const moved = MOVED_SETTINGS.find(
-    (entry) => entry.from === link.section && entry.setting === link.setting,
-  );
-  const section = moved === undefined ? link.section : moved.to;
-  const merged = MERGED_PAGES[section] ?? section;
-  return merged === link.section ? link : { ...link, section: merged };
-}
 
 export function SettingsView(props: SettingsViewProps) {
   const capabilities: SettingsNativeCapabilities = {
@@ -499,18 +441,22 @@ export function SettingsView(props: SettingsViewProps) {
   };
   const hostEffectivePlugins = useFirstPartyPluginsEffective();
   const effectivePlugins = props.effectivePlugins ?? hostEffectivePlugins;
-  const availableSections = listAvailableSections(octantSettingsRegistry, capabilities).filter(
-    (section) => isSettingsSectionAvailable(section.id, effectivePlugins),
+  const availableSections = withoutAbsentContributions(
+    listAvailableSections(octantSettingsRegistry, capabilities),
+    (contributedSection) => isSettingsSectionAvailable(contributedSection, effectivePlugins),
   );
-  const pluginSettingsEntryPoints = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const section of availableSections) {
-      const contribution = resolveSettingsSectionContribution(section.id, effectivePlugins);
-      if (contribution?.entryPoint !== undefined) {
-        map.set(section.id, contribution.entryPoint);
-      }
-    }
-    return map;
+  // Integrations draws the section each enabled plugin contributes, in the
+  // order the page registers their rows.
+  const integrationEntryPoints = useMemo(() => {
+    const contributed = new Set(
+      availableSections
+        .find((section) => section.id === "integrations")
+        ?.settings.flatMap((setting) => setting.contributedSection ?? []),
+    );
+    return [...contributed].flatMap(
+      (sectionId) =>
+        resolveSettingsSectionContribution(sectionId, effectivePlugins)?.entryPoint ?? [],
+    );
   }, [availableSections, effectivePlugins]);
   const route = useSettingsRoute({
     availableSections,
@@ -874,7 +820,7 @@ export function SettingsView(props: SettingsViewProps) {
                     type="button"
                     variant="ghost"
                   >
-                    Reset to default
+                    Reset theme
                   </OctantButton>
                 ) : null}
               </header>
@@ -904,7 +850,7 @@ export function SettingsView(props: SettingsViewProps) {
                       onHarnessEndpointChange={setHarnessEndpoint}
                       onCatalogEntryChange={setCatalogEntry}
                       harnessEndpointOpen={subPage !== undefined}
-                      pluginSettingsEntryPoints={pluginSettingsEntryPoints}
+                      integrationEntryPoints={integrationEntryPoints}
                       props={{ ...savingProps, sandboxInitialScope: route.sandboxScope }}
                     />
                   </SecretStoresClientContext.Provider>
@@ -1030,7 +976,7 @@ interface ActiveSectionContentProps {
   readonly onHarnessEndpointChange: (endpointName: string | undefined) => void;
   readonly onCatalogEntryChange: (entryName: string | undefined) => void;
   readonly harnessEndpointOpen: boolean;
-  readonly pluginSettingsEntryPoints: ReadonlyMap<string, string>;
+  readonly integrationEntryPoints: ReadonlyArray<string>;
   readonly props: SettingsViewProps;
   readonly capabilities: SettingsNativeCapabilities;
 }
@@ -1042,7 +988,7 @@ function ActiveSectionContent({
   onHarnessEndpointChange,
   onCatalogEntryChange,
   harnessEndpointOpen,
-  pluginSettingsEntryPoints,
+  integrationEntryPoints,
   props,
   capabilities,
 }: ActiveSectionContentProps) {
@@ -1053,19 +999,6 @@ function ActiveSectionContent({
   // endpoints, so their "connect one" actions land on the add-endpoint row.
   const openModelEndpoints = () =>
     onApplyDeepLink({ section: "harness", setting: settingId("model-endpoints") });
-  const pluginEntryPoint = pluginSettingsEntryPoints.get(activeSection);
-  if (pluginEntryPoint !== undefined) {
-    return (
-      <PluginSettingsSection
-        entryPoint={pluginEntryPoint}
-        focusedSetting={focusedSetting}
-        githubClient={props.githubClient}
-        integrationClient={props.integrationClient}
-        linearProjects={props.linearProjects}
-        onProjectLinearTargetChange={props.onProjectLinearTargetChange}
-      />
-    );
-  }
   switch (activeSection) {
     // The folded pages are never the active one (their links are redirected
     // before they reach the route); they share the page that holds them now.
@@ -1073,11 +1006,40 @@ function ActiveSectionContent({
     case "profile":
     case "notifications":
       return <GeneralSection focusedSetting={focusedSetting} props={props} />;
+    case "integrations":
+    case "web-search":
+    case "github":
+    case "linear":
+      return (
+        <div className="settings-section-stack" id="settings-integrations">
+          <WebSearchSettingsView
+            {...(props.hostControlClient === undefined ? {} : { client: props.hostControlClient })}
+            {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            onOpenResearchRoute={() =>
+              onApplyDeepLink({ section: "chat-work", setting: settingId("chat-research-backend") })
+            }
+          />
+          {integrationEntryPoints.map((entryPoint) => (
+            <PluginSettingsSection
+              entryPoint={entryPoint}
+              focusedSetting={focusedSetting}
+              githubClient={props.githubClient}
+              integrationClient={props.integrationClient}
+              key={entryPoint}
+              linearProjects={props.linearProjects}
+              onProjectLinearTargetChange={props.onProjectLinearTargetChange}
+            />
+          ))}
+        </div>
+      );
     case "appearance":
+    case "background":
+    case "text":
       return (
         <AppearanceSection
           capabilities={capabilities}
           focusedSetting={focusedSetting}
+          page={activeSection}
           props={props}
         />
       );
@@ -1087,21 +1049,36 @@ function ActiveSectionContent({
       );
     case "keybindings":
       return <KeybindingsSection focusedSetting={focusedSetting} />;
+    case "chat-work":
     case "chat":
+    case "work":
       // Stream replies is this app's own preference, so it stays on the page
-      // while the host's Chat defaults are still loading or unreachable.
+      // while the host's Chat defaults are still loading or unreachable. It
+      // covers every mode's transcript, so it follows both sets of defaults.
       return (
-        <div className="settings-section-stack" id="settings-chat">
+        <div className="settings-section-stack" id="settings-chat-work">
           {props.chatController?.bootstrap === undefined ? null : (
             <ChatSettingsView
               {...(props.chatController.settingsMessage === undefined
                 ? {}
                 : { message: props.chatController.settingsMessage })}
+              focusedSetting={focusedSetting}
               onUpdate={props.chatController.updateSettings}
               {...(props.providerController?.snapshot === undefined
                 ? {}
                 : { providerSnapshot: props.providerController.snapshot })}
               settings={props.chatController.bootstrap.settings}
+            />
+          )}
+          {props.workSettings === undefined ? (
+            <p className="settings-view__empty" role="status">
+              Work settings are unavailable on this host.
+            </p>
+          ) : (
+            <WorkSettingsView
+              controller={props.workSettings}
+              focusedSetting={focusedSetting}
+              providerSnapshot={props.providerController?.snapshot}
             />
           )}
           <SettingsSection title="Replies">
@@ -1121,20 +1098,6 @@ function ActiveSectionContent({
               </SettingRow>
             </div>
           </SettingsSection>
-        </div>
-      );
-    case "work":
-      return props.workSettings === undefined ? (
-        <p className="settings-view__empty" role="status">
-          Work settings are unavailable on this host.
-        </p>
-      ) : (
-        <div className="settings-section-stack" id="settings-work">
-          <WorkSettingsView
-            controller={props.workSettings}
-            focusedSetting={focusedSetting}
-            providerSnapshot={props.providerController?.snapshot}
-          />
         </div>
       );
     case "code":
@@ -1233,6 +1196,7 @@ function ActiveSectionContent({
         </div>
       );
     case "computer-use":
+    case "device-tools":
       return (
         <>
           <ComputerUseSettingsView
@@ -1255,13 +1219,11 @@ function ActiveSectionContent({
               />
             </>
           )}
+          <ManagedToolsSettingsView
+            {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+            focusedSetting={focusedSetting}
+          />
         </>
-      );
-    case "device-tools":
-      return (
-        <ManagedToolsSettingsView
-          {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
-        />
       );
     case "providers":
       // The catalog of every provider Octant can set up sits under the ones
@@ -1629,6 +1591,14 @@ function ActiveSectionContent({
       );
     }
     case "host": {
+      const resources =
+        props.agentRunSettingsClient === undefined ? undefined : (
+          <HostResourceSettings
+            client={props.agentRunSettingsClient}
+            focusedSetting={String(focusedSetting ?? "")}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          />
+        );
       const maintenance = (
         <MaintenanceSection
           capabilities={capabilities}
@@ -1646,10 +1616,12 @@ function ActiveSectionContent({
             ? {}
             : { hostFederationLifecycle: props.hostFederationLifecycle })}
           maintenance={maintenance}
+          {...(resources === undefined ? {} : { resources })}
           {...(focusedSetting === undefined ? {} : { focusedSetting })}
         />
       ) : (
         <section aria-label="Host" className="settings-section-stack" id="settings-host">
+          {resources}
           <p>Host lifecycle controls are available on the host machine only.</p>
           {props.hostFederationLifecycle === undefined ? null : (
             <FederatedHostsLifecyclePanel lifecycle={props.hostFederationLifecycle} />
@@ -1888,6 +1860,29 @@ function ActiveSectionContent({
               </SettingRow>
             </div>
           </SettingsSection>
+          {props.canvasClient?.publicLinkSettings === undefined ? null : (
+            <SettingsSection title="Public links">
+              <div className="setgroup">
+                <PublicLinkSettings
+                  externalUrlHost={props.hostBridge}
+                  client={props.canvasClient}
+                  focusedSetting={focusedSetting}
+                />
+              </div>
+            </SettingsSection>
+          )}
+          {props.extensionClient === undefined ? null : (
+            <RememberedToolApprovalsPanel
+              client={props.extensionClient}
+              projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            />
+          )}
+        </div>
+      );
+    case "limits":
+      return (
+        <div className="settings-section-stack" id="settings-limits">
           <SettingsSection title="Tool steps">
             <div className="setgroup">
               <SettingRow
@@ -1946,30 +1941,6 @@ function ActiveSectionContent({
             onSettingsChange={props.onSettingsChange}
             settings={props.settings}
           />
-          {props.canvasClient?.publicLinkSettings === undefined ? null : (
-            <SettingsSection title="Public links">
-              <div className="setgroup">
-                <PublicLinkSettings
-                  externalUrlHost={props.hostBridge}
-                  client={props.canvasClient}
-                  focusedSetting={focusedSetting}
-                />
-              </div>
-            </SettingsSection>
-          )}
-          {props.extensionClient === undefined ? null : (
-            <RememberedToolApprovalsPanel
-              client={props.extensionClient}
-              projectNames={props.projectNames ?? NO_PROJECT_NAMES}
-              {...(focusedSetting === undefined ? {} : { focusedSetting })}
-            />
-          )}
-        </div>
-      );
-    case "todos":
-      return (
-        <div className="settings-section-stack" id="settings-todos">
-          <TodoListHostSettings />
         </div>
       );
     case "memory":
@@ -1983,6 +1954,7 @@ function ActiveSectionContent({
         </div>
       );
     case "data":
+    case "todos":
       return (
         <div className="settings-section-stack" id="settings-data">
           {props.hostControlClient !== undefined ? (
@@ -2041,17 +2013,8 @@ function ActiveSectionContent({
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           )}
+          <TodoListHostSettings focusedSetting={focusedSetting} />
         </div>
-      );
-    case "web-search":
-      return (
-        <WebSearchSettingsView
-          {...(props.hostControlClient === undefined ? {} : { client: props.hostControlClient })}
-          {...(focusedSetting === undefined ? {} : { focusedSetting })}
-          onOpenResearchRoute={() =>
-            onApplyDeepLink({ section: "chat", setting: settingId("chat-research-backend") })
-          }
-        />
       );
     case "skills":
       // Marketplace fetches is this host's own switch, so it stays reachable
@@ -2654,13 +2617,6 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
   const hostPlatform = useHostPlatform();
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
-      {props.agentRunSettingsClient === undefined ? null : (
-        <HostResourceSettings
-          client={props.agentRunSettingsClient}
-          focusedSetting={String(focusedSetting ?? "")}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        />
-      )}
       <SettingsSection
         description={`Everything is optional and kept on ${thisComputerName(hostPlatform)}.`}
         title="Your identity"
@@ -3070,9 +3026,22 @@ interface AppearanceSectionProps extends SectionProps {
   readonly capabilities: SettingsNativeCapabilities;
 }
 
-function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSectionProps) {
+/**
+ * Appearance, Background and Text: one page held all three until it reached
+ * forty settings. Appearance is the colours and the material, Background is
+ * what is drawn behind the window's content, and Text is how type is set.
+ */
+function AppearanceSection({
+  focusedSetting,
+  props,
+  capabilities,
+  page,
+}: AppearanceSectionProps & { readonly page: "appearance" | "background" | "text" }) {
   const isAvailable = (id: string) =>
-    isSettingAvailable(findSetting(APPEARANCE_SECTION(), settingId(id))!, capabilities);
+    isSettingAvailable(
+      findSetting(findSection(octantSettingsRegistry, page)!, settingId(id))!,
+      capabilities,
+    );
   const sidebarBackground =
     props.themeController?.draft?.sidebarBackground ?? props.settings.sidebarBackground;
   // One control for what used to be two: a Translucent sidebar switch and a
@@ -3092,7 +3061,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               window.matchMedia?.("(prefers-color-scheme: dark)").matches === true,
           )
     ][glass === "strong" ? "strong" : "subtle"];
-  const windowSection = (
+  const windowSection = () => (
     <SettingsSection title="Window">
       <div className="setgroup">
         {isAvailable("sidebar-material") ? (
@@ -3163,7 +3132,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
       </div>
     </SettingsSection>
   );
-  const readingSection = (
+  const readingSection = () => (
     <SettingsSection title="Reading">
       <div className="setgroup">
         {isAvailable("transcript-text-size") ? (
@@ -3238,51 +3207,87 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
       </div>
     </SettingsSection>
   );
+  if (page === "background") {
+    const theme = props.themeController;
+    return (
+      <section
+        aria-label="Background"
+        className="settings-section-stack settings-background-page"
+        id="settings-background"
+      >
+        {/* A refused save answers here, in the slot the theme editor gives it
+            on Appearance and Text: that editor is not on this page. */}
+        <div aria-live="polite" className="settings-feedback-slot">
+          {theme?.error === undefined ? null : (
+            <OctantAlert className="settings-view__error" tone="danger">
+              {theme.error}
+            </OctantAlert>
+          )}
+        </div>
+        {theme === undefined || !isAvailable("app-background") ? (
+          <SettingsSection title="Source and effect">
+            <SettingsState kind="empty">
+              The background cannot be changed in this window.
+            </SettingsState>
+          </SettingsSection>
+        ) : theme.draft === undefined ? (
+          // A change made before the theme has been read has no draft to
+          // join and would be dropped without a word, so the controls wait.
+          // A read that failed says so above and is not still "loading".
+          theme.status === "loading" ? (
+            <p className="settings-view__empty" role="status">
+              Loading Background settings…
+            </p>
+          ) : theme.error === undefined ? (
+            <SettingsState kind="empty">Background settings are unavailable.</SettingsState>
+          ) : null
+        ) : (
+          <SettingsSection className="settings-app-background" title="Source and effect">
+            <AppBackgroundSettings
+              background={theme.draft.appBackground ?? DEFAULT_APP_BACKGROUND}
+              focused={focusedSetting === settingId("app-background")}
+              increasedContrast={theme.draft.increasedContrast === true}
+              library={props.backgroundImageLibrary}
+              onChange={(appBackground) => {
+                void theme.applyPatch({ appBackground });
+              }}
+              onPreview={(appBackground) => {
+                theme.updateDraft({ appBackground });
+              }}
+            />
+          </SettingsSection>
+        )}
+      </section>
+    );
+  }
+  if (page === "text") {
+    return (
+      <section aria-label="Text" className="settings-section-stack" id="settings-text">
+        {props.themeController === undefined ? (
+          readingSection()
+        ) : (
+          <ThemeAppearanceEditor
+            afterTypography={readingSection()}
+            controller={props.themeController}
+            part="text"
+            {...(focusedSetting === undefined ? {} : { focusedSetting })}
+          />
+        )}
+      </section>
+    );
+  }
   return (
     <section aria-label="Appearance" className="settings-section-stack" id="settings-appearance">
-      {props.themeController !== undefined ? (
+      {props.themeController === undefined ? (
+        windowSection()
+      ) : (
         <ThemeAppearanceEditor
-          photoLibrary={props.backgroundImageLibrary}
-          afterScheme={
-            <>
-              {windowSection}
-              {isAvailable("app-background") && props.themeController !== undefined ? (
-                <SettingsSection className="settings-app-background" title="Background">
-                  {isAvailable("app-background") && props.themeController !== undefined ? (
-                    <>
-                      <AppBackgroundSettings
-                        background={
-                          (props.themeController.draft ?? props.themeController.settings)
-                            ?.appBackground ?? DEFAULT_APP_BACKGROUND
-                        }
-                        focused={focusedSetting === settingId("app-background")}
-                        increasedContrast={
-                          (props.themeController.draft ?? props.themeController.settings)
-                            ?.increasedContrast === true
-                        }
-                        library={props.backgroundImageLibrary}
-                        onChange={(appBackground) => {
-                          void props.themeController?.applyPatch({ appBackground });
-                        }}
-                        onPreview={(appBackground) => {
-                          props.themeController?.updateDraft({ appBackground });
-                        }}
-                      />
-                    </>
-                  ) : null}
-                </SettingsSection>
-              ) : null}
-            </>
-          }
-          afterTypography={readingSection}
+          afterScheme={windowSection()}
           controller={props.themeController}
+          part="look"
+          photoLibrary={props.backgroundImageLibrary}
           {...(focusedSetting === undefined ? {} : { focusedSetting })}
         />
-      ) : (
-        <>
-          {windowSection}
-          {readingSection}
-        </>
       )}
     </section>
   );

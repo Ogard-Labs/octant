@@ -385,7 +385,7 @@ The platform face draws every weight in between (a 14px line grows 5.4px for
 each 50 from 400 to 650, measured), so with smoothing on reading text is 450, a
 name or a label 600 and a heading 650; the page title keeps 700, and the
 body's own weight, which a person can set, takes the same half step. Geist is
-an Appearance choice, and Appearance's Smooth text switch (on by default,
+a choice on Settings › Text, and its Smooth text switch (on by default,
 hidden off a Mac, `fontSmoothing` in the theme settings, default `"on"`; a
 stored `"off"` stays off) returns the system's fuller strokes at the plain
 weights (400, 500, 600).
@@ -451,7 +451,7 @@ read as a web page in a frame.
 | Navigation group | 12              | 400    | 14px    | muted       | `oct-nav-group`                                                                                                                                         |
 | Menu option      | 13              | 500    | 16px    | primary     | `oct-menu-option`                                                                                                                                       |
 | Body             | 13              | 400    | 1.5     | primary     | `body`                                                                                                                                                  |
-| Reply text       | transcript size | 400    | 1.6     | primary     | Appearance's transcript size; lists indent 16px                                                                                                         |
+| Reply text       | transcript size | 400    | 1.6     | primary     | Text's transcript size; lists indent 16px                                                                                                               |
 | Activity line    | 13              | 400    | 1.4     | muted       | `oct-activity-line`                                                                                                                                     |
 | Detail           | 13              | 400    | 1.45    | secondary   | `oct-row-detail`                                                                                                                                        |
 | Meta             | 12              | 400    | 1.4     | muted       | `oct-meta`                                                                                                                                              |
@@ -721,7 +721,7 @@ panel outline 6. A new surface takes a token, never a number of its own.
 ### Appearance
 
 What a person can change about the look, and how each choice reaches the
-tokens above. Settings › Appearance draws these controls; their placement and
+tokens above. Settings › Appearance, Background and Text draw these controls; their placement and
 copy are in [Settings](docs/design/settings.md).
 
 **A theme from a few seeds.** Every surface, wash and line in this document is
@@ -1750,8 +1750,9 @@ The kit is `settings/primitives.tsx`; contents are in
   Settings row's height); a command's raw output is a `SettingsOutputWell`,
   collapsed, 160px tall and scrollable.
 - **On this page**: one rule. Pages of four sections or more (General,
-  Appearance, Providers & Models, Octant Harness, Code, Computer use, GitHub,
-  Permissions, Data & storage, Sync; the list is `SETTINGS_OUTLINE_PAGES`) carry
+  Providers & Models, Octant Harness, Code, Computer use, Integrations,
+  Permissions, Limits, Data & storage, Sync, Host; the list is
+  `SETTINGS_OUTLINE_PAGES`) carry
   a single-line row of quiet chips: 24px, 12px text, `--oct-fill-4`, a hover
   wash, the section in view marked as the page scrolls. It never wraps: it
   scrolls sideways under a fade at the edge that has more. Its slot is a fixed

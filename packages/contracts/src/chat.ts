@@ -608,7 +608,7 @@ export const ChatSettings = Schema.Struct({
   defaultPersonalityInstructions: Schema.NonEmptyTrimmedString,
   providerFallback: Schema.optional(ChatProviderFallback),
   /**
-   * Settings › Chat › Continue after restart: whether the host continues, by
+   * Settings › Chat & Work › Continue after restart: whether the host continues, by
    * itself, an answer a restart cut off. Absent is on, which is also what a
    * store persisted before the switch existed reads as.
    */

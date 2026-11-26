@@ -68,7 +68,7 @@ const UNAVAILABLE_FALLBACKS: Readonly<Record<GithubCatalogueUnavailable["reason"
   "scope-limited": "The GitHub account is missing a required scope.",
   "rate-limited": "GitHub reported a rate limit. Try again later.",
   "insecure-storage":
-    "Open Settings → GitHub, remove the insecure credential, then set up GitHub again.",
+    "Open Settings → Integrations, remove the insecure GitHub credential, then set up GitHub again.",
   "external-token": "An ambient GitHub token blocks this capability.",
   "invalid-cursor": "The repository page reference expired. Refresh the list.",
   unavailable: "GitHub repositories are unavailable on this host.",

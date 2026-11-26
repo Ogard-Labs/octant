@@ -1341,7 +1341,7 @@ export function parseShieldModelAnswer(text: string): ShieldModelAnswer | undefi
 // The brakes.
 
 /**
- * The denial counts at which Shield pauses, from Settings › Permissions
+ * The denial counts at which Shield pauses, from Settings › Limits
  * (`shieldDenialsInARow`, `shieldDenialsPerThread`); the defaults are the
  * former fixed 3 and 20.
  */

@@ -822,7 +822,7 @@ export const LEGACY_DEFAULT_ZEN_GROUND_COLOR = "#1a1a2e";
  * channel to `levels` steps through an ordered threshold, so it reads as a
  * halftone. `none` keeps the dials so turning the effect back on restores
  * them. It applies to built-in and uploaded pictures; the application ground
- * carries its own dither in Settings › Appearance › Background.
+ * carries its own dither in Settings › Background.
  */
 export const ZenGroundEffect = Schema.Struct({
   kind: Schema.Literal("none", "pixelate", "dither"),

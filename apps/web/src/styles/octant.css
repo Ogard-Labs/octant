@@ -132,7 +132,7 @@
   /* The interface scale is the size the user chose, not a frozen ladder.
      Every step keeps the ratio it has to the 13px reference size, so the whole
      scale moves together when the setting changes. Freezing these was why
-     Appearance's interface font size reached almost nothing: the ladder
+     Text's interface font size reached almost nothing: the ladder
      carried the great majority of the app's text and none of it could hear
      the setting.
 
@@ -403,7 +403,7 @@
      phone's width the pane's panel already stands 20px in from each edge, so
      the column takes none of its own and the gutter stays 20px, not 40. */
   --oct-thread-gutter: 40px;
-  /* The transcript's own text size (Appearance › Transcript text size).
+  /* The transcript's own text size (Text › Transcript text size).
      Medium is the body size the rest of the interface reads at: a reply set
      one step larger than the question above it and the composer below it
      read as three sizes on one surface. */
@@ -1238,7 +1238,7 @@ html {
 
 /* The thread's column: what a conversation surface lays its pieces in, and the
    one width the title band reads its text edge from (styles.css). Declared on
-   the shell as well, so a measure the shell sets (Appearance › Transcript
+   the shell as well, so a measure the shell sets (Text › Transcript
    width) is the one it resolves; the percentage is the container's, at the use. */
 :root,
 .shell {
