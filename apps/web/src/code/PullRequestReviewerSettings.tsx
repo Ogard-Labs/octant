@@ -263,10 +263,18 @@ export function ProjectPullRequestReviewerSection(props: ProjectPullRequestRevie
     emptyOption: { id: NO_ROUTE_OPTION, label: "Off — pick a reviewer model" },
   });
 
+  const guideRoute = settings?.guideRoute;
+  const guideOptions = reviewerRouteOptions({
+    snapshot: props.providerSnapshot,
+    current: guideRoute,
+    emptyOption: { id: NO_ROUTE_OPTION, label: "None — no guides are written" },
+  });
+
   const save = async (next: {
     readonly enabled: boolean;
     readonly route: PullRequestReviewRoute | null;
     readonly postSummaryComment: boolean;
+    readonly guideRoute?: PullRequestReviewRoute | null;
   }) => {
     setPending(true);
     setError(undefined);
@@ -277,6 +285,7 @@ export function ProjectPullRequestReviewerSection(props: ProjectPullRequestRevie
         ...(settings?.reviewerId === undefined ? {} : { reviewerId: settings.reviewerId }),
         route: next.route,
         postSummaryComment: next.postSummaryComment,
+        ...(next.guideRoute === undefined ? {} : { guideRoute: next.guideRoute }),
       });
       setView(updated);
     } catch (caught: unknown) {
@@ -405,6 +414,38 @@ export function ProjectPullRequestReviewerSection(props: ProjectPullRequestRevie
           }}
         />
       </div>
+
+      <label className="pr-reviewer-settings__field">
+        <span className="pr-reviewer-settings__field-label">Guide model</span>
+        <OctantSelectField
+          aria-label="Guide model"
+          className="pr-reviewer-settings__select window-no-drag"
+          disabled={disabled}
+          onValueChange={(value) => {
+            if (settings === undefined) return;
+            const chosen = guideOptions.find((option) => option.id === value);
+            if (chosen === undefined) return;
+            void save({
+              enabled: settings.enabled,
+              route: settings.route ?? null,
+              postSummaryComment: settings.postSummaryComment,
+              guideRoute:
+                chosen.route === undefined
+                  ? null
+                  : {
+                      providerInstanceId: chosen.route.providerInstanceId,
+                      modelId: chosen.route.modelId,
+                    },
+            });
+          }}
+          options={guideOptions.map(({ id, label }) => ({ id, label }))}
+          value={guideRoute === undefined ? NO_ROUTE_OPTION : routeKey(guideRoute)}
+        />
+        <span className="pr-reviewer-settings__hint">
+          Review guides in a pull request&apos;s Guide tab run on this model, and each run is
+          billed. There is no default.
+        </span>
+      </label>
 
       {error === undefined ? null : (
         <OctantAlert layout="row" tone="warning">

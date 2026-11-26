@@ -39,7 +39,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 17        | 10      | 7            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 6         | 3       | 3            | 0                   |
-| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 7         | 3       | 4            | 0                   |
+| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 8         | 4       | 4            | 0                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 5         | 3       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **302**   | **183** | **115**      | **4**               |
+| **All areas**                                                                         | **303**   | **184** | **115**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1310,6 +1310,19 @@ A bundled, switchable first-party pull request reviewer plugin (`octant/second-m
 - Live maintainer smoke against a real repository and two signed-in providers is owed.
 
 Status: Built. Since: 2026-11-20. Detail: [Architecture: Modes, Merge when ready and Auto-fix](../architecture.md#modes-chat-work-and-code).
+
+### Review guides and Viewed files
+
+A pull request's reading pane has a Guide tab: an ordered list of stops through the change, written for one pushed head by a read-only model run, and the Changes tab marks files Viewed with GitHub's own state (maintainer decision, 2026-11-26).
+
+- A guide is stored once per head on the pull-request link's `pull-request-guide` aggregate (`run-started@1`, `recorded@1`, `run-failed@1`). It holds at most 30 stops; each has a title, why it matters, a "needs your decision" flag and at most 8 anchors (a path and a line range at the head). The host drops every anchor that is not inside the diff at that head; a stop left with none stays and reads as unanchored. Model output over 16 KB is refused as invalid.
+- A run follows the reviewer seam: a `pull-request-guide-writer` contribution proposes stops through a host port that only reads the diff and runs one read-only turn at Plan's gate. It runs on the guide model the person picked in Project settings; there is no default, and with none picked nothing runs. Each run reserves spend through the spend ceiling under a linked thread, and one runs per link at a time. A push that lands mid-run records `head-stale`; after a push the guide reads "Written for an older push" and offers Rewrite, which replaces the guide for the current head unless the run leaves no stop, which keeps it. A closed or merged pull request offers no run.
+- The person starts a run from a local window; a paired phone only reads guides. The agent's `guide` reads its own pull request's guide and never asks; `guide-write` asks below Full access and is refused in Plan. Guide text is outside content to a thread that reads it.
+- Viewed is GitHub's `viewerViewedState`, read and written (`markFileAsViewed`, `unmarkFileAsViewed`) through the host's `gh` GraphQL, from a local window only, under the person's GitHub name, always on github.com. A mark is refused once a push moved the head the person reviewed. Octant keeps no copy and journals nothing for it. A file GitHub dismissed after a new push shows "Changed", and the list header shows "n of m viewed".
+- J and K step between stops. A live billed guide run against a real repository is owed as a maintainer smoke.
+- Departures from the approved plan: an anchor opens Changes at its file, not at its lines; an anchor is kept when its range meets a hunk, not only when every line exists; Viewed is read and written at `/api/code/pull-request-guides/viewed/query` and `/viewed`, and its read is local-window only too; a person's run is charged to the pull request's first active linked thread and refused `no-thread` without one.
+
+Status: Built. Since: 2026-11-26. Detail: [Workspace: the Pull requests reading pane](workspace.md#tool-lifecycles) and [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Delivery to targets the person owns
 

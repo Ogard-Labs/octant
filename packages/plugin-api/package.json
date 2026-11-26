@@ -23,7 +23,8 @@
     "./canvas-export-worker": "./src/canvasExportWorker.ts",
     "./code-tools": "./src/codeTools.ts",
     "./media-tools": "./src/mediaTools.ts",
-    "./pull-request-reviewer": "./src/pullRequestReviewer.ts"
+    "./pull-request-reviewer": "./src/pullRequestReviewer.ts",
+    "./pull-request-guide-writer": "./src/pullRequestGuideWriter.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

@@ -206,6 +206,7 @@
     "./code-provider-file-review": "./src/codeProviderFileReview.ts",
     "./code-tool-contribution": "./src/codeToolContribution.ts",
     "./pull-request-reviewer": "./src/pullRequestReviewer.ts",
+    "./pull-request-guide": "./src/pullRequestGuide.ts",
     "./side-chat-return": "./src/sideChatReturn.ts",
     "./thread-message-queue": "./src/threadMessageQueue.ts"
   },

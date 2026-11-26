@@ -596,6 +596,7 @@ import { ImageJobProjection } from "../image/imageJobProjection";
 import { VideoJobProjection } from "../video/videoJobProjection";
 import { registerBenchmarkEvents } from "../benchmarks/benchmarkEventStore";
 import { registerPullRequestReviewEvents } from "../pullRequestReviewers/pullRequestReviewService";
+import { registerPullRequestGuideEvents } from "../pullRequestGuides/pullRequestGuideService";
 import { BenchmarkProjection } from "../benchmarks/benchmarkProjection";
 import {
   DesktopLeaseProjection,
@@ -1129,6 +1130,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerDesktopLeaseEvents(events);
   registerBenchmarkEvents(events);
   registerPullRequestReviewEvents(events);
+  registerPullRequestGuideEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();
