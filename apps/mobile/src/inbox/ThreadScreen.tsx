@@ -72,6 +72,9 @@ import { useChatThread } from "./thread/useChatThread";
 import { useCodeThread } from "./thread/useCodeThread";
 import { useThreadTurnActions } from "./thread/useThreadTurnActions";
 import { useWorkThread } from "./thread/useWorkThread";
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
+import { QueuedMessages } from "./thread/QueuedMessages";
+import { useMobileMessageQueue } from "./thread/useMobileMessageQueue";
 import {
   MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS,
   MOBILE_CHAT_IDLE_REFRESH_MAX_DELAY_MS,
@@ -406,10 +409,25 @@ export function ThreadScreen(props: ThreadScreenProps) {
     composerAccess.editable &&
     (mode === "chat"
       ? staleGate.allowProductMutations && chat.activeAttempt === undefined
-      : staleGate.allowProductMutations &&
-        !workTurnLive &&
-        !codeTurnLive &&
-        (mode === "code" || work.thread !== undefined));
+      : staleGate.allowProductMutations && (mode === "code" || work.thread !== undefined));
+  // A follow-up typed while a Work or Code turn runs joins the host's queue
+  // for this thread and waits for that turn to end.
+  const followUpTurnLive = workTurnLive || codeTurnLive;
+  const queue = useMobileMessageQueue({
+    transport: offlineDemo ? undefined : transport,
+    scope:
+      (mode === "work" || mode === "code") && threadId !== undefined
+        ? { mode, threadId }
+        : undefined,
+    active: followUpTurnLive,
+    allowChanges: composerAccess.editable && staleGate.allowProductMutations,
+  });
+  const queueFollowUp = () => {
+    const typed = typedClaimFor(typedScope, prompt).typedByPerson === true;
+    void queue.enqueue(prompt, typed).then((queued) => {
+      if (queued) setPrompt("");
+    });
+  };
   const appendToDraft = useCallback(
     (text: string) => setPrompt((draft) => appendTranscript(typedScope, draft, text)),
     [typedScope],
@@ -836,6 +854,15 @@ export function ThreadScreen(props: ThreadScreenProps) {
         />
       ) : null}
       {resumeOffer === undefined ? null : <ResumeBar busy={resumeBusy} offer={resumeOffer} />}
+      {selected.mode === "chat" ? null : (
+        <QueuedMessages
+          changing={queue.changing}
+          error={queue.error}
+          items={queue.items}
+          onEdit={queue.edit}
+          onRemove={queue.remove}
+        />
+      )}
       {selected.mode === "chat" ? (
         <>
           <FloatingComposer
@@ -864,21 +891,24 @@ export function ThreadScreen(props: ThreadScreenProps) {
         </>
       ) : (
         <FloatingComposer
-          busy={busy || workTurnLive || codeTurnLive}
-          busyLabel={
-            !busy && latestTurnAtUsageLimit
-              ? MOBILE_COPY.turnWaitingOnUsageLimit
-              : MOBILE_COPY.turnRunning
-          }
+          busy={busy}
+          busyLabel={MOBILE_COPY.turnRunning}
           editable={composerEditable}
-          footerHint={composerAccess.reason ?? followUpComposerCopy?.footerHint}
+          footerHint={
+            composerAccess.reason ??
+            (!followUpTurnLive
+              ? followUpComposerCopy?.footerHint
+              : latestTurnAtUsageLimit
+                ? MOBILE_COPY.turnWaitingOnUsageLimit
+                : MOBILE_COPY.queueWhileTurnRuns)
+          }
           modelLabel={
             selected.mode === "work" && work.thread !== undefined
               ? mobileModelLabel(models.options, String(work.thread.modelId))
               : MOBILE_COPY.modelHostOnly
           }
           onChangeText={setPrompt}
-          onSubmit={sendFollowUp}
+          onSubmit={followUpTurnLive ? queueFollowUp : sendFollowUp}
           {...(workTurnLive || codeTurnLive ? {} : attachProps)}
           placeholder={followUpComposerCopy?.placeholder ?? MOBILE_COPY.composerFollowUp}
           testID="mobile-thread-composer"
