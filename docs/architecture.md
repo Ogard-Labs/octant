@@ -967,7 +967,7 @@ not separate one paired device from another. A server Project's server is read b
 `GET /api/server-projects/resources?projectId=`, which runs one fixed
 read-only script over that Project's SSH connection and answers the same
 snapshot, for a local window or a paired device (maintainer decision, 2026-11-12;
-not built yet: today a paired device is refused), and Linux servers only.
+the route answers a paired device; that device's own Vitals view is not built yet), and Linux servers only.
 The Computers card
 reads the route only while the card is on screen and the window is visible,
 about every ten seconds, at most one read per host at a time and each abandoned
@@ -1149,8 +1149,10 @@ voice input, and store distribution extend this client under
 [Mobile maturity](design/mobile-maturity.md), which grants the phone no
 authority beyond what the host grants.
 
-**Local client context.** The local trust class is "holds a secret only the
-host's OS user can read", not "is on loopback". Loopback plus an admitted
+**Local client context.** Shared product state is host-owned; window bounds,
+panes, focus, scroll, and unsaved drafts stay client-context state. The local
+trust class is "holds a secret only the host's OS user can read", not "is on
+loopback". Loopback plus an admitted
 Origin says nothing about who is calling: another OS user on the same machine,
 an `ssh -L` forward, a proxy that rewrites `Host`, or a local service account
 all arrive that way, and a forged `Origin` header costs a non-browser caller
@@ -1333,6 +1335,11 @@ through the transport its adapter verified:
 
 No transport edits a person's provider MCP, hook, or global configuration;
 OpenCode's per-launch posture stays in its connection-private configuration.
+A connection binds its catalogue before its prompt and accepts only the
+expected in-process server and tool names, and a catalogue change cannot
+overlap a running tool turn. Late, duplicate, or cancelled tool answers are
+refused, and cancellation reaches the executor even while it waits for
+approval. A missing, malformed, or oversized Browser capture is refused.
 The local-server adapter binds its private tool endpoint to one connection's
 session and exact offered catalogue, and reports app tools only with a process
 receipt attesting that external MCP, plugins, and skills cannot enter the
@@ -1817,8 +1824,32 @@ so a full data purge removes it. The broker has no
 `/v1/app-store-connect-keys/*` routes and `octant apple key` is gone; a key
 saved in 1Password was only ever a reference and is untouched.
 
+Apple discovery is derived from the checkout; Octant never rewrites projects,
+schemes, build settings, or manifests to make it pass. A test run keeps its
+result bundle and logs as evidence and reports a structured verdict, or the raw
+artifact and an incomplete verdict when parsing fails. A build's derived data
+is private to its action and removed when it ends, after a test's result bundle
+is kept, and the host clears leftovers at start (maintainer request,
+2026-11-10). After a restart, ambiguous device work is waiting or
+inconclusive, never verified. A destination has a stable host-local identity
+and an exclusive owner or lease: no other thread may reset, erase, shut down,
+or take over a destination another workflow owns. Erase, content reset, or
+runtime installation is never an implicit recovery step, and Octant stops only
+a process it owns, never by broad name. Device activity, evidence, and
+cancellation are scoped to the requesting task, checkout, and authority; an
+action id alone grants no access. Replaying a completed input needs current
+authorization and an exact request fingerprint, reusing an action id with
+changed input or while it runs is refused, and device artifacts keep task and
+checkout ownership on disk. An explicit screenshot may deliver one PNG through
+the provider image channel under thread and checkout authority; anything else
+is refused, never resized, and no other operation sends screen images.
+
 On an approval-gated thread, **Allow input** is the confirmation that opens
-that destination; clicks, typing, Home, and Lock never raise it.
+that destination; clicks, typing, Home, and Lock never raise it. It opens the
+destination for fifteen minutes for that window, thread, and destination, and
+only a delivered input renews it. The grant lives in host memory, ends with the
+window's authority, a shutdown, or the destination no longer booted, and never
+covers boot, shutdown, Open URL, or Rotate.
 The agent's `octant_apple` and `octant_android` tools follow the thread's
 turn posture per operation, not a Full-access gate on the whole tool:
 `discover`, `status`, `screenshot`, `logs`, and Android's `describe-ui` are
@@ -2064,8 +2095,9 @@ the host opens for its launch
 ([Octant Shield](#octant-shield), servers as built). No mode bans them: in
 Work as in Code they are commands at the thread's level. At Guarded, the
 first connection to each host in a thread asks the person, naming the host,
-even where a remembered approval would cover the command otherwise. Network egress for shell commands follows the level: at Guarded
-and Reviewed it follows the Project's egress rules, so a host those
+even where a remembered approval would cover the command otherwise. Network egress for shell commands follows
+[Network limits](#provider-runtime-network), which ship off: with them on,
+Guarded and Reviewed follow the Project's egress rules, so a host those
 rules do not allow is refused; at Full access the network is open.
 
 Chat's missing filesystem and shell authority is withheld, and by rule, not
@@ -2651,6 +2683,23 @@ command definition. Cancellation during discovery prevents process launch; runti
 shutdown also cancels pending discovery and waits for it to settle. Thread and
 checkout authority checks still precede both run and cancellation.
 
+A repository is identified by an opaque digest of its canonical Git common
+directory, never by a path. File, terminal, test, and Git operations are
+server-owned services; panes are their clients. Managed worktrees live under a
+sibling root that needs its own confirmed grant, get an ownership receipt
+before use, and are never silently reset or reused. Operations use
+checkout-relative targets, symlink and identity checks, atomic writes, bounded
+output, and structured verdicts.
+
+A **project scaffold** is a curated catalog entry with a pinned generator, run
+as an ordinary approval-gated Code operation. A moving version fails to
+decode. The host composes the command line from the catalog record and one
+directory name; an entry adds no flag, path, or shell fragment. The directory
+is one segment with no separators, traversal, leading dot, or leading `-`, and
+an existing name refuses the run. Plan refuses a scaffold. It runs confined
+with network allowed, caches in a private directory, installs no
+dependencies, and is never reported created unless it exits cleanly.
+
 Every Project, in any mode, may carry one optional **colour**: a theme palette
 role (red, orange, yellow, green, teal, blue, purple, or pink) the person picks
 as the Project's identity. It lives on the Project record and is journaled as
@@ -2710,10 +2759,12 @@ read the same file on demand; nothing about its content is journaled. While
 disabled, Octant reads nothing from the folder for this purpose, adds no
 instruction, and writes nothing there; turning the setting off leaves an
 existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
-`CLAUDE.md`, or similar) into a user folder. Claude Work turns read the
-person's global and the Project's `CLAUDE.md` as text with no authority,
-while the Project's settings and code still follow trust (maintainer
-decision, 2026-11-14; [Provider runtimes](design/provider-runtimes.md)).
+`CLAUDE.md`, or similar) into a user folder. Claude Code reads the
+person's global and the Project's `CLAUDE.md` in Work and Code: it loads them
+itself where its `user` and `project` setting sources are on, and Octant reads
+them as text with no authority only where those sources are off, while the
+Project's settings and code still follow trust (maintainer decision,
+2026-11-14; [Provider instruction files](design/decisions.md#provider-instruction-files)).
 Codex Work threads read the Project's `AGENTS.md` as Code threads do, by
 Codex's own discovery from the repository root down to the Project root
 (maintainer decision, 2026-11-14, replacing the zero `project_doc_max_bytes`
@@ -2728,6 +2779,23 @@ promotion moves focus and tooling, not authority: both threads run under the
 shared guardrail levels, and the new thread takes the level of its own
 Project and scope as any new Code thread does, never a level carried over
 from the Work thread.
+
+**Records of what a turn changed** are observations, never attributions. A
+Work turn watches its folder from before the provider starts until it settles
+and records relative paths only, reading no file; an unnameable or refused
+path marks the record truncated, and a host that cannot watch records
+nothing. A Code turn compares the checkout tree to tree at start and settle
+and journals at most 32 paths with lines added and removed and a binary flag;
+a rename is both paths. With no starting capture (Plan, an unreadable
+checkout) or no change it records nothing. Recording never fails or delays a
+turn.
+
+A **thread plan** is the thread's own journaled aggregate of ordered steps, at
+most one live per thread, proposed and approved whole. Approval names the
+exact revision read; rewriting steps mints a new revision and returns the plan
+to proposed. Changing the level, leaving Plan included, never approves a plan.
+Steps become work only after approval: before then the host refuses to start,
+finish, or drop one, and a proposal claims no progress.
 
 Rebinding a Code Project supersedes the checkout its existing threads were
 created against, and no later observation can produce those threads' checkout
@@ -3391,6 +3459,13 @@ turn. Every message of a thread instead offers **Fork from here** and
 **Rewind to here**. Restoring a marked checkpoint still forks; a thread can
 now also move back in place. Chat's differences are under **Chat** below.
 
+A **checkpoint** is a marked point that copies no thread state, journaled on
+its own aggregate (marked, forgotten, restored). Restoring one forks: Chat
+branches through the marked turn, and Code creates a thread on its own
+worktree at the recorded revision with a fresh delivery branch, leaving the
+origin untouched. A Code checkpoint is refused when the host caught no
+revision. Forgetting retires the marker and leaves it readable.
+
 - **Fork from here** on a reply forks through that reply, and on a person's
   message through the reply before it; the first message of a thread offers
   none, because nothing comes before it. A Code fork follows the fork rules
@@ -3580,7 +3655,11 @@ target either child harness. A provider's own native subagents are not
 [Key providers run as themselves](design/provider-runtimes.md#key-providers)
 says, each shown as a child run of its thread.
 Every child appears in the Agents surface, where the person can watch, stop,
-or resume it, and `cancel` is the agent's way to stop one it started.
+or resume it, and `cancel` is the agent's way to stop one it started. Only the
+thread's agent starts a child, and the parent-child hierarchy is the only
+subagent surface. Cancelling a child tree goes leaves-up and completes only
+once each process is confirmed stopped; an ambiguous outcome becomes waiting,
+failed, or interrupted, never completed.
 
 Rationale: the harness once offered its own `delegate` tool beside
 `octant_agents`, with different words (`start`, `collect`) for the same
@@ -3687,7 +3766,13 @@ child read authority, and never resolve a client-supplied filesystem path. Summa
 polling carries metadata only. The existing Review surface opens the saved diff
 without checkout mutation or parent-file navigation. Chat, Work, Plan, legacy
 sessions without a baseline, and unavailable captures report review unavailable;
-a parent checkout is never substituted.
+a parent checkout is never substituted. Reviewing a run measures its branch
+against its confirmed delivery base, remote-tracking ref first; mergeability is
+asked of Git and an unknown answer refused; comparing attempts ranks nothing.
+Merging a run into the checkout is explicit, approval-gated, and journaled,
+uses `--no-ff`, aborts an incomplete merge, and is refused when branch, base,
+or reviewed head changed, the checkout is unreadable, dirty, or on another
+branch, or Git reports conflicts.
 Parent and child scope checks precede reads, streams recheck scope before each
 frame, and a parent purge removes all generations' text and evidence. Nested
 observations retain the authorized root thread and identify their managed parent
@@ -3945,7 +4030,13 @@ operation),
 and a restart never starts one on its own: every run already parked when the
 host boots stays parked, even once its dependencies complete, until a person
 resumes it or resumes the parent's session; a person's resume of the run
-itself is refused while the parent's session is held. The hold lives in the
+itself is refused while the parent's session is held. The same hold keeps a
+child queued for room under the subagent limit or for a free request slot from
+starting while the parent's session is paused; a restart has already
+interrupted such a child, so resuming the session does not restart it.
+Resuming the session lets each held child start, and meanwhile a person's
+Resume of a child waiting on siblings or for room is refused with "resume the
+parent first". The hold lives in the
 orchestration service and is rebuilt the same way at every boot. A dependency that failed or was cancelled fails
 the dependent without running it (`dependency-failed: <id>`); an interrupted
 dependency does not, because a retry can still complete it. A run cannot be
@@ -4612,7 +4703,7 @@ CI or reviewers should be woken, not left polling; maintainer request,
   thread's own open pull request, the one linked to it on the board, to that
   thread; one thread watches a pull request at a time
   (`watched-by-another-thread`). The host checks the Project and the link,
-  asks the person, checks both again after the answer, then reads the pull
+  asks nobody at any level, then reads the pull
   request once and journals what is already true (settled checks, the review
   decision, a conflict) as the baseline it never wakes for. It shares Auto-fix's
   pass, its pauses (a turn running or ambiguous, compaction, a minute after the
@@ -4764,8 +4855,9 @@ third-party reviewer plugin could not take.
   Auto-fix's wake path after recording an outside-content mark (source label
   `pull-request-review`; a refused mark sends nothing); under Strict, Auto-fix's
   three-attempt cap applies, while outside Strict there is no attempt cap.
-- **Spend and unavailable state.** Every review turn counts toward the parent
-  Code thread's spend ceiling (`SpendCeilingService`), usage ledger
+- **Spend and unavailable state.** Every review turn counts, at its input plus
+  output tokens, toward the parent Code thread's spend ceiling
+  (`SpendCeilingService`), usage ledger
   (`pull-request-review-usage`), and `TurnMetricsStore`. When no reviewer can
   run (`no-route-configured`, `no-account`, `route-refused`, `capacity`,
   `spend-ceiling`, `not-effective`), the host records and the Review pane shows
@@ -4918,7 +5010,8 @@ artifact observer that saw a build produced, and no issuer of the per-act
 approval bound to the exact target, revision, and build (the host's workspace
 wiring, `apps/server/src/wiring/workspace.ts`, passes an empty target list,
 `observedArtifact` and `approval` that return nothing, and a publish path that
-fails). The renderer shows Delivery only when a thread has an
+fails). A ship integration never receives a secret: it names a credential
+reference, and the host hands it a bounded, purpose-scoped handle at use. The renderer shows Delivery only when a thread has an
 enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
 until all three exist; a standing grant never substitutes for the per-act
 approval.
@@ -5198,6 +5291,16 @@ Chat still take no app-managed tools.
   repository reader observes the latest 100 completed runs and their latest
   known attempts; the identity is repository/run/attempt. Unseen attempts and
   older runs outside that window are not history the host can reconstruct.
+  That host-private reader binds the registered repository OAuth component,
+  grant, app, numeric account and repository IDs, and each read also needs a
+  host-supplied witness of the current effective component; missing, disabled
+  or untrusted authority refuses before any API read, and work retired by
+  activation cannot publish. Only the broker builds its fixed read-only
+  requests, bounded and owner- and generation-checked, with no arbitrary URL,
+  token output, or `gh` or personal-token fallback. A 403 or 429 rate limit
+  stays retryable; a known permission, account or repository change refuses.
+  Observed completed attempts are metadata, not proof of rerun history, and
+  the manual CI follow-up starts no work.
   Linear contributes the complete current set assigned to the connected person,
   optionally filtered by team key and project identifier, bounded at 256 issues
   and three pages. Its identity binds the viewer and workspace, and ordinary
@@ -5325,8 +5428,7 @@ Chat still take no app-managed tools.
   is refused at the route, and a routine an agent proposes never has it. It
   lets the run's agent merge the pull request its own thread opened under the
   merge rules in [Git and pull requests](#modes-chat-work-and-code), with the
-  head and required checks enforced, while the live routine is enabled. A routine never runs at a level lower than the one
-  its creator chose. Work runs bind the Project's confined root like an
+  head and required checks enforced, while the live routine is enabled. Work runs bind the Project's confined root like an
   interactive Work thread. A Code first turn runs with
   the `agent` initiator, so approvals wait for a person.
 - **Revalidation at every occurrence.** Before creating a thread the dispatcher
@@ -5621,8 +5723,9 @@ retry or resume resolves nothing from them. A Chat branch's and a Work fork's
 copies of the message keep them. In Chat, an explicit mention of a Chat thread also grants the source
 provider the bounded `octant_ask_thread` tool for that turn: it may send one of
 the user's instructions to the mentioned Chat thread and receive its completed
-reply, at most three times a turn by default, a count the person can change
-(maintainer request, 2026-11-12; not built yet: today it is a constant). The target's own Chat turn, provider,
+reply. Under Strict it may do so at most three times a turn, a count the
+person changes in Settings › Limits; outside Strict there is no limit
+(maintainer decision, 2026-11-19; built, `decideThreadDialogueAsk`). The target's own Chat turn, provider,
 Project, and authority remain authoritative; an active target returns Waiting
 rather than being interrupted or duplicated. Coordination is one hop (the
 target's turn is offered no ask) and unavailable, unauthorized, or deleted
@@ -5677,9 +5780,9 @@ thread's too (maintainer decision, 2026-11-16, under
 built): the host refuses no turn for opening with `/name`, because the runtime
 was launched under the level's tool rules, which decide what the command may
 then do, so a command in Plan still cannot write and one in Chat still has no
-folder or shell. An ACP agent with a reviewed command inventory (Kimi Code)
-keeps its probe check and, in every mode, runs only a reviewed command its
-session listed. Codex lists only `/review`, which starts Codex's own review
+folder or shell. Kimi Code runs, in every mode, only a command its session
+listed, or its readiness check listed until the session lists any
+(`listedCommandsOnly`); no reviewed command inventory refuses a release. Codex lists only `/review`, which starts Codex's own review
 run ([Provider runtimes: Codex](design/provider-runtimes.md#codex)): its
 app-server (rust-v0.162.1) lists skills, which are invoked by `$name`, and no
 prompts, and its other slash commands are its terminal client's own. Side Chat is a Chat-mode sidecar about
@@ -6808,6 +6911,13 @@ flowchart LR
 - **Envelope.** Every event carries schema version, event id, aggregate id and
   version, global sequence, correlation and causation ids, actor, host id, and
   timestamp. Unknown or future events are quarantined rather than dropped.
+  A command targets one aggregate with its expected version; a stale version
+  returns a typed conflict and writes nothing. A projection checkpoint may
+  trail the journal head, never lead it. A malformed, contract-invalid,
+  unsupported-version or unapplicable event is quarantined: its projection
+  keeps its last valid state, and readiness becomes recovery-required with a
+  typed reason that discloses no payload. Purgeable bulk content (terminal
+  transcripts, test output) lives outside the journal, referenced from it.
 - **Projections.** Each feature owns its projection and persistence schema
   (`persistence/*Projection.ts`, `*PersistenceSchema.ts`). Projections are
   checkpointed by sequence, detect lag, and can be rebuilt individually or
@@ -7069,9 +7179,8 @@ flowchart LR
     while a turn is running or messages are queued. Every refusal
     is shown as its own sentence, and a `stale` one reloads the list. A client
     that is not on a loopback host (`externalContentAvailable`) neither
-    reads nor draws it. Approval prompts do not yet say that the mark is why
-    they ask: neither the MCP tool approval view nor the harness approval
-    carries that reason.
+    reads nor draws it. An approval on a marked thread says that the mark is
+    why it asks, as **Untrusted-content taint** above describes.
 - **Browser captures.** Only a screenshot the agent asks for with the browser
   tool, or the person takes with the Browser pane's Screenshot control (or
   Draw on page, which takes the same capture to draw on), is kept
@@ -7745,7 +7854,11 @@ ls-remote` against the thread's remote and the GitHub reads they already
   while keeping independent transcripts, streams and active-thread follow-up
   reads; opening another tab does not bootstrap the window's list again.
   A thread paints from an authoritative snapshot before
-  auxiliary Files, Git, Browser, or Computer Use observations begin. Code
+  auxiliary Files, Git, Browser, or Computer Use observations begin; they wait
+  for the transcript or an explicit open. The host reports latency classes
+  (navigation, thread snapshots, conversation evidence, environment
+  observation) and returns `Server-Timing` on measured responses, without
+  identifiers. Code
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside
   their durable evidence references. Work uses a bounded delta feed over its
@@ -7934,7 +8047,9 @@ ls-remote` against the thread's remote and the GitHub reads they already
   DPA/SCC template, or automatic assignment of a GDPR role to a host owner or
   provider. Preserve mandatory rights and assess any changed processing model
   on its facts; [documentation scope](legal/README.md) records the basis.
-- **Artifact mirror.** After each committed artifact version the host
+- **Artifact mirror.** The first mirror command journals the effective
+  fallback (the default folder's Artifacts subfolder), so one override never
+  quietly turns mirroring off. After each committed artifact version the host
   rewrites that artifact's mirrored files in place (removing old names on
   rename) and journals every outcome as a receipt, including skipped and
   refused, with the refusal reason; a write failure never unwinds the
@@ -7956,8 +8071,9 @@ ls-remote` against the thread's remote and the GitHub reads they already
   Settings changes need the current `expectedVersion`. An external edit comes
   back only through an explicit re-import that appends a version. The
   `/api/artifacts/mirror` route answers a local window or a paired device
-  (maintainer decision, 2026-11-12; not built yet: today it is loopback-only and
-  refuses a paired device).
+  (maintainer decision, 2026-11-12): the server admits a device the host's own
+  person paired and refuses a hub-introduced or restricted one; the paired
+  clients do not offer it yet.
 - **Artifact replicas.** A replica is an append-only log in a store the user
   owns — a synced folder, or an S3-compatible bucket. Each host writes only
   its own write-once entries, one per committed artifact version or deletion,
@@ -8279,6 +8395,34 @@ ls-remote` against the thread's remote and the GitHub reads they already
   changes while a response runs, and accessible input labels remain stable.
 
 ## Providers
+
+Rules every provider driver keeps, whatever its kind:
+
+- Every capability starts unavailable until negotiation or evidence proves
+  it. A broken installation never shows as a permanent lack of a feature.
+- Provider permission callbacks are signals, not a sandbox. An adapter may
+  narrow Octant's session authority, never widen it; a driver that cannot
+  represent the authority reports degradation or blocks.
+- A managed-process driver runs one supervised process group per active
+  session, from an absolute executable path with a minimal sanitized
+  environment, and reports incompatible when it cannot separate
+  authentication storage. A driver family without resume, identity or
+  attestation guarantees stays unselectable.
+- Each subscriber to a connection gets its own subscription and every event.
+  Callers subscribe before they send; a lazily subscribing stream fails
+  conformance.
+- A host with no usable secret store reports it unavailable and stores
+  nothing, with no file or in-memory fallback at any flag.
+- First-run enablement of the two key CLI providers is decided once per scan
+  from durable host state, only while onboarding is pending and no instance
+  was ever recorded; later auto-registers stay disabled.
+- Discovery may recover a single-token executable alias only by reading
+  named shell startup files, byte-bounded, through the discovery filesystem
+  port, never sourcing or executing them.
+- A Project's data tags (`eu`, `zdr`) are labels the person maintains, not
+  verified residency or retention. Renderer filtering by provider policy is
+  advisory and cannot grant what the host refused; an unavailable provider
+  never starts a turn, listed or tagged.
 
 ### Provider cloud jobs
 
@@ -9003,7 +9147,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Forest Labs states one in its own credits — so an image row is never
   `provider-recorded` and Octant does not convert credits or price images
   from a list; a job cancelled after its provider returned images keeps its row with those images counted, as a completed job does, since they were billed, even though the cancellation removes the images themselves; a job refused or failed after its provider answered leaves one unreported, unpriced row with no image units, since it may have been billed; and a job that failed before any provider answer, or was cancelled before images came back, leaves none; Usage lists each job with its provider, model, and quality, under the Project and mode of the thread it was made in, and a library job is unfiled). Thread-scoped generation — from both the composer/manual route and the agent tool — is admitted against the thread's and its current Project's configured spend ceilings before provider dispatch (`ImageJobService.enqueue`), independently of the in-thread cost confirmation card; host-wide `image-library` jobs carry no thread or Project ceiling. A job uses exactly one profile; a safety refusal ends it
-  and is never retried elsewhere; a job found queued or running after a
+  and is never retried elsewhere, and one per-image safety failure refuses
+  the whole result; a driver that cannot honour the image count or the
+  references fails closed as invalid configuration. A custom image source is
+  a provider, model and label from a bounded list, accepted only as an exact
+  listed pair, and a removed or disabled instance fails with a reason, never
+  falling back. A job found queued or running after a
   restart fails as interrupted and is never resent. A stored image must fit
   20 MiB and, when its header declares dimensions, 16,384 pixels a side and
   100 million pixels in all; a full disk fails the job with a plain cause and
@@ -9280,8 +9429,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   browser storage, falling back to the system default when it is not
   connected); the
   microphone button or the remappable Dictate chord on the focused composer
-  (tap to toggle, hold to talk) starts it, the transcript is appended to the
-  draft, and the person still sends. Navigator
+  (`dictate`, Mod+Shift+M by default: a tap starts and the next tap stops; a
+  hold of 300 ms or more records until release, even when only the
+  modifier's release is reported; it does nothing while transcription is not
+  ready, and one composer records at a time) starts it, the transcript is
+  appended to the draft, and the person still sends. Your dictionary holds
+  up to 100 terms of at most 64 characters each. Navigator
   can read replies aloud through the configured synthesis endpoint, or with the
   operating system's voices when none is set. A paired device reaches the
   status and transcription routes only: the listener forwards those two routes
@@ -9593,6 +9746,32 @@ media-tool port is a seam extension of its own, deferred to a follow-up
 
 ### Context and usage accounting
 
+**Planner rules.** Each subsystem registers attributed entries in the turn's
+context manifest; an adapter never appends unaccounted context. A turn is not
+sent when planned input exceeds the safe budget: the window minus the response
+budget, reasoning reserve, framing estimate, variance reserve and safety
+margin. Reduction runs in order: duplicates, stale optional context, lazy tool
+schemas, large results as summaries, durable summaries, older resolved ranges,
+narrowed memory, then a question to the person. Safety, authority, approvals,
+the current request and pinned content are never removed silently; if they
+cannot fit, the turn is blocked with remedies. An absent service limit is
+unavailable, never unlimited; conflicting trusted limits take the most
+conservative. A pin or exclusion applies to the next turn only and never
+bypasses the budget.
+
+**Local usage history.** Local provider history is a read capability of the
+provider SDK; quota windows are a separate provider-reported snapshot. History
+is read without a session or provider process, only from bounded, recognized
+usage files under the adapter's documented roots, keeping accounting facts
+only; malformed input makes coverage partial, never a false zero. The
+accounting checkpoint is a versioned, bounded, rebuildable cache apart from
+the journal and ledger, and opaque identities prevent double counting. History
+reaches Usage only through a local authenticated endpoint returning bounded
+aggregates, never model tools or remote clients. A quota reset is never
+assumed to refill. An earlier stored reading answers only when asked, saying
+it is earlier with its range, coverage and time, and the surface reads again
+at once.
+
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
@@ -9787,7 +9966,8 @@ Nothing the helper was admitted under is trusted when its slot frees. The
 host reads the parent again, with no request to carry it: if the helper-agent
 setting is off, the parent thread has read untrusted content where the
 delegation rule ([Modes](#modes-chat-work-and-code)) does not let it delegate
-(not built yet: today any such read ends the helper), is archived or
+(judged at the level the parent runs at, its Strict value, and its journaled
+`delegation` standing answer, `outsideContentGatesHelpers`), is archived or
 moved to another Project than the helper was routed under, or its live grant
 no longer allows starting helpers or covers the helper's, the helper ends
 Interrupted (`authority-drift`) and never starts. The same read gates every
@@ -10924,6 +11104,14 @@ A provider that keeps its own conversation (`conversationOwnership: "provider"`:
 Claude Code, Codex, OpenCode, Pi, Oh My Pi and ACP agents) records every user
 message it is sent and sends it again with every later request. Octant's turn
 prompt is therefore built to be appended, never rewritten:
+
+- **Reuse and resume.** A retained runtime is reused only for an identical
+  task, instance, executable, home, root, mode, model, policy, auth mode and
+  tool catalogue; any mismatch cold-resumes. Resuming a native session file
+  needs a header matching the session and root; a missing, ambiguous or
+  cross-Project history refuses before any input is sent. A follow-up on
+  another model resumes the native session only when the driver reports model
+  switching; otherwise a fresh session starts with a disclosed handoff.
 
 - **Framing.** `renderProviderContextSections` writes each context block as a
   `<octant-context kind="…">` section of plain text, in the order given. A
@@ -12097,7 +12285,9 @@ the model at another size.
   credential. Only a harness tool result that brings in outside content taints
   the thread: `web-fetch` and `web-search`. A finished child's reply taints
   its parent only when the child itself was tainted (maintainer request,
-  2026-11-12; not built yet: today every child reply taints its parent),
+  2026-11-12, scoped to Strict 2026-11-22; built for a reply `wait` hands
+  back under Strict, `recordWaitedResultIngestion`; outside Strict, and for a
+  delivered reply, every child reply taints its parent),
   however it arrives (it may relay what the child fetched): handed
   back by an `octant_agents` `wait`, which records the mark before it returns
   the reply, or delivered as a new turn, journaled before the turn is
@@ -12483,17 +12673,40 @@ the model at another size.
   asks to be resumed, and the cut-off turn raises its own attention. An
   answer, an expiry, or a cancellation from any surface clears it. The
   question and its answer stay journaled on the session (Work, Code) or the
-  attempt (Chat) and nowhere else. At most 32
-  questions and 32 approvals wait at once across the whole host, the cap
-  browser tool approvals use; one
-  past it is refused at once as `question-too-many-waiting` or
-  `approval-too-many-waiting`, journals nothing, and tells the lead nobody
-  was asked. `NativeHarnessTurnObserver` puts the stable
+  attempt (Chat) and nowhere else. Under Strict, at most 32
+  questions and 32 approvals wait at once across the whole host
+  (`MAX_WAITING_NATIVE_HARNESS_QUESTIONS`, `MAX_WAITING_NATIVE_HARNESS_APPROVALS`);
+  a Strict thread's ask past it is refused at once as
+  `question-too-many-waiting` or `approval-too-many-waiting`, journals
+  nothing, and tells the lead nobody was asked. Outside Strict there is no
+  cap: an approval or question waits until it is answered or its turn stops,
+  and stopping the turn ends a lead or child that keeps asking. A session's
+  history keeps its newest 50 approvals and 50 questions, but drops settled
+  ones first, so a waiting ask is never pushed out of reach; while more than
+  50 wait, the view shows the oldest 50 and the next appears as one settles. The cap
+  protects no hard line, so it is one of Octant's own limits
+  ([Octant's own limits become settings](#security-and-authority);
+  maintainer decision, 2026-11-26). `NativeHarnessTurnObserver` puts the stable
   instructions block in front of every harness turn, records the completed
   reply, and asks the `advisor` slot for a review. An advisor with no model of
   its own is off: unlike other jobs, its unconfigured slot does not fall back
   to `default`, because the review costs a request on every turn and runs only
-  once someone chooses it. The session view still
+  once someone chooses it. The advisor reviews compact turn digests and may
+  cancel, redirect or pause, never running tools, editing files or granting
+  approvals. The harness never parses prose as a tool call: an unknown tool
+  name, version, id or argument, or an unoffered capability, fails closed,
+  and an ambiguously accepted call becomes waiting or failed, never an unsafe
+  replay. Every tool result is hard-capped with a truncation marker and
+  paging, and nothing variable enters the stable request prefix. After any
+  context reduction the goal, its acceptance criteria and recently edited
+  files are restored to the request; reduction never changes the journal. A
+  goal loop's token, time and turn budgets are its stopping condition: one
+  that would exceed a ceiling moves to budget-limited, which only a person
+  resumes; a revision's budget replaces the whole budget, and a loop refuses
+  to start on a goal with none. An unattended iteration runs under a ceiling
+  declared at loop start, clamped to the thread's authority, and an effect
+  needing an approval no person can give suspends the loop, never
+  auto-approved. The session view still
   carries the thread's follow-up suggestions for the surfaces that read it,
   joined in from their own store (below).
 - **Terminal.** `octant agent` in `packages/cli` is the same thread on a
@@ -14179,6 +14392,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   cache. A candidate that fails validation is not listed. Opening Settings does
   not fetch a catalog.
 - A structured mention cannot install, trust, enable, or elevate anything.
+- A curated workspace preset may name skills, and naming is all it does: the
+  host reports each named skill's state (in use, installed but not enabled,
+  not installed) and installs, trusts or enables nothing.
 - A selected MCP server component reaches Chat, Work, and Code turns through
   the provider's app-managed tool transport. The host resolves the selection
   against the thread's own mode scope, connects the supervised session for
@@ -14875,6 +15091,13 @@ shows only the featured ones that are not connected. The row lays out in 1, 2,
 skill's own description and is left out when the host gives none. The page then groups what is
 installed first, then what is not by the catalog's own categories, Marketplace
 results and tools found on this computer; a search is one flat list.
+Each group stays closed until opened and opens during a search or filter.
+Each item is one compact row of one height (mark, name, source, authority
+dots, and its state or next step at the trailing edge), in two columns on a
+wide card; a row says its next step, not a repeated state, and its name opens
+the detail. More than ten uninstalled items show the first eight with "Show
+all N"; everything installed is always drawn, and items awaiting a decision
+(blocked, awaiting trust, not connecting) lead.
 
 The Library finishes the job in place, through the same commands the other
 views use and under the same server checks. Connect calls the one shared
@@ -14906,7 +15129,11 @@ the vendor's own address and setup page, and how it is reached: sign-in
 through the MCP authorization flow, a key the vendor issues sent in one
 header, or nothing. An entry whose address stops behaving as its auth says is fixed or
 removed; `bun run connectors:probe` checks every address and setup page
-and runs weekly in CI, never in the app. Nothing is fetched
+and runs weekly in CI and on demand, never in pull-request checks or the app;
+a failing entry is fixed or removed in the catalog, not patched in the UI.
+Google's preview servers answer `initialize` without a credential and ask at
+the tool call, so the probe accepts that for a sign-in entry whose well-known
+resource metadata holds up, and says so. Nothing is fetched
 to show the list, so it adds no request and no marketplace disclosure; the
 catalog relates to the plugin marketplace only in that both end in an
 installed package under the one activation ladder. A remote browser's disabled
@@ -15684,7 +15911,11 @@ every event; failed writes never become claimed evidence.
 Computer observations verify that the requested window still belongs to the
 current application process before requesting its accessibility state or pixels.
 A vanished window returns a window-unavailable refusal directing the caller to
-list current windows; stale IDs are never silently retargeted.
+list current windows; stale IDs are never silently retargeted. A screenshot
+alone never authorizes input: revalidation must resolve that exact window
+first, and interrupted work cancels pending approval and input. Driver startup
+verifies the driver-reported host bundle identity and its protocol and binary
+versions; a failed check refuses admission.
 
 On Apple Silicon macOS, Electron main owns the official CuaDriver SDK and its
 private embedded child. The authenticated loopback broker is available only
@@ -16769,10 +17000,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     reaches another thread's branch, and never writes in Plan; the host
     refuses those whatever the review answered.
   - **What it escalates goes to the person,** through the ordinary approval
-    path. The injection gate stays on at this level: on a thread marked by
-    outside content the provider's own reviewer is withdrawn, as described
-    under Approvals below, and Shield cannot allow irreversible, publish, or
-    new-egress classes.
+    path. Under Strict the injection gate stays on at this level: on a thread
+    marked by outside content the provider's own reviewer is withdrawn, as
+    described under Approvals below. Outside Strict the provider's reviewer
+    stays and the thread is only marked. On a marked thread Shield cannot
+    allow irreversible, publish, or new-egress classes.
   - **No emulation.** `harnessAutoReview` reports only a provider's own
     review; a provider without one reports it `unsupported`. Shield is
     Octant's reviewer under its own name, journaled as Shield, never
@@ -17260,6 +17492,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     up to an hour, and the host refuses a wait past the setting; a Claude Code
     thread still ends one tool call at eleven minutes; maintainer decision,
     2026-11-19; built).
+  - **Harness asks.** The native harness's 32 waiting approvals and 32
+    waiting questions across the host apply under Strict only; outside
+    Strict an ask waits until answered or its turn stops (maintainer
+    decision, 2026-11-26; built; [Native harness](#native-harness)).
   - **Octant Shield, follow-ups and shown commands** (maintainer decision,
     2026-11-21; built). Shield's brakes (3 denials in a row, 20 in a thread),
     how late a follow-up may still run (24 hours, up to 720) and how long a
@@ -18041,11 +18277,21 @@ approval-gated` command that undoes it. The terminal shows no one-time
   confinement matrix below says a runtime is unwrapped. Version reads preserve
   the configured program's invocation path, including a launcher's name and
   sibling-asset lookup, while retaining their existing install-tree read roots,
-  private scratch home, and network denial. On Linux, an executable symlink
+  private scratch home, and network denial. A version read may exec and fork,
+  because launchers start the real program, and the child inherits the
+  profile; a computed read root that is the home folder or one of its
+  ancestors is dropped. On Linux, an executable symlink
   already exposed by its nearest bind mount needs no redundant bind over the
   link; its canonical target remains granted separately. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback.
+  A Plan launch's temporary directory is its own, removed when it exits or is
+  refused, never the shared temp root, and a temp root inside the checkout is
+  refused. A terminal launch may read metadata, never data, on each exact
+  ancestor of its own shell-state directory, so other threads' histories stay
+  unreadable. A macOS launch whose egress is `allow` may reach the system
+  trust daemon and the system keychain roots so TLS verifies; user keychains
+  and offline launches stay denied.
   The child runs `--unshare-all`, regains the network only when egress
   resolves to `allow`, dies with its parent, and gets a new session except for
   interactive terminals. Its own PID namespace ends with the capsule, so a
@@ -18235,13 +18481,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
     an agent grant may turn it on, never off. Built for Codex (the
     provider's own sandbox outside Strict, per runtime, below) and for Claude
     Code (outside Strict Claude's own sandbox runs as the person's settings
-    configure it). Not built yet for the other providers, which still run in
-    the sandbox the table below shows whether Strict is on or off.
+    configure it). Outside Strict OpenCode, Pi and every ACP agent run in
+    Work and Code below Full access with no Octant sandbox, on their own
+    approvals (`providerHoldsLevelWithoutSandbox`); under Strict they run in
+    the sandbox the table below shows. Not built yet: Octant configuring the
+    native sandbox of a provider other than Codex.
   - **Octant's sandbox stays the default** for providers with no sandbox of
-    their own: OpenCode, Mistral Vibe and Pi. For OpenCode and Pi that
-    default now holds only in Chat, Plan and under Strict: in Work and Code
-    outside Strict their own approvals hold the level with no Octant sandbox
-    (maintainer decision, 2026-11-21; below).
+    their own: OpenCode, Mistral Vibe and Pi. That default holds only in
+    Chat, Plan and under Strict: in Work and Code outside Strict their own
+    approvals hold the level with no Octant sandbox (maintainer decision,
+    2026-11-21; Mistral Vibe as an ACP agent; below).
   - **Per provider.** Codex runs its native workspace-write sandbox and its
     own escalation; macOS refuses a Seatbelt profile inside another, so the
     native sandbox replaces Octant's profile rather than running in it.
@@ -19730,6 +19979,74 @@ approval-gated` command that undoes it. The terminal shows no one-time
   sign-in rate limits hold, secrets are redacted and never journaled or
   logged, credentials are stored only in the credential broker, and authority
   is checked on the host.
+  - **Listener and request hard lines.** The listener serves HTTPS only on one
+    person-selected private address and an explicit port; wildcard, public
+    and ambiguous binds are rejected, and certificate validation is never
+    bypassed. Enabling or retargeting it needs the person's confirmation,
+    which shows the address, port, origin, certificate identity and exposure
+    class. Every state-changing remote request carries a device-key proof, a
+    replay nonce, a CSRF value and an exact-origin check; a cookie alone
+    authorizes nothing. Revoking a device drops its sessions and streams
+    before the response completes. Approvals are remote-approvable or
+    local-host-required: a Full device passes the local-host-required class
+    but never becomes a local window, and an action that needs a native
+    control of the host is unavailable where that control is absent
+    (maintainer decision, 2026-11-12). Remote clients never queue
+    authority-bearing mutations offline; disconnected data is stale and
+    read-only.
+  - **Thread surfaces on a companion.** Each thread surface (conversation,
+    host browser, terminal output, simulator screenshot, canvas, file
+    preview) names one catalog action that reads it and a separate one that
+    acts on it. A companion derives each surface's reach (unavailable,
+    read-only or interactive) from the host's catalog and the session's
+    standing, never declares it (`remoteSurfaceMatrix.ts` in the client
+    runtime), says when its picture is stale, and offers only surfaces it can
+    fill. The phone fills the conversation and the Browser today.
+  - **What a Full device holds today.** Each journaled as the device, its
+    pairing re-read on the host where a window's capability would be: shell
+    settings; Browser session, upload and download permissions for every
+    active Work or Code Project; skills; design systems; usage history and
+    ledger; a server-hosted Work thread's files and a server's catalog and
+    load; provider command scan; server Projects and cloud jobs; file and
+    event routines; extensions, outside drivers included; Full access; person
+    memory on its turns; stopping any Computer use session; Project switches
+    (memory writes, default-branch push, pull request comments, toolchain,
+    image generation); wake-ups; Safe networks and Network limits; resource
+    limits and Agents settings; growing an MCP grant; its own Project
+    terminal, ended on revoke or a quiet minute; a Private page; agent
+    grants; a coordinator's proposed worker; Canvas HTML import; Settings ›
+    Permissions › Servers, worktree and Xcode cleanup, leftover servers,
+    desktop spend cap, recipe machines, disposable desktop previews, routine
+    notifications and push gateway; Canvas controls (Allow network, answers,
+    boards, comments, design systems, refresh, actions, share, export, public
+    links, export notices); Artifact library, tags, Claude page copy, mirror
+    and synced routes; thread export with captures; Preview text editing; the
+    Browser's profiles, extensions, flows, captures, downloads, Take over and
+    signed-in pages; provider OAuth, Cloud IAM, tooling and integration
+    sign-in; live tasks and session adoption; memory proposals; replica store
+    and membership (both still loopback-only routes); connector sign-in;
+    diagnostics export, journal growth and the support bundle. The paired
+    browser shows these to a person session only: Host settings ›
+    **Permissions** and › Diagnostics; Claude and Codex tool setup; a
+    Canvas's Allow network, public link review, export approval, comments and
+    design-system switch; a thread's Browser captures and prompts, answered
+    with no live pane; each Project's switches beside its default mode (no
+    default-branch push switch, as in a window). Work and Code's **Project
+    tools** lists the device's terminal and Private page (a profile choice
+    there is refused with the host's sentence); a Chat thread's Canvas tools
+    hold **Import HTML…** alone, since a device's plain create is not built.
+    The phone offers the same Project tools in Views and panes (a
+    **Terminal** of plain output lines, a line to run and Control-C, ended
+    when the sheet closes; a **Private page** with address, picture, title,
+    Refresh and Close page), **Import HTML…** in Chat, and every Work request
+    a window answers (the Plan block, **Provider approval**, questions,
+    questionnaires with **Dismiss**), each answered with the version read; a
+    tool or plan approval asks for the phone's own confirmation (maintainer
+    request, 2026-11-18). A Code thread's asks stay at a window. On the
+    phone, Read only keeps existing threads openable and disables starting
+    threads. In the Active work read, a device only the hub introduced is
+    not told of Code Projects outside the Act item, and an agent grant's
+    session is refused.
   - **How a device qualifies.** The approval record journaled with a device's
     registration says who let it on: `user-approved` when the host's person
     approved the pairing at a local window, or when a device that already acts
@@ -19922,7 +20239,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
     from the journal's own start record. The Browser routes hand the same
     actor to the profile, extension, flow and capture services, so each
     journals a person-paired device's change as the device's. A device-code or cloud sign-in
-    begins only at the host's terminal, so it is the local person's. A device
+    begins only on the host, at its terminal or a local desktop window, so it
+    is the local person's. A device
     is named by its own id in every record, a restricted device's included;
     a second test refuses a module that writes a device's actor under any
     other id. A Code operation's own events name whoever started it, a local
@@ -19993,10 +20311,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   back, writes to a thread terminal, answers profile site approvals, and
   raises a thread to Full access or starts one there. The host's navigation
   guards and site approvals apply to it as they do to a window, with one
-  difference: only an address typed at a local window follows a redirect to a
-  site outside the approved origins, as that person's own view
-  ([Refusal and expiry recovery](design/browser-agent-tool.md#refusal-and-expiry-recovery));
-  a paired device's navigation refuses it. Each
+  difference: only an address typed at a local window or by a device the
+  host's own person paired at Full follows a redirect to a site outside the
+  approved origins, as that person's own view
+  ([Refusal and expiry recovery](design/browser-agent-tool.md#refusal-and-expiry-recovery);
+  maintainer decision, 2026-11-26); a restricted or hub-introduced device's
+  navigation refuses it. Each
   action is journaled with the device as its actor. Built: it navigates,
   types, and sends every page action the route takes, writes to a thread
   terminal, and sets Full access. A
@@ -20853,7 +21173,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
 
 - **Thread secrets.** An agent in a Code or Work thread may ask the person for a
   secret its work needs: an API key, a token, or an account password for `sudo`
-  (maintainer decision, 2026-11-24). Built.
+  (maintainer decision, 2026-11-24). Built. Computer use filling a password
+  prompt from a handle is not part of this; it is a separate, later decision.
   - **Request.** The agent names the secret, a label, a kind (`token` or
     `account-password`), a reason, an optional setup page, up to eight fields and
     a delivery. It can never pass a value: the person enters it in the card every
@@ -21438,7 +21759,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   ([Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members)). An all-hosts list keeps every registered host;
   an unreachable host's cached items stay listed as stale and read-only, and
   an authority-bearing mutation is allowed only on a host whose read model is
-  ready. The hub-and-spoke design keeps this rule: a hub introduces hosts and
+  ready. A host shows as an environment under the person's name for it, and
+  the window's own host is always "Local"; a row names its environment only
+  when it is not this one, filtering and ordering by environment are client
+  view state, and "All environments" includes hosts that connect later. The
+  hub-and-spoke design keeps this rule: a hub introduces hosts and
   devices to each other, an introduction grants only what the receiving host's
   person allowed when it joined the hub (by default full membership, which
   never reaches Full access, and an agent from another member never answers

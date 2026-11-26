@@ -36,6 +36,9 @@ saying it is outside the checkout, when it does not. An agent's
 instead of launching Simulator.app. That request lives only in server memory,
 keyed by thread and served only to the same thread and checkout; it is never
 journaled and dies with the process.
+The host chooses the live view's size, quality and frame rate. Frames are
+dropped under pressure, every viewer of a Simulator shares one stream, and
+frames are never journaled or put in model context.
 Apple artifact and restart-receipt reads validate regular-file identity and size
 on an open handle before allocation. Reads reject linked files and size changes,
 with a 16 MiB artifact limit and 1 MiB receipt limit; existing records are not
@@ -89,6 +92,12 @@ for the host. Both panes draw the same row, so an agent's swipe is never read as
 a person's tap. Evidence is not journaled as separate input events; it lives in
 the host's bounded recent-evidence list.
 
+Typed text and secure-field values never enter durable evidence verbatim, only
+redacted length or class markers, and a post-input screenshot masks those
+regions. A finished input action id returns its recorded evidence without
+repeating the effect; one left interrupted or unknown by a restart refuses
+with a distinct status.
+
 ## Native device helper and typed text
 
 Under the desktop app that injection is the native device helper: a
@@ -112,7 +121,9 @@ drag is one swipe sent when it ends, keys typed on the focused screen go to
 the device as one text per pause, Home and Lock are buttons, and what a person
 does while an action runs is kept and sent in order.
 
-The desktop owns one native helper per Simulator while it is in use. A
+The desktop starts one native helper per Simulator on first use and owns it
+while it is in use; the helper never outlives the desktop, and a Mac without
+the developer tools gets a refusal instead of a helper. A
 request cancellation, timeout, idle expiry, or desktop shutdown closes stdin
 and sends SIGTERM, then SIGKILL after two seconds if needed. Shutdown waits up
 to two more seconds for observed exit and returns an explicit failure if exit
@@ -137,7 +148,10 @@ starts too slowly to send a path one touch at a time. A swipe that starts
 within 2% of a screen edge is flagged as an edge touch on that stream, which
 is what lets a drag from the bottom go Home or unlock. Only straight
 single-finger swipes exist: a press held in place is a tap, and there is no
-long press or pinch.
+long press or pinch. A swipe lasts 50 to 5,000 ms and carries the same
+authority, approval, attribution, booted-destination rule and Plan refusal as a
+tap. A sent swipe records both ends whether delivered or not; one that never
+ran records why.
 
 ## Device Hub input and Repair input
 

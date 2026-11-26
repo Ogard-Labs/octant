@@ -19,7 +19,15 @@ describe("remoteSurfaceMatrix", () => {
     }
     expect(
       listRemoteShellSurfacesByAvailability("remote", reported).map((surface) => surface.id),
-    ).toEqual(["chat", "work", "code", "preview", "provider-models", "settings-read"]);
+    ).toEqual([
+      "chat",
+      "work",
+      "code",
+      "preview",
+      "provider-models",
+      "settings-read",
+      "agent-revoke",
+    ]);
   });
 
   it("classifies desktop-only surfaces as local-host-only", () => {
@@ -59,7 +67,7 @@ describe("remoteSurfaceMatrix", () => {
   });
 
   it("lists every declared surface exactly once", () => {
-    expect(listRemoteShellSurfaces()).toHaveLength(21);
+    expect(listRemoteShellSurfaces()).toHaveLength(22);
   });
 });
 
@@ -119,6 +127,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "preview",
       "provider-models",
       "settings-read",
+      "agent-revoke",
       "shell-settings",
       "design-systems",
       "usage-ledger",
@@ -200,7 +209,7 @@ describe("what a session that acts as the host's own person reaches", () => {
     // Sending a turn is not watching, so the modes' composers are not offered.
     expect(
       listRemoteShellSurfacesByAvailability("remote", readOnly).map((surface) => surface.id),
-    ).toEqual(["preview", "provider-models", "settings-read"]);
+    ).toEqual(["preview", "provider-models", "settings-read", "agent-revoke"]);
   });
 
   it("gives a device paired at Approve and steer what the catalogue gives a restricted session", () => {

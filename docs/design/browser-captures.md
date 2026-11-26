@@ -22,7 +22,9 @@ the Browser pane
   pane action use the ordinary action route and keep nothing.
 - The host decides who asked from the route, never from tool input: the agent
   tools name themselves, the take route names the person, and a caller that names
-  no one keeps nothing. A paired device keeps nothing.
+  no one keeps nothing. A device the host's own person paired at Full keeps a
+  capture through the take route as a window does; any other device keeps
+  nothing.
 - The thread-less Project browser keeps nothing.
 - A CLI the person types into a thread terminal that holds a Browser grant keeps
   nothing: no journal actor describes it, so it names no one
@@ -464,9 +466,9 @@ request, and only by choosing to.
   not.
 - Rationale: the proof names pages and elements the person browsed and sits
   beside the pictures, so reading it is the same authority as reading a capture,
-  not wider. Today a paired device therefore cannot view, attach, or save the
-  proof; Code threads' pull-request flow reads it
-  from the person's own window.
+  not wider. A device the host's own person paired reads it as a window does;
+  the paired shell has no pull-request form yet, so Code threads'
+  pull-request flow reads it from the person's own window.
 - **The agent.** It reads its own step list only as it reads any tool result
   today (`changed` and the failure it gets back). No new operation reads the
   list back.

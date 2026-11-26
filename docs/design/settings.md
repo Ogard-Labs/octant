@@ -281,6 +281,13 @@ the background and the fonts. Host data inventory lives under Stored data. Insta
 skills and collision diagnostics scroll within a bounded collection while
 search, counts, and Show all remain outside that scroller.
 
+The user profile (an optional name, email, accent and avatar) authenticates and
+authorizes nothing. An avatar image is inlined in settings, downscaled to 128px
+and at most 96 KB encoded. Looking an avatar up by the email's hash is the one
+part that leaves the computer: it runs only on a button press, says it sends a
+hash, and copies the result, so the host never contacts that service again by
+itself.
+
 Appearance also offers density (Comfortable or Compact), a Custom preset per mode
 built from Ground, Ink, Accent and a Contrast step (Soft, Standard, Firm; a seed
 set whose text cannot stay readable is refused with the failing role named), and

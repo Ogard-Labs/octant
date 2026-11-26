@@ -895,7 +895,9 @@ task it names, `TaskUpdate` applies a successful update (a `deleted` status
 removes the task), `TaskGet` refreshes a task the list holds, and `TaskList`
 replaces the list. After each change the mapper restates the whole list as
 `task-progress` events and a closing `task-list`, the shape a `TodoWrite`
-call produces, so the panel, the journal, and replay are unchanged. A failed
+call produces, so the panel, the journal, and replay are unchanged. The panel
+names a running task in Claude's `activeForm` wording only while the turn
+runs (maintainer request, 2026-11-17). A failed
 call, a result without its structured output, or an update to a task the
 session never saw changes nothing; no id is ever guessed. The list itself
 lives outside the transcript, in `<config>/tasks/<session id>/<id>.json`
@@ -2795,6 +2797,23 @@ process supervisor, protocol client, or event mapper. Claude Code (Agent SDK), C
 their own runtimes and do not move onto this stack, although the registry
 lists ACP wrappers for them.
 
+One ACP process belongs to one Octant session and is never shared. An
+unknown required method, a malformed frame, a duplicate response id, an
+uncorrelated approval, an impossible ordering or a contradictory outcome is a
+protocol error; an unknown optional notification never promotes a
+capability, and a version string alone proves nothing. A permission request
+carrying only a tool-call id shows the latest description from that session
+and grants nothing. A Code thread journals the opaque provider session
+reference before its first prompt and resumes with only the new message,
+failing explicitly, never into a fresh session, when the reference is
+missing or rejected. A configured provider CLI is always the provider-owned
+executable at its stored absolute path: Octant never copies, downloads,
+replaces or bundles a duplicate binary, stores no provider token and needs no
+second login, except for a registry agent the person's own Install step puts
+in Octant's managed folder. Reusing a host profile exposes only allowlisted
+profile paths; roots, temporary state, network, tool callbacks, approvals and
+confinement stay app-managed.
+
 ### Where an agent message ends
 
 ACP gives an agent message no ID and no end, and a turn's text is stored as
@@ -4057,7 +4076,10 @@ permission rules are updated before each prompt; the deprecated tool toggle
 payload is omitted because it replaces those rules. App tools require a process
 receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime. Ordinary inherited configuration does not supply that attestation and,
-below Full access, continues to report app tools as unsupported. At Full access
+under Strict below Full access, continues to report app tools as unsupported.
+Outside Strict a Work or Code thread below Full access and outside Plan is
+offered them labelled as mixed (`appManagedToolsOutsideStrict: "mixed"`;
+[Octant's tools outside Strict](#octants-tools-outside-strict)). At Full access
 such a runtime is still offered Octant's tools, labelled as mixed with tools
 Octant did not supply (maintainer request, 2026-11-12). The adapter reports
 this as a separate capability, `appManagedToolsAtFullAccess: "mixed"`, beside
@@ -4067,8 +4089,8 @@ show "mixed with tools Octant did not supply". Full access launches the
 runtime outside the sandbox the receipt rests on, so a release that proves
 exclusivity below Full access is mixed there too, unless the thread keeps the
 opt-in sandbox. The capability is reported only when the connection check saw
-the runtime accept the tool endpoint's declaration; that check runs on macOS
-and Linux, so both report mixed. Every reader of the tool
+the runtime accept the tool endpoint's declaration; that check runs on macOS,
+Linux and Windows, so each reports mixed. Every reader of the tool
 gate follows the level the turn runs at (maintainer decision, 2026-11-13): a
 child agent session reads the level its own session runs at; a routine's own
 Browser target reads its running turn's level; a saved flow, which runs
@@ -4268,6 +4290,13 @@ installs or updates anything.
   before, with no automatic update. After the updater exits the host probes
   again, so a release that no longer passes a version floor or capability check
   shows its refusal reason instead of failing turns.
+- **Running the updater.** **Update CLI** runs only the configured absolute
+  binary's verified update subcommand, only when no active session uses it,
+  on the owning host; the renderer never receives an updater command. The
+  updater is a documented exception to deny-default confinement (unwrapped,
+  host environment, bounded output) and must exit before another session is
+  admitted. A failure reaches a client only as a bounded diagnostic, never as
+  raw output, arguments, environment or paths.
 
 ## Windows launches
 

@@ -150,8 +150,8 @@ export class NativeHarnessSessionStore {
       // Follow-up suggestions belong to the thread on every provider; the
       // session route joins them in from their own store.
       activatedFollowUpIds: [],
-      questions: record.questions,
-      approvals: record.approvals,
+      questions: askView(record.questions),
+      approvals: askView(record.approvals),
       tasks: record.tasks,
       steering: this.#steering.get(threadId) ?? [],
       activeTools: this.#activeTools.get(threadId) ?? [],
@@ -391,7 +391,7 @@ export class NativeHarnessSessionStore {
     const record = this.#records.get(threadId);
     if (record === undefined) return;
     this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalAsked, approval);
-    push(record.approvals, approval);
+    pushAsk(record.approvals, approval);
   }
 
   settleApproval(
@@ -575,7 +575,7 @@ export class NativeHarnessSessionStore {
     const record = this.#records.get(threadId);
     if (record === undefined) return;
     this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.questionAsked, question);
-    push(record.questions, question);
+    pushAsk(record.questions, question);
   }
 
   settleQuestion(
@@ -837,7 +837,7 @@ export class NativeHarnessSessionStore {
     } else if (eventName === names.tasksReplaced) {
       record.tasks = (body as { readonly items: ReadonlyArray<NativeHarnessTodoItem> }).items;
     } else if (eventName === names.approvalAsked) {
-      push(record.approvals, payload as NativeHarnessApproval);
+      pushAsk(record.approvals, payload as NativeHarnessApproval);
     } else if (eventName === names.approvalSettled) {
       const index = record.approvals.findIndex(
         (entry) => String(entry.id) === String(body.approvalId),
@@ -852,7 +852,7 @@ export class NativeHarnessSessionStore {
         };
       }
     } else if (eventName === names.questionAsked) {
-      push(record.questions, payload as NativeHarnessQuestion);
+      pushAsk(record.questions, payload as NativeHarnessQuestion);
     } else if (eventName === names.questionSettled) {
       const index = record.questions.findIndex(
         (entry) => String(entry.id) === String(body.questionId),
@@ -889,6 +889,28 @@ function push<T>(list: T[], entry: T): void {
   list.push(entry);
   if (list.length > MAX_NATIVE_HARNESS_VIEW_ENTRIES)
     list.splice(0, list.length - MAX_NATIVE_HARNESS_VIEW_ENTRIES);
+}
+
+/**
+ * Approvals and questions drop their oldest settled entries first. A waiting
+ * one stays until it is settled, so no later asks can push it out of reach
+ * (outside Strict nothing caps how many wait, and an entry that dropped out
+ * could no longer be answered). The list can run past the view's limit only
+ * while more than that many wait.
+ */
+function pushAsk<T extends { readonly status: string }>(list: T[], entry: T): void {
+  list.push(entry);
+  while (list.length > MAX_NATIVE_HARNESS_VIEW_ENTRIES) {
+    const settled = list.findIndex((item) => item.status !== "pending");
+    if (settled === -1) return;
+    list.splice(settled, 1);
+  }
+}
+
+/** The asks a view shows: all of them, or, past its limit, the oldest that wait. */
+function askView<T extends { readonly status: string }>(list: ReadonlyArray<T>): ReadonlyArray<T> {
+  if (list.length <= MAX_NATIVE_HARNESS_VIEW_ENTRIES) return list;
+  return list.filter((item) => item.status === "pending").slice(0, MAX_NATIVE_HARNESS_VIEW_ENTRIES);
 }
 
 /**

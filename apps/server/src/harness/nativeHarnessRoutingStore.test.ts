@@ -614,7 +614,39 @@ describe("native harness session store", () => {
     }
   });
 
-  it("refuses a question past the host-wide waiting cap at once and journals nothing for it", async () => {
+  it("asks a question past the waiting cap when its thread is outside Strict", () => {
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    const relaxed = "00000000-0000-4000-8000-000000000035";
+    const questions = new NativeHarnessQuestionStore({
+      sessions,
+      uuid,
+      clock: () => now,
+      strict: (threadId) => threadId !== relaxed,
+    });
+    const ask = (threadId: string) =>
+      questions.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        prompt: "Continue?",
+        options: [],
+      });
+    for (let index = 0; index < MAX_WAITING_NATIVE_HARNESS_QUESTIONS; index += 1) {
+      void ask("00000000-0000-4000-8000-000000000034");
+    }
+
+    void ask(relaxed);
+    expect(sessions.read(relaxed)?.questions[0]?.status).toBe("pending");
+    expect(questions.waiting()).toHaveLength(MAX_WAITING_NATIVE_HARNESS_QUESTIONS + 1);
+  });
+
+  it("refuses a Strict thread's question past the host-wide waiting cap at once and journals nothing for it", async () => {
     vi.useFakeTimers();
     const uuid = uuidFactory();
     const sessions = new NativeHarnessSessionStore({
@@ -623,7 +655,12 @@ describe("native harness session store", () => {
       actor,
       clock: () => now,
     });
-    const questions = new NativeHarnessQuestionStore({ sessions, uuid, clock: () => now });
+    const questions = new NativeHarnessQuestionStore({
+      sessions,
+      uuid,
+      clock: () => now,
+      strict: () => true,
+    });
     // The cap is shared by every thread, so the waiting questions are spread
     // over two threads and the refused one comes from a third.
     const ask = (threadId: string) =>
@@ -954,7 +991,40 @@ describe("native harness session store", () => {
     expect(questions.waiting().map((waiting) => waiting.threadId)).toEqual([kept]);
   });
 
-  it("refuses an approval past the host-wide waiting cap at once and journals nothing for it", async () => {
+  it("asks an approval past the waiting cap when its thread is outside Strict", () => {
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    const relaxed = "00000000-0000-4000-8000-000000000037";
+    const approvals = new NativeHarnessApprovalStore({
+      sessions,
+      uuid,
+      clock: () => now,
+      strict: (threadId) => threadId !== relaxed,
+    });
+    const ask = (threadId: string) =>
+      approvals.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        toolName: "bash",
+        summary: "bash: bun test",
+        approvalClass: "shell-commands",
+      });
+    for (let index = 0; index < MAX_WAITING_NATIVE_HARNESS_APPROVALS; index += 1) {
+      void ask("00000000-0000-4000-8000-000000000036");
+    }
+
+    void ask(relaxed);
+    expect(sessions.read(relaxed)?.approvals?.[0]?.status).toBe("pending");
+    expect(approvals.waiting()).toHaveLength(MAX_WAITING_NATIVE_HARNESS_APPROVALS + 1);
+  });
+
+  it("refuses a Strict thread's approval past the host-wide waiting cap at once and journals nothing for it", async () => {
     vi.useFakeTimers();
     const uuid = uuidFactory();
     const sessions = new NativeHarnessSessionStore({
@@ -963,7 +1033,12 @@ describe("native harness session store", () => {
       actor,
       clock: () => now,
     });
-    const approvals = new NativeHarnessApprovalStore({ sessions, uuid, clock: () => now });
+    const approvals = new NativeHarnessApprovalStore({
+      sessions,
+      uuid,
+      clock: () => now,
+      strict: () => true,
+    });
     // The cap is shared by every thread, so the waiting approvals are spread
     // over two threads and the refused one comes from a third.
     const ask = (threadId: string) =>

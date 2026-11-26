@@ -171,6 +171,27 @@ describe("Settings › Agent access", () => {
     await userEvent.click(screen.getByRole("button", { name: "Revoke grant" }));
     await waitFor(() => expect(revoke).toHaveBeenCalledWith({ grantId, stopRunningTurns: true }));
   });
+
+  it("lets a Read only device revoke a grant without offering to stop its running turns", async () => {
+    const revoke = vi.fn(async () => ({ kind: "done" as const }));
+    const client: AgentGrantClient = {
+      grants: async () => ({ kind: "grants", grants: [view] }),
+      threads: async () => ({ threads: [] }),
+      revoke,
+      command: vi.fn(),
+    };
+    render(
+      <AgentAccessSettingsSection
+        canStopTurns={false}
+        client={client}
+        projectNames={projectNames}
+      />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Revoke Home bot" }));
+    expect(screen.queryByRole("checkbox", { name: "Also stop its running turns" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Revoke grant" }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith({ grantId, stopRunningTurns: false }));
+  });
 });
 
 describe("Started by", () => {
