@@ -1614,6 +1614,14 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect((await probed("freebsd")).capabilities.appManagedTools).toBe("unsupported");
   });
 
+  it("still refuses Octant's tools on Windows to an agent that cannot prove HTTP MCP", async () => {
+    const { unadvertisedHttpMcpVersions: _unadvertised, ...advertising } = profile;
+    const probed = await withProcessPlatform("win32", () =>
+      Effect.runPromise(Effect.scoped(fixture(advertising).driver.probe({ instanceId }))),
+    );
+    expect(probed.capabilities.appManagedTools).toBe("unsupported");
+  });
+
   it("registers the exact app tool catalogue before an HTTP-capable ACP session starts", async () => {
     const bridgeClose = vi.fn(async () => undefined);
     type ExecuteManagedTool = (
