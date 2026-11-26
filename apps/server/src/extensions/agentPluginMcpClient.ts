@@ -21,7 +21,7 @@ function offersOAuthSignIn(challenge: string | null): boolean {
   return (
     challenge !== null &&
     /\bbearer\b/i.test(challenge) &&
-    /resource_metadata="[^"]+"/i.test(challenge)
+    /(?:^|[\s,])resource_metadata="[^"]+"/i.test(challenge)
   );
 }
 

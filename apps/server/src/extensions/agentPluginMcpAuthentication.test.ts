@@ -679,6 +679,8 @@ describe("a signed-out server the person added by hand", () => {
     const [bare] = await refusedWith(undefined);
     expect(bare).toMatchObject({ state: "failed" });
     expect(bare).not.toHaveProperty("signInOffered");
+    const [other] = await refusedWith('Bearer x_resource_metadata="https://example.test/meta"');
+    expect(other).not.toHaveProperty("signInOffered");
     const [packaged] = await refusedWith(
       'Bearer resource_metadata="https://example.test/.well-known/oauth-protected-resource"',
       false,
