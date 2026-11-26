@@ -20,7 +20,7 @@ import {
   type PullRequestReviewTarget,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -124,6 +124,8 @@ function harness(options: {
   readonly admit?: "admitted" | "refused";
   readonly head?: { current: string };
   readonly reply?: string;
+  readonly captureThrows?: boolean;
+  readonly turnWaitsForAbort?: boolean;
 }) {
   const dir = mkdtempSync(join(tmpdir(), "octant-pr-guide-"));
   dirs.push(dir);
@@ -153,11 +155,20 @@ function harness(options: {
   > = {
     scratchRoot: dir,
     readCurrentHeadSha: async () => head.current,
-    capturePullRequestDiff: async () => ({ status: "ready", capture: { snapshot: DIFF } }),
+    capturePullRequestDiff: async () => {
+      if (options.captureThrows === true) throw new Error("gh refused");
+      return { status: "ready", capture: { snapshot: DIFF } };
+    },
     inspectRoute: () => ({ status: "ready" }),
     // A fake turn: no provider is reached and nothing is billed.
     executeReadOnlyTurn: async (input): Promise<PullRequestReviewTurnExecutionResult> => {
       turns.push(input.prompt);
+      if (options.turnWaitsForAbort === true) {
+        await new Promise<void>((resolve) =>
+          input.signal?.addEventListener("abort", () => resolve()),
+        );
+        return { status: "cancelled" } as never;
+      }
       return { status: "completed", sessionId: "fake", text: options.reply ?? GUIDE_REPLY };
     },
     spendCeiling: {
@@ -329,5 +340,36 @@ describe("review guides", () => {
     expect(declined).toEqual({ status: "not-confirmed" });
     expect(asked).toEqual([42]);
     expect(turns).toEqual([]);
+  });
+
+  it("gives back the spend reservation and frees the pull request when reading the diff throws", async () => {
+    const { make, spend } = harness({ route: ROUTE, captureThrows: true });
+    const service = make();
+    const started = await service.writeForPerson(WINDOW_ID, TARGET);
+    if (started.status !== "started") throw new Error("expected a started run");
+    expect((await started.done).status).toBe("failed");
+    expect(spend).toEqual(["admit", "abandon"]);
+    const read = await service.read(WINDOW_ID, TARGET, HEAD_1);
+    expect(read.status === "read" && read.view.running).toBe(false);
+  });
+
+  it("stopping the agent's turn cancels the guide run it started", async () => {
+    const { make, turns } = harness({ route: ROUTE, turnWaitsForAbort: true });
+    const service = make();
+    const turn = new AbortController();
+    const started = await service.writeForThread(WINDOW_ID, THREAD_ID, undefined, turn.signal);
+    if (started.status !== "started") throw new Error("expected a started run");
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+    turn.abort();
+    expect(await started.done).toEqual({ status: "failed", reason: "cancelled" });
+  });
+
+  it("an earlier push's failure is not shown for the new head", async () => {
+    const { make } = harness({ route: ROUTE, admit: "refused" });
+    const service = make();
+    const started = await service.writeForPerson(WINDOW_ID, TARGET);
+    if (started.status === "started") await started.done;
+    const read = await service.read(WINDOW_ID, TARGET, HEAD_2);
+    expect(read.status === "read" && read.view.lastFailure).toBeUndefined();
   });
 });

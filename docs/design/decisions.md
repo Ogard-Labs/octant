@@ -1320,6 +1320,7 @@ A pull request's reading pane has a Guide tab: an ordered list of stops through 
 - The person starts a run from a local window; a paired phone only reads guides. The agent's `guide` reads its own pull request's guide and never asks; `guide-write` asks below Full access and is refused in Plan. Guide text is outside content to a thread that reads it.
 - Viewed is GitHub's `viewerViewedState`, read and written (`markFileAsViewed`, `unmarkFileAsViewed`) through the host's `gh` GraphQL, from a local window only, under the person's GitHub name. Octant keeps no copy and journals nothing for it. A file GitHub dismissed after a new push shows "Changed", and the list header shows "n of m viewed".
 - J and K step between stops. A live billed guide run against a real repository is owed as a maintainer smoke.
+- Departures from the approved plan: an anchor opens Changes at its file, not at its lines; an anchor is kept when its range meets a hunk, not only when every line exists; Viewed is read and written at `/api/code/pull-request-guides/viewed/query` and `/viewed`, and its read is local-window only too; a person's run is charged to the pull request's first active linked thread and refused `no-thread` without one.
 
 Status: Built. Since: 2026-11-26. Detail: [Workspace: the Pull requests reading pane](workspace.md#tool-lifecycles) and [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 

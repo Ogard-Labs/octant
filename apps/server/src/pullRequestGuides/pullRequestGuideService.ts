@@ -167,7 +167,10 @@ function guideAggregateId(linkId: string) {
 interface GuideFold {
   version: number;
   guide: PullRequestGuide | undefined;
-  lastFailure: PullRequestGuideFailureReason | undefined;
+  /** The newest failure and the head it was for; a push leaves it behind. */
+  lastFailure:
+    | { readonly reason: PullRequestGuideFailureReason; readonly headSha: string | undefined }
+    | undefined;
   readonly started: Map<string, PullRequestGuideRunStartedEvent>;
 }
 
@@ -314,6 +317,7 @@ export class PullRequestGuideService {
     windowId: WindowId,
     threadId: CodeThreadId,
     confirm: ((target: PullRequestReviewTarget) => Promise<boolean>) | undefined,
+    signal?: AbortSignal,
   ): Promise<
     | PullRequestGuideStartResult
     | { readonly status: "refused"; readonly reason: string }
@@ -330,7 +334,8 @@ export class PullRequestGuideService {
       return { status: "refused", reason: "running" };
     }
     if (confirm !== undefined && !(await confirm(own.target))) return { status: "not-confirmed" };
-    return this.#start(own.target, thread, { kind: "agent", threadId });
+    if (signal?.aborted === true) return { status: "refused", reason: "cancelled" };
+    return this.#start(own.target, thread, { kind: "agent", threadId }, signal);
   }
 
   dispose(): void {
@@ -346,7 +351,12 @@ export class PullRequestGuideService {
       ...(guide === undefined ? {} : { guide }),
       stale: guide !== undefined && headSha !== undefined && guide.headSha !== headSha,
       running: this.#running.has(linkId),
-      ...(fold?.lastFailure === undefined ? {} : { lastFailure: fold.lastFailure }),
+      ...(fold?.lastFailure === undefined ||
+      (headSha !== undefined &&
+        fold.lastFailure.headSha !== undefined &&
+        fold.lastFailure.headSha !== headSha)
+        ? {}
+        : { lastFailure: fold.lastFailure.reason }),
       modelPicked: this.#options.guideRoute(target.projectId) !== undefined,
     });
   }
@@ -355,46 +365,66 @@ export class PullRequestGuideService {
     target: PullRequestReviewTarget,
     thread: CodeThread,
     requestedBy: PullRequestGuideRequester,
+    signal?: AbortSignal,
   ): Promise<PullRequestGuideStartResult> {
     const route = this.#options.guideRoute(target.projectId);
     if (route === undefined) return { status: "refused", reason: "no-model" };
     const linkId = pullRequestReviewTargetKey(target);
     if (this.#running.has(linkId)) return { status: "refused", reason: "running" };
     const controller = new AbortController();
+    // The agent's turn being stopped stops the billed run it started.
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
     // Claimed before the first await, so a second click cannot start a twin.
     this.#running.set(linkId, controller);
     const headSha = await this.#options.runtime
       .readCurrentHeadSha(target, controller.signal)
       .catch(() => undefined);
+    const release = () => {
+      signal?.removeEventListener("abort", abort);
+      if (this.#running.get(linkId) === controller) this.#running.delete(linkId);
+    };
     if (headSha === undefined) {
-      this.#running.delete(linkId);
+      release();
       return { status: "refused", reason: "unavailable" };
     }
     const guideId = decodePullRequestGuideId(this.#options.uuid());
     const reservationId = decodeSpendCeilingReservationId(this.#options.uuid());
-    this.#append(linkId, PULL_REQUEST_GUIDE_EVENT_NAMES.runStarted, {
-      kind: "pull-request-guide-run-started",
-      guideId,
-      linkId,
-      headSha,
-      providerInstanceId: route.providerInstanceId,
-      modelId: route.modelId,
-      requestedBy,
-      reservationId,
-    });
+    try {
+      this.#append(linkId, PULL_REQUEST_GUIDE_EVENT_NAMES.runStarted, {
+        kind: "pull-request-guide-run-started",
+        guideId,
+        linkId,
+        headSha,
+        providerInstanceId: route.providerInstanceId,
+        modelId: route.modelId,
+        requestedBy,
+        reservationId,
+      });
+    } catch {
+      // Nothing ran, and the link must not stay "running" for good.
+      release();
+      return { status: "refused", reason: "unavailable" };
+    }
+    // `done` never rejects: a person's run is not awaited, and a journal that
+    // closed under it (shutdown) must not leave the link running.
     const done = this.#run({ target, thread, route, headSha, guideId, reservationId, controller })
       .catch((): PullRequestGuideRunResult => ({ status: "failed", reason: "unavailable" }))
       .then((result) => {
         if (result.status === "failed") {
-          this.#append(linkId, PULL_REQUEST_GUIDE_EVENT_NAMES.runFailed, {
-            kind: "pull-request-guide-run-failed",
-            guideId,
-            reason: result.reason,
-          });
+          try {
+            this.#append(linkId, PULL_REQUEST_GUIDE_EVENT_NAMES.runFailed, {
+              kind: "pull-request-guide-run-failed",
+              guideId,
+              reason: result.reason,
+            });
+          } catch {
+            // The run is over either way; a restart drops an unfinished run.
+          }
         }
-        this.#running.delete(linkId);
         return result;
-      });
+      })
+      .finally(release);
     return { status: "started", target, headSha, done };
   }
 
@@ -426,99 +456,107 @@ export class PullRequestGuideService {
     let usage: TurnUsage | undefined;
     let turnStarted = false;
     let oversized = false;
-    const outcome = await this.#options.writer.write(
-      { target, headSha, baseRef: thread.deliveryTarget.proposedBaseBranch },
-      {
-        readPullRequestDiff: async (diffSignal) => {
-          const captured = await runtime.capturePullRequestDiff(
-            { target, thread, headSha, baseRef: thread.deliveryTarget.proposedBaseBranch },
-            diffSignal ?? signal,
-          );
-          if (captured.status === "stale") return { status: "stale" };
-          if (captured.status === "unavailable") {
-            return { status: "unavailable", reason: "unavailable" };
-          }
-          diff = captured.capture.snapshot;
-          return { status: "ready", diff };
-        },
-        runReadOnlyGuideTurn: async (turn, turnSignal): Promise<PullRequestReviewTurnResult> => {
-          if (turnStarted) {
-            return { status: "refused", reason: "capacity", detail: "A guide run has one turn." };
-          }
-          const inspection = runtime.inspectRoute({ route, projectId: thread.projectId });
-          if (inspection.status === "refused") {
-            return {
-              status: "refused",
-              reason: inspection.reason ?? "route-refused",
-              detail: inspection.detail ?? "The guide model is unavailable.",
-            };
-          }
-          turnStarted = true;
-          const sessionId = this.#options.uuid();
-          const turnInput = {
-            route,
-            thread,
-            prompt: turn.prompt,
-            ...(turn.systemInstructions === undefined
-              ? {}
-              : { systemInstructions: turn.systemInstructions }),
-            signal: turnSignal ?? signal,
-          };
-          let result: PullRequestReviewTurnExecutionResult;
-          if (runtime.executeReadOnlyTurn !== undefined) {
-            result = await runtime.executeReadOnlyTurn(turnInput);
-          } else if (inspection.driver !== undefined) {
-            result = await runDriverReadOnlyTurn({
-              ...turnInput,
-              driver: inspection.driver,
-              ...(inspection.modelOptionValues === undefined
+    let outcome: Awaited<ReturnType<PullRequestGuideServiceOptions["writer"]["write"]>>;
+    try {
+      outcome = await this.#options.writer.write(
+        { target, headSha, baseRef: thread.deliveryTarget.proposedBaseBranch },
+        {
+          readPullRequestDiff: async (diffSignal) => {
+            const captured = await runtime.capturePullRequestDiff(
+              { target, thread, headSha, baseRef: thread.deliveryTarget.proposedBaseBranch },
+              diffSignal ?? signal,
+            );
+            if (captured.status === "stale") return { status: "stale" };
+            if (captured.status === "unavailable") {
+              return { status: "unavailable", reason: "unavailable" };
+            }
+            diff = captured.capture.snapshot;
+            return { status: "ready", diff };
+          },
+          runReadOnlyGuideTurn: async (turn, turnSignal): Promise<PullRequestReviewTurnResult> => {
+            if (turnStarted) {
+              return { status: "refused", reason: "capacity", detail: "A guide run has one turn." };
+            }
+            const inspection = runtime.inspectRoute({ route, projectId: thread.projectId });
+            if (inspection.status === "refused") {
+              return {
+                status: "refused",
+                reason: inspection.reason ?? "route-refused",
+                detail: inspection.detail ?? "The guide model is unavailable.",
+              };
+            }
+            turnStarted = true;
+            const sessionId = this.#options.uuid();
+            const turnInput = {
+              route,
+              thread,
+              prompt: turn.prompt,
+              ...(turn.systemInstructions === undefined
                 ? {}
-                : { modelOptionValues: inspection.modelOptionValues }),
-              scratchRoot: runtime.scratchRoot,
-              sessionId,
-              timeoutMs: this.#options.turnTimeoutMs ?? GUIDE_TURN_TIMEOUT_MS,
-            });
-          } else {
-            turnStarted = false;
-            return { status: "refused", reason: "no-account", detail: "No guide driver." };
-          }
-          if (result.status === "refused") {
-            turnStarted = false;
-            return result;
-          }
-          usage = result.usage;
-          if (result.status !== "completed") return result;
-          if (encoder.encode(result.text).byteLength > MAX_PULL_REQUEST_GUIDE_OUTPUT_BYTES) {
-            oversized = true;
-            return { status: "failed", detail: "The guide was longer than 16 KB." };
-          }
-          return {
-            status: "completed",
-            runId: decodeAgentRunId(this.#options.uuid()),
-            providerInstanceId: route.providerInstanceId,
-            modelId: route.modelId,
-            sessionId: result.sessionId,
-            text: result.text,
-          };
+                : { systemInstructions: turn.systemInstructions }),
+              signal: turnSignal ?? signal,
+            };
+            let result: PullRequestReviewTurnExecutionResult;
+            if (runtime.executeReadOnlyTurn !== undefined) {
+              result = await runtime.executeReadOnlyTurn(turnInput);
+            } else if (inspection.driver !== undefined) {
+              result = await runDriverReadOnlyTurn({
+                ...turnInput,
+                driver: inspection.driver,
+                ...(inspection.modelOptionValues === undefined
+                  ? {}
+                  : { modelOptionValues: inspection.modelOptionValues }),
+                scratchRoot: runtime.scratchRoot,
+                sessionId,
+                timeoutMs: this.#options.turnTimeoutMs ?? GUIDE_TURN_TIMEOUT_MS,
+              });
+            } else {
+              turnStarted = false;
+              return { status: "refused", reason: "no-account", detail: "No guide driver." };
+            }
+            if (result.status === "refused") {
+              turnStarted = false;
+              return result;
+            }
+            usage = result.usage;
+            if (result.status !== "completed") return result;
+            if (encoder.encode(result.text).byteLength > MAX_PULL_REQUEST_GUIDE_OUTPUT_BYTES) {
+              oversized = true;
+              return { status: "failed", detail: "The guide was longer than 16 KB." };
+            }
+            return {
+              status: "completed",
+              runId: decodeAgentRunId(this.#options.uuid()),
+              providerInstanceId: route.providerInstanceId,
+              modelId: route.modelId,
+              sessionId: result.sessionId,
+              text: result.text,
+            };
+          },
         },
-      },
-      signal,
-    );
-    if (turnStarted) {
-      spend?.settle({
-        reservationId,
-        ...(usage === undefined ? {} : { observedTokens: usage.inputTokens + usage.outputTokens }),
-      });
-      // Spend the provider did not report is still recorded, so it is never free.
-      runtime.recordUsage?.({
-        threadId: thread.id,
-        projectId: thread.projectId,
-        providerInstanceId: route.providerInstanceId,
-        modelId: route.modelId,
-        ...(usage === undefined ? {} : { usage }),
-      });
-    } else {
-      spend?.abandon({ reservationId });
+        signal,
+      );
+    } finally {
+      // Settled or abandoned however the writer ends, a throw included, so a
+      // failed run never keeps its reservation against the thread's ceiling.
+      if (turnStarted) {
+        spend?.settle({
+          reservationId,
+          ...(usage === undefined
+            ? {}
+            : { observedTokens: usage.inputTokens + usage.outputTokens }),
+        });
+        // Spend the provider did not report is still recorded, so it is never free.
+        runtime.recordUsage?.({
+          threadId: thread.id,
+          projectId: thread.projectId,
+          providerInstanceId: route.providerInstanceId,
+          modelId: route.modelId,
+          ...(usage === undefined ? {} : { usage }),
+        });
+      } else {
+        spend?.abandon({ reservationId });
+      }
     }
     if (oversized || outcome.status === "invalid-output") {
       return { status: "failed", reason: "invalid-output" };
@@ -529,6 +567,8 @@ export class PullRequestGuideService {
     if (outcome.status === "stale") return { status: "failed", reason: "head-stale" };
     if (outcome.status !== "written") return { status: "failed", reason: "unavailable" };
     const currentHead = await runtime.readCurrentHeadSha(target, signal).catch(() => undefined);
+    // GitHub not answering is not a push.
+    if (currentHead === undefined) return { status: "failed", reason: "unavailable" };
     if (currentHead !== headSha) return { status: "failed", reason: "head-stale" };
     const stops = validateGuideStops(outcome.stops, diff ?? { files: [] });
     const linkId = pullRequestReviewTargetKey(target);
@@ -602,7 +642,7 @@ export class PullRequestGuideService {
     const started = fold.started.get(String(payload.guideId));
     fold.started.delete(String(payload.guideId));
     if (payload.kind === "pull-request-guide-run-failed") {
-      fold.lastFailure = payload.reason;
+      fold.lastFailure = { reason: payload.reason, headSha: started?.headSha };
       return;
     }
     if (started === undefined) return;

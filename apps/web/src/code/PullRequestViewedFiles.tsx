@@ -13,6 +13,8 @@ export interface PullRequestViewedFilesProps {
   readonly client: PullRequestReviewClient;
   readonly target: PullRequestReviewTarget;
   readonly files: CodeProjectPullRequestDetailObserved["files"];
+  /** The head on screen: a new push can reset files to "Changed", so it reads again. */
+  readonly headSha?: string;
 }
 
 /**
@@ -26,8 +28,9 @@ export default function PullRequestViewedFiles(props: PullRequestViewedFilesProp
   const [note, setNote] = useState<string>();
   const [saving, setSaving] = useState<string>();
   const { client, target } = props;
-  // The pane builds its target afresh on every render; read again only when it names another pull request.
-  const targetKey = `${String(target.projectId)}/${String(target.repositoryOwner)}/${String(target.repositoryName)}#${target.number}`;
+  // The pane builds its target afresh on every render; read again only when it
+  // names another pull request or a new head.
+  const targetKey = `${String(target.projectId)}/${String(target.repositoryOwner)}/${String(target.repositoryName)}#${target.number}@${props.headSha ?? ""}`;
   const guides = useMemo(() => createPullRequestGuideClient(client.transport), [client]);
 
   useEffect(() => {

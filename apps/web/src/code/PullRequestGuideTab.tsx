@@ -133,7 +133,7 @@ export default function PullRequestGuideTab(props: PullRequestGuideTabProps) {
 
   return (
     <section aria-label="Review guide" className="pr-guide">
-      {!view.modelPicked && guide === undefined ? (
+      {!view.modelPicked ? (
         <p className="pr-detail__quiet" role="status">
           Pick a model to write guides: Project settings › Pull request reviews › Guide model.
         </p>

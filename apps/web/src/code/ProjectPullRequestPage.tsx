@@ -680,6 +680,7 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                     <PullRequestViewedFiles
                       client={guideClient}
                       files={detail.files}
+                      headSha={detail.headSha}
                       target={guideTarget}
                     />
                   </Suspense>

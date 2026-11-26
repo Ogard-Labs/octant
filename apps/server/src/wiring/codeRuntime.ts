@@ -2428,6 +2428,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               input.confirm === undefined
                 ? undefined
                 : (target) => input.confirm?.({ number: target.number }) ?? Promise.resolve(false),
+              input.signal,
             );
             if (started.status !== "started") return started;
             const done = await started.done;

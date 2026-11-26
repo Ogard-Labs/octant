@@ -4799,8 +4799,12 @@ Guide tab and Viewed checkboxes (maintainer decision, 2026-11-26).
   "why"; model output over 16 KB is `invalid-output`. Every anchor must name a
   file the diff changes at that head (not a deleted one) and a line range that
   meets a hunk on the head side; others are dropped, and a stop left with none
-  stays as unanchored. A push between the start and the record is `head-stale`.
-  A run cut off by a restart is not repeated.
+  stays as unanchored. A push between the start and the record is `head-stale`;
+  a head GitHub does not answer for is `unavailable`. A run gives its spend
+  reservation back however it ends, a writer that throws included, and
+  stopping the agent's turn cancels the run its `guide-write` started. A
+  failure shows only for the head it was for. A run cut off by a restart is
+  not repeated.
 - **Who starts a run.** The person, from a local window
   (`POST /api/code/pull-request-guides/write`). The agent, through the
   pull-request tool's `guide-write` on its own linked pull request: Plan refuses
