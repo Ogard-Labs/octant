@@ -44,7 +44,7 @@ const startAssignment = Schema.decodeUnknownSync(
   Schema.Struct({ title: Schema.String, prompt: Schema.String }),
 );
 
-async function checkoutStartDecoder(cwd: string): Promise<StartDecoder> {
+export async function checkoutStartDecoder(cwd: string): Promise<StartDecoder> {
   const path = Bun.resolveSync("@octant/contracts", resolve(cwd, "apps/server"));
   const contracts: Record<string, unknown> = await import(path);
   const decode = contracts.decodeCoordinatorStartInput;

@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { decodeCoordinatorStartInput } from "@octant/contracts";
 import { decodeInputs, decision, sample } from "./coordinatorEvaluationCli";
 import { expect, it, vi } from "vitest";
@@ -116,6 +120,41 @@ it("refuses delegation arguments containing fields from other operations", () =>
       throw new Error("This checkout does not accept risk.");
     }),
   ).toEqual({ operation: "invalid arguments" });
+});
+
+it("loads the worker-start contract separately from each supplied checkout", () => {
+  const directory = mkdtempSync(join(tmpdir(), "coordinator-contracts-"));
+  try {
+    const checkouts = ["baseline", "candidate"].map((revision) => {
+      const checkout = join(directory, revision);
+      const contracts = join(checkout, "apps/server/node_modules/@octant/contracts");
+      mkdirSync(contracts, { recursive: true });
+      writeFileSync(
+        join(contracts, "package.json"),
+        JSON.stringify({ type: "module", exports: "./index.js" }),
+      );
+      writeFileSync(
+        join(contracts, "index.js"),
+        `export const decodeCoordinatorStartInput = input => ({ ...input, title: ${JSON.stringify(revision)} });`,
+      );
+      return checkout;
+    });
+    // The CLI resolves packages with Bun. Load both in one process to exercise its module cache too.
+    const probe = `
+      const { checkoutStartDecoder } = await import(process.argv[1]);
+      for (const checkout of process.argv.slice(2)) {
+        const decode = await checkoutStartDecoder(checkout);
+        console.log(decode({ operation: "start", title: "Parser", prompt: "Fix parsing" }).title);
+      }`;
+    const cli = new URL("./coordinatorEvaluationCli.ts", import.meta.url).href;
+    const result = execFileSync("bun", ["-e", probe, cli, ...checkouts], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.trim().split(/\r?\n/)).toEqual(["baseline", "candidate"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 it("checks the model input emitted by each checkout", async () => {
