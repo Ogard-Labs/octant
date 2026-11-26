@@ -215,6 +215,24 @@ describe("your own devices through the hub", () => {
     }
   }, 30_000);
 
+  it("a relayed connection reaches only the routes a paired device uses", async () => {
+    const { relayedFetch, spoke } = await setUp();
+    // Pre-auth routes for the private network, which exist on the listener
+    // but are never for the relay: agent access and the server proxy sign-in.
+    for (const path of ["/api/agent-access/claim", "/api/remote/auth/server-proxy-session"]) {
+      const response = await relayedFetch()(new URL(path, spoke.origin), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(response.status, path).toBe(403);
+      expect(await response.json(), path).toEqual({
+        status: "refused",
+        kind: "relayed-admin-refused",
+      });
+    }
+  }, 30_000);
+
   it("the relayed device rejects a host whose pin differs", async () => {
     const { relayedFetch, spoke } = await setUp();
     const otherPin = `sha256-${randomBytes(32).toString("base64url")}`;

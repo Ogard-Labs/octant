@@ -73,7 +73,14 @@ function refuseUpgrade(socket: Duplex, status: string): void {
 export class HubRelayService {
   readonly #options: HubRelayServiceOptions;
   /** Every open device end: admitting or carrying. Closed together when the relay stops. */
-  readonly #open = new Map<WebSocketEndpoint, (code: number, reason: string) => void>();
+  readonly #open = new Map<
+    WebSocketEndpoint,
+    {
+      readonly end: (code: number, reason: string) => void;
+      /** Set once admitted: whose list let it through, so withdrawing that key ends it. */
+      carries?: { readonly target: string; readonly fingerprint: string };
+    }
+  >();
   #tunnels = 0;
 
   constructor(options: HubRelayServiceOptions) {
@@ -97,7 +104,28 @@ export class HubRelayService {
 
   /** Ends every relay at once: the switch went off, or remote access paused. */
   closeAll(): void {
-    for (const end of this.#open.values()) end(1001, "relay closed");
+    for (const open of this.#open.values()) open.end(1001, "relay closed");
+  }
+
+  /**
+   * Ends what should no longer carry: everything when the switch is off or
+   * this host stopped acting as hub, and each tunnel whose device key its
+   * host has withdrawn. Withdrawing permission ends a tunnel already open,
+   * not only the next one.
+   */
+  sweep(): void {
+    if (!this.#load().enabled || !this.#options.serving()) {
+      this.closeAll();
+      return;
+    }
+    for (const open of this.#open.values()) {
+      if (
+        open.carries !== undefined &&
+        !this.#listed(open.carries.target, open.carries.fingerprint)
+      ) {
+        open.end(1001, "relay withdrawn");
+      }
+    }
   }
 
   /** Replaces the device keys one host lets through; an empty list withdraws them. */
@@ -119,6 +147,7 @@ export class HubRelayService {
       actingPrincipal: { kind: "peer", memberId: decodeMemberId(memberId) },
       memberId: decodeMemberId(memberId),
     });
+    this.sweep();
     return { status: "recorded", count: update.fingerprints.length };
   }
 
@@ -183,7 +212,8 @@ export class HubRelayService {
       device.close(code, reason);
       host?.close(1000, "");
     };
-    this.#open.set(device, end);
+    const open: { end: typeof end; carries?: { target: string; fingerprint: string } } = { end };
+    this.#open.set(device, open);
     const timer = setTimeout(
       () => end(RELAY_REFUSED_CLOSE_CODE, "refused"),
       this.#options.admissionTimeoutMs ?? ADMISSION_TIMEOUT_MS,
@@ -210,6 +240,10 @@ export class HubRelayService {
             }
             this.#tunnels += 1;
             counted = true;
+            open.carries = {
+              target: String(admitted.targetMemberId),
+              fingerprint: admitted.fingerprint,
+            };
             const far = await this.#options
               .openTunnel(String(admitted.targetMemberId), admitted.fingerprint)
               .catch(() => undefined);

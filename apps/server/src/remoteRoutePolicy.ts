@@ -23,6 +23,7 @@ import {
   SERVICE_OFFERS_PATH,
   SERVICE_OFFER_DECISION_MAX_BYTES,
   WORK_ATTACHMENT_MEDIA_TYPES,
+  RELAYED_ADMIN_REFUSED,
 } from "@octant/contracts";
 import { REPOSITORY_BOOTSTRAP_LAND_FILES_MAX_BODY_BYTES } from "@octant/contracts/repository-bootstrap";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
@@ -2096,6 +2097,38 @@ export interface RemoteRouteFacts {
   readonly privateAddress?: string;
   /** The remote-access state when the gateway first admitted an agent request. */
   readonly agentAccessPauseSignal?: AbortSignal;
+  /** Set only on a request a paired device sent through its hub's device relay. */
+  readonly relayed?: true;
+}
+
+/**
+ * The pre-auth routes a paired device uses to reach its session: the signed
+ * host hello, negotiation, and the device-key sign-in. Every other pre-auth
+ * route (pairing, hub member routes, agent access, push, the server proxy's
+ * own sign-in) is for the private network, never for the relay.
+ */
+const RELAYED_PRE_AUTH_PATHS: ReadonlySet<string> = new Set([
+  "/health",
+  "/api/remote/hello",
+  "/api/remote/negotiate",
+  "/api/remote/auth/challenge",
+  "/api/remote/auth/session",
+]);
+
+/**
+ * Whether a request that arrived through the device relay may reach this
+ * route at all: only what a paired device reaches with its session, never
+ * by default because a route exists.
+ */
+function relayedMayReach(decision: Extract<RemoteRouteDecision, { readonly kind: "allow" }>) {
+  if (decision.surface === "authenticated-product" || decision.surface === "web-assets")
+    return true;
+  const match = decision.route?.match;
+  return (
+    decision.surface === "pre-auth" &&
+    match?.kind === "exact" &&
+    RELAYED_PRE_AUTH_PATHS.has(match.path)
+  );
 }
 
 export const REMOTE_SECURITY_POLICY = {
@@ -2198,6 +2231,13 @@ export function createRemoteRouteHandler(
     if (decision.kind === "reject") return decision.response;
     if (decision.kind === "preflight")
       return new Response(null, { status: 204, headers: decision.headers });
+    if (facts?.relayed === true && !relayedMayReach(decision)) {
+      await request.body?.cancel().catch(() => undefined);
+      return Response.json(
+        { status: "refused", kind: RELAYED_ADMIN_REFUSED },
+        { status: 403, headers: decision.headers },
+      );
+    }
 
     let maxBodyBytes = decision.maxBodyBytes;
     let releaseUnauthenticated: (() => void) | undefined;

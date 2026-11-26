@@ -35,7 +35,13 @@ function underPrefix(path: string, prefix: string): boolean {
  * on the private network.
  */
 export function relayedRequestRefused(method: string, path: string): boolean {
+  // The check runs on the raw target, which is then resolved into the URL the
+  // routes see; a dot segment (plain or percent-encoded), a backslash, or an
+  // absolute-form target would resolve to a different path than the one
+  // checked, so none is served at all.
+  if (!path.startsWith("/") || path.startsWith("//") || /\\|%2e|%5c/i.test(path)) return true;
   const bare = path.split("?")[0] ?? path;
+  if (bare.split("/").some((segment) => segment === "." || segment === "..")) return true;
   if (REFUSED_PREFIXES.some((prefix) => underPrefix(bare, prefix))) return true;
   const reads = method === "GET" || method === "HEAD";
   return !reads && READ_ONLY_PREFIXES.some((prefix) => underPrefix(bare, prefix));
@@ -110,6 +116,15 @@ async function readBody(incoming: IncomingMessage, max: number): Promise<Buffer 
   return Buffer.concat(chunks);
 }
 
+function resolveTarget(path: string, origin: string): URL | undefined {
+  try {
+    const url = new URL(path, origin);
+    return url.origin === new URL(origin).origin ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function answer(
   incoming: IncomingMessage,
   outgoing: ServerResponse,
@@ -118,7 +133,10 @@ async function answer(
   const method = incoming.method ?? "GET";
   const path = incoming.url ?? "/";
   let response: Response;
-  if (relayedRequestRefused(method, path)) {
+  // Only a target that passed the raw check is resolved; the resolved path is
+  // checked again, and it is the one the routes see.
+  const url = relayedRequestRefused(method, path) ? undefined : resolveTarget(path, options.origin);
+  if (url === undefined || relayedRequestRefused(method, `${url.pathname}${url.search}`)) {
     incoming.resume();
     response = refusal(403, RELAYED_ADMIN_REFUSED);
   } else {
@@ -134,7 +152,7 @@ async function answer(
       const controller = new AbortController();
       outgoing.once("close", () => controller.abort());
       response = await options.fetch(
-        new Request(new URL(path, options.origin), {
+        new Request(url, {
           method,
           headers,
           signal: controller.signal,
@@ -146,10 +164,13 @@ async function answer(
       );
     }
   }
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string | string[]> = {};
   response.headers.forEach((value, name) => {
     headers[name] = value;
   });
+  // Each cookie is its own header line; joined with commas they would break.
+  const cookies = response.headers.getSetCookie();
+  if (cookies.length > 0) headers["set-cookie"] = cookies;
   outgoing.writeHead(response.status, headers);
   if (response.body === null || method === "HEAD") {
     await response.body?.cancel().catch(() => undefined);

@@ -413,6 +413,11 @@ export interface ListenerRelayRoute {
   /** `wss://<front>/relay/v1`; `ws:` only for a test on loopback. */
   readonly url: string;
   readonly targetMemberId: string;
+  /**
+   * The hub the device expects to relay through, from its roster. A challenge
+   * naming another hub is refused, so the signature is never spent on one.
+   */
+  readonly hubMemberId?: string;
   /** The device key's DER SubjectPublicKeyInfo, base64url. */
   readonly deviceSpki: string;
   /** Signs a payload with the device key: P-256, IEEE-P1363, base64url. */
@@ -479,6 +484,13 @@ async function openRelayStream(route: ListenerRelayRoute): Promise<Duplex | unde
       stage = "opening";
       void (async () => {
         const challenge = decodeRelayChallenge(JSON.parse(data));
+        if (
+          route.hubMemberId !== undefined &&
+          String(challenge.hubMemberId) !== route.hubMemberId
+        ) {
+          fail();
+          return;
+        }
         const signature = await route.sign(
           relayAdmissionPayload({
             challenge: challenge.challenge,

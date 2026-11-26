@@ -1579,7 +1579,13 @@ export function wireRemote(deps: RemoteDependencies) {
     });
   // The role and the pause are read on every request; this catches a hub role
   // turned off or a join that ended, and closes the listener itself.
-  const reconcilePublicEntrance = () => void publicEntrance.reconcile().catch(() => undefined);
+  const reconcilePublicEntrance = () => {
+    // Open relays end with the entrance, the hub role, or the relay switch,
+    // not only new ones; the upgraded sockets are no longer the listener's.
+    if (!publicEntrance.status().listening) hubRelay.closeAll();
+    else hubRelay.sweep();
+    void publicEntrance.reconcile().catch(() => undefined);
+  };
   setInterval(reconcilePublicEntrance, PUBLIC_ENTRANCE_LOOK_MS).unref();
   setTimeout(reconcilePublicEntrance, 0).unref();
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({

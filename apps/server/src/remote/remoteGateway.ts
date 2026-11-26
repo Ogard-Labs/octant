@@ -1007,6 +1007,7 @@ function assembleServices(
       agentAccessPauseSignal: remoteAccessPaused()
         ? AbortSignal.abort()
         : outsideAgentAccess.signal,
+      ...(transportFacts.relayed === true ? { relayed: true } : {}),
       ...(transportFacts.privateAddress === undefined
         ? {}
         : { privateAddress: transportFacts.privateAddress }),

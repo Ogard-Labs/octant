@@ -51,7 +51,12 @@ export type RelayTunnelRefusal =
   | "relay-not-granted"
   | "remote-access-paused"
   | "device-not-listed"
-  | "not-private";
+  | "not-private"
+  | "busy";
+
+// The hub caps tunnels too; this host does not rely on it, since each tunnel
+// here is its own TLS server.
+const TUNNELS_MAX = 32;
 
 const EMPTY: SpokeRelayState = { deviceIds: [] };
 
@@ -59,6 +64,8 @@ export class SpokeRelayService {
   readonly #options: SpokeRelayServiceOptions;
   /** What the hub last took, so a look sends again only when it changed. */
   #lastSent: string | undefined;
+  /** Each open relayed stream, by the device key it carries. */
+  readonly #streams = new Map<string, Set<Duplex>>();
 
   constructor(options: SpokeRelayServiceOptions) {
     this.#options = options;
@@ -85,6 +92,7 @@ export class SpokeRelayService {
     const others = held.deviceIds.filter((id) => id !== deviceId);
     this.#save({ ...held, deviceIds: allowed ? [...others, deviceId] : others });
     this.#options.record({ change: "relay-device-changed", actingPrincipal: principal });
+    this.sweep();
     await this.publish();
     return { status: "changed", allowed };
   }
@@ -95,7 +103,21 @@ export class SpokeRelayService {
     if (held.deviceIds.includes(deviceId)) {
       this.#save({ ...held, deviceIds: held.deviceIds.filter((id) => id !== deviceId) });
     }
+    this.sweep();
     await this.publish();
+  }
+
+  /**
+   * Ends each open relayed stream whose device may no longer come through:
+   * Relay unticked, the device forgotten or unlisted, or remote access paused.
+   */
+  sweep(): void {
+    const allowed = this.#options.paused() ? new Set<string>() : new Set(this.#fingerprints());
+    for (const [fingerprint, streams] of this.#streams) {
+      if (allowed.has(fingerprint)) continue;
+      for (const stream of streams) stream.destroy();
+      this.#streams.delete(fingerprint);
+    }
   }
 
   /** The fingerprints the hub may admit: listed, active, and only while Relay is ticked. */
@@ -123,6 +145,7 @@ export class SpokeRelayService {
 
   /** Sends again when the hub has not taken the list, or the grant or the devices changed. */
   async look(): Promise<void> {
+    this.sweep();
     const held = this.#load();
     const current = this.#fingerprints().join(",");
     if (held.unpublished !== true && current === (this.#lastSent ?? "")) return;
@@ -147,6 +170,9 @@ export class SpokeRelayService {
     if (!this.#fingerprints().includes(input.deviceFingerprint)) {
       return { status: "refused", kind: "device-not-listed" };
     }
+    let open = 0;
+    for (const streams of this.#streams.values()) open += streams.size;
+    if (open >= TUNNELS_MAX) return { status: "refused", kind: "busy" };
     const address = normalizePeerAddress(input.hubAddress);
     const sourceClass = classifyRemoteSourceClass(address);
     if (sourceClass !== "lan-private" && sourceClass !== "tailscale") {
@@ -168,6 +194,16 @@ export class SpokeRelayService {
           protocol: undefined,
           open: (client) => {
             const { stream, events } = webSocketByteStream(client);
+            const fingerprint = input.deviceFingerprint;
+            const held = this.#streams.get(fingerprint) ?? new Set<Duplex>();
+            held.add(stream);
+            this.#streams.set(fingerprint, held);
+            stream.once("close", () => {
+              held.delete(stream);
+              if (held.size === 0 && this.#streams.get(fingerprint) === held) {
+                this.#streams.delete(fingerprint);
+              }
+            });
             if (!serve(stream, facts)) stream.destroy();
             return events;
           },

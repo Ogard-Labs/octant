@@ -62,6 +62,7 @@ async function relay(maxTunnels: number) {
 function connect(
   url: string,
   key: ReturnType<typeof deviceKey>,
+  signedFor: { readonly target?: string; readonly hub?: string } = {},
 ): Promise<{ readonly closeCode: number | undefined; readonly socket: WebSocket }> {
   return new Promise((resolve) => {
     const socket = new WebSocket(url);
@@ -75,8 +76,8 @@ function connect(
           signature: key.sign(
             relayAdmissionPayload({
               challenge: challenge.challenge,
-              targetMemberId: HOST,
-              hubMemberId: challenge.hubMemberId,
+              targetMemberId: signedFor.target ?? HOST,
+              hubMemberId: signedFor.hub ?? challenge.hubMemberId,
             }),
           ),
         }),
@@ -115,6 +116,30 @@ describe("the hub's device relay", () => {
     expect(turnedAway.closeCode).not.toBeUndefined();
     expect(service.status().tunnels).toBe(1);
     open.socket.close();
+  });
+
+  it("refuses an admission signed for another host or another hub", async () => {
+    const { service, url } = await relay(32);
+    const key = deviceKey();
+    service.receiveDevices(HOST, { fingerprints: [key.fingerprint] });
+    const otherHost = await connect(url, key, { target: "33333333-3333-4333-8333-333333333333" });
+    expect(otherHost.closeCode).toBe(4401);
+    const otherHub = await connect(url, key, { hub: "44444444-4444-4444-8444-444444444444" });
+    expect(otherHub.closeCode).toBe(4401);
+  });
+
+  it("withdrawing a device's key ends its open relay", async () => {
+    const { service, url } = await relay(32);
+    const key = deviceKey();
+    service.receiveDevices(HOST, { fingerprints: [key.fingerprint] });
+    const open = await connect(url, key);
+    expect(open.closeCode).toBeUndefined();
+    const closed = new Promise<number>((resolve) =>
+      open.socket.addEventListener("close", (event) => resolve(event.code)),
+    );
+    service.receiveDevices(HOST, { fingerprints: [] });
+    expect(await closed).toBe(1001);
+    expect(service.status().tunnels).toBe(0);
   });
 
   it("closes every relay when its switch goes off", async () => {
