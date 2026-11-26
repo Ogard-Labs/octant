@@ -1872,9 +1872,13 @@ Full access runs it, and below Full access each command the agent types into
 it (`run` or `write`) asks the person in the thread with the command shown
 first; an approval for a command that starts the terminal also mints the
 host's one-use approval for that start. Reading and stopping it ask nothing.
-A host that cannot ask refuses it below Full access. In Work it is one shell
-per thread in the thread's folder, at the thread's level and confined as its
-own commands are; a routine's run is offered none.
+A host that cannot ask refuses it below Full access. The ask shows the whole
+command; one too long to show whole (over 8,192 characters) is refused. In
+Work it is one shell per thread in the thread's folder, at the thread's level
+and confined as its own commands are; a routine's run is offered none. It
+outlives the turn that started it, under Strict too, and ends when the agent
+stops it or as soon as the thread is archived or deleted, its Project unbound,
+or its folder changed.
 
 ## Modes: Chat, Work, and Code
 
@@ -16709,7 +16713,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Kernel-owned scopes cover detached descendants, not only a process group.
 
     Personal Project terminals own an admitted policy and broker lifetime;
-    Work terminals also inherit their thread's current protection ceiling.
+    Work terminals also inherit their thread's current protection ceiling,
+    taken when they start; the end of the turn running then does not end them.
     Configured folder grants and network policy reach the actual PTY launcher,
     including at Full access under Strict. Their proxy grants no inference
     endpoints, and closing the terminal revokes it and verifies the native
