@@ -854,7 +854,7 @@ describe("ProviderUsageLimitsPanel", () => {
     expect(screen.getByText(/2 accounts · each account counted on its own/)).toBeVisible();
   });
 
-  it("says a pooled reading whose reset passed is awaiting updated limits, and draws a spent account as an empty meter whatever share it reported", async () => {
+  it("says a pooled reading whose reset passed is awaiting updated limits, and marks a spent account while keeping the share its window reported", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-08-23T15:00:00.000Z"));
     const secondId = "55555555-5555-4555-8555-555555555555" as ProviderInstanceId;
@@ -908,13 +908,14 @@ describe("ProviderUsageLimitsPanel", () => {
       expect(bar).toHaveTextContent("Awaiting updated limits");
       expect(bar).not.toHaveTextContent("Remaining not reported");
       expect(bar.querySelector('[data-state="awaiting"]')).not.toBeNull();
+      // The account is spent, and the window keeps the share it reported:
+      // Codex's flag does not say which window ran out.
       const spent = bar.querySelector('meter[data-state="exhausted"]');
-      expect(spent?.getAttribute("value")).toBe("0");
+      expect(spent?.getAttribute("value")).toBe("60");
       const spentLegend = [...bar.querySelectorAll('[data-segment="reading"]')].find((row) =>
         row.textContent?.startsWith("Spent account"),
       );
-      expect(spentLegend).toHaveTextContent("Limit reached");
-      expect(bar).not.toHaveTextContent("60% left");
+      expect(spentLegend).toHaveTextContent("Limit reached · 60% of this window left");
       expect(bar.querySelector('[data-state="missing"]')).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -1028,5 +1029,49 @@ describe("ProviderUsageLimitsPanel", () => {
     expect(screen.getByText("API")).toBeVisible();
     expect(document.querySelector("[data-pooled-window]")).toBeNull();
     expect(screen.queryByText("Each account")).not.toBeInTheDocument();
+  });
+
+  it("leaves a provider with no window to draw unpooled, so a quota warning stays on its own row", async () => {
+    const secondId = "88888888-8888-4888-8888-888888888888" as ProviderInstanceId;
+    const data = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: "2026-08-23T12:00:00.000Z",
+      entries: [
+        {
+          providerInstanceId,
+          status: "available",
+          source: "provider-runtime",
+          observedAt: "2026-08-23T12:00:00.000Z",
+          limits: {
+            providerInstanceId,
+            scope: "account",
+            requests: { status: "unavailable" },
+            tokens: { status: "unavailable" },
+            concurrency: { status: "unavailable" },
+            retry: { status: "inactive" },
+            quota: "exhausted",
+            source: "runtime-reported",
+            confidence: "high",
+            updatedAt: "2026-08-23T12:00:00.000Z",
+          },
+        },
+        {
+          providerInstanceId: secondId,
+          status: "unavailable",
+          source: "provider-runtime",
+          observedAt: "2026-08-23T12:05:00.000Z",
+          reason: "unsupported",
+        },
+      ],
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[provider, { ...provider, id: secondId, displayName: "Quiet account" }]}
+      />,
+    );
+    expect(await screen.findByText("Account limit reached")).toBeVisible();
+    expect(screen.queryByText("Each account")).not.toBeInTheDocument();
+    expect(screen.getByText("Not reporting limits")).toBeVisible();
   });
 });

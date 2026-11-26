@@ -290,8 +290,10 @@ export function ProviderUsageLimitsPanel(props: {
   // window with a segment per account. Its accounts' own rows fold into it.
   const pooled = useMemo(
     () =>
+      // A provider with no window to draw keeps its accounts on their own
+      // rows, where a quota warning is not hidden behind Each account.
       poolProviderLimits({ entries: visible ?? [], instances: props.instances, now }).filter(
-        (provider) => provider.accounts.length > 1,
+        (provider) => provider.accounts.length > 1 && provider.windows.length > 0,
       ),
     [visible, props.instances, now],
   );
@@ -528,7 +530,6 @@ function PooledProviderRow(props: {
       </div>
       <div className="surface-row__control">
         <div className="provider-limits__details">
-          {props.provider.windows.length === 0 ? <p>No quota windows reported</p> : null}
           {props.provider.windows.map((window) => (
             <PooledWindowBar key={window.window} now={props.now} window={window} />
           ))}
@@ -617,8 +618,12 @@ function segmentReading(
 ): string {
   if (segment.kind === "missing") return "No reading";
   if (segment.awaitingUpdate) return `Awaiting updated limits${segment.stale ? " · stale" : ""}`;
+  // The account is spent even when this window still reports a share left:
+  // Codex flags the account, not the window that ran out.
   const share = segment.exhausted
-    ? "Limit reached"
+    ? segment.remainingPercent !== undefined && segment.remainingPercent > 0
+      ? `Limit reached · ${segment.remainingPercent}% of this window left`
+      : "Limit reached"
     : segment.remainingPercent !== undefined
       ? `${segment.remainingPercent}% left`
       : "Remaining not reported";

@@ -406,11 +406,14 @@ first, and the bar names the soonest reset. There is no averaged share, since
 Octant does not know each account's plan size; an account with no reading for
 a window, including one that has not reported yet, is a dashed segment
 labelled No reading, never zero, and is not listed again under Not reporting
-limits; a spent account is an empty bar that says Limit reached, whatever share
-the provider reported beside it; a reading whose reset passed says Awaiting
+limits; an account the provider says is spent says Limit reached, keeping the share a
+window still reports beside it ("Limit reached · 60% of this window left"),
+since Codex flags the account rather than the window that ran out; a reading whose reset passed says Awaiting
 updated limits; and the row says
 each account is counted on its own, because Octant has no account identity to
-tell that two entries are one account. Only accounts of one service pool:
+tell that two entries are one account. A provider pools only when it has a window to draw, so an account that
+reports only an account-wide limit keeps its own row and warning. Only
+accounts of one service pool:
 Claude Code, Codex, OpenCode, Devin and Mistral Vibe. Two OpenAI-compatible,
 Anthropic-compatible or Azure Foundry endpoints keep their own rows, since one
 protocol is often two services with their own quotas. Each account's full

@@ -131,9 +131,9 @@ const readingOf = (
  * account is counted on its own: Octant has no account identity, so two
  * entries for one real account are two segments.
  *
- * A provider none of whose accounts has a reading is left out, and so is a
- * kind that is not one service; the panel lists their accounts on their
- * own rows or in its closing row.
+ * A kind that is not one service is left out; the panel pools only a
+ * provider with a window to draw and lists the rest on their own rows or in
+ * its closing row.
  */
 export function poolProviderLimits(input: {
   readonly entries: ReadonlyArray<ProviderUsageLimitsEntry>;
@@ -146,12 +146,6 @@ export function poolProviderLimits(input: {
     const kind = String(instance.driverKind);
     if (!ONE_SERVICE_KINDS.has(kind) || !poolable(byId.get(String(instance.id)))) continue;
     groups.set(kind, [...(groups.get(kind) ?? []), instance]);
-  }
-  // Accounts that have all yet to report stay in the closing row.
-  for (const [kind, accounts] of groups) {
-    if (!accounts.some((account) => readingOf(byId.get(String(account.id))) !== undefined)) {
-      groups.delete(kind);
-    }
   }
   return [...groups.entries()].map(([driverKind, accounts]) => {
     const readings = new Map(
@@ -177,15 +171,16 @@ export function poolProviderLimits(input: {
         }
         // A reset already past says nothing about what is left now.
         const expired = match.resetsAt !== undefined && Date.parse(match.resetsAt) <= input.now;
-        // A provider's own "limit reached" outranks the share it reported:
-        // Codex can say a window is spent below 100% utilization.
+        // Codex's "limit reached" flag is the account's, not this window's:
+        // it marks every window of the snapshot, so the window keeps the
+        // share it reported and the segment says the account is spent.
         return {
           kind: "reading",
           providerInstanceId: String(account.id),
           account: account.displayName,
           ...(match.remainingPercent === undefined || expired
             ? {}
-            : { remainingPercent: match.exhausted ? 0 : match.remainingPercent }),
+            : { remainingPercent: match.remainingPercent }),
           exhausted: match.exhausted && !expired,
           ...(match.resetsAt === undefined || expired ? {} : { resetsAt: match.resetsAt }),
           awaitingUpdate: expired,
