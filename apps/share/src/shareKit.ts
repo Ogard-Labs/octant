@@ -2,7 +2,7 @@
 // workspace packages. The service reads the same share format and draws blocks
 // with the same layout code as the app that publishes, because both import this
 // one file. Add a name here when the service needs more of the app.
-export { CANVAS_DESIGN_VIEWPORT } from "@octant/contracts/canvas";
+export { CANVAS_DESIGN_VIEWPORT, CanvasDesignAssetMediaType } from "@octant/contracts/canvas";
 export {
   CANVAS_SHARE_SCHEMA_VERSION,
   type CanvasShareImage,

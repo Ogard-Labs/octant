@@ -92,6 +92,10 @@ count per link; rate limiting counts per IP in memory and keeps nothing after
 the window. Revoked or expired links answer `410` with a content-free tombstone
 (link id and time) for 90 days, then `404`.
 
+Shares stored by an earlier version keep opening after an update. Going back to
+an earlier version keeps every link too, including those published since: each
+share stays one JSON file that earlier versions read.
+
 ## Take a link down
 
 ```sh

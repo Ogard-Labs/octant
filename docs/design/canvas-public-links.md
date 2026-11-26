@@ -140,9 +140,10 @@ change to the Canvas reaches the link only when the person approves an
 update. The document's text, everything but its images, is bounded at
 262,144 bytes of UTF-8, the export body budget, and the service refuses a
 larger one; its images are bounded apart, at 3 MiB each and 4 MiB together,
-and the service stores them with the share, counting them toward its total
-storage cap. A view counts in a small file beside the share, so a share's
-images are never rewritten when it is read. The service serves each carried image once, at its own content-addressed address beside the page that shows it: `/s/<id>/images/<sha256>` for the viewer and `/f/<id>/<block>/images/<sha256>?t=<image token>` for a design's frame. Every reference names that address, so a page that shows one image many times stays small and the browser fetches it once. An image address answers only as its page does: a live link, its password grant when it has a password (the viewer's cookie is scoped to the link's path), or, for a frame, an image token the frame page signs for its link, revision and block, lasting as long as a view grant so a prototype left open past its frame token still draws later screens; and only for an image the document carries by that digest (and, for a frame, one its design names). Image requests count against a per-client image limit. The response is the raster with its sniffed type and `nosniff`, with the digest as its ETag and `Cache-Control: private, no-cache`, so the browser checks again before reusing a copy and a revoked or expired link, a lapsed grant, or an expired token stops serving even a kept one; a page that shows an image many times still loads it once. A frame's image responses allow any origin (`Access-Control-Allow-Origin: *`), since a sandboxed frame's origin is opaque and the token in the address is the authority. _Rationale:_ writing each reference as a `data:` image grows the page with every repeat, and capping the repeats would make a large image shown many times fall back to its description; one address per image is how the web shares a picture across a page. Only a reference a browser would draw counts, both for what a share carries and for what a frame draws: one in a `src`, `srcset`, `poster`, or `background` attribute, in CSS, or in a script or inline event handler, outside comments. A reference in a comment, in text, or in another attribute such as `alt` is left as written: it draws nothing and is not carried. The reading follows the browser's: character references in a handler are decoded first, a line comment ends at any line terminator, and strings and regular expression literals hide no comment. It is a best-effort reading for finding references, not an HTML or JavaScript parser, and its known limits are accepted (maintainer decision, 2026-11-22): a regular expression right after a keyword, a `/*` inside a quoted CSS string, a reference a script builds at run time, and other forms a parser would read differently can be misread. A misreading can leave out an image the design shows, which then draws nothing, or carry an image named only where nothing draws it; the approval card and the share panel list every image before it leaves, so the person sees such an image and can decline. Later narrow cases are recorded as known limits and changed only for an over-share in a common form. _Follow-up:_ an exact answer would come from the browser, by rendering the frame and reading which images it actually loads, not from adding a parser.
+and the service stores them with the share, counting them once toward its
+total storage cap. A view counts in a small file beside the share, so a share's
+images are never rewritten when it is read, and an image request reads only
+that image's bytes ([Stored shares](#stored-shares)). The service serves each carried image once, at its own content-addressed address beside the page that shows it: `/s/<id>/images/<sha256>` for the viewer and `/f/<id>/<block>/images/<sha256>?t=<image token>` for a design's frame. Every reference names that address, so a page that shows one image many times stays small and the browser fetches it once. An image address answers only as its page does: a live link, its password grant when it has a password (the viewer's cookie is scoped to the link's path), or, for a frame, an image token the frame page signs for its link, revision and block, lasting as long as a view grant so a prototype left open past its frame token still draws later screens; and only for an image the document carries by that digest (and, for a frame, one its design names). Image requests count against a per-client image limit. The response is the raster with its sniffed type and `nosniff`, with the digest as its ETag and `Cache-Control: private, no-cache`, so the browser checks again before reusing a copy and a revoked or expired link, a lapsed grant, or an expired token stops serving even a kept one; a page that shows an image many times still loads it once. A frame's image responses allow any origin (`Access-Control-Allow-Origin: *`), since a sandboxed frame's origin is opaque and the token in the address is the authority. _Rationale:_ writing each reference as a `data:` image grows the page with every repeat, and capping the repeats would make a large image shown many times fall back to its description; one address per image is how the web shares a picture across a page. Only a reference a browser would draw counts, both for what a share carries and for what a frame draws: one in a `src`, `srcset`, `poster`, or `background` attribute, in CSS, or in a script or inline event handler, outside comments. A reference in a comment, in text, or in another attribute such as `alt` is left as written: it draws nothing and is not carried. The reading follows the browser's: character references in a handler are decoded first, a line comment ends at any line terminator, and strings and regular expression literals hide no comment. It is a best-effort reading for finding references, not an HTML or JavaScript parser, and its known limits are accepted (maintainer decision, 2026-11-22): a regular expression right after a keyword, a `/*` inside a quoted CSS string, a reference a script builds at run time, and other forms a parser would read differently can be misread. A misreading can leave out an image the design shows, which then draws nothing, or carry an image named only where nothing draws it; the approval card and the share panel list every image before it leaves, so the person sees such an image and can decline. Later narrow cases are recorded as known limits and changed only for an over-share in a common form. _Follow-up:_ an exact answer would come from the browser, by rendering the frame and reading which images it actually loads, not from adding a parser.
 
 ## Link terms
 
@@ -349,6 +350,43 @@ frame-ancestors 'none'`. The page loads one first-party stylesheet and
   neither. A preview image is allowed by this rule but not produced yet.
 - Expired payloads are deleted by a sweep that runs at start and hourly.
 
+### Stored shares
+
+A share is one JSON file, `shares/<id>.json` in the data directory. Its terms
+(times, byte length, password hash, owner secret hash, revision) come first,
+with an image index: each carried image's SHA-256, type, and byte range counted
+from the end of the head, and which images each design names. The document comes
+last, with the images' base64 text at its end. The file opens with its head's length as a
+fixed eight-digit `headBytes`, so an image request, on the page or in a frame,
+reads the head, runs the link's checks on it, and reads that one image's range.
+It neither reads nor decodes the document's text or its other images. Both
+reads use one open file, so an update landing between them never mixes two
+revisions. The page and the frame page still read the whole share.
+
+- A file with no such head, or whose index does not fit the file, is read
+  whole. That covers every share an earlier version stored. Reading never
+  rewrites one; its owner's next update does. A share whose document the
+  service could not read when it last read the file whole (at start, at a page
+  view, and at each owner call) serves no image, as it serves no page.
+- An earlier version of the service reads the same file whole and ignores the
+  head, so an operator can go back to it and keep every link, including links
+  published or updated since. A share it updates there is read whole again
+  after the next upgrade.
+- A publish or update is one atomic rename. A revoke, expiry, takedown, or
+  owner delete writes the tombstone, which stops the images with the page, then
+  unlinks the one file that holds the document and its images; a stop between
+  the two is finished at the next start or request. A write that fails
+  removes its temporary file, and one left by a stop before its rename is
+  removed at the next start.
+- The index is metadata and is not counted toward the storage cap. Each image
+  counts once, as its base64 text in the document.
+
+_Rationale:_ a file per image was rejected. An earlier version cannot read a
+share whose images are in other files, so going back would close every link
+published since; keeping the images in both places would store and write them
+twice; and either way, publish, update, and delete would span several files, with
+cleanup owed after a stop between them.
+
 ### Configuration
 
 `OCTANT_SHARE_HOST` (default `127.0.0.1`), `OCTANT_SHARE_PORT`,
@@ -386,6 +424,8 @@ keeps Update unambiguous; a second link for the same Canvas is a revoke away.
   namespace is out of reach of the provider and sync key routes.
 - The service's tests (in `apps/share`): ids are 128-bit, owner secret, expiry, revocation (410),
   and password are enforced, viewer headers carry `noindex` and the policy,
-  and frames are drawn from the user-content origin.
+  and frames are drawn from the user-content origin. An image request reads
+  only its image and the share's head, measured in bytes, and shares the
+  earlier version stored keep opening.
 - The service's local end-to-end smoke (`bun apps/share/src/shareService.smoke.ts`)
   starts it on `127.0.0.1`, publishes, views, revokes, and reads 410.
