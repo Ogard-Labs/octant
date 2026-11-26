@@ -288,7 +288,8 @@ export function BrowserHubSection(props: BrowserHubSectionProps) {
         {state === undefined ? (
           <div className="setgroup">
             <SettingRow
-              description="On the hub, make a join code in Settings → Remote access or with octant hub join-code (add --owner for an owner code), then paste the whole code here."
+              description="Paste the whole join code made on the hub, in Settings → Remote access or with octant hub join-code."
+              more="Add --owner to octant hub join-code for an owner code."
               label="Join the hub as a guest"
               scope="app"
               settingId="browser-hub-code"
@@ -377,8 +378,8 @@ export function BrowserHubSection(props: BrowserHubSectionProps) {
             <SettingRow
               description={
                 state.ownerPasskey === undefined
-                  ? "Joined as a guest. Each computer on the hub decides what this browser may do there."
-                  : "Joined as an owner device. Owner actions ask for your passkey."
+                  ? "Joined as a guest; each computer on the hub decides what this browser may do there."
+                  : "Joined as an owner device, whose owner actions ask for your passkey."
               }
               label={`Joined ${state.record.hub.name}`}
               scope="app"

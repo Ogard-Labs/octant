@@ -97,7 +97,8 @@ export function DesktopLeaseSettings(props: {
         <SettingRow
           settingId="desktop-confirm-billed"
           label="Confirm each billed desktop"
-          description="On, you confirm every desktop that bills you or runs off this computer before it starts, and every file sent to one. Off, they start and send without asking, inside your monthly cap; a thread in Plan still starts none."
+          description="Confirm every desktop that bills you or runs off this computer, and every file sent to one; off, none ask."
+          more="On, you confirm every desktop that bills you or runs off this computer before it starts, and every file sent to one. Off, they start and send without asking, inside your monthly cap; a thread in Plan still starts none."
           scope="host"
           focused={props.focusedSetting === "desktop-confirm-billed"}
         >
@@ -112,7 +113,7 @@ export function DesktopLeaseSettings(props: {
         <SettingRow
           settingId="desktop-leases-per-thread"
           label="Desktops per thread"
-          description="How many desktops one thread may hold. Lowering it ends none already running."
+          description="How many desktops one thread may hold; lowering it ends none already running."
           scope="host"
           focused={props.focusedSetting === "desktop-leases-per-thread"}
         >
@@ -128,7 +129,8 @@ export function DesktopLeaseSettings(props: {
         <SettingRow
           settingId="desktop-leases-on-host"
           label="Desktops on this host"
-          description="How many desktops may run on this host itself at once, across all threads. Cloud desktops don't count."
+          description="How many desktops may run on this host itself at once, across all threads."
+          more="Cloud desktops don't count."
           scope="host"
           focused={props.focusedSetting === "desktop-leases-on-host"}
         >

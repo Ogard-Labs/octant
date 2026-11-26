@@ -1085,7 +1085,8 @@ function ActiveSectionContent({
             <div className="setgroup">
               <SettingRow
                 label="Stream replies"
-                description="Show answers as they arrive. Off waits for the full answer; reasoning stays expandable."
+                description="Show answers as they arrive."
+                more="Off waits for the full answer; reasoning stays expandable."
                 scope="app"
                 settingId="stream-replies"
                 focused={focusedSetting === settingId("stream-replies")}
@@ -1261,7 +1262,8 @@ function ActiveSectionContent({
             <SettingsSection title="Stalled turns">
               <div className="setgroup">
                 <SettingRow
-                  description="Notices a turn when its provider sends nothing for this long, from the next turn, and ends it under Strict; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
+                  description="Notices a turn when its provider sends nothing for this long, and ends it under Strict."
+                  more="A tool call the provider reports as running is not silence, up to the tool-call pause limit. Changes to this limit and the two below apply from the next turn."
                   focused={focusedSetting === settingId("stalled-turn-limit")}
                   label="Stalled-turn limit"
                   scope="host"
@@ -1275,7 +1277,10 @@ function ActiveSectionContent({
                   />
                 </SettingRow>
                 <SettingRow
-                  description="The stalled-turn limit for a Work or Code turn at Full access, from the next turn. Off by default, since Full access adds no limit of Octant's own; a thread under Strict keeps the stalled-turn limit above at every level."
+                  description="The stalled-turn limit for a Work or Code turn at Full access."
+                  atDefault={props.settings.fullAccessStalledTurnLimitMinutes === null}
+                  defaultValue="Off"
+                  more="Off by default, since Full access adds no limit of Octant's own; a thread under Strict keeps the stalled-turn limit above at every level."
                   focused={focusedSetting === settingId("full-access-stalled-turn-limit")}
                   label="Stalled-turn limit at Full access"
                   scope="host"
@@ -1291,7 +1296,7 @@ function ActiveSectionContent({
                   />
                 </SettingRow>
                 <SettingRow
-                  description="Pauses the stalled-turn limit for up to this long while a running tool call has not finished. Applies from the next turn."
+                  description="Pauses the stalled-turn limit for up to this long while a running tool call has not finished."
                   focused={focusedSetting === settingId("provider-tool-call-pause-limit")}
                   label="Tool-call pause limit"
                   scope="host"
@@ -1305,7 +1310,8 @@ function ActiveSectionContent({
                   />
                 </SettingRow>
                 <SettingRow
-                  description="Stops a provider session that only runs background work, such as a dev server, once its thread has had no turn for this long. Its tasks stop with it."
+                  description="Stops a provider session that only runs background work once its thread has had no turn for this long."
+                  more="Background work is something like a dev server. Its tasks stop with it."
                   focused={focusedSetting === settingId("background-session-idle-limit")}
                   label="Background work limit"
                   scope="host"
@@ -1327,7 +1333,8 @@ function ActiveSectionContent({
             <SettingsSection title="Provider channels">
               <div className="setgroup">
                 <SettingRow
-                  description="Leaves each provider's own usage metrics, error reports and feedback uploads to its own settings. Off by default: Octant turns them off at launch. Strict turns them off whatever this says. Applies from the next turn."
+                  description="Leaves each provider's own usage metrics, error reports and feedback uploads to its own settings."
+                  more="Off by default: Octant turns them off at launch. Strict turns them off whatever this says. This switch and the one below apply from the next turn."
                   focused={focusedSetting === settingId("provider-own-telemetry")}
                   label="Let providers send their own telemetry"
                   scope="host"
@@ -1342,7 +1349,8 @@ function ActiveSectionContent({
                   />
                 </SettingRow>
                 <SettingRow
-                  description="Lets each provider check for and install a newer version of itself. Off by default, since Octant installs and updates provider CLIs; Update CLI is unaffected. Strict keeps it off whatever this says. Applies from the next turn."
+                  description="Lets each provider check for and install a newer version of itself."
+                  more="Off by default, since Octant installs and updates provider CLIs; Update CLI is unaffected. Strict keeps it off."
                   focused={focusedSetting === settingId("provider-self-update")}
                   label="Let providers update themselves"
                   scope="host"
@@ -1722,7 +1730,8 @@ function ActiveSectionContent({
           >
             <div className="setgroup">
               <SettingRow
-                description="Below Full access, lets a page an agent drives start a download; Octant asks before saving. Off blocks those downloads."
+                description="Below Full access, lets a page an agent drives start a download; Octant asks before saving."
+                more="Off blocks those downloads."
                 focused={focusedSetting === settingId("browser-agent-downloads")}
                 label="Let agents download files"
                 scope="host"
@@ -1757,7 +1766,8 @@ function ActiveSectionContent({
                 />
               </SettingRow>
               <SettingRow
-                description="How many downloads wait for an agent to save. A new one replaces the oldest."
+                description="How many downloads wait for an agent to save."
+                more="A new one replaces the oldest."
                 focused={focusedSetting === settingId("browser-held-download-limit")}
                 label="Downloads kept waiting"
                 scope="host"
@@ -1849,7 +1859,8 @@ function ActiveSectionContent({
           <SettingsSection title="Tool-call records">
             <div className="setgroup">
               <SettingRow
-                description="Chat and Work keep a bounded copy of what each tool call was given and what it returned, so you can open a tool row and see it. Kept on this computer outside the journal, with keys redacted, and removed when its thread is purged. Off keeps no new records; the ones already kept stay until their threads go."
+                description="Keeps a bounded copy of what each Chat and Work tool call was given and returned, to show in its tool row."
+                more="Kept on this computer outside the journal, with keys redacted, and removed when its thread is purged. Off keeps no new records; the ones already kept stay until their threads go."
                 focused={focusedSetting === settingId("tool-call-records")}
                 label="Keep tool inputs and outputs"
                 scope="host"
@@ -2009,7 +2020,8 @@ function ActiveSectionContent({
                 scope="host"
                 settingId="persistent-browser-owner"
                 focused={focusedSetting === settingId("persistent-browser-owner")}
-                description="Keeps the agent's Browser running after the last window closes. It starts no task, copies no sign-ins, and adds no permission. Turning it off or quitting Octant ends it."
+                description="Keeps the agent's Browser running after the last window closes."
+                more="It starts no task, copies no sign-ins, and adds no permission. Turning it off or quitting Octant ends it."
               >
                 <OctantSwitch
                   checked={props.settings.persistentBrowserOwner}
@@ -2423,8 +2435,8 @@ function CompletedThreadArchiveSelect(props: {
 
 const AUTO_COMPACT_WINDOW_CHOICES: ReadonlyArray<number> = [50, 60, 70, 75, 80, 85, 90, 95];
 
-const RUNTIME_COMPACTION_DESCRIPTION =
-  "Claude Code, Codex and the other runtimes compact by themselves. A share picked here replaces theirs in the sessions Octant starts, except that Claude Code keeps its own point near a full or small window.";
+const RUNTIME_COMPACTION_MORE =
+  "Claude Code, Codex and the other runtimes compact by themselves. A share picked here replaces theirs, except that Claude Code keeps its own point near a full or small window.";
 
 /** How full a window may get before a compaction rule acts, plus off. */
 function AutoCompactWindowSelect(props: {
@@ -2637,7 +2649,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       >
         <div className="setgroup">
           <SettingRow
-            description="How you appear inside Octant. There is no account, and none of this is required."
+            description="How you appear inside Octant."
+            more="There is no account, and none of this is required."
             focused={focusedSetting === settingId("user-profile")}
             label="Your profile"
             scope="app"
@@ -2657,7 +2670,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Available modes">
         <div className="setgroup">
           <SettingRow
-            description="Offer Chat in Work's composer: answers without touching your files. Hidden threads stay saved."
+            description="Offer Chat in Work's composer: answers without touching your files."
+            more="Hidden threads stay saved."
             focused={focusedSetting === settingId("enable-chat")}
             label="Chat"
             scope="app"
@@ -2670,7 +2684,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Offer In a folder in Work's composer: reads and edits one folder you choose. Hidden threads stay saved."
+            description="Offer In a folder in Work's composer: reads and edits one folder you choose."
+            more="Hidden threads stay saved."
             focused={focusedSetting === settingId("enable-work")}
             label="Work in a folder"
             scope="app"
@@ -2728,7 +2743,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         <SettingsSection title="Quitting">
           <div className="setgroup">
             <SettingRow
-              description="The first ⌘Q shows a notice; a second one soon after quits. Off: one press quits. Choosing Quit from a menu always quits at once, and Octant still asks before stopping running work."
+              description="The first ⌘Q shows a notice; a second one soon after quits."
+              more="Off: one press quits. Choosing Quit from a menu always quits at once, and Octant still asks before stopping running work."
               focused={focusedSetting === settingId("quit-shortcut-second-press")}
               label="Press ⌘Q twice to quit"
               scope="app"
@@ -2748,7 +2764,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Files">
         <div className="setgroup">
           <SettingRow
-            description="Where Work and Code threads without a Project keep their files, and where artifact files are mirrored unless a Project says otherwise."
+            description="Where Work and Code threads without a Project keep their files."
+            more="Artifact files are mirrored here too, unless a Project says otherwise."
             focused={focusedSetting === settingId("default-folder")}
             label="Default folder"
             scope="host"
@@ -2764,7 +2781,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Threads">
         <div className="setgroup">
           <SettingRow
-            description="A thread settles when its agent files a finished report and that turn completes, when you mark a Work or Code thread Done, and when a Code thread's pull request merges. Un-settle brings it back."
+            description="Settles a thread once it is done."
+            more="A thread settles when its agent files a finished report and that turn completes, when you mark a Work or Code thread Done, and when a Code thread's pull request merges. Un-settle brings it back."
             focused={focusedSetting === settingId("put-away-when-done")}
             label="Settle threads when they're done"
             scope="host"
@@ -2779,7 +2797,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="A settled thread rests under Settled, then moves to the archive. Archiving keeps everything."
+            description="A settled thread rests under Settled, then moves to the archive."
+            more="Archiving keeps everything."
             focused={focusedSetting === settingId("completed-thread-archive")}
             label="Archive settled threads"
             scope="host"
@@ -2797,7 +2816,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Compaction">
         <div className="setgroup">
           <SettingRow
-            description="When an Octant Harness or model endpoint thread fills this much of its window, Octant compacts it before the next turn. Every message is kept."
+            description="Compacts an Octant Harness or model endpoint thread once it fills this much of its window."
+            more="It compacts before the next turn. Every message is kept."
             focused={focusedSetting === settingId("auto-compact-octant")}
             label="Compact Octant threads"
             scope="host"
@@ -2814,10 +2834,11 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description={
+            description="In the sessions Octant starts, replaces the share at which Claude Code, Codex and other runtimes compact."
+            more={
               runtimeDefaults === undefined
-                ? RUNTIME_COMPACTION_DESCRIPTION
-                : `${RUNTIME_COMPACTION_DESCRIPTION} ${runtimeCompactionDefaultsText(runtimeDefaults)}`
+                ? RUNTIME_COMPACTION_MORE
+                : `${RUNTIME_COMPACTION_MORE} ${runtimeCompactionDefaultsText(runtimeDefaults)}`
             }
             focused={focusedSetting === settingId("auto-compact-runtime")}
             label="Compact runtime threads"
@@ -2835,7 +2856,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="After a thread sits idle this long, Octant compacts it once, so your next reply starts from a summary. Small threads are left alone."
+            description="After a thread sits idle this long, Octant compacts it once, so your next reply starts from a summary."
+            more="Small threads are left alone."
             focused={focusedSetting === settingId("auto-compact-idle")}
             label="Compact quiet threads"
             scope="host"
@@ -2847,7 +2869,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="When a provider's 5-hour or weekly limit is this full, Octant compacts the thread so another provider can take over before the limit stops you."
+            description="Compacts a thread once a provider's 5-hour or weekly limit is this full, so another provider can take over."
+            more="Octant does this before the limit stops you."
             focused={focusedSetting === settingId("auto-compact-limit")}
             label="Compact near a usage limit"
             scope="host"
@@ -3021,7 +3044,8 @@ function KeybindingsSection({ focusedSetting }: Pick<SectionProps, "focusedSetti
       <SettingsSection title="Keyboard shortcuts">
         <div className="setgroup">
           <SettingRow
-            description="Click a shortcut, then press the new keys. Changes apply at once."
+            description="Click a shortcut, then press the new keys."
+            more="Changes apply at once."
             focused={focusedSetting === settingId("keybindings")}
             label="Shortcuts"
             labelledBySection
@@ -3080,7 +3104,8 @@ function AppearanceSection({
       <div className="setgroup">
         {isAvailable("sidebar-material") ? (
           <SettingRow
-            description="The frosted look behind the window. Off makes it solid."
+            description="The frosted look behind the window."
+            more="Off makes it solid."
             focused={focusedSetting === settingId("sidebar-material")}
             label="Glass"
             scope="app"
@@ -3121,7 +3146,8 @@ function AppearanceSection({
         ) : null}
         {isAvailable("glass-tint") && glass !== "off" && props.themeController !== undefined ? (
           <SettingRow
-            description="How much colour sits over the glass. Lower is more see-through."
+            description="How much colour sits over the glass."
+            more="Lower is more see-through."
             focused={focusedSetting === settingId("glass-tint")}
             label="Tint"
             scope="app"
@@ -3196,7 +3222,8 @@ function AppearanceSection({
         ) : null}
         {isAvailable("reply-detail") ? (
           <SettingRow
-            description={`Where every thread starts unless it sets its own. ${REPLY_DETAIL_DESCRIPTIONS[props.settings.replyDetail]}`}
+            description={REPLY_DETAIL_DESCRIPTIONS[props.settings.replyDetail]}
+            more="Every thread starts here unless it sets its own."
             focused={focusedSetting === settingId("reply-detail")}
             label="Reply detail"
             scope="app"
@@ -3363,7 +3390,8 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
           ) : null}
           {isAvailable("sidebar-more") ? (
             <SettingRow
-              description="Put menu-only destinations and Customize sidebar under a More row. Off keeps them in the account menu."
+              description="Put menu-only destinations and Customize sidebar under a More row."
+              more="Off keeps them in the account menu."
               focused={focusedSetting === settingId("sidebar-more")}
               label="More row in the sidebar"
               scope="app"
@@ -3381,7 +3409,8 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
           ) : null}
           {isAvailable("sidebar-count-tiles") ? (
             <SettingRow
-              description="Show Inbox, Running, To review, and Done today as count tiles. Off shows plain Inbox and Board rows."
+              description="Show Inbox, Running, To review, and Done today as count tiles."
+              more="Off shows plain Inbox and Board rows."
               focused={focusedSetting === settingId("sidebar-count-tiles")}
               label="Count tiles"
               scope="app"
@@ -3490,7 +3519,8 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
         <div className="setgroup">
           {isAvailable("sidebar-background") ? (
             <SettingRow
-              description="A preset gradient behind the sidebar, or none. Adjust the overlay colour and opacity for readability."
+              description="A preset gradient behind the sidebar, or none."
+              more="Adjust the overlay colour and opacity for readability."
               focused={focusedSetting === settingId("sidebar-background")}
               label="Sidebar background"
               scope="app"
@@ -3595,7 +3625,8 @@ function UsageSettingsSection(props: {
     <div className="settings-usage-stack" id="settings-usage">
       <div className="setgroup">
         <SettingRow
-          description="Show the spend ceiling row on threads and Projects. A ceiling that is set always shows."
+          description="Show the spend ceiling row on threads and Projects."
+          more="A ceiling that is set always shows."
           focused={props.focusedSetting === settingId("spend-ceiling-shown")}
           label="Show spend ceiling"
           scope="app"
@@ -3668,7 +3699,8 @@ function MaintenanceSection({
     <SettingsSection id="settings-maintenance" title="Maintenance">
       <div className="setgroup">
         <SettingRow
-          description="Resets this mode's panes, sidebar, and dock to defaults. Threads and data are kept."
+          description="Resets this mode's panes, sidebar, and dock to defaults."
+          more="Threads and data are kept."
           focused={focusedSetting === settingId("reset-layout")}
           label="Reset active mode layout"
           scope="app"
@@ -3685,7 +3717,8 @@ function MaintenanceSection({
         </SettingRow>
         {resetBoundsAvailable ? (
           <SettingRow
-            description="Moves and resizes the window to its default size. Your data is kept."
+            description="Moves and resizes the window to its default size."
+            more="Your data is kept."
             focused={focusedSetting === settingId("reset-window-bounds")}
             label="Reset native window bounds"
             scope="app"
@@ -3703,7 +3736,8 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Saves a file about this host for you to read and send yourself. It lists versions, provider status, recent log lines, and activity names, never messages or keys. Nothing is uploaded."
+            description="Saves a file about this host for you to read and send yourself."
+            more="It lists versions, provider status, recent log lines, and activity names, never messages or keys. Nothing is uploaded."
             focused={focusedSetting === settingId("save-diagnostics")}
             label="Save diagnostics"
             scope="host"
@@ -3719,7 +3753,8 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Saves a redacted report about one failed action, found by the ID shown with the error. Check it before sharing."
+            description="Saves a redacted report about one failed action, found by the ID shown with the error."
+            more="Check it before sharing."
             focused={focusedSetting === settingId("export-diagnostics")}
             label="Failure report"
             scope="host"
@@ -3730,7 +3765,8 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Events per kind over the last 14 days. Counts only. Read when Settings opens."
+            description="Events per kind over the last 14 days."
+            more="Counts only. Read when Settings opens."
             focused={focusedSetting === settingId("journal-growth")}
             label="Journal growth"
             scope="host"

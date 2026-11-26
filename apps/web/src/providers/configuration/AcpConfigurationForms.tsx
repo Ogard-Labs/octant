@@ -383,7 +383,7 @@ export function OllamaConfigurationForm(props: {
     >
       <SettingRow
         htmlFor={`provider-${props.instance.id}-base-url-control`}
-        description="Literal loopback native API only. Octant never manages the shared Ollama service or its models."
+        description="Literal loopback native API only; Octant never manages the shared Ollama service or its models."
         label="Ollama API base URL"
         scope="host"
         settingId={`provider-${props.instance.id}-base-url`}

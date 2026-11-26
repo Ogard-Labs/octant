@@ -25,9 +25,8 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 // so Off is the only way to hold them back; there is no manual start to fall
 // back on.
 const DESCRIPTION: Readonly<Record<AgentRunSelectableCreationPosture, string>> = {
-  automatic:
-    "The agent can hand work to a helper. Helpers never get more access than their thread.",
-  off: "Off: the agent does all the work itself. Helpers already started stay visible.",
+  automatic: "The agent can hand work to a helper, which never gets more access than its thread.",
+  off: "Off: the agent does all the work itself, and helpers already started stay visible.",
 };
 
 /**
@@ -151,7 +150,8 @@ export function AgentRunSettingsPanel(props: {
             />
           </SettingRow>
           <SettingRow
-            description="How many helpers one thread runs at once. Waiting helpers don't count."
+            description="How many helpers one thread runs at once."
+            more="Waiting helpers don't count."
             label="At once in one thread"
             scope="app"
             settingId="subagent-concurrency-per-thread"
@@ -182,7 +182,13 @@ export function AgentRunSettingsPanel(props: {
           </SettingRow>
           <SettingRow
             label="Working minutes per attempt"
-            description={`How long a helper may work per attempt, not counting waits for approval or answers. Default ${DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES} minutes; Project and thread ceilings still apply, and a change affects the next attempt.`}
+            atDefault={
+              (settings?.workingTimeLimitMinutes ?? DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES) ===
+              DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES
+            }
+            defaultValue={String(DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES)}
+            description="How long a helper may work per attempt, not counting waits for approval or answers."
+            more="Project and thread ceilings still apply, and a change affects the next attempt."
             scope="app"
             settingId="subagent-working-minutes"
           >
@@ -199,7 +205,8 @@ export function AgentRunSettingsPanel(props: {
           </SettingRow>
           <SettingRow
             label="No time limit at Full access"
-            description="Helpers of a thread at Full access work until they finish or you cancel them. A helper whose provider stops responding then keeps its place until you cancel it. Other threads keep the limit above."
+            description="Helpers of a thread at Full access work until they finish or you cancel them."
+            more="A helper whose provider stops responding then keeps its place until you cancel it. Other threads keep the limit above."
             scope="app"
             settingId="subagent-no-limit-full-access"
           >
@@ -214,7 +221,14 @@ export function AgentRunSettingsPanel(props: {
           </SettingRow>
           <SettingRow
             label="Minutes to wait for a full provider"
-            description={`How long a helper waits when its provider is taking no more requests, before it stops and can be retried. Default ${DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES} minutes; a change applies to helpers already waiting.`}
+            atDefault={
+              (settings?.providerSlotWaitMinutes ??
+                DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES) ===
+              DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES
+            }
+            defaultValue={String(DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES)}
+            description="How long a helper waits when its provider is taking no more requests, before it stops and can be retried."
+            more="A change applies to helpers already waiting."
             scope="app"
             settingId="subagent-provider-wait-minutes"
           >

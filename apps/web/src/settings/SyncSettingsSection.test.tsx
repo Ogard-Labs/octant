@@ -90,7 +90,7 @@ describe("SyncSettingsSection", () => {
     // The switch says what sync does once this computer belongs to a replica.
     expect(
       screen.getByText(
-        "Once this computer has joined, sync copies artifact versions and comments to the store and brings in your other computers'.",
+        "Once joined, sync copies artifact versions and comments to the store and brings in your other computers'.",
       ),
     ).toBeVisible();
     // Focusable while off, with its reason announced.

@@ -31,7 +31,7 @@ export const PERSON_MEMORY_FACT =
   "Octant remembers your preferences, how you work, and what you worked on, so a new thread in any Project starts knowing them. It learns only from what you wrote in threads you settle, and it stays on this computer.";
 
 export const PERSON_MEMORY_PROVIDER_NOTE =
-  "New threads get these notes whatever provider they use, so something learned in a thread on one provider can reach a thread on another.";
+  "New threads on any provider get these notes, so what a thread on one provider learned can reach another.";
 
 const KIND_LABEL: Record<PersonMemoryKind, string> = {
   preference: "Preference",
@@ -155,7 +155,8 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Agents can look up what earlier threads in other Projects did. They see short excerpts, never files or whole conversations."
+            description="Agents can look up what earlier threads in other Projects did."
+            more="They see short excerpts, never files or whole conversations."
             focused={props.focusedSetting === "past-thread-search"}
             label="Search past threads"
             scope="host"
@@ -371,7 +372,7 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
         )}
         <div className="setgroup">
           <SettingRow
-            description="Erases every entry and remembered thread. Your threads are not touched."
+            description="Erases every entry and remembered thread; your threads are not touched."
             focused={props.focusedSetting === "person-memory-forget"}
             label="Forget everything"
             scope="host"

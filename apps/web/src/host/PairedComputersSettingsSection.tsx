@@ -153,7 +153,8 @@ export function PairedComputersSettingsSection({
     <SettingsSection title="Other computers">
       <div className="setgroup">
         <SettingRow
-          description="On the other computer, create a pairing code in Settings → Remote access or with octant pair, then paste the whole code here. Octant checks that computer's own certificate key against the code before it sends anything."
+          description="Paste the whole pairing code made on the other computer, in Settings → Remote access or with octant pair."
+          more="Octant checks that computer's own certificate key against the code before it sends anything."
           label="Pair with another computer"
           scope="app"
           settingId="paired-computers-code"

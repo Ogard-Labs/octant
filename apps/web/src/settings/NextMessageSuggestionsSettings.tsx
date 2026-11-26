@@ -39,7 +39,8 @@ export function NextMessageSuggestionsSettings(props: NextMessageSuggestionsSett
   return (
     <>
       <SettingRow
-        description="After each reply, the empty composer shows the message you are likely to send next. Press Tab to use it; nothing is sent for you."
+        description="After each reply, the empty composer shows the message you are likely to send next."
+        more="Press Tab to use it; nothing is sent for you."
         focused={props.focusedSetting === "next-message-suggestions"}
         label="Suggest my next message"
         scope="app"

@@ -407,7 +407,8 @@ function ThreadTitleRows(props: {
   return (
     <>
       <SettingRow
-        description="Choose how Octant names new Chat, Work, and Code threads. Model sources receive an excerpt of the first message. Octant remembers each model choice."
+        description="Choose how Octant names new Chat, Work, and Code threads; model sources receive an excerpt of the first message."
+        more="Octant remembers each model choice."
         focused={
           props.focusedSetting === "automatic-model-thread-title" ||
           (focusModel && source === "first-message")
@@ -437,8 +438,8 @@ function ThreadTitleRows(props: {
             <>
               {choice === undefined
                 ? source === "subscription"
-                  ? "Choose a model from a ChatGPT plan endpoint. Used when you send the first message."
-                  : "Choose a model from an API endpoint. Your provider may charge for title requests."
+                  ? "Choose a model from a ChatGPT plan endpoint, used when you send the first message."
+                  : "Choose a model from an API endpoint; your provider may charge for title requests."
                 : `Octant sends up to 2,000 characters of the first message to ${destination(props.snapshot, choice)}, with recognizable secrets removed.`}
               {unavailable === undefined ? null : (
                 <> {unavailable} Octant will use the first message.</>

@@ -228,8 +228,13 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         <SettingRow
           description={
             allowedRings === undefined || allowedRings.includes("candidate")
-              ? "Stable is the released build. Preview tests the next release. Nightly adds Octant Nightly, a separate app with what is being built now. Switching takes effect at the next check, and going back to Stable waits for a stable release newer than this one."
-              : "Stable is the released build. Switching takes effect at the next check."
+              ? "Stable is the released build; Preview tests the next release."
+              : "Stable is the released build; switching takes effect at the next check."
+          }
+          more={
+            allowedRings === undefined || allowedRings.includes("candidate")
+              ? "Nightly adds Octant Nightly, a separate app with what is being built now. Switching takes effect at the next check, and going back to Stable waits for a stable release newer than this one."
+              : undefined
           }
           label="Update channel"
           scope="app"
@@ -437,8 +442,13 @@ function NightlyInstallRow(props: {
       <SettingRow
         description={
           installed
-            ? "Installed beside Octant and sharing its data. Removing it moves the app to the Trash and leaves that data alone."
-            : "A second app with builds of what has been merged, beside Octant and sharing its data. It is checked against Octant's own signature before it is placed."
+            ? "Installed beside Octant and sharing its data."
+            : "A second app with builds of what has been merged, beside Octant and sharing its data."
+        }
+        more={
+          installed
+            ? "Removing it moves the app to the Trash and leaves that data alone."
+            : "It is checked against Octant's own signature before it is placed."
         }
         label="Octant Nightly"
         scope="app"
@@ -554,7 +564,8 @@ function NightlyDataRow(props: { readonly bridge: OctantHostBridge | undefined }
   return (
     <>
       <SettingRow
-        description="Octant's data uses Octant's host and your real work. Separate test data runs Nightly's own host on data that is never Octant's, for development and testing; you sign in again there. A change applies when Octant Nightly relaunches."
+        description="Whether Octant Nightly works on Octant's data or on separate test data."
+        more="Octant's data uses Octant's host and your real work. Separate test data runs Nightly's own host on data that is never Octant's, for development and testing; you sign in again there. A change applies when Octant Nightly relaunches."
         label="Data"
         scope="app"
         settingId="app-nightly-data"
@@ -608,8 +619,8 @@ function NightlyDataRow(props: { readonly bridge: OctantHostBridge | undefined }
         <SettingRow
           description={
             data.running === "test-data"
-              ? "Octant Nightly is running on its test data. Switch to Octant's data and relaunch before removing it."
-              : "Moves Octant Nightly's test data to the Trash. Octant's data is not touched."
+              ? "Octant Nightly is running on its test data; switch to Octant's data and relaunch before removing it."
+              : "Moves Octant Nightly's test data to the Trash; Octant's data is not touched."
           }
           label="Test data"
           scope="app"

@@ -100,6 +100,20 @@ it("starts background Browser ownership off and saves only an explicit local cho
  * Render SettingsView with a controlled `search` prop so the search results
  * panel can be exercised (the real App controls the search string).
  */
+/**
+ * Rows whose one sentence may run past the length below, each with its
+ * reason. A row is added here only when shortening it would hide what a
+ * person must read before choosing (a cost, data leaving this computer, an
+ * effect that cannot be undone). The Full access risk (139 characters) is
+ * one: it shows on the access row once Full access is chosen.
+ */
+const LONG_ROW_SENTENCES: ReadonlyMap<string, string> = new Map([
+  ["work-default-access", "the Full access risk is read before choosing Full access"],
+]);
+
+/** About 110 characters, with room for a number or a name filled in. */
+const ROW_SENTENCE_LIMIT = 125;
+
 function renderSettingsWithSearch(initial: string, overrides: Partial<SettingsViewProps> = {}) {
   const onSearchChange = vi.fn();
   function Harness() {
@@ -353,7 +367,7 @@ describe("SettingsView", () => {
       "true",
     );
     expect(screen.getByRole("group", { name: "Reply detail setting" })).toHaveAccessibleDescription(
-      "Where every thread starts unless it sets its own. Thinking stays folded, and a finished turn's tool calls fold behind one line.",
+      "Thinking stays folded, and a finished turn's tool calls fold behind one line.",
     );
     await user.click(within(replyDetail).getByRole("button", { name: "High" }));
 
@@ -1879,7 +1893,10 @@ describe("SettingsView", () => {
     );
     expect(screen.getByRole("heading", { name: "Host" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveFocus();
-    expect(screen.getByText(/Resets this mode's panes.*Threads and data are kept/i)).toBeVisible();
+    expect(
+      screen.getByText("Resets this mode's panes, sidebar, and dock to defaults."),
+    ).toBeVisible();
+    expect(screen.getByText("Threads and data are kept.")).toBeInTheDocument();
     expect(onDeepLinkApplied).toHaveBeenCalledOnce();
   });
 
@@ -2419,7 +2436,8 @@ describe("SettingsView", () => {
     expect(screen.getByRole("heading", { name: "Tool-call records" })).toBeInTheDocument();
     const control = screen.getByRole("switch", { name: "Keep tool inputs and outputs" });
     expect(control).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText(/removed when its thread is purged/)).toBeVisible();
+    expect(screen.getByText(/bounded copy of what each Chat and Work tool call/)).toBeVisible();
+    expect(screen.getByText(/removed when its thread is purged/)).toBeInTheDocument();
     await userEvent.setup().click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ keepToolCallRecords: false });
   });
@@ -2911,5 +2929,33 @@ describe("SettingsView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Host" }));
     await user.click(screen.getByRole("button", { name: "Reset active mode layout" }));
     expect(onResetLayout).toHaveBeenCalledOnce();
+  });
+});
+
+describe("every Settings row at rest", () => {
+  // A row's detail is one sentence; the rest waits behind its More. Counted
+  // on 2026-11-25, about 240 rows ran to several sentences.
+  it("says what it does in one sentence on every page the window can draw", () => {
+    renderSettings();
+    const pages = within(screen.getByRole("navigation", { name: "Settings sections" }))
+      .getAllByRole("button")
+      .map((button) => button.textContent?.trim() ?? "")
+      .filter((label) => label !== "");
+    expect(pages.length).toBeGreaterThan(10);
+    const long: string[] = [];
+    for (const page of pages) {
+      navigateTo(page);
+      for (const row of document.querySelectorAll<HTMLElement>("[data-testid='setting-row']")) {
+        const id = row.dataset.settingId ?? "";
+        const sentence =
+          row.querySelector(":scope > .setrow-hint > span")?.textContent?.trim() ?? "";
+        if (LONG_ROW_SENTENCES.has(id)) continue;
+        const twoSentences = /[.!?]\s+[A-Z(]/.test(sentence);
+        if (twoSentences || sentence.length > ROW_SENTENCE_LIMIT) {
+          long.push(`${page} › ${id}: ${sentence}`);
+        }
+      }
+    }
+    expect(long).toEqual([]);
   });
 });

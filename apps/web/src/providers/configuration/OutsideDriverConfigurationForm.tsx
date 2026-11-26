@@ -155,7 +155,7 @@ export function OutsideDriverConfigurationForm(props: {
     >
       <SettingRow
         htmlFor={`${id}-address`}
-        description="HTTPS, or HTTP on this computer. Octant sends the driver's requests only here."
+        description="HTTPS, or HTTP on this computer; Octant sends the driver's requests only here."
         label="Address"
         scope="host"
         settingId={`provider-${props.instance.id}-base-url`}
@@ -213,7 +213,7 @@ export function OutsideDriverConfigurationForm(props: {
           htmlFor={`${id}-key`}
           description={
             addressChanged
-              ? `Required: a new address means the saved key is forgotten. Saved in ${hostCredentialStore(hostPlatform)}.`
+              ? `Required: a new address means the saved key is forgotten; the new one is saved in ${hostCredentialStore(hostPlatform)}.`
               : "Leave empty to keep the saved key."
           }
           label="API key"
@@ -238,7 +238,7 @@ export function OutsideDriverConfigurationForm(props: {
       )}
       <SettingRow
         htmlFor={`${id}-models`}
-        description="Separated by commas or spaces. Octant offers only the ones the driver also reports."
+        description="Separated by commas or spaces; Octant offers only the ones the driver also reports."
         label="Model IDs"
         scope="host"
         settingId={`provider-${props.instance.id}-manual-model-ids`}

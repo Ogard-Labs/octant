@@ -501,7 +501,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       >
         <div className="setgroup">
           <SettingRow
-            description="Auto lets a reviewer approve actions: the provider's own or Octant Shield. If none can run, threads ask you."
+            description="Auto lets a reviewer approve actions: the provider's own or Octant Shield."
+            more="If none can run, threads ask you."
             label="Default mode"
             scope="mode"
             settingId="code-default-access"
@@ -522,7 +523,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Who approves at Auto. Provider's own uses the provider's reviewer, or Octant Shield if it has none. Projects can choose their own."
+            description="Who approves at Auto."
+            more="Provider's own uses the provider's reviewer, or Octant Shield if it has none. Projects can choose their own."
             focused={props.focusedSetting === "code-auto-reviewer"}
             label="Auto reviewer"
             scope="mode"
@@ -542,10 +544,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
-            description={
+            description="Strict keeps provider sign-ins, SSH keys and cloud credentials protected."
+            more={
               hostPlatform === "win32"
-                ? "Strict keeps provider sign-ins, SSH keys and cloud credentials protected. On Windows, phase 1 works at Full access with native Codex, in Codex's own Windows sandbox; other providers and lower levels refuse by name. Changes apply to the next turn."
-                : "Strict keeps provider sign-ins, SSH keys and cloud credentials protected. It applies at every access level and preserves required approvals. Changes apply to the next turn."
+                ? "On Windows, phase 1 works at Full access with native Codex, in Codex's own Windows sandbox; other providers and lower levels refuse by name. Changes apply to the next turn."
+                : "It applies at every access level and preserves required approvals. Changes apply to the next turn."
             }
             focused={
               props.focusedSetting === "code-strict" ||
@@ -605,7 +608,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Off lets Code threads start in a plain folder, including the default folder. Branches, diffs, and pull requests are not available there."
+            description="Off lets Code threads start in a plain folder, including the default folder."
+            more="Branches, diffs, and pull requests are not available there."
             label="Code needs a Git repository"
             focused={props.focusedSetting === "code-require-git"}
             scope="mode"
@@ -642,7 +646,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             </OctantToggleGroup>
           </SettingRow>
           <SettingRow
-            description="When Octant stops in the middle of a turn, from a crash, a quit, or a restart of this computer, the thread picks the turn up by itself when Octant opens again. A thread whose push or pull request may have gone out waits for you. A thread can turn this off from its menu."
+            description="When Octant stops in the middle of a turn, the thread picks the turn up by itself when Octant opens again."
+            more="That covers a crash, a quit, or a restart of this computer. A thread whose push or pull request may have gone out waits for you. A thread can turn this off from its menu."
             focused={props.focusedSetting === "code-restart-continuation"}
             label="Continue after restart"
             scope="mode"
@@ -666,7 +671,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       >
         <div className="setgroup">
           <SettingRow
-            description="Whether a coordinator starts workers itself or asks you first. Projects can choose their own."
+            description="Whether a coordinator starts workers itself or asks you first."
+            more="Projects can choose their own, for this and for Show workers."
             focused={props.focusedSetting === "code-coordinator-starting"}
             label="Starting workers"
             scope="mode"
@@ -688,7 +694,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Workers live in their coordinator's thread. Choose where else they show. Their requests always reach Needs you. Projects can choose their own."
+            description="Where else workers show, besides their coordinator's thread."
+            more="Workers live in their coordinator's thread. Their requests always reach Needs you."
             focused={props.focusedSetting === "code-coordinator-show-workers"}
             label="Show workers"
             scope="mode"
@@ -705,7 +712,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
-            description="How many workers one coordinator may have open. Done, settled, and archived workers don't count."
+            description="How many workers one coordinator may have open."
+            more="Done, settled, and archived workers don't count."
             focused={props.focusedSetting === "code-coordinator-open-workers"}
             label="Open workers per coordinator"
             scope="mode"
@@ -730,7 +738,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       <SettingsSection title="Editor">
         <div className="setgroup">
           <SettingRow
-            description="Type errors and go to definition across the checkout, from the TypeScript server bundled with Octant. It reads the checkout and cannot write, run other programs, or reach the network."
+            description="Type errors and go to definition across the checkout, from the TypeScript server bundled with Octant."
+            more="It reads the checkout and cannot write, run other programs, or reach the network."
             label="Language services"
             focused={props.focusedSetting === "code-language-services"}
             scope="mode"
@@ -751,7 +760,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       <SettingsSection title="Devices">
         <div className="setgroup">
           <SettingRow
-            description="Let an Android emulator Octant boots start from its saved quickboot snapshot. Off, every boot is cold and takes about a minute; a saved snapshot can leave the emulator offline for minutes after it loads, so the boot times out."
+            description="Let an Android emulator Octant boots start from its saved quickboot snapshot."
+            more="Off, every boot is cold and takes about a minute; a saved snapshot can leave the emulator offline for minutes after it loads, so the boot times out."
             label="Android snapshot boot"
             focused={props.focusedSetting === "code-android-snapshot-boot"}
             scope="mode"
@@ -773,7 +783,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         <SettingsSection title="Terminal">
           <div className="setgroup">
             <SettingRow
-              description="The shell Code and Project terminals open. On Windows, terminals run only at Full access."
+              description="The shell Code and Project terminals open."
+              more="On Windows, terminals run only at Full access."
               focused={props.focusedSetting === "code-terminal-shell"}
               label="Terminal shell"
               scope="mode"
@@ -825,7 +836,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
           <SettingRow
             description={
               <>
-                One argument per line. Available placeholders: {"{file}"}, {"{line}"}, {"{column}"}.
+                One argument per line, with the placeholders {"{file}"}, {"{line}"} and {"{column}"}
+                .
               </>
             }
             label="External editor arguments"

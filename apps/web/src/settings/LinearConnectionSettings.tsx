@@ -528,7 +528,7 @@ export function LinearConnectionSettings({
         <SettingsSection tone="danger" title="Disconnect Linear">
           <div className="setgroup">
             <SettingRow
-              description="Removes Octant's Linear sign-in from this host. Your Linear workspace is untouched."
+              description="Removes Octant's Linear sign-in from this host; your Linear workspace is untouched."
               focused={focusedId === "linear-disconnect"}
               label="Disconnect Linear"
               scope="host"

@@ -122,7 +122,7 @@ export function SkillFolderSettingsPanel(props: SkillFolderSettingsProps) {
     <div className="setgroup skill-folder-settings" aria-busy={busy}>
       {PROVIDER_FOLDERS.map((provider) => (
         <SettingRow
-          description={`Index the skills in ${provider.path}. Each stays off until you trust and enable it.`}
+          description={`Index the skills in ${provider.path}; each stays off until you trust and enable it.`}
           key={provider.id}
           label={provider.label}
           scope="host"
@@ -147,7 +147,7 @@ export function SkillFolderSettingsPanel(props: SkillFolderSettingsProps) {
         </SettingRow>
       ))}
       <SettingRow
-        description="Any folder of skill folders. Links are ignored."
+        description="Any folder of skill folders; links are ignored."
         label="Added skill folders"
         scope="host"
         settingId="skill-folders-added"

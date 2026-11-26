@@ -189,8 +189,13 @@ export function AgentAccessSettingsSection(props: {
         <SettingRow
           description={
             administration === undefined
-              ? "Agents on other computers on your network that may start work here. You can revoke one from this device; make or change a grant on the computer running Octant."
-              : "Let an agent on another computer on your network, such as a bot or a coding tool, start and follow work here, within what you choose. Its approvals wait for you, and it gets Full access only when you choose it for the grant."
+              ? "Agents on other computers on your network that may start work here."
+              : "Let an agent on another computer on your network start and follow work here, within what you choose."
+          }
+          more={
+            administration === undefined
+              ? "You can revoke one from this device; make or change a grant on the computer running Octant."
+              : "It can be a bot or a coding tool. Its approvals wait for you, and it gets Full access only when you choose it for the grant."
           }
           label="Agents on other computers"
           scope="app"
@@ -230,7 +235,7 @@ export function AgentAccessSettingsSection(props: {
         )}
         {oneTime === undefined ? null : (
           <SettingRow
-            description="Shown once. The code works for five minutes; then confirm the key it sends below."
+            description="Shown once; the code works for five minutes, then confirm the key it sends below."
             label={`Connect ${oneTime.grantName}`}
             scope="app"
             settingId="agent-access-code"
