@@ -25,6 +25,8 @@ export interface ChatSettingsViewProps {
   readonly busy?: boolean;
   readonly message?: string;
   readonly onUpdate: (command: UpdateChatSettingsCommand) => Promise<boolean> | boolean;
+  /** The row a link named, which takes focus and comes into view. */
+  readonly focusedSetting?: string | undefined;
 }
 
 export function ChatSettingsView(props: ChatSettingsViewProps) {
@@ -217,6 +219,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           description="The provider and model a new Chat thread starts with."
           label="Default provider and model"
           scope="host"
+          focused={props.focusedSetting === "chat-default-model"}
           settingId="chat-default-model"
         >
           <ComposerModelPicker
@@ -244,6 +247,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           description="Answers when the default provider cannot. Optional."
           label="Fallback model"
           scope="host"
+          focused={props.focusedSetting === "chat-fallback-model"}
           settingId="chat-fallback-model"
         >
           <div className="chat-settings__fallback">
@@ -293,6 +297,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           description="New Chat threads start with research turned on."
           label="Research by default"
           scope="host"
+          focused={props.focusedSetting === "chat-research-enabled"}
           settingId="chat-research-enabled"
         >
           <OctantSwitch
@@ -309,6 +314,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           description="Where research requests go when a thread does not choose."
           label="Default research backend"
           scope="host"
+          focused={props.focusedSetting === "chat-research-backend"}
           settingId="chat-research-backend"
         >
           <OctantSelectField
@@ -335,6 +341,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           description="The personality new Chat threads start with."
           label="Instructions for new Chat threads"
           scope="host"
+          focused={props.focusedSetting === "chat-personality"}
           settingId="chat-personality"
         >
           <OctantTextarea
@@ -357,6 +364,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           description="When Octant stops in the middle of an answer, from a crash, a quit, or a restart of this computer, the thread picks the answer up by itself when Octant opens again. This applies to every Chat thread, not only new ones. A thread can turn this off from its menu."
           label="Continue after restart"
           scope="mode"
+          focused={props.focusedSetting === "chat-restart-continuation"}
           settingId="chat-restart-continuation"
         >
           <OctantSwitch

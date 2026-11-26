@@ -1695,8 +1695,9 @@ The kit is `settings/primitives.tsx`; contents are in
   Settings row's height); a command's raw output is a `SettingsOutputWell`,
   collapsed, 160px tall and scrollable.
 - **On this page**: one rule. Pages of four sections or more (General,
-  Appearance, Providers & Models, Octant Harness, Code, Computer use, GitHub,
-  Permissions, Data & storage, Sync; the list is `SETTINGS_OUTLINE_PAGES`) carry
+  Appearance, Providers & Models, Octant Harness, Code, Computer use,
+  Integrations, Permissions, Limits, Data & storage, Sync; the list is
+  `SETTINGS_OUTLINE_PAGES`) carry
   a single-line row of quiet chips: 24px, 12px text, `--oct-fill-4`, a hover
   wash, the section in view marked as the page scrolls. It never wraps: it
   scrolls sideways under a fade at the edge that has more. Its slot is a fixed

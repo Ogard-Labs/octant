@@ -29,24 +29,59 @@ export const octantSettingsNavigation = {
   Pick<SettingsSectionEntry, "id" | "label" | "scope" | "nativeRequired">
 >;
 
+type SettingsPageId = keyof typeof octantSettingsNavigation;
+
 /**
- * The names of the pages each page took in. GitHub, Linear, Device tools and
- * To-dos were pages of one to three settings, and a person still types those
- * names into the command palette, where only a page's own name is matched.
+ * The pages each page took in. A person still types "Settings: GitHub" or
+ * "to-dos" into the command palette, so the page that holds those settings now
+ * answers to the old name. A name that was a plugin's page says which section
+ * the plugin contributes, and goes when the plugin is off.
  */
 const PAGES_TAKEN_IN: Readonly<
-  Partial<Record<keyof typeof octantSettingsNavigation, ReadonlyArray<string>>>
+  Partial<
+    Record<
+      SettingsPageId,
+      ReadonlyArray<{ readonly label: string; readonly contributedSection?: string }>
+    >
+  >
 > = {
-  "computer-use": ["Device tools"],
-  integrations: ["GitHub", "Linear"],
-  data: ["To-dos"],
+  "chat-work": [{ label: "Chat" }, { label: "Work" }],
+  "computer-use": [{ label: "Device tools" }],
+  integrations: [
+    { label: "GitHub", contributedSection: "github" },
+    { label: "Linear", contributedSection: "linear" },
+  ],
+  data: [{ label: "To-dos" }],
 };
 
-export const octantSettingsCommandPages: ReadonlyArray<
-  Pick<SettingsSectionEntry, "id" | "label" | "nativeRequired"> & {
-    readonly alsoFoundAs: ReadonlyArray<string>;
-  }
-> = Object.values(octantSettingsNavigation).map((page) => ({
-  ...page,
-  alsoFoundAs: PAGES_TAKEN_IN[page.id] ?? [],
-}));
+/** Pages made only of what plugins contribute: there while one of them is on. */
+const PLUGIN_ONLY_PAGES: ReadonlySet<SettingsPageId> = new Set(["integrations"]);
+
+export interface SettingsCommandPage extends Pick<
+  SettingsSectionEntry,
+  "id" | "label" | "nativeRequired"
+> {
+  /** The names of the pages this one took in that are still on offer. */
+  readonly alsoFoundAs: ReadonlyArray<string>;
+}
+
+/**
+ * The Settings pages the command palette offers. A switched-off plugin's page
+ * name is not offered, and a page made only of plugins' sections is left out
+ * once none is on, so the palette never opens a page that is not there.
+ */
+export function settingsCommandPages(
+  isContributedSectionPresent: (contributedSection: string) => boolean,
+): ReadonlyArray<SettingsCommandPage> {
+  return Object.values(octantSettingsNavigation).flatMap((page) => {
+    const alsoFoundAs = (PAGES_TAKEN_IN[page.id] ?? [])
+      .filter(
+        (taken) =>
+          taken.contributedSection === undefined ||
+          isContributedSectionPresent(taken.contributedSection),
+      )
+      .map((taken) => taken.label);
+    if (PLUGIN_ONLY_PAGES.has(page.id) && alsoFoundAs.length === 0) return [];
+    return [{ ...page, alsoFoundAs }];
+  });
+}

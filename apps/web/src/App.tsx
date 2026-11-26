@@ -261,7 +261,7 @@ import {
   FirstPartyPluginsEffectiveContext,
   useHostFirstPartyPluginsEffective,
 } from "./shell/firstPartyPluginsEffective";
-import { isThreadBoardAvailable } from "./shell/contributionRegistry";
+import { isSettingsSectionAvailable, isThreadBoardAvailable } from "./shell/contributionRegistry";
 import { useWhatsNewAfterUpdate } from "./settings/useWhatsNewAfterUpdate";
 import { hubAdministrationOf, type CodeDeepLink, type OctantHostBridge } from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
@@ -361,7 +361,7 @@ import { useRendererOverlayReport } from "./browser/useRendererOverlayReport";
 import { useHomeShortcut } from "./shell/useHomeShortcut";
 import { useNewThreadShortcut } from "./shell/useNewThreadShortcut";
 import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
-import { octantSettingsCommandPages } from "./settings/octantSettingsNavigation";
+import { settingsCommandPages } from "./settings/octantSettingsNavigation";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
 import { PlanUsageProvider } from "./usage/PlanUsageContext";
 import { FollowUpLineageProvider } from "./followUps/followUpLineage";
@@ -9100,7 +9100,9 @@ function LaunchedShell(
       { id: "artifact-library", label: "Artifacts", onOpen: openArtifactLibrary },
       { id: "projects", label: "Projects", onOpen: openProjects },
     ],
-    settingsPages: octantSettingsCommandPages
+    settingsPages: settingsCommandPages((contributedSection) =>
+      isSettingsSectionAvailable(contributedSection, firstPartyPluginsEffective),
+    )
       .filter((section) => section.nativeRequired === undefined)
       .map((section) => ({
         sectionId: section.id,

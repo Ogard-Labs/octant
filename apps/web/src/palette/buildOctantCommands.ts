@@ -222,8 +222,9 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
     commands.push({
       id: `settings-page:${page.sectionId}`,
       title: `Settings: ${page.label}`,
+      formerTitles: (page.alsoFoundAs ?? []).map((name) => `Settings: ${name}`),
       group: "Go to",
-      keywords: ["settings", "preferences", "page", page.label, ...(page.alsoFoundAs ?? [])],
+      keywords: ["settings", "preferences", "page", page.label],
       action: { kind: "run", run: page.onOpen },
     });
   }

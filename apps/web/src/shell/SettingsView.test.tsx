@@ -488,6 +488,15 @@ describe("SettingsView", () => {
     ).toEqual(["Chat defaults", "Work defaults", "Replies"]);
   });
 
+  it("focuses a Chat row from a link written for the old Chat page", () => {
+    renderSettings({
+      chatController: chatControllerFixture(),
+      initialDeepLink: { section: "chat", setting: "chat-research-backend" },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "Chat & Work" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveFocus();
+  });
+
   it("lands a limit's old Permissions link on its row on Limits", () => {
     renderSettings({
       initialDeepLink: { section: "permissions", setting: "coordinators-per-project" },

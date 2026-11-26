@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { octantSettingsCommandPages } from "./octantSettingsNavigation";
+import { settingsCommandPages } from "./octantSettingsNavigation";
 import { octantSettingsRegistry } from "./octantSettingsRegistry";
 import {
   listAvailableSections,
@@ -156,9 +156,27 @@ describe("octantSettingsRegistry", () => {
       "host",
       "usage",
     ]);
-    expect(octantSettingsCommandPages.map(({ id, label }) => ({ id, label }))).toEqual(
+    expect(settingsCommandPages(() => true).map(({ id, label }) => ({ id, label }))).toEqual(
       octantSettingsRegistry.sections.map(({ id, label }) => ({ id, label })),
     );
+  });
+
+  it("offers the palette the pages Settings itself would list for the plugins that are on", () => {
+    const sections = listAvailableSections(octantSettingsRegistry, capabilities);
+    for (const off of [[], ["github"], ["linear"], ["github", "linear"]]) {
+      const present = (section: string) => !off.includes(section);
+      expect(
+        settingsCommandPages(present).map((page) => page.id),
+        `with ${off.join(" and ") || "nothing"} off`,
+      ).toEqual(withoutAbsentContributions(sections, present).map((section) => section.id));
+    }
+    const names = (...off: ReadonlyArray<string>) =>
+      settingsCommandPages((section) => !off.includes(section)).find(
+        (page) => page.id === "integrations",
+      )?.alsoFoundAs;
+    expect(names()).toEqual(["GitHub", "Linear"]);
+    expect(names("github")).toEqual(["Linear"]);
+    expect(names("github", "linear")).toBeUndefined();
   });
 
   // Permissions had grown to fifty settings while GitHub, Linear, Device tools

@@ -1050,6 +1050,7 @@ function ActiveSectionContent({
               {...(props.chatController.settingsMessage === undefined
                 ? {}
                 : { message: props.chatController.settingsMessage })}
+              focusedSetting={focusedSetting}
               onUpdate={props.chatController.updateSettings}
               {...(props.providerController?.snapshot === undefined
                 ? {}

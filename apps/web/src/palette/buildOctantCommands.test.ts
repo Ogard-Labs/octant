@@ -3,7 +3,7 @@ import { RefreshCw } from "../ui/icons";
 import { buildOctantCommands, type OctantCommandSources } from "./buildOctantCommands";
 import { keybindingActionForCommand } from "./commandKeybinding";
 import { filterOctantCommands, type OctantCommand } from "./commandModel";
-import { octantSettingsCommandPages } from "../settings/octantSettingsNavigation";
+import { settingsCommandPages } from "../settings/octantSettingsNavigation";
 
 function sources(overrides: Partial<OctantCommandSources> = {}): OctantCommandSources {
   return {
@@ -219,26 +219,56 @@ describe("the destination, sidebar and dock commands", () => {
     expect(keybindingActionForCommand("workspace:toggle-sidebar")).toBe("toggle-sidebar");
   });
 
-  // GitHub, Linear, Device tools and To-dos were Settings pages a person could
-  // type into the palette; their settings now sit on another page.
-  it("finds a Settings page by the name of a page it took in", () => {
+  // Chat, Work, GitHub, Linear, Device tools and To-dos were Settings pages a
+  // person could type into the palette; their settings now sit on another page.
+  it("finds a Settings page by the command of a page it took in, typed whole or by name", () => {
     const commands = buildOctantCommands(
       sources({
-        settingsPages: octantSettingsCommandPages.map((page) => ({
+        settingsPages: settingsCommandPages(() => true).map((page) => ({
           sectionId: page.id,
           label: page.label,
           alsoFoundAs: page.alsoFoundAs,
           onOpen: vi.fn(),
         })),
+        onOpenTodos: vi.fn(),
       }),
     );
-    const first = (query: string) => filterOctantCommands(commands, query)[0]?.title;
-    expect(first("github")).toBe("Settings: Integrations");
-    expect(first("linear")).toBe("Settings: Integrations");
-    expect(first("device tools")).toBe("Settings: Computer use");
-    expect(first("to-dos")).toBe("Settings: Data & storage");
-    expect(first("settings: chat")).toBe("Settings: Chat & Work");
-    expect(first("limits")).toBe("Settings: Limits");
+    const found = (query: string) =>
+      filterOctantCommands(commands, query).map((command) => command.title);
+    expect(found("settings: github")[0]).toBe("Settings: Integrations");
+    expect(found("settings: linear")[0]).toBe("Settings: Integrations");
+    expect(found("settings: work")[0]).toBe("Settings: Chat & Work");
+    expect(found("settings: chat")[0]).toBe("Settings: Chat & Work");
+    expect(found("settings: device tools")[0]).toBe("Settings: Computer use");
+    expect(found("settings: to-dos")[0]).toBe("Settings: Data & storage");
+    expect(found("github")[0]).toBe("Settings: Integrations");
+    expect(found("limits")[0]).toBe("Settings: Limits");
+    // The old page's name ranks as a title, so it is not pushed behind every
+    // command that merely mentions the word: beside the To-dos page's own
+    // command, the Settings page is still among the title matches.
+    expect(found("to-dos").slice(0, 2).toSorted()).toEqual([
+      "Open To-dos",
+      "Settings: Data & storage",
+    ]);
+  });
+
+  it("offers no Settings page for an integration that is switched off", () => {
+    const pages = (...off: ReadonlyArray<string>) =>
+      buildOctantCommands(
+        sources({
+          settingsPages: settingsCommandPages((section) => !off.includes(section)).map((page) => ({
+            sectionId: page.id,
+            label: page.label,
+            alsoFoundAs: page.alsoFoundAs,
+            onOpen: vi.fn(),
+          })),
+        }),
+      );
+    const found = (commands: ReadonlyArray<OctantCommand>, query: string) =>
+      filterOctantCommands(commands, query).map((command) => command.title);
+    expect(found(pages("github"), "settings: github")).toEqual([]);
+    expect(found(pages("github"), "settings: linear")).toEqual(["Settings: Integrations"]);
+    expect(found(pages("github", "linear"), "integrations")).toEqual([]);
   });
 
   it("offers no dock tool when the host cannot open one", () => {

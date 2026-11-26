@@ -61,7 +61,9 @@ it, and the page leaves the rail when none is left. **Limits** holds Tool
 steps and Octant's own limits (see below). **Data & storage** ends on
 **To-dos**, the computer that keeps the list. A link to a folded page opens
 the page that holds its settings now, and the command palette finds a page by
-the name of a page it took in. Web search's rules are in
+the command of a page it took in, typed whole ("Settings: GitHub") or by name;
+it offers neither the name of a switched-off plugin's page nor Integrations
+once every integration is off. Web search's rules are in
 [Web search backends](web-search-backends.md#settings). An earlier Privacy & data
 group had grown to seven pages answering three different questions, Modes stood
 apart from the models its pages choose, and Advanced held two pages. General opens on Computer resources (automatic or manual local-work limits,
