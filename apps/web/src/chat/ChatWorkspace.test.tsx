@@ -2376,6 +2376,40 @@ describe("ChatWorkspace", () => {
     expect(message).toHaveValue("");
   });
 
+  it("names a large pasted file in an empty prompt only once Chat attached it", async () => {
+    const upload = vi.fn<ChatController["upload"]>(async () => {
+      throw new Error("offline");
+    });
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView: viewWithQuotableReplies(),
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+            upload,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
+    const message = screen.getByLabelText("Message");
+    message.focus();
+    fireEvent.paste(message, {
+      clipboardData: {
+        getData: (type: string) => (type === "text/plain" ? "x".repeat(40 * 1024) : ""),
+        files: [],
+        items: [],
+        types: ["text/plain"],
+      },
+    });
+    await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/pasted-text-1\.txt could not be attached/)).toBeVisible();
+    expect(message).toHaveValue("");
+  });
+
   it("skips a routine's scheduled follow-up when ArrowUp recalls the person's last prompt", async () => {
     const user = userEvent.setup();
     const view = viewWithQuotableReplies();

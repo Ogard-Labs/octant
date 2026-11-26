@@ -1998,11 +1998,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   type: mediaType,
                 })
               ) {
-                setAttachmentStatus({
-                  kind: "failed",
-                  message: `${displayName} is unavailable to the selected provider and model.`,
-                });
-                return;
+                const message = `${displayName} is unavailable to the selected provider and model.`;
+                setAttachmentStatus({ kind: "failed", message });
+                return Promise.resolve(message);
               }
               const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
               // A new attempt supersedes whatever an earlier one reported; a
@@ -2017,7 +2015,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 setUploadingAttachments((current) =>
                   current.filter((upload) => upload.id !== attachmentId),
                 );
-              void (async () => {
+              // Answers, once known, why the file was not attached, so a large
+              // paste only names a file that Chat took.
+              return (async (): Promise<string | undefined> => {
                 try {
                   const buffer = await file.arrayBuffer();
                   // A file that is not an image goes to the model natively or
@@ -2036,7 +2036,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     settleUpload();
                     if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id))
                       setAttachmentStatus({ kind: "failed", message: refusal });
-                    return;
+                    return refusal;
                   }
                   if (
                     !mountedRef.current ||
@@ -2048,7 +2048,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     await discardAttachmentRef
                       .current({ threadId: view.thread.id, attachmentId })
                       .catch(() => undefined);
-                    return;
+                    return "The attachment was cancelled.";
                   }
                   await props.controller.upload({
                     threadId: view.thread.id,
@@ -2067,21 +2067,21 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     await discardAttachmentRef
                       .current({ threadId: view.thread.id, attachmentId })
                       .catch(() => undefined);
-                    return;
+                    return "The attachment was cancelled.";
                   }
                   appendPendingAttachment({ id: attachmentId, displayName, file });
                   settleUpload();
+                  return undefined;
                 } catch {
                   settleUpload();
                   await discardAttachmentRef
                     .current({ threadId: view.thread.id, attachmentId })
                     .catch(() => undefined);
+                  const message = `${displayName} could not be attached. Paste or choose it again to retry.`;
                   if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id)) {
-                    setAttachmentStatus({
-                      kind: "failed",
-                      message: `${displayName} could not be attached. Paste or choose it again to retry.`,
-                    });
+                    setAttachmentStatus({ kind: "failed", message });
                   }
+                  return message;
                 }
               })();
             }}

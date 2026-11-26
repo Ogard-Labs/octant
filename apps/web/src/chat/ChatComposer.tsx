@@ -132,7 +132,11 @@ export interface ChatComposerProps {
   readonly model: ChatComposerSelection;
   readonly onDraftChange: (draft: string, caretIndex?: number) => void;
   /** Receives the browser-selected File only; file paths are not accepted or exposed. */
-  readonly onFileSelected: (file: File) => void;
+  /**
+   * Takes a chosen, dropped or pasted file. It may answer, once it knows, the
+   * reason the file was not attached, or undefined when it was.
+   */
+  readonly onFileSelected: (file: File) => void | Promise<string | undefined>;
   readonly onModelChange: (modelId: string) => void;
   readonly onProviderChange: (providerId: string) => void;
   readonly onResearchEnabledChange: (enabled: boolean) => void;
@@ -640,9 +644,8 @@ export function ChatComposer(props: ChatComposerProps) {
         props.readOnly === true
           ? undefined
           : (file: File) => {
-              // Chat reports a refused upload beside the composer itself.
-              props.onFileSelected(file);
-              return undefined;
+              const answer = props.onFileSelected(file);
+              return answer instanceof Promise ? answer : undefined;
             }
       }
       inlineChips={mention.inlineChips}
