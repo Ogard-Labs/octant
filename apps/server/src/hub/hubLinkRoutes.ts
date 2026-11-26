@@ -653,10 +653,16 @@ export function createHubLinkRouteHandler(
       if (sender.status === "refused") {
         return refused(SENDER_REFUSAL_STATUS.has(sender.kind) ? 401 : 403, sender.kind);
       }
-      // A standby forwards only for a spoke whose person ticked Standby.
+      // A named standby forwards a delivery only while it stands in: for a spoke
+      // whose person ticked Standby, and only while this spoke cannot reach the
+      // hub. Roster identity alone would let it start routines any time.
       if (sender.status === "standby") {
         const allowed = options.spoke.hubMayUse("standby");
         if (allowed.status === "refused") return refused(403, allowed.kind);
+        if (!(await options.failover.hubUnreachable())) return refused(403, "hub-reachable");
+        // The probe can take the whole link deadline; Standby unticked meanwhile still refuses.
+        const stillAllowed = options.spoke.hubMayUse("standby");
+        if (stillAllowed.status === "refused") return refused(403, stillAllowed.kind);
       }
       if (options.spokeWebhooks === undefined) return refused(404, "invalid");
       let envelope;

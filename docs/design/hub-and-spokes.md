@@ -3331,7 +3331,10 @@ Built, run only between three hosts on loopback (maintainer decision,
 - **No delivery runs twice.** Dedupe is the spoke's: a delivery id the spoke
   has already claimed starts nothing, so a split network in which both hubs
   forward the same delivery still runs it once. A spoke takes a delivery or a
-  visitor question from a standby only when its person ticked Standby.
+  visitor question from a standby only when its person ticked Standby and
+  the spoke itself cannot reach the hub, checking Standby again after that
+  probe; a named standby's delivery is refused while the hub is up and waits
+  in the standby's queue.
 - **Links keep working.** The spoke checks every visitor fetch, so a link the
   spoke revoked is refused on the standby as on the hub, and a stopped link
   is also withdrawn from each standby the spoke reaches. The spoke answers a

@@ -25,6 +25,7 @@ import {
   type OwnPublicServices,
 } from "./publicStandIn";
 import type { HubTransport } from "./pinnedHubTransport";
+import { grantConfirmTimeoutMs } from "./pushService";
 import type { SpokeWebhookHubPort } from "./spokeWebhookService";
 
 interface LinkDependencies {
@@ -123,6 +124,9 @@ export async function sendWebhookDelivery(
     body: JSON.stringify(envelope),
     headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
     now: deps.now(),
+    // A spoke asked by a standby first probes the hub, which can take a whole
+    // link deadline when the hub hangs; the answer gets that long and a margin.
+    timeoutMs: grantConfirmTimeoutMs(),
   });
   // A refusal of the request itself (a stale signature, a roster the spoke has
   // not taken yet) is not the spoke's answer: the delivery waits for the next look.
