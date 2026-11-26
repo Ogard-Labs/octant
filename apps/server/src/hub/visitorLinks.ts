@@ -17,6 +17,7 @@ import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
 import type { HubTransport } from "./pinnedHubTransport";
+import { grantConfirmTimeoutMs } from "./pushService";
 import type { SpokeVisitorHubPort } from "./spokeVisitorService";
 
 interface LinkDependencies {
@@ -83,6 +84,9 @@ export async function askVisitorSpoke(
     body: JSON.stringify(request),
     headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
     now: deps.now(),
+    // A spoke asked by a standby first probes the hub, which can take a whole
+    // link deadline when the hub hangs; the answer gets that long and a margin.
+    timeoutMs: grantConfirmTimeoutMs(),
     maxResponseBytes: VISITOR_FETCH_ANSWER_MAX_BYTES,
   });
   if (answer.status === "unreachable" || !answer.response.ok) return undefined;

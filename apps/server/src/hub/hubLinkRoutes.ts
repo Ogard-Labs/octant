@@ -602,6 +602,9 @@ export function createHubLinkRouteHandler(
         const allowed = options.spoke.hubMayUse("standby");
         if (allowed.status === "refused") return refused(403, allowed.kind);
         if (!(await options.failover.hubUnreachable())) return refused(403, "hub-reachable");
+        // The probe can take the whole link deadline; Standby unticked meanwhile still refuses.
+        const stillAllowed = options.spoke.hubMayUse("standby");
+        if (stillAllowed.status === "refused") return refused(403, stillAllowed.kind);
       }
       if (options.spokeVisitors === undefined) return refused(404, "invalid");
       let fetchRequest;
