@@ -115,7 +115,7 @@ import { DockModuleBoundary } from "./shell/DockModuleBoundary";
 import { couldNotLoad, LazyPartBoundary, WindowNoticeContext } from "./shell/windowNotice";
 import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
-import { threadRestRowActions, type ThreadRestRow } from "./app/threadRestRowActions";
+import { threadRestRowActions } from "./app/threadRestRowActions";
 import { TerminalShellContext, type TerminalShellFacts } from "./shell/terminalSlot";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
@@ -7210,10 +7210,10 @@ function LaunchedShell(
       };
     }
   }
-  function threadRestRow(mode: OctantMode, threadId: string): ThreadRestRow | undefined {
+  function threadRestRow(mode: OctantMode, threadId: string): ChatThreadNavigationItem | undefined {
     const rows =
       mode === "code"
-        ? navigationModel.codeSidebarThreads
+        ? navigationModel.codeProjectThreads
         : mode === "work"
           ? navigationModel.workProjectThreads
           : chatController.status === "ready"
@@ -9249,21 +9249,12 @@ function LaunchedShell(
         ? undefined
         : { id: serverActionsProject.projectId, name: serverActionsProject.name }
       : { id: actionsProject.id, name: actionsProject.name };
-  // The palette acts on the thread in front through that thread's own sidebar
-  // row: the same state decides what is offered, and the same actions run. A
-  // window with no row for it (still loading, or the thread lives elsewhere)
-  // offers nothing.
+  // A worker opened from its Project keeps its commands when Show workers hides its sidebar row.
+  // Read the same thread state that the command will use for Undo.
   const frontThreadRow =
     replyDetailThread === undefined
       ? undefined
-      : (replyDetailThread.mode === "code"
-          ? navigationModel.codeSidebarThreads
-          : replyDetailThread.mode === "work"
-            ? navigationModel.workProjectThreads
-            : chatController.status === "ready"
-              ? navigationModel.markedChatNavigation
-              : []
-        ).find((row) => row.threadId === replyDetailThread.threadId);
+      : threadRestRow(replyDetailThread.mode, replyDetailThread.threadId);
   terminalShell.current = {
     layout: controller.presentedLayout,
     narrow: isNarrow,
@@ -10271,7 +10262,7 @@ function LaunchedShell(
             <MoveThreadToProjectDialog
               {...(moveRequest.busy === true ||
               (moveRequest.mode === "code" &&
-                navigationModel.codeSidebarThreads.some(
+                navigationModel.codeProjectThreads.some(
                   (thread) =>
                     String(thread.threadId) === moveRequest.threadId &&
                     (thread.activity === "working" || thread.activity === "attention"),
