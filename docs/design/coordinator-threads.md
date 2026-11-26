@@ -744,8 +744,8 @@ The JSON report records both SHAs, SHA-256 digests of the assembled case inputs
 including tool metadata, model request settings, observations, and per-case
 pass rates. A start is matched to its assignment by a keyword in the title, falling back
 to the brief when the title has no unique match. A send must name the exact
-recipient and include the requested color and button. Refused calls fail the
-score.
+recipient and include the requested color and button. Both “primary button” and
+“primary action button” identify the target. Refused calls fail the score.
 A direct answer needs text and no decision tool calls. List and help calls are allowed
 in all cases. The score measures delegation decisions. Pass rates count
 completed samples, and the delta is candidate minus baseline. Read errors and

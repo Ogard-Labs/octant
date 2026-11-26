@@ -10,10 +10,10 @@ import { cases, compareSamples, score, summarize } from "./coordinatorEvaluation
 
 it("detects unnecessary starts, missing assignments, duplicate assignments and misdirected sends", () => {
   const start = (prompt: string) => ({ operation: "start", title: prompt, prompt });
-  const send = (recipients: string[]) => ({
+  const send = (recipients: string[], message = "Use dark blue for the primary button") => ({
     operation: "send",
     recipients,
-    message: "Use dark blue for the primary button",
+    message,
   });
   expect(score(cases.status, [start("status")], "One worker is working.")).toBe(false);
   expect(score(cases.status, [{ operation: "help" }], "One worker is working.")).toBe(true);
@@ -34,18 +34,11 @@ it("detects unnecessary starts, missing assignments, duplicate assignments and m
       "",
     ),
   ).toBe(true);
+  const palette = [cases.revise.workers[0].reference];
   expect(
-    score(
-      cases.revise,
-      [
-        {
-          ...send([cases.revise.workers[0].reference]),
-          message: "Use dark blue for the background.",
-        },
-      ],
-      "",
-    ),
-  ).toBe(false);
+    score(cases.revise, [send(palette, "Use dark blue for the primary action button.")], ""),
+  ).toBe(true);
+  expect(score(cases.revise, [send(palette, "Use dark blue for the background.")], "")).toBe(false);
 });
 
 it("passes changed orchestration instructions, production roster and offered tool schema to the model", async () => {
@@ -122,12 +115,13 @@ it("refuses delegation arguments containing fields from other operations", () =>
   ).toEqual({ operation: "invalid arguments" });
 });
 
-it("loads the worker-start contract separately from each supplied checkout", () => {
+it("loads each checkout’s hoisted worker-start contract from its server workspace", () => {
   const directory = mkdtempSync(join(tmpdir(), "coordinator-contracts-"));
   try {
     const checkouts = ["baseline", "candidate"].map((revision) => {
       const checkout = join(directory, revision);
-      const contracts = join(checkout, "apps/server/node_modules/@octant/contracts");
+      mkdirSync(join(checkout, "apps/server"), { recursive: true });
+      const contracts = join(checkout, "node_modules/@octant/contracts");
       mkdirSync(contracts, { recursive: true });
       writeFileSync(
         join(contracts, "package.json"),

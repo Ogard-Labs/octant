@@ -61,13 +61,15 @@ export function score(
   if (decisions.some(({ operation }) => operation !== action)) return false;
   if (action === "send") {
     const recipients = decisions.flatMap(({ recipients }) => recipients ?? []);
+    const message =
+      decisions[0]?.message
+        ?.toLowerCase()
+        .replace(/\bprimary[\s-]+action[\s-]+button\b/g, "primary button") ?? "";
     return (
       decisions.length === 1 &&
       recipients.length === workerCount &&
       targets.every((target) => recipients.includes(target)) &&
-      (messageIncludes ?? []).every((phrase) =>
-        decisions[0]?.message?.toLowerCase().includes(phrase),
-      )
+      (messageIncludes ?? []).every((phrase) => message.includes(phrase))
     );
   }
   if (decisions.length !== workerCount) return false;
