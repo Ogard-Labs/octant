@@ -12,6 +12,8 @@ const phone = vi.hoisted(() => {
     /** Reads the key store refuses next, as it may while the phone is locked. */
     secureFailures: 0,
     files: new Map<string, string>(),
+    /** How many times the app has written a file. */
+    writes: 0,
     session: undefined as unknown,
     inbox: {
       rows: [] as ReadonlyArray<unknown>,
@@ -43,7 +45,10 @@ vi.mock("../hosts/expoSecureStorage", () => ({
 vi.mock("../outbox/sealedFile", () => ({
   sealedFile: (name: string) => ({
     read: () => phone.files.get(name) ?? null,
-    write: (sealed: string) => void phone.files.set(name, sealed),
+    write: (sealed: string) => {
+      phone.writes += 1;
+      phone.files.set(name, sealed);
+    },
     remove: () => void phone.files.delete(name),
   }),
 }));
@@ -187,21 +192,18 @@ describe("the thread list after a restart", () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };
     const first = await launch();
-    // The launch's own write of the list settles first, so the wait below
-    // ends on the write the standing makes, not on that one.
-    const kept = () => [...phone.files.values()].join("");
-    for (let still = 0, last = kept(), turn = 0; still < 10 && turn < 400; turn += 1) {
-      await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 5)));
-      still = kept() === last ? still + 1 : 0;
-      last = kept();
-    }
-    const before = kept();
+    const writesBefore = phone.writes;
     await act(async () => first.threads().noteStanding(studio, { actsAsHostPerson: true }));
-    // The list is sealed and written after the standing lands; on a busy
-    // machine that takes more than one turn, so wait for the write itself.
-    for (let turn = 0; turn < 200 && kept() === before; turn += 1)
+    // A write still pending from the launch may land first; whichever order
+    // they land in, the standing's write comes after it, so the list is kept
+    // once a write has landed since and none follows for a while.
+    for (let idle = 0, seen = phone.writes, turn = 0; turn < 800; turn += 1) {
       await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 5)));
-    expect(kept()).not.toBe(before);
+      idle = phone.writes === seen ? idle + 1 : 0;
+      seen = phone.writes;
+      if (seen > writesBefore && idle >= 60) break;
+    }
+    expect(phone.writes).toBeGreaterThan(writesBefore);
     first.quit();
 
     phone.inbox = { rows: [], reachable: false, offline: [] };
