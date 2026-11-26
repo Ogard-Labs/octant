@@ -18,6 +18,7 @@ import { canvasDigest } from "./canvasDigest";
 import { useCanvasDefinition } from "./useCanvasDefinition";
 import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 import { useCanvasNetworkAccess } from "./useCanvasNetworkAccess";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 const SHOWN_AS_CARD_KEY = "octant.canvas.shown-as-card.v1";
 const EXPANDED_KEY = "octant.canvas.expanded.v1";
@@ -286,7 +287,7 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
       </header>
       {view === "card" ? null : loaded.kind === "loading" ? (
         <p className="thread-canvas__status" role="status">
-          <span aria-hidden="true" className="spinner spinner-sm" />
+          <OctantSpinner size={14} />
           Loading Canvas
         </p>
       ) : loaded.kind === "unavailable" ? (

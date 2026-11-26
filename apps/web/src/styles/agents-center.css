@@ -128,26 +128,6 @@
   white-space: nowrap;
 }
 
-.agents-center-row__dot {
-  flex: none;
-  width: var(--oct-space-2);
-  height: var(--oct-space-2);
-  border-radius: 50%;
-  background: color-mix(in oklab, var(--oct-fg) 22%, transparent);
-}
-
-.agents-center-row__dot[data-tone="active"] {
-  background: color-mix(in oklab, var(--oct-fg) 45%, transparent);
-}
-
-.agents-center-row__dot[data-tone="success"] {
-  background: var(--oct-success);
-}
-
-.agents-center-row__dot[data-tone="failure"] {
-  background: var(--oct-danger);
-}
-
 .agents-center-row__figure {
   color: var(--oct-fg);
   font-size: var(--oct-text-detail);

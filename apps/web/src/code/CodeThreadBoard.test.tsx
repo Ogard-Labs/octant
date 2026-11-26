@@ -680,7 +680,7 @@ describe("CodeThreadBoard", () => {
       "data-executing",
       "true",
     );
-    expect(inProgress.querySelector(".board-status-mark__spin")).not.toBeNull();
+    expect(inProgress.querySelector(".board-status-mark svg.octant-spinner")).not.toBeNull();
     const ready = screen.getByRole("region", { name: "Ready (0)" });
     expect(ready.querySelector(".board-status-mark__dot")).toHaveAttribute("data-fill", "hollow");
     const waiting = screen.getByRole("region", { name: "Waiting (0)" });
@@ -696,7 +696,7 @@ describe("CodeThreadBoard", () => {
     );
     render(<CodeThreadBoard loadBoard={idle} projects={projects} storage={memoryStorage()} />);
     const idleColumn = await screen.findByRole("region", { name: "In progress (1)" });
-    expect(idleColumn.querySelector(".board-status-mark__spin")).toBeNull();
+    expect(idleColumn.querySelector(".board-status-mark svg.octant-spinner")).toBeNull();
     expect(idleColumn.querySelector(".board-status-mark__dot")).toHaveAttribute(
       "data-fill",
       "solid",

@@ -150,13 +150,6 @@
   font-weight: var(--oct-weight-medium);
 }
 
-.canvas-design__running-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-success);
-}
-
 .canvas-design__notice {
   margin: 0;
   color: var(--oct-muted);

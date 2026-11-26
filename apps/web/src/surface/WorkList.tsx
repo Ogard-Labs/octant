@@ -18,6 +18,7 @@ import {
   OctantMenuSeparator,
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
+import { OctantStatusDot } from "../ui/base/OctantStatusDot";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 
 /**
@@ -177,7 +178,7 @@ export function WorkListMenuTrigger(props: {
       >
         {props.children}
         {props.active === true ? (
-          <span aria-hidden="true" className="work-list__active-dot" />
+          <OctantStatusDot className="work-list__active-dot" small tone="accent" />
         ) : null}
       </OctantMenuTrigger>
     </OctantTooltip>

@@ -10,6 +10,7 @@ import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import { OctantKbd } from "../ui/base/OctantKbd";
 import { OctantInput } from "../ui/base/OctantInput";
 import { keybindingActionForCommand } from "./commandKeybinding";
 import { useNeedsYou, useOctantCommands } from "./CommandRegistry";
@@ -254,7 +255,7 @@ export function CommandPalette() {
                         <span className="command-palette__result-detail">{command.detail}</span>
                       )}
                       {shortcut === undefined ? null : (
-                        <kbd className="command-palette__shortcut">{shortcut}</kbd>
+                        <OctantKbd className="command-palette__shortcut">{shortcut}</OctantKbd>
                       )}
                       {index === active ? (
                         <span className="command-palette__result-hint">
@@ -273,7 +274,7 @@ export function CommandPalette() {
               Host-offered commands. Every action still runs its normal authority check.
             </p>
             <span aria-hidden="true" className="command-palette__close-hint">
-              <kbd>Esc</kbd>
+              <OctantKbd>Esc</OctantKbd>
               <span>Close</span>
             </span>
           </footer>

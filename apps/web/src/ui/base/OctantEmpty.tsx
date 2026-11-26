@@ -17,6 +17,7 @@ import {
   EmptyTitle,
 } from "../shadcn/empty";
 import { OctantButton } from "./OctantButton";
+import { OctantSpinner } from "./OctantSpinner";
 
 export {
   Empty as OctantEmptyRoot,
@@ -144,11 +145,7 @@ function StateEmpty(props: OctantEmptyStateProps) {
           triangle on a screen whose glyph and title already say what is wrong
           reads as an alarm it is not. */}
       <EmptyMedia>
-        <StateIcon
-          aria-hidden="true"
-          className={props.state === "loading" ? "shell-state__spinner" : undefined}
-          size={16}
-        />
+        {props.state === "loading" ? <OctantSpinner /> : <StateIcon aria-hidden="true" size={16} />}
       </EmptyMedia>
       <EmptyHeader>
         {props.eyebrow === undefined ? null : <EmptyEyebrow>{props.eyebrow}</EmptyEyebrow>}

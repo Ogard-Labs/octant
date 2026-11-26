@@ -1,7 +1,8 @@
 import "../styles/thread-plan.css";
-import { Check, ChevronDown, Circle, CircleX, Clock3, LoaderCircle } from "../ui/icons";
+import { Check, ChevronDown, Circle, CircleX, Clock3 } from "../ui/icons";
 import { useId, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 /** One task in an agent's restated work plan, with the provider's own wording. */
 export interface ThreadTaskRow {
@@ -35,7 +36,7 @@ export interface ThreadTasksPanelProps {
 function taskIcon(state: ThreadTaskRow["state"]): ReactNode {
   switch (state) {
     case "running":
-      return <LoaderCircle aria-hidden="true" size={12} />;
+      return <OctantSpinner size={12} />;
     case "waiting":
       return <Clock3 aria-hidden="true" size={12} />;
     case "completed":

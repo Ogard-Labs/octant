@@ -93,9 +93,8 @@ describe("the shell's edges and gaps", () => {
   it("stands a dock card's title and every row's name on one edge", () => {
     expect(rule(dock, ".dock-card__head")).toMatch(/border:\s*0;/);
     // 4 + 6 + 4 is the 14px an icon takes, so icon and dot rows share a column.
-    const dot = rule(dock, ".dock-card__dot");
-    expect(dot).toMatch(/width:\s*6px/);
-    expect(dot).toMatch(/margin-inline:\s*var\(--oct-space-1\)/);
+    expect(rule(octant, '.octant-status-dot[data-size="sm"]')).toMatch(/width:\s*6px/);
+    expect(rule(dock, ".dock-card__dot")).toMatch(/margin-inline:\s*var\(--oct-space-1\)/);
   });
 
   it("draws a Settings card's edge inside its box so its rows keep an exact 16px inset", () => {

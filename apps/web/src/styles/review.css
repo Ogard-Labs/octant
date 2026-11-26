@@ -32,17 +32,6 @@
   white-space: nowrap;
 }
 
-.review-page kbd {
-  display: inline-block;
-  padding: 0 var(--oct-space-1);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  line-height: var(--oct-leading-snug);
-}
-
 .review-page__body {
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr);

@@ -57,6 +57,7 @@ import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import { OctantKbd } from "../ui/base/OctantKbd";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
@@ -1002,9 +1003,9 @@ function SettingsSearchField(props: {
         value={props.value}
       />
       {props.value === "" ? (
-        <kbd aria-hidden="true" className="settings-view__search-shortcut">
+        <OctantKbd className="settings-view__search-shortcut" decorative>
           {isApplePlatform() ? "⌘F" : "Ctrl+F"}
-        </kbd>
+        </OctantKbd>
       ) : (
         <OctantIconButton
           className="settings-view__search-clear"
