@@ -13,7 +13,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
-  AUTOMATION_RUN_LEVEL_OPTIONS as RUN_LEVEL_OPTIONS,
+  automationRunLevelOptionsFor,
   automationAuthoritySummary,
   automationModeLabel,
   buildAutomationDraft,
@@ -254,6 +254,11 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
     setAuthorityProfileId("");
   }
 
+  const runLevelOptions = automationRunLevelOptionsFor(trigger);
+  const runLevelShown = runLevelOptions.some((option) => option.id === runLevel)
+    ? runLevel
+    : "ask-first";
+
   async function submit() {
     setServerMessage(undefined);
     const result = buildAutomationDraft({
@@ -268,7 +273,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       missedRunPolicy,
       deliveryTargetSummary: targetSummary,
       deliveryTargetConfirmed: targetConfirmed,
-      runLevel,
+      runLevel: runLevelShown,
       mergesItsPullRequests,
       ...(initial === undefined
         ? {}
@@ -519,8 +524,8 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
             className="select"
             id={ids.runLevel}
             onValueChange={(value) => setRunLevel(value as AutomationRunLevelChoice)}
-            options={RUN_LEVEL_OPTIONS}
-            value={runLevel}
+            options={runLevelOptions}
+            value={runLevelShown}
           />
           <p className="automation-editor__note" id={ids.runLevelNote}>
             A run never uses a higher mode than the Project&apos;s new threads start in. Full access

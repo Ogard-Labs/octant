@@ -16,6 +16,7 @@ import {
   UtcTimestamp,
   WEBHOOK_DEDUPE_RETENTION_MS,
   WEBHOOK_HOLD_MS,
+  WEBHOOK_TIMESTAMP_WINDOW_MS,
   WebhookEndpointId,
   hubSealingKeyPayload,
   type AutomationIntegrationEvent,
@@ -68,6 +69,8 @@ export interface SpokeWebhookServiceOptions {
   readonly state: HubStatePort;
   /** Whether this spoke's person ticked Public in the hub grant. Read on every request. */
   readonly publicGranted: () => boolean;
+  /** Whether this host's person paused remote access; a paused spoke takes no delivery. */
+  readonly remoteAccessPaused: () => boolean;
   /** Absent in a test that has no hub; then nothing is published. */
   readonly hub: SpokeWebhookHubPort | undefined;
   readonly record: (change: HubMembershipChangedPayload) => void;
@@ -122,6 +125,10 @@ export class SpokeWebhookService {
   readonly #options: SpokeWebhookServiceOptions;
   /** Whether Public was ticked at the last list the hub took; unticking it withdraws every endpoint. */
   #publishedGranted: boolean | undefined;
+  /** One publication at a time, so an older list can never reach the hub after a newer one. */
+  #publishing: Promise<boolean> = Promise.resolve(true);
+  /** Counts endpoint changes; a send clears `unpublished` only if none came while it was out. */
+  #revision = 0;
 
   constructor(options: SpokeWebhookServiceOptions) {
     this.#options = options;
@@ -149,6 +156,7 @@ export class SpokeWebhookService {
   async create(input: {
     readonly scheme: WebhookSignatureScheme;
     readonly label: string;
+    readonly formerIds?: ReadonlyArray<WebhookEndpointId>;
   }): Promise<SpokeWebhookCreated> {
     if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
     const held = this.#load();
@@ -159,7 +167,11 @@ export class SpokeWebhookService {
       secret: mintWebhookSecret(),
       label: input.label.trim().slice(0, 128) || "Webhook",
       createdAt: this.#options.now(),
+      ...(input.formerIds === undefined || input.formerIds.length === 0
+        ? {}
+        : { formerIds: input.formerIds.slice(-8) }),
     };
+    this.#revision += 1;
     this.#save({ ...held, endpoints: [...held.endpoints, endpoint], unpublished: true });
     this.#options.record({ change: "webhook-endpoint-created", actingPrincipal: LOCAL_WINDOW });
     const published = await this.publish();
@@ -174,8 +186,8 @@ export class SpokeWebhookService {
 
   /**
    * A new URL and secret with the same scheme and label; the old pair stops at
-   * once. The new endpoint has a new id, so a routine that named the old one
-   * shows its source unavailable until it is pointed at the new one.
+   * once. The new endpoint remembers the ids it replaced, so a routine that
+   * named the old one reads the new one without being edited or re-armed.
    */
   async rotate(endpointId: string): Promise<SpokeWebhookCreated> {
     const held = this.#load();
@@ -184,7 +196,11 @@ export class SpokeWebhookService {
     // Checked before the old one goes, so a refused rotate leaves it working.
     if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
     this.#drop(endpointId);
-    return this.create({ scheme: old.scheme, label: old.label });
+    return this.create({
+      scheme: old.scheme,
+      label: old.label,
+      formerIds: [...(old.formerIds ?? []), old.endpointId],
+    });
   }
 
   async remove(
@@ -203,10 +219,20 @@ export class SpokeWebhookService {
    * The key is taken only when its signer is the hub the roster lists. An empty
    * list withdraws everything; without Public, that is what is sent.
    */
-  async publish(): Promise<boolean> {
+  publish(): Promise<boolean> {
+    const next = this.#publishing.then(
+      () => this.#publishNow(),
+      () => this.#publishNow(),
+    );
+    this.#publishing = next.catch(() => false);
+    return next;
+  }
+
+  async #publishNow(): Promise<boolean> {
     const hub = this.#options.hub;
     const target = hub?.target();
     if (hub === undefined || target === undefined) return false;
+    const revision = this.#revision;
     const held = this.#load();
     const endpoints = this.#options.publicGranted() ? held.endpoints : [];
     let update: HubWebhookEndpointsUpdate = { endpoints: [] };
@@ -244,7 +270,9 @@ export class SpokeWebhookService {
     }
     const granted = this.#options.publicGranted();
     const sent = await hub.sendEndpoints(update);
-    if (sent) {
+    // An endpoint made or removed while this list was out is not in it; the
+    // flag stays, and the next look sends the newer list.
+    if (sent && revision === this.#revision) {
       this.#publishedGranted = granted;
       const { unpublished: _unpublished, ...rest } = this.#load();
       this.#save(rest);
@@ -262,6 +290,9 @@ export class SpokeWebhookService {
   /** A delivery the hub, or a standing-in standby, forwarded. */
   receive(envelope: WebhookDeliveryEnvelope): WebhookDeliveryAnswer {
     if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
+    // Pause refuses this spoke's deliveries; the hub keeps them for the hold,
+    // so a resume within a day still runs what arrived.
+    if (this.#options.remoteAccessPaused()) return { status: "refused", kind: "paused" };
     const now = this.#options.now();
     const held = this.#prune(this.#load(), now);
     const endpointId = String(envelope.endpointId);
@@ -300,8 +331,10 @@ export class SpokeWebhookService {
     );
     // The hub may hold a delivery up to a day, so its timestamp is judged at the
     // time the hub received it, and that time must itself be inside the hold.
+    // The hub's clock may lead this one by as much as a signature may.
     const decision =
-      envelope.receivedAt > now || now - envelope.receivedAt > WEBHOOK_HOLD_MS
+      envelope.receivedAt > now + WEBHOOK_TIMESTAMP_WINDOW_MS ||
+      now - envelope.receivedAt > WEBHOOK_HOLD_MS
         ? ({ status: "refused", kind: "stale-timestamp" } as const)
         : decideWebhookDelivery({
             endpointEnabled: true,
@@ -382,13 +415,17 @@ export class SpokeWebhookService {
         )
           return undefined;
         const endpointId = selection.filters[AUTOMATION_WEBHOOK_ENDPOINT_FILTER];
-        const endpoint = this.#load().endpoints.find(
-          (entry) => String(entry.endpointId) === endpointId,
-        );
-        if (endpoint === undefined || endpointId === undefined) return undefined;
-        const exists = () =>
-          this.#options.publicGranted() &&
-          this.#load().endpoints.some((entry) => String(entry.endpointId) === endpointId);
+        if (endpointId === undefined) return undefined;
+        // A rotated endpoint answers for the ids it replaced.
+        const current = () =>
+          this.#load().endpoints.find(
+            (entry) =>
+              String(entry.endpointId) === endpointId ||
+              (entry.formerIds ?? []).some((former) => String(former) === endpointId),
+          );
+        const endpoint = current();
+        if (endpoint === undefined) return undefined;
+        const exists = () => this.#options.publicGranted() && current() !== undefined;
         return {
           identity: createHash("sha256").update(`octant-webhook|${endpointId}`).digest("hex"),
           label: `Webhook: ${endpoint.label}`,
@@ -396,21 +433,27 @@ export class SpokeWebhookService {
           heldWhileAway: true,
           current: exists,
           read: async () => {
-            if (!exists()) return { kind: "unavailable", reason: "source-unavailable" };
+            const live = current();
+            if (live === undefined || !this.#options.publicGranted()) {
+              return { kind: "unavailable", reason: "source-unavailable" };
+            }
             const held = this.#load();
             const shown = held.deliveries
-              .filter((delivery) => String(delivery.endpointId) === endpointId)
+              .filter((delivery) => String(delivery.endpointId) === String(live.endpointId))
               .slice(-EVENTS_PER_READ);
-            // What a read has shown the routine no longer holds the hub back.
-            const readAt = this.#options.now();
-            this.#save({
-              ...held,
-              deliveries: held.deliveries.map((delivery) =>
-                delivery.readAt === undefined && shown.includes(delivery)
-                  ? { ...delivery, readAt }
-                  : delivery,
-              ),
-            });
+            // A routine starts at most one run a look and holds at most 32
+            // waiting events, so each read frees one slot, the oldest: a burst
+            // waits on the hub instead of overflowing a busy routine.
+            const freed = shown.find((delivery) => delivery.readAt === undefined);
+            if (freed !== undefined) {
+              const readAt = this.#options.now();
+              this.#save({
+                ...held,
+                deliveries: held.deliveries.map((delivery) =>
+                  delivery === freed ? { ...delivery, readAt } : delivery,
+                ),
+              });
+            }
             return { kind: "complete", events: shown.map(eventOf) };
           },
         };
@@ -422,6 +465,7 @@ export class SpokeWebhookService {
     const held = this.#load();
     const kept = held.endpoints.filter((endpoint) => String(endpoint.endpointId) !== endpointId);
     if (kept.length === held.endpoints.length) return false;
+    this.#revision += 1;
     this.#save({
       ...held,
       endpoints: kept,
@@ -465,9 +509,21 @@ function keepUnread(
   });
 }
 
+/**
+ * A routine's event id for a delivery. A delivery id is up to 256 characters,
+ * so a long one is hashed whole rather than cut, which would make two deliveries
+ * that share a prefix one event.
+ */
+function eventIdOf(delivery: SpokeWebhookDelivery): string {
+  const plain = `${String(delivery.endpointId)}:${delivery.deliveryId}`;
+  if (plain.length <= 256) return plain;
+  const digest = createHash("sha256").update(delivery.deliveryId).digest("base64url");
+  return `${String(delivery.endpointId)}:sha256:${digest}`;
+}
+
 function eventOf(delivery: SpokeWebhookDelivery): AutomationIntegrationEvent {
   return {
-    id: `${String(delivery.endpointId)}:${delivery.deliveryId}`.slice(0, 256),
+    id: eventIdOf(delivery),
     label: delivery.event === undefined ? "Webhook delivery" : `GitHub ${delivery.event} delivery`,
     occurredAt: decodeTimestamp(new Date(delivery.receivedAt).toISOString()),
     data: delivery.data,

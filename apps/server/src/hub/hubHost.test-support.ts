@@ -736,6 +736,7 @@ export async function startHubTestHost(input: {
   const spokeWebhooks = new SpokeWebhookService({
     state,
     publicGranted: () => spoke.hubMayUse("public").status === "allowed",
+    remoteAccessPaused: () => false,
     hub: spokeWebhookHubPort(webhookLinks),
     record: (change) => records.push(change),
     now: wakeNow,

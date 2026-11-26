@@ -3065,9 +3065,10 @@ Built for a hub and its spokes (slice 24); the standby's part is slice 26.
   Review/Re-arm as any event routine. The spoke mints the endpoint (Standard
   Webhooks or GitHub signing) and its secret, shows the secret once, and keeps
   a log of recent deliveries; rotating gives a new URL and secret and ends the
-  old pair at once. The new endpoint has a new id, so a routine that named
-  the old one shows its source unavailable until it is pointed at the new
-  one; a rotate refused for want of Public leaves the old pair working.
+  old pair at once. The new endpoint remembers the ids it replaced, so a
+  routine that named the old one reads the new one without an edit or a
+  re-arm; a rotate refused for want of Public leaves the old pair working.
+  An endpoint id never begins with `-`, so the CLI never reads one as a flag.
   `octant hub webhook create|list|rotate|remove` and the
   loopback administration routes do this; a window screen for it is not built.
 - **Sealed to the hub.** The hub keeps a P-256 sealing key in its state file
@@ -3075,20 +3076,30 @@ Built for a hub and its spokes (slice 24); the standby's part is slice 26.
   when the signer's fingerprint is the roster's key for the hub, so no roster
   field is added and the identity key is never used for key agreement. The
   spoke then hands the hub every endpoint with its secret sealed to that key,
-  only while its person ticks Public; unticking it withdraws them all.
+  only while its person ticks Public; unticking it withdraws them all. Only
+  a spoke or a standby may hand the hub endpoints, never a guest, and an
+  endpoint id another member already holds stays that member's. A spoke
+  sends one list at a time, and a list that was out while an endpoint
+  changed does not count as the newer one sent.
 - **Verify, queue, forward.** The acting hub checks each delivery's
   signature and timestamp on the raw bytes before it queues anything, and
   answers a forged one 401, a stale one 400, a repeat of one it still holds
   200, an oversized one 413, the sixty-first in a minute 429, and a full queue 503. It holds a delivery in its state file at most 24 hours, then drops it
   and counts it as expired, and journals counts, never a payload. It hands the
   original bytes and headers to the spoke, which checks them again with its
-  own secret, judging the timestamp at the time the hub received it, and
+  own secret, judging the timestamp at the time the hub received it (which
+  may lead the spoke's clock by up to five minutes), and
   accepts a delivery only if none of its dedupe keys (the delivery id, and for
   GitHub also the body's digest, kept seven days) is already claimed. Claims
-  are never evicted to make room: a spoke whose routine has not read 16 of an
-  endpoint's deliveries yet, or whose claims are full, answers busy and the
-  hub keeps the delivery for a later look within the hold. The hub drops the
-  endpoints and queue of a spoke its roster no longer lists.
+  are never evicted to make room: a spoke holding 16 of an endpoint's
+  deliveries its routine has not taken, or whose claims are full, answers
+  busy and the hub keeps that endpoint's deliveries for a later look within
+  the hold, while other endpoints on the spoke go on. A routine starts at
+  most one run a look, so each look frees one of those 16 places, and a
+  burst waits on the hub rather than overflow a busy routine. A spoke whose
+  person paused remote access answers paused, and the hub keeps its
+  deliveries for the hold without waking it. The hub drops the endpoints and
+  queue of a spoke its roster no longer lists.
 - **GitHub deliveries carry no signed timestamp.** GitHub signs only the body,
   and its delivery id is not covered by the signature, so the timestamp window
   applies to Standard Webhooks alone. A GitHub delivery is claimed under both

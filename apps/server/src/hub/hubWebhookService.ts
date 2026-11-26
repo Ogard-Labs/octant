@@ -119,11 +119,17 @@ export class HubWebhookService {
     const state = this.#options.state.load();
     const hub = state.webhookHub;
     if (hub === undefined) return { status: "recorded", count: 0 };
-    const own = update.endpoints.filter(
-      (endpoint) => String(endpoint.spokeMemberId) === spokeMemberId,
-    );
     const kept = hub.endpoints.filter(
       (endpoint) => String(endpoint.spokeMemberId) !== spokeMemberId,
+    );
+    // An id another member already holds stays that member's: the public
+    // lookup takes the first match, so a second holder could have genuine
+    // deliveries checked against its own secret.
+    const othersHold = new Set(kept.map((endpoint) => String(endpoint.endpointId)));
+    const own = update.endpoints.filter(
+      (endpoint) =>
+        String(endpoint.spokeMemberId) === spokeMemberId &&
+        !othersHold.has(String(endpoint.endpointId)),
     );
     const live = new Set([...kept, ...own].map((endpoint) => String(endpoint.endpointId)));
     this.#options.state.save({
@@ -269,19 +275,28 @@ export class HubWebhookService {
     this.#expire();
     const queue = this.#options.state.load().webhookHub?.queue ?? [];
     const unreachable = new Set<string>();
+    const paused = new Set<string>();
+    // A spoke counts room per endpoint, so one full endpoint holds back only
+    // its own deliveries, not another routine's on the same spoke.
     const busy = new Set<string>();
     for (const queued of queue) {
       const spoke = String(queued.spokeMemberId);
-      if (unreachable.has(spoke) || busy.has(spoke)) continue;
+      const endpoint = `${spoke}|${String(queued.envelope.endpointId)}`;
+      if (unreachable.has(spoke) || paused.has(spoke) || busy.has(endpoint)) continue;
       const result = await this.#options.send(spoke, queued.envelope);
       if (result === undefined) {
         unreachable.add(spoke);
         continue;
       }
       if (result.status === "refused" && result.kind === "busy") {
-        // The spoke is awake but its routine has not caught up; no wake, and
-        // the rest of its queue waits for the next look.
-        busy.add(spoke);
+        // The spoke is awake but this routine has not caught up; no wake, and
+        // the rest of this endpoint's queue waits for the next look.
+        busy.add(endpoint);
+        continue;
+      }
+      if (result.status === "refused" && result.kind === "paused") {
+        // The spoke's person paused remote access: held for the day, no wake.
+        paused.add(spoke);
         continue;
       }
       this.#remove(queued);

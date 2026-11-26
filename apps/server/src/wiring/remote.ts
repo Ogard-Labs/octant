@@ -1346,6 +1346,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const spokeWebhooks = new SpokeWebhookService({
     state: hubStateStore,
     publicGranted: () => spokeLinkService.hubMayUse("public").status === "allowed",
+    remoteAccessPaused: () => readRemoteAccessPaused(persistence.connection),
     hub: spokeWebhookHubPort({
       state: hubStateStore,
       identity: resolveHubIdentity,

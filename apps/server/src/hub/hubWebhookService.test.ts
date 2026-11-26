@@ -36,7 +36,9 @@ function hubIdentity() {
 
 function setup(
   options: {
-    readonly forward?: "unreachable" | "accepted" | "busy";
+    readonly forward?: "unreachable" | "accepted" | "busy" | "paused";
+    /** The endpoints whose spoke answers busy, when the rest are accepted. */
+    readonly busyEndpoints?: ReadonlySet<string>;
     readonly members?: () => ReadonlyArray<string> | undefined;
   } = {},
 ) {
@@ -52,6 +54,10 @@ function setup(
     send: async (_spoke, envelope) => {
       if (options.forward === "unreachable") return undefined;
       if (options.forward === "busy") return { status: "refused", kind: "busy" };
+      if (options.forward === "paused") return { status: "refused", kind: "paused" };
+      if (options.busyEndpoints?.has(String(envelope.endpointId)) === true) {
+        return { status: "refused", kind: "busy" };
+      }
       forwarded.push(envelope.deliveryId);
       return { status: "accepted" };
     },
@@ -79,7 +85,27 @@ function setup(
       },
     ],
   });
-  return { service, secret, clock, forwarded, woken };
+  /** Hands the hub one member's whole list: these endpoints, each with its secret. */
+  const handEndpoints = (
+    owner: HubMemberId,
+    list: ReadonlyArray<readonly [WebhookEndpointId, string]>,
+  ) =>
+    service.receiveEndpoints(owner, {
+      endpoints: list.map(([endpointId, endpointSecret]) => ({
+        endpointId,
+        spokeMemberId: owner,
+        scheme: "standard-webhooks" as const,
+        sealedSecrets: [
+          sealWebhookSecret({
+            secret: endpointSecret,
+            endpointId,
+            recipientMemberId: HUB as HubMemberId,
+            recipientPublicKey: key.sealingPublicKey,
+          }),
+        ],
+      })),
+    });
+  return { service, secret, clock, forwarded, woken, handEndpoints };
 }
 
 function delivery(input: {
@@ -224,5 +250,47 @@ describe("webhook receipt on the hub", () => {
     clock.now += 24 * 60 * 60_000 + 1;
     await service.tick();
     expect(service.status()).toMatchObject({ queued: 0, expired: 1 });
+  });
+
+  it("a full endpoint holds back only its own deliveries, not another routine's on the same spoke", async () => {
+    const OTHER = "CCCCCCCCCCCCCCCCCCCCCC" as WebhookEndpointId;
+    const { service, secret, forwarded, handEndpoints } = setup({
+      busyEndpoints: new Set([ENDPOINT]),
+    });
+    const other = { secret: mintWebhookSecret() };
+    expect(
+      handEndpoints(SPOKE, [
+        [ENDPOINT, secret],
+        [OTHER, other.secret],
+      ]).count,
+    ).toBe(2);
+    await service.handle(delivery({ secret, id: "msg_full", timestampMs: NOW }));
+    expect(
+      (
+        await service.handle(
+          delivery({ secret: other.secret, id: "msg_other", timestampMs: NOW, endpointId: OTHER }),
+        )
+      ).status,
+    ).toBe(202);
+    await service.tick();
+    expect(forwarded).toEqual(["msg_other"]);
+    expect(service.status().queued).toBe(1);
+  });
+
+  it("keeps a delivery for a paused spoke through the hold, and sends no wake", async () => {
+    const { service, secret, woken } = setup({ forward: "paused" });
+    await service.handle(delivery({ secret, id: "msg_1", timestampMs: NOW }));
+    await service.tick();
+    expect(service.status().queued).toBe(1);
+    expect(woken).toEqual([]);
+  });
+
+  it("refuses an endpoint id another member already holds", async () => {
+    const OTHER_SPOKE = "33333333-3333-4333-8333-333333333333" as HubMemberId;
+    const { service, secret, handEndpoints } = setup({ forward: "accepted" });
+    expect(handEndpoints(OTHER_SPOKE, [[ENDPOINT, mintWebhookSecret()]]).count).toBe(0);
+    expect((await service.handle(delivery({ secret, id: "msg_1", timestampMs: NOW }))).status).toBe(
+      202,
+    );
   });
 });

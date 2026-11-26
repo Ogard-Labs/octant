@@ -1,26 +1,70 @@
-import { createHmac } from "node:crypto";
-import type { WebhookDeliveryEnvelope, WebhookEndpointId } from "@octant/contracts";
+import { createHmac, generateKeyPairSync, sign } from "node:crypto";
+import {
+  hubSealingKeyPayload,
+  type HubMemberId,
+  type HubSealingKey,
+  type WebhookDeliveryEnvelope,
+  type WebhookEndpointId,
+} from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
-import { SpokeWebhookService } from "./spokeWebhookService";
+import { SpokeWebhookService, type SpokeWebhookHubPort } from "./spokeWebhookService";
+import { publicKeyFingerprint } from "./hubCrypto";
+import { makeSealingKeyPair } from "./publicEntranceCrypto";
 
 const NOW = 1_800_000_000_000;
+const SPOKE = "11111111-1111-4111-8111-111111111111";
+const HUB_ID = "22222222-2222-4222-8222-222222222222";
+
+/** A hub identity key that signs its sealing key, as the roster's hub would. */
+const SIGNER = (() => {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const spki = publicKey.export({ format: "der", type: "spki" }).toString("base64url");
+  return {
+    publicKey: spki,
+    sealingKey: (sealingPublicKey: string): HubSealingKey => ({
+      memberId: HUB_ID as HubMemberId,
+      sealingPublicKey,
+      signerPublicKey: spki,
+      signature: sign("sha256", Buffer.from(hubSealingKeyPayload(HUB_ID, sealingPublicKey)), {
+        key: privateKey,
+        dsaEncoding: "ieee-p1363",
+      }).toString("base64url"),
+    }),
+  };
+})();
 
 function memoryState(): HubStatePort {
   let state: HubState = {};
   return { load: () => state, save: (next) => void (state = next) };
 }
 
-function setup(granted = true) {
+function setup(
+  granted = true,
+  options: { readonly paused?: () => boolean; readonly hub?: SpokeWebhookHubPort } = {},
+) {
   const clock = { now: NOW };
+  const state = memoryState();
+  if (options.hub !== undefined) {
+    state.save({ link: { selfMemberId: SPOKE } as unknown as HubState["link"] });
+  }
+  let saves = 0;
+  const counted: HubStatePort = {
+    load: state.load,
+    save: (next) => {
+      saves += 1;
+      state.save(next);
+    },
+  };
   const service = new SpokeWebhookService({
-    state: memoryState(),
+    state: counted,
     publicGranted: () => granted,
-    hub: undefined,
+    remoteAccessPaused: options.paused ?? (() => false),
+    hub: options.hub,
     record: () => undefined,
     now: () => clock.now,
   });
-  return { service, clock };
+  return { service, clock, saves: () => saves };
 }
 
 function githubEnvelope(input: {
@@ -197,5 +241,145 @@ describe("webhook deliveries on the spoke", () => {
         }),
       ),
     ).toEqual({ status: "refused", kind: "unknown-endpoint" });
+  });
+
+  it("takes no delivery while its person has paused remote access, so the hub keeps it", async () => {
+    let paused = false;
+    const { service } = setup(true, { paused: () => paused });
+    const created = await service.create({ scheme: "github", label: "Pushes" });
+    if (created.status !== "created") throw new Error(created.status);
+    paused = true;
+    const envelope = githubEnvelope({
+      endpointId: created.endpointId,
+      secret: created.secret,
+      guid: "g",
+      body: "{}",
+      receivedAt: NOW,
+    });
+    expect(service.receive(envelope)).toEqual({ status: "refused", kind: "paused" });
+    paused = false;
+    expect(service.receive(envelope)).toEqual({ status: "accepted" });
+  });
+
+  it("takes a delivery the hub stamped a little ahead of this spoke's clock", async () => {
+    const { service } = setup();
+    const created = await service.create({ scheme: "github", label: "Pushes" });
+    if (created.status !== "created") throw new Error(created.status);
+    expect(
+      service.receive(
+        githubEnvelope({
+          endpointId: created.endpointId,
+          secret: created.secret,
+          guid: "g",
+          body: "{}",
+          receivedAt: NOW + 90_000,
+        }),
+      ),
+    ).toEqual({ status: "accepted" });
+  });
+
+  it("keeps two long delivery ids that share a prefix as two events", async () => {
+    const { service } = setup();
+    const created = await service.create({ scheme: "github", label: "Pushes" });
+    if (created.status !== "created") throw new Error(created.status);
+    for (const tail of ["a", "b"]) {
+      expect(
+        service.receive(
+          githubEnvelope({
+            endpointId: created.endpointId,
+            secret: created.secret,
+            guid: `${"x".repeat(250)}${tail}`,
+            body: `{"tail":"${tail}"}`,
+            receivedAt: NOW,
+          }),
+        ),
+      ).toEqual({ status: "accepted" });
+    }
+    const ids = (await readEvents(service, created.endpointId)).events.map((event) => event.id);
+    expect(new Set(ids).size).toBe(2);
+    for (const id of ids) expect(id.length).toBeLessThanOrEqual(256);
+  });
+
+  it("a routine that named an endpoint keeps reading it after the endpoint is rotated", async () => {
+    const { service } = setup();
+    const created = await service.create({ scheme: "github", label: "Pushes" });
+    if (created.status !== "created") throw new Error(created.status);
+    const before = await readEvents(service, created.endpointId);
+    const rotated = await service.rotate(created.endpointId);
+    if (rotated.status !== "created") throw new Error(rotated.status);
+    expect(
+      service.receive(
+        githubEnvelope({
+          endpointId: rotated.endpointId,
+          secret: rotated.secret,
+          guid: "after-rotation",
+          body: "{}",
+          receivedAt: NOW,
+        }),
+      ),
+    ).toEqual({ status: "accepted" });
+    const after = await readEvents(service, created.endpointId);
+    expect(after.source.identity).toBe(before.source.identity);
+    expect(after.source.current()).toBe(true);
+    expect(after.events.map((event) => event.id)).toEqual([`${rotated.endpointId}:after-rotation`]);
+  });
+
+  it("frees one slot per routine read, so a burst waits on the hub rather than overflow a busy routine", async () => {
+    const { service } = setup();
+    const created = await service.create({ scheme: "github", label: "Pushes" });
+    if (created.status !== "created") throw new Error(created.status);
+    const send = (index: number) =>
+      service.receive(
+        githubEnvelope({
+          endpointId: created.endpointId,
+          secret: created.secret,
+          guid: `guid-${index}`,
+          body: `{"n":${index}}`,
+          receivedAt: NOW,
+        }),
+      );
+    for (let index = 0; index < 16; index += 1) send(index);
+    await readEvents(service, created.endpointId);
+    expect(send(16)).toEqual({ status: "accepted" });
+    expect(send(17)).toEqual({ status: "refused", kind: "busy" });
+  });
+
+  it("a read with nothing new to mark leaves the state file alone", async () => {
+    const { service, saves } = setup();
+    const created = await service.create({ scheme: "github", label: "Pushes" });
+    if (created.status !== "created") throw new Error(created.status);
+    const { source } = await readEvents(service, created.endpointId);
+    const before = saves();
+    await source.read(new AbortController().signal);
+    await source.read(new AbortController().signal);
+    expect(saves()).toBe(before);
+  });
+
+  it("an older endpoint list never reaches the hub after a newer one, and the newer one is not marked sent early", async () => {
+    const sent: number[] = [];
+    const key = makeSealingKeyPair();
+    let releaseFirst: (() => void) | undefined;
+    let calls = 0;
+    const hub: SpokeWebhookHubPort = {
+      target: () => ({ memberId: HUB_ID, fingerprint: publicKeyFingerprint(SIGNER.publicKey) }),
+      sealingKey: async () => {
+        calls += 1;
+        if (calls === 1) await new Promise<void>((resolve) => (releaseFirst = resolve));
+        return SIGNER.sealingKey(key.publicKey);
+      },
+      sendEndpoints: async (update) => {
+        sent.push(update.endpoints.length);
+        return true;
+      },
+    };
+    const { service } = setup(true, { hub });
+    const first = service.create({ scheme: "github", label: "One" });
+    await Promise.resolve();
+    const second = service.create({ scheme: "github", label: "Two" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseFirst?.();
+    await Promise.all([first, second]);
+    expect(sent.at(-1)).toBe(2);
+    expect(service.view().published).toBe(true);
   });
 });

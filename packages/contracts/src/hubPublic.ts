@@ -275,6 +275,8 @@ export const WebhookDeliveryAnswer = Schema.Union(
       "public-not-granted",
       "unknown-endpoint",
       "busy",
+      // The spoke's person paused remote access; the hub keeps the delivery.
+      "paused",
     ),
   }).annotations(strict),
 );

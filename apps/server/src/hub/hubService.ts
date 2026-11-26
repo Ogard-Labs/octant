@@ -292,6 +292,19 @@ export class HubService {
   }
 
   /**
+   * The key for a request only a spoke or a standby may make, such as handing
+   * the hub public webhook endpoints or visitor links. A guest is a device, not
+   * a host that owns threads or routines, so it has none here.
+   */
+  hostMemberKey(memberId: string, presentedKey?: string): string | undefined {
+    const listed = this.#options.state
+      .load()
+      .hub?.roster?.roster.members.find((member) => String(member.memberId) === memberId);
+    if (listed?.role !== "spoke" && listed?.role !== "standby-hub") return undefined;
+    return this.memberKey(memberId, presentedKey);
+  }
+
+  /**
    * What the hub answers a member that asks whether it is there: its latest
    * roster, and the identity facts a spoke pins when it accepts a promoted hub.
    */

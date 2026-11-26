@@ -526,7 +526,8 @@ export function createHubLinkRouteHandler(
         path: route,
         body,
         recipientMemberId: options.hub.hubMemberId(),
-        publicKeyFor: (sender) => options.hub.memberKey(sender, presentedKey ?? undefined),
+        // A guest owns no routine, so it cannot put a webhook on the internet.
+        publicKeyFor: (sender) => options.hub.hostMemberKey(sender, presentedKey ?? undefined),
       });
       if (verified.status === "refused") return refused(401, verified.kind);
       if (route === HUB_LINK_ROUTES.publicSealingKey) {

@@ -172,4 +172,49 @@ describe("webhook triggers through the hub", () => {
     });
     expect(hub.webhooks.status().endpoints).toBe(0);
   });
+
+  it("a guest's request to put webhook endpoints on the hub is refused", async () => {
+    const network = new HubTestNetwork();
+    const hub = await startHubTestHost({
+      name: "Mac mini",
+      address: "100.101.102.107",
+      network,
+      cleanups,
+    });
+    const laptop = await startHubTestHost({
+      name: "Laptop",
+      address: "100.101.102.108",
+      network,
+      cleanups,
+    });
+    expect(hub.hub.enable(window).status).toBe("enabled");
+    await join(hub, laptop);
+    laptop.spoke.setGrant(publicGrant, window);
+    // The hub's roster now lists this member as a guest, as it lists a device.
+    const state = hub.state.load();
+    const held = state.hub;
+    const roster = held?.roster;
+    if (held === undefined || roster === undefined) throw new Error("The hub holds no roster.");
+    hub.state.save({
+      ...state,
+      hub: {
+        ...held,
+        roster: {
+          ...roster,
+          roster: {
+            ...roster.roster,
+            members: roster.roster.members.map((member) =>
+              String(member.memberId) === laptop.hostId
+                ? { ...member, role: "guest" as const }
+                : member,
+            ),
+          },
+        },
+      },
+    });
+    const created = await laptop.spokeWebhooks.create({ scheme: "github", label: "Pushes" });
+    if (created.status !== "created") throw new Error(created.status);
+    expect(created.published).toBe(false);
+    expect(hub.webhooks.status().endpoints).toBe(0);
+  });
 });

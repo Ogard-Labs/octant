@@ -464,6 +464,8 @@ export const SpokeWebhookEndpoint = Schema.Struct({
   secret: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
   label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
   createdAt: Schema.Int.pipe(Schema.nonNegative()),
+  /** The ids this endpoint replaced by rotation, so a routine that names one still reads it. */
+  formerIds: Schema.optional(Schema.Array(WebhookEndpointId).pipe(Schema.maxItems(8))),
 }).annotations(strict);
 export type SpokeWebhookEndpoint = typeof SpokeWebhookEndpoint.Type;
 
