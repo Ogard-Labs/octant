@@ -23,6 +23,33 @@ describe("window glass", () => {
     expect(rule).toContain("--octant-float-blur: none;");
   });
 
+  it("lights every float's top edge under Glass only, and never under reduced transparency or increased contrast", () => {
+    const css = read("styles.css");
+    const glass =
+      /html\[data-octant-host-vibrancy="active"\]:not\(([^)]*)\)\s*\{([^}]*)\}/.exec(css) ?? [];
+    expect(glass[1]).toContain('[data-octant-reduced-transparency="true"]');
+    expect(glass[1]).toContain('[data-octant-increased-contrast="true"]');
+    expect(glass[2]).toContain("--octant-float-rim: inset 0 1px 0 var(--octant-float-rim-lit);");
+    const lit = [...css.matchAll(/--octant-float-rim:\s*([^;]*);/g)].map((match) => match[1]);
+    expect(lit).toEqual(["0 0 transparent", "inset 0 1px 0 var(--octant-float-rim-lit)"]);
+    for (const pop of css.matchAll(/--octant-shadow-pop:\s*([^;]*);/g)) {
+      expect(pop[1]?.trim().startsWith("var(--octant-float-rim),")).toBe(true);
+    }
+    // A composer notice floats on its own soft shadow and carries the same rim.
+    const notice =
+      /\.callout\.composer-notice,\s*\.thread-column > \.callout\s*\{([^}]*)\}/.exec(
+        read("styles/octant.css"),
+      )?.[1] ?? "";
+    expect(notice).toContain("box-shadow: var(--octant-float-rim), var(--oct-shadow-float);");
+    // The picture-in-picture draws one lit line under Glass, not its own on top of the rim.
+    const pip =
+      /html\[data-octant-host-vibrancy="active"\]:not\([^)]*\)\s*:is\(([^)]*)\)\s*\{([^}]*)\}/.exec(
+        read("styles/components.css"),
+      ) ?? [];
+    expect(pip[1]).toContain(".thread-activity-pip__card");
+    expect(pip[2]?.trim()).toBe("box-shadow: var(--octant-shadow-pop);");
+  });
+
   it("draws a float dense and without a backdrop filter in the desktop app whether Glass is on or off", () => {
     const css = read("styles.css");
     const rule =
