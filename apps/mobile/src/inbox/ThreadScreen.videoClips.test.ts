@@ -32,7 +32,7 @@ vi.mock("expo-file-system", () => ({
     }
     open() {
       return {
-        writeBytes: (bytes: Uint8Array) =>
+        writeBytesSync: (bytes: Uint8Array) =>
           cachedFiles.set(this.uri, (cachedFiles.get(this.uri) ?? 0) + bytes.length),
         close: () => undefined,
       };
