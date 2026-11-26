@@ -563,6 +563,7 @@ describe("Chat usage-limit strip", () => {
         })}
       />,
     );
+    await waitFor(() => expect(document.querySelector(".usage-limit-strip")).not.toBeNull());
     expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Resume now" }));
     await user.click(screen.getByRole("button", { name: "Resume at reset" }));
@@ -603,8 +604,8 @@ describe("Chat usage-limit strip", () => {
         })}
       />,
     );
+    await user.click(await screen.findByRole("button", { name: "Cancel resume" }));
     expect(screen.queryByRole("button", { name: "Resume at reset" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Cancel resume" }));
     await waitFor(() =>
       expect(execute).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "cancel-chat-usage-resume" }),

@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import type { ProviderUsageLimit, UsageResumeThreadState } from "@octant/contracts";
-import { resetClock } from "./usageLimitStrip";
+import { resetClock } from "./resetClock";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import "./usage-limit-record.css";
 
 /**
  * What the person is told when a provider's own protocol signal stopped a

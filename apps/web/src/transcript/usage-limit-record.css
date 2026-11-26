@@ -1,0 +1,11 @@
+/* The transcript's record of a usage-limit stop is a quiet line in the
+   column's width, never a floating card. */
+.thread-column > .callout--row.usage-limit-record {
+  width: auto;
+  max-width: 100%;
+  box-shadow: none;
+  animation: none;
+}
+.usage-limit-record > .callout__body {
+  flex: 1 1 16ch;
+}

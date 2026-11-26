@@ -1512,7 +1512,7 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
   });
 
-  it("shows a waiting limited stop once in the transcript and once as the strip above the composer", () => {
+  it("shows a waiting limited stop once in the transcript and once as the strip above the composer", async () => {
     render(
       <CodeThreadWorkspace
         controller={controller({
@@ -1527,6 +1527,7 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
+    await waitFor(() => expect(document.querySelector(".usage-limit-strip")).not.toBeNull());
     expect(screen.getAllByTestId("usage-limit-record")).toHaveLength(1);
     expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Resume at reset" })).toBeVisible();
@@ -1548,14 +1549,14 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Resume now" }));
+    await user.click(await screen.findByRole("button", { name: "Resume now" }));
     const call = sendFollowUp.mock.calls[0] as ReadonlyArray<unknown> | undefined;
     expect(call?.[0]).toBe("Fix the build");
     // Sent from outside the composer, so the person's draft is left alone.
     expect(call?.[13]).toMatchObject({ onAccepted: expect.any(Function) });
   });
 
-  it("withholds Resume now when the stopped prompt could not be read", () => {
+  it("withholds Resume now when the stopped prompt could not be read", async () => {
     render(
       <CodeThreadWorkspace
         controller={controller({
@@ -1576,7 +1577,7 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    expect(document.querySelector(".usage-limit-strip")).not.toBeNull();
+    await screen.findByText(/· Rate limit ·/);
     expect(screen.queryByRole("button", { name: "Resume now" })).toBeNull();
   });
 
