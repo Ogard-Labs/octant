@@ -17,7 +17,7 @@ export interface ComposerQuoteTools {
   readonly appendComposerQuote: (draft: string, quote: ComposerQuote) => string;
   readonly findComposerQuotes: (value: string) => ReadonlyArray<ComposerQuotePlace>;
   readonly composerQuoteTextsIn: (value: string) => ReadonlyArray<string>;
-  readonly trustComposerQuotes: (texts: ReadonlyArray<string>) => void;
+  readonly trustComposerQuotes: (texts: ReadonlyArray<string>) => ReadonlyArray<string>;
   readonly separateComposerQuotes: (
     value: string,
     caret: number,

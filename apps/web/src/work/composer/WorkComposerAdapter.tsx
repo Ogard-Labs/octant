@@ -534,7 +534,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 typedScope={typedScope}
                 {...(props.creating === true
                   ? {}
-                  : { onPasteAsFile: (file: File) => void images.attach([file]) })}
+                  : { onPasteAsFile: (file: File) => images.attach([file]) })}
                 inlineChips={mention.inlineChips}
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"

@@ -143,8 +143,11 @@ export interface ComposerInputProps extends ForwardedAttributes {
    * Takes a paste too large for the prompt as a text file instead: 32 KiB or
    * more, or enough to push the prompt past what a message may hold. ⌘⇧V
    * (Ctrl+Shift+V) pastes it inline anyway. Without it every paste is text.
+   * It answers the reason the file was not taken, or undefined once it was.
    */
-  readonly onPasteAsFile?: ((file: File) => void) | undefined;
+  readonly onPasteAsFile?:
+    | ((file: File) => string | undefined | Promise<string | undefined>)
+    | undefined;
 }
 
 const TAG_NAME = "octant-composer-input";
@@ -715,12 +718,23 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       if (!plain && tooLarge && onPasteAsFile !== undefined) {
         pastedFilesRef.current += 1;
         const name = `pasted-text-${String(pastedFilesRef.current)}.txt`;
-        onPasteAsFile(new File([text], name, { type: "text/plain" }));
         // Every composer sends only a prompt with words in it, so a paste that
         // would be the whole prompt leaves an editable line that points at its
         // file; otherwise the file waits beside an empty prompt that cannot send.
-        if (`${current.slice(0, start)}${current.slice(end)}`.trim() === "") {
+        // Only a file the composer took gets the line: a refused one (past the
+        // attachment limit, say) would leave a prompt naming a file not sent.
+        const wholePrompt = `${current.slice(0, start)}${current.slice(end)}`.trim() === "";
+        const pointAtFile = (refusal: string | undefined) => {
+          if (refusal !== undefined || !wholePrompt) return;
+          // An answer that comes later finds the prompt as the person left it.
+          if (modelRef.current.trim() !== "" && modelRef.current !== current) return;
           replaceSelection(root, `See the attached ${name}.`);
+        };
+        const answer = onPasteAsFile(new File([text], name, { type: "text/plain" }));
+        if (answer instanceof Promise) {
+          void answer.then(pointAtFile).catch(() => undefined);
+        } else {
+          pointAtFile(answer);
         }
         return;
       }
@@ -1116,17 +1130,19 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           // landed before it could), and the prompt draws them as chips.
           void loadComposerQuoteTools()
             .then((loaded) => {
-              loaded.trustComposerQuotes(copied);
+              const trusted = loaded.trustComposerQuotes(copied);
               const current = modelRef.current;
               const at = lastSelectionRef.current.end;
-              const separated = loaded.separateComposerQuotes(current, at, copied);
+              const separated = loaded.separateComposerQuotes(current, at, trusted);
               if (separated.value === current) tick();
               else replaceRange(0, current.length, separated.value, separated.caret);
             })
             .catch(() => undefined);
         }
-        tools?.trustComposerQuotes(copied);
-        pasteText(root, text.replace(/\r\n?/g, "\n"), plain, copied);
+        // Only whole quotes are kept apart from the text around them; other
+        // data under Octant's type is ordinary pasted text.
+        const trusted = tools?.trustComposerQuotes(copied) ?? [];
+        pasteText(root, text.replace(/\r\n?/g, "\n"), plain, trusted);
       },
       onCopy: (event: ClipboardEvent<ComposerInputElement>) => {
         const root = rootRef.current;

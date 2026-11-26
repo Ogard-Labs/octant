@@ -74,12 +74,17 @@ function rememberQuoteText(text: string): void {
   }
 }
 
-/** Marks quote texts a composer copied (carried by Octant's clipboard type) as Octant's own again. */
-export function trustComposerQuotes(texts: ReadonlyArray<string>): void {
-  for (const text of texts)
-    if (findQuoteShapes(text).some((place) => place.chipText === text)) {
-      rememberQuoteText(text);
-    }
+/**
+ * Marks quote texts a composer copied (carried by Octant's clipboard type) as
+ * Octant's own again, and answers the ones that are whole quotes. Anything
+ * else under that type (another app's data, an empty string) is not a quote.
+ */
+export function trustComposerQuotes(texts: ReadonlyArray<string>): ReadonlyArray<string> {
+  const trusted = texts.filter((text) =>
+    findQuoteShapes(text).some((place) => place.chipText === text),
+  );
+  for (const text of trusted) rememberQuoteText(text);
+  return trusted;
 }
 
 function readNote(written: string | undefined): string {
@@ -173,6 +178,8 @@ export function separateComposerQuotes(
   let next = value;
   let at = caret;
   for (const text of new Set(held)) {
+    // An empty text is found everywhere and would never move past itself.
+    if (text === "") continue;
     let from = 0;
     for (;;) {
       const start = next.indexOf(text, from);

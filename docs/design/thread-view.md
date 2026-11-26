@@ -814,7 +814,7 @@ characters a message may hold, attaches as `pasted-text-<n>.txt` instead of
 filling the prompt, through the composer's own attach path: a Chat, Work or
 Code thread, and the Work and Code start screens. ⌘⇧V (Ctrl+Shift+V) pastes it
 inline anyway. Every composer sends only a prompt with words in it, so when
-the paste would be the whole prompt it leaves the editable line "See the
+the paste would be the whole prompt and the composer took the file, it leaves the editable line "See the
 attached `pasted-text-<n>.txt`." in its place. The Chat start screen keeps a
 large paste as text, because a first Chat message needs words: the thread's
 title is made from them.

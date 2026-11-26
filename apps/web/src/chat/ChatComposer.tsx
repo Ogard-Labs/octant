@@ -636,7 +636,15 @@ export function ChatComposer(props: ChatComposerProps) {
       typedScope={props.typedScope}
       recall={props.recall}
       // A large paste attaches even while another upload runs; uploads queue.
-      onPasteAsFile={props.readOnly === true ? undefined : props.onFileSelected}
+      onPasteAsFile={
+        props.readOnly === true
+          ? undefined
+          : (file: File) => {
+              // Chat reports a refused upload beside the composer itself.
+              props.onFileSelected(file);
+              return undefined;
+            }
+      }
       inlineChips={mention.inlineChips}
       renderModelChip={atMenu.renderModelChip}
       aria-activedescendant={

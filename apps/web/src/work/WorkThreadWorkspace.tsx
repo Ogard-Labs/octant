@@ -3689,7 +3689,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               )}
               {...(readOnly || completionLocked
                 ? {}
-                : { onPasteAsFile: (file: File) => void images.attach([file]) })}
+                : { onPasteAsFile: (file: File) => images.attach([file]) })}
               inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"

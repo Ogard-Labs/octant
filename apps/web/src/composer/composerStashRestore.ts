@@ -97,12 +97,14 @@ export function planComposerStashRestore(
   }
 
   const sameComposer = composerStashLocationKey(origin) === composerStashLocationKey(destination);
-  // A reply quote names "this thread" as its source, so in another thread's
-  // composer it would present that reply as the destination's own history.
-  if (
-    !sameComposer &&
-    saved.text.includes(`Quoted from ${REPLY_QUOTE_SOURCE}${QUOTE_HEADER_TAIL}`)
-  ) {
+  // A reply quote names "this thread" as its source, so in another thread it
+  // would present that reply as the destination's own history. The same
+  // thread is the same conversation even after it moves to another Project.
+  const sameThread =
+    origin.threadId !== null &&
+    origin.mode === destination.mode &&
+    origin.threadId === destination.threadId;
+  if (!sameThread && saved.text.includes(`Quoted from ${REPLY_QUOTE_SOURCE}${QUOTE_HEADER_TAIL}`)) {
     return { kind: "refused", reason: `${CONTEXT_LABELS.quote} needs its original composer.` };
   }
   const sameNewTaskScope =

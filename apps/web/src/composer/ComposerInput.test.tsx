@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -56,7 +56,7 @@ function Recalling(props: { readonly recall: ReadonlyArray<string> }) {
 }
 
 function Attaching(props: {
-  readonly onPasteAsFile?: (file: File) => void;
+  readonly onPasteAsFile?: (file: File) => string | undefined | Promise<string | undefined>;
   readonly initial?: string;
 }) {
   const [value, setValue] = useState(props.initial ?? "Draft ");
@@ -444,6 +444,31 @@ describe("ComposerInput", () => {
     fireEvent.paste(input, { clipboardData: { getData: () => "x".repeat(40 * 1024) } });
     expect(onPasteAsFile).toHaveBeenCalledOnce();
     expect(input).toHaveValue("See the attached pasted-text-1.txt.");
+  });
+
+  it("names no file in the prompt when the composer refuses the pasted file", async () => {
+    const onPasteAsFile = vi.fn(async () => "This message can carry 8 files.");
+    render(<Attaching initial="" onPasteAsFile={onPasteAsFile} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    fireEvent.paste(input, { clipboardData: { getData: () => "x".repeat(40 * 1024) } });
+    await waitFor(() => expect(onPasteAsFile).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(input).toHaveValue("");
+  });
+
+  it("pastes another app's data under the quote type as plain text, splitting nothing", () => {
+    render(<Prompt initial="a b" />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    input.setSelectionRange(3, 3);
+    fireEvent.paste(input, {
+      clipboardData: {
+        getData: (type: string) =>
+          type === COMPOSER_QUOTE_CLIPBOARD_TYPE ? JSON.stringify(["", "a"]) : " and a c",
+      },
+    });
+    expect(input).toHaveValue("a b and a c");
   });
 
   it("⌘⇧V keeps a large paste inline", () => {

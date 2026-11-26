@@ -270,6 +270,21 @@ describe("restoring a saved composer draft", () => {
     );
   });
 
+  it("restores a reply quote into its own thread after the thread moves to a Project", () => {
+    const saved = {
+      ...emptyComposerStashDraft(),
+      text: appendComposerQuote("", { source: REPLY_QUOTE_SOURCE, text: "Excerpt", comment: "" }),
+    };
+    expect(
+      planComposerStashRestore(
+        chat,
+        { ...target, location: { ...chat, projectId: "filed-project" } },
+        emptyComposerStashDraft(),
+        saved,
+      ).kind,
+    ).toBe("ready");
+  });
+
   it("keeps a draft within the host that owns its source scope", () => {
     expect(
       planComposerStashRestore(
