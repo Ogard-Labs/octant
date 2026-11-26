@@ -116,6 +116,28 @@ describe("Computer use driver updates", () => {
     expect(f.activate).not.toHaveBeenCalled();
   });
 
+  it("keeps an update the person asked for while the daily check was already downloading it", async () => {
+    const f = fixture();
+    let finish: (() => void) | undefined;
+    f.stage.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return { version: "0.25.0", path: "/private/driver/0.25.0/cua-driver" };
+    });
+    f.updates.configure({ enabled: true, automaticUpdates: true });
+    f.scheduled.at(-1)?.();
+    await vi.waitFor(() => expect(f.updates.state().status).toBe("downloading"));
+    const asked = f.updates.check();
+    finish?.();
+    await asked;
+    expect(f.updates.state().status).toBe("staged");
+    f.updates.configure({ enabled: true, automaticUpdates: false });
+    f.idle();
+    await f.updates.applyWhenIdle();
+    expect(f.activate).toHaveBeenCalledOnce();
+  });
+
   it("still installs an update the person asked for while automatic updates are off", async () => {
     const f = fixture();
     f.updates.configure({ enabled: true, automaticUpdates: false });

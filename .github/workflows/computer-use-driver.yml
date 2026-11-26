@@ -33,6 +33,10 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    defaults:
+      run:
+        # An explicit bash runs with pipefail, so `check | tee` fails when check does.
+        shell: bash
     env:
       BRANCH: feature/computer-use-driver-pin
       BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
@@ -113,6 +117,15 @@ jobs:
           git status --short
           git -c user.name="github-actions[bot]" -c user.email="$BOT_EMAIL" \
             commit -m "chore(desktop): move the bundled computer-use driver to $VERSION"
+          # A person may mark the pull request ready while this job builds;
+          # that does not move the branch, so the lease below cannot see it.
+          ready_now=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+            --json isDraft,headRepositoryOwner \
+            --jq "[.[] | select(.headRepositoryOwner.login == \"${REPO%%/*}\")][0] | if . then (.isDraft | not) else false end")
+          if [ "$ready_now" = "true" ]; then
+            echo "::notice::The bot pull request was marked ready while this job ran, so its tested head stays."
+            exit 0
+          fi
           # Publish only over the exact head inspected above (or onto no
           # branch at all), so a commit pushed meanwhile stops the run.
           git push --force-with-lease="refs/heads/$BRANCH:$lease" origin "HEAD:refs/heads/$BRANCH"
@@ -127,11 +140,23 @@ jobs:
         run: |
           set -euo pipefail
           title="Move the bundled computer-use driver to $VERSION"
+          export TITLE="$title"
           if [ -n "$EXISTING" ]; then
             if [ "$PUSHED" = "true" ]; then
               gh pr edit "$EXISTING" --repo "$REPO" --title "$title" --body-file "$RUNNER_TEMP/body.md"
             fi
-          elif ! gh pr create --repo "$REPO" --draft --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"; then
+            exit 0
+          fi
+          # A maintainer who closed the proposal for this version has answered
+          # it; a new one follows only when upstream moves again.
+          closed=$(gh pr list --repo "$REPO" --head "$BRANCH" --state closed \
+            --json title,headRepositoryOwner \
+            --jq "[.[] | select(.headRepositoryOwner.login == \"${REPO%%/*}\") | select(.title == \$ENV.TITLE)] | length")
+          if [ "$closed" != "0" ]; then
+            echo "::notice::A pull request for driver $VERSION was already closed; nothing new to propose."
+            exit 0
+          fi
+          if ! gh pr create --repo "$REPO" --draft --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"; then
             echo "::error::Could not open the pull request. Turn on 'Allow GitHub Actions to create and approve pull requests' and run this job again, or open it from https://github.com/$REPO/compare/main...$BRANCH"
             exit 1
           fi

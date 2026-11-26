@@ -42,6 +42,8 @@ export function createManagedToolUpdates<
   /** Whether `staged` came from the daily schedule rather than the person's own check. */
   let stagedAutomatically = false;
   let checking: Promise<void> | undefined;
+  /** Who started the check in flight; a person joining it makes it theirs. */
+  let checkingOrigin: "automatic" | "manual" = "manual";
   let applying: Promise<void> | undefined;
   let abort = new AbortController();
   const schedule =
@@ -99,7 +101,11 @@ export function createManagedToolUpdates<
 
   async function check(origin: "automatic" | "manual" = "manual"): Promise<void> {
     if (closed) return;
-    if (checking !== undefined) return checking;
+    if (checking !== undefined) {
+      if (origin === "manual") checkingOrigin = "manual";
+      return checking;
+    }
+    checkingOrigin = origin;
     const run = generation;
     const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(180_000)]);
     checking = (async () => {
@@ -127,7 +133,7 @@ export function createManagedToolUpdates<
         if (run !== generation || signal.aborted || closed) return;
         if (verified.version !== release.version) throw new Error("Verified tool version changed.");
         staged = verified;
-        stagedAutomatically = origin === "automatic";
+        stagedAutomatically = checkingOrigin === "automatic";
         publish({
           status: "staged",
           currentVersion: state.currentVersion,
