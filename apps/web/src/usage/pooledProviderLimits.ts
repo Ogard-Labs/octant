@@ -18,6 +18,11 @@ export type PooledSegment =
       readonly remainingPercent?: number;
       readonly exhausted: boolean;
       readonly resetsAt?: string;
+      /**
+       * The reading's reset has passed, so it says nothing about what is left
+       * now until a fresh reading arrives; never an assumed refill.
+       */
+      readonly awaitingUpdate: boolean;
       /** The reading is the last one before a refresh failed. */
       readonly stale: boolean;
     }
@@ -148,6 +153,7 @@ export function poolProviderLimits(input: {
             : { remainingPercent: match.remainingPercent }),
           exhausted: match.exhausted && !expired,
           ...(match.resetsAt === undefined || expired ? {} : { resetsAt: match.resetsAt }),
+          awaitingUpdate: expired,
           stale: reading.stale,
         };
       });

@@ -567,19 +567,29 @@ function PooledWindowBar(props: { readonly window: PooledWindow; readonly now: n
       </div>
       <div className="provider-limits__segments">
         {props.window.segments.map((segment) =>
-          segment.kind === "reading" && segment.remainingPercent !== undefined ? (
+          // A spent account is an empty meter, not the dashed outline of an
+          // account with no reading: the two must never look alike.
+          segment.kind === "reading" &&
+          (segment.remainingPercent !== undefined || segment.exhausted) ? (
             <meter
               aria-label={`${segment.account}, ${label} remaining`}
+              data-state={segment.exhausted ? "exhausted" : "reading"}
               key={segment.providerInstanceId}
               max={100}
               min={0}
-              value={segment.remainingPercent}
+              value={segment.remainingPercent ?? 0}
             />
           ) : (
             <span
               aria-hidden="true"
               className="provider-limits__segment-empty"
-              data-state={segment.kind === "missing" ? "missing" : "unreported"}
+              data-state={
+                segment.kind === "missing"
+                  ? "missing"
+                  : segment.awaitingUpdate
+                    ? "awaiting"
+                    : "unreported"
+              }
               key={segment.providerInstanceId}
             />
           ),
@@ -602,6 +612,7 @@ function segmentReading(
   timestampFormat: TimestampFormatPreference | undefined,
 ): string {
   if (segment.kind === "missing") return "No reading";
+  if (segment.awaitingUpdate) return `Awaiting updated limits${segment.stale ? " · stale" : ""}`;
   const share =
     segment.remainingPercent !== undefined
       ? `${segment.remainingPercent}% left`

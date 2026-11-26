@@ -848,8 +848,67 @@ describe("ProviderUsageLimitsPanel", () => {
     expect(segments[0]?.getAttribute("aria-label")).toBe("Work Claude, 5-hour window remaining");
     expect(segments[0]?.getAttribute("value")).toBe("90");
     expect(segments[1]?.getAttribute("value")).toBe("40");
-    expect(bar).toHaveTextContent("Soonest reset");
+    expect(
+      bar.querySelector(".provider-limits__window-heading time")?.getAttribute("dateTime"),
+    ).toBe("2026-08-23T14:00:00.000Z");
     expect(screen.getByText(/2 accounts · each account counted on its own/)).toBeVisible();
+  });
+
+  it("says a pooled reading whose reset passed is awaiting updated limits, and draws a spent account as an empty meter", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-23T15:00:00.000Z"));
+    const secondId = "55555555-5555-4555-8555-555555555555" as ProviderInstanceId;
+    const account = (id: ProviderInstanceId, window: Record<string, unknown>) => ({
+      providerInstanceId: id,
+      status: "available" as const,
+      source: "provider-runtime" as const,
+      observedAt: "2026-08-23T12:00:00.000Z",
+      limits: {
+        providerInstanceId: id,
+        scope: "account",
+        requests: { status: "unavailable" },
+        tokens: { status: "unavailable" },
+        concurrency: { status: "unavailable" },
+        retry: { status: "inactive" },
+        quota: "available",
+        source: "runtime-reported",
+        confidence: "high",
+        updatedAt: "2026-08-23T12:00:00.000Z",
+        rateLimitWindows: [
+          { window: "five_hour", observedAt: "2026-08-23T12:00:00.000Z", ...window },
+        ],
+      },
+    });
+    const data = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: "2026-08-23T12:00:00.000Z",
+      entries: [
+        account(providerInstanceId, {
+          status: "allowed",
+          utilization: 0.4,
+          resetsAt: "2026-08-23T14:00:00.000Z",
+        }),
+        account(secondId, { status: "exhausted", resetsAt: "2026-08-23T18:00:00.000Z" }),
+      ],
+    });
+    try {
+      render(
+        <ProviderUsageLimitsPanel
+          client={{ list: async () => data, refresh: async () => data }}
+          instances={[provider, { ...provider, id: secondId, displayName: "Spent account" }]}
+        />,
+      );
+      await screen.findByText("Each account");
+      const bar = document.querySelector('[data-pooled-window="five_hour"]') as HTMLElement;
+      expect(bar).toHaveTextContent("Awaiting updated limits");
+      expect(bar).not.toHaveTextContent("Remaining not reported");
+      expect(bar.querySelector('[data-state="awaiting"]')).not.toBeNull();
+      const spent = bar.querySelector('meter[data-state="exhausted"]');
+      expect(spent?.getAttribute("value")).toBe("0");
+      expect(bar.querySelector('[data-state="missing"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("an account without a reading is labelled, not counted as zero", async () => {
