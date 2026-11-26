@@ -1720,7 +1720,8 @@ html[data-octant-density="compact"]
   color: var(--octant-accent-text);
 }
 
-.sidebar-navigation__thread-state[data-activity="attention"] {
+.sidebar-navigation__thread-state[data-activity="attention"],
+.sidebar-navigation__thread-state[data-activity="limited"] {
   color: var(--oct-warn-fg);
 }
 

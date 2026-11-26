@@ -48,6 +48,12 @@ export interface WorkBoardRuntimeActivity {
   readonly awaitingInput: boolean;
   readonly awaitingKind?: "approval" | "user-input";
   readonly interrupted: boolean;
+  /**
+   * `awaitingInput` is only because the latest turn's status is `waiting`: no
+   * request is open and no child waits. The sidebar then reads a usage-limit
+   * stop as Limited rather than as waiting on the person.
+   */
+  readonly waitsOnTurnAlone?: true;
   readonly blockingReason?: string;
   /** The latest finished turn closed by asking the person to decide; absent means none. */
   readonly decisionPending?: boolean;
@@ -132,6 +138,9 @@ export function boardRuntimeActivityFromTurnsAndSignals(input: {
     executing,
     awaitingInput,
     interrupted,
+    ...(turnWaiting && !pendingRequest && input.childWaiting === 0
+      ? { waitsOnTurnAlone: true as const }
+      : {}),
     ...(awaitingInput && pendingRequestKind !== undefined
       ? { awaitingKind: pendingRequestKind }
       : {}),

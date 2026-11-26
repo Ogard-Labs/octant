@@ -7889,6 +7889,34 @@ describe("scheduling a Code thread's usage-limit resume", () => {
     },
   ];
 
+  /** What a running turn journals: its start's result, then the state it stopped in. */
+  const runningThenStoppedEnvelopes = () =>
+    [
+      {
+        kind: "operation-result",
+        result: { kind: "provider-turn-state", operationId, state: "running" },
+      },
+      {
+        kind: "operation-state",
+        state: "waiting",
+        failure: {
+          category: "failed",
+          message: "The provider's usage window is spent.",
+          usageLimit: { kind: "exhausted", resetsAt },
+        },
+      },
+    ].map((event, index) => ({
+      ...eventEnvelope(index + 1, "code.operation-event-recorded@1", {
+        threadId: ids.thread,
+        operationId,
+        cursor: index + 1,
+        occurredAt: now,
+        event,
+      }),
+      aggregateType: "code-operation" as never,
+      aggregateId: operationId as never,
+    }));
+
   const waitingLimitEnvelope = (usageLimit: Record<string, unknown> = {}) => ({
     ...eventEnvelope(1, "code.operation-event-recorded@1", {
       threadId: ids.thread,
@@ -7916,6 +7944,48 @@ describe("scheduling a Code thread's usage-limit resume", () => {
     }),
     aggregateType: "code-operation" as never,
     aggregateId: operationId as never,
+  });
+
+  it("marks the navigation row Limited while the stop is current and drops it after a resume", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      events: [waitingLimitEnvelope()],
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+
+    const parked = await fixture.service.navigation(ids.window);
+    expect(parked.runtime[0]).toMatchObject({ executing: false, limited: { resetsAt } });
+    expect(parked.runtime[0]).not.toHaveProperty("awaitingInput");
+
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue([
+      ...waitingProviderWork(),
+      {
+        work: decodeCodeRuntimeWork({
+          id: testUuid(3102),
+          threadId: ids.thread,
+          kind: "provider-turn",
+          state: "running",
+          updatedAt: now,
+        }),
+        firstSequence: 2,
+      },
+    ]);
+    const resumed = await fixture.service.navigation(ids.window);
+    expect(resumed.runtime[0]).not.toHaveProperty("limited");
+  });
+
+  it("marks the navigation row Limited when a running turn stops at a usage limit", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      events: runningThenStoppedEnvelopes(),
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+
+    const navigation = await fixture.service.navigation(ids.window);
+
+    expect(navigation.runtime[0]).toMatchObject({ limited: { resetsAt } });
+    // One decode of the thread's work list serves the whole row.
+    expect(fixture.persistence.readCodeRuntimeWorks).toHaveBeenCalledTimes(1);
   });
 
   it("schedules a host-owned resume for a provider turn waiting on a usage limit", async () => {
@@ -8196,7 +8266,15 @@ describe("moving a Code thread to another account", () => {
     );
     return fixture;
   };
-  const limitedTurn = (fixture: ReturnType<typeof serviceFixture>) => {
+  const limitedTurn = (
+    fixture: ReturnType<typeof serviceFixture>,
+    recordedAs: "operation-result" | "operation-state" = "operation-result",
+  ) => {
+    const failure = {
+      category: "waiting",
+      message: "The provider's usage window is spent.",
+      usageLimit: { kind: "exhausted" },
+    };
     fixture.persistence.readCodeRuntimeWorks.mockReturnValue([
       {
         work: decodeCodeRuntimeWork({
@@ -8216,19 +8294,18 @@ describe("moving a Code thread to another account", () => {
           operationId,
           cursor: 1,
           occurredAt: now,
-          event: {
-            kind: "operation-result",
-            result: {
-              kind: "provider-turn-state",
-              operationId,
-              state: "waiting",
-              failure: {
-                category: "waiting",
-                message: "The provider's usage window is spent.",
-                usageLimit: { kind: "exhausted" },
-              },
-            },
-          },
+          event:
+            recordedAs === "operation-state"
+              ? { kind: "operation-state", state: "waiting", failure }
+              : {
+                  kind: "operation-result",
+                  result: {
+                    kind: "provider-turn-state",
+                    operationId,
+                    state: "waiting",
+                    failure,
+                  },
+                },
         }),
         aggregateType: "code-operation" as never,
         aggregateId: operationId as never,
@@ -8267,15 +8344,21 @@ describe("moving a Code thread to another account", () => {
     });
   });
 
-  it("releases a turn parked on the old account's usage limit when the person moves the thread", async () => {
-    const fixture = limitedTurn(withAccounts(serviceFixture({ threads: [thread()] })));
+  it.each(["operation-result", "operation-state"] as const)(
+    "releases a turn parked on the old account's usage limit, recorded as an %s, when the person moves the thread",
+    async (recordedAs) => {
+      const fixture = limitedTurn(
+        withAccounts(serviceFixture({ threads: [thread()] })),
+        recordedAs,
+      );
 
-    const result = await fixture.service.execute(ids.window, move);
+      const result = await fixture.service.execute(ids.window, move);
 
-    expect(result).toMatchObject({
-      thread: { providerHandoff: { releasedStopId: operationId } },
-    });
-  });
+      expect(result).toMatchObject({
+        thread: { providerHandoff: { releasedStopId: operationId } },
+      });
+    },
+  );
 
   it("refuses a move from an agent, from a routine, and while a turn runs", async () => {
     const fixture = withAccounts(serviceFixture({ threads: [thread()] }));
@@ -8346,6 +8429,21 @@ describe("moving a Code thread to another account", () => {
     const again = limitedTurn(withAccounts(serviceFixture({ threads: [handled] })));
     await again.service.handOffAfterUsageLimit(ids.thread);
     expect(again.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("hands off when a running turn stops at a usage limit", async () => {
+    const opted = thread({ usageLimitHandoff: { providerInstanceId: personal as never } });
+    const fixture = limitedTurn(
+      withAccounts(serviceFixture({ threads: [opted] })),
+      "operation-state",
+    );
+
+    await fixture.service.handOffAfterUsageLimit(ids.thread);
+
+    expect(appendedThreads(fixture)[0]).toMatchObject({
+      providerInstanceId: personal,
+      providerHandoff: { releasedStopId: operationId },
+    });
   });
 
   it("does not move a thread on a usage limit without the person's opt-in", async () => {

@@ -11,6 +11,8 @@ import {
   type LinkedIssueRef,
   type LinkedIssueSource,
   type ThreadLinkedIssue,
+  type ThreadUsageLimited,
+  type ProviderUsageLimit,
   MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS,
 } from "@octant/contracts";
 import { composeThreadTouchedIssues } from "@octant/domain/thread-board-pull-request-policy";
@@ -32,6 +34,8 @@ import {
   unsupportedModelOptionValues,
   withUsageLimitHandoff,
   withUsageLimitHandoffOutcome,
+  currentUsageLimitStop,
+  limitedThreadFact,
 } from "@octant/domain";
 import {
   defaultFullAccessSandboxFor,
@@ -484,12 +488,16 @@ function profileContextSnapshot(profiled: ProfiledThreadAuthority): {
 }
 
 /**
- * The recorded shape of a provider turn's last state, as journaled on its
- * operation aggregate — the tail frame a schedule opt-in is validated against.
+ * A provider turn's last recorded state, as journaled on its operation
+ * aggregate. A turn that ran records it as an `operation-state` frame; only a
+ * provider-turn result carries the resume `evidence`.
  */
-type CodeProviderTurnRecordedState = Extract<
-  Extract<CodeOperationEventFrame["event"], { kind: "operation-result" }>["result"],
-  { kind: "provider-turn-state" }
+type CodeProviderTurnRecordedState = Pick<
+  Extract<
+    Extract<CodeOperationEventFrame["event"], { kind: "operation-result" }>["result"],
+    { kind: "provider-turn-state" }
+  >,
+  "state" | "failure" | "evidence"
 >;
 
 export interface CodePersistencePort {
@@ -1248,6 +1256,15 @@ export class CodeServiceError extends Error {
 }
 
 export class CodeService {
+  /** Each limited thread's stop as last read from the journal, keyed by its work record. */
+  readonly #limitStops = new Map<
+    string,
+    {
+      readonly key: string;
+      readonly state: string | undefined;
+      readonly limit: ProviderUsageLimit | undefined;
+    }
+  >();
   readonly #persistence: CodePersistencePort;
   readonly #coordinatorsPerProject: (() => number) | undefined;
   readonly #access: CodeWindowAccessPort;
@@ -1689,14 +1706,18 @@ export class CodeService {
     return { executing, awaitingInput: awaitingKind !== undefined };
   }
 
-  #turnActivity(threadId: CodeThreadId) {
+  #turnActivity(
+    threadId: CodeThreadId,
+    works: ReadonlyArray<ProjectedCodeRuntimeWork> = this.#persistence.readCodeRuntimeWorks(
+      threadId,
+    ),
+  ) {
     // A provider turn parked on a question keeps its `running` work record,
     // so the live read is what tells a waiting turn from an executing one.
     const asked = this.#turnAwaiting?.(String(threadId));
-    const activity = boardRuntimeActivityFromWorks(
-      this.#persistence.readCodeRuntimeWorks(threadId),
-      { turnParkedOnPerson: asked !== undefined },
-    );
+    const activity = boardRuntimeActivityFromWorks(works, {
+      turnParkedOnPerson: asked !== undefined,
+    });
     // A turn parked on the agent's own approval is owed by the person, not
     // executing, the same as the board reads it. The thread keeps saying so
     // after a restart took the turn: the approval stays until it is resumed.
@@ -1710,7 +1731,9 @@ export class CodeService {
     pullRequests: ThreadBoardPullRequestSnapshot | undefined,
   ): ReadonlyArray<CodeNavigationRuntime> {
     return threads.map((thread) => {
-      const { executing, awaitingKind } = this.#turnActivity(thread.id);
+      // Read once per row: each read decodes the thread's whole work list.
+      const works = this.#persistence.readCodeRuntimeWorks(thread.id);
+      const { executing, awaitingKind } = this.#turnActivity(thread.id, works);
       const checkout = this.#persistence.readCodeCheckout(thread.checkoutId);
       const checkoutChip = codeNavigationCheckoutChip(checkout);
       // The board's three for clients that know only `pullRequestSummaries`,
@@ -1738,12 +1761,43 @@ export class CodeService {
         ...(hasPullRequests ? { pullRequestSummaries, threadPullRequests } : {}),
         ...this.#touchedIssuesFor(thread, pullRequests),
         ...this.#linkedIssuesFor(thread),
+        ...this.#limitedFact(thread, works),
         // Rides on the row the caller was already allowed to see: `threads`
         // is the authority-filtered list, so a window never learns what a
         // thread it cannot browse is running.
         ...(parked ? {} : this.#liveTurns?.read(String(thread.id))),
       };
     });
+  }
+
+  /**
+   * The current usage-limit stop for a thread's navigation row. Only a latest
+   * provider turn still waiting reads the journal, and once per recorded state:
+   * navigation is read on a timer and a long turn's stream is thousands of
+   * frames.
+   */
+  #limitedFact(
+    thread: CodeThread,
+    works: ReadonlyArray<ProjectedCodeRuntimeWork>,
+  ): { readonly limited?: ThreadUsageLimited } {
+    const latest = works.filter(({ work }) => work.kind === "provider-turn").at(-1)?.work;
+    if (latest === undefined || latest.state !== "waiting") {
+      this.#limitStops.delete(String(thread.id));
+      return {};
+    }
+    const key = `${String(latest.id)} ${String(latest.updatedAt)}`;
+    let read = this.#limitStops.get(String(thread.id));
+    if (read === undefined || read.key !== key) {
+      const stopped = this.#latestProviderTurnState(latest.id);
+      read = { key, state: stopped?.state, limit: stopped?.failure?.usageLimit };
+      this.#limitStops.set(String(thread.id), read);
+    }
+    const stop = currentUsageLimitStop(thread, {
+      state: read.state,
+      limit: read.limit,
+      turnId: String(latest.id),
+    });
+    return stop === undefined ? {} : { limited: limitedThreadFact(stop.limit) };
   }
 
   #linkedIssuesFor(thread: CodeThread): {
@@ -5795,8 +5849,10 @@ export class CodeService {
   }
 
   /**
-   * The latest provider-turn result the operation aggregate recorded — the
-   * authoritative copy of the stop the schedule opt-in binds to.
+   * The latest provider-turn state the operation aggregate recorded, with that
+   * frame's own failure. A running turn that stops at a usage limit journals
+   * it as an `operation-state` frame, after the `running` result its start
+   * answered with, so reading results alone never sees the stop.
    */
   #latestProviderTurnState(operationId: string): CodeProviderTurnRecordedState | undefined {
     // Provider turns journal an event per streamed frame, so a long turn can
@@ -5815,7 +5871,9 @@ export class CodeService {
         afterVersion = committed.aggregateVersion;
         if (committed.eventName !== "code.operation-event-recorded@1") continue;
         const frame = decodeCodeOperationEventFrame(committed.payload);
-        if (
+        if (frame.event.kind === "operation-state") {
+          latest = frame.event;
+        } else if (
           frame.event.kind === "operation-result" &&
           frame.event.result.kind === "provider-turn-state"
         ) {

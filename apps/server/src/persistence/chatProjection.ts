@@ -47,12 +47,14 @@ import {
   type ChatTurnRouteDecision,
   type EventEnvelope,
   type ThreadFollowUp,
+  type ThreadUsageLimited,
 } from "@octant/contracts";
 import { AggregateId as AggregateIdSchema } from "@octant/contracts";
 import type { AggregateVersion } from "@octant/contracts/events";
 import type { ThreadWorkList } from "@octant/domain/thread-work-policy";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import { activeChatTurns } from "@octant/domain/chat-policy";
+import { currentUsageLimitStop, limitedThreadFact } from "@octant/domain";
 import { Schema } from "effect";
 import type { Projection } from "./projection";
 import {
@@ -913,7 +915,32 @@ export function readChatNavigation(
                SELECT 1 FROM chat_attempt_projection
                WHERE thread_id = thread.thread_id
                  AND json_extract(attempt_json, '$.outcome') IN ('queued', 'streaming')
-             ) AS executing
+             ) AS executing,
+             EXISTS (
+               SELECT 1 FROM chat_attempt_projection AS attempt
+               INNER JOIN chat_turn_projection AS stopped
+                 ON stopped.turn_id = attempt.turn_id
+               WHERE attempt.thread_id = thread.thread_id
+                 AND json_extract(attempt.attempt_json, '$.outcome') = 'waiting'
+                 AND json_extract(attempt.attempt_json, '$.usageLimit') IS NOT NULL
+                 -- No retry has replaced this attempt.
+                 AND json_extract(stopped.turn_json, '$.attempts[#-1].id') = attempt.attempt_id
+                 -- No later turn has passed it. A rewound edit can leave an
+                 -- unrewound turn superseded, so then the turn order decides.
+                 AND NOT EXISTS (
+                   SELECT 1 FROM chat_turn_projection AS later
+                   WHERE later.thread_id = thread.thread_id
+                     AND later.sequence > stopped.sequence
+                     AND json_type(later.turn_json, '$.rewound') IS NULL
+                     AND NOT EXISTS (
+                       SELECT 1 FROM chat_turn_projection AS edit
+                       WHERE edit.thread_id = thread.thread_id
+                         AND edit.sequence > later.sequence
+                         AND json_type(edit.turn_json, '$.rewound') IS NOT NULL
+                         AND json_type(edit.turn_json, '$.supersedes') IS NOT NULL
+                     )
+                 )
+             ) AS limit_waiting
       FROM chat_thread_projection AS thread
       LEFT JOIN thread_follow_up_projection AS follow_up
         ON follow_up.thread_id = thread.thread_id
@@ -926,10 +953,14 @@ export function readChatNavigation(
     readonly last_sequence: number;
     readonly follow_up_open: number;
     readonly executing: number;
+    readonly limit_waiting: number;
   }>;
   return rows.map((row) => {
     assertChatProjectionSchema(row.schema_version);
     const thread = decodeChatThread(JSON.parse(row.thread_json));
+    // Only a thread whose stop may still be current reads its turn order: a
+    // retried or passed stop leaves its waiting attempt in history for good.
+    const limited = row.limit_waiting === 1 ? readChatLimitedFact(connection, thread) : undefined;
     return decodeChatNavigationThread({
       id: thread.id,
       ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
@@ -939,10 +970,38 @@ export function readChatNavigation(
       lastSequence: row.last_sequence,
       followUpOpen: row.follow_up_open === 1,
       executing: row.executing === 1,
+      ...(limited === undefined ? {} : { limited }),
       ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
       ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
     });
   });
+}
+
+/** The current usage-limit stop on a thread's latest active turn, if any. */
+function readChatLimitedFact(
+  connection: SqliteConnection,
+  thread: ChatThread,
+): ThreadUsageLimited | undefined {
+  const turnId = readTurnIds(connection, thread.id).active.at(-1);
+  if (turnId === undefined) return undefined;
+  const row = connection
+    .prepare(`
+      SELECT schema_version, turn_json
+      FROM chat_turn_projection
+      WHERE turn_id = ?
+    `)
+    .get(turnId) as { readonly schema_version: number; readonly turn_json: string } | undefined;
+  if (row === undefined) return undefined;
+  assertChatProjectionSchema(row.schema_version);
+  const attempt = decodeChatTurn(JSON.parse(row.turn_json)).attempts.at(-1);
+  if (attempt === undefined) return undefined;
+  const stop = currentUsageLimitStop(hydrateThreadUsageResume(connection, thread), {
+    state: attempt.outcome,
+    limit: attempt.usageLimit,
+    turnId,
+    attemptId: String(attempt.id),
+  });
+  return stop === undefined ? undefined : limitedThreadFact(stop.limit);
 }
 
 export function readChatThreadView(
@@ -1719,19 +1778,24 @@ export function readActiveChatTurnIds(
   return readTurnIds(connection, threadId).active;
 }
 
-function readTurnIds(
-  connection: SqliteConnection,
-  threadId: string,
-): { readonly journaled: ReadonlyArray<string>; readonly active: ReadonlyArray<string> } {
-  const order = connection
-    .prepare(`
+/**
+ * The fold over a thread's whole turn history. It is named so a reader that
+ * must not pay for it (the navigation's limit read) can be held to that by
+ * identity, not by how the SQL happens to be spelled.
+ */
+export const CHAT_TURN_ORDER_SQL = `
       SELECT turn_id, json_extract(turn_json, '$.supersedes') AS supersedes,
         json_type(turn_json, '$.rewound') IS NOT NULL AS rewound
       FROM chat_turn_projection
       WHERE thread_id = ?
       ORDER BY sequence ASC
-    `)
-    .all(threadId) as ReadonlyArray<{
+    `;
+
+function readTurnIds(
+  connection: SqliteConnection,
+  threadId: string,
+): { readonly journaled: ReadonlyArray<string>; readonly active: ReadonlyArray<string> } {
+  const order = connection.prepare(CHAT_TURN_ORDER_SQL).all(threadId) as ReadonlyArray<{
     readonly turn_id: string;
     readonly supersedes: string | null;
     readonly rewound: number;

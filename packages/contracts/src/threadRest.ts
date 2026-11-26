@@ -25,6 +25,21 @@ export const ThreadSnooze = Schema.Struct({
 export type ThreadSnooze = typeof ThreadSnooze.Type;
 
 /**
+ * The latest turn is stopped on a provider usage limit, as a thread's
+ * navigation row reports it. `resetsAt` is the provider's declared reset;
+ * absent for a billing stop, which no clock clears, and when the provider did
+ * not say. Absent from an older host, whose rows then say nothing of a limit.
+ */
+export const ThreadUsageLimited = Schema.Struct({
+  resetsAt: Schema.optional(UtcTimestamp),
+}).annotations(strict);
+export type ThreadUsageLimited = typeof ThreadUsageLimited.Type;
+
+export const ThreadLimitedFields = {
+  limited: Schema.optional(ThreadUsageLimited),
+} as const;
+
+/**
  * The two resting states a Chat, Work, or Code thread can carry beside
  * archive. Both are optional so a journal written before they existed
  * replays as "in play"; absent means the same.

@@ -155,6 +155,7 @@ import {
   searchChatThreads,
   searchChatTranscript,
   readChatNavigation,
+  CHAT_TURN_ORDER_SQL,
 } from "../persistence/chatProjection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
@@ -6753,6 +6754,57 @@ describe("ChatService", () => {
     expect(view.thread.usageResume?.record.turnId).toBe(String(turn.id));
     expect(view.thread.usageResume?.record.attemptId).toBe(String(attempt.id));
     expect(view.thread.usageResume?.record.resetsAt).toBe("2026-07-19T13:00:00.000Z");
+  });
+
+  it("marks the navigation row Limited while the stop is current and drops it after a resume", async () => {
+    const { service, persistence } = openFixture({
+      nativeConversation: true,
+      turnOutcome: (index) => (index === 0 ? "limited" : "completed"),
+      usageLimitResetsAt: "2099-01-02T09:00:00.000Z",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    expect(service.navigation().threads[0]?.limited).toEqual({
+      resetsAt: "2099-01-02T09:00:00.000Z",
+    });
+
+    const parked = service.read(created.thread.id);
+    const turn = parked.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) {
+      throw new Error("Expected the parked attempt.");
+    }
+    await service.execute({
+      kind: "retry-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: parked.thread.version,
+      turnId: turn.id,
+      attemptId: attempt.id,
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+      { timeoutMs: 10_000 },
+    );
+    const prepare = vi.spyOn(persistence.connection, "prepare");
+    expect(service.navigation().threads[0]).not.toHaveProperty("limited");
+    // The retried attempt stays in history as waiting, and must not cost
+    // every later navigation read a fold over the thread's turns.
+    expect(prepare.mock.calls.some(([sql]) => sql === CHAT_TURN_ORDER_SQL)).toBe(false);
+    prepare.mockRestore();
   });
 
   async function defaultArmingFixture() {

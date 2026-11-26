@@ -51,6 +51,7 @@ import {
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   type WorkTranscriptSearch,
   type ImportedSessionHistory,
+  type WorkThreadNavigationRuntime,
 } from "@octant/contracts";
 import type { FinishedReportSettleOutcome } from "../finishedReceipts/finishedReportSettle";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
@@ -94,6 +95,8 @@ import {
   resolveStrict,
   STRICT_REFUSES_FULL_ACCESS_RUN_FLAG,
   workProjectKeepsStatusFile,
+  currentUsageLimitStop,
+  limitedThreadFact,
 } from "@octant/domain";
 import {
   completedThreadArchiveDue,
@@ -638,9 +641,7 @@ export class WorkThreadService {
           runtime.push({
             threadId: thread.id,
             executing: activity.executing,
-            // Carried only when true, so an idle row's payload stays as it was.
-            ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
-            ...(activity.awaitingKind === undefined ? {} : { awaitingKind: activity.awaitingKind }),
+            ...this.#waitingFacts(thread, activity),
             ...liveTurnFacts(activity),
             ...(due === undefined ? {} : { followUpDue: due }),
           });
@@ -650,6 +651,36 @@ export class WorkThreadService {
     } catch (error) {
       throw this.#mapFailure(error);
     }
+  }
+
+  /**
+   * What a navigation row says the thread waits on. A turn stopped on a usage
+   * limit waits on the provider, so a row whose only wait is that turn says
+   * Limited and not that it waits on the person: reported as input, it read as
+   * Needs you and ended the thread's snooze to the reset the moment it was set.
+   */
+  #waitingFacts(
+    thread: WorkThread,
+    activity: WorkThreadRuntimeActivity,
+  ): Pick<WorkThreadNavigationRuntime, "awaitingInput" | "awaitingKind" | "limited"> {
+    const turn = this.#turnProjection.listForThread(thread.id).at(-1);
+    const stop = currentUsageLimitStop(
+      thread,
+      turn === undefined
+        ? undefined
+        : { state: turn.status, limit: turn.failure?.usageLimit, turnId: String(turn.turnId) },
+    );
+    const limited = stop === undefined ? {} : { limited: limitedThreadFact(stop.limit) };
+    // A stop a move released is no longer current, but its turn still reads
+    // `waiting` with nothing asked of the person, so it stays out of Needs you.
+    const stoppedOnLimit = turn?.status === "waiting" && turn.failure?.usageLimit !== undefined;
+    if (stoppedOnLimit && activity.waitsOnTurnAlone === true) return limited;
+    return {
+      // Carried only when true, so an idle row's payload stays as it was.
+      ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
+      ...(activity.awaitingKind === undefined ? {} : { awaitingKind: activity.awaitingKind }),
+      ...limited,
+    };
   }
 
   /**
@@ -700,9 +731,7 @@ export class WorkThreadService {
         runtime.push({
           threadId: thread.id,
           executing: activity.executing,
-          // Carried only when true, so an idle row's payload stays as it was.
-          ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
-          ...(activity.awaitingKind === undefined ? {} : { awaitingKind: activity.awaitingKind }),
+          ...this.#waitingFacts(thread, activity),
           ...liveTurnFacts(activity),
           ...(due === undefined ? {} : { followUpDue: due }),
         });
@@ -2788,6 +2817,8 @@ export interface WorkThreadRuntimeActivity {
   readonly executing: boolean;
   readonly awaitingInput?: boolean;
   readonly awaitingKind?: "approval" | "user-input";
+  /** `awaitingInput` is only because the latest turn's status is `waiting`. */
+  readonly waitsOnTurnAlone?: boolean;
   /** Present while a turn runs: its start and latest step, already redacted. */
   readonly turnStartedAt?: string;
   readonly liveStep?: ThreadLiveStep;

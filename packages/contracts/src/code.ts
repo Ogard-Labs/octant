@@ -4,7 +4,7 @@ import { Option, Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { FinishedReceiptId } from "./finishedReceipt";
-import { ThreadRestFields } from "./threadRest";
+import { ThreadRestFields, ThreadLimitedFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { GithubIssueContextRequest } from "./githubIssueContext";
@@ -1972,6 +1972,8 @@ export const CodeNavigationRuntime = Schema.Struct({
   linkedIssues: Schema.optional(ThreadLinkedIssues),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
+  /** The latest turn's current usage-limit stop; absent otherwise. */
+  ...ThreadLimitedFields,
 }).annotations(strict);
 export type CodeNavigationRuntime = typeof CodeNavigationRuntime.Type;
 

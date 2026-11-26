@@ -62,6 +62,7 @@ import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
   parkedStopReleased,
+  currentUsageLimitStop,
   prependEarlierTurns,
   refreshNewestTurns,
   startedConversationPickerGroups,
@@ -2986,28 +2987,29 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   // is still scheduled for it, offering Cancel alone: a model-only change
   // leaves that resume armed.
   const stoppedTurn = turns.at(-1);
-  const stoppedResume =
-    stoppedTurn === undefined ||
-    thread?.usageResume === undefined ||
-    String(thread.usageResume.record.turnId) !== String(stoppedTurn.turnId)
+  const currentStop = currentUsageLimitStop(
+    thread ?? {},
+    stoppedTurn === undefined
       ? undefined
-      : thread.usageResume;
+      : {
+          state: stoppedTurn.status,
+          limit: stoppedTurn.failure?.usageLimit,
+          turnId: String(stoppedTurn.turnId),
+        },
+  );
   const usageLimitNotice =
-    stoppedTurn === undefined ||
-    stoppedTurn.status !== "waiting" ||
-    stoppedTurn.failure?.usageLimit === undefined ||
-    (latestStopReleased && stoppedResume?.status !== "scheduled")
+    stoppedTurn === undefined || currentStop === undefined
       ? undefined
       : usageLimitStripNotice({
-          limit: stoppedTurn.failure.usageLimit,
+          limit: currentStop.limit,
           provider: providerInstanceLabel(
             props.providerGroups ?? [],
             stoppedTurn.authority.providerInstanceId,
           ),
-          usageResume: stoppedResume,
+          usageResume: currentStop.resume,
           ...(readOnly
             ? {}
-            : latestStopReleased
+            : currentStop.released
               ? { onCancelResume: cancelUsageResume }
               : {
                   ...(props.turnClient === undefined

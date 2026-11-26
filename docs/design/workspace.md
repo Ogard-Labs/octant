@@ -630,8 +630,8 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
 ### Sidebar thread status
 
 The sidebar speaks about what a thread is doing now with one vocabulary, in
-descending strength: `working` (Working), `attention` (Needs attention), `woke`
-(Snooze ended), and `unread` (New activity). `@octant/contracts`
+descending strength: `working` (Working), `attention` (Needs attention),
+`limited` (Limited), `woke` (Snooze ended), and `unread` (New activity). `@octant/contracts`
 (`SidebarThreadStatus`) declares the legal set because a saved Project View
 persists it; `@octant/domain` (`sidebarThreadStatusPolicy`) owns the order,
 labels, roll-up, and comparison, and its label record is typed over the
@@ -639,10 +639,29 @@ contract's union so a word cannot be added without a rank. A thread row, a
 Project heading, a filter, and a sort all resolve through that policy, so they
 cannot rank the same facts differently.
 
+- **Limited** says a provider usage limit holds the thread's latest turn
+  (maintainer decision, 2026-11-26). The row says it in the warning tone with
+  the alert mark, as "Limited 2h" in the row's short form while the provider
+  named a reset still ahead, and as "Limited" when it named none or the stop is
+  a billing one, which no clock clears. It ranks below Needs you, because a
+  question or an approval is more urgent, and above Snooze ended and New
+  activity. The thread stays in the active list; the Status arrangement gives
+  it no heading of its own. The host decides which stop is current by the
+  same rule as
+  [the strip above the composer](thread-view.md#usage-limit-strip) (the latest
+  turn still waits on the limit, and a stop released by a move counts only
+  while its resume is still scheduled) and sends it on the thread's navigation
+  row; the renderer reads nothing from text or timing beyond dropping the word
+  once the named reset has passed on its clock, on the row's minute tick. A
+  snoozed or settled thread says where it rests instead. A Work turn stopped
+  on a limit, a stop a move released included, is therefore not reported as
+  waiting on the person unless a request or a child also waits, so it raises no
+  Needs you row, Inbox entry or early wake, as in Chat and Code. A side task's
+  receipt still reads such a child as needing the person.
 - Nothing to report is the absence of a status (`undefined`), not a word: no
   "Idle" mark, filter value, or sort rank exists. The Status arrangement's
-  **Idle** heading only gathers the threads with no status; it is not one of
-  the words, and its headings are phrased as what the person does next rather
+  **Idle** heading only gathers the threads no heading above it holds; it is
+  not one of the words, and its headings are phrased as what the person does next rather
   than as the status labels.
 - Only facts the sidebar already carries are statuses. A failed run or blocked
   check is not inferred from silence; adding a status is a wire change that
@@ -654,7 +673,7 @@ cannot rank the same facts differently.
   width to the row's hover controls rather than widening the row, and obeys
   the Status row property.
 - A saved view's status filter keeps a thread whose strongest status is
-  selected. An empty or absent list means every status; a saved word this build
+  selected, from the same five words, Limited included. An empty or absent list means every status; a saved word this build
   does not know is dropped rather than refusing the view, and dropping every
   word means no constraint.
 - Ordering by status puts the Project with the strongest status first, then

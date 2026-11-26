@@ -1,3 +1,4 @@
+import type { ThreadUsageLimited } from "@octant/contracts";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
   ChatClientFailure,
@@ -276,6 +277,9 @@ export function useChatController(options: ChatControllerOptions) {
   const [awaitingKindByThread, setAwaitingKindByThread] = useState<
     ReadonlyMap<string, "approval" | "user-input">
   >(new Map());
+  const [limitedByThread, setLimitedByThread] = useState<ReadonlyMap<string, ThreadUsageLimited>>(
+    () => new Map(),
+  );
   const [liveTurnByThread, setLiveTurnByThread] = useState<ReadonlyMap<string, LiveTurnFacts>>(
     new Map(),
   );
@@ -405,6 +409,24 @@ export function useChatController(options: ChatControllerOptions) {
         if (current.get(key) === awaiting) continue;
         if (awaiting === undefined) next.delete(key);
         else next.set(key, awaiting);
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+    setLimitedByThread((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const thread of threads) {
+        const key = String(thread.id);
+        const limited = thread.limited;
+        const previous = current.get(key);
+        if (
+          previous?.resetsAt === limited?.resetsAt &&
+          current.has(key) === (limited !== undefined)
+        )
+          continue;
+        if (limited === undefined) next.delete(key);
+        else next.set(key, limited);
         changed = true;
       }
       return changed ? next : current;
@@ -926,6 +948,9 @@ export function useChatController(options: ChatControllerOptions) {
           ...(executingByThread.get(String(thread.id)) === true ? { executing: true } : {}),
           ...(awaitingKind === undefined ? {} : { awaitingInput: true, awaitingKind }),
           ...liveTurnByThread.get(String(thread.id)),
+          ...(limitedByThread.has(String(thread.id))
+            ? { limited: limitedByThread.get(String(thread.id)) }
+            : {}),
           ...(followUpByThread.get(String(thread.id)) === undefined
             ? {}
             : { followUpOpen: followUpByThread.get(String(thread.id))! }),
@@ -959,6 +984,7 @@ export function useChatController(options: ChatControllerOptions) {
     bootstrap,
     executingByThread,
     followUpByThread,
+    limitedByThread,
     liveTurnByThread,
     markedUnreadThreads,
     readCursors,

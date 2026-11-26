@@ -23,7 +23,13 @@ import { Schema } from "effect";
  * could filter for, and a schema that accepted it would invite a saved filter
  * asking for threads that have nothing to report.
  */
-export const SidebarThreadStatus = Schema.Literal("working", "attention", "woke", "unread");
+export const SidebarThreadStatus = Schema.Literal(
+  "working",
+  "attention",
+  "limited",
+  "woke",
+  "unread",
+);
 export type SidebarThreadStatus = typeof SidebarThreadStatus.Type;
 
 export const decodeSidebarThreadStatus = Schema.decodeUnknownSync(SidebarThreadStatus);

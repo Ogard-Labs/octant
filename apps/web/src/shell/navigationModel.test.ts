@@ -712,3 +712,12 @@ function descriptorIds(
 ): ReadonlyArray<SidebarNavigationDescriptorId> {
   return buildSidebarNavigation(input).map((descriptor) => descriptor.id);
 }
+
+describe("a Chat thread stopped on a usage limit", () => {
+  it("carries the host's limit fact onto its sidebar row", () => {
+    const [row] = buildChatThreadNavigation([
+      { threadId: "thread-a", title: "Planning", readSequence: 0, limited: {} },
+    ]);
+    expect(row?.limited).toEqual({});
+  });
+});

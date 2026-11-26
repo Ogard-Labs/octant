@@ -361,3 +361,14 @@ describe("buildWorkThreadNavigation rest and attention", () => {
     ]);
   });
 });
+
+describe("a Work thread stopped on a usage limit", () => {
+  it("carries the host's limit fact onto its sidebar row", () => {
+    const [row] = buildWorkThreadNavigation(
+      [workThread()],
+      [{ threadId, executing: false, limited: {} }],
+    );
+    expect(row?.limited).toEqual({});
+    expect(row?.activity).toBeUndefined();
+  });
+});

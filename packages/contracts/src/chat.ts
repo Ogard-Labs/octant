@@ -33,7 +33,7 @@ import {
   RewindConversationHandoff,
 } from "./contextHandoff";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
-import { ThreadRestFields } from "./threadRest";
+import { ThreadRestFields, ThreadLimitedFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { ExtensionSelection } from "./extensions";
 import { HostId } from "./host";
@@ -1343,6 +1343,8 @@ export const ChatNavigationThread = Schema.Struct({
   awaitingKind: Schema.optional(Schema.Literal("approval", "user-input")),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
+  /** The latest attempt's current usage-limit stop; absent otherwise. */
+  ...ThreadLimitedFields,
   /** Completed and snoozed rest, so the sidebar can file the row; absent on an older host. */
   ...ThreadRestFields,
 }).annotations(strict);
