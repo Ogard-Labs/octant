@@ -1041,7 +1041,7 @@ export class VideoJobService {
             answer.status !== "running" &&
             (answer.status !== "failed" || answer.billed === true)
           ) {
-            await this.#conclude(job, answer, true);
+            await this.#conclude(job, answer, true, reported);
             return;
           }
         } else {
@@ -1085,7 +1085,7 @@ export class VideoJobService {
           pollFailureLeavesJobUnconfirmed(poll.providerFailure)
         )
       ) {
-        await this.#conclude(job, poll, running.stopRequested);
+        await this.#conclude(job, poll, running.stopRequested, reported);
         return;
       }
       // A provider that answered with a retry-after wait is honoured before
@@ -1148,6 +1148,7 @@ export class VideoJobService {
     job: VideoJob,
     answer: Exclude<VideoAdapterPoll, { readonly status: "running" }>,
     stopped: boolean,
+    reported?: VideoAdapterUsage,
   ): Promise<void> {
     const current = this.#current(job);
     switch (answer.status) {
@@ -1228,18 +1229,23 @@ export class VideoJobService {
         });
         break;
       }
-      case "failed":
+      case "failed": {
+        // Usage an earlier status check reported means the provider already
+        // billed the clip: a later check that fails (Gemini answers 404 or 400
+        // once the interaction is gone) settles at that usage, never at zero.
+        const usage = answer.usage ?? reported;
         this.#finish(current, stopped ? "cancelled" : "failed", {
           ...(stopped ? {} : { failure: answer.providerFailure }),
-          ...(answer.billed === true
+          ...(answer.billed === true || reported !== undefined
             ? {
                 billed: true,
-                settledCostUsdMicros: this.#settled(current, answer.usage),
-                ...(answer.usage === undefined ? {} : { usage: answer.usage }),
+                settledCostUsdMicros: this.#settled(current, usage),
+                ...(usage === undefined ? {} : { usage }),
               }
             : {}),
         });
         break;
+      }
       case "cancelled":
         this.#finish(current, "cancelled", {
           settledCostUsdMicros: this.#settled(current, answer.usage),

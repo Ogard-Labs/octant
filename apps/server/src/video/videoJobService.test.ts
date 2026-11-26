@@ -18,6 +18,7 @@ import {
   type VideoModelCapabilities,
 } from "@octant/contracts/video-generation";
 import {
+  classifyVideoHttpFailure,
   classifyVideoStartHttpFailure,
   isProviderFailure,
   type VideoAdapterForget,
@@ -2170,6 +2171,28 @@ describe("video jobs", () => {
     );
     service.close();
   });
+
+  it.each([404, 400])(
+    "settles at the usage the provider last reported when a later status check answers %i",
+    async (httpStatus) => {
+      const { service, calls, spend } = harness({
+        poll: async () =>
+          calls.poll === 1
+            ? { status: "running", usage: { outputTokens: 28_960 } }
+            : {
+                status: "failed",
+                providerFailure: classifyVideoHttpFailure(
+                  new Response(null, { status: httpStatus }),
+                ),
+              },
+      });
+      const queued = await enqueue(service);
+      const done = await service.whenTerminal(queued.id);
+      expect(done).toMatchObject({ status: "failed", settledCostUsdMicros: 347_520 });
+      expect(spend.settle).toHaveBeenCalledOnce();
+      service.close();
+    },
+  );
 
   it("ends a job on the provider's own failure answer, billed nothing", async () => {
     const { service, spend } = harness({
