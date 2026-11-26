@@ -1,5 +1,6 @@
 import { createPublicKey, X509Certificate } from "node:crypto";
 import { isIP } from "node:net";
+import type { Duplex } from "node:stream";
 import { createSecureContext } from "node:tls";
 import { classifyRemoteListenerAddress } from "@octant/domain";
 import {
@@ -9,6 +10,7 @@ import {
   type RemoteAdmissionLimits,
   type RemoteBoundaryFetchOptions,
 } from "./remote/remoteAdmissionPolicy";
+import { serveRelayedConnection } from "./relayedConnection";
 import type { OctantServer, RequestTransportFacts, Serve } from "./server";
 
 const DEFAULT_MAX_REQUEST_BODY_SIZE = 1_048_576;
@@ -126,6 +128,12 @@ export interface PrivateListener {
   readonly start: () => Promise<void>;
   readonly stop: () => Promise<void>;
   readonly restart: (config: PrivateListenerConfig) => Promise<void>;
+  /**
+   * Serves one connection a paired device made through its hub's device relay,
+   * with this listener's certificate and boundary. False, and nothing served,
+   * while the listener is not ready.
+   */
+  readonly serveRelayed: (socket: Duplex, facts: RequestTransportFacts) => boolean;
 }
 
 export function createPrivateListener(options: PrivateListenerOptions): PrivateListener {
@@ -235,6 +243,18 @@ export function createPrivateListener(options: PrivateListenerOptions): PrivateL
     stop: async () => {
       options.signal?.removeEventListener("abort", onAbort);
       await stop();
+    },
+    serveRelayed: (socket, facts) => {
+      if (state !== "ready") return false;
+      serveRelayedConnection({
+        socket,
+        tls: config.tls,
+        origin: listenerOrigin(config, activeServer?.url),
+        fetch: boundaryFetch,
+        facts,
+        maxBodyBytes: options.maxRequestBodySize ?? DEFAULT_MAX_REQUEST_BODY_SIZE,
+      });
+      return true;
     },
     restart: async (nextConfig) => {
       validatePrivateListenerConfig(nextConfig);

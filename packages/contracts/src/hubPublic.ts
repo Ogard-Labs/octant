@@ -440,3 +440,62 @@ export const VISITOR_PROOF_HEADER = "octant-visitor-proof";
 export const VISITOR_KEY_HEADER = "octant-visitor-key";
 /** How far a proof's time may stray from the hub's clock. */
 export const VISITOR_PROOF_SKEW_MS = 60_000;
+// The device relay (decision H36). The hub carries a paired device's bytes to
+// one host and reads none of them: inside, the device runs its ordinary TLS to
+// that host's listener and checks the pin it stored at pairing.
+
+/** The hub's first message on a relay: a fresh challenge and who is asking. */
+export const RelayChallenge = Schema.Struct({
+  challenge: base64Url(43, 43),
+  hubMemberId: HubMemberId,
+}).annotations(strict);
+export type RelayChallenge = typeof RelayChallenge.Type;
+export const decodeRelayChallenge = Schema.decodeUnknownSync(RelayChallenge);
+
+/** The device's answer: the host it wants and its device key's signature over the challenge. */
+export const RelayAdmission = Schema.Struct({
+  targetMemberId: HubMemberId,
+  deviceSpki: base64Url(80, 512),
+  signature: base64Url(86, 86),
+}).annotations(strict);
+export type RelayAdmission = typeof RelayAdmission.Type;
+export const decodeRelayAdmission = Schema.decodeUnknownSync(RelayAdmission);
+
+/** The text a device key signs to open a relay to one host through one hub. */
+export const relayAdmissionPayload = (input: {
+  readonly challenge: string;
+  readonly targetMemberId: string;
+  readonly hubMemberId: string;
+}): string => `octant/relay/v1|${input.challenge}|${input.targetMemberId}|${input.hubMemberId}`;
+
+/** What the hub sends once it admitted the device; binary frames follow. */
+export const RELAY_OPENED_MESSAGE = "opened";
+/** The close code a refused admission ends with. */
+export const RELAY_REFUSED_CLOSE_CODE = 4401;
+/** The close code when the host behind the relay cannot be reached or refuses the tunnel. */
+export const RELAY_UNAVAILABLE_CLOSE_CODE = 4503;
+
+/**
+ * A host whose person ticked Relay tells the hub which of its paired devices'
+ * keys may open a relay to it, by fingerprint. An empty list withdraws them all.
+ */
+export const HubRelayDevicesUpdate = Schema.Struct({
+  fingerprints: Schema.Array(digest).pipe(Schema.maxItems(256)),
+}).annotations(strict);
+export type HubRelayDevicesUpdate = typeof HubRelayDevicesUpdate.Type;
+export const decodeHubRelayDevicesUpdate = Schema.decodeUnknownSync(HubRelayDevicesUpdate);
+
+/** A window on the hub turns the device relay on or off; off, `/relay/v1` answers 404. */
+export const HubRelaySwitchRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(strict);
+export const decodeHubRelaySwitchRequest = Schema.decodeUnknownSync(HubRelaySwitchRequest);
+
+/** A window on a host lets one of its paired devices through the hub, or stops letting it. */
+export const HubRelayDeviceRequest = Schema.Struct({
+  deviceId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  allowed: Schema.Boolean,
+}).annotations(strict);
+export type HubRelayDeviceRequest = typeof HubRelayDeviceRequest.Type;
+export const decodeHubRelayDeviceRequest = Schema.decodeUnknownSync(HubRelayDeviceRequest);
+
+/** A relayed connection asked for a route only a connection on the private network may use. */
+export const RELAYED_ADMIN_REFUSED = "relayed-admin-refused";

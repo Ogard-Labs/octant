@@ -99,6 +99,8 @@ export interface RequestTransportFacts {
   readonly sourceKey: string;
   /** The peer's address, only when it is on the private network: shown in a new-device alert, never journaled. */
   readonly privateAddress?: string;
+  /** Set only on a request a paired device sent through its hub's device relay. */
+  readonly relayed?: true;
 }
 
 export interface ServeOptions {

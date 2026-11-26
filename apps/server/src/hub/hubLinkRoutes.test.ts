@@ -20,7 +20,7 @@ import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, signHubLinkRequest } from "./hubL
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
 import { createPinnedHubTransport } from "./pinnedHubTransport";
 import { REMOTE_HUB_LINK_ROUTE_IDS, createRemoteRoutePolicy } from "../remoteRoutePolicy";
-import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
+import { HUB_LINK_ROUTES, HUB_RELAY_TUNNEL_PREFIX } from "./hubLinkRoutes";
 import { PEER_CREDENTIAL_ROUTE } from "./ownerCredentialCopy";
 import { THREAD_MOVE_ROUTES } from "./threadMoveService";
 import { PEER_DELEGATION_ROUTES } from "./peerDelegationRoutes";
@@ -488,6 +488,8 @@ describe("the hub-link routes the private listener serves", () => {
         "POST",
         HUB_LINK_ROUTES.publicWebhookHandback,
       ],
+      [REMOTE_HUB_LINK_ROUTE_IDS.publicRelayDevices, "POST", HUB_LINK_ROUTES.publicRelayDevices],
+      [REMOTE_HUB_LINK_ROUTE_IDS.relayTunnel, "GET", `${HUB_RELAY_TUNNEL_PREFIX}${"a".repeat(64)}`],
       [REMOTE_HUB_LINK_ROUTE_IDS.provisionOffer, "POST", HUB_LINK_ROUTES.provisionOffer],
       [REMOTE_HUB_LINK_ROUTE_IDS.provisionMirror, "POST", HUB_LINK_ROUTES.provisionMirror],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegate, "POST", PEER_DELEGATION_ROUTES.create],

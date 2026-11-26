@@ -87,6 +87,9 @@ export type HubCliCommand =
       readonly hours?: number;
     }
   | { readonly action: "visitor"; readonly mode: "stop" | "send" | "dismiss"; readonly id: string }
+  /** The hub's device relay switch, and which of this host's paired devices may come through it. */
+  | { readonly action: "relay"; readonly mode: "on" | "off" | "list" }
+  | { readonly action: "relay"; readonly mode: "allow" | "forget"; readonly deviceId: string }
   | {
       readonly action: "certificate";
       readonly mode: "status" | "disable" | "enable";
@@ -303,6 +306,19 @@ export function resolveHubCliCommand(
       }
       return { action, mode, scheme, label };
     }
+    case "relay": {
+      const [mode, deviceId] = rest;
+      if (mode === "on" || mode === "off" || mode === "list") {
+        return rest.length === 1 && only() ? { action, mode } : undefined;
+      }
+      return (mode === "allow" || mode === "forget") &&
+        rest.length === 2 &&
+        only() &&
+        deviceId !== undefined &&
+        deviceId.length <= 128
+        ? { action, mode, deviceId }
+        : undefined;
+    }
     case "visitor": {
       const [mode, first, second] = rest;
       if (mode === "on" || mode === "off" || mode === "list") {
@@ -490,7 +506,58 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runWebhook(input, command);
     case "visitor":
       return await runVisitor(input, command);
+    case "relay":
+      return await runRelay(input, command);
   }
+}
+
+async function runRelay(
+  input: Input,
+  command: Extract<HubCliCommand, { action: "relay" }>,
+): Promise<number> {
+  if (command.mode === "on" || command.mode === "off") {
+    const response = await post(input, "/api/desktop/hub/relay", {
+      enabled: command.mode === "on",
+    });
+    if (!isOk(response, "changed")) return refusal(input, response, "Octant refused that.");
+    input.stdout.write(
+      command.mode === "on"
+        ? "The device relay is on: a device a member listed can reach that member through this hub's public entrance.\n"
+        : "The device relay is off; its route answers nothing and every open relay ended.\n",
+    );
+    return 0;
+  }
+  if (command.mode === "list") {
+    const response = await input.session.send({ path: "/api/desktop/hub/status", method: "GET" });
+    const devices = field(field(response.body, "relay"), "devices");
+    if (response.status !== 200 || !Array.isArray(devices)) {
+      input.stderr.write(`${failureMessage(response, "Octant could not read the devices.")}\n`);
+      return 1;
+    }
+    input.stdout.write(
+      devices.length === 0
+        ? "This computer has no paired device.\n"
+        : `${devices
+            .map(
+              (device: unknown) =>
+                `${String(field(device, "deviceId"))}  ${field(device, "allowed") === true ? "through the hub" : "private network only"}`,
+            )
+            .join("\n")}\n`,
+    );
+    return 0;
+  }
+  if (!("deviceId" in command)) return 1;
+  const response = await post(input, "/api/desktop/hub/relay/devices", {
+    deviceId: command.deviceId,
+    allowed: command.mode === "allow",
+  });
+  if (!isOk(response, "changed")) return refusal(input, response, "Octant refused that.");
+  input.stdout.write(
+    command.mode === "allow"
+      ? "That device can reach this computer through the hub while this computer's grant ticks Relay.\n"
+      : "That device reaches this computer only on the private network now.\n",
+  );
+  return 0;
 }
 
 const CERTIFICATE_TRANSPARENCY_NOTE =

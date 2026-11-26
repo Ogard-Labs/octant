@@ -69,6 +69,11 @@ export function acceptWebSocketUpgrade(
   return response;
 }
 
+/** Whether an answer carries an acceptance, without taking it. */
+export function carriesWebSocketUpgrade(response: Response): boolean {
+  return acceptances.has(response);
+}
+
 /** The acceptance an answer carries, at most once. */
 export function takeWebSocketUpgrade(response: Response): WebSocketUpgradeAcceptance | undefined {
   const acceptance = acceptances.get(response);

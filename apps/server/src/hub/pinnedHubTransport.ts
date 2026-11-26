@@ -8,7 +8,7 @@ import { createHash, X509Certificate } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { lookup } from "node:dns/promises";
 import { connect as connectTcp, isIP, type Socket } from "node:net";
-import { connect as connectTls } from "node:tls";
+import { connect as connectTls, type TLSSocket } from "node:tls";
 import { classifyRemoteListenerAddress } from "@octant/domain";
 import { digestFromListenerPin } from "./hubCrypto";
 
@@ -70,60 +70,74 @@ const isPrivateAddress = (address: string): boolean => {
   return sourceClass === "lan-private" || sourceClass === "tailscale";
 };
 
+/**
+ * A TLS connection to one listener origin's private address, handed over only
+ * after the served key matches the pin. The device relay's tunnel runs on it.
+ */
+export async function openPinnedSocket(
+  target: { readonly origin: string; readonly pin: string },
+  network: HubNetwork = SYSTEM_NETWORK,
+  signal?: AbortSignal,
+): Promise<TLSSocket> {
+  const url = new URL(target.origin);
+  const expectedDigest = digestFromListenerPin(target.pin);
+  if (expectedDigest === undefined) throw new HubTransportRefused("invalid-pin");
+  signal?.throwIfAborted();
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  const addresses = await network.resolve(hostname);
+  // Every address the name resolves to must be private, so a name that also
+  // resolves to a public address is never dialled.
+  const first = addresses[0];
+  if (first === undefined || !addresses.every(isPrivateAddress)) {
+    throw new HubTransportRefused("not-private");
+  }
+  const tcp = await network.dial(first, Number(url.port || 443));
+  if (tcp.remoteAddress !== undefined && !isPrivateAddress(tcp.remoteAddress)) {
+    tcp.destroy();
+    throw new HubTransportRefused("not-private");
+  }
+  const secure = connectTls({
+    socket: tcp,
+    // The pin judges the certificate, not a name or a chain.
+    rejectUnauthorized: false,
+    minVersion: "TLSv1.3",
+    // No server name: a listener that also holds a certificate for its
+    // tailnet name serves that one to a client naming it, and the pin
+    // is the key of the listener's own certificate.
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("handshake timed out")),
+        HANDSHAKE_TIMEOUT_MS,
+      );
+      secure.once("secureConnect", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      secure.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+    const leaf = secure.getPeerCertificate(true);
+    const served = createHash("sha256")
+      .update(new X509Certificate(leaf.raw).publicKey.export({ format: "der", type: "spki" }))
+      .digest("hex");
+    if (served !== expectedDigest) throw new HubTransportRefused("pin-mismatch");
+  } catch (error) {
+    secure.destroy();
+    throw error;
+  }
+  return secure;
+}
+
 export function createPinnedHubTransport(network: HubNetwork = SYSTEM_NETWORK): HubTransport {
   return ({ origin, pin }) =>
     async (input, init = {}) => {
       const url = new URL(input);
       if (url.origin !== origin) throw new HubTransportRefused("wrong-origin");
-      const expectedDigest = digestFromListenerPin(pin);
-      if (expectedDigest === undefined) throw new HubTransportRefused("invalid-pin");
-      init.signal?.throwIfAborted();
-      const hostname = url.hostname.replace(/^\[|\]$/g, "");
-      const addresses = await network.resolve(hostname);
-      // Every address the name resolves to must be private, so a name that also
-      // resolves to a public address is never dialled.
-      const first = addresses[0];
-      if (first === undefined || !addresses.every(isPrivateAddress)) {
-        throw new HubTransportRefused("not-private");
-      }
-      const tcp = await network.dial(first, Number(url.port || 443));
-      if (tcp.remoteAddress !== undefined && !isPrivateAddress(tcp.remoteAddress)) {
-        tcp.destroy();
-        throw new HubTransportRefused("not-private");
-      }
-      const secure = connectTls({
-        socket: tcp,
-        // The pin judges the certificate, not a name or a chain.
-        rejectUnauthorized: false,
-        minVersion: "TLSv1.3",
-        // No server name: a listener that also holds a certificate for its
-        // tailnet name serves that one to a client naming it, and the pin
-        // is the key of the listener's own certificate.
-      });
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(
-            () => reject(new Error("handshake timed out")),
-            HANDSHAKE_TIMEOUT_MS,
-          );
-          secure.once("secureConnect", () => {
-            clearTimeout(timer);
-            resolve();
-          });
-          secure.once("error", (error) => {
-            clearTimeout(timer);
-            reject(error);
-          });
-        });
-        const leaf = secure.getPeerCertificate(true);
-        const served = createHash("sha256")
-          .update(new X509Certificate(leaf.raw).publicKey.export({ format: "der", type: "spki" }))
-          .digest("hex");
-        if (served !== expectedDigest) throw new HubTransportRefused("pin-mismatch");
-      } catch (error) {
-        secure.destroy();
-        throw error;
-      }
+      const secure = await openPinnedSocket({ origin, pin }, network, init.signal);
       return await new Promise<Response>((resolve, reject) => {
         const body = init.body === undefined ? undefined : Buffer.from(init.body, "utf8");
         const outgoing = httpRequest(

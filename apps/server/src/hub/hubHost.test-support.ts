@@ -54,6 +54,15 @@ import { sendWebhookDelivery, spokeWebhookHubPort } from "./webhookLinks";
 import { HubVisitorService } from "./hubVisitorService";
 import { SpokeVisitorService, type VisitorThreadSource } from "./spokeVisitorService";
 import { askVisitorSpoke, spokeVisitorHubPort } from "./visitorLinks";
+import { HubRelayService } from "./hubRelayService";
+import { SpokeRelayService } from "./spokeRelayService";
+import { openRelayTunnel, spokeRelayHubPort } from "./relayLinks";
+import {
+  WEBSOCKET_RELAY_MAX_MESSAGE_BYTES,
+  WebSocketEndpoint,
+  takeWebSocketUpgrade,
+  webSocketAcceptFor,
+} from "../webSocketRelay";
 import {
   handBackPublicQueue,
   servesOwnPublicEndpoints,
@@ -257,6 +266,10 @@ export interface HubTestHost {
   readonly spokeWebhooks: SpokeWebhookService;
   /** The acting hub's visitor links: each spoke's signed grants, and the visitor routes. */
   readonly visitors: HubVisitorService;
+  /** The acting hub's device relay. */
+  readonly relayHub: HubRelayService;
+  /** This host's side of the device relay. */
+  readonly spokeRelay: SpokeRelayService;
   /** This host's own visitor links, as a spoke; its one thread is a fixed Code thread. */
   readonly spokeVisitors: SpokeVisitorService;
   /** The owner unlock a paired client's merge may need here, over the same challenges the owner route issues. */
@@ -831,6 +844,32 @@ export async function startHubTestHost(input: {
     record: (change) => records.push(change),
     now: Date.now,
   });
+  const relayHub = new HubRelayService({
+    state,
+    serving: () => hub.status().enabled,
+    hubMemberId: () => hub.hubMemberId(),
+    openTunnel: (targetMemberId, fingerprint) =>
+      openRelayTunnel(
+        { ...webhookLinks, selfMemberId: () => hub.hubMemberId(), network: input.network.network },
+        targetMemberId,
+        fingerprint,
+      ),
+    record: (change) => records.push(change),
+  });
+  const spokeRelay = new SpokeRelayService({
+    state,
+    relayGranted: () => spoke.hubMayUse("relay").status === "allowed",
+    hub: spokeRelayHubPort(webhookLinks),
+    devices: () =>
+      (gateway?.localDeviceAdministration()?.listDevices() ?? []).map((device) => ({
+        deviceId: String(device.deviceId),
+        fingerprint: device.deviceKeyFingerprint,
+        active: device.state === "active",
+      })),
+    paused: () => gateway?.localDeviceAdministration()?.remoteAccessPaused() ?? false,
+    serve: (socket, facts) => gateway?.listener()?.serveRelayed(socket, facts) ?? false,
+    record: (change) => records.push(change),
+  });
   const hubLinkRoutes = createHubLinkRouteHandler({
     hub,
     spoke,
@@ -861,6 +900,8 @@ export async function startHubTestHost(input: {
     spokeWebhooks,
     visitors,
     spokeVisitors,
+    relay: relayHub,
+    spokeRelay,
     publicState: () => state.load(),
     ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
   });
@@ -1037,7 +1078,10 @@ export async function startHubTestHost(input: {
       signing: identity.signing,
       webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
       hubLink,
-      onDeviceRemoved: (deviceId) => pairedDeviceAlerts.dropDevice(deviceId),
+      onDeviceRemoved: (deviceId) => {
+        pairedDeviceAlerts.dropDevice(deviceId);
+        void spokeRelay.deviceRemoved(deviceId);
+      },
       ...(input.productDispatch === undefined ? {} : { productDispatch: input.productDispatch }),
       serve,
       clock: isoNow,
@@ -1074,6 +1118,33 @@ export async function startHubTestHost(input: {
         outgoing.end(Buffer.from(await response.arrayBuffer()));
       })();
     });
+  });
+  // A WebSocket upgrade reaches the gateway as the listener's own transport
+  // hands it over: the device relay's tunnel opens this way.
+  server.on("upgrade", (incoming, socket: Socket, head: Buffer) => {
+    socket.on("error", () => undefined);
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(incoming.headers)) {
+      if (typeof value === "string") headers.set(name, value);
+    }
+    void (async () => {
+      if (gatewayFetch === undefined) throw new Error("The gateway is not serving.");
+      const response = await gatewayFetch(
+        new Request(`${origin}${incoming.url}`, { method: "GET", headers }),
+        tailscaleFacts,
+      );
+      const acceptance = takeWebSocketUpgrade(response);
+      const key = incoming.headers["sec-websocket-key"];
+      if (acceptance === undefined || typeof key !== "string") {
+        socket.end(`HTTP/1.1 ${response.status} Refused\r\nconnection: close\r\n\r\n`);
+        return;
+      }
+      socket.write(
+        `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${webSocketAcceptFor(key)}\r\n\r\n`,
+      );
+      const client = new WebSocketEndpoint(socket, "server", WEBSOCKET_RELAY_MAX_MESSAGE_BYTES);
+      client.start(acceptance.open(client), head);
+    })().catch(() => socket.destroy());
   });
   server.on("tlsClientError", () => undefined);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -1128,6 +1199,8 @@ export async function startHubTestHost(input: {
     spokeWebhooks,
     visitors,
     spokeVisitors,
+    relayHub,
+    spokeRelay,
     pairedMergeUnlock,
     ownerApprovalAnswerUnlock,
     accounts,

@@ -115,8 +115,8 @@ On 2026-11-26 the maintainer added one narrow
 triggers, and the person's own paired devices away from the private network,
 with failover and no Octant-run service, and settled
 [decisions H29 to H36](#decisions); slices 21 to 26 are built as the
-delivery plan records, run only on loopback, and slice 27 is designed, not
-built.
+delivery plan records, run only on loopback, and slice 27 is partly built: the
+server side and a Node client, with no phone or desktop app using it yet.
 
 ## Outcome
 
@@ -166,9 +166,8 @@ in a browser at its Tailscale name. After that:
     webhook delivery runs twice and visitor links keep working
     ([The public entrance during failover](#the-public-entrance-during-failover)).
 
-Items 10, 11 and 13 are built and run only on loopback, as the
-[delivery plan](#delivery-plan) records; item 12 is designed, not built
-(maintainer decision, 2026-11-26).
+Items 10 to 13 were added by maintainer decision on 2026-11-26; each one's
+section says what is built, all of it run only on loopback.
 
 **Not in scope:** members that are not the person's own devices (teams, shared
 machines, other people's computers), cloud machines Octant provisions, an
@@ -2954,7 +2953,7 @@ the path.
   Tailscale Funnel switch, or a tunnel or proxy the person runs themselves
   (decision H29). It is off by default, and nothing on it reaches a private,
   pairing, administration, or member-to-member route (built, run only on
-  loopback; the device relay is designed, not built; maintainer decision,
+  loopback; the device relay is partly built, on the server; maintainer decision,
   2026-11-26).
 - **No Octant relay, no port forwarding.** No traffic goes through a relay or
   tunnel Octant runs, and no member opens or asks for a port on the person's
@@ -3180,8 +3179,10 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
 
 A paired phone or computer away from the private network can reach the hosts
 it paired with through the hub's public entrance, so the hub is the person's
-own relay and no Octant-run relay is needed (decision H36; designed, not
-built).
+own relay and no Octant-run relay is needed (decision H36). Partly built: the
+hub's admission, the host's list and tunnel, the refusals, and a client for a
+device on Node are built and run between hosts on loopback; the phone and
+desktop apps do not use the client yet (below).
 
 - **Pinned end to end.** The device opens a WebSocket to the entrance's relay
   route and names one host. The hub carries the bytes to that host over the
@@ -3201,7 +3202,30 @@ built).
   QR.
 - **Off by default.** The hub's Device relay switch, each host's Relay
   hub-grant item, and each device's own per-host choice. A browser cannot
-  check a pin, so the relay serves only the phone and desktop apps.
+  check a pin, so the relay serves only the phone and desktop apps. Until a
+  device can make its own choice, the host's person makes it on the host
+  (`octant hub relay allow <device-id>`): only a device the host's own window
+  allowed is listed, and the hub learns only its key's fingerprint.
+- **How it is built.** The device answers the hub's challenge with
+  `octant/relay/v1|<challenge>|<host>|<hub>` signed by its device key; the
+  hub admits it only if that host listed the key's fingerprint, then opens a
+  WebSocket on the host's listener at `/api/hub/relay/<fingerprint>`, signed
+  like any hub request over the pinned private transport. The host checks
+  its own list, its Relay item and its pause again, and serves the bytes
+  with its own listener certificate through the same remote boundary, with
+  each relayed device on its own admission key. Pairing, the pairing
+  tickets and requests, member and window routes, and any change to the
+  device list or the pause answer `relayed-admin-refused` before routing.
+  At most 32 tunnels are open at once; turning the switch off or pausing
+  remote access on the hub ends the open ones, and revoking a device takes
+  its key off the hub's list at once.
+- **Not built yet:** the phone and desktop apps using the relay (the Node
+  client in `packages/client-runtime` exists, with no app wiring) and the
+  device's own per-host choice; WebSocket routes inside a relay (a host
+  answers them 501); a relay through a forwarding member or a standing-in
+  standby (only the acting hub admits relays, and a forwarding member answers
+  the relay route 404); a window control for the switch and the device list
+  (the CLI and loopback routes have them).
 - **Phone push is separate.** The relay carries a device's own connection,
   not notifications. The store build of the phone app still gets push through
   the minimal Octant push gateway
@@ -3480,7 +3504,7 @@ new device. Owner powers move the main risk to
 the unlock key; it lives in each device's secure hardware and is used only
 after the person proves presence.
 
-The public entrance (built except the device relay) adds internet reach to
+The public entrance (built; the device relay on the server only) adds internet reach to
 the hub,
 which the private-network argument above no longer covers for those routes.
 Its own locks are: a route table with no private, pairing or administration
@@ -4701,7 +4725,12 @@ limits, and the device relay's channel design.
     desktop apps. Acceptance: a paired device reaches its host through the
     entrance with its pin checked, the hub sees only ciphertext, and an
     unlisted key or a pairing route is refused. **Linux container: yes**
-    for the server; a phone on mobile data is a maintainer gate.
+    for the server; a phone on mobile data is a maintainer gate. Partly
+    built: the server side, the CLI and loopback routes, and the Node client,
+    proved by a two-host loopback smoke over real TLS in which a recording
+    front never sees the request or its answer; not built yet: the apps'
+    use of the client, the device's own choice, and a relay through a
+    standby ([Your own devices through the hub](#your-own-devices-through-the-hub)).
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

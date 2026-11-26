@@ -230,6 +230,9 @@ import { SpokeWebhookService } from "../hub/spokeWebhookService";
 import { sendWebhookDelivery, spokeWebhookHubPort } from "../hub/webhookLinks";
 import { HubVisitorService } from "../hub/hubVisitorService";
 import { SpokeVisitorService } from "../hub/spokeVisitorService";
+import { HubRelayService } from "../hub/hubRelayService";
+import { SpokeRelayService } from "../hub/spokeRelayService";
+import { openRelayTunnel, spokeRelayHubPort } from "../hub/relayLinks";
 import { askVisitorSpoke, spokeVisitorHubPort } from "../hub/visitorLinks";
 import {
   handBackPublicQueue,
@@ -659,11 +662,21 @@ export function wireRemote(deps: RemoteDependencies) {
   // The public entrance is made with the hub services below; the gateway's pause
   // hook reaches it through this slot, since the gateway can be made first.
   let publicEntranceBound: PublicEntranceService | undefined;
+  let relaysBound: { readonly hub: HubRelayService; readonly spoke: SpokeRelayService } | undefined;
   const publicEntranceSlot = {
     bind: (service: PublicEntranceService) => {
       publicEntranceBound = service;
     },
-    reconcile: () => void publicEntranceBound?.reconcile().catch(() => undefined),
+    bindRelays: (relays: { readonly hub: HubRelayService; readonly spoke: SpokeRelayService }) => {
+      relaysBound = relays;
+    },
+    reconcile: () => {
+      // A pause ends the relays already carrying, not only the next ones.
+      if (readRemoteAccessPaused(persistence.connection)) relaysBound?.hub.closeAll();
+      void publicEntranceBound?.reconcile().catch(() => undefined);
+    },
+    deviceRemoved: (deviceId: string) =>
+      void relaysBound?.spoke.deviceRemoved(deviceId).catch(() => undefined),
   };
   const injectedRemoteListenerServices = options.remoteListener?.services;
   const resolveRemoteGatewayServices = (): Omit<RemoteGatewayServices, "config" | "serve"> => {
@@ -680,7 +693,10 @@ export function wireRemote(deps: RemoteDependencies) {
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).pairedDeviceLifetime,
       onDevicePaired: (device) => alertNewDevice(device),
       onRemoteAccessPauseChanged: () => publicEntranceSlot.reconcile(),
-      onDeviceRemoved: (deviceId) => pairedDeviceAlerts.dropDevice(deviceId),
+      onDeviceRemoved: (deviceId) => {
+        pairedDeviceAlerts.dropDevice(deviceId);
+        publicEntranceSlot.deviceRemoved(deviceId);
+      },
       hostId: identity.hostId,
       displayName: identity.displayName,
       serverBuildVersion: version,
@@ -1466,6 +1482,48 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
     now: Date.now,
   });
+  // The device relay (decision H36): only the acting hub admits devices, by the
+  // keys each host listed, and every host serves a tunnel as its own listener.
+  const hubRelay = new HubRelayService({
+    state: hubStateStore,
+    serving: () => hubService.status().enabled,
+    hubMemberId: () => hubService.hubMemberId(),
+    openTunnel: (targetMemberId, fingerprint) =>
+      openRelayTunnel(
+        {
+          state: hubStateStore,
+          identity: resolveHubIdentity,
+          transport: hubTransport,
+          now: Date.now,
+          selfMemberId: () => hubService.hubMemberId(),
+        },
+        targetMemberId,
+        fingerprint,
+      ),
+    record: recordHubMembership,
+  });
+  const spokeRelay = new SpokeRelayService({
+    state: hubStateStore,
+    relayGranted: () => spokeLinkService.hubMayUse("relay").status === "allowed",
+    hub: spokeRelayHubPort({
+      state: hubStateStore,
+      identity: resolveHubIdentity,
+      transport: hubTransport,
+      now: Date.now,
+    }),
+    devices: () =>
+      (currentRemoteGateway?.localDeviceAdministration()?.listDevices() ?? []).map((device) => ({
+        deviceId: String(device.deviceId),
+        fingerprint: device.deviceKeyFingerprint,
+        active: device.state === "active",
+      })),
+    paused: () => readRemoteAccessPaused(persistence.connection),
+    serve: (socket, facts) =>
+      currentRemoteGateway?.listener()?.serveRelayed(socket, facts) ?? false,
+    record: recordHubMembership,
+  });
+  publicEntranceSlot.bindRelays({ hub: hubRelay, spoke: spokeRelay });
+  setInterval(() => void spokeRelay.look().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
   setInterval(() => void spokeVisitors.look().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
   setInterval(() => void hubWebhooks.tick().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
   // A standby the hub took out of the order keeps no copy of a spoke's sealed
@@ -1492,7 +1550,14 @@ export function wireRemote(deps: RemoteDependencies) {
       const link = hubStateStore.load().link;
       return link !== undefined && link.removed !== true ? "member" : "none";
     },
-    handlers: () => ({ webhook: hubWebhooks.handle, ...hubVisitors.handlers() }),
+    handlers: () => {
+      const relay = hubRelay.handler();
+      return {
+        webhook: hubWebhooks.handle,
+        ...hubVisitors.handlers(),
+        ...(relay === undefined ? {} : { relay }),
+      };
+    },
     forward: (envelope) =>
       forwardToActingHub({
         state: hubStateStore,
@@ -1558,6 +1623,8 @@ export function wireRemote(deps: RemoteDependencies) {
     spokeWebhooks,
     visitors: hubVisitors,
     spokeVisitors,
+    relay: hubRelay,
+    spokeRelay,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   const hubLinkRoutes = createHubLinkRouteHandler({
@@ -1579,6 +1646,8 @@ export function wireRemote(deps: RemoteDependencies) {
     spokeWebhooks,
     visitors: hubVisitors,
     spokeVisitors,
+    relay: hubRelay,
+    spokeRelay,
   });
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's

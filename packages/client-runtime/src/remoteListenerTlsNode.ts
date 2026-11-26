@@ -8,7 +8,13 @@ import { createHash, type X509Certificate } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { connect as connectTcp, isIP, type Socket } from "node:net";
+import { Duplex } from "node:stream";
 import { connect as connectTls, type TLSSocket } from "node:tls";
+import {
+  RELAY_OPENED_MESSAGE,
+  decodeRelayChallenge,
+  relayAdmissionPayload,
+} from "@octant/contracts";
 import { LISTENER_KEY_TRANSITION_HEADER } from "@octant/domain";
 import { listenerTrustAfterResponse } from "./listenerKeyTransition";
 import {
@@ -130,6 +136,8 @@ const BODYLESS_STATUSES: ReadonlySet<number> = new Set([101, 204, 205, 304]);
 function createListenerFetchOver(
   options: ListenerConnectionOptions,
   network: ListenerNetwork,
+  connect: (options: ListenerConnectionOptions) => Promise<ListenerConnection> = (each) =>
+    connectListenerOver(each, network),
 ): ListenerFetch {
   let trust = options.trust;
   const remember = async (
@@ -151,7 +159,7 @@ function createListenerFetchOver(
     request.signal.throwIfAborted();
     const body = request.body === null ? undefined : Buffer.from(await request.arrayBuffer());
     const previous = trust;
-    const connection = await connectListenerOver({ ...options, trust: previous }, network);
+    const connection = await connect({ ...options, trust: previous });
     if (connection.status === "refused") throw new ListenerTrustRefused(connection.reason);
     if (connection.status === "failed") throw new TypeError("The listener could not be reached.");
     const socket = connection.socket;
@@ -289,7 +297,7 @@ async function connectListenerOver(
  * the origin's trust.
  */
 function secureListenerSocket(input: {
-  readonly socket: Socket;
+  readonly socket: Duplex;
   readonly hostname: string;
   readonly trust: ListenerOriginTrust;
   readonly now: () => number;
@@ -392,6 +400,127 @@ function dialTcp(address: string, port: number): Promise<Socket> {
     socket.once("connect", () => {
       socket.off("error", reject);
       resolve(socket);
+    });
+  });
+}
+
+/**
+ * How a paired device reaches its host away from the private network: the
+ * hub's public relay route, the host's member id, and the device key it
+ * paired with, which signs the hub's challenge (decision H36).
+ */
+export interface ListenerRelayRoute {
+  /** `wss://<front>/relay/v1`; `ws:` only for a test on loopback. */
+  readonly url: string;
+  readonly targetMemberId: string;
+  /** The device key's DER SubjectPublicKeyInfo, base64url. */
+  readonly deviceSpki: string;
+  /** Signs a payload with the device key: P-256, IEEE-P1363, base64url. */
+  readonly sign: (payload: string) => string | Promise<string>;
+  readonly timeoutMs?: number;
+}
+
+/**
+ * Opens a relay through the hub and hands back its bytes as a stream, once the
+ * hub admitted the device key. Nothing of the request is sent before the TLS
+ * inside it passed the origin's stored trust, so the hub carries only
+ * ciphertext.
+ */
+async function openRelayStream(route: ListenerRelayRoute): Promise<Duplex | undefined> {
+  const socket = new WebSocket(route.url);
+  socket.binaryType = "arraybuffer";
+  let stage: "challenge" | "opening" | "carrying" = "challenge";
+  const stream = new Duplex({
+    read() {},
+    write(chunk: Buffer, _encoding, callback) {
+      if (socket.readyState === WebSocket.OPEN) socket.send(Uint8Array.from(chunk));
+      callback();
+    },
+    final(callback) {
+      socket.close(1000);
+      callback();
+    },
+    destroy(error, callback) {
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close(1000);
+      }
+      callback(error);
+    },
+  });
+  return await new Promise<Duplex | undefined>((resolve) => {
+    const timer = setTimeout(() => fail(), route.timeoutMs ?? LISTENER_HANDSHAKE_TIMEOUT_MS);
+    const fail = (): void => {
+      clearTimeout(timer);
+      if (stage !== "carrying") {
+        socket.close();
+        resolve(undefined);
+      }
+      stream.destroy();
+    };
+    socket.addEventListener("error", fail);
+    socket.addEventListener("close", () => {
+      if (stage === "carrying") stream.push(null);
+      fail();
+    });
+    socket.addEventListener("message", (event: MessageEvent) => {
+      const data: unknown = event.data;
+      if (stage === "carrying") {
+        if (data instanceof ArrayBuffer) stream.push(Buffer.from(data));
+        return;
+      }
+      if (typeof data !== "string") return fail();
+      if (stage === "opening") {
+        if (data !== RELAY_OPENED_MESSAGE) return fail();
+        stage = "carrying";
+        clearTimeout(timer);
+        resolve(stream);
+        return;
+      }
+      stage = "opening";
+      void (async () => {
+        const challenge = decodeRelayChallenge(JSON.parse(data));
+        const signature = await route.sign(
+          relayAdmissionPayload({
+            challenge: challenge.challenge,
+            targetMemberId: route.targetMemberId,
+            hubMemberId: String(challenge.hubMemberId),
+          }),
+        );
+        socket.send(
+          JSON.stringify({
+            targetMemberId: route.targetMemberId,
+            deviceSpki: route.deviceSpki,
+            signature,
+          }),
+        );
+      })().catch(fail);
+    });
+  });
+}
+
+/**
+ * A `fetch` to a paired host's listener origin that travels through the hub's
+ * device relay instead of the private network. Each request opens its own
+ * relay and runs the same TLS judgement against the origin's stored trust as a
+ * direct connection; a host whose key differs is refused before any request
+ * byte is sent. The host serves no WebSocket through the relay.
+ */
+export function createRelayedListenerFetch(
+  options: ListenerConnectionOptions & { readonly relay: ListenerRelayRoute },
+): ListenerFetch {
+  return createListenerFetchOver(options, SYSTEM_NETWORK, async (each) => {
+    const url = new URL(each.origin);
+    if (url.protocol !== "https:" || url.origin !== each.origin) {
+      throw new Error("A listener origin must be exactly an HTTPS origin.");
+    }
+    const stream = await openRelayStream(options.relay);
+    if (stream === undefined) return { status: "failed", reason: "unreachable" };
+    return secureListenerSocket({
+      socket: stream,
+      hostname: url.hostname.replace(/^\[(.*)\]$/, "$1"),
+      trust: each.trust,
+      now: each.now ?? Date.now,
+      handshakeTimeoutMs: SYSTEM_NETWORK.handshakeTimeoutMs,
     });
   });
 }

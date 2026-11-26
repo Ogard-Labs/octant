@@ -37,6 +37,8 @@ import {
   decodeHubVisitorLinkRequest,
   decodeHubVisitorShareRequest,
   decodeHubVisitorSwitchRequest,
+  decodeHubRelaySwitchRequest,
+  decodeHubRelayDeviceRequest,
   decodeHubWebhookEndpointRequest,
   decodeHubPushSwitchRequest,
   decodeHubSignInAsk,
@@ -67,6 +69,8 @@ import type { HubWebhookService } from "./hubWebhookService";
 import type { PublicEntranceService } from "./publicEntranceService";
 import type { ServeWhileStandingInOutcome, standbyPublicUrls } from "./publicStandIn";
 import type { SpokeWebhookService } from "./spokeWebhookService";
+import type { HubRelayService } from "./hubRelayService";
+import type { SpokeRelayService } from "./spokeRelayService";
 import type { HubVisitorService } from "./hubVisitorService";
 import type { SpokeVisitorService } from "./spokeVisitorService";
 import type { PushService } from "./pushService";
@@ -152,6 +156,9 @@ export const HUB_ADMINISTRATION_ROUTES = {
   visitorShare: "/api/desktop/hub/visitors/share",
   visitorStop: "/api/desktop/hub/visitors/stop",
   visitorComment: "/api/desktop/hub/visitors/comment",
+  /** The hub's device relay switch, and which of this host's paired devices may come through it. */
+  relaySwitch: "/api/desktop/hub/relay",
+  relayDevice: "/api/desktop/hub/relay/devices",
   /** The hub's offer switch: only a window on the hub turns it on or off. */
   provision: "/api/desktop/hub/provision",
   /** The hub's window makes an offer for its spokes. */
@@ -210,6 +217,9 @@ export interface HubAdministrationRouteOptions {
   /** The hub's visitor links and this host's own; absent, their routes answer unavailable. */
   readonly visitors?: Pick<HubVisitorService, "status" | "setEnabled">;
   readonly spokeVisitors?: Pick<SpokeVisitorService, "view" | "share" | "stop" | "decideComment">;
+  /** The hub's device relay and this host's own relay list; absent, their routes answer unavailable. */
+  readonly relay?: Pick<HubRelayService, "status" | "setEnabled">;
+  readonly spokeRelay?: Pick<SpokeRelayService, "view" | "allow">;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -286,6 +296,9 @@ export function createHubAdministrationRouteHandler(
           : {
               visitors: { hub: options.visitors.status(), spoke: options.spokeVisitors.view() },
             }),
+        ...(options.relay === undefined || options.spokeRelay === undefined
+          ? {}
+          : { relay: { hub: options.relay.status(), devices: options.spokeRelay.view() } }),
       });
     }
     if (route === HUB_ADMINISTRATION_ROUTES.certificate && request.method === "GET") {
@@ -524,6 +537,18 @@ export function createHubAdministrationRouteHandler(
           const value = decodeHubVisitorCommentRequest(parseJson(request, body.text));
           if (options.spokeVisitors === undefined) return failure("unavailable", 503);
           return outcome(options.spokeVisitors.decideComment(value.commentId, value.action));
+        }
+        case HUB_ADMINISTRATION_ROUTES.relaySwitch: {
+          const value = decodeHubRelaySwitchRequest(parseJson(request, body.text));
+          if (options.relay === undefined) return failure("unavailable", 503);
+          return outcome(options.relay.setEnabled(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.relayDevice: {
+          const value = decodeHubRelayDeviceRequest(parseJson(request, body.text));
+          if (options.spokeRelay === undefined) return failure("unavailable", 503);
+          return outcome(
+            await options.spokeRelay.allow(value.deviceId, value.allowed, WINDOW_PRINCIPAL),
+          );
         }
         case HUB_ADMINISTRATION_ROUTES.directPush: {
           const value = decodeHubDirectPushSwitchRequest(parseJson(request, body.text));

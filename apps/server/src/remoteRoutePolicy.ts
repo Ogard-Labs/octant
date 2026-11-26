@@ -35,6 +35,7 @@ import { PAIRED_DEVICE_ADMINISTRATION_ROUTES } from "./remote/localDeviceAdminis
 import { PAIRED_DEVICE_ACCESS_ACTIVITY_ROUTES } from "./remote/accessActivityRoutes";
 import { PAIRED_THREAD_SECRETS_PATH } from "./threadSecrets/threadSecretRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
+import { carriesWebSocketUpgrade } from "./webSocketRelay";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
 const DEFAULT_RESPONSE_BYTES = 8 * 1_024 * 1_024;
@@ -240,6 +241,8 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   publicVisitorGrants: "hub-link-public-visitor-grants",
   publicVisitorFetch: "hub-link-public-visitor-fetch",
   publicWebhookHandback: "hub-link-public-webhook-handback",
+  publicRelayDevices: "hub-link-public-relay-devices",
+  relayTunnel: "hub-link-relay-tunnel",
   owner: "hub-link-owner",
   delegate: "hub-link-delegate",
   delegationStatus: "hub-link-delegation-status",
@@ -633,6 +636,31 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 262_144,
     maxResponseBytes: 4_096,
+  },
+  // The device relay (decision H36): a host lists the device keys the hub may
+  // admit, and the hub opens one device's tunnel here, a WebSocket whose bytes
+  // are that device's own TLS to this listener.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.publicRelayDevices,
+    match: { kind: "exact", path: "/api/hub/public/relay-devices" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 32_768,
+    maxResponseBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.relayTunnel,
+    match: { kind: "prefix", path: "/api/hub/relay" },
+    surface: "pre-auth",
+    methods: ["GET"],
+    allowQuery: false,
+    allowedRequestHeaders: [HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    maxBodyBytes: 1_024,
+    maxResponseBytes: 4_096,
+    opensDeviceRelay: true,
   },
   {
     id: REMOTE_HUB_LINK_ROUTE_IDS.publicVisitorFetch,
@@ -1945,6 +1973,12 @@ export interface RemoteRouteDefinition {
    */
   readonly relaysDevServer?: true;
   /**
+   * Set only on the device relay's tunnel route. An answer that accepted the
+   * WebSocket upgrade passes as it is, so the listener's transport can take
+   * the acceptance; the hub's own tunnel cap bounds how many stay open.
+   */
+  readonly opensDeviceRelay?: true;
+  /**
    * Set only on a mode's attachment upload route. Its body budget is its own,
    * above the listener's default, so a phone photo fits; its media types are
    * still the route's own.
@@ -2257,6 +2291,10 @@ export function createRemoteRouteHandler(
       // The dev server's own response: its headers stand and its body streams
       // uncapped, holding this request's slot until it ends.
       return withAdmissionRelease(response, release);
+    }
+    if (decision.route?.opensDeviceRelay === true && carriesWebSocketUpgrade(response)) {
+      release();
+      return response;
     }
     if (
       decision.route?.streamsNdjson === true &&
