@@ -2459,7 +2459,7 @@ Pairing issues a revocable device key; the private listener serves HTTPS on one 
 - **Pause remote access** refuses every device and outside agent until resumed, keeping records, keys and grants; a local window or `octant auth resume` turns it on or off, a Full device only on (maintainer decision, 2026-11-22). **Sign out all other devices** keeps only the asking device (maintainer decision, 2026-11-22).
 - A party the host already trusts approves every new device (maintainer decision, 2026-11-12).
 - The listener binds only a person-selected private address and port after the person confirms it, every state-changing request carries a device-key proof, and nothing authority-bearing queues offline.
-- The hub's public entrance is a separate listener with its own closed route table and never relaxes the listener's rule; Pause remote access closes it too (maintainer decision, 2026-11-26; designed, not built; [Hub public entrance](#hub-public-entrance)).
+- The hub's public entrance is a separate listener with its own closed route table and never relaxes the listener's rule; Pause remote access closes it too (maintainer decision, 2026-11-26; built; [Hub public entrance](#hub-public-entrance)).
 - An agent's debug session (`octant_debug`) runs unasked at Full access, with one approval per session below it, and is refused in Plan (maintainer decisions, 2026-11-12 and 2026-11-13); a Full device drives one as a window does, other devices are refused.
 
 Not built yet:

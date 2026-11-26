@@ -228,6 +228,8 @@ export class PublicEntranceService {
   }
 
   async #reconcile(): Promise<boolean> {
+    // A stopped host runs no Tailscale command and opens nothing on a later look.
+    if (this.#closed) return false;
     const saved = this.#saved();
     const paused = this.#options.remoteAccessPaused();
     const role = this.#options.role();
@@ -268,14 +270,16 @@ export class PublicEntranceService {
       // to whatever program holds it now, outside the closed route table; the
       // front goes before a fresh port opens, and only the person turns it on
       // again, at the new port.
-      if (saved.funnel !== undefined) {
-        const off = await this.#funnel.off(saved.funnel.port);
+      // Read again: an owed off above may already have turned Funnel off.
+      const front = this.#saved()?.funnel;
+      if (front !== undefined) {
+        const off = await this.#funnel.off(front.port);
         if (off.status !== "done") {
           this.#funnelOffOwed = true;
           this.#funnelOffRetryAt = this.#now() + FUNNEL_OFF_RETRY_MS;
           return false;
         }
-        this.#save({ ...saved, funnel: undefined });
+        this.#save({ ...this.#savedOrOff(), funnel: undefined });
       }
       try {
         this.#entrance = await this.#start(0);
