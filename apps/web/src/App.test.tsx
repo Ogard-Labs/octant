@@ -4550,7 +4550,7 @@ describe("App", () => {
     },
   );
 
-  it.each(["ordinary Review", "a thread switch"])(
+  it.each(["ordinary Review", "a thread switch", "its subagent tab"])(
     "opens captured generations without reading the parent checkout and forgets them after %s",
     async (returnThrough) => {
       const user = userEvent.setup();
@@ -4689,6 +4689,29 @@ describe("App", () => {
       });
       await user.click(originalPane);
       const tray = await within(originalPane).findByRole("group", { name: "Subagents" });
+      if (returnThrough === "its subagent tab") {
+        // Opened from the subagent's own tab, the saved review's Back leaves
+        // that tab in view, and on a wide window the dock stays as it was.
+        await user.click(within(tray).getByRole("button", { name: /Subagents,.*Show them/ }));
+        await user.click(within(tray).getByRole("button", { name: /Review parser.*Opens it/ }));
+        const subagent = await screen.findByRole("region", { name: "Subagent" });
+        const latestInTab = await within(subagent).findByRole("region", {
+          name: "Generation 2 result",
+        });
+        await user.click(within(latestInTab).getByRole("button", { name: "Review changes" }));
+        const reviewDock = screen.getByRole("complementary", { name: "Right Utility Dock" });
+        expect(
+          await within(reviewDock).findByRole("table", { name: "Diff for src/parser.ts" }),
+        ).toHaveTextContent("captured generation 2");
+        await user.click(within(reviewDock).getByRole("button", { name: "Back to subagent" }));
+        expect(
+          screen.queryByRole("region", { name: "Saved child review" }),
+        ).not.toBeInTheDocument();
+        expect(screen.getByRole("region", { name: "Subagent" })).toBeVisible();
+        expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+        expect(within(reviewDock).queryByRole("region", { name: "Subagent" })).toBeNull();
+        return;
+      }
       await user.click(within(tray).getByRole("button", { name: /View all/ }));
       const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
       await user.click(await within(dock).findByRole("button", { name: /Review parser/ }));
