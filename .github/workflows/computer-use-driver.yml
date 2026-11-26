@@ -1,0 +1,113 @@
+name: Computer use driver pin
+
+# The app updates its computer-use driver by itself only within one wire
+# contract; a release on a newer contract needs a new Octant with the matching
+# SDK. In November 2026 the pin sat on 0.38.0 while upstream moved to 0.62.1 on
+# a newer contract, and every in-app update was refused. This job moves the
+# pin weekly on one branch and one draft pull request; a person runs the live
+# Computer use check and marks it ready, which starts CI. The job rebuilds the
+# branch from main only when upstream moved past what the branch pins, and
+# never over a commit a person pushed there.
+#
+# Opening the pull request needs the repository setting "Allow GitHub Actions
+# to create and approve pull requests". Without it the branch is still pushed
+# and the job says where to open the pull request by hand.
+on:
+  schedule:
+    # Mondays 07:00 UTC.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: computer-use-driver-pin
+  cancel-in-progress: false
+
+jobs:
+  pin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      BRANCH: feature/computer-use-driver-pin
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The bot branch is compared with main commit by commit.
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - name: Compare the pin with upstream
+        id: check
+        run: bun scripts/computer-use-driver-pin.ts check
+      - name: Move the pin on the bot branch
+        if: steps.check.outputs.newer == 'true'
+        id: move
+        env:
+          VERSION: ${{ steps.check.outputs.version }}
+          BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          # Exit 2 means the branch does not exist; any other failure stops the job.
+          status=0
+          git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null || status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then exit "$status"; fi
+          if [ "$status" -eq 0 ]; then
+            git fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            # Leave the branch alone when it already holds this pin, so a
+            # person's review fixes and live check stay on its head; refuse to
+            # replace commits this job did not write.
+            pinned=$(git show "origin/$BRANCH:apps/desktop/src/computerUseDriverRelease.ts")
+            if [[ "$pinned" == *"version: \"$VERSION\""* ]]; then
+              echo "The bot branch already pins $VERSION."
+              echo "pushed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            others=$(git log --format=%ae "origin/main..origin/$BRANCH" | grep -vxF "$BOT_EMAIL" || true)
+            if [ -n "$others" ]; then
+              echo "::error::$BRANCH holds commits a person pushed. Merge or close its pull request before the pin moves again."
+              exit 1
+            fi
+          fi
+          git switch -C "$BRANCH"
+          bun scripts/computer-use-driver-pin.ts apply "$VERSION" > "$RUNNER_TEMP/body.md"
+          bun install
+          # The native package is macOS-only, so this Linux runner never
+          # installs it; read its runtime notice from the published package.
+          (cd "$RUNNER_TEMP" && npm pack --silent "@trycua/cua-driver-darwin-arm64@$VERSION" > pack.txt \
+            && tar -xzf "$(cat pack.txt)" package/node-runtime-NOTICE.md)
+          cp "$RUNNER_TEMP/package/node-runtime-NOTICE.md" \
+            apps/desktop/resources/licenses/cua-driver-node-runtime-NOTICE.md
+          bun run --cwd scripts test computer-use-driver-pin packaged-browser-owner-driver-cache
+          bun run --cwd apps/desktop typecheck
+          git add apps/desktop/package.json package.json bun.lock patches \
+            apps/desktop/src/computerUseDriverRelease.ts apps/desktop/src/computerUseDriverUpdates.ts \
+            scripts/packaged-browser-owner-driver-cache.ts \
+            apps/desktop/resources/licenses/cua-driver-node-runtime-NOTICE.md
+          git status --short
+          git -c user.name="github-actions[bot]" -c user.email="$BOT_EMAIL" \
+            commit -m "Move the bundled computer-use driver to $VERSION"
+          git push --force origin "$BRANCH"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+      - name: Open or refresh the draft pull request
+        if: steps.move.outputs.pushed == 'true'
+        env:
+          VERSION: ${{ steps.check.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="Move the bundled computer-use driver to $VERSION"
+          existing=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          elif ! gh pr create --draft --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"; then
+            echo "::error::Could not open the pull request. Turn on 'Allow GitHub Actions to create and approve pull requests', or open it from https://github.com/$REPO/compare/main...$BRANCH"
+            exit 1
+          fi
