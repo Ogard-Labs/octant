@@ -111,6 +111,8 @@ const settings = {
   providerCredentialPassThrough: {},
   threadWakeupsWaitingLimit: 8,
   threadWakeupsRunMissedOnReturn: true,
+  usageLimitResumeAtResetByDefault: false,
+  usageLimitSnoozeUntilResetByDefault: false,
   messageWakesPerHour: 30,
   messageWakeRounds: 10,
   coordinatorsPerProject: 4,

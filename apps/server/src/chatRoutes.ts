@@ -47,6 +47,12 @@ const decodeGlobalSequence = Schema.decodeUnknownSync(GlobalSequence);
 
 export interface ChatRouteDependencies {
   readonly service: ChatService;
+  /**
+   * Records a turn the person sent (a window on this host or a device they
+   * paired; never an outside agent's grant or a device only the hub
+   * introduced), which alone the usage-limit defaults may arm for.
+   */
+  readonly notePersonSentTurn?: (turnId: string) => void;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly maxAttachmentBodySize?: number;
@@ -425,6 +431,10 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
             origin,
           );
         }
+        const personSent = boundPrincipalIsThePerson(request);
+        if (command.kind === "retry-chat-turn" && personSent) {
+          dependencies.notePersonSentTurn?.(String(command.turnId));
+        }
         return jsonResponse(
           await dependencies.service.execute(command, {
             windowId: authenticatedWindowId,
@@ -433,6 +443,11 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
             // other device session is refused a secret answer by the service.
             initiator: boundPrincipalIsRestricted(request) ? "agent" : "user",
             ...(boundPrincipalIsAgent(request) ? { fromOutsideAgent: true } : {}),
+            ...(command.kind === "send-chat-turn" &&
+            personSent &&
+            dependencies.notePersonSentTurn !== undefined
+              ? { onPersonTurnAdmitted: dependencies.notePersonSentTurn }
+              : {}),
             // Believed only from the person's own window or paired device.
             ...(command.kind === "send-chat-turn" &&
             command.typedByPerson === true &&

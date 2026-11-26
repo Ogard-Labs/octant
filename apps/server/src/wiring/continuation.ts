@@ -1,9 +1,16 @@
+import { UsageLimitDefaults, type PersonSentTurns } from "../usage/usageLimitDefaults";
+import { readAggregateVersion } from "../persistence/chatProjection";
 import { randomUUID } from "node:crypto";
 import {
   decodeChatSubmissionId,
   decodeChatThreadId,
   decodeCodeThreadId,
+  decodeAggregateVersion,
+  decodeCodeOperationId,
   decodeContextSubjectRef,
+  decodeEventActor,
+  decodeProviderInstanceId,
+  personalSignInRefusals,
   decodeProviderSessionId,
   decodeUtcTimestamp,
   decodeWorkThreadId,
@@ -84,8 +91,10 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
-export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
-  Pick<
+export type ContinuationDependencies = Pick<ServerStart, "persistence"> & {
+  /** The turns a person sent, which alone the usage-limit defaults cover. */
+  readonly personSentTurns: PersonSentTurns;
+} & Pick<
     AuthorityWiring,
     | "agentRunParentAuthority"
     | "agentRunPersistence"
@@ -271,6 +280,113 @@ export function wireContinuation(deps: ContinuationDependencies) {
       }),
     );
     usageResumeService.start();
+    // The person's usage-limit defaults: arm the resume or the snooze on a
+    // stop the person's own send hit, through each mode's ordinary command,
+    // as the host. The resume then fires through the scheduler above.
+    const hostActor = decodeEventActor({ kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID });
+    const usageLimitDefaults = new UsageLimitDefaults({
+      settings: () => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return {
+          resumeAtReset: settings.usageLimitResumeAtResetByDefault,
+          snoozeUntilReset: settings.usageLimitSnoozeUntilResetByDefault,
+        };
+      },
+      personSent: (mode, turnId) => deps.personSentTurns.sent(mode, turnId),
+      providerInstanceOf: (mode, threadId) => {
+        const providerInstanceId =
+          mode === "chat"
+            ? persistence.readChatThread(decodeChatThreadId(threadId))?.providerInstanceId
+            : mode === "work"
+              ? workThreadProjection.read(decodeWorkThreadId(threadId))?.providerInstanceId
+              : persistence.readCodeThread(decodeCodeThreadId(threadId))?.providerInstanceId;
+        return providerInstanceId === undefined ? undefined : String(providerInstanceId);
+      },
+      refusesHostContinuations: (providerInstanceId) =>
+        personalSignInRefusals(
+          persistence.readProviderInstance(decodeProviderInstanceId(providerInstanceId)),
+        )?.refusesUnattendedRuns !== undefined,
+      clock: () => new Date(),
+      scheduleResume: async (stop) => {
+        const expectedVersion = readAggregateVersion(
+          persistence.connection,
+          `${stop.mode}-thread`,
+          stop.threadId,
+        );
+        if (stop.mode === "chat") {
+          await chatService.execute(
+            {
+              kind: "schedule-chat-usage-resume",
+              threadId: stop.threadId,
+              expectedVersion,
+              turnId: stop.turnId,
+              attemptId: stop.attemptId,
+            },
+            { usageResumeOrigin: "default", actor: hostActor },
+          );
+        } else if (stop.mode === "work") {
+          await deps.workThreadService.execute(
+            ROUTINE_HOST_SCOPE_ID,
+            {
+              kind: "schedule-work-usage-resume",
+              threadId: stop.threadId,
+              expectedVersion,
+              turnId: stop.turnId,
+            },
+            { usageResumeOrigin: "default", actor: hostActor },
+          );
+        } else {
+          await deps.codeService.execute(
+            ROUTINE_HOST_SCOPE_ID,
+            {
+              kind: "schedule-code-usage-resume",
+              threadId: decodeCodeThreadId(stop.threadId),
+              expectedVersion: decodeAggregateVersion(expectedVersion),
+              operationId: decodeCodeOperationId(stop.turnId),
+            },
+            undefined,
+            { usageResumeOrigin: "default", actor: hostActor },
+          );
+        }
+      },
+      snoozeAtReset: async (stop) => {
+        const expectedVersion = decodeAggregateVersion(
+          readAggregateVersion(persistence.connection, `${stop.mode}-thread`, stop.threadId),
+        );
+        if (stop.mode === "chat") {
+          await chatService.execute(
+            {
+              kind: "snooze-chat-thread-at-usage-reset",
+              threadId: stop.threadId,
+              expectedVersion,
+            },
+            { actor: hostActor },
+          );
+        } else if (stop.mode === "work") {
+          await deps.workThreadService.execute(
+            ROUTINE_HOST_SCOPE_ID,
+            { kind: "snooze-work-thread-at-usage-reset", threadId: stop.threadId, expectedVersion },
+            { actor: hostActor },
+          );
+        } else {
+          await deps.codeService.execute(
+            ROUTINE_HOST_SCOPE_ID,
+            {
+              kind: "snooze-code-thread-at-usage-reset",
+              threadId: decodeCodeThreadId(stop.threadId),
+              expectedVersion,
+            },
+            undefined,
+            { actor: hostActor },
+          );
+        }
+      },
+      onError: (message, error) => console.error(`[usage-limit defaults] ${message}`, error),
+    });
+    const unsubscribeUsageLimitDefaults = persistence.journal.subscribeCommitted((append) =>
+      usageLimitDefaults.onCommittedAppend(append),
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeUsageLimitDefaults()));
     // A finished subagent run owes its parent thread a journaled turn carrying
     // its result. The service watches committed appends and dispatches through
     // each mode's ordinary turn admission — the mark on that turn is what

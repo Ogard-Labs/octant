@@ -711,6 +711,18 @@ export interface ChatServiceExecutionContext {
    */
   readonly limitRecovery?: boolean;
   /**
+   * Set only by the host's usage-limit defaults when the person's "Resume at
+   * reset by default" setting arms a resume: the record says so. No wire
+   * command carries it.
+   */
+  readonly usageResumeOrigin?: "default";
+  /**
+   * Set only by the person's own route: told the id of the turn a send just
+   * admitted, before its run starts, so the usage-limit defaults know a person
+   * sent it. The send's answer comes only after the run, too late for a stop.
+   */
+  readonly onPersonTurnAdmitted?: (turnId: string) => void;
+  /**
    * Called once a sent turn is journaled and before it runs, for a caller
    * that must answer as soon as the message is in rather than when the
    * reply ends.
@@ -2012,7 +2024,7 @@ export class ChatService {
           );
         case "schedule-chat-usage-resume":
           return await this.#withThreadAdmission(command.threadId, () =>
-            this.#scheduleUsageResume(command),
+            this.#scheduleUsageResume(command, executionContext?.usageResumeOrigin),
           );
         case "cancel-chat-usage-resume":
           return await this.#withThreadAdmission(command.threadId, () =>
@@ -3427,6 +3439,7 @@ export class ChatService {
         releaseDrain();
         throw error;
       }
+      executionContext?.onPersonTurnAdmitted?.(String(turn.id));
       // After the turn, before its run: a turn with no mark is not the
       // person's words, so a failed or missing mark is the safe side.
       if (executionContext?.typedByPerson === true) {
@@ -4680,6 +4693,7 @@ export class ChatService {
    */
   async #scheduleUsageResume(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "schedule-chat-usage-resume" }>,
+    origin: "default" | undefined,
   ): Promise<ChatCommandResult> {
     const thread = this.#requireActiveThread(command.threadId);
     this.#assertExpectedThreadVersion(thread, command.expectedVersion);
@@ -4739,6 +4753,7 @@ export class ChatService {
       usageLimit: attempt.usageLimit,
       resetsAt: attempt.usageLimit.resetsAt,
       scheduledAt: decodeTimestamp(this.#clock()),
+      ...(origin === undefined ? {} : { origin }),
     };
     const usageResume: UsageResumeThreadState = { record, status: "scheduled" };
     // Opting in is not a message from the person: it must not unsnooze or
@@ -4753,8 +4768,17 @@ export class ChatService {
       aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
       expectedVersion: command.expectedVersion,
       events: [
-        this.#pending(USAGE_RESUME_SCHEDULED, { resume: record }),
-        this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
+        // A default is the host acting on the person's setting, not the person.
+        this.#pending(
+          USAGE_RESUME_SCHEDULED,
+          { resume: record },
+          origin === "default" ? { actorKind: "system" } : undefined,
+        ),
+        this.#pending(
+          "chat.thread-updated@1",
+          { kind: "thread-updated", thread: updatedThread },
+          origin === "default" ? { actorKind: "system" } : undefined,
+        ),
       ],
     });
     return { kind: "thread-updated", thread: updatedThread };

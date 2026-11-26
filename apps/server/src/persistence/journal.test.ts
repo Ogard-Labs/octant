@@ -199,6 +199,8 @@ describe("Journal", () => {
         providerCredentialPassThrough: {},
         threadWakeupsWaitingLimit: 8,
         threadWakeupsRunMissedOnReturn: false,
+        usageLimitResumeAtResetByDefault: false,
+        usageLimitSnoozeUntilResetByDefault: false,
         messageWakesPerHour: 30,
         messageWakeRounds: 10,
         coordinatorsPerProject: 4,

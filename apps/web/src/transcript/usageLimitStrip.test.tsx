@@ -115,6 +115,25 @@ describe("the usage-limit strip", () => {
     expect(screen.getByText(/^Codex · Usage limit · Resumes at /)).toBeDefined();
   });
 
+  it("says when a resume was armed by the default, with Cancel", () => {
+    const set = handlers();
+    renderStrip(
+      usageLimitStripNotice({
+        limit: { kind: "exhausted", resetsAt: IN_42_MIN },
+        provider: "Codex",
+        usageResume: {
+          ...resume("scheduled"),
+          record: { ...resume("scheduled").record, origin: "default" },
+        },
+        now: NOW,
+        ...set,
+      }),
+    );
+    expect(screen.getByText(/· Resumes at .+ \(default\)$/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel resume" }));
+    expect(set.onCancelResume).toHaveBeenCalledTimes(1);
+  });
+
   it("tells why a scheduled resume did not run and offers it again", () => {
     renderStrip(
       usageLimitStripNotice({

@@ -100,7 +100,12 @@ export function usageLimitStripText(input: {
   if (input.limit.kind !== "billing") {
     const resume = input.usageResume;
     if (resume?.status === "scheduled") {
-      parts.push(`Resumes at ${resetClock(resume.record.resetsAt, input.now)}`);
+      const when = resetClock(resume.record.resetsAt, input.now);
+      // A resume the person's default armed says so, so it never reads as a
+      // choice they made on this stop.
+      parts.push(
+        resume.record.origin === "default" ? `Resumes at ${when} (default)` : `Resumes at ${when}`,
+      );
     } else if (input.limit.resetsAt === undefined) {
       parts.push("reset time not given");
     } else {

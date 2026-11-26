@@ -726,6 +726,15 @@ every thread's Usage group and every Project page show the spend ceiling row;
 off, a row shows only where a ceiling is set or has refused a turn. A settings
 store from before the switch reads as off (maintainer request, 2026-11-17).
 
+Below it, two host switches, both off by default, set what happens when a
+provider's usage limit stops a turn the person sent and names its reset:
+**Resume at reset by default** schedules the resume at that reset, and
+**Snooze until reset by default** hides the thread until then. Neither applies
+to a billing stop, a turn a routine or an agent started, or (for the resume) a
+provider that refuses Octant's own continuations; the strip above the composer
+says "(default)" with Cancel ([Thread view: usage-limit strip](thread-view.md#usage-limit-strip);
+maintainer decision, 2026-11-26).
+
 The Usage destination opens local provider history by default when that host
 supports it. Octant records remain a separate source; the two totals are never
 added. A period change replaces the query, cancels the previous read, and cannot

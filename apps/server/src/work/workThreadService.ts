@@ -323,6 +323,12 @@ export interface WorkThreadExecutionContext {
    * person at this host.
    */
   readonly actor?: EventActor;
+  /**
+   * Set only by the host's usage-limit defaults when the person's "Resume at
+   * reset by default" setting arms a resume: the record says so. No wire
+   * command carries it.
+   */
+  readonly usageResumeOrigin?: "default";
 }
 
 export class WorkThreadServiceError extends Error {
@@ -1340,6 +1346,9 @@ export class WorkThreadService {
           usageLimit: turn.failure.usageLimit,
           resetsAt: turn.failure.usageLimit.resetsAt,
           scheduledAt: usageResumeUpdatedAt,
+          ...(executionContext?.usageResumeOrigin === undefined
+            ? {}
+            : { origin: executionContext.usageResumeOrigin }),
         };
         const updated = decodeWorkThread({
           ...current,

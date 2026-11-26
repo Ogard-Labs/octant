@@ -3639,6 +3639,36 @@ function UsageSettingsSection(props: {
             onCheckedChange={(checked) => props.onSettingsChange({ spendCeilingShown: checked })}
           />
         </SettingRow>
+        <SettingRow
+          description="When a provider's usage limit stops a turn you sent and says when it resets, schedule the resume at that reset. Never for a billing problem, a turn a routine or an agent started, or a provider that refuses Octant's own continuations."
+          focused={props.focusedSetting === settingId("usage-limit-resume-by-default")}
+          label="Resume at reset by default"
+          scope="host"
+          settingId="usage-limit-resume-by-default"
+        >
+          <OctantSwitch
+            checked={props.settings.usageLimitResumeAtResetByDefault}
+            label="Resume at reset by default"
+            onCheckedChange={(checked) =>
+              props.onSettingsChange({ usageLimitResumeAtResetByDefault: checked })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          description="When a provider's usage limit stops a turn you sent and says when it resets, hide the thread until then. It starts nothing."
+          focused={props.focusedSetting === settingId("usage-limit-snooze-by-default")}
+          label="Snooze until reset by default"
+          scope="host"
+          settingId="usage-limit-snooze-by-default"
+        >
+          <OctantSwitch
+            checked={props.settings.usageLimitSnoozeUntilResetByDefault}
+            label="Snooze until reset by default"
+            onCheckedChange={(checked) =>
+              props.onSettingsChange({ usageLimitSnoozeUntilResetByDefault: checked })
+            }
+          />
+        </SettingRow>
       </div>
       {source === "diagnostics" ? (
         <TurnDiagnosticsWorkspace

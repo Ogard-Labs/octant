@@ -1,3 +1,4 @@
+import type { PersonSentTurns } from "../usage/usageLimitDefaults";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { randomUUID } from "node:crypto";
@@ -123,6 +124,8 @@ const SIDE_CHAT_WORK_READ_MAX_BYTES = 2 * 1024 * 1024;
 export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
+  /** Where the route records a turn the person sent, for the usage-limit defaults. */
+  readonly personSentTurns: PersonSentTurns;
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -1077,6 +1080,7 @@ export function wireChat(deps: ChatDependencies) {
     });
     const chatRoutes = createChatRouteHandler({
       service: chatService,
+      notePersonSentTurn: (turnId) => deps.personSentTurns.note("chat", turnId),
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       maxAttachmentBodySize: MAX_CHAT_ATTACHMENT_BYTES,

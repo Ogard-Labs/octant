@@ -5611,6 +5611,23 @@ rescans `status = scheduled` rows on return and dispatches the still-valid
 ones; a record that cannot be re-validated settles `invalidated` and never
 re-arms.
 
+The person may make either recovery their standing default (maintainer
+decision, 2026-11-26): the host settings **Resume at reset by default** and
+**Snooze until reset by default**, both off by default. A host service watches
+committed appends for a journaled usage-limit stop and, when a setting is on,
+runs the mode's ordinary `schedule-*-usage-resume` or
+`snooze-*-thread-at-usage-reset` command as the host, the resume record carrying
+`origin: "default"` and journaled as the `system` actor. It arms each stop at
+most once, so a default the person cancels stays cancelled, and only a stop
+that names a reset still ahead on a turn a person sent: the Chat, Work and Code
+routes record a turn when its sender is the person at a window or a device they
+paired (never an outside agent's grant or a device only the hub introduced),
+in the running host's memory, so a turn a routine, wake-up, agent, delivery or
+queued message started, or one sent before a restart, is never covered. The
+resume is never armed on a provider account whose sign-in refuses the host's
+continuations. Nothing else changes: the resume fires through the same
+scheduler, inspection and ordinary turn admission as a person's opt-in.
+
 **Wake-ups a thread's agent schedules.** A provider runtime that can wake
 its model later (Claude Code's `ScheduleWakeup` and `CronCreate`) keeps no
 schedule of its own in Octant: its driver hands each wake-up to the host
