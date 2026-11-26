@@ -1037,6 +1037,27 @@ visible-page interval. The turn a wake-up starts opens with the host heading
 `Wake-up you scheduled earlier in this thread:` above its prompt. The rules
 are in [Architecture: wake-ups](../architecture.md#modes-chat-work-and-code).
 
+## Usage-limit strip
+
+While a provider's own usage-limit signal holds a thread's latest turn, in
+Chat, Work and Code, one notice card stands above the composer: the provider
+account, **Usage limit**, **Rate limit** or **Billing problem**, and when the
+limit resets as a clock time and a distance ("resets 3:40 PM · in 42 min"),
+or "reset time not given" when the provider did not say. Its actions are
+**Resume now**, which sends the stopped turn's prompt again as the person's
+next turn through ordinary admission (Chat retries the parked attempt);
+**Resume at reset**, the per-thread opt-in, which becomes **Cancel resume**
+and reads "Resumes at 3:40 PM" once set; and **Snooze until reset**, offered
+until the thread carries a snooze of its own. Resume at reset and Snooze
+appear only while the reset is known and still ahead. A billing stop names
+the problem and offers nothing, since no clock clears it. A scheduled resume
+that did not run says why on the line and offers Resume at reset again. The
+strip goes once the turn leaves the limit; it never shows plan meters. The
+transcript keeps one quiet line per stop, the provider's sentence and its
+reset as a clock time, and no actions; Code shows that line once, not
+again beside its waiting row. The rules are in
+[Architecture: usage limits](../architecture.md#modes-chat-work-and-code).
+
 ## Live tasks
 
 A Work or Code thread whose last turn completed while background work it

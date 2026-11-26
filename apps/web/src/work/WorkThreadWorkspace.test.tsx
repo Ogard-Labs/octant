@@ -3252,7 +3252,7 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.queryByRole("option", { name: /Browser/ })).not.toBeInTheDocument();
   });
 
-  it("offers a limited stop's recovery only while that stop is still waiting", async () => {
+  it("shows one line above the composer while a turn is parked on a limit, and none after it is released", async () => {
     const failure = {
       category: "rate-limited",
       message: "Rate limit reached.",
@@ -3293,16 +3293,67 @@ describe("WorkThreadWorkspace", () => {
     );
 
     const failed = render(renderTurn("failed"));
-    await screen.findByRole("alert");
-    expect(
-      screen.queryByRole("button", { name: "Resume when the limit resets" }),
-    ).not.toBeInTheDocument();
+    await screen.findByTestId("usage-limit-record");
+    expect(document.querySelector(".usage-limit-strip")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume at reset" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
     failed.unmount();
 
     render(renderTurn("waiting"));
-    await screen.findByRole("button", { name: "Resume when the limit resets" });
+    await screen.findByRole("button", { name: "Resume at reset" });
     expect(screen.getByRole("button", { name: "Snooze until reset" })).toBeVisible();
+    expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
+    expect(screen.getAllByTestId("usage-limit-record")).toHaveLength(1);
+  });
+
+  it("sends the stopped turn's own prompt again from the strip's Resume now", async () => {
+    const user = userEvent.setup();
+    const parked = workTurn({
+      status: "waiting",
+      failure: {
+        category: "rate-limited",
+        message: "Usage limit reached.",
+        usageLimit: {
+          kind: "exhausted",
+          resetsAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+        },
+      },
+      transcript: [
+        { role: "user", text: "Summarize the brief" },
+        { role: "assistant", text: "", status: "waiting" },
+      ],
+    });
+    const startFirstTurn = vi.fn(async () => ({
+      kind: "accepted" as const,
+      turn: workTurn({ requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", status: "accepted" }),
+    }));
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={
+          {
+            bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+            execute: vi.fn(),
+          } as unknown as WorkThreadClient
+        }
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={
+          {
+            transcript: vi.fn(async () => ({ threadId, turns: [parked] })),
+            startFirstTurn,
+            putAttachment: vi.fn(),
+            discardAttachment: vi.fn(async () => undefined),
+          } as never
+        }
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Resume now" }));
+    await waitFor(() =>
+      expect(startFirstTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "start-work-thread-turn", prompt: "Summarize the brief" }),
+      ),
+    );
   });
 
   it("stops treating a turn parked on a usage limit as running once a hand-off released it", async () => {

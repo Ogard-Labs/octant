@@ -5400,6 +5400,19 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
 .callout:is(.composer-notice, .thread-column) > .callout__body {
   flex: 1 1 16ch;
 }
+/* The usage-limit strip's ways on sit together at the card's trailing edge and
+   wrap below its line at a narrow width rather than squeezing the words. The
+   transcript's record of the same stop is a quiet line, never a floating card. */
+.usage-limit-strip__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oct-space-1);
+}
+.thread-column > .callout--row.usage-limit-record {
+  box-shadow: none;
+  animation: none;
+}
 @keyframes composer-notice-in {
   from {
     opacity: 0;

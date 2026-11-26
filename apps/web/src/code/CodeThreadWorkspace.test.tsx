@@ -1507,12 +1507,49 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("temporary rate limit");
-    expect(
-      screen.queryByRole("button", { name: "Resume when the limit resets" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("usage-limit-record")).toHaveTextContent("temporary rate limit");
+    expect(screen.queryByRole("button", { name: "Resume at reset" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
+  });
+
+  it("shows a waiting limited stop once in the transcript and once as the strip above the composer", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnUsageLimit: {
+            kind: "exhausted",
+            resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+          },
+          latestProviderTurnOperationId: "op-1",
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getAllByTestId("usage-limit-record")).toHaveLength(1);
+    expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Resume at reset" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Snooze until reset" })).toBeVisible();
+  });
+
+  it("sends the stopped turn's prompt again from the strip's Resume now", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnUsageLimit: { kind: "temporary" },
+          latestProviderTurnOperationId: "op-1",
+          conversation: [{ id: "m1", role: "user", text: "Fix the build", operationId: "op-1" }],
+          sendFollowUp,
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Resume now" }));
+    expect(sendFollowUp).toHaveBeenCalledWith("Fix the build", [], [], [], expect.anything());
   });
 
   it("keeps the retry control off an ordinary turn error", () => {

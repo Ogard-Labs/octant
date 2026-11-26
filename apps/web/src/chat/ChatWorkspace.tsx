@@ -121,6 +121,8 @@ import type { ComposerStashBinding, ComposerStashSubmission } from "../composer/
 import type { ProjectId } from "@octant/contracts/projects";
 import type { MoveToProjectChoice } from "./MoveToProjectDialog";
 import { activeChatTurns } from "@octant/domain/chat-policy";
+import { usageLimitStripNotice } from "../transcript/usageLimitStrip";
+import { providerInstanceLabel } from "../providers/providerModelLabel";
 import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
@@ -1276,6 +1278,81 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     return sent;
   };
 
+  // The strip above the composer while the conversation's tail is parked on a
+  // provider's usage limit. Every action rides the ordinary serialized command
+  // path, so the line changes only from what the host journaled.
+  const stoppedAttempt = activeChatTurns(view.turns).at(-1)?.attempts.at(-1);
+  const usageLimitNotice =
+    stoppedAttempt === undefined ||
+    stoppedAttempt.outcome !== "waiting" ||
+    stoppedAttempt.usageLimit === undefined
+      ? undefined
+      : usageLimitStripNotice({
+          limit: stoppedAttempt.usageLimit,
+          provider:
+            props.providerGroups === undefined
+              ? "The provider"
+              : providerInstanceLabel(props.providerGroups, stoppedAttempt.providerInstanceId),
+          usageResume:
+            view.thread.usageResume === undefined ||
+            String(view.thread.usageResume.record.turnId) !== String(stoppedAttempt.turnId) ||
+            String(view.thread.usageResume.record.attemptId) !== String(stoppedAttempt.id)
+              ? undefined
+              : view.thread.usageResume,
+          ...(readOnly
+            ? {}
+            : {
+                onResumeNow: () => {
+                  void enqueueThreadCommand(async (previous) => {
+                    const result = await props.controller.execute({
+                      kind: "retry-chat-turn",
+                      threadId: view.thread.id,
+                      expectedVersion: queuedVersion(previous),
+                      turnId: stoppedAttempt.turnId,
+                      attemptId: stoppedAttempt.id,
+                    });
+                    return { value: undefined, base: baseFromResult(result) };
+                  }).catch(() => undefined);
+                },
+                onScheduleResume: () => {
+                  void enqueueThreadCommand(async (previous) => {
+                    const result = await props.controller.execute({
+                      kind: "schedule-chat-usage-resume",
+                      threadId: view.thread.id,
+                      expectedVersion: queuedVersion(previous),
+                      turnId: stoppedAttempt.turnId,
+                      attemptId: stoppedAttempt.id,
+                    });
+                    return { value: undefined, base: baseFromResult(result) };
+                  }).catch(() => undefined);
+                },
+                onCancelResume: () => {
+                  void enqueueThreadCommand(async (previous) => {
+                    const result = await props.controller.execute({
+                      kind: "cancel-chat-usage-resume",
+                      threadId: view.thread.id,
+                      expectedVersion: queuedVersion(previous),
+                    });
+                    return { value: undefined, base: baseFromResult(result) };
+                  }).catch(() => undefined);
+                },
+                ...(view.thread.snooze === undefined
+                  ? {
+                      onSnoozeAtReset: () => {
+                        void enqueueThreadCommand(async (previous) => {
+                          const result = await props.controller.execute({
+                            kind: "snooze-chat-thread-at-usage-reset",
+                            threadId: view.thread.id,
+                            expectedVersion: queuedVersion(previous),
+                          });
+                          return { value: undefined, base: baseFromResult(result) };
+                        }).catch(() => undefined);
+                      },
+                    }
+                  : {}),
+              }),
+        });
+
   const sideChatNotice = sideChatDraftNotice({
     count: props.controller.draftSideChatReturns?.length ?? 0,
     invalid: props.controller.draftSideChatReturnsInvalid === true,
@@ -1660,38 +1737,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                         return { value: undefined, base: baseFromResult(result) };
                       }).catch(() => undefined);
                     },
-                    onScheduleUsageResume: (turnId, attemptId) => {
-                      void enqueueThreadCommand(async (previous) => {
-                        const result = await props.controller.execute({
-                          kind: "schedule-chat-usage-resume",
-                          threadId: view.thread.id,
-                          expectedVersion: queuedVersion(previous),
-                          turnId,
-                          attemptId,
-                        });
-                        return { value: undefined, base: baseFromResult(result) };
-                      }).catch(() => undefined);
-                    },
-                    onCancelUsageResume: () => {
-                      void enqueueThreadCommand(async (previous) => {
-                        const result = await props.controller.execute({
-                          kind: "cancel-chat-usage-resume",
-                          threadId: view.thread.id,
-                          expectedVersion: queuedVersion(previous),
-                        });
-                        return { value: undefined, base: baseFromResult(result) };
-                      }).catch(() => undefined);
-                    },
-                    onSnoozeAtUsageReset: () => {
-                      void enqueueThreadCommand(async (previous) => {
-                        const result = await props.controller.execute({
-                          kind: "snooze-chat-thread-at-usage-reset",
-                          threadId: view.thread.id,
-                          expectedVersion: queuedVersion(previous),
-                        });
-                        return { value: undefined, base: baseFromResult(result) };
-                      }).catch(() => undefined);
-                    },
                   } satisfies Partial<ChatTranscriptProps>))}
               readOnly={readOnly}
               view={view}
@@ -1862,6 +1907,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   : () => void props.controller.reopenThread(thread.id),
               }),
               sideChatNotice,
+              usageLimitNotice,
             ].filter((notice) => notice !== undefined)}
             key={String(thread.id)}
             info={

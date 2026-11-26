@@ -5566,8 +5566,11 @@ new task in the Project, the composer left ready to send — keys on that
 stated category, never on the absence of a request or a limit, which a
 different parked wait could also satisfy.
 
-A stop that disclosed `resetsAt` additionally offers an explicit per-thread
-opt-in: Resume when the limit resets. A billing stop never offers it, and a
+While the stop is the thread's latest turn, the composer's
+[usage-limit strip](design/thread-view.md#usage-limit-strip) offers Resume
+now (the person's ordinary send of the stopped prompt), and a stop that
+disclosed `resetsAt` additionally offers an explicit per-thread
+opt-in: Resume at reset. A billing stop never offers it, and a
 stop that preserved no resumable provider state — the parked Chat attempt's or
 Work turn's `resumeCursor`, or the Code turn's journaled evidence — cannot
 take it. Accepting journals `usage-resume.scheduled@1` on the thread's own
@@ -5583,8 +5586,9 @@ bound all hold unchanged. The dispatch settles by appending
 `usage-resume.settled@1` plus the mode's `thread-updated` in one commit; the
 outcome it records (`dispatched`, `invalidated`, or `failed` with the refusal
 detail) stays on the thread until a newer thread event replaces it.
-The old stop's notice describes a dispatched recovery as started, rather than
-implying that the resumed turn is still running after it settles.
+The old stop's transcript line records a dispatched recovery as resumed at
+the reset, rather than implying that the resumed turn is still running after
+it settles.
 Cancellation, a manual retry, archival, a provider change, or any superseding
 turn transition settles a stale recovery as `invalidated` rather than letting
 it fire against newer state; a dispatch the admission path refuses settles as

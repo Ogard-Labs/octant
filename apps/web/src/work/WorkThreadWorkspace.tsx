@@ -255,7 +255,8 @@ import {
   pendingThreadHandoffNotice,
   threadHandoffDisclosure,
 } from "../providers/conversationHandoff";
-import { providerModelLabel } from "../providers/providerModelLabel";
+import { providerInstanceLabel, providerModelLabel } from "../providers/providerModelLabel";
+import { usageLimitStripNotice } from "../transcript/usageLimitStrip";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { providerFamilyForThread } from "../providers/providerFamily";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
@@ -444,12 +445,8 @@ function WorkTurnHeader(props: {
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   /** Puts the stopped turn's prompt back in the composer to send again. */
   readonly onRestorePrompt?: (prompt: string) => void;
+  /** The thread's resume record, when it names this turn's stop. */
   readonly usageResume?: UsageResumeThreadState;
-  readonly resumable?: boolean;
-  readonly onScheduleResume?: (turnId: WorkTurnId) => void;
-  readonly onCancelResume?: () => void;
-  /** Hides the thread until this stop's declared reset; no provider turn. */
-  readonly onSnoozeAtReset?: () => void;
 }) {
   const outcome = turnHeaderOutcome(props.turn);
   const usageLimit = props.turn.failure?.usageLimit;
@@ -504,16 +501,6 @@ function WorkTurnHeader(props: {
           limit={usageLimit}
           provider={providerModelLabel(props.providerGroups, props.turn.authority)}
           {...(props.usageResume === undefined ? {} : { usageResume: props.usageResume })}
-          {...(props.resumable === undefined ? {} : { resumable: props.resumable })}
-          {...(props.onScheduleResume === undefined
-            ? {}
-            : {
-                onScheduleResume: () => props.onScheduleResume?.(props.turn.turnId),
-              })}
-          {...(props.onCancelResume === undefined ? {} : { onCancelResume: props.onCancelResume })}
-          {...(props.onSnoozeAtReset === undefined
-            ? {}
-            : { onSnoozeAtReset: props.onSnoozeAtReset })}
           {...(props.onRestorePrompt === undefined
             ? {}
             : {
@@ -2279,6 +2266,71 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       });
   }, [props, thread]);
 
+  // Resume now sends the stopped turn's own prompt again as the person's next
+  // turn, the same continuation the host would send at the reset, through the
+  // ordinary turn admission. The provider may still refuse it while the limit
+  // holds; that answer is the provider's to give.
+  const resumeWorkTurnNow = useCallback(
+    async (stopped: WorkTurnState) => {
+      if (
+        thread === undefined ||
+        props.turnClient === undefined ||
+        thread.bindingRevisionId === undefined ||
+        projectId === undefined ||
+        creating
+      ) {
+        return;
+      }
+      const threadKey = currentThreadKeyRef.current;
+      setCreating(true);
+      setErrorMessage(undefined);
+      try {
+        const started = await props.turnClient.startFirstTurn({
+          kind: "start-work-thread-turn",
+          ...(stopped.extensionSelections === undefined || stopped.extensionSelections.length === 0
+            ? {}
+            : { extensionSelections: stopped.extensionSelections }),
+          requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
+          threadId: props.threadId,
+          turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
+          prompt: stopped.prompt,
+          authority: {
+            hostId: props.hostId ?? LOCAL_HOST_ID,
+            projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            workingDirectory: thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
+            confinementPosture: "project-root-confined",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          },
+        });
+        if (currentThreadKeyRef.current !== threadKey) return;
+        if (started.kind !== "accepted") {
+          setErrorMessage("The Work turn could not be started.");
+          return;
+        }
+        setTurns((current) =>
+          current.some((turn) => String(turn.requestId) === String(started.turn.requestId))
+            ? current
+            : [...current, started.turn],
+        );
+      } catch (error) {
+        if (currentThreadKeyRef.current !== threadKey) return;
+        setErrorMessage(
+          error instanceof WorkTurnClientFailure
+            ? error.message
+            : "The Work turn could not be started.",
+        );
+      } finally {
+        setCreating(false);
+      }
+    },
+    [creating, projectId, props.hostId, props.threadId, props.turnClient, thread],
+  );
+
   const sendWorkTurn = useCallback(
     async (enqueue = false, toolCatalogHandoff = false): Promise<boolean> => {
       if (
@@ -2899,6 +2951,37 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     );
   }
 
+  // The strip above the composer while the thread's latest turn is parked on a
+  // provider's usage limit; the transcript keeps only a one-line record.
+  const stoppedTurn = turns.at(-1);
+  const usageLimitNotice =
+    stoppedTurn === undefined ||
+    stoppedTurn.status !== "waiting" ||
+    stoppedTurn.failure?.usageLimit === undefined
+      ? undefined
+      : usageLimitStripNotice({
+          limit: stoppedTurn.failure.usageLimit,
+          provider: providerInstanceLabel(
+            props.providerGroups ?? [],
+            stoppedTurn.authority.providerInstanceId,
+          ),
+          usageResume:
+            thread?.usageResume === undefined ||
+            String(thread.usageResume.record.turnId) !== String(stoppedTurn.turnId)
+              ? undefined
+              : thread.usageResume,
+          ...(readOnly
+            ? {}
+            : {
+                ...(props.turnClient === undefined
+                  ? {}
+                  : { onResumeNow: () => void resumeWorkTurnNow(stoppedTurn) }),
+                onScheduleResume: () => scheduleUsageResume(stoppedTurn.turnId),
+                onCancelResume: cancelUsageResume,
+                ...(thread?.snooze === undefined ? { onSnoozeAtReset: snoozeAtUsageReset } : {}),
+              }),
+        });
+
   return (
     <ThreadReplyDetailScope thread={{ mode: "work", threadId: String(props.threadId) }}>
       <section aria-label="Task workspace" className="work-thread-workspace">
@@ -3078,16 +3161,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                             serverUrl={props.serverUrl}
                             windowCapability={props.windowCapability}
                             {...(readOnly ? {} : { onRestorePrompt: composerDraft.setDraft })}
-                            {...(readOnly ? {} : { onCancelResume: cancelUsageResume })}
-                            {...(readOnly ? {} : { onScheduleResume: scheduleUsageResume })}
                             providerGroups={props.providerGroups ?? []}
-                            resumable={
-                              String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
-                              row.head.status === "waiting"
-                            }
-                            {...(!readOnly && thread?.snooze === undefined
-                              ? { onSnoozeAtReset: snoozeAtUsageReset }
-                              : {})}
                             turn={row.head}
                             previousStrictKept={previousStrictKeptOf(row.head)}
                             {...(readOnly ||
@@ -3145,17 +3219,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     <WorkTurnHeader
                       serverUrl={props.serverUrl}
                       windowCapability={props.windowCapability}
-                      {...(readOnly ? {} : { onCancelResume: cancelUsageResume })}
                       {...(readOnly ? {} : { onRestorePrompt: composerDraft.setDraft })}
-                      {...(readOnly ? {} : { onScheduleResume: scheduleUsageResume })}
                       providerGroups={props.providerGroups ?? []}
-                      resumable={
-                        String(row.turn.turnId) === String(turns.at(-1)?.turnId) &&
-                        row.turn.status === "waiting"
-                      }
-                      {...(!readOnly && thread?.snooze === undefined
-                        ? { onSnoozeAtReset: snoozeAtUsageReset }
-                        : {})}
                       turn={row.turn}
                       previousStrictKept={previousStrictKeptOf(row.turn)}
                       {...(readOnly ||
@@ -3958,6 +4023,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   },
                 ]
               : []),
+            ...(usageLimitNotice === undefined ? [] : [usageLimitNotice]),
             ...(handoffNotice === undefined || completionLocked || turnRunning
               ? []
               : [{ key: "handoff", tone: "neutral" as const, text: handoffNotice }]),

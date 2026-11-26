@@ -16,6 +16,17 @@ export function providerModelLabel(
   return `${providerLabel} — ${modelDisplayName(groups, turn)}`;
 }
 
+/** The provider account alone, as the picker names it, for a line that is about the account. */
+export function providerInstanceLabel(
+  groups: ReadonlyArray<PickerGroup>,
+  providerInstanceId: unknown,
+): string {
+  return (
+    groups.find((candidate) => String(candidate.instance.id) === String(providerInstanceId))
+      ?.instance.displayName ?? String(providerInstanceId)
+  );
+}
+
 /** The model alone, for a divider that must not read as a provider change. */
 export function modelDisplayName(
   groups: ReadonlyArray<PickerGroup>,

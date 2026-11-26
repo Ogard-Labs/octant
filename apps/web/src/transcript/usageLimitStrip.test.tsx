@@ -1,0 +1,133 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import type { ProviderUsageLimit, UsageResumeThreadState, UtcTimestamp } from "@octant/contracts";
+import { usageLimitStripNotice, usageLimitStripText } from "./usageLimitStrip";
+
+const NOW = Date.parse("2026-07-19T12:00:00.000Z");
+const IN_42_MIN = new Date(NOW + 42 * 60_000).toISOString() as UtcTimestamp;
+const AGO = new Date(NOW - 60_000).toISOString() as UtcTimestamp;
+
+const resume = (
+  status: UsageResumeThreadState["status"],
+  limit: ProviderUsageLimit = { kind: "exhausted", resetsAt: IN_42_MIN },
+): UsageResumeThreadState => ({
+  record: {
+    threadId: "83000000-0000-4000-8000-000000000003",
+    turnId: "83000000-0000-4000-8000-000000000004",
+    providerInstanceId:
+      "83000000-0000-4000-8000-00000000000a" as UsageResumeThreadState["record"]["providerInstanceId"],
+    usageLimit: limit,
+    resetsAt: IN_42_MIN,
+    scheduledAt: new Date(NOW).toISOString() as UtcTimestamp,
+  },
+  status,
+});
+
+const handlers = () => ({
+  onResumeNow: vi.fn(),
+  onScheduleResume: vi.fn(),
+  onCancelResume: vi.fn(),
+  onSnoozeAtReset: vi.fn(),
+});
+
+function renderStrip(notice: ReturnType<typeof usageLimitStripNotice>) {
+  return render(
+    <div>
+      {notice.text}
+      {notice.action}
+    </div>,
+  );
+}
+
+describe("the usage-limit strip", () => {
+  it("names the provider, the kind of limit and when it resets", () => {
+    const text = usageLimitStripText({
+      limit: { kind: "exhausted", resetsAt: IN_42_MIN },
+      provider: "Codex",
+      now: NOW,
+    });
+    expect(text).toMatch(/^Codex · Usage limit · resets .+ · in 42 min$/);
+    expect(
+      usageLimitStripText({ limit: { kind: "temporary" }, provider: "Claude", now: NOW }),
+    ).toBe("Claude · Rate limit · reset time not given");
+  });
+
+  it("offers Resume at reset and Snooze only when the reset is known and in the future", () => {
+    const known = handlers();
+    const first = renderStrip(
+      usageLimitStripNotice({
+        limit: { kind: "exhausted", resetsAt: IN_42_MIN },
+        provider: "Codex",
+        now: NOW,
+        ...known,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Resume at reset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Snooze until reset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume now" }));
+    expect(known.onScheduleResume).toHaveBeenCalledTimes(1);
+    expect(known.onSnoozeAtReset).toHaveBeenCalledTimes(1);
+    expect(known.onResumeNow).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    for (const limit of [
+      { kind: "exhausted" as const },
+      { kind: "exhausted" as const, resetsAt: AGO },
+    ]) {
+      const view = renderStrip(
+        usageLimitStripNotice({ limit, provider: "Codex", now: NOW, ...handlers() }),
+      );
+      expect(screen.queryByRole("button", { name: "Resume at reset" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Snooze until reset" })).toBeNull();
+      // Trying again now needs no clock.
+      expect(screen.getByRole("button", { name: "Resume now" })).toBeDefined();
+      view.unmount();
+    }
+  });
+
+  it("a billing stop shows no reset and no resume", () => {
+    const notice = usageLimitStripNotice({
+      limit: { kind: "billing", resetsAt: IN_42_MIN },
+      provider: "Codex",
+      now: NOW,
+      ...handlers(),
+    });
+    renderStrip(notice);
+    expect(screen.getByText("Codex · Billing problem")).toBeDefined();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(notice.action).toBeUndefined();
+  });
+
+  it("turns Resume at reset into Cancel once a resume is set, and says when it runs", () => {
+    const set = handlers();
+    renderStrip(
+      usageLimitStripNotice({
+        limit: { kind: "exhausted", resetsAt: IN_42_MIN },
+        provider: "Codex",
+        usageResume: resume("scheduled"),
+        now: NOW,
+        ...set,
+      }),
+    );
+    expect(screen.queryByRole("button", { name: "Resume at reset" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel resume" }));
+    expect(set.onCancelResume).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/^Codex · Usage limit · Resumes at /)).toBeDefined();
+  });
+
+  it("tells why a scheduled resume did not run and offers it again", () => {
+    renderStrip(
+      usageLimitStripNotice({
+        limit: { kind: "exhausted", resetsAt: IN_42_MIN },
+        provider: "Codex",
+        usageResume: { ...resume("failed"), detail: "Work is turned off on this host." },
+        now: NOW,
+        ...handlers(),
+      }),
+    );
+    expect(
+      screen.getByText(/The scheduled resume could not start: Work is turned off on this host\./),
+    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Resume at reset" })).toBeDefined();
+  });
+});
