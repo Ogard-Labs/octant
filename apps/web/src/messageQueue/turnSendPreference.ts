@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 /**
  * What a Work or Code message sent while a turn runs does by default on this
  * client: steer that turn where its runtime steers, or wait for the next turn
- * (maintainer decision D1, 2026-11-26). It is this client's own preference,
+ * (thread-view.md, Message queue and Stop). It is this client's own preference,
  * never the host's; the host only learns, per message, that one waits.
  */
 export type TurnSendPreference = "steer" | "queue";

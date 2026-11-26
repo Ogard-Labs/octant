@@ -7961,7 +7961,10 @@ ls-remote` against the thread's remote and the GitHub reads they already
   clients. An enqueue may say `timing: "next-turn"`; the item then carries
   `waitsForNextTurn` in the journaled `thread.message-queue-changed@1` state
   (an optional field, so earlier journals replay unchanged) and is never
-  offered to a running turn until `send-now` clears it and moves it ahead.
+  offered to a running turn until `send-now` clears it and moves it ahead;
+  a later message without it may still steer past it. A host that predates
+  the field refuses it as an invalid command, and the client sends that
+  enqueue once more without it, as an older client would.
   Stable submission identities prevent an acknowledgement retry from adding
   another message.
   Code dispatch records a distinct operation identity for each attempt before

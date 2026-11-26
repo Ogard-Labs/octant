@@ -1030,6 +1030,85 @@ describe("durable ordinary thread queue", () => {
       ]),
     );
   });
+  it("steers a message sent to steer into the running turn while an earlier one waits for the next", async () => {
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(async () => "steered");
+    const f = fixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const waiting = { ...enqueue(0), timing: "next-turn" as const };
+    const steering = enqueue(1);
+    await f.service.execute(windowId, waiting);
+    await f.service.execute(windowId, steering);
+    await f.service.tick();
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledOnce());
+    expect(steer.mock.calls[0]?.[0].messageId).toBe(steering.messageId);
+    await vi.waitFor(async () =>
+      expect((await snapshot(f.service)).items.map((item) => item.messageId)).toEqual([
+        waiting.messageId,
+      ]),
+    );
+    expect(f.p.admit).not.toHaveBeenCalled();
+  });
+  it("keeps a waiting message waiting through an edit and a rebuild of the queue", async () => {
+    const f = fixture();
+    f.p.setInspection({ status: "busy", binding: "authorized-target" });
+    const waiting = { ...enqueue(), timing: "next-turn" as const };
+    await f.service.execute(windowId, waiting);
+    await f.service.execute(
+      windowId,
+      command("edit", 1, { messageId: waiting.messageId, prompt: "changed" }),
+    );
+    rebuildProjection({
+      connection: f.connection,
+      journal: f.journal,
+      projection: new ThreadMessageQueueProjection(),
+      clock: () => now,
+    });
+    expect((await snapshot(f.service)).items).toEqual([
+      expect.objectContaining({ messageId: waiting.messageId, waitsForNextTurn: true }),
+    ]);
+  });
+  it("Send now asks a running turn again for a message it would not take before, and refuses while it is asked", async () => {
+    let answer: (value: "steered" | "refused") => void = () => undefined;
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(async () => "refused");
+    const f = fixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const message = enqueue();
+    await f.service.execute(windowId, message);
+    await f.service.tick();
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledOnce());
+    await f.service.tick();
+    expect(steer).toHaveBeenCalledOnce();
+    steer.mockImplementationOnce(
+      () => new Promise<"steered" | "refused">((resolve) => (answer = resolve)),
+    );
+    const version = (await snapshot(f.service)).version;
+    expect(
+      (
+        await f.service.execute(
+          windowId,
+          command("send-now", version, { messageId: message.messageId }),
+        )
+      ).status,
+    ).toBe("applied");
+    await f.service.tick();
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledTimes(2));
+    expect(
+      await f.service.execute(
+        windowId,
+        command("send-now", (await snapshot(f.service)).version, { messageId: message.messageId }),
+      ),
+    ).toMatchObject({ status: "refused", reason: "not-editable" });
+    answer("steered");
+    await vi.waitFor(async () => expect((await snapshot(f.service)).items).toEqual([]));
+  });
   it("Send now on a paused queue is refused and steers nothing", async () => {
     const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(async () => "steered");
     const f = fixture({ ...port(), steer });
@@ -1898,7 +1977,7 @@ describe("a paired device at the queue", () => {
     ).toBe("applied");
   });
 
-  it("refuses a device another's message and the pause, resume and reorder of the queue", async () => {
+  it("refuses a device another's message, Send now included, and the pause, resume and reorder of the queue", async () => {
     const f = deviceFixture();
     f.p.setInspection({ status: "busy", binding: "authorized-target" });
     const local = enqueue();
@@ -1911,7 +1990,6 @@ describe("a paired device at the queue", () => {
       command("pause", version),
       command("resume", version),
       command("reorder", version, { messageIds: [local.messageId] }),
-      // A restricted paired device cannot send another client's message now.
       command("send-now", version, { messageId: local.messageId }),
     ])
       expect(await f.service.execute(deviceId, attempt)).toMatchObject(refused);
@@ -1919,7 +1997,7 @@ describe("a paired device at the queue", () => {
     expect((await snapshot(f.service)).items[0]?.payload?.prompt).toBe("private prompt");
   });
 
-  it("lets a device the host's own person paired pause, resume and reorder the queue and edit or remove another's message, journaled as the device", async () => {
+  it("lets a device the host's own person paired pause, resume and reorder the queue and edit, remove or send now another's message, journaled as the device", async () => {
     const f = deviceFixture();
     f.p.setInspection({ status: "busy", binding: "authorized-target" });
     const first = enqueue();
@@ -1935,6 +2013,7 @@ describe("a paired device at the queue", () => {
         command("edit", await at(), { messageId: first.messageId, prompt: "from my phone" }),
       async () => command("remove", await at(), { messageId: second.messageId }),
       async () => command("resume", await at()),
+      async () => command("send-now", await at(), { messageId: first.messageId }),
     ])
       expect((await f.service.execute(personDeviceId, await attempt())).status).toBe("applied");
     const after = await snapshot(f.service);
@@ -1945,8 +2024,8 @@ describe("a paired device at the queue", () => {
         "SELECT actor_kind, actor_id FROM event_journal WHERE aggregate_type = 'thread-message-queue' ORDER BY global_sequence",
       )
       .all() as Array<{ actor_kind: string; actor_id: string }>;
-    expect(actors.slice(-5)).toEqual(
-      Array.from({ length: 5 }, () => ({
+    expect(actors.slice(-6)).toEqual(
+      Array.from({ length: 6 }, () => ({
         actor_kind: "remote-device",
         actor_id: String(personDeviceId),
       })),

@@ -350,12 +350,22 @@ export function useThreadMessageQueue(options: {
         pending.current = undefined;
         setUncertain(false);
         if (result !== undefined && result.status !== "refused") apply(result.snapshot);
+        const command = receipt.command;
         setMessage(
           result?.status === "refused"
             ? `The host refused this queue change: ${result.reason.replaceAll("-", " ")}.`
             : result?.status === "conflict"
               ? "The queue changed in another window. Review it and try again; your draft is kept."
-              : undefined,
+              : result?.status === "applied" &&
+                  command.kind === "enqueue" &&
+                  command.timing === "next-turn" &&
+                  result.snapshot.items.some(
+                    (item) =>
+                      String(item.messageId) === String(command.messageId) &&
+                      item.waitsForNextTurn !== true,
+                  )
+                ? "This host cannot keep a message for the next turn, so this one may steer the running turn."
+                : undefined,
         );
         return accepted ? "accepted" : "refused";
       } finally {

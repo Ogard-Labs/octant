@@ -1102,11 +1102,17 @@ default) offers it to the running turn where its runtime steers, **Queue**
 keeps it for the next turn (maintainer decision D1, 2026-11-26). ⌘↩ (Ctrl+↩)
 does the other for one message. The host never learns the setting; each
 message it holds says only whether it waits ("Waits for the next turn" in the
-queue). Each waiting Work or Code message has **Send now**, which moves it to
-the front of the messages that can still move and lets it steer the running
-turn under the same checks as any message; a message its runtime refused
-before is asked again. Send now waits for a paused or held queue to be resumed
-first, and Chat, which never steers, does not offer it.
+queue). A message sent to steer while an earlier one waits goes into the
+running turn ahead of it; the waiting ones keep their order for the next turn.
+Each waiting Work or Code message has **Send now**, which moves it to the
+front of the messages that can still move and lets it steer the running turn
+under the same checks as any message; a message its runtime refused before is
+asked again. On a paused or held queue the host refuses Send now with the
+pause or hold reason, so the person resumes first; Chat, which never steers,
+does not offer it. A host from before this choice refuses the unknown field,
+and the client then sends the message once more without it, so it may steer,
+and says so. The send button names Steer or Queue only while a turn runs; with
+no turn running and messages still queued it reads **Queue message**.
 
 In Work and Code a message sent while the turn runs is steered into that
 turn where its runtime steers (maintainer decision, 2026-11-21;

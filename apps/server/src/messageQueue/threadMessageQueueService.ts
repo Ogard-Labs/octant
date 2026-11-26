@@ -619,7 +619,7 @@ export class ThreadMessageQueueService {
         // The running turn is the head's own: a message this queue admitted
         // stays at the head until its turn settles, and the next one may
         // still be steered into it.
-        await this.#steerBehindAccepted(scope);
+        await this.#steerFirstSteerable(scope, 1);
         return;
       }
       if (reconciled.status === "not-admitted") {
@@ -734,9 +734,11 @@ export class ThreadMessageQueueService {
       if (head === undefined) return;
     }
     if (inspection.status === "busy") {
-      // A message the person chose to queue waits for the next turn.
+      // A message the person chose to queue waits for the next turn; one
+      // sent to steer behind it (⌘↩ under Queue) still goes into this one.
       if (head.waitsForNextTurn !== true)
         this.#steer(scope, head.messageId, content, auth.windowId);
+      else await this.#steerFirstSteerable(scope, 0);
       return;
     }
     this.#unsteerable.delete(head.messageId);
@@ -796,20 +798,22 @@ export class ThreadMessageQueueService {
     } else this.#hold(state, "delivery-unknown");
   }
   /**
-   * Offers the message behind the head to the running turn when that turn is
-   * the head's own, which this queue admitted. Only that one message is
-   * offered, under the same pause, hold, authority and binding checks as the
-   * head, so the queue's order holds. A check that fails leaves it for the
-   * head's ordinary dispatch to judge, and holds nothing.
+   * Offers one message to the running turn: the first from `from` on that
+   * the person did not keep for the next turn. Behind an accepted head
+   * (`from` 1) the turn is the head's own; past a waiting head (`from` 0) a
+   * message sent to steer goes into the turn while the waiting ones keep
+   * their places for the next. Only that one message is offered, under the
+   * same pause, hold, authority and binding checks as the head, so the order
+   * of the messages that steer holds. A check that fails leaves it for the
+   * ordinary dispatch to judge, and holds nothing.
    */
-  async #steerBehindAccepted(scope: ThreadMessageQueueScope): Promise<void> {
+  async #steerFirstSteerable(scope: ThreadMessageQueueScope, from: 0 | 1): Promise<void> {
     const state = this.#store.state(scope);
-    const next = state.items[1];
+    const next = state.items.slice(from).find((item) => item.waitsForNextTurn !== true);
     if (
       this.#port.steer === undefined ||
       next === undefined ||
       next.status !== "queued" ||
-      next.waitsForNextTurn === true ||
       state.paused ||
       state.holdReason !== undefined ||
       this.#disposed ||

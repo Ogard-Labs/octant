@@ -3,6 +3,7 @@ import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
 import { automationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
+import { writeTurnSendPreference } from "../messageQueue/turnSendPreference";
 import {
   decodeWorkThreadTranscript,
   decodeWorkTurnState,
@@ -142,6 +143,34 @@ describe("Work host queue", () => {
     unmount();
     expect(clients.turnClient.startFirstTurn).not.toHaveBeenCalled();
     expect(clients.turnClient.discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it("⌘↩ steers when the default is Queue, and the send button says it queues", async () => {
+    writeTurnSendPreference("queue");
+    try {
+      const host = queueTestHost();
+      const user = userEvent.setup();
+      render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          messageQueueClient={host}
+          {...queuedWorkClients()}
+          threadId={threadId}
+          title="Draft brief"
+        />,
+      );
+      const composer = await screen.findByLabelText("Work prompt");
+      await user.type(composer, "Wait for the next turn");
+      await user.click(await screen.findByRole("button", { name: "Queue for the next turn" }));
+      await waitFor(() => expect(composer).toHaveValue(""));
+      await user.type(composer, "Steer this one");
+      await user.keyboard("{Meta>}{Enter}{/Meta}");
+      await waitFor(() => expect(host.execute).toHaveBeenCalledTimes(2));
+      expect(host.execute.mock.calls[0]?.[0]).toMatchObject({ timing: "next-turn" });
+      expect(host.execute.mock.calls[1]?.[0]).not.toHaveProperty("timing");
+    } finally {
+      writeTurnSendPreference("steer");
+    }
   });
 
   it.each([false, true])(

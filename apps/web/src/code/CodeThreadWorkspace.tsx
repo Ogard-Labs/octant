@@ -3524,9 +3524,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               send: {
                 ariaLabel: !queueFollowUp
                   ? "Send follow-up"
-                  : turnSendPreference === "queue"
-                    ? "Queue for the next turn"
-                    : "Send into the running turn",
+                  : !busy
+                    ? "Queue message"
+                    : turnSendPreference === "queue"
+                      ? "Queue for the next turn"
+                      : "Send into the running turn",
                 disabled: !canSend,
                 onSend: () => void submitFollowUp(),
               },

@@ -3998,9 +3998,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               sending: turnRunning,
               send: {
                 ariaLabel: queueFollowUp
-                  ? turnSendPreference === "queue"
-                    ? "Queue for the next turn"
-                    : "Send into the running turn"
+                  ? !turnRunning
+                    ? "Queue message"
+                    : turnSendPreference === "queue"
+                      ? "Queue for the next turn"
+                      : "Send into the running turn"
                   : props.turnClient === undefined && !turnRunning
                     ? "Create artifact"
                     : "Send follow-up",
