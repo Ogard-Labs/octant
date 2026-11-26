@@ -81,7 +81,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useRetainedRecord } from "../polling/useRetainedRecord";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
-import { applyActivityEvent, forgetWrittenPath, withStreamedReasoning } from "./transcriptActivity";
+import { applyActivityEvent, forgetWrittenPath } from "./transcriptActivity";
 import { EMPTY_TURN_ACTIVITY, type TurnActivity } from "../transcript/turnActivity";
 import { samePollingData } from "../polling/samePollingData";
 import {
@@ -875,14 +875,19 @@ export function useCodeController(options: CodeControllerOptions) {
       return updated;
     });
   }, []);
+  /**
+   * A turn's reasoning as its stream has shown it from the turn's start. A read
+   * of the thread can land before the stream commits a chunk it holds, and
+   * already carry that chunk; set rather than appended, the chunk shows once. A
+   * read that holds this text and more is the newer, so it stays.
+   */
   const noteReasoning = useCallback((operationId: CodeOperationId, streamed: string) => {
     setTurnActivity((current) => {
       const key = String(operationId);
       const existing = current.get(key) ?? EMPTY_TURN_ACTIVITY;
-      const next = withStreamedReasoning(existing, streamed);
-      if (next === existing) return current;
+      if (existing.reasoning.startsWith(streamed)) return current;
       const updated = new Map(current);
-      updated.set(key, next);
+      updated.set(key, { ...existing, reasoning: streamed });
       return updated;
     });
   }, []);
@@ -1674,7 +1679,6 @@ export function useCodeController(options: CodeControllerOptions) {
         let conversationIncomplete = false;
         let conversationOperationId: CodeOperationId | undefined;
         let openingReadFailed = false;
-        let keptShownTranscript = false;
         try {
           const hydrated = await conversationRead;
           conversationIncomplete = hydrated?.incomplete === true;
@@ -1695,7 +1699,6 @@ export function useCodeController(options: CodeControllerOptions) {
           if (!isActive(request, threadGeneration, mounted)) return;
           openingReadFailed = true;
           if (reloadsShown) {
-            keptShownTranscript = true;
             // What a read loaded stays, as when a refresh fails: emptying it
             // would also take the row a reply this window sends streams into.
             setConversationHistory("loaded");
@@ -1706,7 +1709,6 @@ export function useCodeController(options: CodeControllerOptions) {
             // went on: the next read starts the thread again from its newest
             // turns, as a first open does.
             conversationThreadKey.current = undefined;
-            conversationRef.current = [];
             setConversation([]);
             setTurnActivity(new Map());
             setEarlierConversation(() => NO_EARLIER_CONVERSATION);
@@ -1724,7 +1726,7 @@ export function useCodeController(options: CodeControllerOptions) {
             if (!isActive(request, threadGeneration, mounted)) return;
             inheritedConversation.current = inherited.messages;
             // A kept transcript already starts with the inherited turns.
-            if (!keptShownTranscript) {
+            if (!(reloadsShown && openingReadFailed)) {
               setConversation((current) => [...inherited.messages, ...current]);
             }
             setTurnActivity((current) => new Map([...inherited.activity, ...current]));
@@ -1741,7 +1743,6 @@ export function useCodeController(options: CodeControllerOptions) {
         const readFirstInheritedPage = async () => {
           if (
             initial.thread.forkedFrom === undefined ||
-            !readsConversationWindow(client) ||
             conversationThreadKey.current !== String(threadId) ||
             earlierConversationRef.current.ownHasEarlier ||
             earlierConversationRef.current.inherited !== undefined ||
