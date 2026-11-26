@@ -121,8 +121,7 @@ import type { ComposerStashBinding, ComposerStashSubmission } from "../composer/
 import type { ProjectId } from "@octant/contracts/projects";
 import type { MoveToProjectChoice } from "./MoveToProjectDialog";
 import { activeChatTurns } from "@octant/domain/chat-policy";
-import { usageLimitStripNotice } from "../transcript/usageLimitStrip";
-import { providerInstanceLabel } from "../providers/providerModelLabel";
+import { providerInstanceLabel, usageLimitStripNotice } from "../transcript/usageLimitStrip";
 import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";

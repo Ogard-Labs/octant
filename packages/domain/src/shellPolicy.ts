@@ -239,8 +239,6 @@ export function defaultShellSettings(): ShellSettings {
     providerCredentialPassThrough: {},
     threadWakeupsWaitingLimit: DEFAULT_THREAD_WAKEUPS_WAITING,
     threadWakeupsRunMissedOnReturn: true,
-    usageLimitResumeAtResetByDefault: false,
-    usageLimitSnoozeUntilResetByDefault: false,
     messageWakesPerHour: DEFAULT_COORDINATOR_WAKES_PER_HOUR,
     messageWakeRounds: DEFAULT_COORDINATOR_ROUNDS,
     coordinatorsPerProject: MAX_COORDINATORS_PER_PROJECT,

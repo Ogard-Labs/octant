@@ -179,8 +179,8 @@ import { latestTurnTasks, splitTurnTasks } from "./transcriptActivity";
 import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { PendingRequests } from "../transcript/PendingRequests";
-import { providerInstanceLabel, providerModelLabel } from "../providers/providerModelLabel";
-import { usageLimitStripNotice } from "../transcript/usageLimitStrip";
+import { providerModelLabel } from "../providers/providerModelLabel";
+import { providerInstanceLabel, usageLimitStripNotice } from "../transcript/usageLimitStrip";
 import { resumeStoppedPromptNow, stoppedPromptOf } from "./resumeStoppedPrompt";
 import {
   TranscriptHandoff,

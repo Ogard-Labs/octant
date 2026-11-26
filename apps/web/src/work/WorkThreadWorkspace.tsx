@@ -255,8 +255,8 @@ import {
   pendingThreadHandoffNotice,
   threadHandoffDisclosure,
 } from "../providers/conversationHandoff";
-import { providerInstanceLabel, providerModelLabel } from "../providers/providerModelLabel";
-import { usageLimitStripNotice } from "../transcript/usageLimitStrip";
+import { providerModelLabel } from "../providers/providerModelLabel";
+import { providerInstanceLabel, usageLimitStripNotice } from "../transcript/usageLimitStrip";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { providerFamilyForThread } from "../providers/providerFamily";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";

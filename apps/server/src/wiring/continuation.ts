@@ -285,8 +285,8 @@ export function wireContinuation(deps: ContinuationDependencies) {
       settings: () => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
         return {
-          resumeAtReset: settings.usageLimitResumeAtResetByDefault,
-          snoozeUntilReset: settings.usageLimitSnoozeUntilResetByDefault,
+          resumeAtReset: settings.usageLimitResumeAtResetByDefault === true,
+          snoozeUntilReset: settings.usageLimitSnoozeUntilResetByDefault === true,
         };
       },
       personSent: (mode, key) => deps.personSentTurns.sent(mode, key),

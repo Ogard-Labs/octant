@@ -3647,7 +3647,7 @@ function UsageSettingsSection(props: {
           settingId="usage-limit-resume-by-default"
         >
           <OctantSwitch
-            checked={props.settings.usageLimitResumeAtResetByDefault}
+            checked={props.settings.usageLimitResumeAtResetByDefault === true}
             label="Resume at reset by default"
             onCheckedChange={(checked) =>
               props.onSettingsChange({ usageLimitResumeAtResetByDefault: checked })
@@ -3662,7 +3662,7 @@ function UsageSettingsSection(props: {
           settingId="usage-limit-snooze-by-default"
         >
           <OctantSwitch
-            checked={props.settings.usageLimitSnoozeUntilResetByDefault}
+            checked={props.settings.usageLimitSnoozeUntilResetByDefault === true}
             label="Snooze until reset by default"
             onCheckedChange={(checked) =>
               props.onSettingsChange({ usageLimitSnoozeUntilResetByDefault: checked })

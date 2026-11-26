@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import type { ProviderUsageLimit, UsageResumeThreadState } from "@octant/contracts";
+import type { PickerGroup } from "@octant/domain";
 import type { ComposerNoticeItem } from "../composer/ComposerNotice";
 
 /**
@@ -72,4 +73,19 @@ export function usageLimitStripNotice(input: UsageLimitStripInput): ComposerNoti
         }
       : {}),
   };
+}
+
+/**
+ * The provider account alone, as the picker names it, for the strip's line.
+ * Kept here, with the lazily loaded workspaces that use it, rather than in the
+ * shared label module the initial window loads.
+ */
+export function providerInstanceLabel(
+  groups: ReadonlyArray<PickerGroup>,
+  providerInstanceId: unknown,
+): string {
+  return (
+    groups.find((candidate) => String(candidate.instance.id) === String(providerInstanceId))
+      ?.instance.displayName ?? String(providerInstanceId)
+  );
 }
