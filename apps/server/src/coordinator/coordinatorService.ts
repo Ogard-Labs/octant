@@ -1230,6 +1230,13 @@ export class CoordinatorService {
       // new worktree task; the coordinator's own open outcome proposal stays
       // with the coordinator.
       const { proposedOutcome: _proposal, ...deliveryTarget } = caller.deliveryTarget;
+      // A detached Project checkout records HEAD as its intent and pins the
+      // actual commit as its base. A branch whose name resembles an OID keeps
+      // its own branch intent and is still resolved through refs/heads.
+      const detachedBase =
+        this.#ports.isProjectConversation?.(caller) === true &&
+        deliveryTarget.branchIntent === "HEAD" &&
+        /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(deliveryTarget.proposedBaseBranch);
       const marked = this.#ports.isMarked(String(caller.id));
       const command = decodeCodeCommand({
         kind: "create-managed-code-thread",
@@ -1256,6 +1263,7 @@ export class CoordinatorService {
           confirmedAt: new Date(this.#ports.now()).toISOString(),
         },
         sourceBranch: deliveryTarget.proposedBaseBranch,
+        ...(detachedBase ? { sourceRevision: deliveryTarget.proposedBaseBranch } : {}),
         startFromOrigin: false,
         ...(deliveryTarget.remoteName === undefined
           ? {}

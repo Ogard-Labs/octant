@@ -45,6 +45,23 @@ describe("where a coordinator's workers are listed", () => {
     });
   });
 
+  it("uses Show workers for a Project conversation while leaving a former coordinator’s workers visible", () => {
+    const rows = [ordinary, working, orphan];
+    expect(ids(sidebarThreadsWithWorkers(rows, undefined, [coordinator.threadId]))).toEqual([
+      "t",
+      "w3",
+    ]);
+    expect(
+      ids(
+        sidebarThreadsWithWorkers(
+          rows,
+          { coordinatorWorkerListing: { sidebar: true, board: false } },
+          [coordinator.threadId],
+        ),
+      ),
+    ).toEqual(ids(rows));
+  });
+
   it("keeps a put-away coordinator's workers as ordinary Project rows", () => {
     const putAway: ChatThreadNavigationItem = { ...coordinator, shelf: "completed" };
     const rows = sidebarThreadsWithWorkers([ordinary, putAway, working, asking], undefined);

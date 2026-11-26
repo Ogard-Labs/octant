@@ -2231,11 +2231,11 @@ export class CodeService {
             thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, existing),
           };
         const settings = this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings();
-        const model = command.model ?? settings.defaultModel;
+        const model = command.model;
         if (model === undefined)
           throw this.#failure(
             "unavailable",
-            "Choose a Code provider and model to start the Project conversation.",
+            "No ready Code model was selected for this Project. Check its provider access and configured models.",
           );
         const prepared = await this.execute(authenticatedWindowId, {
           kind: "prepare-code-project-checkout",
@@ -2263,7 +2263,7 @@ export class CodeService {
             ...(posture.autoApprove ? { autoApprove: true } : {}),
             permissionPersistence: settings.defaultPermissionPersistence,
             deliveryTarget: {
-              branchIntent: base,
+              branchIntent: head.kind === "detached" ? "HEAD" : base,
               proposedBaseBranch: base,
               remoteName: "origin",
               proposedBaseRepository: `local/${project.name}`,

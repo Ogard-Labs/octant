@@ -435,12 +435,9 @@ import { useTodoListHost } from "./todos/useTodoListHost";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { TodoListHostSettingsContext } from "./todos/todoListHostSettingsContext";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
-import { ProjectActionButtons } from "./projects/ProjectActionButtons";
+import type { ProjectActionButtonsProps } from "./projects/ProjectActionButtons";
 import { coordinatorDoneWhenEqual } from "@octant/domain";
-import {
-  ProjectActionRunDialog,
-  type ProjectActionTarget,
-} from "./projects/ProjectActionRunDialog";
+import type { ProjectActionTarget } from "./projects/ProjectActionRunDialog";
 import { ProjectIconPrefetch, ProjectIconProvider } from "./projects/ProjectIcon";
 import {
   type ProjectThreadsAccess,
@@ -537,6 +534,7 @@ import {
   RemotePairingView,
   RemoteTodoDraft,
 } from "./shell/deferredSurfaces";
+import { providerGroupsForProject } from "./projects/ProjectProviderPolicySection";
 import { firstSelectableProviderSelection } from "./providers/firstSelectableProviderSelection";
 import {
   isAuthorizedCanvasDocument,
@@ -737,6 +735,25 @@ const NO_IMAGE_PROFILES: ReadonlyArray<never> = [];
 const NO_CODE_THREADS: ReadonlyArray<never> = [];
 const NO_CODE_CHECKOUTS: ReadonlyArray<never> = [];
 const NO_COMPUTER_SNAPSHOTS: ReadonlyArray<never> = [];
+const LazyProjectActionButtons = lazy(() =>
+  import("./projects/ProjectActionButtons").then(({ ProjectActionButtons }) => ({
+    default: ProjectActionButtons,
+  })),
+);
+function ProjectActionButtons(props: ProjectActionButtonsProps) {
+  if (props.actions.length === 0) return null;
+  return (
+    <Suspense fallback={null}>
+      <LazyProjectActionButtons {...props} />
+    </Suspense>
+  );
+}
+
+const ProjectActionRunDialog = lazy(() =>
+  import("./projects/ProjectActionRunDialog").then(({ ProjectActionRunDialog }) => ({
+    default: ProjectActionRunDialog,
+  })),
+);
 const PrepareToShutDownHost = lazy(() =>
   import("./environment/threadMove/PrepareToShutDownHost").then((module) => ({
     default: module.PrepareToShutDownHost,
@@ -5897,6 +5914,7 @@ function LaunchedShell(
     const codeSidebarThreads = sidebarThreadsWithWorkers(
       codeProjectThreads,
       codeController.bootstrap?.settings,
+      codeController.bootstrap?.projectConversationIds,
     );
     const sidebarThreadGroups = sidebarThreadGroupsForMode({
       activeMode,
@@ -7430,16 +7448,10 @@ function LaunchedShell(
       !conversation || activeMode !== "code" || activeProjectId !== project.id;
     if (needsProjectSurface) await controller.openProject(project.id, project.type, project.name);
     if (!conversation || projectOpenRequest.current !== request) return;
-    const selection = resolveDraftProviderSelection(
-      codeProviderGroups,
-      codeDraftPreferredSelection,
-    );
-    const fallback = codeProviderChoices[0];
+    const groups = providerGroupsForProject(project, codeProviderGroups);
     const model =
-      selection ??
-      (fallback === undefined
-        ? undefined
-        : { providerInstanceId: fallback.instanceId, modelId: fallback.modelId });
+      resolveDraftProviderSelection(groups, codeDraftPreferredSelection) ??
+      firstSelectableProviderSelection(groups);
     const opened = await codeController.execute({
       kind: "open-code-project-conversation",
       projectId: project.id,
@@ -10535,39 +10547,43 @@ function LaunchedShell(
                                 />
                               ) : null}
                               {projectActionRun === undefined ? null : (
-                                <ProjectActionRunDialog
-                                  key={JSON.stringify(projectActionRun.target)}
-                                  client={projectTerminalClient}
-                                  target={projectActionRun.target}
-                                  storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
-                                  open={projectActionRun.open}
-                                  onClose={() =>
-                                    setProjectActionRun((current) =>
-                                      current === undefined
-                                        ? undefined
-                                        : { ...current, open: false },
+                                <Suspense
+                                  fallback={<SurfaceLoading label="Opening Project action" />}
+                                >
+                                  <ProjectActionRunDialog
+                                    key={JSON.stringify(projectActionRun.target)}
+                                    client={projectTerminalClient}
+                                    target={projectActionRun.target}
+                                    storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                                    open={projectActionRun.open}
+                                    onClose={() =>
+                                      setProjectActionRun((current) =>
+                                        current === undefined
+                                          ? undefined
+                                          : { ...current, open: false },
+                                      )
+                                    }
+                                    {...(zen.enabled &&
+                                    !serverCodeProjects.workProjects.some(
+                                      (project) =>
+                                        project.projectId === projectActionRun.target.projectId,
                                     )
-                                  }
-                                  {...(zen.enabled &&
-                                  !serverCodeProjects.workProjects.some(
-                                    (project) =>
-                                      project.projectId === projectActionRun.target.projectId,
-                                  )
-                                    ? {
-                                        onOpenTerminal: (
-                                          terminalId: ReturnType<typeof decodeCodeTerminalId>,
-                                        ) => {
-                                          void (async () => {
-                                            if (!zen.active) await zen.enterZen();
-                                            await zen.pinProjectTerminal({
-                                              projectId: projectActionRun.target.projectId,
-                                              terminalId,
-                                            });
-                                          })();
-                                        },
-                                      }
-                                    : {})}
-                                />
+                                      ? {
+                                          onOpenTerminal: (
+                                            terminalId: ReturnType<typeof decodeCodeTerminalId>,
+                                          ) => {
+                                            void (async () => {
+                                              if (!zen.active) await zen.enterZen();
+                                              await zen.pinProjectTerminal({
+                                                projectId: projectActionRun.target.projectId,
+                                                terminalId,
+                                              });
+                                            })();
+                                          },
+                                        }
+                                      : {})}
+                                  />
+                                </Suspense>
                               )}
                             </OctantDialogPresence>
 

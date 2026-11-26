@@ -185,8 +185,9 @@ function harness(options: HarnessOptions = {}) {
       onSleep?.();
     },
   });
-  const newTurn = () =>
+  const newTurn = (operationId?: string) =>
     createThreadsTools({
+      ...(operationId === undefined ? {} : { operationId }),
       mode: options.mode ?? "code",
       windowId: "f0000000-0000-4000-8000-0000000000ff" as WindowId,
       service,
@@ -806,6 +807,28 @@ describe("starting workers through the threads tool", () => {
     const answer = await fixture.call({ operation: "start", title: "Fix it", prompt: "Go." });
     expect(answer).toEqual({ result: { status: "started" }, isError: false });
     expect(started).toEqual([{ operation: "start", title: "Fix it", prompt: "Go." }]);
+  });
+
+  it("replays a provider tool call as the same assignment and distinguishes subsequent calls and turns", async () => {
+    const fixture = harness({
+      coordinator: {
+        levelOf: () => "approval-gated",
+        start: async ({ assignmentId }) => ({ result: assignmentId, isError: false }),
+      },
+    });
+    const assign = async (turn: string, call: string) =>
+      (
+        await fixture.newTurn(turn).execute({
+          name: SIBLING_THREADS_TOOL_NAME,
+          toolCallId: call,
+          inputJson: JSON.stringify({ operation: "start", title: "Retry", prompt: "Fix it." }),
+        })
+      ).result;
+    const first = await assign("turn-a", "call-1");
+    expect(first).toEqual(expect.any(String));
+    expect(await assign("turn-a", "call-1")).toBe(first);
+    expect(await assign("turn-a", "call-2")).not.toBe(first);
+    expect(await assign("turn-b", "call-1")).not.toBe(first);
   });
 
   it("does not offer start to a thread that is not a coordinator, and refuses the call", async () => {

@@ -5660,6 +5660,28 @@ describe("App", () => {
   it("opens the pinned conversation by keyboard and keeps the ordinary Project's Overview choice", async () => {
     const user = userEvent.setup();
     const codeApi = await projectConversationCodes();
+    const providerApi = providersWithToolModel();
+    const catalog = await providerApi.bootstrap();
+    const observed = catalog.observedStates[0];
+    const first = observed?.models[0];
+    if (!observed || !first) throw new Error("Expected a ready Code model");
+    const allowed = {
+      ...providerModel({
+        id: "project-model",
+        displayName: "Project model",
+        toolCalling: "supported",
+        evidence: "supported",
+      }),
+      dataTags: ["zdr" as const],
+    };
+    const restricted = projectBootstrap();
+    const projectApi = projects({
+      ...restricted,
+      active: restricted.active.map((project) => ({
+        ...project,
+        providerPolicy: { mode: "eu-zdr" as const, providerInstanceIds: [] },
+      })),
+    });
     const shell = codeShellBootstrap();
     const key = `octant.code.project-destination.${projectId}`;
     localStorage.removeItem(key);
@@ -5669,7 +5691,7 @@ describe("App", () => {
           isNarrow={false}
           launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
           codeClient={codeApi}
-          projectClient={projects()}
+          projectClient={projectApi}
           projectWindowCapability={projectWindowCapability}
           shellClient={client({
             ...shell,
@@ -5679,13 +5701,27 @@ describe("App", () => {
               sidebarPinnedProjects: [projectId],
             },
           })}
-          providerClient={providersWithToolModel()}
+          providerClient={{
+            ...providerApi,
+            bootstrap: async () => ({
+              ...catalog,
+              observedStates: [{ ...observed, models: [first, allowed] }],
+            }),
+          }}
         />,
       );
       const rail = await screen.findByRole("navigation", { name: "Destinations" });
       const pin = await within(rail).findByRole("button", { name: "Octant, unread" });
       pin.focus();
       await user.keyboard("{Enter}");
+      await waitFor(() =>
+        expect(codeApi.execute).toHaveBeenCalledWith(
+          expect.objectContaining({
+            kind: "open-code-project-conversation",
+            model: { providerInstanceId: observed.instanceId, modelId: allowed.id },
+          }),
+        ),
+      );
       const views = await screen.findByRole("navigation", { name: "Project views" });
       await waitFor(() =>
         expect(within(views).getByRole("button", { name: "Conversation" })).toHaveAttribute(

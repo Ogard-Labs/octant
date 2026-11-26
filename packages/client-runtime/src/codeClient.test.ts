@@ -169,7 +169,13 @@ describe("code client", () => {
     const answer = { settings, threads: [thread], checkouts: [] };
     const fetch = vi
       .fn()
-      .mockResolvedValueOnce(Response.json({ ...answer, plannerThreadIds: [ids.thread] }))
+      .mockResolvedValueOnce(
+        Response.json({
+          ...answer,
+          plannerThreadIds: [ids.thread],
+          projectConversationIds: [ids.thread],
+        }),
+      )
       // A host with no planner still sends the list, empty.
       .mockResolvedValueOnce(Response.json({ ...answer, plannerThreadIds: [] }))
       .mockResolvedValueOnce(Response.json(answer))
@@ -179,6 +185,7 @@ describe("code client", () => {
     await expect(client.bootstrap()).resolves.toMatchObject({
       threads: [thread],
       plannerThreadIds: [ids.thread],
+      projectConversationIds: [ids.thread],
     });
     await expect(client.bootstrap()).resolves.toMatchObject({ plannerThreadIds: [] });
     // An older host omits the list; the reader then knows of no planner.

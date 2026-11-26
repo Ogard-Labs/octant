@@ -1,4 +1,3 @@
-import "../styles/project-conversation.css";
 import { useEffect, useRef, useState } from "react";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeProjectReport, CodeThreadId } from "@octant/contracts/code";

@@ -51,7 +51,7 @@ import {
   type CodeProjectPullRequestSwitchOutcome,
   type CodeProjectPullRequestSwitchTarget,
   type CodeProjectPullRequestSwitchesView,
-  type CodeBootstrap,
+  CodeBootstrap,
   CodeNavigation,
   type CodeCheckoutId,
   type CodeCommand,
@@ -98,10 +98,7 @@ import {
   CodeCheckoutIdentity,
   CodeFileOpenResultEnvelope,
   CodeFileSaveResultEnvelope,
-  CodeSettings,
   CodeThread,
-  CodeNavigationRuntime,
-  CodeThreadActivity,
   decodeHostAnswer,
   OWNER_UNLOCK_HEADER,
   CodeTranscriptSearch,
@@ -1869,53 +1866,13 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
 }
 
 function decodeBootstrap(value: unknown): CodeBootstrap {
-  // `activity` and `runtime` are optional for older hosts; Schema defaults fill them.
-  if (!isRecord(value)) throw new Error("invalid");
-  const keys = Object.keys(value);
-  const allowed = new Set([
-    "settings",
-    "threads",
-    "checkouts",
-    "activity",
-    "runtime",
-    "plannerThreadIds",
-  ]);
   if (
-    !["settings", "threads", "checkouts"].every((key) => keys.includes(key)) ||
-    keys.some((key) => !allowed.has(key))
+    !isRecord(value) ||
+    Object.keys(value).some((key) => !Object.hasOwn(CodeBootstrap.fields, key))
   ) {
     throw new Error("invalid");
   }
-  if (
-    !Array.isArray(value.threads) ||
-    !Array.isArray(value.checkouts) ||
-    (value.activity !== undefined && !Array.isArray(value.activity)) ||
-    (value.runtime !== undefined && !Array.isArray(value.runtime)) ||
-    (value.plannerThreadIds !== undefined && !Array.isArray(value.plannerThreadIds))
-  ) {
-    throw new Error("invalid");
-  }
-  return {
-    settings: decodeHostAnswer(CodeSettings)(value.settings),
-    threads: value.threads.map((thread) => decodeHostAnswer(CodeThread)(thread)),
-    checkouts: value.checkouts.map((checkout) => decodeHostAnswer(CodeCheckoutIdentity)(checkout)),
-    activity:
-      value.activity === undefined
-        ? []
-        : value.activity.map((entry) => decodeHostAnswer(CodeThreadActivity)(entry)),
-    runtime:
-      value.runtime === undefined
-        ? []
-        : value.runtime.map((entry) => decodeHostAnswer(CodeNavigationRuntime)(entry)),
-    // The host sends this list on every bootstrap, empty where no Project has
-    // a planner. While this reader did not know the key it refused the whole
-    // answer, and Code listed no threads at all.
-    ...(value.plannerThreadIds === undefined
-      ? {}
-      : {
-          plannerThreadIds: value.plannerThreadIds.map((id) => decodeCodeThreadId(id)),
-        }),
-  };
+  return decodeHostAnswer(CodeBootstrap)(value);
 }
 
 function decodeThreadView(value: unknown): CodeThreadView {

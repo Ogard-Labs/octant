@@ -45,6 +45,7 @@ export function workerListingFor(
 export function sidebarThreadsWithWorkers(
   threads: ReadonlyArray<ChatThreadNavigationItem>,
   settings: Parameters<typeof workerListingFor>[0],
+  projectConversationIds: ReadonlyArray<string> = [],
 ): ReadonlyArray<ChatThreadNavigationItem> {
   // Only a coordinator the Project tree lists can hold its workers: a put-away
   // coordinator sits on the Put away shelf, and its unfinished workers stay
@@ -54,6 +55,7 @@ export function sidebarThreadsWithWorkers(
       .filter((thread) => thread.coordinator === true && thread.shelf !== "completed")
       .map((thread) => thread.threadId),
   );
+  for (const id of projectConversationIds) coordinatorIds.add(id);
   if (coordinatorIds.size === 0) return threads;
   const hidden = new Map<string, { working: number; attention: number }>();
   const listed: ChatThreadNavigationItem[] = [];

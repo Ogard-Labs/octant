@@ -44,8 +44,11 @@ can see Project work and cannot direct a different coordinator’s worker.
 
 The Project conversation has no delivery or Done action. Its backing Code
 thread carries checkout and delivery defaults for the workers it starts. The
-Project owns its lifecycle. Settled worker turns supply reports linked to the
-worker, including blockers and decisions. Reports derive from journaled turns,
+Project owns its lifecycle. Workers assigned from a detached Project checkout start
+at the commit recorded when the conversation opened. Settled worker turns supply reports linked to the
+worker, including blockers and decisions. A completed turn uses its recorded
+finished summary when available. A long reply without a finished summary shows
+its opening and conclusion, with the full exchange in the linked worker. Reports derive from journaled turns,
 so recovery preserves their identity without another provider call. Activity
 updates the roster. Reading a report spends unread, and the worker retains each
 unanswered request until the person answers it.

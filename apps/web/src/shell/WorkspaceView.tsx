@@ -1,4 +1,4 @@
-import { CodeProjectWork } from "../projects/CodeProjectWork";
+import "../styles/project-conversation.css";
 import {
   rememberProjectDestination,
   type CodeProjectDestination,
@@ -263,6 +263,11 @@ const WorkThreadEnvironment = lazy(() =>
 const ChatProjectOverview = lazy(() =>
   import("../chat/ChatProjectOverview").then(({ ChatProjectOverview }) => ({
     default: ChatProjectOverview,
+  })),
+);
+const CodeProjectWork = lazy(() =>
+  import("../projects/CodeProjectWork").then(({ CodeProjectWork }) => ({
+    default: CodeProjectWork,
   })),
 );
 const CodeOverview = lazy(() =>

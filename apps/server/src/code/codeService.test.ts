@@ -1201,7 +1201,13 @@ describe("CodeService reads", () => {
 
 describe("CodeService commands", () => {
   it("binds a Project conversation as a coordinator without starting a turn", async () => {
-    const fixture = serviceFixture({ project: rememberedFullAccessProject });
+    const oid = "a".repeat(40);
+    const detached = decodeCodeCheckoutIdentity({ ...checkout, head: { kind: "detached", oid } });
+    const fixture = serviceFixture({
+      project: rememberedFullAccessProject,
+      observedCheckout: detached,
+      checkout: detached,
+    });
     const result = await fixture.service.execute(ids.window, {
       kind: "open-code-project-conversation",
       projectId: ids.project,
@@ -1213,6 +1219,7 @@ describe("CodeService commands", () => {
         projectId: ids.project,
         coordinator: true,
         lifecycle: "active",
+        deliveryTarget: { branchIntent: "HEAD", proposedBaseBranch: oid },
       },
     });
     expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
@@ -1395,6 +1402,34 @@ describe("CodeService commands", () => {
         }),
       ).toEqual(first);
       expect(await report()).toEqual(waiting);
+      const conclusion = "Blocked until the Windows signing key is available.";
+      const body = "Ran the updater checks. ".repeat(45) + conclusion;
+      host.connection
+        .prepare(`INSERT INTO code_transcript_search_projection
+        (operation_id,content_role,thread_id,start_sequence,part_count,rewound,body_text,search_text,last_sequence)
+        VALUES (?,'assistant',?,1,1,0,?,?,1)`)
+        .run(operationId, worker.id, body, body.toLowerCase());
+      expect(await report()).toMatchObject({
+        reports: [
+          { workerId: worker.id, operationId, summary: expect.stringContaining(conclusion) },
+        ],
+      });
+      observe(2, "completed");
+      const summary = "Windows retry is fixed. All updater checks passed.";
+      append("thread-finished-receipt", worker.id, 0, "thread.finished-receipt-recorded@1", {
+        receiptId: randomUUID(),
+        threadId: worker.id,
+        projectId: ids.project,
+        mode: "code",
+        turnId: operationId,
+        summary,
+        items: [],
+        diff: { status: "unavailable", reason: "No checkout diff." },
+        recordedAt: now,
+      });
+      expect(await report()).toMatchObject({
+        reports: [{ workerId: worker.id, operationId, state: "completed", summary }],
+      });
       expect(readCodePlannerDesignation(host.connection, ids.project)).toMatchObject({
         plannerThreadId: planner.id,
       });
