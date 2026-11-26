@@ -8051,8 +8051,24 @@ function LaunchedShell(
     plannerReview?: PlannerProposalReview,
   ): Promise<boolean> {
     const sentFromTodo = todoStartOfSentDraft("code");
-    setDraftCreating(true);
-    setDraftError(undefined);
+    // A start the composer stays on (⌘↩, or one prompt on several models)
+    // leaves the window on the draft: the thread is not opened, and a refusal
+    // goes to that composer, which is already the next draft.
+    const stay = input.stay;
+    let createdThreadId: string | undefined;
+    const showDraftError = (message: string | undefined): void => {
+      if (stay === undefined) setDraftError(message);
+      else if (message !== undefined)
+        stay.report({
+          status: "refused",
+          reason: message,
+          ...(createdThreadId === undefined ? {} : { threadId: createdThreadId }),
+        });
+    };
+    if (stay === undefined) {
+      setDraftCreating(true);
+      setDraftError(undefined);
+    }
     setDraftPendingMessage(undefined);
     setRailPlaceholder(undefined);
     let firstPromptAnnouncedFor: import("@octant/contracts").CodeThreadId | undefined;
@@ -8062,7 +8078,7 @@ function LaunchedShell(
         action: "create-code-thread",
         requiredCapability: "code",
         onlyThisHost: true,
-        onRefuse: (reason) => setDraftError(reason),
+        onRefuse: (reason) => showDraftError(reason),
       });
       if (destinationHostId === undefined) return false;
       // A server Project is not in the Project catalog. The host prepares its
@@ -8078,7 +8094,7 @@ function LaunchedShell(
             })
           : undefined;
       if (resolution?.kind === "unresolved-selection") {
-        setDraftError(UNRESOLVED_DRAFT_PROJECT_MESSAGE);
+        showDraftError(UNRESOLVED_DRAFT_PROJECT_MESSAGE);
         return false;
       }
       const localProject = resolution?.project;
@@ -8092,7 +8108,7 @@ function LaunchedShell(
               }
             : undefined;
       if (project === undefined) {
-        setDraftError("Choose a Code Project before starting a thread.");
+        showDraftError("Choose a Code Project before starting a thread.");
         return false;
       }
       if (
@@ -8101,11 +8117,11 @@ function LaunchedShell(
           plannerReview.proposal.status !== "pending" ||
           input.prompt !== plannerReview.proposal.intent)
       ) {
-        setDraftError("The described planner proposal changed. Refresh it before approving.");
+        showDraftError("The described planner proposal changed. Refresh it before approving.");
         return false;
       }
       if (codeController.bootstrap === undefined) {
-        setDraftError(
+        showDraftError(
           codeUnavailableMessage({
             status: codeController.status,
             ...(codeController.errorMessage === undefined
@@ -8121,7 +8137,7 @@ function LaunchedShell(
       try {
         await draftProjectBinding.current;
       } catch {
-        setDraftError("That Project could not be selected. Choose it again before starting.");
+        showDraftError("That Project could not be selected. Choose it again before starting.");
         return false;
       }
 
@@ -8130,21 +8146,22 @@ function LaunchedShell(
         projectId: project.id,
       });
       if (prepared?.kind !== "checkout-prepared") {
-        setDraftError(
+        showDraftError(
           codeController.lastExecuteError.current?.message ??
             checkoutNotPreparedMessage(project.name),
         );
         return false;
       }
-      const codeSelection = resolveDraftProviderSelection(
-        codeProviderGroups,
-        codeDraftPreferredSelection,
-      );
+      // One prompt on several models names each thread's model; the host
+      // still admits it like any other.
+      const codeSelection =
+        input.providerSelection ??
+        resolveDraftProviderSelection(codeProviderGroups, codeDraftPreferredSelection);
       const providerInstanceId =
         codeSelection?.providerInstanceId ?? codeProviderChoices[0]?.instanceId;
       const modelId = codeSelection?.modelId ?? codeProviderChoices[0]?.modelId;
       if (providerInstanceId === undefined || modelId === undefined) {
-        setDraftError(
+        showDraftError(
           "No provider is available. Configure a provider before starting a Code thread.",
         );
         return false;
@@ -8167,7 +8184,7 @@ function LaunchedShell(
         title,
       });
       if (plan.kind === "rejected") {
-        setDraftError(plan.message);
+        showDraftError(plan.message);
         return false;
       }
       const command = plan.command;
@@ -8195,12 +8212,12 @@ function LaunchedShell(
           command.kind !== "create-code-thread" &&
           command.kind !== "create-managed-code-thread"
         ) {
-          setDraftError("This proposal cannot use that creation command.");
+          showDraftError("This proposal cannot use that creation command.");
           return false;
         }
         const outcome = await createPlannerProposalTask(codeClient, plannerReview, command);
         if (outcome.status !== "confirmed") {
-          setDraftError(outcome.message);
+          showDraftError(outcome.message);
           if (outcome.existingThread !== undefined) {
             const existing = outcome.existingThread;
             void codeController.refreshNavigation();
@@ -8220,7 +8237,7 @@ function LaunchedShell(
         void codeController.refreshNavigation();
       }
       if (created?.kind !== "managed-thread-created" && created?.kind !== "thread-created") {
-        setDraftError(
+        showDraftError(
           codeController.lastExecuteError.current?.message ??
             "The Code thread could not be created.",
         );
@@ -8241,6 +8258,7 @@ function LaunchedShell(
           },
         });
       }
+      createdThreadId = String(created.thread.id);
       await linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
       // The branch Start a fix handed in now belongs to this thread; the next
       // draft must not open on it.
@@ -8272,19 +8290,23 @@ function LaunchedShell(
               ? "The coordinator was created with the default bounds"
               : "The thread was created, but it could not become a coordinator"
           }: ${codeController.lastExecuteError.current?.message ?? "the host refused the change."}`;
-          await controller.openCodeThread(
-            created.thread.id,
-            created.thread.title,
-            undefined,
-            created.thread.projectId,
-          );
+          // A start the composer stays on leaves the thread closed; its row
+          // under the composer offers Open.
+          if (stay === undefined) {
+            await controller.openCodeThread(
+              created.thread.id,
+              created.thread.title,
+              undefined,
+              created.thread.projectId,
+            );
+          }
           codeThreadControllers.restoreDraft(
             created.thread.id,
             input.prompt,
             refusal,
             input.typedByPerson === true,
           );
-          setDraftError(refusal);
+          showDraftError(refusal);
           return false;
         }
       }
@@ -8295,12 +8317,14 @@ function LaunchedShell(
       firstPromptAnnouncedFor = created.thread.id;
       // Open the durable thread before staging images so an upload failure
       // retries on this thread instead of creating another.
-      await controller.openCodeThread(
-        created.thread.id,
-        created.thread.title,
-        undefined,
-        created.thread.projectId,
-      );
+      if (stay === undefined) {
+        await controller.openCodeThread(
+          created.thread.id,
+          created.thread.title,
+          undefined,
+          created.thread.projectId,
+        );
+      }
       const checkoutId =
         created.kind === "managed-thread-created" ? created.checkout.id : created.thread.checkoutId;
       const attachmentIds: import("@octant/contracts").CodeAttachmentId[] = [];
@@ -8334,7 +8358,7 @@ function LaunchedShell(
       });
       if (!firstTurnStarted) {
         const refusal = codeController.lastStartRefusal.current;
-        setDraftError(
+        showDraftError(
           refusal ?? "The thread was created, but its first provider turn could not be started.",
         );
         // The prompt was not sent after all; it goes back to the composer below
@@ -8359,6 +8383,7 @@ function LaunchedShell(
       // published the controller slot yet.
       worktreeLaunch?.update({ turn: "started" });
       codeThreadControllers.refreshConversation(created.thread.id);
+      stay?.report({ status: "started", threadId: String(created.thread.id) });
       return true;
     } catch (error) {
       // A staged image or the turn itself threw after the prompt was announced,
@@ -8375,7 +8400,7 @@ function LaunchedShell(
           input.typedByPerson === true,
         );
       }
-      setDraftError(
+      showDraftError(
         error instanceof Error && error.message !== ""
           ? error.message
           : "The Code thread could not be created.",
@@ -8383,7 +8408,7 @@ function LaunchedShell(
       return false;
     } finally {
       worktreeLaunch?.finish();
-      setDraftCreating(false);
+      if (stay === undefined) setDraftCreating(false);
     }
   }
 

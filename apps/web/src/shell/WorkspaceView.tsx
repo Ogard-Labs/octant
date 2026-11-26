@@ -2358,7 +2358,12 @@ function renderNonCodeTab(
           {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
           {...(props.onDraftCreateCodeThread === undefined
             ? {}
-            : { onCreateCodeThread: props.onDraftCreateCodeThread })}
+            : {
+                onCreateCodeThread: props.onDraftCreateCodeThread,
+                // The window's own create path starts a thread without opening
+                // it and on a named model.
+                codeStartsInBackground: true,
+              })}
           {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
           {...(props.projectWindowCapability === undefined
             ? {}
