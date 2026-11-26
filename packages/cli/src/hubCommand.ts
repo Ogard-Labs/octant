@@ -65,6 +65,15 @@ export type HubCliCommand =
   | { readonly action: "public"; readonly mode: "on"; readonly front: "own" }
   | { readonly action: "public"; readonly mode: "off" }
   | { readonly action: "public"; readonly mode: "status" }
+  /** This spoke's webhook endpoints; a new or rotated endpoint's secret is printed once. */
+  | {
+      readonly action: "webhook";
+      readonly mode: "create";
+      readonly scheme: "standard-webhooks" | "github";
+      readonly label: string;
+    }
+  | { readonly action: "webhook"; readonly mode: "list" }
+  | { readonly action: "webhook"; readonly mode: "rotate" | "remove"; readonly endpointId: string }
   | {
       readonly action: "certificate";
       readonly mode: "status" | "disable" | "enable";
@@ -257,6 +266,25 @@ export function resolveHubCliCommand(
       if (port !== "443" && port !== "10000") return undefined;
       return { action, mode, front: "funnel", port: port === "443" ? 443 : 10000 };
     }
+    case "webhook": {
+      const [mode, endpointId] = rest;
+      if (mode === "list") return rest.length === 1 && only() ? { action, mode } : undefined;
+      if (mode === "rotate" || mode === "remove") {
+        return rest.length === 2 &&
+          only() &&
+          endpointId !== undefined &&
+          /^[A-Za-z0-9_-]{22}$/.test(endpointId)
+          ? { action, mode, endpointId }
+          : undefined;
+      }
+      if (mode !== "create" || rest.length !== 1 || !only("scheme", "label")) return undefined;
+      const scheme = flags.scheme ?? "standard-webhooks";
+      const label = flags.label ?? "Webhook";
+      if ((scheme !== "standard-webhooks" && scheme !== "github") || typeof label !== "string") {
+        return undefined;
+      }
+      return { action, mode, scheme, label };
+    }
     case "certificate": {
       if (rest.length !== 0 || !only("enable", "disable", "status", "acknowledge-transparency")) {
         return undefined;
@@ -408,6 +436,8 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runCertificate(input, command.mode, command.acknowledgeTransparency);
     case "public":
       return await runPublic(input, command);
+    case "webhook":
+      return await runWebhook(input, command);
   }
 }
 
@@ -523,6 +553,62 @@ async function runPublic(
   }
   input.stdout.write(
     `The public entrance is open, and Tailscale Funnel carries it on port ${port} of this computer's tailnet name. Visitor links, webhooks and the device relay each stay off until you turn them on.\n`,
+  );
+  return 0;
+}
+
+async function runWebhook(
+  input: Input,
+  command: Extract<HubCliCommand, { action: "webhook" }>,
+): Promise<number> {
+  if (command.mode === "list") {
+    const response = await input.session.send({ path: "/api/desktop/hub/status", method: "GET" });
+    const endpoints = field(field(field(response.body, "webhooks"), "spoke"), "endpoints");
+    if (response.status !== 200 || !Array.isArray(endpoints)) {
+      input.stderr.write(`${failureMessage(response, "Octant could not read the webhooks.")}\n`);
+      return 1;
+    }
+    input.stdout.write(
+      endpoints.length === 0
+        ? "This computer has no webhook endpoints.\n"
+        : endpoints
+            .map(
+              (endpoint: unknown) =>
+                `${String(field(endpoint, "label"))}  ${String(field(endpoint, "scheme"))}  ${String(field(endpoint, "path"))}  ${String(field(endpoint, "deliveries"))} deliveries`,
+            )
+            .join("\n") + "\n",
+    );
+    return 0;
+  }
+  if (command.mode === "remove") {
+    const response = await post(input, "/api/desktop/hub/webhooks/remove", {
+      endpointId: command.endpointId,
+    });
+    if (!isOk(response, "removed")) {
+      return refusal(input, response, "Octant refused to remove that endpoint.");
+    }
+    input.stdout.write("The endpoint is removed; its URL answers nothing now.\n");
+    return 0;
+  }
+  const response =
+    command.mode === "create"
+      ? await post(input, "/api/desktop/hub/webhooks/create", {
+          scheme: command.scheme,
+          label: command.label,
+        })
+      : await post(input, "/api/desktop/hub/webhooks/rotate", { endpointId: command.endpointId });
+  if (!isOk(response, "created")) {
+    return refusal(input, response, "Octant refused to make the endpoint.");
+  }
+  input.stdout.write(
+    [
+      `Path on your hub's public address  ${String(field(response.body, "path"))}`,
+      `Secret  ${String(field(response.body, "secret"))}`,
+      "Give the sender the full URL and this secret now. Octant does not show the secret again.",
+      ...(field(response.body, "published") === true
+        ? []
+        : ["The hub has not taken the endpoint yet; this computer tries again shortly."]),
+    ].join("\n") + "\n",
   );
   return 0;
 }
@@ -1272,6 +1358,9 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "funnel-off-failed":
     "Tailscale did not turn Funnel off. Run `tailscale funnel --https=443 off` yourself.",
   "listener-failed": "The public entrance could not open a port on this computer.",
+  "public-not-granted":
+    "This computer's hub grant does not tick Public. Tick it with `octant hub grant --items` first.",
+  "unknown-endpoint": "This computer has no endpoint with that id.",
   "provision-service-off": "Offers are off. Turn them on with `octant hub provision on`.",
   "needs-person":
     "That proposal needs you: a routine is applied with --project <project-id>, and a routine or an endpoint row never applies on its own.",

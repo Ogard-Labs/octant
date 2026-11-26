@@ -231,3 +231,63 @@ export const PublicForwardAnswer = Schema.Struct({
 }).annotations(strict);
 export type PublicForwardAnswer = typeof PublicForwardAnswer.Type;
 export const decodePublicForwardAnswer = Schema.decodeUnknownSync(PublicForwardAnswer);
+
+/**
+ * A hub's or standby's key for opening sealed webhook secrets, signed with its
+ * host identity key. A spoke takes it only when the signer's fingerprint is
+ * the one the roster lists for `memberId`, so the identity key itself is never
+ * used for key agreement.
+ */
+export const HubSealingKey = Schema.Struct({
+  memberId: HubMemberId,
+  sealingPublicKey: base64Url(80, 128),
+  signerPublicKey: base64Url(80, 512),
+  signature: base64Url(86, 86),
+}).annotations(strict);
+export type HubSealingKey = typeof HubSealingKey.Type;
+export const decodeHubSealingKey = Schema.decodeUnknownSync(HubSealingKey);
+
+export const HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE = 64;
+
+/** Everything one spoke lets the hub hold for webhooks: it replaces what the hub held for it. */
+export const HubWebhookEndpointsUpdate = Schema.Struct({
+  endpoints: Schema.Array(HubWebhookEndpoint).pipe(
+    Schema.maxItems(HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE),
+  ),
+}).annotations(strict);
+export type HubWebhookEndpointsUpdate = typeof HubWebhookEndpointsUpdate.Type;
+export const decodeHubWebhookEndpointsUpdate = Schema.decodeUnknownSync(HubWebhookEndpointsUpdate);
+
+/**
+ * What a spoke answers a forwarded delivery. Every answer takes it off the
+ * hub's queue except `busy`, which leaves it for a later look within the hold.
+ */
+export const WebhookDeliveryAnswer = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("accepted", "duplicate") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    kind: Schema.Literal(
+      ...WEBHOOK_REFUSAL_KINDS,
+      "public-not-granted",
+      "unknown-endpoint",
+      "busy",
+      // The spoke's person paused remote access; the hub keeps the delivery.
+      "paused",
+    ),
+  }).annotations(strict),
+);
+export type WebhookDeliveryAnswer = typeof WebhookDeliveryAnswer.Type;
+export const decodeWebhookDeliveryAnswer = Schema.decodeUnknownSync(WebhookDeliveryAnswer);
+
+/** A window on a spoke mints a webhook endpoint for its routines. */
+export const HubWebhookCreateRequest = Schema.Struct({
+  scheme: WebhookSignatureScheme,
+  label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+}).annotations(strict);
+export const decodeHubWebhookCreateRequest = Schema.decodeUnknownSync(HubWebhookCreateRequest);
+
+/** A window on a spoke rotates or removes one of its endpoints. */
+export const HubWebhookEndpointRequest = Schema.Struct({
+  endpointId: WebhookEndpointId,
+}).annotations(strict);
+export const decodeHubWebhookEndpointRequest = Schema.decodeUnknownSync(HubWebhookEndpointRequest);

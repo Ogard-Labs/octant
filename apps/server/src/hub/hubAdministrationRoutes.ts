@@ -31,6 +31,8 @@ import {
   decodeHubProvisionSwitchRequest,
   decodeHubPublicEntranceSwitchRequest,
   decodeHubPublicFunnelRequest,
+  decodeHubWebhookCreateRequest,
+  decodeHubWebhookEndpointRequest,
   decodeHubPushSwitchRequest,
   decodeHubSignInAsk,
   decodeHubSignInDecisionRequest,
@@ -56,7 +58,9 @@ import { windowComputersFrom } from "./memberOrigin";
 import type { PairedMergeUnlockService } from "./pairedMergeUnlock";
 import type { OwnerApprovalAnswerUnlock } from "./ownerApprovalAnswerUnlock";
 import type { ProvisionService } from "./provisionService";
+import type { HubWebhookService } from "./hubWebhookService";
 import type { PublicEntranceService } from "./publicEntranceService";
+import type { SpokeWebhookService } from "./spokeWebhookService";
 import type { PushService } from "./pushService";
 import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
@@ -129,6 +133,10 @@ export const HUB_ADMINISTRATION_ROUTES = {
   /** This host's public entrance and its Funnel front: only a window on this host turns them on or off. */
   publicEntrance: "/api/desktop/hub/public",
   publicFunnel: "/api/desktop/hub/public/funnel",
+  /** This spoke's webhook endpoints: only a window on this host mints, rotates or removes one. */
+  webhookCreate: "/api/desktop/hub/webhooks/create",
+  webhookRotate: "/api/desktop/hub/webhooks/rotate",
+  webhookRemove: "/api/desktop/hub/webhooks/remove",
   /** The hub's offer switch: only a window on the hub turns it on or off. */
   provision: "/api/desktop/hub/provision",
   /** The hub's window makes an offer for its spokes. */
@@ -173,6 +181,9 @@ export interface HubAdministrationRouteOptions {
   readonly certificate: TailscaleCertificateService;
   /** Absent where the public entrance is not composed; its routes then answer unavailable. */
   readonly publicEntrance?: PublicEntranceService;
+  /** The hub's webhook receipt and this host's own endpoints; absent, their routes answer unavailable. */
+  readonly webhooks?: Pick<HubWebhookService, "status">;
+  readonly spokeWebhooks?: Pick<SpokeWebhookService, "view" | "create" | "rotate" | "remove">;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -236,6 +247,11 @@ export function createHubAdministrationRouteHandler(
         ...(options.publicEntrance === undefined
           ? {}
           : { publicEntrance: options.publicEntrance.status() }),
+        ...(options.spokeWebhooks === undefined || options.webhooks === undefined
+          ? {}
+          : {
+              webhooks: { hub: options.webhooks.status(), spoke: options.spokeWebhooks.view() },
+            }),
       });
     }
     if (route === HUB_ADMINISTRATION_ROUTES.certificate && request.method === "GET") {
@@ -431,6 +447,21 @@ export function createHubAdministrationRouteHandler(
               { enabled: value.enabled, ...(value.port === undefined ? {} : { port: value.port }) },
               WINDOW_PRINCIPAL,
             ),
+          );
+        }
+        case HUB_ADMINISTRATION_ROUTES.webhookCreate: {
+          const value = decodeHubWebhookCreateRequest(parseJson(request, body.text));
+          if (options.spokeWebhooks === undefined) return failure("unavailable", 503);
+          return outcome(await options.spokeWebhooks.create(value));
+        }
+        case HUB_ADMINISTRATION_ROUTES.webhookRotate:
+        case HUB_ADMINISTRATION_ROUTES.webhookRemove: {
+          const value = decodeHubWebhookEndpointRequest(parseJson(request, body.text));
+          if (options.spokeWebhooks === undefined) return failure("unavailable", 503);
+          return outcome(
+            route === HUB_ADMINISTRATION_ROUTES.webhookRotate
+              ? await options.spokeWebhooks.rotate(String(value.endpointId))
+              : await options.spokeWebhooks.remove(String(value.endpointId)),
           );
         }
         case HUB_ADMINISTRATION_ROUTES.directPush: {

@@ -240,6 +240,29 @@ describe("automation contracts", () => {
     expect(() => persists({ ...definition, runLevel: "plan" })).toThrow();
   });
 
+  it("a payload never changes the routine's authority: a webhook routine stays at Ask first at most", () => {
+    const webhook = {
+      ...definition,
+      trigger: {
+        kind: "integration-event" as const,
+        integrationId: "octant.webhooks",
+        sourceId: "endpoint",
+        filters: { endpoint: "AAAAAAAAAAAAAAAAAAAAAA" },
+        sourceIdentity: "a".repeat(64),
+        sourceLabel: "Webhook",
+        pollMinutes: 1,
+        automaticStartLimit: 8,
+      },
+      nextDueAt: null,
+      nextDueResolution: undefined,
+    };
+    expect(persists(webhook)).toMatchObject({ eventName: "automation-definition-created@1" });
+    expect(persists({ ...webhook, runLevel: "ask-first" })).toBeDefined();
+    expect(() => persists({ ...webhook, runLevel: "full-access" })).toThrow();
+    expect(() => persists({ ...webhook, runLevel: "auto" })).toThrow();
+    expect(() => persists({ ...webhook, projectLevel: "opted-in" })).toThrow();
+  });
+
   it("validates definitions embedded in every persisted definition event", () => {
     const validEvents = [
       {

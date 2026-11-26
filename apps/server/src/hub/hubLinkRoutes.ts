@@ -27,12 +27,18 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { HUB_HANDBACK_MAX_BODY_BYTES, HUB_WAKE_COPY_MAX_BODY_BYTES } from "../remoteRoutePolicy";
-import { PUBLIC_FORWARD_MAX_BODY_BYTES } from "@octant/contracts";
+import {
+  PUBLIC_FORWARD_MAX_BODY_BYTES,
+  decodeHubWebhookEndpointsUpdate,
+  decodeWebhookDeliveryEnvelope,
+} from "@octant/contracts";
 import type { FailoverService } from "./failoverService";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, HubLinkVerifier } from "./hubLink";
 import type { HubService } from "./hubService";
 import type { ProvisionService } from "./provisionService";
+import type { HubWebhookService } from "./hubWebhookService";
 import type { PublicEntranceService } from "./publicEntranceService";
+import type { SpokeWebhookService } from "./spokeWebhookService";
 import { readForwardedRequest } from "./publicEntranceForwarding";
 import type { PushService } from "./pushService";
 import type { SignInService } from "./signInService";
@@ -87,6 +93,12 @@ export const HUB_LINK_ROUTES = {
   signInOutcome: "/api/hub/sign-in-outcome",
   /** A member's public entrance hands the acting hub a request it admitted from the internet. */
   publicForward: "/api/hub/public/forward",
+  /** A spoke asks the hub for the key it seals webhook secrets to. */
+  publicSealingKey: "/api/hub/public/sealing-key",
+  /** A spoke whose person ticked Public hands the hub its webhook endpoints, secrets sealed. */
+  publicWebhookEndpoints: "/api/hub/public/webhook-endpoints",
+  /** The acting hub hands a spoke a webhook delivery it queued for it. */
+  publicWebhookDelivery: "/api/hub/public/webhook-delivery",
 } as const;
 
 const decodeHubMemberId = Schema.decodeUnknownSync(HubMemberId);
@@ -125,6 +137,10 @@ export interface HubLinkRouteOptions {
   readonly readUsageLimits?: () => ProviderUsageLimitsSnapshot;
   /** This host's public entrance, which runs a request another member's entrance forwarded. */
   readonly publicEntrance?: Pick<PublicEntranceService, "dispatchForwarded">;
+  /** The acting hub's webhook receipt: its sealing key and each spoke's endpoints. */
+  readonly webhooks?: Pick<HubWebhookService, "sealingKey" | "receiveEndpoints">;
+  /** This host's own webhook endpoints, as a spoke. */
+  readonly spokeWebhooks?: Pick<SpokeWebhookService, "receive">;
   readonly now?: () => number;
 }
 
@@ -182,7 +198,9 @@ export function createHubLinkRouteHandler(
         ? HUB_HANDBACK_MAX_BODY_BYTES
         : route === HUB_LINK_ROUTES.wakeCopy
           ? HUB_WAKE_COPY_MAX_BODY_BYTES
-          : route === HUB_LINK_ROUTES.publicForward
+          : route === HUB_LINK_ROUTES.publicForward ||
+              route === HUB_LINK_ROUTES.publicWebhookDelivery ||
+              route === HUB_LINK_ROUTES.publicWebhookEndpoints
             ? FORWARD_MAX_BODY_BYTES
             : MAX_BODY_BYTES,
     );
@@ -493,6 +511,60 @@ export function createHubLinkRouteHandler(
       return Response.json(await options.publicEntrance.dispatchForwarded(envelope), {
         headers: NO_STORE,
       });
+    }
+
+    if (
+      route === HUB_LINK_ROUTES.publicSealingKey ||
+      route === HUB_LINK_ROUTES.publicWebhookEndpoints
+    ) {
+      if (!options.hub.status().enabled || options.webhooks === undefined) {
+        return refused(403, "hub-role-off");
+      }
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        // A guest owns no routine, so it cannot put a webhook on the internet.
+        publicKeyFor: (sender) => options.hub.hostMemberKey(sender, presentedKey ?? undefined),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      if (route === HUB_LINK_ROUTES.publicSealingKey) {
+        return Response.json(options.webhooks.sealingKey(), { headers: NO_STORE });
+      }
+      let update;
+      try {
+        update = decodeHubWebhookEndpointsUpdate(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      // A spoke hands over only its own endpoints; any other is dropped.
+      return Response.json(options.webhooks.receiveEndpoints(verified.senderMemberId, update), {
+        headers: NO_STORE,
+      });
+    }
+
+    if (route === HUB_LINK_ROUTES.publicWebhookDelivery) {
+      const sender = options.spoke.authenticateRosterSender({
+        header,
+        publicKey: presentedKey,
+        method: request.method,
+        path: route,
+        body,
+      });
+      if (sender.status === "refused") {
+        return refused(SENDER_REFUSAL_STATUS.has(sender.kind) ? 401 : 403, sender.kind);
+      }
+      if (options.spokeWebhooks === undefined) return refused(404, "invalid");
+      let envelope;
+      try {
+        envelope = decodeWebhookDeliveryEnvelope(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      // The spoke checks its Public item, the bytes, and its own claims itself.
+      return Response.json(options.spokeWebhooks.receive(envelope), { headers: NO_STORE });
     }
 
     if (route === HUB_LINK_ROUTES.push) {

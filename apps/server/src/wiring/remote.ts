@@ -225,6 +225,9 @@ import {
 import { createTailscaleCliDaemon, execTailscale } from "../hub/tailscaleCliDaemon";
 import { PublicEntranceService } from "../hub/publicEntranceService";
 import { forwardToActingHub } from "../hub/publicEntranceForwarding";
+import { HubWebhookService } from "../hub/hubWebhookService";
+import { SpokeWebhookService } from "../hub/spokeWebhookService";
+import { sendWebhookDelivery, spokeWebhookHubPort } from "../hub/webhookLinks";
 import { SpokeWakeService } from "../hub/spokeWakeService";
 import { createUdpWakeOnLanPort } from "../hub/wakeOnLan";
 import { WakeService } from "../hub/wakeService";
@@ -279,6 +282,8 @@ const WAKE_REPORT_MS = 30_000;
 const PUSH_LOOK_MS = 60_000;
 /** How soon the public entrance closes after the hub role ends or a join is lost; each request already checks. */
 const PUBLIC_ENTRANCE_LOOK_MS = 5_000;
+/** How often the hub hands queued webhook deliveries on, and a spoke retries handing the hub its endpoints. */
+const WEBHOOK_LOOK_MS = 15_000;
 /** How often a spoke lets lapsed sign-in requests end and tells the hub any outcome word still owed. */
 const SIGN_IN_LOOK_MS = 30_000;
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
@@ -379,6 +384,7 @@ export type RemoteDependencies = {
     | "automationCommandService"
     | "automationScheduler"
     | "hubPushHandoffSlot"
+    | "webhookEventSourceSlot"
     | "pushGatewaySetting"
     | "pushNotificationTokenStore"
   > &
@@ -445,6 +451,7 @@ export function wireRemote(deps: RemoteDependencies) {
     withholdThreadFromPersonMemory,
     octantInstructions,
     hubPushHandoffSlot,
+    webhookEventSourceSlot,
     pairedMergeUnlockSlot,
     hubActScopeSlot,
     nativeHarnessSessions,
@@ -1310,6 +1317,48 @@ export function wireRemote(deps: RemoteDependencies) {
   // it on, closed while remote access is paused, and served only by the acting
   // hub; a member forwards to it. No feature is plugged in yet, so every route
   // but health answers 404.
+  // Webhook receipt (decisions H33 to H35): the acting hub checks and queues
+  // deliveries; a spoke whose person ticked Public owns each endpoint, checks
+  // each delivery again, and its routines read them through the webhook source.
+  const hubWebhooks = new HubWebhookService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    hubMemberId: () => hubService.hubMemberId(),
+    serving: () => hubService.status().enabled,
+    send: (spokeMemberId, envelope) =>
+      sendWebhookDelivery(
+        {
+          state: hubStateStore,
+          identity: resolveHubIdentity,
+          transport: hubTransport,
+          now: Date.now,
+          selfMemberId: () => hubService.hubMemberId(),
+        },
+        spokeMemberId,
+        envelope,
+      ),
+    wake: async (spokeMemberId) => void (await wakeService.wakeForDelivery(spokeMemberId)),
+    members: () =>
+      hubService.status().roster?.roster.members.map((member) => String(member.memberId)),
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  const spokeWebhooks = new SpokeWebhookService({
+    state: hubStateStore,
+    publicGranted: () => spokeLinkService.hubMayUse("public").status === "allowed",
+    remoteAccessPaused: () => readRemoteAccessPaused(persistence.connection),
+    hub: spokeWebhookHubPort({
+      state: hubStateStore,
+      identity: resolveHubIdentity,
+      transport: hubTransport,
+      now: Date.now,
+    }),
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  webhookEventSourceSlot.bind(spokeWebhooks.eventSources());
+  setInterval(() => void hubWebhooks.tick().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
+  setInterval(() => void spokeWebhooks.look().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
   const publicEntrance = new PublicEntranceService({
     state: hubStateStore,
     exec: execTailscale,
@@ -1325,6 +1374,7 @@ export function wireRemote(deps: RemoteDependencies) {
       const link = hubStateStore.load().link;
       return link !== undefined && link.removed !== true ? "member" : "none";
     },
+    handlers: () => ({ webhook: hubWebhooks.handle }),
     forward: (envelope) =>
       forwardToActingHub({
         state: hubStateStore,
@@ -1364,6 +1414,8 @@ export function wireRemote(deps: RemoteDependencies) {
     spokeSignIn: spokeSignInService,
     certificate: tailscaleCertificate,
     publicEntrance,
+    webhooks: hubWebhooks,
+    spokeWebhooks,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   const hubLinkRoutes = createHubLinkRouteHandler({
@@ -1380,6 +1432,8 @@ export function wireRemote(deps: RemoteDependencies) {
     spokeSignIn: spokeSignInService,
     readUsageLimits: () => deps.providerUsageLimitsService.snapshot(),
     publicEntrance,
+    webhooks: hubWebhooks,
+    spokeWebhooks,
   });
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's

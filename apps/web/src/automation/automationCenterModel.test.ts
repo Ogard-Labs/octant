@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  automationRunLevelOptionsFor,
   automationAuthoritySummary,
   automationBlockReasonLabel,
   automationLifecycleLabel,
@@ -299,6 +300,20 @@ describe("buildAutomationDraft", () => {
     if (result.kind !== "invalid") return;
     expect(result.issues).toContain(
       "The selection does not satisfy the automation contract. Match host, mode, and Project across every choice.",
+    );
+  });
+});
+
+describe("the modes a routine's trigger allows", () => {
+  it("offers a webhook routine only Ask first, and every other trigger the full list", () => {
+    expect(
+      automationRunLevelOptionsFor({
+        kind: "integration-event",
+        integrationId: "octant.webhooks",
+      }).map((option) => option.id),
+    ).toEqual(["ask-first"]);
+    expect(automationRunLevelOptionsFor({ kind: "interval" }).map((option) => option.id)).toContain(
+      "full-access",
     );
   });
 });

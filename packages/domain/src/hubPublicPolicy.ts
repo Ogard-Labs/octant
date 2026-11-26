@@ -127,6 +127,11 @@ export function decideWebhookDelivery(input: {
   return { status: "accept", claimKeys: input.dedupeKeys };
 }
 
+/** The text a hub signs for its sealing key. */
+export function hubSealingKeyPayload(memberId: string, sealingPublicKey: string): string {
+  return `octant/sealing-key/v1|${memberId}|${sealingPublicKey}`;
+}
+
 const VISITOR_LINK_DOMAIN = "octant/visitor-link/v1";
 
 /** The text a spoke signs for a grant: a domain line, then the grant as JSON with sorted keys. */

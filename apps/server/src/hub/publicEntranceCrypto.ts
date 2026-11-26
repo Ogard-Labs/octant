@@ -35,7 +35,11 @@ export function mintVisitorLinkSecret(): string {
 
 /** Sixteen random bytes: a link id or an endpoint id. */
 export function mintPublicId(): string {
-  return randomBytes(16).toString("base64url");
+  // An id that began with "-" would read as a flag to `octant hub`.
+  for (;;) {
+    const id = randomBytes(16).toString("base64url");
+    if (!id.startsWith("-")) return id;
+  }
 }
 
 export function visitorLinkSecretHash(linkId: string, secret: string): string {

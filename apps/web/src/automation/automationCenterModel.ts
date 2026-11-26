@@ -1,4 +1,5 @@
 import {
+  AUTOMATION_WEBHOOK_INTEGRATION_ID,
   decodeAutomationDefinitionDraft,
   decodeAutomationTrigger,
   type AutomationFileArrivalTrigger,
@@ -305,6 +306,21 @@ export const AUTOMATION_RUN_LEVEL_OPTIONS: ReadonlyArray<{
   { id: "full-access", label: "Full access" },
   { id: "project", label: "The Project's mode" },
 ];
+
+/**
+ * The modes a routine may pick for its trigger. A webhook is started by
+ * someone outside, so its runs always ask first, and the server refuses any
+ * other mode; the editor offers only that one.
+ */
+export function automationRunLevelOptionsFor(trigger: {
+  readonly kind: string;
+  readonly integrationId?: string;
+}): typeof AUTOMATION_RUN_LEVEL_OPTIONS {
+  return trigger.kind === "integration-event" &&
+    trigger.integrationId === AUTOMATION_WEBHOOK_INTEGRATION_ID
+    ? AUTOMATION_RUN_LEVEL_OPTIONS.filter((option) => option.id === "ask-first")
+    : AUTOMATION_RUN_LEVEL_OPTIONS;
+}
 
 export interface AutomationDraftFormInput {
   readonly displayName: string;

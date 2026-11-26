@@ -31,6 +31,8 @@ import {
   decodeHubSignInDecisionRequest,
   decodeHubPublicEntranceSwitchRequest,
   decodeHubPublicFunnelRequest,
+  decodeHubWebhookCreateRequest,
+  decodeHubWebhookEndpointRequest,
   decodeHubPushSwitchRequest,
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
@@ -221,6 +223,22 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/public/funnel",
     decodeBody: decodeHubPublicFunnelRequest,
+  },
+  // This spoke's webhook endpoints; a new secret is shown once.
+  "webhook-create": {
+    method: "POST",
+    path: "/api/desktop/hub/webhooks/create",
+    decodeBody: decodeHubWebhookCreateRequest,
+  },
+  "webhook-rotate": {
+    method: "POST",
+    path: "/api/desktop/hub/webhooks/rotate",
+    decodeBody: decodeHubWebhookEndpointRequest,
+  },
+  "webhook-remove": {
+    method: "POST",
+    path: "/api/desktop/hub/webhooks/remove",
+    decodeBody: decodeHubWebhookEndpointRequest,
   },
   "direct-push": {
     method: "POST",

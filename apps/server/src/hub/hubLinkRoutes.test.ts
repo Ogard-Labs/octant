@@ -470,6 +470,17 @@ describe("the hub-link routes the private listener serves", () => {
       [REMOTE_HUB_LINK_ROUTE_IDS.pushGrant, "POST", HUB_LINK_ROUTES.pushGrant],
       [REMOTE_HUB_LINK_ROUTE_IDS.pushCopy, "PUT", HUB_LINK_ROUTES.pushCopy],
       [REMOTE_HUB_LINK_ROUTE_IDS.publicForward, "POST", HUB_LINK_ROUTES.publicForward],
+      [REMOTE_HUB_LINK_ROUTE_IDS.publicSealingKey, "POST", HUB_LINK_ROUTES.publicSealingKey],
+      [
+        REMOTE_HUB_LINK_ROUTE_IDS.publicWebhookEndpoints,
+        "POST",
+        HUB_LINK_ROUTES.publicWebhookEndpoints,
+      ],
+      [
+        REMOTE_HUB_LINK_ROUTE_IDS.publicWebhookDelivery,
+        "POST",
+        HUB_LINK_ROUTES.publicWebhookDelivery,
+      ],
       [REMOTE_HUB_LINK_ROUTE_IDS.provisionOffer, "POST", HUB_LINK_ROUTES.provisionOffer],
       [REMOTE_HUB_LINK_ROUTE_IDS.provisionMirror, "POST", HUB_LINK_ROUTES.provisionMirror],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegate, "POST", PEER_DELEGATION_ROUTES.create],

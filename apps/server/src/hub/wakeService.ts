@@ -423,6 +423,24 @@ export class WakeService {
     }
   }
 
+  /**
+   * A Wake-on-LAN packet for one spoke a held webhook delivery waits for. It is
+   * sent only while the wake service is on (a standby's copy says so) and only to
+   * an address the spoke's own person entered; nothing else is sent, so it can
+   * wake a machine and never start anything on it.
+   */
+  async wakeForDelivery(memberId: string): Promise<"sent" | "no-address" | "off"> {
+    const book = this.#book();
+    if (book === undefined) return "off";
+    const address = book.spokes.find(
+      (spoke) => String(spoke.memberId) === memberId,
+    )?.hardwareAddress;
+    const packet = address === undefined ? undefined : buildWakeOnLanPacket(address);
+    if (packet === undefined) return "no-address";
+    await this.#options.wakeOnLan.broadcast(packet);
+    return "sent";
+  }
+
   #book(): Book | undefined {
     const state = this.#options.state.load();
     const hub = state.hub;

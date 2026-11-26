@@ -229,6 +229,7 @@ export class AutomationEventSources {
     }
     if (!source.current() || !current()) return;
     const gap =
+      source.heldWhileAway !== true &&
       previous.baselineReady &&
       (!this.#observed.has(String(definition.id)) ||
         Date.parse(this.#options.now()) - Date.parse(previous.observedAt) >

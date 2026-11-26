@@ -10,6 +10,7 @@ import {
 } from "./automationFileArrival";
 export * from "./automationFileArrival";
 import {
+  AUTOMATION_WEBHOOK_INTEGRATION_ID,
   AutomationIntegrationEventTrigger,
   AutomationIntegrationEventReceipt,
   AutomationEventSourceCheckpoint,
@@ -687,8 +688,30 @@ function automationAuthorityIsChat(authority: AgentRunAuthority): boolean {
   return !authority.filesystem && !authority.shell && !authority.git && !authority.subagents;
 }
 
+/**
+ * A run a webhook starts never reaches Full access (decision H34): it may not
+ * follow its Project's level, and may name no level above Ask first, so Code is
+ * approval-gated at most and Work runs at its default. Checked when a routine is
+ * saved and again before every occurrence.
+ */
+export function automationLevelFitsTrigger(
+  definition: Pick<AutomationDefinitionDraft, "trigger" | "projectLevel" | "runLevel">,
+): boolean {
+  const trigger = definition.trigger;
+  if (
+    trigger.kind !== "integration-event" ||
+    trigger.integrationId !== AUTOMATION_WEBHOOK_INTEGRATION_ID
+  )
+    return true;
+  return (
+    definition.projectLevel === undefined &&
+    (definition.runLevel === undefined || definition.runLevel === "ask-first")
+  );
+}
+
 function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinitionDraft): boolean {
   if (
+    !automationLevelFitsTrigger(definition) ||
     ((definition.trigger.kind === "file-arrival" ||
       definition.trigger.kind === "integration-event") &&
       (definition.mode === "chat" || definition.targetPolicy !== "new-thread")) ||

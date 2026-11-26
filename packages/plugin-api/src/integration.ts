@@ -31,6 +31,12 @@ export interface IntegrationEventSource {
   readonly label: string;
   /** Assignment sets detect absent-to-present transitions; append sources retain seen event ids. */
   readonly semantics: "assignment-set" | "append";
+  /**
+   * True for a source whose events are kept for the host while it is away (a
+   * queue the sender's side holds), so a restart or a long sleep leaves no gap
+   * to skip or squash: every event is still there to read.
+   */
+  readonly heldWhileAway?: boolean;
   readonly current: () => boolean;
   readonly read: (signal: AbortSignal) => Promise<
     | {

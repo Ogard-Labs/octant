@@ -1,4 +1,8 @@
 import { secretGuardRefusal } from "../process/secretGuard";
+import {
+  integrationEventSources as combineIntegrationEventSources,
+  lateIntegrationEventSources,
+} from "../integration/integrationEventSources";
 import { joinWorkPath } from "../work/workPathConfinement";
 import { revalidateAutomationAuthority } from "../automation/automationAuthorityRevalidation";
 import { randomUUID } from "node:crypto";
@@ -147,8 +151,13 @@ export type AutomationDependencies = {
   >;
 
 export function wireAutomation(deps: AutomationDependencies) {
+  // The webhook source belongs to the hub services, which are wired later.
+  const webhookEventSourceSlot = lateIntegrationEventSources();
+  const integrationEventSources = combineIntegrationEventSources([
+    deps.integrationEventSources,
+    webhookEventSourceSlot.provider,
+  ]);
   const {
-    integrationEventSources,
     automationEventStore,
     capacityScheduler,
     agentRunOrchestration,
@@ -1238,6 +1247,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     completedThreadArchiveSweep,
     hasPushStanding,
     hubPushHandoffSlot,
+    webhookEventSourceSlot,
     pushComputerLabel,
     pushDeliveryTransport,
     pushGatewaySetting,

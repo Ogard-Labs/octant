@@ -31,6 +31,10 @@ import {
   NewMemberAlert,
   PeerGrant,
   PublicFunnelPort,
+  HubWebhookEndpoint,
+  WebhookDeliveryEnvelope,
+  WebhookEndpointId,
+  WebhookSignatureScheme,
   ProjectId,
   RosterMember,
   SignedHubRoster,
@@ -426,10 +430,88 @@ export const PublicEntranceState = Schema.Struct({
 }).annotations(strict);
 export type PublicEntranceState = typeof PublicEntranceState.Type;
 
+/** One delivery the hub holds for a spoke that has not taken it yet; never journaled. */
+export const HubWebhookQueued = Schema.Struct({
+  spokeMemberId: HubMemberId,
+  keys: Schema.Array(Schema.String.pipe(Schema.maxLength(320))).pipe(Schema.maxItems(2)),
+  bytes: Schema.Int.pipe(Schema.nonNegative()),
+  envelope: WebhookDeliveryEnvelope,
+}).annotations(strict);
+export type HubWebhookQueued = typeof HubWebhookQueued.Type;
+
+/**
+ * What the acting hub holds for webhooks: its own sealing key, each spoke's
+ * endpoints with secrets sealed to that key, the deliveries waiting for a
+ * spoke, and counts. The routine an endpoint starts is never here.
+ */
+export const HubWebhookHubState = Schema.Struct({
+  sealingKey: Schema.Struct({ publicKey: Schema.String, privateKey: Schema.String }).annotations(
+    strict,
+  ),
+  endpoints: Schema.Array(HubWebhookEndpoint).pipe(Schema.maxItems(4_096)),
+  queue: Schema.Array(HubWebhookQueued),
+  counts: Schema.Struct({
+    forwarded: Schema.Int.pipe(Schema.nonNegative()),
+    refused: Schema.Int.pipe(Schema.nonNegative()),
+    expired: Schema.Int.pipe(Schema.nonNegative()),
+  }).annotations(strict),
+}).annotations(strict);
+
+/** One of this spoke's endpoints, with the secret it checks deliveries with; only the person sees the secret, once. */
+export const SpokeWebhookEndpoint = Schema.Struct({
+  endpointId: WebhookEndpointId,
+  scheme: WebhookSignatureScheme,
+  secret: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  createdAt: Schema.Int.pipe(Schema.nonNegative()),
+  /** The ids this endpoint replaced by rotation, so a routine that names one still reads it. */
+  formerIds: Schema.optional(Schema.Array(WebhookEndpointId).pipe(Schema.maxItems(8))),
+}).annotations(strict);
+export type SpokeWebhookEndpoint = typeof SpokeWebhookEndpoint.Type;
+
+/** A delivery this spoke accepted: what its routine reads, as outside content. */
+export const SpokeWebhookDelivery = Schema.Struct({
+  endpointId: WebhookEndpointId,
+  deliveryId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  receivedAt: Schema.Int.pipe(Schema.nonNegative()),
+  event: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+  data: Schema.String.pipe(Schema.maxLength(2_048)),
+  /** When a routine's read first showed it; until then it counts against the endpoint's backlog. */
+  readAt: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+}).annotations(strict);
+export type SpokeWebhookDelivery = typeof SpokeWebhookDelivery.Type;
+
+export const SpokeWebhookLogEntry = Schema.Struct({
+  at: Schema.Int.pipe(Schema.nonNegative()),
+  endpointId: Schema.String.pipe(Schema.maxLength(64)),
+  outcome: Schema.String.pipe(Schema.maxLength(64)),
+}).annotations(strict);
+export type SpokeWebhookLogEntry = typeof SpokeWebhookLogEntry.Type;
+
+/** This spoke's endpoints, the deliveries it accepted, the keys it claimed (kept seven days), and a short log. */
+export const SpokeWebhookState = Schema.Struct({
+  endpoints: Schema.Array(SpokeWebhookEndpoint).pipe(Schema.maxItems(64)),
+  deliveries: Schema.Array(SpokeWebhookDelivery).pipe(Schema.maxItems(1_024)),
+  claimed: Schema.Array(
+    Schema.Struct({
+      key: Schema.String.pipe(Schema.maxLength(320)),
+      at: Schema.Int.pipe(Schema.nonNegative()),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(50_000)),
+  log: Schema.Array(SpokeWebhookLogEntry).pipe(Schema.maxItems(50)),
+  /** The hub has not taken the current endpoint list yet; the next look sends it again. */
+  unpublished: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type SpokeWebhookState = typeof SpokeWebhookState.Type;
+
 export const HubState = Schema.Struct({
   hub: Schema.optional(HubSideState),
   link: Schema.optional(HubLinkState),
   publicEntrance: Schema.optional(PublicEntranceState),
+  /** The acting hub's webhook endpoints and queue (decision H33). */
+  webhookHub: Schema.optional(HubWebhookHubState),
+  /** This spoke's own webhook endpoints and deliveries. */
+  webhooks: Schema.optional(SpokeWebhookState),
   /** Guest devices a dropped link, or the hub dropping a member window, could not revoke because the device pairing was not running; revoked once it is. */
   pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
   /** Devices that paired directly with this host, until a window clears each alert or the device is removed. */
