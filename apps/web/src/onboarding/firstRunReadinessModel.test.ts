@@ -107,6 +107,11 @@ describe("first-run provider readiness", () => {
     );
     expect(scan([], ["/opt/bin"])).toBe("Not installed");
     expect(scan([], ["/usr/bin"])).toBe("Off");
+    // The scan found this runtime under another name beside the saved one, so
+    // its silence about a launcher of the person's own proves nothing.
+    expect(scan([{ driverKind: "codex", binaryPath: "/opt/bin/codex-other" }], ["/opt/bin"])).toBe(
+      "Off",
+    );
   });
 
   it("claims no provider is ready while the registry cannot be read", () => {

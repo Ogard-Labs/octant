@@ -166,7 +166,15 @@ function resolveInstallation(
 ): FirstRunProviderInstallation {
   if (isDetectedLocally(instance, snapshot)) return "installed";
   const binaryPath = providerBinaryPath(instance);
-  return binaryPath !== undefined && isAbsenceProven(binaryPath, instance.driverKind, snapshot)
+  // A runtime the scan found under another path may be reached by the saved
+  // one too (a launcher of the person's own), so only a driver found nowhere
+  // is called missing.
+  const foundElsewhere = snapshot?.candidates.some(
+    (candidate) => candidate.driverKind === instance.driverKind,
+  );
+  return foundElsewhere !== true &&
+    binaryPath !== undefined &&
+    isAbsenceProven(binaryPath, instance.driverKind, snapshot)
     ? "not-installed"
     : "unknown";
 }

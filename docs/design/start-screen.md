@@ -965,8 +965,8 @@ switch, whose accessible name states the provider and that state. The state is
 Ready, a problem word (No models, Sign-in required, Credential unavailable,
 Unreachable, Incompatible, Degraded, Checking, Not checked), or for a provider
 that is off: Installed · off when the latest scan found it, Not installed only
-when the scan searched where it should be and did not find it, and Off
-otherwise. While the provider registry is loading or unreachable, no row claims
+when the scan searched where it should be and found that runtime nowhere, and
+Off otherwise. While the provider registry is loading or unreachable, no row claims
 Ready. The full reason and remedy for a problem are in Settings › Providers &
 Models.
 

@@ -132,6 +132,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const [passedSteps, setPassedSteps] = useState<ReadonlySet<FirstRunStepId>>(() => new Set());
   const [chosenMode, setChosenMode] = useState<PermissionMode>();
   const [modeRecorded, setModeRecorded] = useState(false);
+  const [modeRefused, setModeRefused] = useState(false);
   // Off until the person answers: first run is where the question is asked,
   // so nothing earlier can have turned checks on.
   const [updateChecksAllowed, setUpdateChecksAllowed] = useState(false);
@@ -205,7 +206,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     providersReady: props.readiness.overall === "ready",
     projectReady: handoff.project !== undefined,
     modelChosen: modeModel !== undefined,
-    modeChosen: modeRecorded,
+    modeChosen: modeRecorded && !modeRefused,
   });
   const currentStepIndex = Math.max(
     0,
@@ -274,7 +275,10 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     const write = props.onSetDefaultMode;
     if (write === undefined) return;
     setModeRecorded(true);
-    track(write(mode));
+    setModeRefused(false);
+    const landed = write(mode).catch(() => false);
+    void landed.then((accepted) => setModeRefused(!accepted));
+    track(landed);
   }
 
   function goTo(target: FirstRunStepId) {

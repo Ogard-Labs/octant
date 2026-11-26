@@ -898,6 +898,16 @@ describe("FirstRunOnboarding", () => {
     expect(railStep("Project")).toHaveAttribute("data-progress", "pending");
   });
 
+  it("shows no check for a mode the host refused to keep", async () => {
+    const user = userEvent.setup();
+    mount({ ...readyHandoff(), onSetDefaultMode: vi.fn(async () => false) });
+
+    await user.click(railStep("Mode"));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(railStep("Mode")).toHaveAttribute("data-progress", "pending"));
+  });
+
   it("marks the current setup step and leaves unanswered steps pending", async () => {
     const user = userEvent.setup();
     mount(readyHandoff());
