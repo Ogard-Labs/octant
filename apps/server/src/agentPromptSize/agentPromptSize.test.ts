@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import {
+  CANVAS_DELIVERY_INSTRUCTIONS,
+  nativeArtifactDeliveryInstructions,
+} from "../canvas/canvasDeliveryInstructions";
 import { nativeHarnessToolDefinitionsFor } from "../harness/nativeHarnessTools";
 import { appToolHostLines } from "../providers/appToolHostLines";
 import { firstPartyToolNames } from "../providers/firstPartyToolNames.test-support";
@@ -9,6 +13,7 @@ import {
   measureAgentPrompts,
   NOT_MEASURED_TOOLS,
   overBudget,
+  promptInstructionTexts,
   promptTools,
   readAgentPromptBudget,
   underBudget,
@@ -47,6 +52,19 @@ describe("agent prompt size", () => {
     expect(report.acp.code.laterTurn.toolBytes).toBe(0);
     // An endpoint holds nothing between requests.
     expect(report.harness.code.laterTurn).toEqual(report.harness.code.firstPrompt);
+  });
+
+  it("measures Claude's artifact delivery rule where a Work or Code turn can carry it", () => {
+    const artifactRule = nativeArtifactDeliveryInstructions({
+      toolName: "Artifact",
+      canvasOffered: true,
+    });
+    // Claude alone names an artifact tool, and only for a Work or Code lead.
+    for (const context of ["work", "code"] as const) {
+      expect(promptInstructionTexts("claude", context)).toContain(artifactRule);
+      expect(promptInstructionTexts("codex", context)).toContain(CANVAS_DELIVERY_INSTRUCTIONS);
+    }
+    expect(promptInstructionTexts("claude", "chat")).toContain(CANVAS_DELIVERY_INSTRUCTIONS);
   });
 
   it("measures every guided first-party tool, or says why a turn never carries it", () => {

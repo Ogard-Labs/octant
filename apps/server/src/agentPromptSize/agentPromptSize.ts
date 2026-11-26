@@ -67,6 +67,7 @@ import { DESKTOP_TOOL, MAC_TOOL } from "../plugins/computerUse/computerUsePlugin
 import { linearReadDefinition } from "../plugins/linear/linearReadToolService";
 import { projectMemoryDefinition } from "../projectMemory/projectMemoryTools";
 import { appToolHostLines } from "../providers/appToolHostLines";
+import { CLAUDE_ARTIFACT_TOOL } from "../providers/claudeDriver";
 import { codexDynamicTools } from "../providers/codexDriver";
 import { encodeChatCompletionsTools } from "../providers/openAiToolEncoding";
 import { threadsToolDefinition } from "../siblingThreads/siblingThreadTools";
@@ -373,8 +374,11 @@ function promptInstructions(
     (line): ProviderContextBlock => ({ kind: "instructions", text: line.text, tool: line.tool }),
   );
   if (isChild(context)) return lines;
+  // A Claude Work or Code lead whose person turned on artifact delivery is
+  // given the longer artifact rule in place of the Canvas rule; no other
+  // runtime names an artifact tool, and Chat never does.
   const delivery = documentDeliveryInstructions({
-    artifactToolName: undefined,
+    artifactToolName: runtime === "claude" && mode !== "chat" ? CLAUDE_ARTIFACT_TOOL : undefined,
     canvasOffered: offersCanvasTool(tools),
   });
   return [
@@ -399,6 +403,16 @@ function promptInstructions(
     ...(delivery === undefined ? [] : [{ kind: "instructions" as const, text: delivery }]),
     ...lines,
   ];
+}
+
+/** The instruction texts the widest first turn of a context sends a runtime. */
+export function promptInstructionTexts(
+  runtime: AgentPromptRuntime,
+  context: AgentPromptContext,
+): ReadonlyArray<string> {
+  return promptInstructions(runtime, context, runtimeTools(runtime, context)).map(
+    (block) => block.text,
+  );
 }
 
 function renderedInstructions(

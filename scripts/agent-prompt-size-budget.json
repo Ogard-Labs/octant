@@ -5,11 +5,11 @@
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 48211,
+      "firstPromptBytes": 48344,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 64376,
+      "firstPromptBytes": 64509,
       "laterTurnBytes": 0
     },
     "chat-child": {
