@@ -30,7 +30,7 @@ export const CLAUDE_ARTIFACTS_TELEMETRY_WARNING =
 const HOST_OPT_OUT =
   "This computer’s own telemetry opt-out keeps Claude Code’s telemetry and Claude artifacts off.";
 const HOST_OPT_OUT_VARIABLES =
-  "The opt-out is any of CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, DISABLE_TELEMETRY or DO_NOT_TRACK set on this computer.";
+  "The opt-out is any of CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, DISABLE_TELEMETRY or DO_NOT_TRACK turned on for this computer.";
 
 /** What the switch does, with the data that leaves this computer in the same sentence. */
 const PUBLISHES =
