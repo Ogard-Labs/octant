@@ -82,13 +82,17 @@ describe("how a terminal command says it finished", () => {
   });
 
   it.each([powershell, pwsh])(
-    "writes %s's line without printf, clearing a stale native exit code first",
+    "writes %s's line without printf, telling a failed cmdlet from a failed program without touching $LASTEXITCODE",
     (shell) => {
       const { before, command, pattern } = terminalCompletion(shell, marker);
       expect(command).not.toContain("printf");
-      // A failed cmdlet after a failed native program must not report the program's code.
-      expect(before).toBe("$global:LASTEXITCODE = 0");
-      expect(command.indexOf("$?")).toBeLessThan(command.indexOf("$LASTEXITCODE"));
+      // A follow-up command that reads $LASTEXITCODE must still see the program's code.
+      expect(`${before ?? ""}\n${command}`).not.toMatch(/\$(global:)?LASTEXITCODE\s*=/);
+      // A failed cmdlet after a failed native program shows as a new error record.
+      expect(before).toBe("$octantLastError = $Error[0]");
+      expect(command).toContain("ReferenceEquals($Error[0], $octantLastError)");
+      expect(command.indexOf("$?")).toBeLessThan(command.indexOf("$Error"));
+      expect(command.indexOf("$Error")).toBeLessThan(command.indexOf("$LASTEXITCODE"));
       const echoed = colouredEcho(before ?? "") + colouredEcho(command);
       expect(codes(echoed, pattern)).toEqual([]);
       expect(

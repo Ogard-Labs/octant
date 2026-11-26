@@ -85,12 +85,15 @@ export function terminalCompletion(
     case "powershell.exe":
     case "pwsh.exe":
       // A failed cmdlet sets `$?` but leaves `$LASTEXITCODE` as the last
-      // native program left it, so it is cleared before the command: a failed
-      // `cmd /c exit 7` followed by a failed `Get-Item` reported 7. `$?` is
-      // read first, before anything else resets it.
+      // native program left it, so a failed `cmd /c exit 7` followed by a
+      // failed `Get-Item` reported 7. Clearing `$LASTEXITCODE` first fixed
+      // that but changed what the command itself read, so the newest error
+      // record is noted instead: a new one means PowerShell failed (1), and
+      // none means a native program did. `$?` is read first, before anything
+      // else resets it.
       return {
-        before: "$global:LASTEXITCODE = 0",
-        command: `$octantOk = $?; $octantExit = if ($octantOk) { 0 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }; [Console]::Write("$([char]27)]777;octant=${marker};exit=$octantExit$([char]7)")`,
+        before: "$octantLastError = $Error[0]",
+        command: `$octantOk = $?; $octantExit = if ($octantOk) { 0 } elseif ($Error.Count -gt 0 -and -not [object]::ReferenceEquals($Error[0], $octantLastError)) { 1 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }; [Console]::Write("$([char]27)]777;octant=${marker};exit=$octantExit$([char]7)")`,
         pattern: framed,
       };
     case "cmd.exe":
