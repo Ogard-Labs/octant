@@ -2202,12 +2202,46 @@ describe("video jobs", () => {
                 providerFailure: classifyVideoHttpFailure(
                   new Response(null, { status: httpStatus }),
                 ),
+                httpStatus,
               },
       });
       const queued = await enqueue(service);
       const done = await service.whenTerminal(queued.id);
       expect(done).toMatchObject({ status: "failed", settledCostUsdMicros: 347_520 });
       expect(spend.settle).toHaveBeenCalledOnce();
+      service.close();
+    },
+  );
+
+  it.each([
+    {
+      name: "a status check that answers 409",
+      failure: {
+        providerFailure: classifyVideoHttpFailure(new Response(null, { status: 409 })),
+        httpStatus: 409,
+      },
+    },
+    {
+      name: "the provider's own failure answer",
+      failure: {
+        providerFailure: { category: "provider-failed" as const, message: "The clip failed." },
+      },
+    },
+  ])(
+    "ends a job billed nothing on $name, even after the provider reported usage",
+    async ({ failure }) => {
+      const { service, calls, spend } = harness({
+        poll: async () =>
+          calls.poll === 1
+            ? { status: "running", usage: { outputTokens: 28_960 } }
+            : { status: "failed", ...failure },
+      });
+      const queued = await enqueue(service);
+      const done = await service.whenTerminal(queued.id);
+      expect(done).toMatchObject({ status: "failed", failure: { category: "provider-failed" } });
+      expect(done?.settledCostUsdMicros).toBeUndefined();
+      expect(spend.settle).not.toHaveBeenCalled();
+      expect(spend.abandon).toHaveBeenCalledOnce();
       service.close();
     },
   );

@@ -335,6 +335,35 @@ describe("Gemini video driver", () => {
     expect((await adapter.poll("v1_abc", new AbortController().signal)).status).toBe("completed");
   });
 
+  it.each([404, 400, 409])(
+    "says which HTTP status a status check Google answered with %i failed on",
+    async (status) => {
+      const adapter = geminiVideoDriver.create({
+        profile,
+        ports: ports(() => new Response(null, { status })).ports,
+      });
+      expect(await adapter.poll("v1_abc", new AbortController().signal)).toMatchObject({
+        status: "failed",
+        httpStatus: status,
+      });
+    },
+  );
+
+  it("names no HTTP status for a clip Google itself failed to make", async () => {
+    const adapter = geminiVideoDriver.create({
+      profile,
+      ports: ports(() =>
+        Response.json({ id: "v1_abc", status: "failed", error: { message: "internal" } }),
+      ).ports,
+    });
+    const answer = await adapter.poll("v1_abc", new AbortController().signal);
+    expect(answer).toMatchObject({
+      status: "failed",
+      providerFailure: { category: "provider-failed" },
+    });
+    expect(answer).not.toHaveProperty("httpStatus");
+  });
+
   it("calls a completed interaction with no clip a safety refusal", async () => {
     const adapter = geminiVideoDriver.create({
       profile,

@@ -268,7 +268,11 @@ async function readInteraction(
       ...(signal === undefined ? {} : { signal }),
     });
     if (!response.ok) {
-      return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
+      return {
+        status: "failed",
+        providerFailure: classifyVideoHttpFailure(response),
+        httpStatus: response.status,
+      };
     }
     const payload = await readVideoJson(response);
     const status = jsonField(payload, "status");

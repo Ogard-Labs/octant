@@ -1238,8 +1238,7 @@ export class VideoJobService {
         const keepsReportedCharge =
           answer.billed !== true &&
           reported !== undefined &&
-          (answer.providerFailure.category === "unsupported" ||
-            answer.providerFailure.category === "provider-failed");
+          (answer.httpStatus === 404 || answer.httpStatus === 400);
         const usage = keepsReportedCharge ? reported : answer.usage;
         this.#finish(current, stopped ? "cancelled" : "failed", {
           ...(stopped ? {} : { failure: answer.providerFailure }),
