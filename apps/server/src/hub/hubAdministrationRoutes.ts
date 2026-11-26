@@ -29,6 +29,8 @@ import {
   decodeHubOfferWithdrawRequest,
   decodeHubProposalDecisionRequest,
   decodeHubProvisionSwitchRequest,
+  decodeHubPublicEntranceSwitchRequest,
+  decodeHubPublicFunnelRequest,
   decodeHubPushSwitchRequest,
   decodeHubSignInAsk,
   decodeHubSignInDecisionRequest,
@@ -54,6 +56,7 @@ import { windowComputersFrom } from "./memberOrigin";
 import type { PairedMergeUnlockService } from "./pairedMergeUnlock";
 import type { OwnerApprovalAnswerUnlock } from "./ownerApprovalAnswerUnlock";
 import type { ProvisionService } from "./provisionService";
+import type { PublicEntranceService } from "./publicEntranceService";
 import type { PushService } from "./pushService";
 import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
@@ -123,6 +126,9 @@ export const HUB_ADMINISTRATION_ROUTES = {
   directPushEnvironment: "/api/desktop/hub/direct-push/environment",
   directPushCredential: "/api/desktop/hub/direct-push/credential",
   directPushCredentialRemove: "/api/desktop/hub/direct-push/credential/remove",
+  /** This host's public entrance and its Funnel front: only a window on this host turns them on or off. */
+  publicEntrance: "/api/desktop/hub/public",
+  publicFunnel: "/api/desktop/hub/public/funnel",
   /** The hub's offer switch: only a window on the hub turns it on or off. */
   provision: "/api/desktop/hub/provision",
   /** The hub's window makes an offer for its spokes. */
@@ -165,6 +171,8 @@ export interface HubAdministrationRouteOptions {
   readonly signIn: SignInService;
   readonly spokeSignIn: SpokeSignInService;
   readonly certificate: TailscaleCertificateService;
+  /** Absent where the public entrance is not composed; its routes then answer unavailable. */
+  readonly publicEntrance?: PublicEntranceService;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -225,6 +233,9 @@ export function createHubAdministrationRouteHandler(
         signIn: { hub: options.signIn.status(), spoke: options.spokeSignIn.view() },
         pairedMergeUnlock: options.pairedMergeUnlock.required(),
         ownerApprovalAnswerUnlock: options.ownerApprovalAnswerUnlock.required(),
+        ...(options.publicEntrance === undefined
+          ? {}
+          : { publicEntrance: options.publicEntrance.status() }),
       });
     }
     if (route === HUB_ADMINISTRATION_ROUTES.certificate && request.method === "GET") {
@@ -406,6 +417,21 @@ export function createHubAdministrationRouteHandler(
         case HUB_ADMINISTRATION_ROUTES.push: {
           const value = decodeHubPushSwitchRequest(parseJson(request, body.text));
           return outcome(await options.push.setEnabled(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.publicEntrance: {
+          const value = decodeHubPublicEntranceSwitchRequest(parseJson(request, body.text));
+          if (options.publicEntrance === undefined) return failure("unavailable", 503);
+          return outcome(await options.publicEntrance.setEnabled(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.publicFunnel: {
+          const value = decodeHubPublicFunnelRequest(parseJson(request, body.text));
+          if (options.publicEntrance === undefined) return failure("unavailable", 503);
+          return outcome(
+            await options.publicEntrance.setFunnel(
+              { enabled: value.enabled, ...(value.port === undefined ? {} : { port: value.port }) },
+              WINDOW_PRINCIPAL,
+            ),
+          );
         }
         case HUB_ADMINISTRATION_ROUTES.directPush: {
           const value = decodeHubDirectPushSwitchRequest(parseJson(request, body.text));

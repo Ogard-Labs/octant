@@ -29,6 +29,8 @@ import {
   decodeHubProvisionSwitchRequest,
   decodeHubSignInAsk,
   decodeHubSignInDecisionRequest,
+  decodeHubPublicEntranceSwitchRequest,
+  decodeHubPublicFunnelRequest,
   decodeHubPushSwitchRequest,
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
@@ -208,6 +210,17 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/push",
     decodeBody: decodeHubPushSwitchRequest,
+  },
+  // This host's public entrance and its Funnel front.
+  public: {
+    method: "POST",
+    path: "/api/desktop/hub/public",
+    decodeBody: decodeHubPublicEntranceSwitchRequest,
+  },
+  "public-funnel": {
+    method: "POST",
+    path: "/api/desktop/hub/public/funnel",
+    decodeBody: decodeHubPublicFunnelRequest,
   },
   "direct-push": {
     method: "POST",

@@ -223,6 +223,8 @@ import {
   createListenerCertificateSink,
 } from "../hub/tailscaleCertificate";
 import { createTailscaleCliDaemon, execTailscale } from "../hub/tailscaleCliDaemon";
+import { PublicEntranceService } from "../hub/publicEntranceService";
+import { forwardToActingHub } from "../hub/publicEntranceForwarding";
 import { SpokeWakeService } from "../hub/spokeWakeService";
 import { createUdpWakeOnLanPort } from "../hub/wakeOnLan";
 import { WakeService } from "../hub/wakeService";
@@ -275,6 +277,8 @@ const HANDOVER_REPORT_RETRY_MS = 60_000;
 const WAKE_REPORT_MS = 30_000;
 /** How often the push sender forgets old rate marks and hands standbys its switch. */
 const PUSH_LOOK_MS = 60_000;
+/** How soon the public entrance closes after the hub role ends or a join is lost; each request already checks. */
+const PUBLIC_ENTRANCE_LOOK_MS = 5_000;
 /** How often a spoke lets lapsed sign-in requests end and tells the hub any outcome word still owed. */
 const SIGN_IN_LOOK_MS = 30_000;
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
@@ -629,6 +633,15 @@ export function wireRemote(deps: RemoteDependencies) {
     console.warn("Octant could not record that a past run's port forwards ended.");
   }
   setInterval(() => remotePortForwards.sweep(), 60_000).unref();
+  // The public entrance is made with the hub services below; the gateway's pause
+  // hook reaches it through this slot, since the gateway can be made first.
+  let publicEntranceBound: PublicEntranceService | undefined;
+  const publicEntranceSlot = {
+    bind: (service: PublicEntranceService) => {
+      publicEntranceBound = service;
+    },
+    reconcile: () => void publicEntranceBound?.reconcile().catch(() => undefined),
+  };
   const injectedRemoteListenerServices = options.remoteListener?.services;
   const resolveRemoteGatewayServices = (): Omit<RemoteGatewayServices, "config" | "serve"> => {
     if (injectedRemoteListenerServices !== undefined) return injectedRemoteListenerServices;
@@ -643,6 +656,7 @@ export function wireRemote(deps: RemoteDependencies) {
       registrationLifetime: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).pairedDeviceLifetime,
       onDevicePaired: (device) => alertNewDevice(device),
+      onRemoteAccessPauseChanged: () => publicEntranceSlot.reconcile(),
       onDeviceRemoved: (deviceId) => pairedDeviceAlerts.dropDevice(deviceId),
       hostId: identity.hostId,
       displayName: identity.displayName,
@@ -1292,6 +1306,40 @@ export function wireRemote(deps: RemoteDependencies) {
     dismissPaired: (alertId) => pairedDeviceAlerts.dismiss(alertId),
     windowAuthorityStore,
   });
+  // This host's public entrance (decisions H29 and H30): off until a window turns
+  // it on, closed while remote access is paused, and served only by the acting
+  // hub; a member forwards to it. No feature is plugged in yet, so every route
+  // but health answers 404.
+  const publicEntrance = new PublicEntranceService({
+    state: hubStateStore,
+    exec: execTailscale,
+    platform: process.platform,
+    record: recordHubMembership,
+    remoteAccessPaused: () => readRemoteAccessPaused(persistence.connection),
+    privateListenerPort: () => {
+      const listener = privateListenerController.status();
+      return listener.enabled && typeof listener.port === "number" ? listener.port : undefined;
+    },
+    role: () => {
+      if (hubService.status().enabled) return "hub";
+      const link = hubStateStore.load().link;
+      return link !== undefined && link.removed !== true ? "member" : "none";
+    },
+    forward: (envelope) =>
+      forwardToActingHub({
+        state: hubStateStore,
+        identity: resolveHubIdentity,
+        transport: hubTransport,
+        envelope,
+        now: Date.now(),
+      }),
+  });
+  publicEntranceSlot.bind(publicEntrance);
+  // The role and the pause are read on every request; this catches a hub role
+  // turned off or a join that ended, and closes the listener itself.
+  const reconcilePublicEntrance = () => void publicEntrance.reconcile().catch(() => undefined);
+  setInterval(reconcilePublicEntrance, PUBLIC_ENTRANCE_LOOK_MS).unref();
+  setTimeout(reconcilePublicEntrance, 0).unref();
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
     // Read at each request: the delegation state is opened below.
     delegationAccepting: {
@@ -1315,6 +1363,7 @@ export function wireRemote(deps: RemoteDependencies) {
     signIn: signInService,
     spokeSignIn: spokeSignInService,
     certificate: tailscaleCertificate,
+    publicEntrance,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   const hubLinkRoutes = createHubLinkRouteHandler({
@@ -1330,6 +1379,7 @@ export function wireRemote(deps: RemoteDependencies) {
     signIn: signInService,
     spokeSignIn: spokeSignInService,
     readUsageLimits: () => deps.providerUsageLimitsService.snapshot(),
+    publicEntrance,
   });
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's

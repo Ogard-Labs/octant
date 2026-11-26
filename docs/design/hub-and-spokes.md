@@ -2976,17 +2976,18 @@ person's work without any service Octant runs (maintainer decision,
   ignores any `Cookie`, `Forwarded`, or `X-Forwarded-*` header for authority.
   A request that reaches it from loopback (as every Funnel request does) is
   never loopback administration.
-- **Where it binds.** On `127.0.0.1` at a port the hub picks, plain HTTP,
-  for a front on the same machine (Funnel, or the person's own `cloudflared`).
-  For the person's own proxy on another machine in the tailnet (Caddy on a
-  VPS), it may instead bind the hub's Tailscale address with the hub's
-  Tailscale certificate and accept connections only from the front addresses
-  the person entered. It never binds a wildcard, LAN, or public address.
+- **Where it binds.** On `127.0.0.1` at a port the hub picks and keeps,
+  plain HTTP, for a front on the same machine (Funnel, or the person's own
+  `cloudflared`). For the person's own proxy on another machine in the
+  tailnet (Caddy on a VPS), it may instead bind the hub's Tailscale address
+  with the hub's Tailscale certificate and accept connections only from the
+  front addresses the person entered (not built yet). It never binds a
+  wildcard, LAN, or public address.
 - **A closed route table.** The visitor page and its assets, the visitor
   stream, visitor comments, webhook receipt, the device relay, and health.
   Every other path answers 404, and a known path with another method answers
   405 without reading the body. HEAD and GET never start a run.
-- **Off at three levels.** The hub's own Public entrance switch; each
+- **Off at three levels.** The host's own Public entrance switch; each
   spoke's Public (and, for the device relay, Relay) hub-grant item; and each
   link, endpoint, or device. Each feature on the entrance has its own switch
   on the hub too. **Pause remote access** on the hub closes the entrance
@@ -4484,9 +4485,20 @@ limits, and the device relay's channel design.
     limits, and health served by the acting hub only; the Funnel switch in
     Settings and `octant hub public`; Pause; forwarding to the acting hub.
     Acceptance: the public listener answers 404 to every private route, and
-    pausing remote access closes it. **Linux container: yes**, with a fake
-    Tailscale daemon; a real Funnel URL from mobile data is a maintainer
-    gate.
+    pausing remote access closes it. Built: the separate loopback listener
+    with its closed route table, the entrance-wide rate cap, header and body
+    timeouts and hardening headers, health on the acting hub only, the
+    switch and the Funnel front in Settings and `octant hub public` (443 or
+    10000; 8443 is refused while the private listener serves it), Pause and
+    the end of the hub role closing it and turning Funnel off, and a
+    member forwarding to the hub over the pinned private transport. Every
+    feature route answers 404 until its slice plugs in. Not built yet:
+    binding the hub's Tailscale address for the person's own proxy on
+    another machine (a front on the same machine works), reading
+    `tailscale funnel status`, forwarding to a standing-in standby (slice
+    26), and forwarding a streamed answer. **Linux container: yes**, with a
+    fake Tailscale daemon; a real Funnel URL from mobile data is a
+    maintainer gate.
 24. **Webhook triggers.** The `webhook` trigger kind, secret mint and
     rotation, and the delivery log on the spoke; verify, queue, and forward
     on the hub under the Public item; a wake for a sleeping spoke; claims in

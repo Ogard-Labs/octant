@@ -176,3 +176,49 @@ export type WebhookRefusalKind = typeof WebhookRefusalKind.Type;
 
 /** A body digest as the spoke remembers it beside a delivery id. */
 export const WebhookBodyDigest = digest;
+
+/** The public ports Tailscale Funnel listens on; nothing else can be asked for. */
+export const PUBLIC_FUNNEL_PORTS = [443, 8443, 10000] as const;
+export const PublicFunnelPort = Schema.Literal(...PUBLIC_FUNNEL_PORTS);
+export type PublicFunnelPort = typeof PublicFunnelPort.Type;
+
+/** A window turns this host's public entrance on or off. */
+export const HubPublicEntranceSwitchRequest = Schema.Struct({
+  enabled: Schema.Boolean,
+}).annotations(strict);
+export const decodeHubPublicEntranceSwitchRequest = Schema.decodeUnknownSync(
+  HubPublicEntranceSwitchRequest,
+);
+
+/** A window turns the built-in Funnel front on (on one public port) or off. */
+export const HubPublicFunnelRequest = Schema.Struct({
+  enabled: Schema.Boolean,
+  port: Schema.optional(PublicFunnelPort),
+}).annotations(strict);
+export const decodeHubPublicFunnelRequest = Schema.decodeUnknownSync(HubPublicFunnelRequest);
+
+/** The most a forwarded request or its answer carries, base64 included. */
+export const PUBLIC_FORWARD_MAX_BODY_BYTES = 512 * 1024;
+
+/**
+ * A request a member's entrance admitted and hands to the acting hub over the
+ * pinned private transport, unchanged except for the headers the entrance
+ * never passes on (cookies, credentials, and forwarding claims).
+ */
+export const PublicForwardEnvelope = Schema.Struct({
+  method: Schema.Literal("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"),
+  path: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(2048)),
+  headers: Schema.Record({ key: Schema.String, value: Schema.String }),
+  body: Schema.String,
+}).annotations(strict);
+export type PublicForwardEnvelope = typeof PublicForwardEnvelope.Type;
+export const decodePublicForwardEnvelope = Schema.decodeUnknownSync(PublicForwardEnvelope);
+
+/** The acting hub's answer to a forwarded request, carried back unchanged. */
+export const PublicForwardAnswer = Schema.Struct({
+  status: Schema.Int.pipe(Schema.between(100, 599)),
+  headers: Schema.Record({ key: Schema.String, value: Schema.String }),
+  body: Schema.String,
+}).annotations(strict);
+export type PublicForwardAnswer = typeof PublicForwardAnswer.Type;
+export const decodePublicForwardAnswer = Schema.decodeUnknownSync(PublicForwardAnswer);

@@ -27,10 +27,13 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { HUB_HANDBACK_MAX_BODY_BYTES, HUB_WAKE_COPY_MAX_BODY_BYTES } from "../remoteRoutePolicy";
+import { PUBLIC_FORWARD_MAX_BODY_BYTES } from "@octant/contracts";
 import type { FailoverService } from "./failoverService";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, HubLinkVerifier } from "./hubLink";
 import type { HubService } from "./hubService";
 import type { ProvisionService } from "./provisionService";
+import type { PublicEntranceService } from "./publicEntranceService";
+import { readForwardedRequest } from "./publicEntranceForwarding";
 import type { PushService } from "./pushService";
 import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
@@ -82,6 +85,8 @@ export const HUB_LINK_ROUTES = {
   signInRequest: "/api/hub/sign-in-request",
   /** A spoke tells the hub one word about how a sign-in request ended. */
   signInOutcome: "/api/hub/sign-in-outcome",
+  /** A member's public entrance hands the acting hub a request it admitted from the internet. */
+  publicForward: "/api/hub/public/forward",
 } as const;
 
 const decodeHubMemberId = Schema.decodeUnknownSync(HubMemberId);
@@ -100,6 +105,8 @@ const GUEST_REFUSAL_STATUS: ReadonlySet<string> = new Set([
 ]);
 
 const MAX_BODY_BYTES = 64 * 1_024;
+/** A forwarded request carries its body as base64 inside JSON. */
+const FORWARD_MAX_BODY_BYTES = Math.ceil((PUBLIC_FORWARD_MAX_BODY_BYTES * 4) / 3) + 16 * 1_024;
 const NO_STORE = { "cache-control": "no-store" } as const;
 
 export interface HubLinkRouteOptions {
@@ -116,6 +123,8 @@ export interface HubLinkRouteOptions {
   readonly spokeSignIn: SpokeSignInService;
   /** This computer's provider plan-limit readings, as its own Limits view reads them. */
   readonly readUsageLimits?: () => ProviderUsageLimitsSnapshot;
+  /** This host's public entrance, which runs a request another member's entrance forwarded. */
+  readonly publicEntrance?: Pick<PublicEntranceService, "dispatchForwarded">;
   readonly now?: () => number;
 }
 
@@ -173,7 +182,9 @@ export function createHubLinkRouteHandler(
         ? HUB_HANDBACK_MAX_BODY_BYTES
         : route === HUB_LINK_ROUTES.wakeCopy
           ? HUB_WAKE_COPY_MAX_BODY_BYTES
-          : MAX_BODY_BYTES,
+          : route === HUB_LINK_ROUTES.publicForward
+            ? FORWARD_MAX_BODY_BYTES
+            : MAX_BODY_BYTES,
     );
     if (body === undefined) return refused(413, "invalid");
     const header = request.headers.get(HUB_LINK_HEADER);
@@ -461,6 +472,27 @@ export function createHubLinkRouteHandler(
       return held.status === "recorded"
         ? Response.json(held, { headers: NO_STORE })
         : refused(403, held.kind);
+    }
+
+    if (route === HUB_LINK_ROUTES.publicForward) {
+      // Only the acting hub serves the entrance; a member that is not forwards here.
+      if (!options.hub.status().enabled) return refused(403, "hub-role-off");
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        publicKeyFor: (sender) => options.hub.memberKey(sender, presentedKey ?? undefined),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      const envelope = readForwardedRequest(body);
+      if (envelope === undefined || options.publicEntrance === undefined) {
+        return refused(envelope === undefined ? 400 : 404, "invalid");
+      }
+      return Response.json(await options.publicEntrance.dispatchForwarded(envelope), {
+        headers: NO_STORE,
+      });
     }
 
     if (route === HUB_LINK_ROUTES.push) {

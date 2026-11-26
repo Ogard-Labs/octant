@@ -231,6 +231,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   provisionMirror: "hub-link-provision-mirror",
   signInRequest: "hub-link-sign-in-request",
   signInOutcome: "hub-link-sign-in-outcome",
+  publicForward: "hub-link-public-forward",
   owner: "hub-link-owner",
   delegate: "hub-link-delegate",
   delegationStatus: "hub-link-delegation-status",
@@ -553,6 +554,19 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 32_768,
     maxResponseBytes: 4_096,
+  },
+  // A member's public entrance hands the acting hub a request it admitted from
+  // the internet: one public request and its answer, base64 inside JSON.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.publicForward,
+    match: { kind: "exact", path: "/api/hub/public/forward" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 786_432,
+    maxResponseBytes: 786_432,
   },
   {
     id: REMOTE_HUB_LINK_ROUTE_IDS.pushGrant,
