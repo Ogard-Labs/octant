@@ -56,7 +56,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 18        | 12      | 5            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 7       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 14        | 8       | 6            | 0                   |
-| [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 5       | 3            | 0                   |
+| [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 4       | 4            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 12        | 11      | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 21        | 17      | 4            | 0                   |
@@ -73,7 +73,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 1       | 0            | 0                   |
-| **All areas**                                                                         | **320**   | **215** | **101**      | **4**               |
+| **All areas**                                                                         | **320**   | **214** | **102**      | **4**               |
 
 ## Principles and hard lines
 
@@ -568,7 +568,7 @@ Status: Partly built. Since: 2026-11-16. Detail: [Provider runtimes: Any ACP age
 Google Antigravity runs the official `agy` CLI unmodified as `agy acp`, under the rules Google sets for ACP clients (maintainer decision, 2026-11-20).
 
 - Outside Strict, Work and Code start it unsandboxed at every level; Chat, Plan, Strict and an explicit sandbox stay sandboxed.
-- Octant never spoofs identity, reads the CLI's credentials or rotates accounts.
+- Octant never spoofs identity, reads the CLI's credentials, rotates accounts or runs `agy -p`. On the personal sign-in, account windows come only from a reversible bridge on `agy`'s documented status-line hook that the person opts into.
 - On the personal Google sign-in it stays inside Google's consumer-plan line, interactive use by one person (maintainer decision, 2026-11-25). Routines wait for the person's confirmation, every other turn no person sent is refused, and background model calls skip it.
 - Those limits lift only for an instance configured with a Gemini API key or Agent Platform (maintainer decision, 2026-11-22).
 - Its signed-in live probe is a maintainer check still owed.
@@ -801,23 +801,27 @@ Status: Built. Detail: [Architecture: Process topology](../architecture.md#proce
 
 ### GitHub reads for Code agents
 
-A Code thread's agent reads its Project's delivery repository through one read-only family, `octant_github`.
+A Code thread's agent reads its Project's delivery repository through one family, `octant_github`, which writes only to the thread's linked issues.
 
 - The host fixes the repository to the thread's delivery target; no input names a repository or host.
-- Every call re-checks the thread's authority and changes nothing on GitHub.
+- Every call re-checks the thread's authority; reads change nothing on GitHub.
+- On a thread linked to issues it may comment on and close a linked issue of the delivery repository. Plan refuses, below Full access it asks unless the Project's switch allows it on a thread that read no outside content, and a write fails closed without issue-write permission on the repository (maintainer decision, 2026-11-26).
 - Every cut is stated, and a size outside bounds is refused, not clamped.
 - A read is journaled as outside content before the model sees it, and withheld when it cannot be.
 
-Status: Built. Detail: [Architecture: Reading GitHub](../architecture.md#modes-chat-work-and-code).
+Status: Built. Detail: [Architecture: Reading GitHub](../architecture.md#modes-chat-work-and-code) and [Workspace: Boards and integrations](workspace.md#boards-and-integrations).
 
 ### Linear Project mapping and reads for Code agents
 
-A Work or Code Project may bind a Linear team, and optionally a Linear project, on the host. The binding scopes the issue browser, the `Create from…` picker, Start issue and the Code agent's read-only `octant_linear` (maintainer decision, 2026-11-24).
+A Work or Code Project may bind a Linear team, and optionally a Linear project, on the host. The binding scopes the issue browser, the `Create from…` picker, Start issue and the Code agent's `octant_linear`, read-only except on the thread's linked issues (maintainer decision, 2026-11-24).
 
 - Only a local window sets or clears the binding, journaled.
-- `octant_linear` never writes to Linear, stays inside the bound scope, and journals outside content before returning data.
+- `octant_linear` writes only to the thread's linked issues, stays inside the bound scope, and journals outside content before returning data.
+- A Code thread is linked to the issue it was created from and to the issues the person links; links change only from a local window or a host-person-paired device (maintainer decision, 2026-11-26).
+- Under the Project's Keep linked issues up to date switch, off by default, the host moves linked issues forward to In Progress, In Review and Done, never backwards, and host-started turns move nothing. Every write attempt is journaled, and a token without write access fails closed.
+- A live check against a Linear workspace with write access and a real GitHub issue is a maintainer check still owed.
 
-Status: Built. Since: 2026-11-24. Detail: [Host reads and commands: Linear issues](host-reads-and-commands.md#linear-issues).
+Status: Built. Since: 2026-11-24. Detail: [Host reads and commands: Linear issues](host-reads-and-commands.md#linear-issues) and [Workspace: Boards and integrations](workspace.md#boards-and-integrations).
 
 ### Zen assistant tool
 
@@ -1043,6 +1047,7 @@ A fork is a managed-worktree creation the host resolves from a finished turn; a 
 - The phone rewinds files only at Full access; otherwise it rewinds the conversation only.
 - Fork and rewind use the provider's own session copy where its runtime offers one, else a disclosed text handoff (maintainer principle, 2026-11-14).
 - An in-place Git restore or discard is refused while another thread writes on the checkout root.
+- A thread on its Project's shared checkout may move onto a managed worktree of its own, keeping its id and history and copying its uncommitted changes, which the source keeps (maintainer decision, 2026-11-26). The move revokes grants as a rebind does, refuses work a copy would leave behind, and an agent's request always asks the person from a local window; the next turn continues by a disclosed text handoff, and a one-click Discard of the copy in the source is not offered.
 
 Status: Built. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -1231,6 +1236,8 @@ A Code thread may push its own branch and open, update and stack pull requests f
 - No agent or routine reviews a pull request; reviews are the person's, recorded on the head they read.
 - At Full access a Harness command that merges, plain-force-pushes or touches another branch is refused before it runs. At Ask first and Auto, recognizable pushes and pull-request writes in the Harness shell are refused; a provider runtime's own push or `gh` write is an ordinary ask, which Octant Shield decides at Auto. (maintainer decision, 2026-11-14)
 - What Octant only observes after the act is recorded, never presented as enforcement.
+- A pull request the thread opens names each linked issue as fixed unless its body already does, and Merge when ready is only the person's to turn on (maintainer decision, 2026-11-26).
+- The thread's agent reads its own pull request's failed CI logs without asking and reruns failed checks on the current head: a rerun asks below Full access, Plan refuses, and three reruns per workflow run on one head is the cap (maintainer decision, 2026-11-26). Neither reaches another thread's pull request.
 
 Not built yet:
 
@@ -1347,9 +1354,11 @@ Status: Built. Detail: [Architecture: Modes: Chat, Work, and Code](../architectu
 
 ### Usage limits and stalled turns
 
-A turn stopped by an explicit provider usage-limit signal carries a provider-neutral fact. Resuming at the reset is the person's per-thread opt-in.
+A turn stopped by an explicit provider usage-limit signal carries a provider-neutral fact. Resuming at the reset is the person's per-thread opt-in, or their standing default (maintainer decision, 2026-11-26).
 
-- Only a protocol signal makes the fact, never text matching; an unknown reset stays unknown, and a billing stop gets no resume.
+- Only a protocol signal makes the fact, never text matching; an unknown reset stays unknown, and a billing stop gets no resume or snooze.
+- While the stop is the thread's latest turn, one strip above the composer names the provider, the limit and the reset, and offers Resume now, Resume at reset and Snooze until reset; no plan meters stand beside the composer (maintainer decision, 2026-11-26).
+- The host settings Resume at reset by default and Snooze until reset by default are off by default. Each arms once per stopped turn, only for a reset still ahead on a turn the person sent from a local window or a device they paired; the resume still passes ordinary admission, and a cancelled default stays cancelled.
 - A stalled or looping turn gets a quiet notice outside Strict and is cut off under Strict, per [Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on). Its settings change only at a local window or a host-person-paired device. (maintainer decision, 2026-11-13)
 - Force stop kills only that attempt's process and leaves the thread resumable; a Stop naming a superseded turn is refused, and an unconfirmed Stop never invents an outcome.
 
@@ -1525,10 +1534,16 @@ Unsent drafts stay on the client that typed them. Messages sent while a turn run
 - Every dispatch rechecks authority through ordinary admission. Changed authority, uncertain delivery, a cancel and a Work Done mark hold the queue until a person resumes it. (maintainer request, 2026-11-12)
 - A paired device queues on a thread it may send to and edits its own; one the host's own person paired at Full manages the whole queue. (maintainer decision, 2026-11-13)
 - A steered message is a user message of its turn everywhere it is carried. (maintainer decision, 2026-11-21)
+- The phone's Work and Code composer queues a follow-up while a turn runs and lists, edits and removes waiting messages (maintainer request, 2026-11-26).
+- A quote from a reply, a terminal or a file is one chip held as the prompt's own text, framed as reference, not instructions; only a quote Octant wrote in the window is a chip, and pasted quote-shaped text stays plain (maintainer decision, 2026-11-26).
+- A large paste attaches as a text file where the composer takes files, and ⌘⇧V pastes it inline (maintainer decision, 2026-11-26). The Chat start screen keeps it as text, since a first Chat message needs words for its title.
+- ArrowUp in an empty thread composer recalls the person's own sent prompts in that thread, newest first.
+- On the Code start composer, ⌘↩ starts the thread in the background and keeps a fresh draft, and one prompt may start on up to four models, each an ordinary create in its own worktree (maintainer decision, 2026-11-26).
 
 Not built yet:
 
-- The queue in paired clients' composer: the server accepts their queue commands, but the clients do not offer it yet.
+- Send now in the phone's queue: the phone lists, edits and removes queued messages but does not offer it yet.
+- Start and stay on the Chat and Work start composers: built for Code first.
 
 Status: Partly built. Detail: [Architecture: Persistence](../architecture.md#persistence).
 
@@ -1635,6 +1650,7 @@ Short clips run as a journaled job through provider-neutral video driver plugins
 - Drivers plug into the provider SDK's `videoGeneration` seam through the plugin-host activation ladder; the host builds card, price, limits, spend and storage from what each model declares. Other providers than the first-party three are left to plugins (maintainer decision, 2026-11-22).
 - A runtime's own native media output shows with no Octant gate.
 - Thread and Project spend ceilings apply, and a model is offered only at combinations it has a rate for.
+- A clip Gemini reported usage for but that never arrives settles at that usage, else the estimate; a reported count that is not a finite amount of at least zero settles at the estimate (maintainer decision, 2026-11-26).
 - Clip bytes are served on a ticket that rechecks thread authority and the device's session on every request.
 - Real-provider runs, physical phone playback and packaged download are maintainer live checks still owed.
 
@@ -1937,6 +1953,8 @@ A person connects an MCP server from Settings, in a local window or on a device 
 
 - A secret value goes to the credential broker, never into the package. Listing servers found on the computer is read-only.
 - The Connectors catalog is bundled and fetches nothing to render; the host accepts a connector id only at that entry's own address. The Library is one searchable list that never reaches the network.
+- A server the person typed in by hand reads as Needs sign-in only when its refusal is the protocol's sign-in challenge; any other refusal reads as Not connecting.
+- A thread whose next turn would get a server that needs sign-in offers the same sign-in control, and signing in reselects only that server's refused `@` names.
 - Reading connection states never connects, signs in or lists tools. Reconnect clears sessions so the next authorized task connects fresh, and is the person's act from a local window or a person-paired device; a failed call is never replayed.
 - A Project pin offers a plugin on every turn but grants nothing; calls still ask per [MCP tool approvals](#mcp-tool-approvals).
 - Hosted-server sign-in uses the protocol's authorization flow with PKCE, and the grant lives in the broker; a person-paired device starts and finishes one as a local window does ([Connector sign-in finished from a paired device](#connector-sign-in-finished-from-a-paired-device)). Paired devices cannot prepare or save client setup. Vendor consent, permissions and admin restrictions stay authoritative, and no scope, shared secret or hosted service is invented.
@@ -2651,8 +2669,15 @@ Plan limits that a provider reports only from an account endpoint are read with 
 
 - The host reads the credential only for an enabled instance, sends it nowhere else, and never writes, copies or stores it.
 - A missing allowance reads as unavailable, never 0% used.
+- A hub reads a spoke's plan-limit readings only under the spoke's Usage hub grant item, off by default and checked on every read; a standby standing in may not read them (maintainer decision, 2026-11-26).
+- Limits pools a provider's accounts on this computer as one bar per window with a segment per account, never an averaged share, pooling only accounts of one service (maintainer decision, 2026-11-26).
 
-Status: Built. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
+Not built yet:
+
+- The hub's merged view of its spokes' readings, and the history totals the Usage item covers: the spoke's read is built, the hub side is not.
+- Pooling accounts across paired computers: it waits on the cross-host read.
+
+Status: Partly built. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority) and [Settings: Models, providers, and skills](settings.md#models-providers-and-skills).
 
 ### Claude gateway accounts
 
@@ -2940,6 +2965,9 @@ A thread can be settled (completed) or snoozed; both are overlays, not lifecycle
 - A host sweep archives only settled threads, after a configurable delay.
 - A thread waiting on the person cannot be snoozed; a snooze wakes early when the agent needs the person (maintainer decision, 2026-11-25).
 - The palette's settle and snooze commands add no authority (maintainer request, 2026-11-25). A deferred pending question never changes the thread, draft, answer or execution authority.
+- Dragging a row onto or out of Pinned, Settled or Snoozed runs the row menu's own command, so the host decides; Snoozed is never a drop target (maintainer decision, 2026-11-26).
+- Every sidebar state change the host accepts offers Undo for a moment, sent as a new person command, never a rewrite; Archive has none (maintainer decision, 2026-11-26).
+- Files dropped on a thread row open the thread and go to its composer's own attach path (maintainer decision, 2026-11-26).
 
 Status: Built. Detail: [Workspace: Thread visibility and completion](workspace.md#thread-visibility-and-completion).
 
@@ -3055,9 +3083,9 @@ Status: Built. Detail: [Workspace: Active work](workspace.md#active-work) and [A
 
 ### Threads from issues and repositories
 
-A thread or Project can start from a forge issue, a tracker issue or a cloned repository, without write-back.
+A thread or Project can start from a forge issue, a tracker issue or a cloned repository. A Code thread is linked to its issue, and writes back only through [linked issues](#linear-project-mapping-and-reads-for-code-agents).
 
-- Creating from an issue attaches only its identity; the server reauthorizes, frames redacted text as external content and journals the ingestion.
+- Creating from an issue attaches its identity and writes nothing to the tracker; the server reauthorizes, frames redacted text as external content and journals the ingestion.
 - A local window, or a device [Paired devices act as the person](#paired-devices-act-as-the-person) admits, may start a Work or Code thread with a labeled text handoff from a provider session in its Project (maintainer decision, 2026-11-12). The server resolves scopes and refuses foreign folders and symlink escapes; clients supply no paths.
 - This import never adopts natively and never clones the unverified native writer ([Key providers run as themselves](#key-providers-run-as-themselves)).
 - Cloning verifies identity and origin and never overwrites.

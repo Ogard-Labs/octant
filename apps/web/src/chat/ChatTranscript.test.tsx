@@ -740,7 +740,7 @@ describe("ChatTranscript", () => {
     expect(screen.queryByRole("button", { name: /Retry cancelled/i })).not.toBeInTheDocument();
   });
 
-  it("names the limit and counts down to a provider-declared reset on a parked attempt", () => {
+  it("records a parked attempt's limit and its reset in one line, leaving Resume now to the strip", () => {
     const parked = viewFixture().turns[0]!.attempts[0]!;
     render(
       <ChatTranscript
@@ -766,10 +766,11 @@ describe("ChatTranscript", () => {
     );
 
     expect(screen.getByText("Rate limited")).toBeVisible();
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("The provider reached a temporary rate limit.");
-    expect(alert).toHaveTextContent("Resets in 10 min");
-    expect(screen.getByRole("button", { name: "Retry limited response" })).toBeVisible();
+    const record = screen.getByTestId("usage-limit-record");
+    expect(record).toHaveTextContent("The provider reached a temporary rate limit.");
+    expect(record).toHaveTextContent("It resets at");
+    // The tail stop's way on is the strip's Resume now, above the composer.
+    expect(screen.queryByRole("button", { name: "Retry limited response" })).toBeNull();
   });
 
   it("shows an endpoint retry only while the attempt is still running", () => {
@@ -824,10 +825,10 @@ describe("ChatTranscript", () => {
     );
 
     expect(screen.getByText("Usage exhausted")).toBeVisible();
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("usage allowance on this account is exhausted");
-    expect(alert).toHaveTextContent("The provider did not say when this clears.");
-    expect(alert).not.toHaveTextContent("Resets");
+    const record = screen.getByTestId("usage-limit-record");
+    expect(record).toHaveTextContent("usage allowance on this account is exhausted");
+    expect(record).toHaveTextContent("The provider did not say when this clears.");
+    expect(record).not.toHaveTextContent("resets at");
   });
 
   it("explains a billing stop without inventing a countdown", () => {
@@ -853,18 +854,16 @@ describe("ChatTranscript", () => {
     );
 
     expect(screen.getByText("Billing problem")).toBeVisible();
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("billing or credit problem");
-    expect(alert).not.toHaveTextContent("Resets");
-    expect(alert).not.toHaveTextContent("did not say when");
+    const record = screen.getByTestId("usage-limit-record");
+    expect(record).toHaveTextContent("billing or credit problem");
+    expect(record).not.toHaveTextContent("resets");
+    expect(record).not.toHaveTextContent("did not say when");
   });
 
   it("offers no scheduled recovery on a limited stop that already failed", () => {
     const failed = viewFixture().turns[0]!.attempts[0]!;
     render(
       <ChatTranscript
-        onScheduleUsageResume={vi.fn()}
-        onSnoozeAtUsageReset={vi.fn()}
         view={viewFixture({
           turns: [
             {
@@ -886,11 +885,8 @@ describe("ChatTranscript", () => {
       />,
     );
 
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("temporary rate limit");
-    expect(
-      screen.queryByRole("button", { name: "Resume when the limit resets" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("usage-limit-record")).toHaveTextContent("temporary rate limit");
+    expect(screen.queryByRole("button", { name: "Resume at reset" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
   });
 

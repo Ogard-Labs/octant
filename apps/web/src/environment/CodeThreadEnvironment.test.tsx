@@ -1167,6 +1167,107 @@ describe("CodeThreadEnvironment branch and move actions", () => {
     }
   });
 
+  it("moves a thread on a shared checkout into a new worktree and says its changes were copied", async () => {
+    const onMoveToWorktree = vi.fn(async () => ({
+      status: "moved" as const,
+      branch: "octant/moved-1",
+    }));
+    const { user, rerender } = await openBranchMenuClicked({
+      checkoutKind: "existing-worktree",
+      onMoveToWorktree,
+    });
+    await user.click(await screen.findByRole("menuitem", { name: "Move to a new worktree…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Move to a new worktree" });
+    expect(dialog).toHaveTextContent("copied");
+    await user.click(within(dialog).getByRole("button", { name: "Move" }));
+    expect(onMoveToWorktree).toHaveBeenCalledWith(undefined);
+    expect(
+      await within(dialog).findByText(/Moved to worktree octant\/moved-1/),
+    ).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("still has them");
+    // The refreshed checkout is the thread's own worktree now, which offers no
+    // move; the result stays until the person closes it.
+    rerender(
+      <CodeThreadEnvironment
+        environmentOpen
+        checkoutKind="managed-worktree"
+        onNewThreadInProject={vi.fn()}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    expect(screen.getByRole("dialog", { name: "Move to a new worktree" })).toHaveTextContent(
+      "still has them",
+    );
+  });
+
+  it("shows a refused move's reason, naming what could not be copied, and claims nothing was copied", async () => {
+    const onMoveToWorktree = vi.fn(async () => ({
+      status: "refused" as const,
+      message:
+        "Changes inside vendor/lib cannot be copied into a worktree. Commit them there first; nothing was moved.",
+    }));
+    const { user, rerender } = await openBranchMenuClicked({
+      checkoutKind: "existing-worktree",
+      onMoveToWorktree,
+    });
+    await user.click(await screen.findByRole("menuitem", { name: "Move to a new worktree…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Move to a new worktree" });
+    await user.click(within(dialog).getByRole("button", { name: "Move" }));
+    expect(await within(dialog).findByText(/vendor\/lib/)).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent("Moved to worktree");
+    expect(dialog).not.toHaveTextContent("still has them");
+    // The thread refreshed to a new version; a retry sends that one.
+    const retried = vi.fn(async () => ({ status: "moved" as const, branch: "octant/moved-2" }));
+    rerender(
+      <CodeThreadEnvironment
+        environmentOpen
+        checkoutKind="existing-worktree"
+        onMoveToWorktree={retried}
+        onNewThreadInProject={vi.fn()}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    const again = within(
+      screen.getByRole("dialog", { name: "Move to a new worktree" }),
+    ).queryByRole("button", { name: "Move" });
+    if (again === null) throw new Error("a refused move offers Move again");
+    await user.click(again);
+    expect(retried).toHaveBeenCalledOnce();
+    expect(onMoveToWorktree).toHaveBeenCalledOnce();
+  });
+
+  it("offers no move for a thread that already owns a worktree, and greys it while a turn runs or in Plan", async () => {
+    const onMoveToWorktree = vi.fn();
+    const owned = await openBranchMenuClicked({
+      checkoutKind: "managed-worktree",
+      onMoveToWorktree,
+    });
+    await screen.findByRole("menuitem", { name: "Worktrees" });
+    expect(screen.queryByRole("menuitem", { name: "Move to a new worktree…" })).toBeNull();
+    await owned.user.keyboard("{Escape}");
+    owned.unmount();
+    for (const extra of [{ threadBusy: true }, { threadPolicy: "plan" as const }]) {
+      const busy = await openBranchMenuClicked({
+        checkoutKind: "existing-worktree",
+        onMoveToWorktree,
+        ...extra,
+      });
+      expect(
+        await screen.findByRole("menuitem", { name: "Move to a new worktree…" }),
+      ).toHaveAttribute("aria-disabled", "true");
+      await busy.user.keyboard("{Escape}");
+      busy.unmount();
+    }
+  });
+
   it("draws the branch as a fact row when none of its actions can run", async () => {
     const { container } = render(
       <CodeThreadEnvironment

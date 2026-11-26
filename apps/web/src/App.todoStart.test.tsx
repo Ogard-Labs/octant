@@ -127,12 +127,19 @@ describe("starting a thread from a to-do", () => {
           todoListHostClient={thisHostKeepsList}
         />,
       );
+      // The To-dos page, the draft and its Draft actions load on demand. This
+      // test runs first in its file, so each import is cold and can outlast
+      // findBy's one-second wait on a loaded runner; under CPU load 13 of 30
+      // runs failed that way. Wait for each import itself instead.
       await user.click(await screen.findByRole("button", { name: /^To-dos/ }));
+      await act(() => vi.dynamicImportSettled());
       await user.click(await screen.findByRole("button", { name: "Start Draft the launch post" }));
       await user.click(await screen.findByRole("menuitem", { name: "Chat" }));
+      await act(() => vi.dynamicImportSettled());
       const draft = await screen.findByRole("region", { name: "New Octant Chat thread" });
       const input = within(draft).getByRole("textbox", { name: "First message" });
       await waitFor(() => expect(input).toHaveValue("Draft the launch post\n\nKeep it short."));
+      await act(() => vi.dynamicImportSettled());
       await user.click(await within(draft).findByRole("button", { name: "Draft actions" }));
       await user.click(await screen.findByRole("menuitem", { name: "Saved drafts" }));
       const list = await screen.findByRole("dialog", { name: "Saved drafts" });

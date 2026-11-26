@@ -9,6 +9,7 @@ import {
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
   THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE,
   THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
+  THREAD_LINKED_ISSUES_AGGREGATE,
   THREAD_RETENTION_EVENT_NAMES,
   THREAD_SIDE_TASKS_AGGREGATE_TYPE,
 } from "@octant/contracts";
@@ -295,6 +296,10 @@ function topicsForEvent(event: {
   )
     return ["thread-follow-ups"];
   if (aggregateType === "thread-message-queue") return ["thread-message-queue"];
+  // A thread's issue links ride on its Code navigation row but sit on an
+  // aggregate of their own: without this the desktop's linking dialog kept
+  // the list it opened with.
+  if (aggregateType === THREAD_LINKED_ISSUES_AGGREGATE) return ["code-navigation"];
   // A steered message is journaled on its own aggregate, never on the running
   // turn, so without this the turn showed it only at its next unrelated
   // refresh, well after the message had left the queue.

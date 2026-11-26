@@ -75,13 +75,14 @@ import {
   ThreadBoardPullRequestSummaries,
   type ThreadBoardPullRequestIdentity,
   ThreadTouchedIssues,
+  ThreadLinkedIssue,
   type ThreadLiveStep,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRetainedRecord } from "../polling/useRetainedRecord";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
-import { appendReasoning, applyActivityEvent, forgetWrittenPath } from "./transcriptActivity";
+import { applyActivityEvent, forgetWrittenPath } from "./transcriptActivity";
 import { EMPTY_TURN_ACTIVITY, type TurnActivity } from "../transcript/turnActivity";
 import { samePollingData } from "../polling/samePollingData";
 import {
@@ -107,7 +108,6 @@ import {
   providerAnswerOutcome,
   providerRequestFromEvent,
   readConversationEvidence,
-  readForkConversation,
   readOperationText,
   refreshActiveThreadView,
   replaceById,
@@ -218,6 +218,8 @@ export interface CodeThreadNavigationItem {
   readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
   /** The issues the thread's tool calls wrote to; absent when it has none. */
   readonly touchedIssues?: ThreadTouchedIssues;
+  /** The issues the thread works on; absent when none is linked. */
+  readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
   readonly executing?: boolean;
   /** An approval or a question waits on the person; the thread is parked, not working. */
   readonly awaitingInput?: boolean;
@@ -295,6 +297,7 @@ const MAX_CODE_RECONNECT_DELAY_MS = 10_000;
  * so a retried thread does not keep wearing a stale history banner.
  */
 const HISTORY_UNAVAILABLE_MESSAGE = "Conversation history could not be loaded.";
+const HISTORY_UNREFRESHED_MESSAGE = "Conversation history could not be refreshed.";
 const INHERITED_HISTORY_UNAVAILABLE_MESSAGE = "Inherited conversation history could not be loaded.";
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
@@ -614,6 +617,10 @@ export function useCodeController(options: CodeControllerOptions) {
   const [conversationHistory, setConversationHistory] = useState<
     "loading" | "loaded" | "unavailable"
   >("loading");
+  // How the last read of the transcript ended, read by an activation: each
+  // sets the state to loading first, and one may start while another reads.
+  const settledHistory = useRef(conversationHistory);
+  if (conversationHistory !== "loading") settledHistory.current = conversationHistory;
   const [followUps, setFollowUps] = useState<ReadonlyMap<string, CodeThreadFollowUpView>>(
     () => new Map(),
   );
@@ -787,15 +794,55 @@ export function useCodeController(options: CodeControllerOptions) {
   // lives here rather than in the surface that ran the restore because that
   // surface is unmounted the moment the user opens another tab, and the only
   // copy of the state the restore overwrote would go with it.
-  const [restoreUndo, setRestoreUndo] = useState<CodeCheckpoint>();
+  //
+  // It is bound to the thread and checkout it belongs to, and offered only
+  // while the open thread is that thread on that checkout: sent to another
+  // checkout, a way back would overwrite files nobody asked about. A restore
+  // or rewind result that lands after the view left the thread or checkout it
+  // ran on is not kept, and does not take the open thread's own way back. A point read
+  // from the host binds to the checkout installed when it is read. The host's
+  // page does not say which checkout its point belongs to, and it reports the
+  // thread's last one after a rebind too, so a successful read after a rebind
+  // can still bind the old checkout's point to the new one; only the host can
+  // close that.
+  const [restorePoint, setRestorePoint] = useState<{
+    readonly threadId: CodeThreadId | undefined;
+    readonly checkoutId: CodeThreadView["checkout"]["id"] | undefined;
+    readonly checkpoint: CodeCheckpoint;
+  }>();
+  // The checkout of the thread view last installed for the open thread; none
+  // until the first is installed, and a point read before then binds to it.
+  const installedCheckout = useRef<CodeThreadView["checkout"]["id"] | undefined>(undefined);
   /**
    * Carry what a restore just replaced, so the offer appears without waiting
    * for the thread to be reopened. The host has already recorded it; this only
    * keeps the renderer level with the journal it will read back next time.
    */
-  const noteRestoreUndo = useCallback((checkpoint: CodeCheckpoint | undefined) => {
-    setRestoreUndo(checkpoint);
-  }, []);
+  const noteRestoreUndo = useCallback(
+    (
+      checkpoint: CodeCheckpoint | undefined,
+      ranOn?: {
+        readonly threadId: CodeThreadId;
+        readonly checkoutId: CodeThreadView["checkout"]["id"];
+      },
+    ) => {
+      if (
+        ranOn !== undefined &&
+        (String(ranOn.threadId) !== String(activeThreadId.current) ||
+          String(ranOn.checkoutId) !== String(installedCheckout.current))
+      )
+        return;
+      setRestorePoint(
+        checkpoint && {
+          threadId: activeThreadId.current,
+          checkoutId: installedCheckout.current,
+          checkpoint,
+        },
+      );
+    },
+    [],
+  );
+  const setRestoreUndo = noteRestoreUndo;
   const [keptUsage] = useState(() => new Map<string, CodeTurnUsage>(kept?.usageByOperation));
   const usageByOperation = useRef(keptUsage);
   // The host's fold of every own turn older than the oldest loaded one.
@@ -870,14 +917,19 @@ export function useCodeController(options: CodeControllerOptions) {
       return updated;
     });
   }, []);
-  const noteReasoning = useCallback((operationId: CodeOperationId, chunk: string) => {
+  /**
+   * A turn's reasoning as its stream has shown it from the turn's start. A read
+   * of the thread can land before the stream commits a chunk it holds, and
+   * already carry that chunk; set rather than appended, the chunk shows once. A
+   * read that holds this text and more is the newer, so it stays.
+   */
+  const noteReasoning = useCallback((operationId: CodeOperationId, streamed: string) => {
     setTurnActivity((current) => {
       const key = String(operationId);
       const existing = current.get(key) ?? EMPTY_TURN_ACTIVITY;
-      const next = appendReasoning(existing, chunk);
-      if (next === existing) return current;
+      if (existing.reasoning.startsWith(streamed)) return current;
       const updated = new Map(current);
-      updated.set(key, next);
+      updated.set(key, { ...existing, reasoning: streamed });
       return updated;
     });
   }, []);
@@ -1200,6 +1252,15 @@ export function useCodeController(options: CodeControllerOptions) {
           ? view
           : (refreshActiveThreadView(view, bootstrapRef.current) ?? view);
       setActiveView(resolvedView);
+      const checkoutId = resolvedView.checkout.id;
+      installedCheckout.current = checkoutId;
+      setRestorePoint((point) =>
+        point?.checkoutId === undefined
+          ? point && { ...point, checkoutId }
+          : String(point.checkoutId) === String(checkoutId)
+            ? point
+            : undefined,
+      );
       setBootstrap((current) =>
         current === undefined
           ? current
@@ -1270,9 +1331,12 @@ export function useCodeController(options: CodeControllerOptions) {
       const turns: CodeConversationTurn[] = [];
       const messages: CodeConversationMessage[] = [];
       let pageLimits: ReadonlyArray<CodeProviderLimit> = [];
-      let pageRestoreUndo: CodeCheckpoint | undefined;
-      usageByOperation.current = new Map();
+      const usage: typeof usageByOperation.current = new Map();
       earlierUsage.current = undefined;
+      // A transcript already shown, and the usage and restore point that go
+      // with it, are replaced only once every page is read: a later page that
+      // fails must not leave them cut short.
+      const shown = conversationThreadKey.current === String(threadId);
       for (;;) {
         const page = await client.conversation(threadId, cursor, 50, signal);
         if (!isActive(request, threadGeneration, mounted) || page.threadId !== threadId)
@@ -1291,20 +1355,19 @@ export function useCodeController(options: CodeControllerOptions) {
         messages.push(...projected.messages);
         for (const turn of page.turns) {
           if (turn.usage !== undefined) {
-            usageByOperation.current.set(String(turn.operationId), turn.usage);
+            usage.set(String(turn.operationId), turn.usage);
           }
         }
         if (page.limits !== undefined) pageLimits = page.limits;
-        pageRestoreUndo = page.restoreUndo;
         nextCursor = page.nextCursor;
-        setThreadUsage((current) =>
-          retainThreadUsage(current, {
-            ...totalTurnUsage(usageByOperation.current),
-            limits: pageLimits,
-          }),
-        );
-        setRestoreUndo(pageRestoreUndo);
-        showConversation(threadId, [...inheritedConversation.current, ...messages]);
+        if (!shown || !page.hasMore) {
+          usageByOperation.current = usage;
+          setThreadUsage((current) =>
+            retainThreadUsage(current, { ...totalTurnUsage(usage), limits: pageLimits }),
+          );
+          setRestoreUndo(page.restoreUndo);
+          showConversation(threadId, [...inheritedConversation.current, ...messages]);
+        }
         if (projected.activity.size > 0) {
           takeReadActivity(projected.activity);
         }
@@ -1646,10 +1709,10 @@ export function useCodeController(options: CodeControllerOptions) {
         // The page read just aborted with the stream it belonged to.
         setEarlierConversation((value) => ({ ...value, loading: "idle" }));
       }
-      // The restore point belongs to the thread being left, for the same
-      // reason: hydration may fail, and offering one thread's way back on
-      // another thread's checkout would overwrite files nobody asked about.
-      setRestoreUndo(undefined);
+      // A thread read again in place (a rename, a retry) shows the transcript
+      // this activation's earlier read loaded, not one kept from a visit.
+      const reloadsShown =
+        conversationThreadKey.current === String(threadId) && settledHistory.current === "loaded";
       setConversationHistory("loading");
       // The first read covers the thread as the list described it now.
       const activityAtOpen = threadListActivity(bootstrapRef.current, threadId)?.sequence ?? -1;
@@ -1676,6 +1739,7 @@ export function useCodeController(options: CodeControllerOptions) {
           // before activation still belongs to the user's bounced prompt.
           setTurnError((current) =>
             current === HISTORY_UNAVAILABLE_MESSAGE ||
+            current === HISTORY_UNREFRESHED_MESSAGE ||
             current === INHERITED_HISTORY_UNAVAILABLE_MESSAGE
               ? undefined
               : current,
@@ -1683,15 +1747,27 @@ export function useCodeController(options: CodeControllerOptions) {
         } catch {
           if (!isActive(request, threadGeneration, mounted)) return;
           openingReadFailed = true;
-          setConversation([]);
-          // A transcript kept from an earlier visit goes, and with it the
-          // tool activity of turns no longer shown.
-          setTurnActivity(new Map());
-          setConversationHistory("unavailable");
-          setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
+          if (reloadsShown) {
+            // What a read loaded stays, as when a refresh fails: emptying it
+            // would also take the row a reply this window sends streams into.
+            setConversationHistory("loaded");
+            setTurnError(HISTORY_UNREFRESHED_MESSAGE);
+          } else {
+            // A transcript kept from an earlier visit goes, and with it the
+            // tool activity of turns no longer shown and where Load earlier
+            // went on: the next read starts the thread again from its newest
+            // turns, as a first open does.
+            conversationThreadKey.current = undefined;
+            setConversation([]);
+            setTurnActivity(new Map());
+            setEarlierConversation(() => NO_EARLIER_CONVERSATION);
+            setConversationHistory("unavailable");
+            setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
+          }
         }
         if (initial.thread.forkedFrom !== undefined && !readsConversationWindow(client)) {
           try {
+            const { readForkConversation } = await import("./forkConversation");
             const inherited = await readForkConversation(
               client,
               initial.thread.forkedFrom,
@@ -1699,28 +1775,38 @@ export function useCodeController(options: CodeControllerOptions) {
             );
             if (!isActive(request, threadGeneration, mounted)) return;
             inheritedConversation.current = inherited.messages;
-            setConversation((current) => [...inherited.messages, ...current]);
+            // A kept transcript already starts with the inherited turns.
+            if (!(reloadsShown && openingReadFailed)) {
+              setConversation((current) => [...inherited.messages, ...current]);
+            }
             setTurnActivity((current) => new Map([...inherited.activity, ...current]));
           } catch {
             if (!isActive(request, threadGeneration, mounted)) return;
             setTurnError((current) => current ?? INHERITED_HISTORY_UNAVAILABLE_MESSAGE);
           }
-        } else if (
-          initial.thread.forkedFrom !== undefined &&
-          conversationThreadKey.current === String(threadId) &&
-          !earlierConversationRef.current.ownHasEarlier &&
-          earlierConversationRef.current.inherited === undefined &&
-          conversationRef.current.filter((message) => message.role === "user").length <
-            CODE_CONVERSATION_PAGE_TURNS
-        ) {
-          // A new fork has few turns of its own, so its first inherited page
-          // is read at open rather than leaving the fork nearly empty.
+        }
+        /**
+         * A new fork has few turns of its own, so its first inherited page is
+         * read with the first read of the fork that succeeds, rather than
+         * leaving the fork nearly empty.
+         */
+        const readFirstInheritedPage = async () => {
+          if (
+            initial.thread.forkedFrom === undefined ||
+            conversationThreadKey.current !== String(threadId) ||
+            earlierConversationRef.current.ownHasEarlier ||
+            earlierConversationRef.current.inherited !== undefined ||
+            conversationRef.current.filter((message) => message.role === "user").length >=
+              CODE_CONVERSATION_PAGE_TURNS
+          )
+            return;
           const loaded = await readEarlierPage(threadId);
           if (!isActive(request, threadGeneration, mounted)) return;
           if (!loaded && earlierConversationRef.current.loading === "failed") {
             setTurnError((current) => current ?? INHERITED_HISTORY_UNAVAILABLE_MESSAGE);
           }
-        }
+        };
+        await readFirstInheritedPage();
         if (!isActive(request, threadGeneration, mounted)) return;
         // The thread is open in front of the user now: its recorded turns when
         // history loaded, its explicit error state when it did not. Either way
@@ -1739,7 +1825,7 @@ export function useCodeController(options: CodeControllerOptions) {
           operationStream = (async () => {
             let operationCursor = 0;
             let assistantText = "";
-            let reasoningTail = "";
+            let reasoningText = "";
             const replyBeat = createReplyBeat(() => {
               if (assistantText.length > 0) {
                 const nextText = assistantText;
@@ -1751,11 +1837,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   ),
                 );
               }
-              if (reasoningTail.length > 0) {
-                const chunk = reasoningTail;
-                reasoningTail = "";
-                noteReasoning(operationId, chunk);
-              }
+              if (reasoningText.length > 0) noteReasoning(operationId, reasoningText);
             });
             let snapshotRequired = false;
             try {
@@ -1780,7 +1862,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   if (hydrated.incomplete !== true) return;
                   operationCursor = 0;
                   assistantText = "";
-                  reasoningTail = "";
+                  reasoningText = "";
                   // The operation replays from its beginning on a fresh base,
                   // so its deltas commit on beats again.
                   replyBeat.reset();
@@ -1833,7 +1915,7 @@ export function useCodeController(options: CodeControllerOptions) {
                           controller.signal,
                         ));
                       if (chunk !== undefined) {
-                        reasoningTail += chunk;
+                        reasoningText += chunk;
                         replyBeat.schedule();
                       }
                     }
@@ -1977,6 +2059,23 @@ export function useCodeController(options: CodeControllerOptions) {
         if (conversationOperationId !== undefined) {
           startConversationOperationStream(conversationOperationId);
         }
+        // A read of the thread that succeeds settles its history, whichever
+        // path started it: the warning a failed read put up comes down with
+        // the state it stood for. A read an older activation finishes
+        // settles nothing here.
+        const historyRead = () => {
+          if (!isActive(request, threadGeneration, mounted)) return;
+          // A read that recovers a history that never loaded is the fork's
+          // first read to succeed, so it brings the first inherited page: a
+          // new fork has no turn activity that would read the fork again.
+          if (settledHistory.current !== "loaded") void readFirstInheritedPage();
+          setConversationHistory("loaded");
+          setTurnError((current) =>
+            current === HISTORY_UNAVAILABLE_MESSAGE || current === HISTORY_UNREFRESHED_MESSAGE
+              ? undefined
+              : current,
+          );
+        };
         let conversationPoll: Promise<void> | undefined;
         const startConversationPoll = () => {
           if (conversationPoll !== undefined) return;
@@ -2034,17 +2133,13 @@ export function useCodeController(options: CodeControllerOptions) {
                   // turn is on screen now, and the timed refresh that would
                   // otherwise report it may not run until the user has left.
                   void recordSeenActivity(threadId);
-                  setTurnError((current) =>
-                    current === "Conversation history could not be refreshed."
-                      ? undefined
-                      : current,
-                  );
+                  historyRead();
                   return;
                 }
                 conversationCursor = hydrated.nextCursor ?? conversationCursor;
               } catch {
                 if (!isActive(request, threadGeneration, mounted)) return;
-                setTurnError("Conversation history could not be refreshed.");
+                setTurnError(HISTORY_UNREFRESHED_MESSAGE);
               }
             }
           })().finally(() => {
@@ -2068,8 +2163,9 @@ export function useCodeController(options: CodeControllerOptions) {
         // A first read that failed covered nothing, so its activity is still
         // to be looked at.
         let triedActivity = openingReadFailed ? -1 : activityAtOpen;
-        // Until a read succeeds there is nothing shown to compare the newest
-        // turn with, so a look reads the thread.
+        // Until a read that follows the turn succeeds, a look reads the
+        // thread: a read for a change to the thread does not replay a turn
+        // waiting on the person, and its approval comes only with that replay.
         let unread = openingReadFailed;
         let following = false;
         let retryPending = false;
@@ -2079,12 +2175,8 @@ export function useCodeController(options: CodeControllerOptions) {
           if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
             return true;
           conversationCursor = hydrated.nextCursor ?? conversationCursor;
-          // It may be the first read of the thread to succeed.
           unread = false;
-          setConversationHistory("loaded");
-          setTurnError((current) =>
-            current === HISTORY_UNAVAILABLE_MESSAGE ? undefined : current,
-          );
+          historyRead();
           if (hydrated.incomplete) startConversationPoll();
           if (hydrated.activeOperationId !== undefined) {
             startConversationOperationStream(hydrated.activeOperationId);
@@ -2250,12 +2342,13 @@ export function useCodeController(options: CodeControllerOptions) {
                 const settled = await conversationRead;
                 if (settled.status === "rejected") {
                   if (!isActive(request, threadGeneration, mounted)) return;
-                  setTurnError("Conversation history could not be refreshed.");
+                  setTurnError(HISTORY_UNREFRESHED_MESSAGE);
                 } else {
                   const hydrated = settled.value;
                   conversationIncomplete = hydrated?.incomplete === true;
                   conversationOperationId = hydrated?.activeOperationId;
                   conversationCursor = hydrated?.nextCursor ?? conversationCursor;
+                  if (hydrated !== undefined) historyRead();
                   // The thread's state and its recorded turns were both
                   // re-read into the transcript, so the activity the host had
                   // reported by now has been read.
@@ -2402,7 +2495,12 @@ export function useCodeController(options: CodeControllerOptions) {
         : firstTurnFailures.current.get(String(options.activeThreadId));
     setTurnError(firstTurnFailure?.message);
     // Activation rehydrates the journal's own fact; nothing carried over from
-    // the thread being left is allowed to speak for this one.
+    // the thread being left is allowed to speak for this one. Above all its
+    // restore point: offered on another thread's checkout, it would overwrite
+    // files nobody asked about. Reading the open thread again keeps its own
+    // until a read replaces it, so a read that fails leaves Undo restore.
+    setRestoreUndo(undefined);
+    installedCheckout.current = undefined;
     setTurnUsageLimit(undefined);
     setLatestProviderTurnOperationId(undefined);
     if (firstTurnFailure !== undefined) {
@@ -2480,6 +2578,7 @@ export function useCodeController(options: CodeControllerOptions) {
         };
         readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
         readonly touchedIssues?: ThreadTouchedIssues;
+        readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
         readonly turnStartedAt?: string;
         readonly liveStep?: ThreadLiveStep;
       }
@@ -2495,6 +2594,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
         ...(pullRequestSummaries === undefined ? {} : { pullRequestSummaries }),
         ...(entry.touchedIssues === undefined ? {} : { touchedIssues: entry.touchedIssues }),
+        ...(entry.linkedIssues === undefined ? {} : { linkedIssues: entry.linkedIssues }),
       });
     }
     return byThread;
@@ -2563,6 +2663,7 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(runtime?.touchedIssues === undefined
               ? {}
               : { touchedIssues: runtime.touchedIssues }),
+            ...(runtime?.linkedIssues === undefined ? {} : { linkedIssues: runtime.linkedIssues }),
             ...(thread.pinned === true ? { pinned: true } : {}),
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
@@ -3141,6 +3242,12 @@ export function useCodeController(options: CodeControllerOptions) {
     (threadId: CodeThreadId) => restCommand(threadId, wakeCodeThread),
     [restCommand],
   );
+  /** A list pin from a sidebar row, which has nowhere else to show a refusal. */
+  const setThreadPin = useCallback(
+    (threadId: CodeThreadId, pinned: boolean) =>
+      restCommand(threadId, (thread) => pinCodeThread(thread, pinned)),
+    [restCommand],
+  );
   /**
    * A move the person asked to run after the source thread's current turn. The
    * intent stays scoped to that thread and that turn — each queued request is
@@ -3639,7 +3746,7 @@ export function useCodeController(options: CodeControllerOptions) {
         let cursor = 0;
         let assistantAt: string | undefined;
         let assistantText = "";
-        let reasoningTail = "";
+        let reasoningText = "";
         const replyBeat = createReplyBeat(() => {
           if (assistantText.length > 0) {
             const nextText = assistantText;
@@ -3649,11 +3756,7 @@ export function useCodeController(options: CodeControllerOptions) {
               ),
             );
           }
-          if (reasoningTail.length > 0) {
-            const chunk = reasoningTail;
-            reasoningTail = "";
-            noteReasoning(operationId, chunk);
-          }
+          if (reasoningText.length > 0) noteReasoning(operationId, reasoningText);
         });
         let terminal = false;
         // No conversation read follows a turn this window sent, so its end
@@ -3770,7 +3873,7 @@ export function useCodeController(options: CodeControllerOptions) {
                     controller.signal,
                   ));
                 if (chunk !== undefined) {
-                  reasoningTail += chunk;
+                  reasoningText += chunk;
                   replyBeat.schedule();
                 }
               }
@@ -4156,6 +4259,18 @@ export function useCodeController(options: CodeControllerOptions) {
       void activateThread(options.activeThreadId);
     }
   }, [activateThread, loadBootstrap, options.activeThreadId]);
+  // Offered only while both the view's checkout and the thread record name the
+  // checkout the point is bound to: a rebind reaches the thread record before
+  // the thread is read again and its new checkout installed.
+  const restoreUndo =
+    restorePoint?.threadId !== undefined &&
+    restorePoint.checkoutId !== undefined &&
+    activeView !== undefined &&
+    String(restorePoint.threadId) === String(activeView.thread.id) &&
+    String(restorePoint.checkoutId) === String(activeView.checkout.id) &&
+    String(restorePoint.checkoutId) === String(activeView.thread.checkoutId)
+      ? restorePoint.checkpoint
+      : undefined;
   // One identity while nothing in it moved, so the surfaces that take the
   // controller whole can bail out of a render that changed none of it.
   const returnedDraftFacts: {
@@ -4220,6 +4335,7 @@ export function useCodeController(options: CodeControllerOptions) {
     markDraftStagedDropped: composerDraft.markStagedDropped,
     purgeThreadDraft: composerDraft.purge,
     pinThread,
+    setThreadPin,
     setThreadCoordinator,
     setThreadCoordinatorBounds,
     setThreadCoordinatorDoneWhen,

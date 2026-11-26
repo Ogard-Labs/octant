@@ -139,6 +139,50 @@ describe("the standby order", () => {
     });
   });
 
+  it("never lets a standby read a spoke's Status or Usage, even standing in with both ticked", async () => {
+    const { network, hub, standby, member } = await startFamily();
+    standby.spoke.setGrant(standbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    expect(ordered.status).toBe("ordered");
+    member.spoke.setGrant(
+      { items: ["roster", "introduce", "owners", "standby", "status", "usage"], actProjects: [] },
+      window,
+    );
+    // Put the standby in charge, the member following it, so the refusal below
+    // is the stand-in's and not only a standby's that never took over.
+    await standby.failover.tick();
+    await member.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    await vi.waitFor(() => expect(roster(member).signedBy.kind).toBe("standby"));
+    await member.failover.tick();
+    expect(member.failover.status().followingStandby).toBe(standby.hostId);
+
+    for (const path of [HUB_LINK_ROUTES.status, HUB_LINK_ROUTES.usage]) {
+      const answer = await member.hubLink(
+        new Request(`https://${member.address}:8443${path}`, {
+          method: "GET",
+          headers: {
+            host: `${member.address}:8443`,
+            [HUB_PEER_KEY_HEADER]: standby.hostPublicKey,
+            [HUB_LINK_HEADER]: signHubLinkRequest({
+              signHostPayload: standby.signHostPayload,
+              senderMemberId: standby.hostId,
+              recipientMemberId: member.hostId,
+              method: "GET",
+              path,
+              body: "",
+              now: Date.now(),
+            }),
+          },
+        }),
+      );
+      expect(answer?.status, path).toBe(401);
+    }
+  });
+
   it("refuses a spoke whose person did not tick Standby and leaves the order as it was", async () => {
     const { hub, standby } = await startFamily();
     const before = hub.hub.status().roster;

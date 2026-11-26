@@ -1,6 +1,6 @@
 import { sidebarThreadsWithWorkers } from "../code/coordinatorWorkerListing";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeProjectId, type ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { SidebarRowPropertyVisibility } from "@octant/contracts/shell";
@@ -13,6 +13,10 @@ import {
 import { mergeThreadRowActions } from "./mergeThreadRowActions";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarRowPropertiesContext } from "../shell/sidebarRowProperties";
+import {
+  SidebarThreadDragContext,
+  type SidebarThreadDragTargets,
+} from "../shell/useWorkspaceTabDrag";
 
 const thread = {
   threadId: "thread-one",
@@ -361,7 +365,60 @@ describe("ProjectThreadRows", () => {
 
     await userEvent.pointer({ target: row, keys: "[MouseRight]" });
     expect(row).toHaveAttribute("aria-expanded", "true");
-    expect(document.querySelector(".thread-row-context-menu")).toBeInTheDocument();
+    // The menu's items load with the first right-click.
+    await waitFor(() =>
+      expect(document.querySelector(".thread-row-context-menu")).toBeInTheDocument(),
+    );
+  });
+
+  it("opens the thread and attaches files dropped on a row outside the sidebar, even after a cancelled drag", () => {
+    const onSelectThread = vi.fn();
+    const drag: SidebarThreadDragTargets = {
+      beginThreadDrag: vi.fn(),
+      onPointerMove: vi.fn(),
+      onPointerUp: vi.fn(),
+      onPointerCancel: vi.fn(),
+      // A cancelled drag of this row asks its next click to be ignored.
+      consumeThreadClickSuppression: vi.fn(() => true),
+      draggingRow: null,
+      offerFiles: vi.fn(),
+    };
+    // The rows a server's Projects and a Project's overview draw.
+    render(
+      <SidebarThreadDragContext.Provider value={drag}>
+        <ProjectThreadRows onSelectThread={onSelectThread} threads={[thread]} />
+      </SidebarThreadDragContext.Provider>,
+    );
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    const file = new File(["notes"], "notes.md", { type: "text/markdown" });
+    const dataTransfer = { types: ["Files"], files: [file], dropEffect: "none" };
+    fireEvent.dragOver(row, { dataTransfer });
+    expect(row).toHaveAttribute("data-file-drop-over", "true");
+    fireEvent.drop(row, { dataTransfer });
+
+    expect(onSelectThread).toHaveBeenCalledWith("thread-one");
+    expect(drag.offerFiles).toHaveBeenCalledWith("thread-one", [file]);
+    expect(row).not.toHaveAttribute("data-file-drop-over");
+  });
+
+  it("moves focus into the row menu and to its first item when it is opened from the keyboard", async () => {
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    row.focus();
+    // Shift+F10 and the menu key ask the focused row for its context menu.
+    fireEvent.contextMenu(row);
+    await waitFor(() => expect(screen.getAllByRole("menuitem")[0]).toBeInTheDocument());
+    // Focus moves into the menu once its items load, as it did when they
+    // were drawn with the row, and the arrow keys reach the first item.
+    await waitFor(() => expect(screen.getByRole("menu")).toHaveFocus());
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "ArrowDown" });
+    await waitFor(() => expect(screen.getAllByRole("menuitem")[0]).toHaveFocus());
   });
 
   it("pins a thread from its own right-click menu", async () => {

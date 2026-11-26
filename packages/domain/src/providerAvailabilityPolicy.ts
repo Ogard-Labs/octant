@@ -50,10 +50,13 @@ export function overageAllowsContinuedUse(overage: ProviderRateLimitOverage | un
 
 /**
  * Whether the host's last plan-usage reading for an account says its limit
- * is reached: a window the provider flagged exhausted, or one at 100%, whose
- * reset has not come yet, unless extra usage is still allowed; the account's
- * quota flagged exhausted with no window; or a request or token bucket with
- * nothing left before its reset. The account counts as at its limit until the
+ * is reached: an account-scoped window the provider flagged exhausted, or one
+ * at 100%, whose reset has not come yet, unless extra usage is still allowed;
+ * the account's quota flagged exhausted with no window (or on a model-scoped
+ * reading); or a request or token bucket with nothing left before its reset.
+ * Model-scoped readings (`scope === "model"`) carry independent per-model or
+ * per-family buckets, so one exhausted family window must not block unrelated
+ * models at the account level. The account counts as at its limit until the
  * latest such reset. A reached limit with no reset named holds for
  * {@link PROVIDER_DOWN_MS} from the reading's own time, like an availability
  * mark, and then the next start tries the account again: a reading the host
@@ -79,7 +82,8 @@ export function usageLimitFromReading(
   const future = (resetsAt: string | undefined) =>
     resetsAt === undefined || Date.parse(resetsAt) > now;
   const windows = limits.rateLimitWindows ?? [];
-  const reached: Array<{ readonly resetsAt?: string | undefined }> = windows.filter(
+  const accountWindows = limits.scope === "model" ? [] : windows;
+  const reached: Array<{ readonly resetsAt?: string | undefined }> = accountWindows.filter(
     (window) =>
       future(window.resetsAt) &&
       (window.status === "exhausted" ||
@@ -87,9 +91,9 @@ export function usageLimitFromReading(
       !overageAllowsContinuedUse(window.overage),
   );
   // The same signals the automatic-model account check counts: the
-  // aggregate quota flag when no window explains it, and an HTTP bucket
-  // with nothing left before its reset.
-  if (windows.length === 0 && limits.quota === "exhausted") reached.push({});
+  // aggregate quota flag when no account-wide window explains it, and an HTTP
+  // bucket with nothing left before its reset.
+  if (accountWindows.length === 0 && limits.quota === "exhausted") reached.push({});
   for (const bucket of [limits.requests, limits.tokens]) {
     if (bucket.status === "available" && bucket.remaining === 0 && future(bucket.resetsAt)) {
       reached.push({ resetsAt: bucket.resetsAt });

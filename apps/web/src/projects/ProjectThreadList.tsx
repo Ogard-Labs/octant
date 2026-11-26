@@ -41,6 +41,8 @@ import {
   threadRowPullRequestDestinations,
 } from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
+import { threadRowFileDrop } from "./sidebarRowDrop";
+import { LazyPartBoundary } from "../shell/windowNotice";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
 import {
@@ -56,7 +58,12 @@ import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarThreadRowContent, sidebarThreadRowLabel } from "./SidebarThreadRowContent";
 import { NO_THREAD_ROW_STATE, sidebarThreadStatusIcon, threadRowState } from "./threadRowState";
 import { ThreadRenameField } from "./ThreadRenameField";
-import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
+import {
+  ThreadCoordinatorMenuItems,
+  threadCoordinatorMenuOffers,
+  type ThreadRowActions,
+  threadRowMenuIsEmpty,
+} from "./ThreadRowMenu";
 import {
   lineageParentTitle,
   threadAncestorChain,
@@ -568,6 +575,12 @@ function scrollMarginFor(list: HTMLElement, scrollElement: HTMLElement): number 
   return listRect.top - scrollRect.top + scrollElement.scrollTop;
 }
 
+// The right-click menu's items load with the first right-click rather than
+// with the window.
+const DeferredThreadRowMenu = lazy(() =>
+  import("./ThreadRowMenuItems").then((module) => ({ default: module.ThreadRowMenu })),
+);
+
 interface ProjectThreadRowProps {
   readonly actions: ThreadRowActions;
   readonly activeThreadId?: string;
@@ -625,10 +638,13 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         threadId: props.thread.threadId,
         title: props.thread.title,
         ...(props.thread.projectId === undefined ? {} : { projectId: props.thread.projectId }),
+        ...(props.thread.pinned === true ? { pinned: true } : {}),
+        ...(props.thread.shelf === undefined ? {} : { shelf: props.thread.shelf }),
       });
     },
     [drag, props.thread, rowId],
   );
+
   const activity = threadRowActivity(props.thread);
   const unread = activity === "unread" || props.thread.unread === true;
   if (props.isRenaming) {
@@ -689,6 +705,13 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       }
       onClick={onSelect}
       onDoubleClick={() => tabs?.keep(props.thread.threadId)}
+      {...threadRowFileDrop(
+        () => {
+          tabs?.openAsPreview(props.thread.threadId);
+          props.onSelectThread(rowId);
+        },
+        drag === null ? undefined : (files) => drag.offerFiles(props.thread.threadId, files),
+      )}
       {...(drag === null
         ? {}
         : {
@@ -961,10 +984,23 @@ export function ThreadRowContextMenu(props: {
   readonly className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // The items load when the menu first opens and stay drawn after, so the
+  // menu's close animation runs as it always has.
+  const [wanted, setWanted] = useState(false);
+  // Each opening, so a menu that failed to load says so again when reopened.
+  const [asked, setAsked] = useState(0);
   return (
     <div className={["sidebar-navigation__thread-row", props.className].filter(Boolean).join(" ")}>
       {props.leading}
-      <OctantContextMenuRoot onOpenChange={setOpen}>
+      <OctantContextMenuRoot
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (next) {
+            setWanted(true);
+            setAsked((count) => count + 1);
+          }
+        }}
+      >
         <ThreadRowInfoPopup
           actions={props.actions}
           {...(props.lineageParentTitle === undefined
@@ -978,7 +1014,23 @@ export function ThreadRowContextMenu(props: {
         {props.inlineActions ? (
           <ThreadRowActionsGutter actions={props.actions} thread={props.thread} />
         ) : null}
-        <ThreadRowMenu actions={props.actions} thread={props.thread} />
+        {wanted ? (
+          <LazyPartBoundary asked={asked} what="this thread's menu">
+            <Suspense fallback={null}>
+              <DeferredThreadRowMenu
+                actions={props.actions}
+                {...(threadCoordinatorMenuOffers(props.thread, props.actions)
+                  ? {
+                      coordinatorItems: (
+                        <ThreadCoordinatorMenuItems actions={props.actions} thread={props.thread} />
+                      ),
+                    }
+                  : {})}
+                thread={props.thread}
+              />
+            </Suspense>
+          </LazyPartBoundary>
+        ) : null}
       </OctantContextMenuRoot>
     </div>
   );

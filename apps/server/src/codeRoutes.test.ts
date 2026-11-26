@@ -632,6 +632,44 @@ describe("Code routes", () => {
     );
   });
 
+  it("lets only a local window or a device its person paired link or unlink a thread's issue", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-issue-links" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000950";
+    const link = (admittedBy?: "hub-roster" | "host-person") => {
+      const sent = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "link-code-thread-issue", threadId, reference: "ENG-12" }),
+      });
+      if (admittedBy === undefined) return sent;
+      bindPrincipalRouteContext(sent, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000952" as never,
+          admittedBy,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return sent;
+    };
+    const refused = await route(link("hub-roster"));
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({
+      category: "unauthorized",
+      message:
+        "Only you, from a window or a device you paired, can link or unlink a task's issues.",
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect((await route(link()))?.status).toBe(200);
+    expect((await route(link("host-person")))?.status).toBe(200);
+  });
+
   it("refuses setting or clearing a coordinator done-when condition from a non-person principal", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
@@ -715,7 +753,7 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledTimes(4);
   });
 
-  it("lets a device the host's own person paired change Strict, restart continuation, worktree naming and cleanup, branch suggestions and account choices, as that device, and refuses any other device", async () => {
+  it("lets a device the host's own person paired change Strict, restart continuation, worktree naming and cleanup, branch suggestions and account choices, and move a thread into a worktree, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
@@ -774,6 +812,7 @@ describe("Code routes", () => {
         expectedVersion: 1,
         providerInstanceId: "00000000-0000-4000-8000-000000000943",
       },
+      { kind: "move-code-thread-to-worktree", threadId, expectedVersion: 1 },
     ];
     const from = (command: unknown, admittedBy?: "host-person" | "hub-roster") => {
       const remote = request("/api/code/commands", {

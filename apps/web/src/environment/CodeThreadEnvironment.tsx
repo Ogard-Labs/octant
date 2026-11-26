@@ -22,12 +22,14 @@ import type {
   ThreadBoardPullRequestIdentity,
   ThreadBoardPullRequestSummaries,
   ThreadTouchedIssues,
+  LinkedIssueRef,
+  ThreadLinkedIssue,
   WorkspaceTab,
 } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ChevronRight,
   FolderOpen,
@@ -35,6 +37,7 @@ import {
   GitCommitHorizontal,
   GitFork,
   GitPullRequest,
+  Link2,
   MoreHorizontal,
   Paperclip,
   Plus,
@@ -78,6 +81,16 @@ import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { ThreadPullRequestReviewerSection } from "../code/PullRequestReviewerSettings";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { SwitchBranchDialog } from "./SwitchBranchDialog";
+import type { MoveToWorktreeAnswer } from "./MoveToWorktreeDialog";
+
+// Moving is rare, so its dialog loads only when the person opens it.
+const MoveToWorktreeDialog = lazy(() =>
+  import("./MoveToWorktreeDialog").then((module) => ({ default: module.MoveToWorktreeDialog })),
+);
+// So is linking an issue by hand; the row is all the first frame carries.
+const LinkedIssuesDialog = lazy(() =>
+  import("./LinkedIssuesDialog").then((module) => ({ default: module.LinkedIssuesDialog })),
+);
 import type { CodeBranchPreviewOutcome, SwitchCodeBranchOutcome } from "../code/switchCodeBranch";
 import { CODE_DELIVERY_OUTCOME_OPTIONS } from "../code/composer/CodeDeliveryOutcomeSelector";
 
@@ -151,6 +164,11 @@ export interface CodeThreadEnvironmentProps {
   /** Opens the existing Move to Project dialog for this thread. */
   readonly onMoveToProject?: () => void;
   /**
+   * Moves this thread off the checkout it shares onto a worktree of its own.
+   * Offered only for a thread on the Project's own checkout; absent hides it.
+   */
+  readonly onMoveToWorktree?: (branchName: string | undefined) => Promise<MoveToWorktreeAnswer>;
+  /**
    * True while a turn occupies the thread: branch switching waits for idle
    * (the host also refuses mid-turn) and the busy move choice is offered.
    */
@@ -193,6 +211,10 @@ export interface CodeThreadEnvironmentProps {
   readonly threadPullRequests?: ThreadBoardPullRequestSummaries;
   /** The issues the thread's tool calls wrote to, listed under its pull requests. */
   readonly threadIssues?: ThreadTouchedIssues;
+  /** The issues this thread works on; with the two callbacks, the person links and unlinks them. */
+  readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
+  readonly onLinkIssue?: (reference: string) => Promise<string | undefined>;
+  readonly onUnlinkIssue?: (issue: LinkedIssueRef) => Promise<string | undefined>;
   /** Opens a page outside Octant: a touched issue, or a pull request's checks or conflicts. */
   readonly onOpenThreadPage?: (url: string) => void;
   /** Opens one of this thread's pull requests in the app. Absent leaves its rows inert. */
@@ -283,6 +305,18 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     readyObservation !== undefined &&
     readyObservation.branch.kind === "named";
   const [switchBranchOpen, setSwitchBranchOpen] = useState(false);
+  // The move held while its dialog is open: a successful move makes the
+  // checkout managed, which withdraws `onMoveToWorktree`, and the dialog must
+  // stay to show its result until the person closes it.
+  const [moveToWorktree, setMoveToWorktree] = useState<
+    CodeThreadEnvironmentProps["onMoveToWorktree"] | undefined
+  >(undefined);
+  // A retry after a refusal must send the thread's current version, which
+  // only the latest callback carries; the held one is the fallback once the
+  // move itself withdrew it.
+  const latestMoveToWorktree = useRef(props.onMoveToWorktree);
+  latestMoveToWorktree.current = props.onMoveToWorktree;
+  const [linkedIssuesOpen, setLinkedIssuesOpen] = useState(false);
   const onExecute = props.onExecute;
   const fetchLocalRefs = useCallback(async (): Promise<ReadonlyArray<CodeWorktreeRef>> => {
     if (onExecute === undefined || project === undefined) return [];
@@ -357,6 +391,29 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           },
         ]
       : []),
+    // Only a thread on the checkout it shares with the Project can move out;
+    // one that owns a worktree already has one, and the host refuses the rest.
+    ...(props.onMoveToWorktree === undefined ||
+    props.checkoutKind !== "existing-worktree" ||
+    checkoutUnusable
+      ? []
+      : [
+          {
+            value: "move-to-worktree",
+            label: "Move to a new worktree…",
+            icon: <GitFork aria-hidden="true" size={16} />,
+            ...(props.threadBusy === true || props.threadPolicy === "plan"
+              ? {
+                  disabled: true,
+                  description:
+                    props.threadPolicy === "plan"
+                      ? "Plan mode is read-only."
+                      : "Available when the current turn finishes.",
+                }
+              : {}),
+            run: () => setMoveToWorktree(() => props.onMoveToWorktree),
+          },
+        ]),
     ...(project === undefined || props.onNewTaskOnBranch === undefined || checkoutUnusable
       ? []
       : [
@@ -609,6 +666,17 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               summaries={props.threadPullRequests}
             />
             <EnvironmentThreadIssues issues={props.threadIssues} onOpen={props.onOpenThreadPage} />
+            {props.onLinkIssue === undefined ? null : (
+              <EnvironmentRow
+                icon={Link2}
+                label={
+                  (props.linkedIssues?.length ?? 0) === 0
+                    ? "Link an issue…"
+                    : `Linked issues (${String(props.linkedIssues?.length ?? 0)})`
+                }
+                onClick={() => setLinkedIssuesOpen(true)}
+              />
+            )}
           </EnvironmentCard>
         }
         mode="code"
@@ -883,6 +951,25 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           {props.children}
         </CodeCheckoutProvider>
       </div>
+      {linkedIssuesOpen && props.onLinkIssue !== undefined && props.onUnlinkIssue !== undefined ? (
+        <Suspense fallback={null}>
+          <LinkedIssuesDialog
+            linkedIssues={props.linkedIssues ?? []}
+            onClose={() => setLinkedIssuesOpen(false)}
+            onLink={props.onLinkIssue}
+            onUnlink={props.onUnlinkIssue}
+          />
+        </Suspense>
+      ) : null}
+      {moveToWorktree !== undefined ? (
+        <Suspense fallback={null}>
+          <MoveToWorktreeDialog
+            onClose={() => setMoveToWorktree(undefined)}
+            onMove={(branchName) => (latestMoveToWorktree.current ?? moveToWorktree)(branchName)}
+            sourceLabel="the Project's folder"
+          />
+        </Suspense>
+      ) : null}
       {switchBranchOpen && readyObservation !== undefined && project !== undefined ? (
         <SwitchBranchDialog
           currentBranch={

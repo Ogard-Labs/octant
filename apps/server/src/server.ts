@@ -1,3 +1,4 @@
+import { PersonSentTurns } from "./usage/usageLimitDefaults";
 import { createConversationInputRoutes } from "./attachments/conversationInputRoutes";
 import type { ConversationInputOwner } from "./attachments/conversationInputTransfer";
 import type {
@@ -275,6 +276,10 @@ export function startOctantServer(
       resolveProjectStrict,
       resolveHostStrict,
     } = wireFoundations({ latencyStats, options, persistence });
+    // The turns a person sent through a route, so the usage-limit defaults
+    // arm only for those; routines, wake-ups and agents never pass a route
+    // that records one.
+    const personSentTurns = new PersonSentTurns();
     // The member's Act item, which bounds what a device only the hub
     // introduced may do in a Project here. The routes that read it are built
     // before the hub side, which binds it once its spoke link exists.
@@ -443,6 +448,7 @@ export function startOctantServer(
       githubIssueContextService,
       githubReadToolService,
       linearReadToolService,
+      linkedIssues,
       linearRoutineEventSources,
       githubRoutes,
       integrationRoutes,
@@ -917,6 +923,7 @@ export function startOctantServer(
       gitObservationPort,
       linearConnected,
       linearIssueContextService,
+      linkedIssues,
       terminalSessionImports,
       liveTurns,
       machineChangeFeed,
@@ -1085,6 +1092,7 @@ export function startOctantServer(
       codeActiveWorkForWindow,
       codeTurnDecisions,
       mergedThreadPutAway,
+      linkedIssueWriteBack,
       contributeCodeTools,
       registerCodeEditDiagnostics,
       contributeServerCodeTools,
@@ -1177,6 +1185,7 @@ export function startOctantServer(
       githubExtensionSnapshot,
       githubReadToolService,
       linearReadToolService,
+      linkedIssues,
       isCodeProviderModelAllowed,
       liveTurns,
       machineChangeFeed,
@@ -1252,6 +1261,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      personSentTurns,
       configuredDriverOptions,
       hubActScopeSlot,
       providerRuntimeNetwork,
@@ -1314,6 +1324,7 @@ export function startOctantServer(
       threadNotesRoutes,
       workspacePresetRoutes,
     } = yield* wireChat({
+      personSentTurns,
       threadUnfinishedWork,
       imageDescriber,
       resolveThreadStrict,
@@ -1519,6 +1530,7 @@ export function startOctantServer(
       shieldServerStore,
     });
     const { restartRecovery } = yield* wireContinuation({
+      personSentTurns,
       threadUnfinishedWorkHost,
       codeService,
       workThreadService,
@@ -1554,6 +1566,7 @@ export function startOctantServer(
     });
     const { navigatorAssistantRoutes, workTurnRoutes, zenBackgroundRoutes, zenRoutes, zenService } =
       wireZen({
+        personSentTurns,
         hubActScopeSlot,
         contributeChatTools,
         chatService,
@@ -2268,6 +2281,7 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      providerUsageLimitsService,
       hostDrain,
       shieldServerStore,
       serverConnection,
@@ -2552,6 +2566,7 @@ export function startOctantServer(
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
           mergedThreadPutAway?.start();
+          linkedIssueWriteBack?.start();
           worktreeReclaimSweep.start();
           idleCompactions.start();
           stopBenchmarkRunner = benchmarkRunner.start();
@@ -2660,6 +2675,7 @@ export function startOctantServer(
           }
           completedThreadArchiveSweep.stop();
           mergedThreadPutAway?.stop();
+          linkedIssueWriteBack?.stop();
           worktreeReclaimSweep.stop();
           idleCompactions.stop();
           personMemorySweep.stop();

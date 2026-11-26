@@ -615,6 +615,115 @@ describe("GitMutationPort", () => {
     );
   });
 
+  it("copies a checkout's staged, unstaged and untracked work onto a new worktree and leaves the source as it was", async () => {
+    // A thread moving into its own worktree is this capture, a worktree made
+    // at the captured head on a new branch, and the trees laid over it.
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "README.md"), "staged\n");
+    git(repository, "add", "--", "README.md");
+    writeFileSync(join(repository, "README.md"), "staged then edited\n");
+    writeFileSync(join(repository, "notes.txt"), "untracked\n");
+    const before = gitOutput(repository, "status", "--porcelain");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
+    if (captured.status !== "captured") throw new Error("expected a capture");
+    const head = gitOutput(repository, "rev-parse", "HEAD").trim();
+    expect(captured.snapshot.head).toBe(head);
+    const worktree = join(temporaryDirectory(), "moved");
+    git(repository, "worktree", "add", "-b", "octant/moved", worktree, head);
+
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: worktree, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "applied" });
+
+    expect(readFileSync(join(worktree, "README.md"), "utf8")).toBe("staged then edited\n");
+    expect(readFileSync(join(worktree, "notes.txt"), "utf8")).toBe("untracked\n");
+    expect(gitOutput(worktree, "show", ":README.md")).toBe("staged\n");
+    // The source keeps every change it had.
+    expect(gitOutput(repository, "status", "--porcelain")).toBe(before);
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("staged then edited\n");
+  });
+
+  it("names a dirty submodule and an untracked nested repository that a capture cannot copy", async () => {
+    const root = temporaryDirectory();
+    const library = createRepository(temporaryDirectory());
+    const repository = createRepository(root);
+    execFileSync(
+      "git",
+      [
+        "-C",
+        repository,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        library,
+        "vendor/lib",
+      ],
+      { stdio: "ignore" },
+    );
+    git(repository, "commit", "-m", "add submodule");
+    const port = new GitMutationPort(undefined, confinedOptions());
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([]);
+
+    writeFileSync(join(repository, "vendor/lib/README.md"), "changed inside\n");
+    const nested = join(repository, "scratch");
+    mkdirSync(nested);
+    git(nested, "init", "--initial-branch=main");
+    writeFileSync(join(nested, "notes.txt"), "nested\n");
+
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([
+      "scratch",
+      "vendor/lib",
+    ]);
+  });
+
+  it("skips ignored folders inside an untracked folder, as a capture does", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, ".gitignore"), "build/\n");
+    git(repository, "add", ".gitignore");
+    git(repository, "commit", "-m", "ignore build");
+    const ignoredRepository = join(repository, "vendor", "build", "cache");
+    mkdirSync(ignoredRepository, { recursive: true });
+    git(ignoredRepository, "init", "--initial-branch=main");
+    writeFileSync(join(repository, "vendor", "README.md"), "untracked parent\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([]);
+  });
+
+  it("checks a folder named like a Git pathspec as itself, not as the path it spells", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, ".gitignore"), "build/\n");
+    git(repository, "add", ".gitignore");
+    git(repository, "commit", "-m", "ignore build");
+    const nested = join(repository, ":build", "lib");
+    mkdirSync(nested, { recursive: true });
+    git(nested, "init", "--initial-branch=main");
+    writeFileSync(join(nested, "notes.txt"), "nested\n");
+    writeFileSync(join(repository, ":build", "README.md"), "untracked parent\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([
+      ":build/lib",
+    ]);
+  });
+
+  it("names a nested repository below a folder that is untracked as a whole", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const nested = join(repository, "vendor", "lib");
+    mkdirSync(nested, { recursive: true });
+    git(nested, "init", "--initial-branch=main");
+    writeFileSync(join(nested, "notes.txt"), "nested\n");
+    writeFileSync(join(repository, "vendor", "README.md"), "untracked parent\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([
+      "vendor/lib",
+    ]);
+  });
+
   it("checkpoints the working tree and puts every kind of change back on restore", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, "doomed.txt"), "doomed\n");

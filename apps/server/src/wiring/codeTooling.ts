@@ -1,3 +1,4 @@
+import type { PersonSentTurns } from "../usage/usageLimitDefaults";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { terminalShellFor } from "../code/terminalShell";
 import {
@@ -131,8 +132,10 @@ import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNati
 import { resolveProviderTerminal } from "../providers/providerTerminal";
 import { homedir } from "node:os";
 
-export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
-  Pick<ComputerUseWiring, "desktopLeases" | "installDesktopPreviewRequest"> &
+export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> & {
+  /** Where the route records a turn the person sent, for the usage-limit defaults. */
+  readonly personSentTurns: PersonSentTurns;
+} & Pick<ComputerUseWiring, "desktopLeases" | "installDesktopPreviewRequest"> &
   Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -1067,6 +1070,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     });
     const codeRoutes = createCodeRouteHandler({
       service: routeCodeService,
+      notePersonSentTurn: (operationId) => deps.personSentTurns.note("code", operationId),
       homeActivity: codeHomeActivity,
       pairedMergeUnlock: pairedMergeUnlockSlot.current,
       hubActScope: hubActScopeSlot.current,

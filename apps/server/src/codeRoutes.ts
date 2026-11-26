@@ -214,7 +214,11 @@ import {
   resolveLocalWindowPrincipal,
   WINDOW_CAPABILITY_HEADER,
 } from "./clientPrincipal";
-import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
+import {
+  authenticateRoutePrincipal,
+  boundPrincipalIsThePerson,
+  retainRouteAdmissionCurrent,
+} from "./principalRouteContext";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -631,6 +635,12 @@ export interface CodeRouteService {
 export interface CodeRouteDependencies {
   readonly service: CodeRouteService;
   /**
+   * Records a turn the person sent (a window on this host or a device they
+   * paired; never an outside agent's grant or a device only the hub
+   * introduced), which alone the usage-limit defaults may arm for.
+   */
+  readonly notePersonSentTurn?: (turnId: string) => void;
+  /**
    * The owner unlock a paired client's merge may need. Absent, or with its
    * switch off, a paired client's merge keeps its confirmation and checks gate.
    */
@@ -1019,6 +1029,24 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // A link decides which issues the host and the agent may write to
+          // under the host's own tracker accounts, so it is the person's act;
+          // a device only the hub introduced acts as an agent here.
+          if (
+            (command?.kind === "link-code-thread-issue" ||
+              command?.kind === "unlink-code-thread-issue") &&
+            (callerAuthority !== "local-window" || agentGrantSession)
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message:
+                  "Only you, from a window or a device you paired, can link or unlink a task's issues.",
+              },
+              403,
+              origin,
+            );
+          }
           // Whether the host may continue a turn by itself after a restart is
           // the person's choice about this computer's unattended work, at a
           // window on it or on a device they paired.
@@ -1082,6 +1110,22 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           ) {
             return failureResponse(
               { category: "unauthorized", message: ACCOUNT_MOVE_PERSON_ONLY },
+              403,
+              origin,
+            );
+          }
+          // Moving a thread into a worktree ends its session and changes its
+          // checkout, so it is the person's act; an agent asks through its tool.
+          if (
+            callerAuthority !== "local-window" &&
+            command?.kind === "move-code-thread-to-worktree"
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message:
+                  "Only you, from a window or a device you paired, can move a task into a worktree.",
+              },
               403,
               origin,
             );
@@ -1205,6 +1249,14 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               403,
               origin,
             );
+          }
+          if (
+            operation.kind === "start-provider-turn" &&
+            !agentGrantSession &&
+            !hubIntroduced &&
+            boundPrincipalIsThePerson(request)
+          ) {
+            dependencies.notePersonSentTurn?.(String(operation.operationId));
           }
           const operationResult = decodeCodeOperationResult(
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {

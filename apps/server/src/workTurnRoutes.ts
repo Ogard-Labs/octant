@@ -94,6 +94,12 @@ export interface WorkTurnRouteService {
 
 export interface WorkTurnRouteDependencies {
   readonly service: WorkTurnRouteService;
+  /**
+   * Records a turn the person sent (a window on this host or a device they
+   * paired; never an outside agent's grant or a device only the hub
+   * introduced), which alone the usage-limit defaults may arm for.
+   */
+  readonly notePersonSentTurn?: (turnId: string) => void;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly maxFileBodySize?: number;
@@ -349,6 +355,14 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
           200,
           origin,
         );
+      }
+      if (
+        boundPrincipalIsThePerson(request) &&
+        isRecord(value) &&
+        value["kind"] === "start-work-thread-turn" &&
+        typeof value["turnId"] === "string"
+      ) {
+        dependencies.notePersonSentTurn?.(value["turnId"]);
       }
       return jsonResponse(
         decodeWorkTurnLookupResult(

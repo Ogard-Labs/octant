@@ -6,10 +6,18 @@ import {
   type ThreadFinishedReceipt,
   type ThreadTouchedIssue,
   type ThreadTouchedIssues,
+  type CodeThreadIssueLinkRefusal,
+  type CodeThreadIssueLinksResult,
+  type LinkedIssueRef,
+  type LinkedIssueSource,
+  type ThreadLinkedIssue,
   MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS,
 } from "@octant/contracts";
 import { composeThreadTouchedIssues } from "@octant/domain/thread-board-pull-request-policy";
+import { parseLinkedIssueReference } from "@octant/domain/tracker-issue-write-policy";
+import type { LinkIssueOutcome, UnlinkIssueOutcome } from "../trackerIssues/threadLinkedIssueStore";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
   coordinatorDoneWhenEqual,
@@ -89,6 +97,8 @@ import {
   type CodeCheckoutHead,
   type CodeCheckoutIdentity,
   type CodeCommand,
+  type CodeThreadWorktreeMoveRefusal,
+  CODE_THREAD_MOVED_TO_WORKTREE,
   type CodeCommandResult,
   type CodeWorktreeCreationProgress,
   type ForkCodeThreadCommand,
@@ -636,7 +646,21 @@ export interface CodeForkPointPort {
     source: CodeThread,
     throughOperationId: string,
   ) => Promise<CodeForkPoint>;
+  /** The thread's checkout as it stands now, for a move into a worktree. */
+  readonly capture: (windowId: WindowId, source: CodeThread) => Promise<CodeCheckoutCapture>;
 }
+
+/**
+ * A capture for a move: a fork point, or a refusal naming the submodules and
+ * nested repositories whose own changes laying it down elsewhere would lose.
+ */
+export type CodeCheckoutCapture =
+  | CodeForkPoint
+  | {
+      readonly status: "refused";
+      readonly reason: "nested-changes";
+      readonly paths: ReadonlyArray<string>;
+    };
 
 /**
  * The resolved source context for a managed creation, produced before any
@@ -790,6 +814,12 @@ export interface CodeServiceExecutionContext {
    * person at this host.
    */
   readonly actor?: EventActor;
+  /**
+   * Set only by the host's usage-limit defaults when the person's "Resume at
+   * reset by default" setting arms a resume: the record says so. No wire
+   * command carries it.
+   */
+  readonly usageResumeOrigin?: "default";
 }
 
 export interface CodeServiceOptions {
@@ -968,6 +998,31 @@ export interface CodeServiceOptions {
    * Linear). Absent, no row carries touched issues.
    */
   readonly touchedIssues?: CodeNavigationTouchedIssueSource;
+  /**
+   * The issues each thread is linked to, and the way to link and unlink them.
+   * Absent, threads carry no links and the link commands are unavailable.
+   */
+  readonly linkedIssues?: CodeLinkedIssuesPort;
+}
+
+/** A thread's issue links, on their own journal aggregate. */
+export interface CodeLinkedIssuesPort {
+  list(threadId: string): ReadonlyArray<ThreadLinkedIssue>;
+  link(
+    threadId: string,
+    issue: LinkedIssueRef,
+    source: LinkedIssueSource,
+    actor?: EventActor,
+  ): LinkIssueOutcome;
+  unlink(threadId: string, issue: LinkedIssueRef, actor?: EventActor): UnlinkIssueOutcome;
+  /** A Linear identifier's node id, read through the Linear plugin. */
+  resolveLinear(
+    identifier: string,
+    signal: AbortSignal,
+  ): Promise<
+    | { readonly status: "found"; readonly issueId: string }
+    | { readonly status: "not-found" | "unavailable" }
+  >;
 }
 
 export interface CodeNavigationTouchedIssueSource {
@@ -1238,6 +1293,7 @@ export class CodeService {
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
   readonly #touchedIssues: CodeNavigationTouchedIssueSource | undefined;
+  readonly #linkedIssues: CodeLinkedIssuesPort | undefined;
   readonly #readLatestFinishedReceipt:
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
@@ -1313,6 +1369,7 @@ export class CodeService {
     this.#waitForThreadChange = options.waitForThreadChange;
     this.#pullRequests = options.pullRequests;
     this.#touchedIssues = options.touchedIssues;
+    this.#linkedIssues = options.linkedIssues;
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#turnAwaiting = options.turnAwaiting;
@@ -1680,12 +1737,81 @@ export class CodeService {
         ...(checkoutChip === undefined ? {} : { checkoutChip }),
         ...(hasPullRequests ? { pullRequestSummaries, threadPullRequests } : {}),
         ...this.#touchedIssuesFor(thread, pullRequests),
+        ...this.#linkedIssuesFor(thread),
         // Rides on the row the caller was already allowed to see: `threads`
         // is the authority-filtered list, so a window never learns what a
         // thread it cannot browse is running.
         ...(parked ? {} : this.#liveTurns?.read(String(thread.id))),
       };
     });
+  }
+
+  #linkedIssuesFor(thread: CodeThread): {
+    readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
+  } {
+    try {
+      const linkedIssues = this.#linkedIssues?.list(String(thread.id)) ?? [];
+      return linkedIssues.length === 0 ? {} : { linkedIssues };
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Links or unlinks one issue at the person's request. A typed `#12` is the
+   * thread's delivery repository; a Linear identifier is resolved to its node
+   * id through the Linear plugin, which also proves the issue exists.
+   */
+  async #changeIssueLinks(
+    current: CodeThread,
+    command: Extract<
+      CodeCommand,
+      { readonly kind: "link-code-thread-issue" | "unlink-code-thread-issue" }
+    >,
+    actor: EventActor | undefined,
+  ): Promise<CodeThreadIssueLinksResult> {
+    const links = this.#linkedIssues;
+    const refused = (reason: CodeThreadIssueLinkRefusal): CodeThreadIssueLinksResult => ({
+      kind: "thread-issue-links",
+      threadId: current.id,
+      outcome: { status: "refused", reason },
+    });
+    if (links === undefined)
+      throw this.#failure("unavailable", "Issue links are unavailable here.");
+    const threadId = String(current.id);
+    if (command.kind === "unlink-code-thread-issue") {
+      const outcome = links.unlink(threadId, command.issue, actor);
+      return outcome.status === "refused"
+        ? refused(outcome.reason)
+        : {
+            kind: "thread-issue-links",
+            threadId: current.id,
+            outcome: { status: "unlinked", linkedIssues: outcome.linkedIssues },
+          };
+    }
+    const parsed = parseLinkedIssueReference(
+      command.reference,
+      current.deliveryTarget.proposedBaseRepository,
+    );
+    if (parsed === undefined) return refused("invalid-reference");
+    let issue: LinkedIssueRef;
+    if (parsed.forge === "linear") {
+      const resolved = await links.resolveLinear(parsed.identifier, new AbortController().signal);
+      if (resolved.status !== "found") {
+        return refused(resolved.status === "not-found" ? "not-found" : "linear-unavailable");
+      }
+      issue = { forge: "linear", identifier: parsed.identifier, issueId: resolved.issueId };
+    } else {
+      issue = parsed;
+    }
+    const outcome = links.link(threadId, issue, "person", actor);
+    return outcome.status === "refused"
+      ? refused(outcome.reason)
+      : {
+          kind: "thread-issue-links",
+          threadId: current.id,
+          outcome: { status: outcome.status, linkedIssues: outcome.linkedIssues },
+        };
   }
 
   /**
@@ -2714,6 +2840,22 @@ export class CodeService {
         throw this.#failure("unauthorized", "Only a person can mark a Code thread Done.");
       }
       if (
+        command.kind === "link-code-thread-issue" ||
+        command.kind === "unlink-code-thread-issue"
+      ) {
+        // A link decides which issues the host and the agent may write to, so
+        // it is the person's act; a routine or the host's own timer cannot.
+        if (isRoutineHostScope(authenticatedWindowId) || actor?.kind === "system") {
+          throw this.#failure("unauthorized", "Only a person can link or unlink an issue.");
+        }
+        const linkedThread = this.#persistence.readCodeThread(command.threadId);
+        if (linkedThread === undefined) {
+          throw this.#failure("invalid", "Code thread was not found.");
+        }
+        await this.#authorizeThread(authenticatedWindowId, linkedThread);
+        return await this.#changeIssueLinks(linkedThread, command, actor);
+      }
+      if (
         command.kind === "unlink-code-thread-pull-request" &&
         (isRoutineHostScope(authenticatedWindowId) || actor?.kind === "system")
       ) {
@@ -2935,6 +3077,9 @@ export class CodeService {
           usageLimit: stopped.failure.usageLimit,
           resetsAt: stopped.failure.usageLimit.resetsAt,
           scheduledAt: updatedAt,
+          ...(executionContext?.usageResumeOrigin === undefined
+            ? {}
+            : { origin: executionContext.usageResumeOrigin }),
         };
         const next = decodeCodeThread({
           ...current,
@@ -2978,6 +3123,9 @@ export class CodeService {
           actor,
         );
         return { kind: "thread-updated", thread: next };
+      }
+      if (command.kind === "move-code-thread-to-worktree") {
+        return await this.#moveToWorktree(authenticatedWindowId, current, command, actor);
       }
       if (command.kind === "rebind-code-thread-checkout") {
         // Recovery from a superseded checkout. The thread's id was derived from
@@ -5226,6 +5374,235 @@ export class CodeService {
     });
   }
 
+  /**
+   * Moves a thread off the checkout it shares onto a managed worktree of its
+   * own. The source checkout is captured as Git trees (objects only), a
+   * worktree is made at the captured head on a new branch and the trees are
+   * laid over it, so staged, unstaged and untracked work all arrive; the
+   * source keeps every change. Only then is the move journaled, with the
+   * thread's new checkout, and every grant minted under the old checkout is
+   * revoked, as for a rebind. Anything that fails earlier removes the new
+   * worktree and leaves the thread where it was.
+   */
+  /**
+   * Threads with a move in flight. Two moves of one thread would make the
+   * same worktree, and the loser's rollback would remove the one the winner
+   * just bound the thread to.
+   */
+  readonly #movingToWorktree = new Set<string>();
+
+  async #moveToWorktree(
+    windowId: WindowId,
+    current: CodeThread,
+    command: Extract<CodeCommand, { readonly kind: "move-code-thread-to-worktree" }>,
+    actor: EventActor | undefined,
+  ): Promise<CodeCommandResult> {
+    const key = String(current.id);
+    if (this.#movingToWorktree.has(key)) {
+      return {
+        kind: "thread-moved-to-worktree",
+        threadId: current.id,
+        outcome: { status: "refused", reason: "turn-running" },
+      };
+    }
+    this.#movingToWorktree.add(key);
+    try {
+      return await this.#moveToWorktreeOnce(windowId, current, command, actor);
+    } finally {
+      this.#movingToWorktree.delete(key);
+    }
+  }
+
+  async #moveToWorktreeOnce(
+    windowId: WindowId,
+    current: CodeThread,
+    command: Extract<CodeCommand, { readonly kind: "move-code-thread-to-worktree" }>,
+    actor: EventActor | undefined,
+  ): Promise<CodeCommandResult> {
+    const refused = (
+      reason: CodeThreadWorktreeMoveRefusal,
+      paths?: ReadonlyArray<string>,
+    ): CodeCommandResult => ({
+      kind: "thread-moved-to-worktree",
+      threadId: current.id,
+      outcome: {
+        status: "refused",
+        reason,
+        ...(paths === undefined ? {} : { paths: paths.slice(0, 50) }),
+      },
+    });
+    if (command.expectedVersion !== current.version) {
+      throw this.#failure("conflict", "Code thread version is stale.");
+    }
+    if (current.lifecycle !== "active" || current.completedAt !== undefined) {
+      return refused("unavailable");
+    }
+    const checkout = this.#persistence.readCodeCheckout(current.checkoutId);
+    if (checkout === undefined || checkout.availability !== "available") {
+      return refused("unavailable");
+    }
+    if (checkout.kind === "managed-worktree") return refused("already-own-worktree");
+    if (checkout.kind === "remote-root") return refused("server-project");
+    if (checkout.kind === "plain-folder") return refused("not-a-repository");
+    if (current.executionPolicy === "plan") return refused("plan");
+    // A task working in another of the Project's folders edits files the
+    // worktree, made from the main folder, never holds: after the move it
+    // would keep editing that folder outside its worktree.
+    if (current.workingFolderId !== undefined) {
+      const project = this.#persistence.readProject?.(current.projectId);
+      let root: string | undefined;
+      try {
+        root =
+          project?.type === "code"
+            ? approvedWorkingFolderRoot(project, current.workingFolderId)
+            : undefined;
+      } catch {
+        root = undefined;
+      }
+      if (project?.type !== "code" || root !== project.binding.canonicalRoot) {
+        return refused("working-folder");
+      }
+    }
+    const executing = (threadId: CodeThreadId) =>
+      boardRuntimeActivityFromWorks(this.#persistence.readCodeRuntimeWorks(threadId)).executing;
+    // Read before the move starts and again just before it is journaled: a
+    // turn a phone, a wake or a routine starts in between keeps writing to
+    // the source, so its work would not be in the copy.
+    const busy = (): "turn-running" | "checkout-in-use" | undefined => {
+      if (executing(current.id)) return "turn-running";
+      return this.#persistence
+        .readCodeThreads()
+        .some(
+          (thread) =>
+            String(thread.id) !== String(current.id) &&
+            thread.lifecycle === "active" &&
+            String(thread.checkoutId) === String(current.checkoutId) &&
+            executing(thread.id),
+        )
+        ? "checkout-in-use"
+        : undefined;
+    };
+    const busyBefore = busy();
+    if (busyBefore !== undefined) return refused(busyBefore);
+    const creation = this.#managedThreadCreation;
+    if (this.#forkPoints === undefined || creation === undefined) return refused("unavailable");
+    const point = await this.#forkPoints.capture(windowId, current);
+    if (point.status === "refused" && point.reason === "nested-changes") {
+      return refused("nested-changes", point.paths);
+    }
+    if (point.status !== "resolved") return refused("capture-failed");
+    const branch =
+      command.branchName ??
+      deriveDeliveryBranch({
+        baseBranch: current.deliveryTarget.branchIntent,
+        shortId: String(current.id).replace(/-/g, "").slice(0, 12),
+        prefix: this.#persistence.readCodeSettings()?.settings.worktrees?.branchPrefix,
+      });
+    const input: ManagedCodeThreadCreationInput = {
+      authenticatedWindowId: windowId,
+      projectId: current.projectId,
+      bindingRevisionId: current.bindingRevisionId,
+      threadId: current.id,
+      branchIntent: branch,
+      sourceBranch: current.deliveryTarget.branchIntent,
+      startFromOrigin: false,
+      sourceRevision: point.head,
+      sourceFiles: point.files,
+      executionPolicy: current.executionPolicy,
+    };
+    const signal = new AbortController().signal;
+    const prepared = await creation.prepare(input, signal);
+    if (prepared.status !== "prepared") return refused("unavailable");
+    const preparation = prepared.preparation;
+    const committed = await creation.commit(input, preparation, signal);
+    if (committed.status !== "created") {
+      return refused(
+        committed.status === "refused" && committed.reason === "source-files-unavailable"
+          ? "apply-failed"
+          : "unavailable",
+      );
+    }
+    if (committed.expectedHead !== preparation.resolvedHead) {
+      await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
+      return refused("unavailable");
+    }
+    const observedAt = decodeTimestamp(this.#clock());
+    const moved = decodeCodeCheckoutIdentity({
+      id: preparation.checkoutId,
+      repositoryId: preparation.repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: branch, oid: preparation.resolvedHead },
+      ownershipReceiptId: committed.receiptId,
+      observedAt,
+    });
+    const next = decodeCodeThread({
+      ...current,
+      repositoryId: preparation.repositoryId,
+      checkoutId: moved.id,
+      deliveryTarget: { ...current.deliveryTarget, branchIntent: branch },
+      version: command.expectedVersion + 2,
+      updatedAt: observedAt,
+    });
+    let busyAtCommit: "turn-running" | "checkout-in-use" | undefined;
+    try {
+      this.#inUnit(() => {
+        busyAtCommit = busy();
+        if (busyAtCommit !== undefined) return;
+        this.#append(
+          "code-checkout",
+          moved.id,
+          this.#persistence.readCodeCheckoutAggregateVersion(moved.id),
+          "code.checkout-observed@1",
+          { kind: "checkout-observed", checkout: moved },
+        );
+        this.#appendBoth(
+          "code-thread",
+          current.id,
+          command.expectedVersion,
+          [
+            [
+              CODE_THREAD_MOVED_TO_WORKTREE,
+              {
+                kind: "thread-moved-to-worktree",
+                threadId: current.id,
+                fromCheckoutId: current.checkoutId,
+                toCheckoutId: moved.id,
+                branch,
+                sourceHead: point.head,
+                capturedTrees: point.files,
+                movedAt: observedAt,
+              },
+            ],
+            ["code.thread-updated@1", { kind: "thread-updated", thread: next }],
+          ],
+          actor ?? "local-user",
+        );
+      });
+    } catch (error) {
+      await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
+      throw error;
+    }
+    if (busyAtCommit !== undefined) {
+      await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
+      return refused(busyAtCommit);
+    }
+    // As for a rebind: every capability minted under the checkout the thread
+    // left is discarded, in every window that holds one.
+    this.#sessionAuthority.revokeThreadEverywhere(current.id);
+    return {
+      kind: "thread-moved-to-worktree",
+      threadId: current.id,
+      outcome: {
+        status: "moved",
+        thread: this.#sessionAuthority.effectiveThread(windowId, next),
+        checkout: moved,
+        fromCheckoutId: current.checkoutId,
+        branch,
+      },
+    };
+  }
+
   /** Runs `body` as one journal unit where the journal offers one. */
   #inUnit(body: () => void): void {
     const journal = this.#persistence.journal;
@@ -5832,6 +6209,34 @@ export class CodeService {
       } catch {
         // The thread is already journaled; taint recording must not invert create.
       }
+    }
+    // A thread made from an issue works on that issue: link the two, so the
+    // host and the agent may keep it current. Like the mark above, a failed
+    // link must not undo the thread it belongs to.
+    try {
+      if (prepared.github.status === "ready" && command.issueContext !== undefined) {
+        this.#linkedIssues?.link(
+          threadId,
+          {
+            forge: "github",
+            owner: command.issueContext.owner,
+            repository: command.issueContext.name,
+            number: command.issueContext.number,
+          },
+          "created-from",
+        );
+      }
+      const identifier =
+        prepared.linear.status === "ready" ? prepared.linear.identifier : undefined;
+      if (identifier !== undefined && command.linearIssueContext !== undefined) {
+        this.#linkedIssues?.link(
+          threadId,
+          { forge: "linear", identifier, issueId: command.linearIssueContext.id },
+          "created-from",
+        );
+      }
+    } catch {
+      // The person can still link it by hand from the thread.
     }
   }
 

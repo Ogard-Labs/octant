@@ -108,6 +108,101 @@ describe("provider usage limit routes", () => {
     ).toBe(200);
     expect(refresh).toHaveBeenCalledOnce();
   });
+
+  it("authenticates provider-neutral limits capture list, connect, disconnect, and trigger-refresh actions", async () => {
+    const instanceId = "11111111-1111-4111-8111-111111111111";
+    const baseStatus = {
+      connected: false,
+      summary: "CLI status line",
+      disconnectedHint: "Connect to capture.",
+      connectedHint: "Connected.",
+      connectLabel: "Connect status line",
+      refreshActionLabel: "Open terminal",
+    };
+    const capabilityPort = {
+      status: vi.fn(() => baseStatus),
+      connect: vi.fn(async () => ({ ...baseStatus, connected: true })),
+      disconnect: vi.fn(async () => ({ restored: true, status: baseStatus })),
+      triggerRefresh: vi.fn(async () => ({ launched: true })),
+    };
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const refresh = vi.fn(async () => snapshot);
+    const route = createProviderUsageLimitsRouteHandler({
+      service: { snapshot: vi.fn(() => snapshot), refresh },
+      limitsCapture: {
+        list: () => ({ [instanceId]: baseStatus }),
+        resolve: (id) => (String(id) === instanceId ? capabilityPort : undefined),
+      },
+      windowAuthorityStore: store,
+      now: () => 1,
+    });
+    const headers = { "x-octant-window-capability": capability };
+
+    const listResp = await route(
+      new Request("http://127.0.0.1/api/provider-usage-limits/capture", { headers }),
+    );
+    expect(listResp?.status).toBe(200);
+    expect(await listResp?.json()).toEqual({ captures: { [instanceId]: baseStatus } });
+
+    const connectResp = await route(
+      new Request(`http://127.0.0.1/api/provider-usage-limits/capture/${instanceId}/connect`, {
+        method: "POST",
+        headers,
+      }),
+    );
+    expect(connectResp?.status).toBe(200);
+    expect(await connectResp?.json()).toEqual({ ...baseStatus, connected: true });
+
+    const triggerResp = await route(
+      new Request(
+        `http://127.0.0.1/api/provider-usage-limits/capture/${instanceId}/trigger-refresh`,
+        { method: "POST", headers },
+      ),
+    );
+    expect(triggerResp?.status).toBe(200);
+    expect(await triggerResp?.json()).toEqual({ launched: true });
+
+    const disconnectResp = await route(
+      new Request(`http://127.0.0.1/api/provider-usage-limits/capture/${instanceId}/disconnect`, {
+        method: "POST",
+        headers,
+      }),
+    );
+    expect(disconnectResp?.status).toBe(200);
+    expect(await disconnectResp?.json()).toEqual({ restored: true, status: baseStatus });
+
+    // Unknown instance, wrong method, and missing auth fail closed.
+    expect(
+      (
+        await route(
+          new Request(
+            "http://127.0.0.1/api/provider-usage-limits/capture/22222222-2222-4222-8222-222222222222/connect",
+            { method: "POST", headers },
+          ),
+        )
+      )?.status,
+    ).toBe(404);
+    expect(
+      (
+        await route(
+          new Request(`http://127.0.0.1/api/provider-usage-limits/capture/${instanceId}/connect`, {
+            method: "GET",
+            headers,
+          }),
+        )
+      )?.status,
+    ).toBe(405);
+    expect(
+      (
+        await route(
+          new Request(`http://127.0.0.1/api/provider-usage-limits/capture/${instanceId}/connect`, {
+            method: "POST",
+          }),
+        )
+      )?.status,
+    ).toBe(401);
+  });
 });
 
 function fixture(service: {

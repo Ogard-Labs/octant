@@ -108,9 +108,10 @@ import { useHomeStart } from "./app/homeStart";
 import { OctantSheet } from "./ui/base/OctantSheet";
 import { SurfaceLoading } from "./surface/SurfaceLoading";
 import { DockModuleBoundary } from "./shell/DockModuleBoundary";
+import { couldNotLoad, LazyPartBoundary, WindowNoticeContext } from "./shell/windowNotice";
 import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
-import { threadRestRowActions } from "./app/threadRestRowActions";
+import { threadRestRowActions, type ThreadRestRow } from "./app/threadRestRowActions";
 import { TerminalShellContext, type TerminalShellFacts } from "./shell/terminalSlot";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
@@ -527,6 +528,7 @@ import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
 import {
   CoordinatorBoundsDialog,
   LazyHostNoticeToasts,
+  LazyThreadRestUndoHost,
   RemotePairingView,
   RemoteTodoDraft,
 } from "./shell/deferredSurfaces";
@@ -1764,6 +1766,10 @@ function LaunchedShell(
   // another Project of this mode lands as its own pane; the host resolves that
   // pane's Project and judges every call made from it.
   const sidebarDragRows = useRef(new Map<string, SidebarThreadDragRow>());
+  // What a row dropped within the sidebar does loads with the first row drag,
+  // during the press before it becomes a drag, so the first load does not
+  // carry it.
+  const sidebarRowDropRules = useRef<typeof import("./projects/sidebarRowDropRules")>(undefined);
   // The Chat list's thread ids, read when a drag starts; filled in below once
   // the Chat controller exists.
   const chatThreadIdsForDrag = useRef<ReadonlySet<string>>(new Set());
@@ -1771,9 +1777,25 @@ function LaunchedShell(
     ...(controller.workspace?.focusedPaneId === undefined
       ? {}
       : { focusedPaneId: controller.workspace.focusedPaneId }),
+    resolveSidebarDrop: (point, source) => {
+      const row = sidebarDragRows.current.get(source.dragKey);
+      const rules = sidebarRowDropRules.current;
+      if (row === undefined || rules === undefined) return null;
+      const mode = sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current);
+      return rules.sidebarRowDropDestination({ point, row, canPin: mode === "code" });
+    },
     onDrop: (source, destination) => {
       const row = sidebarDragRows.current.get(source.dragKey);
       sidebarDragRows.current.delete(source.dragKey);
+      if (destination.kind === "sidebar") {
+        const rules = sidebarRowDropRules.current;
+        if (row === undefined || rules === undefined) return;
+        // The same handlers as the row menu, so the host decides, a refusal
+        // shows its sentence, and an accepted change offers Undo.
+        const mode = sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current);
+        rules.runSidebarRowDrop(destination.action, row.rowId, threadRestRowActions(actions)[mode]);
+        return;
+      }
       if (destination.kind === "composer") {
         if (row === undefined || row.threadId.trim().length === 0) {
           void deliverComposerThreadDrop({
@@ -1850,6 +1872,14 @@ function LaunchedShell(
   const sidebarThreadDrag = useMemo<SidebarThreadDragTargets>(
     () => ({
       beginThreadDrag: (event, row) => {
+        if (sidebarRowDropRules.current === undefined) {
+          void import("./projects/sidebarRowDropRules").then(
+            (rules) => {
+              sidebarRowDropRules.current = rules;
+            },
+            () => setThreadExportNotice(couldNotLoad("dragging rows within the sidebar")),
+          );
+        }
         const dragKey = `thread:${row.rowId}`;
         sidebarDragRows.current.set(dragKey, row);
         workspaceDrag.onPointerDown(event, {
@@ -1866,6 +1896,19 @@ function LaunchedShell(
       onPointerCancel: workspaceDrag.onPointerCancel,
       consumeThreadClickSuppression: (rowId) =>
         workspaceDrag.consumeSuppressedClick(`thread:${rowId}`),
+      draggingRow:
+        workspaceDrag.active === null
+          ? null
+          : (sidebarDragRows.current.get(workspaceDrag.active.source.dragKey) ?? null),
+      offerFiles: (threadId, files) => {
+        const mode = sidebarRowMode(activeMode, threadId, chatThreadIdsForDrag.current);
+        // The offer store loads with the first file drop: the same store the
+        // thread composers take from.
+        void import("./composer/threadFileOffers").then(
+          ({ offerRowFiles }) => offerRowFiles(mode, threadId, files, setThreadExportNotice),
+          () => setThreadExportNotice(couldNotLoad("the dropped files")),
+        );
+      },
     }),
     [activeMode, workspaceDrag],
   );
@@ -6300,6 +6343,7 @@ function LaunchedShell(
       persistBottomPanelPresentation,
       pinChatThreadInPane,
       pinCodeThread: codeController.pinThread,
+      setCodeThreadPin: codeController.setThreadPin,
       pinCodeThreadInPane,
       pinWorkThreadInPane,
       previewSplitResize: controller.previewSplitResize,
@@ -6353,6 +6397,7 @@ function LaunchedShell(
       setCodeAgentMerge: projectController.setCodeAgentMerge,
       setCodeAgentPullRequestComments: projectController.setCodeAgentPullRequestComments,
       setCodeAgentDefaultBranchPush: projectController.setCodeAgentDefaultBranchPush,
+      setCodeIssueUpdates: projectController.setCodeIssueUpdates,
       setCodePullRequestsOpen,
       setDockSidecarsByThread,
       setDockStatesByThread,
@@ -6421,6 +6466,7 @@ function LaunchedShell(
       showDockToolFromRest,
       runDockToolMenu,
       touchMemoryRevision: projectController.touchMemoryRevision,
+      threadRestRow,
       tryWorkRestCommand,
       updateSettings: controller.updateSettings,
       viewAllChatProjectThreads,
@@ -7053,7 +7099,7 @@ function LaunchedShell(
   // the host's answer is folded back into the navigation list.
   async function tryWorkRestCommand(
     threadId: string,
-    command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
+    command: (expectedVersion: WorkThread["version"], thread: WorkThread) => WorkThreadCommand,
   ): Promise<ReviewActionOutcome> {
     const thread = workNavigation.bootstrap?.threads.find(
       (candidate) => String(candidate.id) === threadId,
@@ -7062,8 +7108,11 @@ function LaunchedShell(
       return { status: "refused", message: "This thread is no longer in the list." };
     }
     try {
-      const result = await workThreadClient.execute(command(thread.version));
-      if ("kind" in result && result.kind === "thread-updated") {
+      const result = await workThreadClient.execute(command(thread.version, thread));
+      if (
+        "kind" in result &&
+        (result.kind === "thread-updated" || result.kind === "thread-completion-confirmed")
+      ) {
         workNavigation.applyThread(result.thread);
       }
       return { status: "ok" };
@@ -7080,6 +7129,19 @@ function LaunchedShell(
             : "The host could not change this thread.",
       };
     }
+  }
+  function threadRestRow(mode: OctantMode, threadId: string): ThreadRestRow | undefined {
+    const rows =
+      mode === "code"
+        ? navigationModel.codeSidebarThreads
+        : mode === "work"
+          ? navigationModel.workProjectThreads
+          : chatController.status === "ready"
+            ? navigationModel.markedChatNavigation
+            : [];
+    return rows.find(
+      (row) => (row.navigationId ?? row.threadId) === threadId || row.threadId === threadId,
+    );
   }
   // A sidebar row has nowhere of its own to report a refusal, so its answer
   // reads where thread notices already appear.
@@ -8051,8 +8113,24 @@ function LaunchedShell(
     plannerReview?: PlannerProposalReview,
   ): Promise<boolean> {
     const sentFromTodo = todoStartOfSentDraft("code");
-    setDraftCreating(true);
-    setDraftError(undefined);
+    // A start the composer stays on (⌘↩, or one prompt on several models)
+    // leaves the window on the draft: the thread is not opened, and a refusal
+    // goes to that composer, which is already the next draft.
+    const stay = input.stay;
+    let createdThreadId: string | undefined;
+    const showDraftError = (message: string | undefined): void => {
+      if (stay === undefined) setDraftError(message);
+      else if (message !== undefined)
+        stay.report({
+          status: "refused",
+          reason: message,
+          ...(createdThreadId === undefined ? {} : { threadId: createdThreadId }),
+        });
+    };
+    if (stay === undefined) {
+      setDraftCreating(true);
+      setDraftError(undefined);
+    }
     setDraftPendingMessage(undefined);
     setRailPlaceholder(undefined);
     let firstPromptAnnouncedFor: import("@octant/contracts").CodeThreadId | undefined;
@@ -8062,7 +8140,7 @@ function LaunchedShell(
         action: "create-code-thread",
         requiredCapability: "code",
         onlyThisHost: true,
-        onRefuse: (reason) => setDraftError(reason),
+        onRefuse: (reason) => showDraftError(reason),
       });
       if (destinationHostId === undefined) return false;
       // A server Project is not in the Project catalog. The host prepares its
@@ -8078,7 +8156,7 @@ function LaunchedShell(
             })
           : undefined;
       if (resolution?.kind === "unresolved-selection") {
-        setDraftError(UNRESOLVED_DRAFT_PROJECT_MESSAGE);
+        showDraftError(UNRESOLVED_DRAFT_PROJECT_MESSAGE);
         return false;
       }
       const localProject = resolution?.project;
@@ -8092,7 +8170,7 @@ function LaunchedShell(
               }
             : undefined;
       if (project === undefined) {
-        setDraftError("Choose a Code Project before starting a thread.");
+        showDraftError("Choose a Code Project before starting a thread.");
         return false;
       }
       if (
@@ -8101,11 +8179,11 @@ function LaunchedShell(
           plannerReview.proposal.status !== "pending" ||
           input.prompt !== plannerReview.proposal.intent)
       ) {
-        setDraftError("The described planner proposal changed. Refresh it before approving.");
+        showDraftError("The described planner proposal changed. Refresh it before approving.");
         return false;
       }
       if (codeController.bootstrap === undefined) {
-        setDraftError(
+        showDraftError(
           codeUnavailableMessage({
             status: codeController.status,
             ...(codeController.errorMessage === undefined
@@ -8121,7 +8199,7 @@ function LaunchedShell(
       try {
         await draftProjectBinding.current;
       } catch {
-        setDraftError("That Project could not be selected. Choose it again before starting.");
+        showDraftError("That Project could not be selected. Choose it again before starting.");
         return false;
       }
 
@@ -8130,21 +8208,22 @@ function LaunchedShell(
         projectId: project.id,
       });
       if (prepared?.kind !== "checkout-prepared") {
-        setDraftError(
+        showDraftError(
           codeController.lastExecuteError.current?.message ??
             checkoutNotPreparedMessage(project.name),
         );
         return false;
       }
-      const codeSelection = resolveDraftProviderSelection(
-        codeProviderGroups,
-        codeDraftPreferredSelection,
-      );
+      // One prompt on several models names each thread's model; the host
+      // still admits it like any other.
+      const codeSelection =
+        input.providerSelection ??
+        resolveDraftProviderSelection(codeProviderGroups, codeDraftPreferredSelection);
       const providerInstanceId =
         codeSelection?.providerInstanceId ?? codeProviderChoices[0]?.instanceId;
       const modelId = codeSelection?.modelId ?? codeProviderChoices[0]?.modelId;
       if (providerInstanceId === undefined || modelId === undefined) {
-        setDraftError(
+        showDraftError(
           "No provider is available. Configure a provider before starting a Code thread.",
         );
         return false;
@@ -8167,7 +8246,7 @@ function LaunchedShell(
         title,
       });
       if (plan.kind === "rejected") {
-        setDraftError(plan.message);
+        showDraftError(plan.message);
         return false;
       }
       const command = plan.command;
@@ -8195,12 +8274,12 @@ function LaunchedShell(
           command.kind !== "create-code-thread" &&
           command.kind !== "create-managed-code-thread"
         ) {
-          setDraftError("This proposal cannot use that creation command.");
+          showDraftError("This proposal cannot use that creation command.");
           return false;
         }
         const outcome = await createPlannerProposalTask(codeClient, plannerReview, command);
         if (outcome.status !== "confirmed") {
-          setDraftError(outcome.message);
+          showDraftError(outcome.message);
           if (outcome.existingThread !== undefined) {
             const existing = outcome.existingThread;
             void codeController.refreshNavigation();
@@ -8220,7 +8299,7 @@ function LaunchedShell(
         void codeController.refreshNavigation();
       }
       if (created?.kind !== "managed-thread-created" && created?.kind !== "thread-created") {
-        setDraftError(
+        showDraftError(
           codeController.lastExecuteError.current?.message ??
             "The Code thread could not be created.",
         );
@@ -8241,6 +8320,7 @@ function LaunchedShell(
           },
         });
       }
+      createdThreadId = String(created.thread.id);
       await linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
       // The branch Start a fix handed in now belongs to this thread; the next
       // draft must not open on it.
@@ -8272,19 +8352,23 @@ function LaunchedShell(
               ? "The coordinator was created with the default bounds"
               : "The thread was created, but it could not become a coordinator"
           }: ${codeController.lastExecuteError.current?.message ?? "the host refused the change."}`;
-          await controller.openCodeThread(
-            created.thread.id,
-            created.thread.title,
-            undefined,
-            created.thread.projectId,
-          );
+          // A start the composer stays on leaves the thread closed; its row
+          // under the composer offers Open.
+          if (stay === undefined) {
+            await controller.openCodeThread(
+              created.thread.id,
+              created.thread.title,
+              undefined,
+              created.thread.projectId,
+            );
+          }
           codeThreadControllers.restoreDraft(
             created.thread.id,
             input.prompt,
             refusal,
             input.typedByPerson === true,
           );
-          setDraftError(refusal);
+          showDraftError(refusal);
           return false;
         }
       }
@@ -8295,12 +8379,14 @@ function LaunchedShell(
       firstPromptAnnouncedFor = created.thread.id;
       // Open the durable thread before staging images so an upload failure
       // retries on this thread instead of creating another.
-      await controller.openCodeThread(
-        created.thread.id,
-        created.thread.title,
-        undefined,
-        created.thread.projectId,
-      );
+      if (stay === undefined) {
+        await controller.openCodeThread(
+          created.thread.id,
+          created.thread.title,
+          undefined,
+          created.thread.projectId,
+        );
+      }
       const checkoutId =
         created.kind === "managed-thread-created" ? created.checkout.id : created.thread.checkoutId;
       const attachmentIds: import("@octant/contracts").CodeAttachmentId[] = [];
@@ -8334,7 +8420,7 @@ function LaunchedShell(
       });
       if (!firstTurnStarted) {
         const refusal = codeController.lastStartRefusal.current;
-        setDraftError(
+        showDraftError(
           refusal ?? "The thread was created, but its first provider turn could not be started.",
         );
         // The prompt was not sent after all; it goes back to the composer below
@@ -8359,6 +8445,7 @@ function LaunchedShell(
       // published the controller slot yet.
       worktreeLaunch?.update({ turn: "started" });
       codeThreadControllers.refreshConversation(created.thread.id);
+      stay?.report({ status: "started", threadId: String(created.thread.id) });
       return true;
     } catch (error) {
       // A staged image or the turn itself threw after the prompt was announced,
@@ -8375,7 +8462,7 @@ function LaunchedShell(
           input.typedByPerson === true,
         );
       }
-      setDraftError(
+      showDraftError(
         error instanceof Error && error.message !== ""
           ? error.message
           : "The Code thread could not be created.",
@@ -8383,7 +8470,7 @@ function LaunchedShell(
       return false;
     } finally {
       worktreeLaunch?.finish();
-      setDraftCreating(false);
+      if (stay === undefined) setDraftCreating(false);
     }
   }
 
@@ -10242,6 +10329,11 @@ function LaunchedShell(
             title={`Reply detail: ${REPLY_DETAIL_LABELS[replyDetailNotice]}`}
           />
         )}
+        <LazyPartBoundary what="the Undo notice">
+          <Suspense fallback={null}>
+            <LazyThreadRestUndoHost hostKey={props.launch.serverUrl} />
+          </Suspense>
+        </LazyPartBoundary>
         {threadExportNotice === undefined ? null : (
           <OctantToast
             detail={threadExportNotice}
@@ -10259,324 +10351,338 @@ function LaunchedShell(
   );
 
   return (
-    <AgentThreadAttributionProvider client={launchedClients.agentGrantClient}>
-      <SubagentProvidersProvider
-        instances={providerController.instances}
-        observedByInstance={providerController.observedByInstance}
-        showMarks={controller.settings.showThreadProviderIcons}
-      >
-        <GuardrailDefaultsContext.Provider value={guardrailDefaults}>
-          <FirstPartyPluginsEffectiveContext.Provider value={firstPartyPluginsEffective}>
-            <PluginContributionsProvider grounds={pluginGrounds} themes={pluginThemes}>
-              <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
-                <CanvasChoiceAnswersChangeRevisionContext.Provider
-                  value={machineChanges.canvasChoiceAnswers}
-                >
-                  <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
-                    <SpeechCapabilityProvider
-                      client={speechClient}
-                      instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
-                      settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
-                    >
-                      <TodoListHostSettingsContext.Provider value={todoListHostSettings}>
-                        <OctantCommandProvider commands={octantCommands}>
-                          <OctantDialogPresence>
-                            {remoteTodo === undefined ? null : (
-                              <OctantDialog
-                                label={
-                                  remoteTodo.destination?.project.name ??
-                                  "Thread on paired computer"
-                                }
-                                open
-                                onClose={() => setRemoteTodo(undefined)}
-                              >
-                                {remoteTodoSlot?.bridge === undefined ? (
-                                  <p>Pair with this computer to open its thread.</p>
-                                ) : (
-                                  <DockModuleBoundary onClose={() => setRemoteTodo(undefined)}>
-                                    <Suspense fallback={<SurfaceLoading label="Opening to-do" />}>
-                                      <RemoteTodoDraft
-                                        key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
-                                        bridge={remoteTodoSlot.bridge}
-                                        hostId={remoteTodo.hostId}
-                                        ownerWindowId={props.launch.windowId}
-                                        hostName={remoteTodoSlot.displayName}
-                                        connected={remoteTodoSlot.state.kind === "ready"}
-                                        {...(remoteTodo.destination === undefined
-                                          ? {}
-                                          : { project: remoteTodo.destination.project })}
-                                        {...(remoteTodo.todo === undefined
-                                          ? {}
-                                          : { todo: remoteTodo.todo })}
-                                        {...(remoteTodo.todoListHostId === undefined
-                                          ? {}
-                                          : { todoListHostId: remoteTodo.todoListHostId })}
-                                        canRestoreTodo={canRestoreTodoSource}
-                                        {...(remoteTodo.thread === undefined
-                                          ? {}
-                                          : { thread: remoteTodo.thread })}
-                                        onCreated={async (link) => {
-                                          if (remoteTodo.todo !== undefined)
-                                            await recordTodoLink(String(remoteTodo.todo.id), link);
-                                        }}
-                                        onClose={() => setRemoteTodo(undefined)}
-                                      />
-                                    </Suspense>
-                                  </DockModuleBoundary>
-                                )}
-                              </OctantDialog>
-                            )}
-                            {todoQuickAddOpen ? (
-                              <TodoQuickAddDialog
-                                list={todoList}
-                                {...(todoThisHostId === undefined
-                                  ? {}
-                                  : { thisHostId: todoThisHostId })}
-                                onClose={() => setTodoQuickAddOpen(false)}
-                                open
-                                projects={todoProjects}
-                              />
-                            ) : null}
-                            {projectActionRun === undefined ? null : (
-                              <ProjectActionRunDialog
-                                key={JSON.stringify(projectActionRun.target)}
-                                client={projectTerminalClient}
-                                target={projectActionRun.target}
-                                storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
-                                open={projectActionRun.open}
-                                onClose={() =>
-                                  setProjectActionRun((current) =>
-                                    current === undefined ? undefined : { ...current, open: false },
+    <WindowNoticeContext.Provider value={setThreadExportNotice}>
+      <AgentThreadAttributionProvider client={launchedClients.agentGrantClient}>
+        <SubagentProvidersProvider
+          instances={providerController.instances}
+          observedByInstance={providerController.observedByInstance}
+          showMarks={controller.settings.showThreadProviderIcons}
+        >
+          <GuardrailDefaultsContext.Provider value={guardrailDefaults}>
+            <FirstPartyPluginsEffectiveContext.Provider value={firstPartyPluginsEffective}>
+              <PluginContributionsProvider grounds={pluginGrounds} themes={pluginThemes}>
+                <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
+                  <CanvasChoiceAnswersChangeRevisionContext.Provider
+                    value={machineChanges.canvasChoiceAnswers}
+                  >
+                    <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
+                      <SpeechCapabilityProvider
+                        client={speechClient}
+                        instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
+                        settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
+                      >
+                        <TodoListHostSettingsContext.Provider value={todoListHostSettings}>
+                          <OctantCommandProvider commands={octantCommands}>
+                            <OctantDialogPresence>
+                              {remoteTodo === undefined ? null : (
+                                <OctantDialog
+                                  label={
+                                    remoteTodo.destination?.project.name ??
+                                    "Thread on paired computer"
+                                  }
+                                  open
+                                  onClose={() => setRemoteTodo(undefined)}
+                                >
+                                  {remoteTodoSlot?.bridge === undefined ? (
+                                    <p>Pair with this computer to open its thread.</p>
+                                  ) : (
+                                    <DockModuleBoundary onClose={() => setRemoteTodo(undefined)}>
+                                      <Suspense fallback={<SurfaceLoading label="Opening to-do" />}>
+                                        <RemoteTodoDraft
+                                          key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
+                                          bridge={remoteTodoSlot.bridge}
+                                          hostId={remoteTodo.hostId}
+                                          ownerWindowId={props.launch.windowId}
+                                          hostName={remoteTodoSlot.displayName}
+                                          connected={remoteTodoSlot.state.kind === "ready"}
+                                          {...(remoteTodo.destination === undefined
+                                            ? {}
+                                            : { project: remoteTodo.destination.project })}
+                                          {...(remoteTodo.todo === undefined
+                                            ? {}
+                                            : { todo: remoteTodo.todo })}
+                                          {...(remoteTodo.todoListHostId === undefined
+                                            ? {}
+                                            : { todoListHostId: remoteTodo.todoListHostId })}
+                                          canRestoreTodo={canRestoreTodoSource}
+                                          {...(remoteTodo.thread === undefined
+                                            ? {}
+                                            : { thread: remoteTodo.thread })}
+                                          onCreated={async (link) => {
+                                            if (remoteTodo.todo !== undefined)
+                                              await recordTodoLink(
+                                                String(remoteTodo.todo.id),
+                                                link,
+                                              );
+                                          }}
+                                          onClose={() => setRemoteTodo(undefined)}
+                                        />
+                                      </Suspense>
+                                    </DockModuleBoundary>
+                                  )}
+                                </OctantDialog>
+                              )}
+                              {todoQuickAddOpen ? (
+                                <TodoQuickAddDialog
+                                  list={todoList}
+                                  {...(todoThisHostId === undefined
+                                    ? {}
+                                    : { thisHostId: todoThisHostId })}
+                                  onClose={() => setTodoQuickAddOpen(false)}
+                                  open
+                                  projects={todoProjects}
+                                />
+                              ) : null}
+                              {projectActionRun === undefined ? null : (
+                                <ProjectActionRunDialog
+                                  key={JSON.stringify(projectActionRun.target)}
+                                  client={projectTerminalClient}
+                                  target={projectActionRun.target}
+                                  storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                                  open={projectActionRun.open}
+                                  onClose={() =>
+                                    setProjectActionRun((current) =>
+                                      current === undefined
+                                        ? undefined
+                                        : { ...current, open: false },
+                                    )
+                                  }
+                                  {...(zen.enabled &&
+                                  !serverCodeProjects.workProjects.some(
+                                    (project) =>
+                                      project.projectId === projectActionRun.target.projectId,
                                   )
-                                }
-                                {...(zen.enabled &&
-                                !serverCodeProjects.workProjects.some(
-                                  (project) =>
-                                    project.projectId === projectActionRun.target.projectId,
-                                )
+                                    ? {
+                                        onOpenTerminal: (
+                                          terminalId: ReturnType<typeof decodeCodeTerminalId>,
+                                        ) => {
+                                          void (async () => {
+                                            if (!zen.active) await zen.enterZen();
+                                            await zen.pinProjectTerminal({
+                                              projectId: projectActionRun.target.projectId,
+                                              terminalId,
+                                            });
+                                          })();
+                                        },
+                                      }
+                                    : {})}
+                                />
+                              )}
+                            </OctantDialogPresence>
+
+                            <OctantDialogPresence>
+                              {preparationTarget === undefined ? null : (
+                                <Suspense fallback={null}>
+                                  <WorktreePreparationDialog
+                                    key={JSON.stringify(preparationTarget)}
+                                    client={projectTerminalClient}
+                                    runs={agentRunClient}
+                                    target={preparationTarget}
+                                    onClose={() => setPreparationTarget(undefined)}
+                                  />
+                                </Suspense>
+                              )}
+                            </OctantDialogPresence>
+                            {actionsProject === undefined ? null : (
+                              <ProjectActionButtons
+                                actions={activeProjectActions}
+                                {...(activeMode === "code" &&
+                                activeCodeThreadView !== undefined &&
+                                activeCodeThreadView.checkout.kind !== "remote-root" &&
+                                String(activeCodeThreadView.thread.projectId) ===
+                                  String(actionsProject.id)
                                   ? {
-                                      onOpenTerminal: (
-                                        terminalId: ReturnType<typeof decodeCodeTerminalId>,
-                                      ) => {
-                                        void (async () => {
-                                          if (!zen.active) await zen.enterZen();
-                                          await zen.pinProjectTerminal({
-                                            projectId: projectActionRun.target.projectId,
-                                            terminalId,
-                                          });
-                                        })();
+                                      onSetup: () => {
+                                        const view = activeCodeThreadView;
+                                        setPreparationTarget({
+                                          projectId: actionsProject.id,
+                                          thread: {
+                                            threadId: view.thread.id,
+                                            checkoutId: view.checkout.id,
+                                            ...(view.checkout.head.kind === "none"
+                                              ? {}
+                                              : { head: view.checkout.head.oid }),
+                                          },
+                                        });
                                       },
                                     }
                                   : {})}
+                                {...(activeMode === "code" &&
+                                activeCodeThreadView !== undefined &&
+                                String(activeCodeThreadView.thread.projectId) ===
+                                  String(actionsProject.id)
+                                  ? { defaultFolderLabel: "Active checkout" }
+                                  : {})}
+                                {...(actionsProject.type === "code"
+                                  ? {
+                                      mainFolder: actionsProject.binding.canonicalRoot,
+                                      extraFolders: (actionsProject.extraFolders ?? []).map(
+                                        (folder) => folder.canonicalRoot,
+                                      ),
+                                    }
+                                  : {})}
+                                onRun={(action, folder) =>
+                                  void runProjectAction(actionsProject.id, action, folder)
+                                }
                               />
                             )}
-                          </OctantDialogPresence>
-
-                          <OctantDialogPresence>
-                            {preparationTarget === undefined ? null : (
-                              <Suspense fallback={null}>
-                                <WorktreePreparationDialog
-                                  key={JSON.stringify(preparationTarget)}
-                                  client={projectTerminalClient}
-                                  runs={agentRunClient}
-                                  target={preparationTarget}
-                                  onClose={() => setPreparationTarget(undefined)}
-                                />
-                              </Suspense>
+                            {serverActionsProject === undefined ? null : (
+                              <ProjectActionButtons
+                                actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
+                                {...(serverActionsProject.folder === undefined
+                                  ? {}
+                                  : { mainFolder: serverActionsProject.folder })}
+                                defaultFolderLabel={
+                                  activeMode === "work" ? "Task folder" : "Active server checkout"
+                                }
+                                onRun={(action, folder) =>
+                                  void runProjectAction(
+                                    serverActionsProject.projectId,
+                                    action,
+                                    folder,
+                                  )
+                                }
+                              />
                             )}
-                          </OctantDialogPresence>
-                          {actionsProject === undefined ? null : (
-                            <ProjectActionButtons
-                              actions={activeProjectActions}
-                              {...(activeMode === "code" &&
-                              activeCodeThreadView !== undefined &&
-                              activeCodeThreadView.checkout.kind !== "remote-root" &&
-                              String(activeCodeThreadView.thread.projectId) ===
-                                String(actionsProject.id)
-                                ? {
-                                    onSetup: () => {
-                                      const view = activeCodeThreadView;
-                                      setPreparationTarget({
-                                        projectId: actionsProject.id,
-                                        thread: {
-                                          threadId: view.thread.id,
-                                          checkoutId: view.checkout.id,
-                                          ...(view.checkout.head.kind === "none"
-                                            ? {}
-                                            : { head: view.checkout.head.oid }),
-                                        },
-                                      });
-                                    },
-                                  }
-                                : {})}
-                              {...(activeMode === "code" &&
-                              activeCodeThreadView !== undefined &&
-                              String(activeCodeThreadView.thread.projectId) ===
-                                String(actionsProject.id)
-                                ? { defaultFolderLabel: "Active checkout" }
-                                : {})}
-                              {...(actionsProject.type === "code"
-                                ? {
-                                    mainFolder: actionsProject.binding.canonicalRoot,
-                                    extraFolders: (actionsProject.extraFolders ?? []).map(
-                                      (folder) => folder.canonicalRoot,
-                                    ),
-                                  }
-                                : {})}
-                              onRun={(action, folder) =>
-                                void runProjectAction(actionsProject.id, action, folder)
-                              }
-                            />
-                          )}
-                          {serverActionsProject === undefined ? null : (
-                            <ProjectActionButtons
-                              actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
-                              {...(serverActionsProject.folder === undefined
-                                ? {}
-                                : { mainFolder: serverActionsProject.folder })}
-                              defaultFolderLabel={
-                                activeMode === "work" ? "Task folder" : "Active server checkout"
-                              }
-                              onRun={(action, folder) =>
-                                void runProjectAction(
-                                  serverActionsProject.projectId,
-                                  action,
-                                  folder,
-                                )
-                              }
-                            />
-                          )}
-                          <NeedsYouProvider source={needsYouSource}>
-                            {/* Held here rather than with any Code pane: a thread's controller has to
+                            <NeedsYouProvider source={needsYouSource}>
+                              {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-                            <CodeThreadControllerSlots
-                              client={codeClient}
-                              navigationBootstrap={codeController.bootstrap}
-                              readCursorStore={codeReadCursorStore}
-                              registry={codeThreadControllers}
-                              threadIds={openCodeThreadIds}
-                            />
-                            <TrackerReferenceProvider ports={trackerReferencePorts}>
-                              <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-                                <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
-                                  <ProjectIconProvider
-                                    serverUrl={props.launch.serverUrl}
-                                    windowCapability={props.projectWindowCapability}
-                                  >
-                                    <ProjectIconPrefetch projectIds={projectIconIds} />
-                                    <StableProjectThreadsProvider value={projectThreadsAccess}>
-                                      <ThreadReferencesContext.Provider value={threadReferences}>
-                                        <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                                          <StreamRepliesContext.Provider
-                                            value={controller.settings?.streamReplies !== false}
-                                          >
-                                            <NextMessageSuggestionsContext.Provider
-                                              value={controller.settings?.nextMessageSuggestions}
+                              <CodeThreadControllerSlots
+                                client={codeClient}
+                                navigationBootstrap={codeController.bootstrap}
+                                readCursorStore={codeReadCursorStore}
+                                registry={codeThreadControllers}
+                                threadIds={openCodeThreadIds}
+                              />
+                              <TrackerReferenceProvider ports={trackerReferencePorts}>
+                                <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+                                  <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
+                                    <ProjectIconProvider
+                                      serverUrl={props.launch.serverUrl}
+                                      windowCapability={props.projectWindowCapability}
+                                    >
+                                      <ProjectIconPrefetch projectIds={projectIconIds} />
+                                      <StableProjectThreadsProvider value={projectThreadsAccess}>
+                                        <ThreadReferencesContext.Provider value={threadReferences}>
+                                          <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                                            <StreamRepliesContext.Provider
+                                              value={controller.settings?.streamReplies !== false}
                                             >
-                                              <ReplyDetailSourceContext.Provider
-                                                value={replyDetailSource}
+                                              <NextMessageSuggestionsContext.Provider
+                                                value={controller.settings?.nextMessageSuggestions}
                                               >
-                                                <ReplyDetailContext.Provider
-                                                  value={replyDetailSource.reading.defaultLevel}
+                                                <ReplyDetailSourceContext.Provider
+                                                  value={replyDetailSource}
                                                 >
-                                                  {/* The floor for every rendered link: panes that can host a
+                                                  <ReplyDetailContext.Provider
+                                                    value={replyDetailSource.reading.defaultLevel}
+                                                  >
+                                                    {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                                                  <MarkdownLinkActionsContext.Provider
-                                                    value={rootLinkActions}
-                                                  >
-                                                    <WorkKindChoiceContext.Provider
-                                                      value={workKindChoice}
+                                                    <MarkdownLinkActionsContext.Provider
+                                                      value={rootLinkActions}
                                                     >
-                                                      <ModelToolVerificationContext.Provider
-                                                        value={providerController.verifyModelTools}
+                                                      <WorkKindChoiceContext.Provider
+                                                        value={workKindChoice}
                                                       >
-                                                        <HostFederationStackContext.Provider
-                                                          value={federation}
+                                                        <ModelToolVerificationContext.Provider
+                                                          value={
+                                                            providerController.verifyModelTools
+                                                          }
                                                         >
-                                                          <PlanUsageProvider
-                                                            client={
-                                                              launchedClients.providerUsageLimitsClient
-                                                            }
-                                                            instances={providerController.instances}
-                                                            order={
-                                                              providerController.defaults
-                                                                .providerOrder
-                                                            }
+                                                          <HostFederationStackContext.Provider
+                                                            value={federation}
                                                           >
-                                                            <HostPlatformContext.Provider
-                                                              value={hostPlatform}
+                                                            <PlanUsageProvider
+                                                              client={
+                                                                launchedClients.providerUsageLimitsClient
+                                                              }
+                                                              instances={
+                                                                providerController.instances
+                                                              }
+                                                              order={
+                                                                providerController.defaults
+                                                                  .providerOrder
+                                                              }
                                                             >
-                                                              <ServerCodeProjectsContext.Provider
-                                                                value={serverCodeProjects}
+                                                              <HostPlatformContext.Provider
+                                                                value={hostPlatform}
                                                               >
-                                                                <CodeDebugWindowProvider
-                                                                  origin={
-                                                                    new URL(props.launch.serverUrl)
-                                                                      .origin
-                                                                  }
-                                                                  windowId={String(
-                                                                    props.launch.windowId,
-                                                                  )}
+                                                                <ServerCodeProjectsContext.Provider
+                                                                  value={serverCodeProjects}
                                                                 >
-                                                                  <QuestionnaireDraftsProvider
-                                                                    serverUrl={
-                                                                      props.launch.serverUrl
+                                                                  <CodeDebugWindowProvider
+                                                                    origin={
+                                                                      new URL(
+                                                                        props.launch.serverUrl,
+                                                                      ).origin
                                                                     }
-                                                                    windowId={props.launch.windowId}
+                                                                    windowId={String(
+                                                                      props.launch.windowId,
+                                                                    )}
                                                                   >
-                                                                    <PaneDockToolsContext.Provider
-                                                                      value={paneDockTools}
+                                                                    <QuestionnaireDraftsProvider
+                                                                      serverUrl={
+                                                                        props.launch.serverUrl
+                                                                      }
+                                                                      windowId={
+                                                                        props.launch.windowId
+                                                                      }
                                                                     >
-                                                                      <BenchmarkAdviceContext.Provider
-                                                                        value={{
-                                                                          client:
-                                                                            launchedClients.benchmarksClient,
-                                                                          projects:
-                                                                            projectController.allProjects,
-                                                                        }}
+                                                                      <PaneDockToolsContext.Provider
+                                                                        value={paneDockTools}
                                                                       >
-                                                                        <TerminalShellContext.Provider
-                                                                          value={terminalShell}
+                                                                        <BenchmarkAdviceContext.Provider
+                                                                          value={{
+                                                                            client:
+                                                                              launchedClients.benchmarksClient,
+                                                                            projects:
+                                                                              projectController.allProjects,
+                                                                          }}
                                                                         >
-                                                                          {shell}
-                                                                        </TerminalShellContext.Provider>
-                                                                      </BenchmarkAdviceContext.Provider>
-                                                                    </PaneDockToolsContext.Provider>
-                                                                  </QuestionnaireDraftsProvider>
-                                                                </CodeDebugWindowProvider>
-                                                              </ServerCodeProjectsContext.Provider>
-                                                            </HostPlatformContext.Provider>
-                                                          </PlanUsageProvider>
-                                                        </HostFederationStackContext.Provider>
-                                                      </ModelToolVerificationContext.Provider>
-                                                    </WorkKindChoiceContext.Provider>
-                                                  </MarkdownLinkActionsContext.Provider>
-                                                </ReplyDetailContext.Provider>
-                                              </ReplyDetailSourceContext.Provider>
-                                            </NextMessageSuggestionsContext.Provider>
-                                          </StreamRepliesContext.Provider>
-                                        </NewTaskDraftsContext.Provider>
-                                      </ThreadReferencesContext.Provider>
-                                    </StableProjectThreadsProvider>
-                                  </ProjectIconProvider>
-                                </SidebarThreadTabsContext.Provider>
-                              </SidebarThreadDragContext.Provider>
-                            </TrackerReferenceProvider>
-                          </NeedsYouProvider>
-                        </OctantCommandProvider>
-                      </TodoListHostSettingsContext.Provider>
-                    </SpeechCapabilityProvider>
-                  </ThreadActivityRevisionsContext.Provider>
-                </CanvasChoiceAnswersChangeRevisionContext.Provider>
-              </ImageJobChangeRevisionContext.Provider>
-            </PluginContributionsProvider>
-          </FirstPartyPluginsEffectiveContext.Provider>
-        </GuardrailDefaultsContext.Provider>
-      </SubagentProvidersProvider>
-    </AgentThreadAttributionProvider>
+                                                                          <TerminalShellContext.Provider
+                                                                            value={terminalShell}
+                                                                          >
+                                                                            {shell}
+                                                                          </TerminalShellContext.Provider>
+                                                                        </BenchmarkAdviceContext.Provider>
+                                                                      </PaneDockToolsContext.Provider>
+                                                                    </QuestionnaireDraftsProvider>
+                                                                  </CodeDebugWindowProvider>
+                                                                </ServerCodeProjectsContext.Provider>
+                                                              </HostPlatformContext.Provider>
+                                                            </PlanUsageProvider>
+                                                          </HostFederationStackContext.Provider>
+                                                        </ModelToolVerificationContext.Provider>
+                                                      </WorkKindChoiceContext.Provider>
+                                                    </MarkdownLinkActionsContext.Provider>
+                                                  </ReplyDetailContext.Provider>
+                                                </ReplyDetailSourceContext.Provider>
+                                              </NextMessageSuggestionsContext.Provider>
+                                            </StreamRepliesContext.Provider>
+                                          </NewTaskDraftsContext.Provider>
+                                        </ThreadReferencesContext.Provider>
+                                      </StableProjectThreadsProvider>
+                                    </ProjectIconProvider>
+                                  </SidebarThreadTabsContext.Provider>
+                                </SidebarThreadDragContext.Provider>
+                              </TrackerReferenceProvider>
+                            </NeedsYouProvider>
+                          </OctantCommandProvider>
+                        </TodoListHostSettingsContext.Provider>
+                      </SpeechCapabilityProvider>
+                    </ThreadActivityRevisionsContext.Provider>
+                  </CanvasChoiceAnswersChangeRevisionContext.Provider>
+                </ImageJobChangeRevisionContext.Provider>
+              </PluginContributionsProvider>
+            </FirstPartyPluginsEffectiveContext.Provider>
+          </GuardrailDefaultsContext.Provider>
+        </SubagentProvidersProvider>
+      </AgentThreadAttributionProvider>
+    </WindowNoticeContext.Provider>
   );
 }
 

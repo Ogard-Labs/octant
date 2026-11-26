@@ -1,7 +1,12 @@
 import {
   decodeProviderUsageLimitsSnapshot,
+  type ProviderInstanceId,
   type ProviderUsageLimitsSnapshot,
 } from "@octant/contracts";
+import type {
+  ProviderLimitsCaptureCapability,
+  ProviderLimitsCaptureStatus,
+} from "@octant/provider-sdk/context-facts";
 import { principalActsAsHostPerson } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
@@ -14,8 +19,17 @@ export interface ProviderUsageLimitsRouteService {
   }) => Promise<ProviderUsageLimitsSnapshot>;
 }
 
+export interface ProviderLimitsCaptureRouteRegistry {
+  readonly list: () => Readonly<Record<string, ProviderLimitsCaptureStatus>>;
+  readonly resolve: (instanceId: ProviderInstanceId) => ProviderLimitsCaptureCapability | undefined;
+}
+
+const CAPTURE_ACTION_PATTERN =
+  /^\/api\/provider-usage-limits\/capture\/([^/]+)\/(connect|disconnect|trigger-refresh)$/u;
+
 export function createProviderUsageLimitsRouteHandler(dependencies: {
   readonly service: ProviderUsageLimitsRouteService;
+  readonly limitsCapture?: ProviderLimitsCaptureRouteRegistry;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
   readonly allowedRendererHttpOrigin?: string | null;
@@ -25,7 +39,11 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
     const url = new URL(request.url);
     const isList = url.pathname === "/api/provider-usage-limits";
     const isRefresh = url.pathname === "/api/provider-usage-limits/refresh";
-    if (!isList && !isRefresh) return undefined;
+    const isCaptureList = url.pathname === "/api/provider-usage-limits/capture";
+    const captureMatch = CAPTURE_ACTION_PATTERN.exec(url.pathname);
+    if (!isList && !isRefresh && !isCaptureList && captureMatch === null) {
+      return undefined;
+    }
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname))
       return response({ message: "Provider limits require loopback." }, 400, null);
@@ -33,7 +51,8 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
       return response({ message: "Renderer origin is not allowed." }, 400, null);
     if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: cors(origin) });
-    if ((isList && request.method !== "GET") || (isRefresh && request.method !== "POST")) {
+    const expectsGet = isList || isCaptureList;
+    if ((expectsGet && request.method !== "GET") || (!expectsGet && request.method !== "POST")) {
       return response({ message: "Provider limits method is not supported." }, 405, origin);
     }
     if (url.search !== "")
@@ -61,6 +80,58 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
         error instanceof WindowAuthorityError ? 401 : 400,
         origin,
       );
+    }
+    if (isCaptureList || captureMatch !== null) {
+      const registry = dependencies.limitsCapture;
+      if (registry === undefined) {
+        return isCaptureList
+          ? response({ captures: {} }, 200, origin)
+          : response({ message: "Limits capture is unavailable." }, 503, origin);
+      }
+      if (isCaptureList || captureMatch === null) {
+        return response({ captures: registry.list() }, 200, origin);
+      }
+      let rawInstanceId: string;
+      try {
+        rawInstanceId = decodeURIComponent(captureMatch[1] ?? "");
+      } catch {
+        return response({ message: "Provider limits request is invalid." }, 400, origin);
+      }
+      const action = captureMatch[2] as "connect" | "disconnect" | "trigger-refresh";
+      const capability = registry.resolve(rawInstanceId as ProviderInstanceId);
+      if (capability === undefined) {
+        return response(
+          { message: "This provider does not offer local limits capture." },
+          404,
+          origin,
+        );
+      }
+      try {
+        if (action === "connect") {
+          const status = await capability.connect();
+          await dependencies.service.refresh({ onDemand: true }).catch(() => undefined);
+          return response(status, 200, origin);
+        }
+        if (action === "disconnect") {
+          const result = await capability.disconnect();
+          await dependencies.service.refresh({ onDemand: true }).catch(() => undefined);
+          return response(result, 200, origin);
+        }
+        if (capability.triggerRefresh === undefined) {
+          return response(
+            { message: "This provider does not offer a manual capture launch." },
+            404,
+            origin,
+          );
+        }
+        return response(await capability.triggerRefresh(), 200, origin);
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "Limits capture action failed.";
+        return response({ message }, 400, origin);
+      }
     }
     try {
       const value = isRefresh

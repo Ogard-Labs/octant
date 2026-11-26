@@ -214,6 +214,9 @@ export const MOBILE_COPY = {
   transcriptEmpty: "No turns yet.",
   codeEarlierTurns: "Showing the newest turns. Open the thread on the desktop for earlier ones.",
   turnRunning: "Working on your computer…",
+  queueWhileTurnRuns: "The turn is running. What you send now waits for the next turn.",
+  queueKeepsAttachments:
+    "The turn is running. Your words wait for the next turn; attachments stay here for a message after it.",
   turnWaitingOnUsageLimit: "Waiting for the usage limit to reset",
   steeredMessage: "Sent while the turn ran",
   routineReceiptLabel: "Created automation",

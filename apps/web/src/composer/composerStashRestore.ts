@@ -4,6 +4,7 @@ import { MAX_CHAT_TURN_PREVIEW_SELECTIONS } from "@octant/contracts/chat";
 import { MAX_CODE_REVIEW_CORRECTION_FINDINGS } from "@octant/contracts/code-operations";
 import { MAX_SIDE_CHAT_DRAFT_RETURNS } from "@octant/contracts/side-chat-return";
 import { isImageAttachment } from "./attachmentMediaType";
+import { loadComposerQuoteTools, QUOTE_HEADER_TAIL, REPLY_QUOTE_SOURCE } from "./composerQuoteMark";
 import {
   composerStashContextValues,
   composerStashLocationKey,
@@ -58,6 +59,32 @@ function matchingTodo(
     : undefined;
 }
 
+/**
+ * A draft stashed while quoted replies sat beside the prompt carries them as
+ * context; the prompt now holds quotes in its own text, so they come back as
+ * quote chips ahead of the text. Quoted words are not the person's typing.
+ * The quote code loads only for such a draft.
+ */
+export async function withStashedQuotesInText(
+  draft: ComposerStashDraft,
+): Promise<ComposerStashDraft> {
+  const quotes = composerStashContextValues(draft, "quote");
+  if (quotes.length === 0) return draft;
+  const { appendComposerQuote } = await loadComposerQuoteTools();
+  const lead = quotes.reduce(
+    (text, quote) =>
+      appendComposerQuote(text, { source: REPLY_QUOTE_SOURCE, text: quote.text, comment: "" }),
+    "",
+  );
+  const { typed: _typed, ...rest } = draft;
+  return {
+    ...rest,
+    text: `${lead}${draft.text}`,
+    caret: lead.length + draft.caret,
+    context: draft.context.filter((part) => part.kind !== "quote"),
+  };
+}
+
 export function planComposerStashRestore(
   origin: ComposerStashLocation,
   target: ComposerStashTarget,
@@ -70,6 +97,16 @@ export function planComposerStashRestore(
   }
 
   const sameComposer = composerStashLocationKey(origin) === composerStashLocationKey(destination);
+  // A reply quote names "this thread" as its source, so in another thread it
+  // would present that reply as the destination's own history. The same
+  // thread is the same conversation even after it moves to another Project.
+  const sameThread =
+    origin.threadId !== null &&
+    origin.mode === destination.mode &&
+    origin.threadId === destination.threadId;
+  if (!sameThread && saved.text.includes(`Quoted from ${REPLY_QUOTE_SOURCE}${QUOTE_HEADER_TAIL}`)) {
+    return { kind: "refused", reason: `${CONTEXT_LABELS.quote} needs its original composer.` };
+  }
   const sameNewTaskScope =
     origin.threadId === null &&
     destination.threadId === null &&

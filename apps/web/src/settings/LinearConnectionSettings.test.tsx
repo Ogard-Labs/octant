@@ -216,7 +216,10 @@ describe("LinearConnectionSettings", () => {
     );
     expect(await screen.findByText("Henrik")).toBeInTheDocument();
     expect(screen.getByText("1 project linked")).toBeInTheDocument();
-    expect(await screen.findByText("octant")).toBeInTheDocument();
+    // The team options load after the account and redraw the mapping row, so a
+    // node found before that redraw can be detached by the time it is checked;
+    // under CI load this failed on unrelated pull requests.
+    await waitFor(() => expect(screen.getByText("octant")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Personal API key" }));
     expect(screen.getByLabelText("Personal API key")).toHaveAttribute(
@@ -279,7 +282,8 @@ describe("LinearConnectionSettings", () => {
       />,
     );
     expect(await screen.findByText("workspace-a")).toBeInTheDocument();
-    expect(listIssueFilters).toHaveBeenCalledTimes(1);
+    // Team options are read after the account shows, not with it.
+    await waitFor(() => expect(listIssueFilters).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("button", { name: "Personal API key" }));
     fireEvent.change(screen.getByLabelText("Personal API key"), {
@@ -288,6 +292,6 @@ describe("LinearConnectionSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Store key" }));
 
     expect(await screen.findByText("workspace-b")).toBeInTheDocument();
-    expect(listIssueFilters).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(listIssueFilters).toHaveBeenCalledTimes(2));
   });
 });

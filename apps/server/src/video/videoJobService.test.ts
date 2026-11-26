@@ -18,6 +18,7 @@ import {
   type VideoModelCapabilities,
 } from "@octant/contracts/video-generation";
 import {
+  classifyVideoHttpFailure,
   classifyVideoStartHttpFailure,
   isProviderFailure,
   type VideoAdapterForget,
@@ -1061,6 +1062,24 @@ describe("video jobs", () => {
       expect(spend.abandon).not.toHaveBeenCalled();
     },
   );
+
+  it("settles a safety refusal at its estimate when the reported cost is not a finite amount", async () => {
+    const { service, spend } = harness({
+      polls: [
+        {
+          status: "refused",
+          safetyRefusal: "Blocked by the provider's filters.",
+          usage: { costUsdMicros: Number.POSITIVE_INFINITY },
+        },
+      ],
+    });
+    const job = await enqueue(service);
+    expect(await service.whenTerminal(job.id)).toMatchObject({
+      status: "failed",
+      settledCostUsdMicros: job.estimatedCostUsdMicros,
+    });
+    expect(spend.settle).toHaveBeenCalledOnce();
+  });
 
   it("keeps an owed removal through a failure and clears it on a later try", async () => {
     let refuse = true;
@@ -2170,6 +2189,62 @@ describe("video jobs", () => {
     );
     service.close();
   });
+
+  it.each([404, 400])(
+    "settles at the usage the provider last reported when a later status check answers %i",
+    async (httpStatus) => {
+      const { service, calls, spend } = harness({
+        poll: async () =>
+          calls.poll === 1
+            ? { status: "running", usage: { outputTokens: 28_960 } }
+            : {
+                status: "failed",
+                providerFailure: classifyVideoHttpFailure(
+                  new Response(null, { status: httpStatus }),
+                ),
+                httpStatus,
+              },
+      });
+      const queued = await enqueue(service);
+      const done = await service.whenTerminal(queued.id);
+      expect(done).toMatchObject({ status: "failed", settledCostUsdMicros: 347_520 });
+      expect(spend.settle).toHaveBeenCalledOnce();
+      service.close();
+    },
+  );
+
+  it.each([
+    {
+      name: "a status check that answers 409",
+      failure: {
+        providerFailure: classifyVideoHttpFailure(new Response(null, { status: 409 })),
+        httpStatus: 409,
+      },
+    },
+    {
+      name: "the provider's own failure answer",
+      failure: {
+        providerFailure: { category: "provider-failed" as const, message: "The clip failed." },
+      },
+    },
+  ])(
+    "ends a job billed nothing on $name, even after the provider reported usage",
+    async ({ failure }) => {
+      const { service, calls, spend } = harness({
+        poll: async () =>
+          calls.poll === 1
+            ? { status: "running", usage: { outputTokens: 28_960 } }
+            : { status: "failed", ...failure },
+      });
+      const queued = await enqueue(service);
+      const done = await service.whenTerminal(queued.id);
+      expect(done).toMatchObject({ status: "failed", failure: { category: "provider-failed" } });
+      expect(done?.settledCostUsdMicros).toBeUndefined();
+      expect(spend.settle).not.toHaveBeenCalled();
+      expect(spend.abandon).toHaveBeenCalledOnce();
+      service.close();
+    },
+  );
 
   it("ends a job on the provider's own failure answer, billed nothing", async () => {
     const { service, spend } = harness({

@@ -1402,6 +1402,37 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByLabelText("Follow-up message")).toBeEnabled();
   });
 
+  it("keeps the transcript and a streaming reply under the notice when reading the thread again fails", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "a:user", role: "user", text: "Earlier prompt" },
+            { id: "a:assistant", role: "assistant", text: "Earlier reply" },
+            { id: "b:user", role: "user", text: "Add the index" },
+            { id: "b:assistant", role: "assistant", text: "First half", status: "incomplete" },
+          ] as never,
+          conversationHistory: "loaded",
+          turnStatus: "running",
+          turnError: "Conversation history could not be refreshed.",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    for (const text of ["Earlier prompt", "Earlier reply", "Add the index", "First half"]) {
+      expect(screen.getByText(text)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("Send a prompt to begin")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Conversation history could not be refreshed.",
+    );
+    // The view reads the thread again on its own; Retry is for a history
+    // that never loaded.
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
   it("keeps a failed turn's reason out of the callout once the transcript carries it", () => {
     render(
       <CodeThreadWorkspace
@@ -1507,12 +1538,83 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("temporary rate limit");
-    expect(
-      screen.queryByRole("button", { name: "Resume when the limit resets" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("usage-limit-record")).toHaveTextContent("temporary rate limit");
+    expect(screen.queryByRole("button", { name: "Resume at reset" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
+  });
+
+  it("shows a waiting limited stop once in the transcript and once as the strip above the composer", async () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnUsageLimit: {
+            kind: "exhausted",
+            resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+          },
+          latestProviderTurnOperationId: "op-1",
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+
+    await waitFor(() => expect(document.querySelector(".usage-limit-strip")).not.toBeNull());
+    expect(screen.getAllByTestId("usage-limit-record")).toHaveLength(1);
+    expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Resume at reset" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Snooze until reset" })).toBeVisible();
+  });
+
+  it("sends the stopped turn's prompt again from the strip's Resume now", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnUsageLimit: { kind: "temporary" },
+          latestProviderTurnOperationId: "op-1",
+          conversation: [{ id: "m1", role: "user", text: "Fix the build", operationId: "op-1" }],
+          sendFollowUp,
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Resume now" }));
+    const call = sendFollowUp.mock.calls[0] as ReadonlyArray<unknown> | undefined;
+    expect(call?.[0]).toBe("Fix the build");
+    // Sent from outside the composer, so the person's draft is left alone.
+    expect(call?.[13]).toMatchObject({ onAccepted: expect.any(Function) });
+  });
+
+  it("withholds Resume now when the stopped prompt could not be read", async () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          // A reset ahead gives the strip actions to wait for, so the absence
+          // below is read after the lazily loaded buttons have rendered.
+          turnUsageLimit: {
+            kind: "temporary",
+            resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+          },
+          latestProviderTurnOperationId: "op-1",
+          conversation: [
+            {
+              id: "m1",
+              role: "user",
+              text: "Conversation prompt evidence is unavailable.",
+              promptUnavailable: true,
+              operationId: "op-1",
+            },
+          ],
+          sendFollowUp: vi.fn(async () => true),
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Resume at reset" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Resume now" })).toBeNull();
   });
 
   it("keeps the retry control off an ordinary turn error", () => {
@@ -1694,7 +1796,7 @@ describe("CodeThreadWorkspace", () => {
     ).toBeTruthy();
   });
 
-  it("sends the next message on the new account once a usage-limit hand-off released the parked turn", async () => {
+  it("sends the next message on the new account, with no usage-limit strip, once a hand-off released the parked turn", async () => {
     const user = userEvent.setup();
     const stopId = "30000000-0000-4000-8000-0000000000e1";
     const base = controller();
@@ -1703,11 +1805,16 @@ describe("CodeThreadWorkspace", () => {
       turnStatus: "waiting" as const,
       turnError: "The provider's usage window is spent.",
       turnErrorCategory: "failed",
+      turnUsageLimit: {
+        kind: "exhausted" as const,
+        resetsAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      },
       latestProviderTurnOperationId: stopId,
     };
     const { rerender } = render(
       <CodeThreadWorkspace controller={parked as never} threadId={threadId} />,
     );
+    expect(await screen.findByRole("button", { name: "Snooze until reset" })).toBeVisible();
     await user.type(screen.getByLabelText("Follow-up message"), "Carry on");
     expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
 
@@ -1738,6 +1845,8 @@ describe("CodeThreadWorkspace", () => {
     );
     expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    // Recovery would resend the stopped prompt on the account it moved to.
+    expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
   });
 
   it("leaves the model picker enabled on a turn parked by a refused resume", () => {
@@ -2012,8 +2121,12 @@ describe("CodeThreadWorkspace", () => {
     await waitFor(() =>
       expect(screen.getByRole("textbox", { name: /message/i })).toHaveValue("rewrite the parser"),
     );
-    // The way back from the file restore is kept where Undo restore reads it.
-    expect(noteRestoreUndo).toHaveBeenCalledWith(checkpoint);
+    // The way back from the file restore is kept where Undo restore reads it,
+    // bound to the thread and checkout the rewind ran on.
+    expect(noteRestoreUndo).toHaveBeenCalledWith(
+      checkpoint,
+      expect.objectContaining({ threadId, checkoutId: "20000000-0000-4000-8000-000000000002" }),
+    );
   });
 
   it("rewinds only the conversation without asking for an approval", async () => {
@@ -2138,8 +2251,13 @@ describe("CodeThreadWorkspace", () => {
     ];
     // The undo point belongs to the controller, which outlives this surface;
     // opening another tab unmounts the surface exactly like this.
+    const noted = vi.fn();
     function Harness(props: { readonly open: boolean }) {
-      const [restoreUndo, noteRestoreUndo] = useState<unknown>();
+      const [restoreUndo, setRestoreUndo] = useState<unknown>();
+      const noteRestoreUndo = (point: unknown, ranOn?: unknown) => {
+        noted(point, ranOn);
+        setRestoreUndo(point);
+      };
       if (!props.open) return <p>Another tab</p>;
       return (
         <CodeThreadWorkspace
@@ -2157,8 +2275,13 @@ describe("CodeThreadWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Restore files" }));
     await waitFor(() => expect(screen.getByText("Files restored to this point.")).toBeVisible());
     // The host returned what it replaced, so the destructive overwrite is
-    // reachable rather than stranded.
+    // reachable rather than stranded, bound to the thread and checkout the
+    // restore ran on.
     expect(await screen.findByRole("button", { name: "Undo restore" })).toBeVisible();
+    expect(noted).toHaveBeenLastCalledWith(
+      undo,
+      expect.objectContaining({ threadId, checkoutId: "20000000-0000-4000-8000-000000000002" }),
+    );
 
     rerender(<Harness open={false} />);
     expect(screen.queryByRole("button", { name: "Undo restore" })).toBeNull();
@@ -2640,6 +2763,25 @@ describe("CodeThreadWorkspace", () => {
     expect(live).toEqual({ status: "added" });
     expect(putAttachment).toHaveBeenCalledTimes(2);
     expect(screen.getByLabelText("Follow-up message")).toHaveFocus();
+  });
+
+  it("keeps a file dropped on the row waiting until the thread is read, so its image check applies", async () => {
+    const putAttachment = vi.fn();
+    const key = threadImageOfferKey("code", String(anotherThreadId));
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          { putAttachment, discardAttachment: vi.fn(), attachment: vi.fn() } as never
+        }
+        controller={controller({})}
+        threadId={anotherThreadId}
+      />,
+    );
+    // The open thread is another one, so this thread's model is not known yet.
+    await expect(
+      threadImageOffers.offer(key, new File(["png"], "early.png", { type: "image/png" })),
+    ).resolves.toEqual({ status: "waiting" });
+    expect(putAttachment).not.toHaveBeenCalled();
   });
 
   it("answers an offered picture with the composer's refusal when the host takes no attachments", async () => {

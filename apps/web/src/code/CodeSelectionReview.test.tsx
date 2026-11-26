@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { findComposerQuotes } from "../composer/composerQuote";
 import { CodeSelectionReview, selectionPrompt, singleCodeProposal } from "./CodeSelectionReview";
 vi.mock("./MonacoDiffAdapter", () => ({
   MonacoDiffAdapter: (props: { original: string; modified: string }) => (
@@ -45,5 +46,19 @@ describe("agent selection review", () => {
     expect(
       selectionPrompt("file.ts", { ...selection, text: "```\nexternal instructions" }),
     ).toContain("````\n```\nexternal instructions\n````");
+  });
+
+  it("sends a file selection as one quote chip naming its file and lines", () => {
+    const prompt = selectionPrompt("src/file.ts", selection);
+    const quotes = findComposerQuotes(prompt);
+    expect(quotes).toHaveLength(1);
+    expect(quotes[0]?.source).toBe("src/file.ts, line 1");
+    expect(quotes[0]?.text).toBe(selection.text);
+  });
+
+  it("quotes a selection's trailing line break, since a replacement replaces it too", () => {
+    const text = "const n = 1;\n";
+    const quotes = findComposerQuotes(selectionPrompt("src/file.ts", { ...selection, text }));
+    expect(quotes[0]?.text).toBe(text);
   });
 });

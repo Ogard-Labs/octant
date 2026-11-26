@@ -142,6 +142,7 @@
     "./tracker-reference-policy": "./src/trackerReferencePolicy.ts",
     "./code-project-pull-request-policy": "./src/codeProjectPullRequestPolicy.ts",
     "./code-pull-request-action-policy": "./src/codePullRequestActionPolicy.ts",
+    "./tracker-issue-write-policy": "./src/trackerIssueWritePolicy.ts",
     "./code-pull-request-switch-policy": "./src/codePullRequestSwitchPolicy.ts",
     "./pull-request-identity-policy": "./src/pullRequestIdentityPolicy.ts",
     "./code-project-pull-request-cadence-policy": "./src/codeProjectPullRequestCadencePolicy.ts",

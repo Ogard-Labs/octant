@@ -102,6 +102,8 @@ export interface McpConnectionObservation {
   readonly state: "connected" | "connecting" | "failed" | "idle";
   readonly reason?: string;
   readonly at?: string;
+  /** The failure was a server the person added by hand refusing with an OAuth sign-in on offer. */
+  readonly signInOffered?: true;
 }
 
 function pick(
@@ -110,11 +112,22 @@ function pick(
   return { extensionId: String(target.extensionId), componentId: String(target.componentId) };
 }
 
+/** What a sign-in change did to the component's grant, when it knows. */
+export interface McpAuthenticationChange {
+  readonly grant: "unchanged";
+}
+
 /** A component the manager should keep connected, with the server name its mcp.json uses. */
 type AgentPluginMcpSessionTarget = AgentPluginMcpSessionKey & {
   readonly serverNameHint: string;
   /** True for a package the host wrote for a server the person added by hand. */
   readonly userAdded: boolean;
+  /**
+   * Of those, one the person typed in themselves, not a catalog connector or
+   * a local setup the host wrote for them: the catalog says how those sign
+   * in, so a refusal never makes them offer a sign-in of its own.
+   */
+  readonly addedByHand?: true;
   /**
    * The hosts a stdio server may reach through the host's proxy, from the
    * bundled catalog entry the host's own store vouches for. Never read from
@@ -162,6 +175,8 @@ export interface AgentPluginMcpSessionManagerOptions {
    * broker: a third-party package never gets to name a secret.
    */
   readonly isUserAddedSource?: (sourceRef: string) => boolean;
+  /** Whether that package is a server the person typed in, not a catalog connector or local setup. */
+  readonly addedByHandSource?: (sourceRef: string) => boolean;
   /** The catalog's listed hosts for a package the host wrote for a command connector. */
   readonly egressHostsForSource?: (sourceRef: string) => ReadonlyArray<string> | undefined;
   readonly askEveryCallForSource?: (sourceRef: string) => ReadonlyArray<string> | undefined;
@@ -189,6 +204,7 @@ export class AgentPluginMcpSessionManager {
   readonly #recordExternalContentIngestion: AgentPluginMcpSessionManagerOptions["recordExternalContentIngestion"];
   readonly #uuid: () => string;
   readonly #isUserAddedSource: AgentPluginMcpSessionManagerOptions["isUserAddedSource"];
+  readonly #addedByHandSource: AgentPluginMcpSessionManagerOptions["addedByHandSource"];
   readonly #egressHostsForSource: AgentPluginMcpSessionManagerOptions["egressHostsForSource"];
   readonly #askEveryCallForSource: AgentPluginMcpSessionManagerOptions["askEveryCallForSource"];
   readonly #exclusiveForSource: AgentPluginMcpSessionManagerOptions["exclusiveForSource"];
@@ -239,6 +255,7 @@ export class AgentPluginMcpSessionManager {
       readonly target: AgentPluginMcpSessionKey;
       readonly reason: string;
       readonly at: string;
+      readonly signInOffered?: true;
     }
   >();
   readonly #now: () => Date;
@@ -266,6 +283,7 @@ export class AgentPluginMcpSessionManager {
     this.#uuid = options.uuid ?? randomUUID;
     this.#now = options.now ?? (() => new Date());
     this.#isUserAddedSource = options.isUserAddedSource;
+    this.#addedByHandSource = options.addedByHandSource;
     this.#egressHostsForSource = options.egressHostsForSource;
     this.#askEveryCallForSource = options.askEveryCallForSource;
     this.#exclusiveForSource = options.exclusiveForSource;
@@ -302,7 +320,7 @@ export class AgentPluginMcpSessionManager {
       readonly target: AgentPluginMcpSessionKey;
       connecting: boolean;
       connected: boolean;
-      failure?: { readonly reason: string; readonly at: string };
+      failure?: { readonly reason: string; readonly at: string; readonly signInOffered?: true };
     };
     const components = new Map<string, Facts>();
     const entry = (target: AgentPluginMcpSessionKey): Facts => {
@@ -314,9 +332,10 @@ export class AgentPluginMcpSessionManager {
       return created;
     };
     for (const { target } of this.#lastConnected.values()) entry(target);
-    for (const { target, reason, at } of this.#failures.values()) {
+    for (const { target, reason, at, signInOffered } of this.#failures.values()) {
       const known = entry(target);
-      if (known.failure === undefined || known.failure.at < at) known.failure = { reason, at };
+      if (known.failure === undefined || known.failure.at < at)
+        known.failure = { reason, at, ...(signInOffered === undefined ? {} : { signInOffered }) };
     }
     for (const { target } of this.#connections.values()) entry(target).connecting = true;
     for (const record of this.#sessions.values()) entry(record).connected = true;
@@ -333,6 +352,9 @@ export class AgentPluginMcpSessionManager {
           state: "failed",
           reason: known.failure.reason,
           at: known.failure.at,
+          ...(known.failure.signInOffered === undefined
+            ? {}
+            : { signInOffered: known.failure.signInOffered }),
         };
       return { ...pick(known.target), state: known.connected ? "connected" : "idle", ...since };
     });
@@ -652,6 +674,11 @@ export class AgentPluginMcpSessionManager {
           userAdded:
             "sourceRef" in packageState.source &&
             this.#isUserAddedSource?.(packageState.source.sourceRef) === true,
+          ...("sourceRef" in packageState.source &&
+          this.#isUserAddedSource?.(packageState.source.sourceRef) === true &&
+          this.#addedByHandSource?.(packageState.source.sourceRef) === true
+            ? { addedByHand: true as const }
+            : {}),
           ...(egressHosts === undefined || egressHosts.length === 0 ? {} : { egressHosts }),
           ...(askEveryCall === undefined || askEveryCall.length === 0 ? {} : { askEveryCall }),
           ...(sourceRef !== undefined && this.#exclusiveForSource?.(sourceRef) === true
@@ -714,12 +741,29 @@ export class AgentPluginMcpSessionManager {
           target,
           reason: error instanceof Error ? error.message : "MCP connection failed.",
           at: this.#now().toISOString(),
+          // Only a server added by hand carries the host's own sign-in on
+          // connect, so only its refusal is one a sign-in here can answer.
+          ...(target.addedByHand === true &&
+          error instanceof McpHttpStatusError &&
+          error.signInOffered
+            ? { signInOffered: true as const }
+            : {}),
         });
       }
     }
   }
 
-  async invalidateAuthentication(extensionId: string, componentId: string): Promise<void> {
+  /**
+   * `grant: "unchanged"` is a sign-out that found no grant, such as cancelling
+   * a first sign-in. The server's refusal that offered the sign-in still
+   * stands then, so it is kept while it is the newest fact: dropping it made
+   * the thread stop offering Sign in until another turn failed the same way.
+   */
+  async invalidateAuthentication(
+    extensionId: string,
+    componentId: string,
+    change?: McpAuthenticationChange,
+  ): Promise<void> {
     const matches = (target: AgentPluginMcpSessionKey) =>
       target.extensionId === extensionId && target.componentId === componentId;
     const identity = { extensionId, componentId };
@@ -733,8 +777,23 @@ export class AgentPluginMcpSessionManager {
         if (this.#connections.get(key) === connection) this.#connections.delete(key);
       }
     for (const [key, target] of this.#desired) if (matches(target)) this.#desired.delete(key);
+    // Kept only while it is still the component's newest fact, so a cancel
+    // never brings back an older refusal over a later failure or connection.
+    let newest:
+      | { readonly key: string; readonly at: string; readonly offered: boolean }
+      | undefined;
     for (const [key, failure] of this.#failures)
-      if (matches(failure.target)) this.#failures.delete(key);
+      if (matches(failure.target) && (newest === undefined || newest.at < failure.at))
+        newest = { key, at: failure.at, offered: failure.signInOffered === true };
+    const lastConnected = this.#lastConnected.get(authenticationKey(identity))?.at;
+    const kept =
+      change?.grant === "unchanged" &&
+      newest?.offered === true &&
+      (lastConnected === undefined || lastConnected < newest.at)
+        ? newest.key
+        : undefined;
+    for (const [key, failure] of this.#failures)
+      if (matches(failure.target) && key !== kept) this.#failures.delete(key);
     const closing: Promise<void>[] = [];
     for (const [key, record] of this.#sessions)
       if (matches(record)) closing.push(this.#close(key, record));
@@ -776,7 +835,7 @@ export class AgentPluginMcpSessionManager {
    */
   async reconcileLifecycleSnapshot(snapshot: ExtensionSnapshot): Promise<void> {
     const retained = new Set<string>();
-    for (const [key, target] of this.#desired) {
+    const stillEffective = (target: AgentPluginMcpSessionKey) => {
       const packageState = snapshot.packages.find(
         (candidate) =>
           candidate.extensionId === target.extensionId &&
@@ -787,8 +846,9 @@ export class AgentPluginMcpSessionManager {
       const componentState = packageState?.components.find(
         (candidate) => candidate.component.id === target.componentId,
       );
-      if (componentState?.effectiveState.kind === "effective") retained.add(key);
-    }
+      return componentState?.effectiveState.kind === "effective";
+    };
+    for (const [key, target] of this.#desired) if (stillEffective(target)) retained.add(key);
 
     for (const [key, record] of this.#sessions) {
       if (!retained.has(key)) await this.#close(key, record);
@@ -796,9 +856,12 @@ export class AgentPluginMcpSessionManager {
     for (const key of this.#desired.keys()) {
       if (!retained.has(key)) this.#desired.delete(key);
     }
-    for (const key of this.#failures.keys()) {
-      if (!retained.has(key)) this.#failures.delete(key);
-    }
+    // A cancelled first sign-in keeps its refusal without a desired session
+    // (see invalidateAuthentication), so that refusal is judged by its own
+    // package: an unrelated extension change must not hide Sign in.
+    for (const [key, failure] of this.#failures)
+      if (!retained.has(key) && !(failure.signInOffered === true && stillEffective(failure.target)))
+        this.#failures.delete(key);
     const installed = new Set(
       snapshot.packages.flatMap((packageState) =>
         packageState.components.map((componentState) =>

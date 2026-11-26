@@ -41,6 +41,7 @@ import {
   ThreadNavigationPullRequestSummaries,
 } from "./threadBoardPullRequests";
 import { ThreadTouchedIssues } from "./threadTouchedIssues";
+import { LinkedIssueRef, ThreadLinkedIssues } from "./threadLinkedIssues";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -1194,9 +1195,37 @@ export const CodeCommand = Schema.Union(
    * the user's, never inferred from a matching filesystem root: what authority
    * a thread holds only changes because someone asked.
    */
+  /**
+   * Link an issue to the thread, from a reference the person typed:
+   * `#12` (the thread's delivery repository), `owner/repo#12`, or a Linear
+   * identifier such as `ENG-12`. Links live on their own aggregate, so no
+   * thread version is expected.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("link-code-thread-issue"),
+    threadId: CodeThreadId,
+    reference: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unlink-code-thread-issue"),
+    threadId: CodeThreadId,
+    issue: LinkedIssueRef,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("rebind-code-thread-checkout"),
     ...CodeThreadCommandFields,
+  }).annotations(strict),
+  /**
+   * Move a thread off a checkout it shares onto a managed worktree of its own,
+   * copying its uncommitted changes there. The move writes none of the source
+   * checkout's files, so the source keeps those changes; discarding them there
+   * is the person's own later step. Without `branchName` the host names the
+   * branch as it does for a fork.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("move-code-thread-to-worktree"),
+    ...CodeThreadCommandFields,
+    branchName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-access"),
@@ -1697,6 +1726,97 @@ export const CodeThreadCheckoutRebindOutcome = Schema.Union(
 );
 export type CodeThreadCheckoutRebindOutcome = typeof CodeThreadCheckoutRebindOutcome.Type;
 
+/** Why a thread was not moved onto a worktree of its own; each is an expected answer. */
+export const CodeThreadWorktreeMoveRefusal = Schema.Literal(
+  "already-own-worktree",
+  "not-a-repository",
+  "server-project",
+  "plan",
+  "turn-running",
+  "checkout-in-use",
+  "capture-failed",
+  "nested-changes",
+  "apply-failed",
+  "working-folder",
+  "unavailable",
+);
+export type CodeThreadWorktreeMoveRefusal = typeof CodeThreadWorktreeMoveRefusal.Type;
+
+export const CodeThreadWorktreeMoveOutcome = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("moved"),
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity,
+    /** The checkout the thread left, which still holds the copied changes. */
+    fromCheckoutId: CodeCheckoutId,
+    branch: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: CodeThreadWorktreeMoveRefusal,
+    /**
+     * With `nested-changes`: the submodules and nested repositories whose own
+     * changes a copy would leave behind, so nothing is claimed as copied.
+     */
+    paths: Schema.optional(Schema.Array(Schema.String).pipe(Schema.maxItems(50))),
+  }).annotations(strict),
+);
+export type CodeThreadWorktreeMoveOutcome = typeof CodeThreadWorktreeMoveOutcome.Type;
+
+export const CodeThreadMovedToWorktreeResult = Schema.Struct({
+  kind: Schema.Literal("thread-moved-to-worktree"),
+  threadId: CodeThreadId,
+  outcome: CodeThreadWorktreeMoveOutcome,
+}).annotations(strict);
+export type CodeThreadMovedToWorktreeResult = typeof CodeThreadMovedToWorktreeResult.Type;
+
+/**
+ * The record of one move, appended on the thread's own aggregate just before
+ * the `code.thread-updated@1` that carries its new checkout (the thread's
+ * version advances by two, as for other paired thread events). It says where
+ * the thread came from and what was copied, for the audit trail, the "moved"
+ * notice and the next turn's handoff.
+ */
+export const CODE_THREAD_MOVED_TO_WORKTREE = "code.thread-moved-to-worktree@1";
+export const CodeThreadMovedToWorktree = Schema.Struct({
+  kind: Schema.Literal("thread-moved-to-worktree"),
+  threadId: CodeThreadId,
+  fromCheckoutId: CodeCheckoutId,
+  toCheckoutId: CodeCheckoutId,
+  branch: Schema.NonEmptyTrimmedString,
+  sourceHead: GitObjectId,
+  capturedTrees: Schema.Struct({ worktree: GitObjectId, index: GitObjectId }).annotations(strict),
+  movedAt: UtcTimestamp,
+}).annotations(strict);
+export type CodeThreadMovedToWorktree = typeof CodeThreadMovedToWorktree.Type;
+export const decodeCodeThreadMovedToWorktree = Schema.decodeUnknownSync(CodeThreadMovedToWorktree);
+
+/** Why a link or unlink did not change the thread's issues; each is an expected answer. */
+export const CodeThreadIssueLinkRefusal = Schema.Literal(
+  "invalid-reference",
+  "not-found",
+  "too-many",
+  "not-linked",
+  "linear-unavailable",
+);
+export type CodeThreadIssueLinkRefusal = typeof CodeThreadIssueLinkRefusal.Type;
+
+export const CodeThreadIssueLinksResult = Schema.Struct({
+  kind: Schema.Literal("thread-issue-links"),
+  threadId: CodeThreadId,
+  outcome: Schema.Union(
+    Schema.Struct({
+      status: Schema.Literal("linked", "unlinked", "unchanged"),
+      linkedIssues: ThreadLinkedIssues,
+    }).annotations(strict),
+    Schema.Struct({
+      status: Schema.Literal("refused"),
+      reason: CodeThreadIssueLinkRefusal,
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type CodeThreadIssueLinksResult = typeof CodeThreadIssueLinksResult.Type;
+
 /**
  * A refusal here is an expected answer, not a fault: the Project may be
  * unreadable or the thread may already be where it belongs. Carrying it as a
@@ -1761,6 +1881,8 @@ export const CodeCommandResult = Schema.Union(
   CodeWorktreeBranchSuggested,
   CodeWorktreeBranchSuggestionDeclined,
   CodeThreadCheckoutRebound,
+  CodeThreadMovedToWorktreeResult,
+  CodeThreadIssueLinksResult,
   CodeForkContextMerged,
 );
 export type CodeCommandResult = typeof CodeCommandResult.Type;
@@ -1846,6 +1968,8 @@ export const CodeNavigationRuntime = Schema.Struct({
   threadPullRequests: Schema.optional(ThreadNavigationPullRequestSummaries),
   /** The issues the thread's tool calls wrote to, newest first; absent when none. */
   touchedIssues: Schema.optional(ThreadTouchedIssues),
+  /** The issues the thread works on, oldest link first; absent when none. */
+  linkedIssues: Schema.optional(ThreadLinkedIssues),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
 }).annotations(strict);

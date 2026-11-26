@@ -1540,6 +1540,9 @@ describe("pull request readers use the single forge identity owner", () => {
           }),
           enableAutoMerge: async () => ({ status: "enabled" }),
           disableAutoMerge: async () => ({ status: "disabled" }),
+          readCiLogs: async () => ({ status: "unavailable" }),
+          planCiRerun: async () => ({ status: "unavailable" }),
+          rerunCi: async () => ({ status: "unavailable" }),
           observe: async () => ({
             status: "observed",
             state: "open",
@@ -1908,6 +1911,9 @@ exit 1
           }),
           enableAutoMerge: async () => ({ status: "enabled" }),
           disableAutoMerge: async () => ({ status: "disabled" }),
+          readCiLogs: async () => ({ status: "unavailable" }),
+          planCiRerun: async () => ({ status: "unavailable" }),
+          rerunCi: async () => ({ status: "unavailable" }),
           observe: async () => ({
             status: "observed",
             state: "open",

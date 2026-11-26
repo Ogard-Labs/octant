@@ -233,11 +233,13 @@ every `start`; the renderer and the agent decide nothing.
    signed out or down (its check failed, or its last request failed with an
    availability error within 5 minutes), the model is not offered, the account
    is at a usage limit (a failed request's own limit signal, or the host's
-   plan-usage reading of a window the provider flagged exhausted or at 100%,
-   a quota flagged exhausted with no window, or a request or token bucket
-   with nothing left, until its reset; a reached limit whose reading names
-   no reset counts for 5 minutes from the reading's own time, like a down
-   mark; a reading below the limit never filters), the Project's
+   plan-usage reading of an account-scoped window the provider flagged exhausted
+   or at 100%, a quota flagged exhausted with no account-scoped window, or a
+   request or token bucket with nothing left, until its reset; model-scoped
+   readings with independent per-family buckets do not filter unrelated models
+   unless the provider flags the whole account exhausted; a reached limit whose
+   reading names no reset counts for 5 minutes from the reading's own time,
+   like a down mark; a reading below the limit never filters), the Project's
    policy or data rules disallow it, an endpoint Octant runs has not proven its
    tools, or `needsImages` is set and it cannot read images while Sees images
    cannot describe one for this Project. With Sees images able to (a model in

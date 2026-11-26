@@ -10,6 +10,7 @@ export function WorkspaceDropOverlay(props: {
   if (
     destination === null ||
     destination.kind === "composer" ||
+    destination.kind === "sidebar" ||
     String(destination.targetPaneId) !== props.targetPaneId
   ) {
     return null;
@@ -32,11 +33,13 @@ export function WorkspaceDragStatus(props: { readonly drag: WorkspaceSurfaceDrag
   const message =
     destination === null
       ? `Dragging ${props.drag.source.title}. Nothing to drop it on here.`
-      : destination.kind === "composer"
-        ? `Attach ${props.drag.source.title} as context. The draft will not be sent.`
-        : destination.kind === "edge"
-          ? `Split ${destination.edge} and open ${props.drag.source.title}.`
-          : `Open ${props.drag.source.title} in this pane.`;
+      : destination.kind === "sidebar"
+        ? `${destination.label} ${props.drag.source.title}.`
+        : destination.kind === "composer"
+          ? `Attach ${props.drag.source.title} as context. The draft will not be sent.`
+          : destination.kind === "edge"
+            ? `Split ${destination.edge} and open ${props.drag.source.title}.`
+            : `Open ${props.drag.source.title} in this pane.`;
   return (
     <>
       <div aria-live="polite" className="sr-only" role="status">
@@ -52,6 +55,10 @@ export function WorkspaceDragStatus(props: { readonly drag: WorkspaceSurfaceDrag
           } as CSSProperties
         }
       >
+        {/* Over the sidebar the dragged row says what letting go does. */}
+        {destination?.kind === "sidebar" ? (
+          <strong className="workspace-drag-preview__action">{destination.label}</strong>
+        ) : null}
         {props.drag.source.title}
       </div>
     </>

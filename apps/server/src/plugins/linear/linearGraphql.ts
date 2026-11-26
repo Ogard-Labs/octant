@@ -23,14 +23,22 @@ export async function requestLinearCredential(hostPort: IntegrationHostPort): Pr
       readonly kind: "granted";
       readonly reference: string;
       readonly source: "oauth" | "personal-api-key";
+      /** What Linear granted the OAuth token; absent for a personal key. */
+      readonly scopes?: ReadonlyArray<string>;
     }
   | { readonly kind: "unauthorized"; readonly reconnect: boolean }
   | { readonly kind: "unavailable" }
 > {
   const oauth = await hostPort.requestCredential("oauth");
   if (oauth.kind === "refused") return { kind: "unauthorized", reconnect: true };
-  if (oauth.kind === "granted")
-    return { kind: "granted", reference: oauth.reference, source: "oauth" };
+  if (oauth.kind === "granted") {
+    return {
+      kind: "granted",
+      reference: oauth.reference,
+      source: "oauth",
+      ...(oauth.scopes === undefined ? {} : { scopes: oauth.scopes }),
+    };
+  }
   const personal = await hostPort.requestCredential("personal-api-key");
   if (personal.kind === "granted") {
     return { kind: "granted", reference: personal.reference, source: "personal-api-key" };

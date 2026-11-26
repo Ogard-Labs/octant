@@ -38,7 +38,6 @@ import type {
 } from "@octant/contracts/previews";
 import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
-import { quoteChipLabel, type TranscriptQuoteChip } from "./quoteSelection";
 import type { ImageGenerationProfileView, ImageGenerationScopeId } from "@octant/contracts";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
@@ -117,6 +116,8 @@ const MODEL_OPTION_DEFAULT_ID = "(provider default)";
 export interface ChatComposerProps {
   /** The draft this composer holds (see `threadDraftScope`). */
   readonly typedScope?: string | undefined;
+  /** This thread's sent prompts, newest first, for ArrowUp recall. */
+  readonly recall?: ReadonlyArray<string> | undefined;
   readonly stash?: ComposerStashBinding | undefined;
   readonly readOnly?: boolean;
   readonly benchmarkProjectId?: ProjectId | undefined;
@@ -131,7 +132,11 @@ export interface ChatComposerProps {
   readonly model: ChatComposerSelection;
   readonly onDraftChange: (draft: string, caretIndex?: number) => void;
   /** Receives the browser-selected File only; file paths are not accepted or exposed. */
-  readonly onFileSelected: (file: File) => void;
+  /**
+   * Takes a chosen, dropped or pasted file. It may answer, once it knows, the
+   * reason the file was not attached, or undefined when it was.
+   */
+  readonly onFileSelected: (file: File) => void | Promise<string | undefined>;
   readonly onModelChange: (modelId: string) => void;
   readonly onProviderChange: (providerId: string) => void;
   readonly onResearchEnabledChange: (enabled: boolean) => void;
@@ -189,12 +194,6 @@ export interface ChatComposerProps {
   readonly onRemovePreviewSelection?: (selectionId: PreviewContextSelectionId) => void;
   readonly pendingCanvasSelections?: ReadonlyArray<CanvasContextSelection>;
   readonly onRemoveCanvasSelection?: (selectionId: CanvasContextSelectionId) => void;
-  /**
-   * Excerpts quoted from finished assistant turns. Renderer-local chips that
-   * fold into the outgoing message with attribution at send time.
-   */
-  readonly pendingQuotes?: ReadonlyArray<TranscriptQuoteChip>;
-  readonly onRemoveQuote?: (quoteId: string) => void;
   readonly pendingExtensionSelections?: ReadonlyArray<ChatComposerExtensionSelection>;
   readonly onRemoveExtensionSelection?: (reference: string) => void;
   readonly threadMentions?: ChatComposerThreadMentions;
@@ -300,10 +299,9 @@ export function ChatComposer(props: ChatComposerProps) {
   const commandOpen = offeredCommands.length > 0 && commandToken !== undefined;
   const activeCommand = commandOpen ? commandMatches[activeCommandIndex] : undefined;
   const trimmedDraft = props.draft.trim();
-  const hasQuoteChips = (props.pendingQuotes ?? []).length > 0;
   const baseSendDisabledReason =
     props.sendDisabledReason ??
-    (trimmedDraft.length === 0 && !hasQuoteChips ? "Enter a message before sending." : undefined);
+    (trimmedDraft.length === 0 ? "Enter a message before sending." : undefined);
   const [sendPending, setSendPending] = useState(false);
   const compacting = useComposerCompacting();
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
@@ -609,29 +607,6 @@ export function ChatComposer(props: ChatComposerProps) {
           ))}
         </ul>
       ) : null}
-      {(props.pendingQuotes ?? []).length > 0 ? (
-        <ul aria-label="Quoted replies" className="composer-chips chat-composer__selections">
-          {(props.pendingQuotes ?? []).map((quote) => {
-            const label = quoteChipLabel(quote.text);
-            return (
-              <li key={quote.id} className="chip chat-composer__selection">
-                <span>Quote · {label}</span>
-                {props.onRemoveQuote === undefined ? null : (
-                  <OctantButton
-                    aria-label={`Remove quote ${label}`}
-                    className="chip-x window-no-drag"
-                    onClick={() => props.onRemoveQuote?.(quote.id)}
-                    type="button"
-                    variant="bare"
-                  >
-                    <X aria-hidden="true" size={12} />
-                  </OctantButton>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
       {(props.pendingExtensionSelections ?? []).length > 0 ? (
         <ul aria-label="Selected extensions" className="composer-chips chat-composer__selections">
           {(props.pendingExtensionSelections ?? []).map((item) => (
@@ -663,6 +638,16 @@ export function ChatComposer(props: ChatComposerProps) {
   const input = (
     <ComposerInput
       typedScope={props.typedScope}
+      recall={props.recall}
+      // A large paste attaches even while another upload runs; uploads queue.
+      onPasteAsFile={
+        props.readOnly === true
+          ? undefined
+          : (file: File) => {
+              const answer = props.onFileSelected(file);
+              return answer instanceof Promise ? answer : undefined;
+            }
+      }
       inlineChips={mention.inlineChips}
       renderModelChip={atMenu.renderModelChip}
       aria-activedescendant={

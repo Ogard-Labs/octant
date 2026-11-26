@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
+  THREAD_LINKED_ISSUES_AGGREGATE,
   THREAD_RETENTION_EVENT_NAMES,
 } from "@octant/contracts";
 import { MachineChangeFeed } from "./machineChangeFeed";
@@ -289,6 +290,21 @@ describe("MachineChangeFeed", () => {
         },
       });
     }
+    controller.abort();
+  });
+
+  it("invalidates the Code navigation when a person links or unlinks a thread's issue", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+    feed.publishCommitted({
+      events: [
+        { aggregateType: THREAD_LINKED_ISSUES_AGGREGATE, eventName: "thread.issue-linked@1" },
+      ],
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { sequence: 1, topics: ["code-navigation"] },
+    });
     controller.abort();
   });
 

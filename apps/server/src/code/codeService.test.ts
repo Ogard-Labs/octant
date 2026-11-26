@@ -1,3 +1,5 @@
+import { UsageLimitDefaults } from "../usage/usageLimitDefaults";
+import { usageLimitDefaultCommands } from "../usage/usageLimitDefaultCommands";
 import {
   CodeNavigation,
   CodeNavigationRuntime,
@@ -2294,6 +2296,39 @@ describe("CodeService commands", () => {
       failure: { category: "invalid" },
     });
     expect(elsewhere.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("creating a thread from an issue links it", async () => {
+    const link = vi.fn(() => ({ status: "linked" as const, linkedIssues: [] }));
+    const fixture = serviceFixture({
+      threads: [],
+      project: rememberedFullAccessProject,
+      issueContext: {
+        prepare: vi.fn(async () => ({ status: "ready", framed: {} }) as never),
+        bindCreatedThread: vi.fn(() => ({ kind: "recorded" }) as never),
+        peekFramedForFirstTurn: vi.fn(),
+        consumeFramedForFirstTurn: vi.fn(),
+        takeFramedForFirstTurn: vi.fn(),
+      },
+      linkedIssues: {
+        list: () => [],
+        link,
+        unlink: vi.fn(),
+        resolveLinear: vi.fn(),
+      },
+    });
+
+    await fixture.service.execute(ids.window, {
+      kind: "create-code-thread",
+      thread: thread({ executionPolicy: "approval-gated" }),
+      issueContext: { owner: "octant", name: "octant", number: 7 },
+    } as never);
+
+    expect(link).toHaveBeenCalledWith(
+      String(ids.thread),
+      { forge: "github", owner: "octant", repository: "octant", number: 7 },
+      "created-from",
+    );
   });
 
   it("refuses a thread that starts from both an issue and a terminal session", async () => {
@@ -6942,6 +6977,8 @@ function serviceFixture(
     readonly content?: CodeContentStoreOptions;
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
     readonly touchedIssues?: CodeServiceOptions["touchedIssues"];
+    readonly linkedIssues?: CodeServiceOptions["linkedIssues"];
+    readonly issueContext?: CodeServiceOptions["issueContext"];
     readonly readLatestFinishedReceipt?: CodeServiceOptions["readLatestFinishedReceipt"];
     readonly putAwayWhenDone?: CodeServiceOptions["putAwayWhenDone"];
     readonly unfinishedWork?: CodeServiceOptions["unfinishedWork"];
@@ -7091,6 +7128,8 @@ function serviceFixture(
       : { serverGitHistory: options.serverGitHistory }),
     ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
     ...(options.touchedIssues === undefined ? {} : { touchedIssues: options.touchedIssues }),
+    ...(options.linkedIssues === undefined ? {} : { linkedIssues: options.linkedIssues }),
+    ...(options.issueContext === undefined ? {} : { issueContext: options.issueContext }),
     ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
     ...(options.awaitsHarnessApproval === undefined
       ? {}
@@ -7906,6 +7945,56 @@ describe("scheduling a Code thread's usage-limit resume", () => {
         expectedVersion: 1,
         events: [
           expect.objectContaining({ eventName: "usage-resume.scheduled@1" }),
+          expect.objectContaining({ eventName: "code.thread-updated@1" }),
+        ],
+      }),
+    );
+  });
+
+  it("arms the default resume at reset as the host, through the ordinary command", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      events: [waitingLimitEnvelope()],
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+    const defaults = new UsageLimitDefaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: false }),
+      personSent: () => true,
+      providerInstanceOf: () => "provider",
+      refusesHostContinuations: () => false,
+      leftToAccountHandoff: () => false,
+      clock: () => new Date(Date.parse(resetsAt) - 60 * 60_000),
+      ...usageLimitDefaultCommands({
+        hostScope: ROUTINE_HOST_SCOPE_ID,
+        readVersion: () => 1,
+        chat: { execute: async () => undefined },
+        work: { execute: async () => undefined },
+        code: {
+          execute: (windowId, input, signal, context) =>
+            fixture.service.execute(windowId, input, signal, context),
+        },
+      }),
+    });
+
+    const armed = await defaults.arm({
+      mode: "code",
+      threadId: String(ids.thread),
+      turnId: operationId,
+      usageLimit: { kind: "exhausted", resetsAt: resetsAt as never },
+    });
+
+    expect(armed).toEqual({ resumed: true, snoozed: false });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({
+            eventName: "usage-resume.scheduled@1",
+            actor: expect.objectContaining({ kind: "system" }),
+            payload: {
+              resume: expect.objectContaining({ turnId: operationId, origin: "default" }),
+            },
+          }),
           expect.objectContaining({ eventName: "code.thread-updated@1" }),
         ],
       }),

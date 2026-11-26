@@ -244,6 +244,12 @@ export function threadsToolOperations(input: {
    */
   readonly coordinatorLevel?: string;
   readonly profileAllowsStart?: boolean;
+  /**
+   * Whether the host would let this turn ask to move its own thread into a
+   * worktree: a turn a person attends, on a checkout the thread shares with
+   * its Project. The person is asked every time, at every level.
+   */
+  readonly worktreeMoveOffered?: boolean;
 }): ReadonlyArray<ThreadsToolOperation> {
   if (input.mode !== "work" && input.mode !== "code") return [];
   const operations: ThreadsToolOperation[] = [];
@@ -262,6 +268,14 @@ export function threadsToolOperations(input: {
     input.profileAllowsStart === true
   ) {
     operations.push("start");
+  }
+  if (
+    input.mode === "code" &&
+    input.worktreeMoveOffered === true &&
+    input.posture !== "plan" &&
+    input.profileAllowsRead
+  ) {
+    operations.push("move-to-worktree");
   }
   return operations.length === 0 ? [] : ["help", ...operations];
 }

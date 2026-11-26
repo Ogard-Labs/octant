@@ -772,6 +772,37 @@ composer in Chat, Work and Code; a Work task marked Done shows its Done banner
 instead. A row's hover slot offers **Settle**, or **Un-settle** once the row
 has settled, in place of Archive, which stays in the row menu.
 
+**Dragging a row within the sidebar** (maintainer decision, 2026-11-26) uses the
+same pointer drag as a drop on a pane. Dropped on the **Pinned** group a Code
+row is pinned; on the **Settled** shelf a row is settled. Dragged out of the
+Pinned group, the Settled shelf or the Snoozed shelf, onto anywhere else in the
+list, a row is unpinned, un-settled or woken. Snoozed is never a target,
+because a snooze needs a time; the row menu and the palette keep it. While the
+row is over a target, that group or shelf takes the pane drop's wash and the
+dragged label leads with what letting go does ("Pin", "Unpin", "Settle",
+"Un-settle", "Wake"); a list that shows no Pinned group (the Project tree, or
+Status with nothing pinned) or no Settled shelf draws a slot for it while a row
+is dragged. Each drop sends the mode's ordinary command through the row menu's
+own handler, so the host decides and a refusal shows its sentence. Every drop
+has the row menu's item as its keyboard path, and the drag has no animation of
+its own to still under reduced motion.
+
+**Undo** (maintainer decision, 2026-11-26). Every sidebar state change the host
+accepts offers **Undo** in a notice for five seconds: pin, unpin, Settle, Mark
+done, Un-settle or Reopen, snooze and wake, whether it came from the row menu,
+a drag or the palette. Undo is a new person command, never a rewrite: it sends
+the inverse command (Un-settle for a Settle or Mark done; Mark done again for a
+reopened thread that was marked Done; Wake for a snooze), and the host may
+refuse it like any other, its sentence then showing. Mark done on a thread that
+was already settled is undone by Reopen and then Settle, since Reopen also
+clears the settlement; a refused Reopen stops there. Undoing a wake snoozes the
+thread again only while its old wake time is still ahead; otherwise the thread
+stays awake and the notice says so. A newer change replaces the notice.
+Archive has no Undo, because no command takes it back. While the notice shows,
+⌘Z (Ctrl+Z off Apple platforms) runs it, but only with focus outside a text
+field, an editor and a terminal, which keep the chord as their own undo; it is
+not a remappable binding.
+
 **Settled** is the only name people see for this state, beside the board's
 Done: the sidebar group, the row-menu actions (**Settle**, **Un-settle**), the
 Review page action, the Settings rows and the host's refusal sentences all use
@@ -1006,6 +1037,21 @@ composer the Code threads of the window's lead Project, exactly as in a
 window that shows only that Project. Image and file drops, and dropping a thread on a pane rather
 than its composer, stay pane and attachment behaviour.
 
+**Files dropped on a row.** Files dragged from the computer onto a Chat, Work
+or Code thread row open that thread the way a click does, and the files go to
+its composer once it is open, through the composer's own attach path, so every
+limit, model check and message a drop on the composer has applies. Until the
+composer opens they wait in this window's memory only (a reload drops them, as
+a draft keeps no attachments), at most eight for a thread; past that the
+person is told to drop the rest on the composer. A composer that is asking the
+host whether Sees images can describe a picture takes the waiting files once
+it has the answer, so a picture is not refused on the model picker's word
+alone. A Chat composer holds at most one message's attachments (16) and says so
+for each file past that, however the files arrive. When a drop of several
+files has some refused, the window's notice names each refused file and its
+reason, since the composer's own warning clears when it takes the next file.
+A drag that carries no files passes over the row.
+
 ### Find in a thread, and a new thread from a selection
 
 ⌘/Ctrl+F in an open Chat, Work, or Code thread opens a find bar pinned to the
@@ -1032,12 +1078,15 @@ row in addition to the ordinary viewport. This trades incremental first-search
 latency for responsive input and bounded mounted content in long histories.
 
 In a Work or Code thread, selecting text inside one assistant reply offers
-"New thread from selection" as a small action under the reply and in the
-reply's right-click menu. It opens the new-thread draft in the same Project and
+"Add to chat" and "New thread from selection" as small actions under the reply
+and in the reply's right-click menu. Add to chat puts the selection in this
+thread's composer as a quote chip, as Chat's Add to chat does
+([Thread view](thread-view.md#quotes-recalled-prompts-and-large-pastes)).
+New thread from selection opens the new-thread draft in the same Project and
 mode with the selection prefilled as a Markdown block quote. It is a draft
 only: nothing is sent until the person sends it, and the new thread has exactly
 the authority a new thread in that Project has. A Project that is archived or
-unknown opens nothing. Chat keeps its own "Add to chat" quote chips.
+unknown opens nothing.
 
 ## File editing
 
@@ -1153,7 +1202,8 @@ but cannot save it. Nothing runs a language-server command or writes without the
 ordinary authoritative file-save route.
 
 Send selection to agent quotes the exact selected text, path and line range in
-the current conversation draft; only the person sends it. The editor retains
+the current conversation draft as a quote chip, followed by the request for one
+replacement block; only the person sends it. The editor retains
 that selection's complete draft baseline. The person may load the latest
 completed same-thread/same-checkout agent reply when it contains exactly one
 fenced code block, or paste a proposed replacement. Preview replacement shows a
@@ -2551,7 +2601,8 @@ GitHub tab attaches only `{ owner, name, number }` to the draft. At creation the
 reauthorizes `issues-read`, frames redacted issue text as external content,
 and journals that ingestion
 ([details](host-reads-and-commands.md#github-issues)). Refusal fails creation visibly. The
-resulting thread is ordinary Chat, Work, or Code with no GitHub write-back.
+resulting thread is ordinary Chat, Work, or Code; a Code thread is also linked to the issue
+(see [Linked issues](#linked-issues-kept-current) below).
 Disabled GitHub, missing capability, and unauthorized or rate-limited states
 fail closed. See
 [security/github-repository-onboarding-threat-model.md](../security/github-repository-onboarding-threat-model.md).
@@ -2597,7 +2648,83 @@ Selecting a row attaches only `{ id }`. At creation the server reauthorizes
 through the Integration port, frames redacted issue text
 (`identifier`, status, description, comments, links) as external content and
 journals that ingestion ([details](host-reads-and-commands.md#linear-issues)).
-Refusal fails creation visibly. No Linear write-back path exists.
+Refusal fails creation visibly. A Code thread made this way is linked to the issue.
+
+<a id="linked-issues-kept-current"></a>
+**Linked issues kept current.** A Code thread works on up to ten linked
+issues: the one it was created from (`created-from`) and any the person links
+from the environment's **Link an issue…** row (`#12` in the delivery
+repository, `owner/repo#12`, or a Linear identifier such as `ENG-12`, which
+the host resolves through the Linear plugin). The row opens a lazily loaded
+dialog that lists the links with **Unlink**. Links are journaled as
+`thread.issue-linked@1` and `thread.issue-unlinked@1` on their own
+`thread-linked-issues` aggregate; only a person may change them, at a window
+on the host or on a device they paired (a device only the hub introduced is
+refused, since a link decides what the host's tracker accounts may write).
+A change refreshes the Code navigation, so an open dialog shows it at once.
+
+Each Code Project's Pull requests settings menu has two switches, both off by
+default and set only by the host's own person. Project Overview shows them
+too, for a Project the Pull requests menu does not list (one working on
+Linear issues with no GitHub repository):
+
+- **Keep linked issues up to date.** The host moves each linked issue forward:
+  In Progress when a person asks the thread for a turn (a wake, a routine or
+  an approved plan's continuation is the host's own and moves nothing), In
+  Review when the thread's agent opens its pull request (or when the host
+  first sees it open), and Done with the comment "Merged in `<url>`." once
+  its merge is observed, in the journal or in the pull-request refresh cache,
+  which sees a merge made outside Octant first. Linear states are chosen from the
+  team's own states (the `started` state named In Progress, else the first by
+  position; a `started` state whose name says review, else the move is
+  skipped; the `completed` state named Done, else the first). GitHub has only
+  open and closed, so In Progress and In Review are skipped and Done closes the
+  issue as completed; an issue already closed counts as Done. The host never
+  moves an issue backwards, writes each moment once per thread and issue, and
+  writes one thread's moments one at a time. A refused or failed moment is
+  tried again only at the thread's next trigger (a turn the person asks for,
+  or a pull request the thread opens), never on every pass. Done is written
+  only for an issue whose In Review the host recorded, that is, the switch
+  was on while the pull request was open, so turning the switch on does not
+  close the issues of threads that merged before, which a person may have
+  reopened, even after a follow-up turn records In Progress. The cost: a
+  pull request opened and merged outside Octant between two passes (about
+  two minutes apart) was never seen open, so its issues are left as they
+  are. Every attempt is journaled as
+  `tracker.issue-write-recorded@1`, with a comment's SHA-256 digest, never its
+  text. A refused write (a Linear connection that may only read, a GitHub
+  login without triage access) adds one line naming the remedy to the thread's
+  Pull request updates follow-up; while a follow-up the person set is open,
+  the line waits and is added after they finish it. GitHub writes need Octant's GitHub
+  integration on as well as the `gh` login.
+  Not built: per-moment Linear state overrides in Project settings (the
+  team's own states are always used), and a **Reconnect** button beside the
+  switch when the Linear connection may only read (the refused write's
+  follow-up line names the remedy instead).
+- **Agents may update linked issues.** The agent's `set-state` and `comment`
+  operations ([agent tools](agent-tools.md)) skip the ask below Full access on
+  a thread that has read no outside content, as Agents may comment on pull
+  requests does for pull requests. A comment that still asks must fit the
+  approval, which shows it whole (about 1.9 KB); otherwise it is refused
+  before the ask with `comment-too-long-to-approve`. Without an ask a comment
+  may be 4 KB: it posts under the person's name with nobody reading it first,
+  so it is bounded as the tool's own input is, and a longer report belongs in
+  the pull request. Only a window on the host or a device the person paired
+  may allow an ask, and an allowed write is refused if the person unlinked
+  the issue while the ask waited. The Linear plugin's two write operations
+  are the host's alone: the integration route refuses them from every
+  client, so no window or device reaches an issue past these checks.
+
+A pull request a linked thread opens through its tool carries `Fixes #N`
+(or `Fixes owner/repo#N`, or `Fixes ENG-12`) for each linked issue its body
+does not already name. Once it is open, the thread's Pull request updates
+follow-up offers **Merge when ready…** once per pull request while the host
+runs, never in place of an Auto-fix line for the same pull request, and never
+over a follow-up the person set by hand (the offer waits until they finish
+it), which the person confirms; the host
+reads the head at that moment (from GitHub when no detail is cached yet) and
+turns on GitHub's own auto-merge. Nothing
+here merges, and Merge when ready stays the person's act.
 
 Composer `Create from…` also has a Terminal tab in a Work or Code draft with a
 Project, for a local window. It lists the newest Claude Code and Codex sessions
@@ -3799,8 +3926,14 @@ unreadable checkout. The items of a
 while the section is open, hold only New task in this Project.
 
 The rows above the section are themselves the actions their facts describe.
-The **Branch row** opens a menu (Branch) with Switch branch…, New task on
-another branch…, and Worktrees. Switch branch… appears only while the host
+The **Branch row** opens a menu (Branch) with Switch branch…, Move to a new
+worktree…, New task on another branch…, and Worktrees. Move to a new
+worktree… appears only for a thread on the checkout it shares with its
+Project, greyed with the reason while a turn runs or under Plan; its dialog
+(loaded when opened) takes an optional branch name, says the uncommitted
+changes are copied and the Project's folder keeps them, and after the move
+names the new branch and repeats that the source still has the changes
+([Architecture: moving a thread into its own worktree](../architecture.md#modes-chat-work-and-code)). Switch branch… appears only while the host
 reports a readable local Git checkout — a remote root or a plain folder has
 no local HEAD to move, and neither gets it — and waits, greyed with the
 reason, while a turn runs: switching under a running turn would move the

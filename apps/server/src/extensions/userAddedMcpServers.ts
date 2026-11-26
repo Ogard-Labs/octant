@@ -306,6 +306,19 @@ export class UserAddedMcpServerStore {
   }
 
   /**
+   * Whether that package is a server the person typed in themselves, not a
+   * catalog connector (a reserved `connector-<id>` folder) or a local setup.
+   */
+  addedByHand(sourceRef: string): boolean {
+    const registered = this.#registry.get(sourceRef);
+    return (
+      registered !== undefined &&
+      !basename(registered.absolutePath).startsWith(CONNECTOR_PACKAGE_PREFIX) &&
+      this.localSetupId(sourceRef) === undefined
+    );
+  }
+
+  /**
    * The hosts a package may reach, from the bundled catalog entry whose
    * reserved `connector-<id>` folder this host wrote. The package never names
    * its own: a third-party package or a hand-added server cannot hold that

@@ -51,8 +51,18 @@ import {
   draftThreadModePresentation,
   findPickerModel,
   type CreateHostViewScope,
+  type ModelPickerSelection,
   type PickerGroup,
 } from "@octant/domain";
+import { lazyOr } from "../../lib/lazyOr";
+import {
+  MAX_FAN_OUT_MODELS,
+  startEachModel,
+  toggleFanOutModel,
+  type CodeDraftStartOutcome,
+  type CodeFanOutResult,
+} from "./codeFanOut";
+import type { CodeStartResultsProps } from "./CodeStartResults";
 import {
   branchNameTaken,
   deriveDeliveryBranch,
@@ -241,6 +251,12 @@ export interface CodeComposerAdapterProps {
   /** Optional multi-model pool control slot rendered in the composer bar. */
   readonly poolControl?: ReactNode;
   /**
+   * The create path honours `stay` and `providerSelection`: it can start a
+   * thread without opening it, on the model a start names. Only then does
+   * this composer offer ⌘↩ (start and stay) and Shift-click for several models.
+   */
+  readonly startsInBackground?: boolean;
+  /**
    * The selected Code Project's remembered habit for how new threads start. It only
    * preselects the Workspace control: choosing differently here overrides one thread
    * and never rewrites the Project setting.
@@ -311,11 +327,24 @@ export interface CodeComposerSubmitInput {
   };
   readonly images?: ReadonlyArray<File>;
   readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
+  /**
+   * The Create from source. A start that stays on the draft names the one it
+   * was submitted with here, since the draft's own is cleared for the next
+   * task; any other start takes the draft's current one.
+   */
   readonly issueContext?: GithubIssueContextRequest;
   readonly linearIssueContext?: LinearIssueContextRequest;
   readonly terminalSession?: TerminalSessionImportRequest;
   /** Local draft identity used only to anchor a native approval view. */
   readonly presentation?: { readonly composerId: string };
+  /**
+   * Start the thread and stay on this draft (⌘↩, or a start on several
+   * models): the window does not open the new thread, and what the start
+   * reached is reported here rather than on the draft.
+   */
+  readonly stay?: { readonly report: (outcome: CodeDraftStartOutcome) => void };
+  /** This one thread's provider and model, when one prompt starts on several. */
+  readonly providerSelection?: ModelPickerSelection;
 }
 
 /**
@@ -324,6 +353,20 @@ export interface CodeComposerSubmitInput {
  * have.
  */
 const LAST_RESORT_BASE_BRANCH = "development";
+const LazyCodeStartResults = lazyOr<CodeStartResultsProps>(
+  async () => (await import("./CodeStartResults")).CodeStartResults,
+  ({ results, label }) => (
+    <>
+      {results
+        .map((result) =>
+          result.outcome.status === "started"
+            ? `${label(result)}: started.`
+            : `${label(result)}: ${result.outcome.reason}`,
+        )
+        .join(" ")}
+    </>
+  ),
+);
 const WorktreeLaunchProgress = lazy(() =>
   import("../WorktreeLaunchProgress").then(({ WorktreeLaunchProgress }) => ({
     default: WorktreeLaunchProgress,
@@ -339,6 +382,20 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     [props.providerGroups, isServer],
   );
   const [draftPrompt, setPrompt] = useNewTaskPrompt();
+  // A start the composer stays on settles later, against the draft as it is then.
+  const latestDraftPrompt = useRef(draftPrompt);
+  latestDraftPrompt.current = draftPrompt;
+  const latestStashSource = useRef(props.stashSource);
+  latestStashSource.current = props.stashSource;
+  // New thread remounts this composer on the same draft scope; a start from
+  // the composer that was replaced must not write its source into the new one.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const typedScope = useNewTaskTypedScope();
   const prompt = props.fixedPrompt ?? draftPrompt;
   const drafts = useContext(NewTaskDraftsContext);
@@ -492,11 +549,19 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique
   // `octant/<short-id>` default once from a stable short id.
-  const [shortId] = useState(() =>
+  const newShortId = () =>
     typeof crypto !== "undefined" && crypto.randomUUID !== undefined
       ? crypto.randomUUID().slice(0, 8)
-      : "new",
-  );
+      : "new";
+  // A start the composer stays on takes this id's name, so the next draft
+  // gets a fresh one.
+  const [shortId, setShortId] = useState(newShortId);
+  // Branches handed to starts this composer stayed on that the host may not
+  // list yet: the next draft's name must not reuse one.
+  const [branchesInFlight, setBranchesInFlight] = useState<ReadonlyArray<string>>([]);
+  // Starts this composer stays on run one after another, so one start's
+  // refusal is never read as another's.
+  const stayStarts = useRef<Promise<void>>(Promise.resolve());
   // Unknown until the host says. Neither caller supplies a branch for a
   // Project-bound composer, so seeding a literal here meant the tray asserted
   // `development` for every repository, including the ones on `main`.
@@ -612,6 +677,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // A send refused before the host saw it explains itself beside the composer,
   // since no thread exists to carry a reason.
   const [sendNotice, setSendNotice] = useState<string>();
+  // The models besides the chosen one that a Shift-click in the picker added:
+  // one prompt then starts a thread on each, each in a new worktree.
+  const [fanOutModels, setFanOutModels] = useState<ReadonlyArray<ModelPickerSelection>>([]);
+  // What the starts this composer stayed on reached, until the person dismisses it.
+  const [startResults, setStartResults] = useState<ReadonlyArray<CodeFanOutResult>>([]);
   // A notice about the Project no longer applies once another is chosen.
   useEffect(() => setSendNotice(undefined), [props.projectId]);
   // Whether the chosen model is one the server runs. Neither this nor the
@@ -832,8 +902,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       ...(branchNames !== undefined && branchNames.forProject === projectId
         ? branchNames.names
         : []),
+      ...branchesInFlight,
     ],
-    [worktreeRefs, branchNames, projectId],
+    [worktreeRefs, branchNames, projectId, branchesInFlight],
   );
   // Words from the prompt are used only once every taken name is known: with a
   // name list that is missing or cut short the id name is the one that fails closed.
@@ -993,81 +1064,215 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const latestQuestion = useRef(currentQuestion);
   latestQuestion.current = currentQuestion;
 
-  const submit = useCallback(() => {
-    if (!canSubmit) return;
-    const typedClaim = typedClaimFor(typedScope, trimmed);
-    // A Code thread belongs to a Project, so the first turn cannot start until
-    // one is chosen. Send stays live and says so: a Send greyed out for this
-    // alone left people guessing why nothing happened.
-    if (props.projectId === undefined) {
-      setSendNotice("Choose a Project first. A Code task works in a folder.");
-      return;
-    }
-    const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
-      receipt.selection === undefined ? [] : [receipt.selection],
-    );
-    setSendNotice(undefined);
-    setSubmitting(true);
-    const staged = images.filesForSend();
-    void threadMentions
-      .resolveForSend()
-      .then(async (threadMentionIds) => {
-        const created = await props.onCreateThread({
-          prompt: trimmed,
-          ...typedClaim,
-          modelOptionValues,
-          ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
-          executionPolicy,
-          // Nothing about a thread on a server is remembered for the Project.
-          permissionPersistence: isServer ? "current-session" : permissionPersistence,
-          ...(autoApprove ? { autoApprove: true } : {}),
-          deliveryTarget: {
-            branchIntent: worktreeBranch,
-            remoteName: resolvedWorktreeRemote,
-            proposedBaseRepository: baseRepository,
-            proposedBaseBranch: submittedBaseBranch,
-            outcomeKind,
-          },
-          ...(resolvedBaseBranch === undefined ? { baseBranchAssumed: true as const } : {}),
-          workspace,
-          worktreeSource: {
-            startFromOrigin,
-            remoteName: resolvedWorktreeRemote,
-          },
-          presentation: { composerId: composerIdRef.current },
-          ...(staged.length === 0 ? {} : { images: staged }),
-          ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
-        });
-        if (created !== false) images.clearAfterAccepted();
-        // A refused creation may be because the name was taken meanwhile; the
-        // names are read again so the name shown is the one that would be tried.
-        else loadBranchNames();
-        return created;
-      })
-      .finally(() => {
-        setSubmitting(false);
+  const primaryModel: ModelPickerSelection | undefined =
+    props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+      ? undefined
+      : { providerInstanceId: props.selectedProviderInstanceId, modelId: props.selectedModelId };
+  // A model chosen as the main one is no longer an extra.
+  const extraModels = fanOutModels.filter(
+    (each) =>
+      primaryModel === undefined ||
+      String(each.providerInstanceId) !== String(primaryModel.providerInstanceId) ||
+      String(each.modelId) !== String(primaryModel.modelId),
+  );
+  const startsInBackground = props.startsInBackground === true;
+  // A reviewed proposal is one exact thread, so it starts on one model; and
+  // without a chosen model there is no first thread to add others beside.
+  const fanOutOffered =
+    startsInBackground && props.fixedPrompt === undefined && primaryModel !== undefined;
+  const fanningOut = fanOutOffered && extraModels.length > 0;
+  const modelLabel = (selection: ModelPickerSelection | undefined): string => {
+    const found = findPickerModel(providerGroups, selection)?.model.displayName;
+    return found ?? (selection === undefined ? "The chosen model" : String(selection.modelId));
+  };
+
+  const submit = useCallback(
+    (how: "open" | "stay" = "open") => {
+      if (!canSubmit) return;
+      const typedClaim = typedClaimFor(typedScope, trimmed);
+      // A Code thread belongs to a Project, so the first turn cannot start until
+      // one is chosen. Send stays live and says so: a Send greyed out for this
+      // alone left people guessing why nothing happened.
+      if (props.projectId === undefined) {
+        setSendNotice("Choose a Project first. A Code task works in a folder.");
+        return;
+      }
+      const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
+        receipt.selection === undefined ? [] : [receipt.selection],
+      );
+      setSendNotice(undefined);
+      const staged = images.filesForSend();
+      const stays = startsInBackground && (how === "stay" || fanningOut);
+      const sentPrompt = trimmed;
+      const input = (
+        threadMentionIds: ReadonlyArray<MentionableThreadId>,
+      ): CodeComposerSubmitInput => ({
+        prompt: sentPrompt,
+        ...typedClaim,
+        modelOptionValues,
+        ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
+        executionPolicy,
+        // Nothing about a thread on a server is remembered for the Project.
+        permissionPersistence: isServer ? "current-session" : permissionPersistence,
+        ...(autoApprove ? { autoApprove: true } : {}),
+        deliveryTarget: {
+          branchIntent: worktreeBranch,
+          remoteName: resolvedWorktreeRemote,
+          proposedBaseRepository: baseRepository,
+          proposedBaseBranch: submittedBaseBranch,
+          outcomeKind,
+        },
+        ...(resolvedBaseBranch === undefined ? { baseBranchAssumed: true as const } : {}),
+        workspace,
+        worktreeSource: {
+          startFromOrigin,
+          remoteName: resolvedWorktreeRemote,
+        },
+        // A start the composer stays on shows no launch progress in it: the
+        // composer is already the next draft.
+        ...(stays ? {} : { presentation: { composerId: composerIdRef.current } }),
+        ...(staged.length === 0 ? {} : { images: staged }),
+        ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
       });
-  }, [
-    extensionDraft,
-    canSubmit,
-    trimmed,
-    modelOptionValues,
-    executionPolicy,
-    autoApprove,
-    permissionPersistence,
-    isServer,
-    workspace,
-    baseRepository,
-    baseBranch,
-    worktreeBranch,
-    outcomeKind,
-    startFromOrigin,
-    resolvedWorktreeRemote,
-    images,
-    loadBranchNames,
-    threadMentions,
-    props,
-  ]);
+      if (!stays) {
+        setSubmitting(true);
+        void threadMentions
+          .resolveForSend()
+          .then(async (threadMentionIds) => {
+            const created = await props.onCreateThread(input(threadMentionIds));
+            if (created !== false) images.clearAfterAccepted();
+            // A refused creation may be because the name was taken meanwhile; the
+            // names are read again so the name shown is the one that would be tried.
+            else loadBranchNames();
+            return created;
+          })
+          .finally(() => {
+            setSubmitting(false);
+          });
+        return;
+      }
+      // Start and stay: the prompt is handed over and the composer is the next
+      // draft at once, keeping its Project, workspace and base branch.
+      const models: ReadonlyArray<ModelPickerSelection | undefined> = fanningOut
+        ? [primaryModel, ...extraModels]
+        : [primaryModel];
+      const sentReceipts = extensionDraft.stagedReceipts;
+      const sentSource = props.stashSource?.current;
+      setPrompt("");
+      images.clearAfterAccepted();
+      // Chips beside the prompt leave with it, or the next draft would carry
+      // a plugin or connector choice, or a Create from issue or terminal
+      // session, into threads it was never chosen for.
+      extensionDraft.clear();
+      if (sentSource !== undefined) props.stashSource?.change(undefined);
+      setShortId(newShortId());
+      const run = async () => {
+        const threadMentionIds = await threadMentions.resolveForSend();
+        // Every model's thread starts from the source this submission captured.
+        const base: CodeComposerSubmitInput = {
+          ...input(threadMentionIds),
+          ...(sentSource?.kind === "github" ? { issueContext: sentSource.request } : {}),
+          ...(sentSource?.kind === "linear" ? { linearIssueContext: sentSource.request } : {}),
+          ...(sentSource?.kind === "terminal" ? { terminalSession: sentSource.request } : {}),
+        };
+        const startOne = async (
+          selection: ModelPickerSelection | undefined,
+          branch: string,
+        ): Promise<CodeDraftStartOutcome> => {
+          let reported: CodeDraftStartOutcome | undefined;
+          // A model added beside the chosen one starts on its own default
+          // options, and takes the plugin and connector choices only from
+          // the same provider family: both were made for the chosen model.
+          const added = selection !== primaryModel;
+          const { modelOptionValues: _options, extensionSelections: _extensions, ...shared } = base;
+          const created = await props.onCreateThread({
+            ...shared,
+            ...(added || base.modelOptionValues === undefined
+              ? {}
+              : { modelOptionValues: base.modelOptionValues }),
+            ...(base.extensionSelections === undefined ||
+            (added &&
+              providerFamilyForThread(providerGroups, selection?.providerInstanceId) !==
+                selectedFamily)
+              ? {}
+              : { extensionSelections: base.extensionSelections }),
+            ...(fanningOut ? { workspace: "managed-worktree" as const } : {}),
+            deliveryTarget: { ...base.deliveryTarget, branchIntent: branch },
+            ...(selection === undefined ? {} : { providerSelection: selection }),
+            stay: {
+              report: (outcome) => {
+                reported = outcome;
+              },
+            },
+          });
+          return (
+            reported ??
+            (created === false
+              ? { status: "refused", reason: "The thread could not be started." }
+              : { status: "started" })
+          );
+        };
+        const results = await startEachModel(
+          models,
+          worktreeBranch,
+          takenNames,
+          (selection, branch) => {
+            setBranchesInFlight((current) => [...current, branch]);
+            return startOne(selection, branch);
+          },
+        );
+        setStartResults((current) => [...current, ...results]);
+        loadBranchNames();
+        // Nothing was even created: the prompt and its files come back, unless
+        // the person already began the next prompt. A thread that exists keeps
+        // its prompt in its own draft instead, and its row offers Open.
+        if (
+          results.every(
+            (result) =>
+              result.outcome.status === "refused" && result.outcome.threadId === undefined,
+          )
+        ) {
+          const nextDraftStarted =
+            latestDraftPrompt.current !== "" || latestStashSource.current?.current !== undefined;
+          setPrompt((current) => (current === "" ? sentPrompt : current));
+          if (staged.length > 0) images.restore(staged);
+          if (sentReceipts.length > 0) extensionDraft.restore(sentReceipts);
+          if (sentSource !== undefined && mounted.current && !nextDraftStarted) {
+            latestStashSource.current?.change(sentSource);
+          }
+        }
+      };
+      stayStarts.current = stayStarts.current.then(run, run).catch(() => undefined);
+    },
+    [
+      extensionDraft,
+      canSubmit,
+      trimmed,
+      modelOptionValues,
+      executionPolicy,
+      autoApprove,
+      permissionPersistence,
+      isServer,
+      workspace,
+      baseRepository,
+      baseBranch,
+      worktreeBranch,
+      outcomeKind,
+      startFromOrigin,
+      resolvedWorktreeRemote,
+      images,
+      loadBranchNames,
+      threadMentions,
+      fanningOut,
+      primaryModel,
+      extraModels,
+      startsInBackground,
+      takenNames,
+      providerGroups,
+      selectedFamily,
+      props,
+    ],
+  );
 
   const folderDrops = useDroppedFolderMentions({
     scope:
@@ -1110,7 +1315,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      submit();
+      // ⌘↩ (Ctrl+↩) starts the thread and leaves a fresh draft here.
+      submit(startsInBackground && (event.metaKey || event.ctrlKey) ? "stay" : "open");
     }
     if (event.key === "Escape") {
       event.preventDefault();
@@ -1271,6 +1477,62 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     },
                   ]
                 : []),
+              ...(fanningOut
+                ? [
+                    {
+                      key: "fan-out",
+                      tone: "neutral" as const,
+                      role: "status" as const,
+                      text: `Starts ${String(extraModels.length + 1)} threads, each in a new worktree: ${[
+                        primaryModel,
+                        ...extraModels,
+                      ]
+                        .map(modelLabel)
+                        .join(
+                          ", ",
+                        )}. Shift-click a model, or press Shift+Enter on it, to add or remove it (up to ${String(
+                        MAX_FAN_OUT_MODELS,
+                      )}).`,
+                      action: (
+                        <OctantButton
+                          onClick={() => setFanOutModels([])}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          Use one model
+                        </OctantButton>
+                      ),
+                    },
+                  ]
+                : []),
+              ...(startResults.length === 0
+                ? []
+                : [
+                    {
+                      key: "start-results",
+                      tone: startResults.some((result) => result.outcome.status === "refused")
+                        ? ("warning" as const)
+                        : ("neutral" as const),
+                      role: "status" as const,
+                      text: (
+                        <LazyCodeStartResults
+                          label={(result) => modelLabel(result.selection ?? primaryModel)}
+                          results={startResults}
+                        />
+                      ),
+                      action: (
+                        <OctantButton
+                          onClick={() => setStartResults([])}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          Dismiss
+                        </OctantButton>
+                      ),
+                    },
+                  ]),
               // A refusal answers the Send just pressed, so it is the card
               // directly above the composer, not a line below the start screen.
               ...(props.errorMessage !== undefined || sendNotice !== undefined
@@ -1416,6 +1678,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             input={
               <ComposerInput
                 typedScope={typedScope}
+                {...(props.creating === true || props.fixedPrompt !== undefined
+                  ? {}
+                  : { onPasteAsFile: (file: File) => images.attach([file]) })}
                 inlineChips={mention.inlineChips}
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
@@ -1513,6 +1778,15 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       }}
                       menuSide="bottom"
                       onSelect={props.onSelectProvider}
+                      {...(fanOutOffered
+                        ? {
+                            alsoSelected: extraModels,
+                            onShiftSelect: (selection: ModelPickerSelection) =>
+                              setFanOutModels(
+                                toggleFanOutModel(primaryModel, extraModels, selection),
+                              ),
+                          }
+                        : {})}
                       {...(props.onOpenSettings === undefined
                         ? {}
                         : { onOpenSettings: props.onOpenSettings })}
@@ -1560,11 +1834,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               actions: {
                 kind: "send",
                 send: {
-                  ariaLabel:
-                    props.createLabel ??
-                    (props.errorMessage === undefined ? "Create thread" : "Retry creating thread"),
+                  ariaLabel: fanningOut
+                    ? `Start ${String(extraModels.length + 1)} threads`
+                    : (props.createLabel ??
+                      (props.errorMessage === undefined
+                        ? "Create thread"
+                        : "Retry creating thread")),
                   disabled: !canSubmit,
-                  onSend: submit,
+                  onSend: () => submit(),
                 },
               },
             }}

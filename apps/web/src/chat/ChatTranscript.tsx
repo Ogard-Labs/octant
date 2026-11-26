@@ -97,19 +97,6 @@ export interface ChatTranscriptProps {
   /** Stops the running attempt from an inline loop or stall notice. */
   readonly onStopTurn?: () => void;
   readonly stoppingTurn?: boolean;
-  /**
-   * Opts the named stopped attempt into the host-owned resume at its declared
-   * reset. Absent when the surface cannot schedule one.
-   */
-  readonly onScheduleUsageResume?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
-  /** Withdraws the thread's scheduled resume opt-in. */
-  readonly onCancelUsageResume?: () => void;
-  /**
-   * Hides the thread until the current limit's declared reset without
-   * authorizing another provider turn. Absent once the thread carries a
-   * snooze of its own.
-   */
-  readonly onSnoozeAtUsageReset?: () => void;
   /** Starts a second thread carrying the conversation through this turn. */
   readonly onBranchTurn?: (turnId: ChatTurnId) => void;
   /**
@@ -125,7 +112,7 @@ export interface ChatTranscriptProps {
   }) => void;
   /**
    * Quotes a finished assistant excerpt into the same thread's composer as a
-   * structured chip. Absent when the surface cannot accept quotes.
+   * quote chip. Absent when the surface cannot accept quotes.
    */
   readonly onQuoteSelection?: (input: {
     readonly turnId: ChatTurnId;
@@ -716,12 +703,6 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   onRetryAttempt={props.onRetryAttempt}
                   onStopTurn={props.onStopTurn}
                   stoppingTurn={props.stoppingTurn}
-                  onScheduleUsageResume={props.onScheduleUsageResume}
-                  onCancelUsageResume={props.onCancelUsageResume}
-                  {...(props.view.thread.snooze === undefined &&
-                  props.onSnoozeAtUsageReset !== undefined
-                    ? { onSnoozeAtReset: props.onSnoozeAtUsageReset }
-                    : {})}
                   previousAttempt={turn.attempts[index - 1]}
                   handoffRenderedAtTurn={index === 0 && turnHandoff !== undefined}
                   subagentsFrom={attempt.createdAt}
@@ -1029,9 +1010,6 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
   readonly onStopTurn: ChatTranscriptProps["onStopTurn"];
   readonly stoppingTurn: ChatTranscriptProps["stoppingTurn"];
-  readonly onScheduleUsageResume: ChatTranscriptProps["onScheduleUsageResume"];
-  readonly onCancelUsageResume: ChatTranscriptProps["onCancelUsageResume"];
-  readonly onSnoozeAtReset?: () => void;
   readonly onFork: (() => void) | undefined;
   readonly forkDisabled: boolean;
   readonly previousAttempt: ChatAttempt | undefined;
@@ -1096,11 +1074,12 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   });
   const usageLimit = props.attempt.usageLimit;
   // A limited attempt parks as waiting with the provider's fact beside it;
-  // retry is the manual recovery path the notice offers.
+  // the composer's usage-limit strip offers Resume now while it is the tail,
+  // so the transcript offers retry only on an older parked attempt.
   const canRetry =
     props.attempt.outcome === "failed" ||
     props.attempt.outcome === "interrupted" ||
-    (props.attempt.outcome === "waiting" && usageLimit !== undefined);
+    (props.attempt.outcome === "waiting" && usageLimit !== undefined && !props.tailAttempt);
   // A completed attempt may run again: the person is asking for a different
   // answer to the same prompt. The server decides whether the turn may.
   const canRegenerate = props.attempt.outcome === "completed" && props.onRetryAttempt !== undefined;
@@ -1246,27 +1225,13 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 ? "The provider"
                 : providerModelLabel(props.providerGroups, props.attempt)
             }
-            // The opt-in belongs to exactly this stop: the scheduled record
-            // names turn and attempt, so an older attempt's notice never
-            // borrows a newer record and vice versa.
+            // The record belongs to exactly this stop: the resume names turn
+            // and attempt, so an older attempt's line never borrows a newer one.
             {...(props.threadUsageResume === undefined ||
             String(props.threadUsageResume.record.turnId) !== String(props.attempt.turnId) ||
             String(props.threadUsageResume.record.attemptId) !== String(props.attempt.id)
               ? {}
               : { usageResume: props.threadUsageResume })}
-            resumable={props.tailAttempt && props.attempt.outcome === "waiting"}
-            {...(props.onScheduleUsageResume === undefined
-              ? {}
-              : {
-                  onScheduleResume: () =>
-                    props.onScheduleUsageResume?.(props.attempt.turnId, props.attempt.id),
-                })}
-            {...(props.onCancelUsageResume === undefined
-              ? {}
-              : { onCancelResume: props.onCancelUsageResume })}
-            {...(props.onSnoozeAtReset === undefined
-              ? {}
-              : { onSnoozeAtReset: props.onSnoozeAtReset })}
           />
         )}
         {props.attempt.outcome === "failed" || props.attempt.failure !== undefined ? (

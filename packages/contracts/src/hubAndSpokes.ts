@@ -68,6 +68,7 @@ export const HUB_GRANT_ITEMS = [
   "provision",
   "sign-in",
   "act",
+  "usage",
 ] as const;
 export const HubGrantItem = Schema.Literal(...HUB_GRANT_ITEMS);
 export type HubGrantItem = typeof HubGrantItem.Type;

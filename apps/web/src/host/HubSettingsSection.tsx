@@ -101,6 +101,10 @@ const GRANT_ITEM_COPY: Readonly<Record<HubGrantItem, { label: string; line: stri
     label: "Act",
     line: "Act here as a paired device would, in the Projects you name. Approvals stay here.",
   },
+  usage: {
+    label: "Usage",
+    line: "Read this computer's provider plan-limit readings. No sign-ins, threads, or costs.",
+  },
 };
 
 const REFUSAL_COPY: Readonly<Record<string, string>> = {

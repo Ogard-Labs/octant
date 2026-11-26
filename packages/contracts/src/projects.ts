@@ -538,6 +538,16 @@ export const CodeProject = Schema.Struct({
   agentPullRequestComments: Schema.optional(CodeProjectAgentPullRequestComments),
   agentDefaultBranchPush: Schema.optional(CodeProjectAgentDefaultBranchPush),
   /**
+   * The host moves the issues linked to this Project's threads to In
+   * Progress, In Review and Done, with a comment on merge. Absent is off.
+   */
+  keepLinkedIssuesCurrent: Schema.optional(Schema.Boolean),
+  /**
+   * Agents below Full access change the state of, or comment on, their
+   * thread's linked issues without asking for each act. Absent is off.
+   */
+  agentsMayUpdateIssues: Schema.optional(Schema.Boolean),
+  /**
    * The mode this Project's new threads start in, overriding Settings. Absent
    * follows Settings, except that a Project which remembered Full access
    * before the field existed (`codeAccessPersistence: "project-default"`)
@@ -607,6 +617,16 @@ const CodeProjectSummary = Schema.Struct({
   ownToolchain: Schema.optional(CodeProjectOwnToolchain),
   agentPullRequestComments: Schema.optional(CodeProjectAgentPullRequestComments),
   agentDefaultBranchPush: Schema.optional(CodeProjectAgentDefaultBranchPush),
+  /**
+   * The host moves the issues linked to this Project's threads to In
+   * Progress, In Review and Done, with a comment on merge. Absent is off.
+   */
+  keepLinkedIssuesCurrent: Schema.optional(Schema.Boolean),
+  /**
+   * Agents below Full access change the state of, or comment on, their
+   * thread's linked issues without asking for each act. Absent is off.
+   */
+  agentsMayUpdateIssues: Schema.optional(Schema.Boolean),
   defaultPermissionMode: Schema.optional(PermissionMode),
   /** New threads here at Full access keep the sandbox; absent follows Settings. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
@@ -901,6 +921,13 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     agentDefaultBranchPush: CodeProjectAgentDefaultBranchPush,
   }).annotations(strict),
+  /** Either or both of the Project's two linked-issue choices; at least one. */
+  Schema.Struct({
+    kind: Schema.Literal("change-code-project-issue-updates"),
+    ...ProjectCommandFields,
+    keepLinkedIssuesCurrent: Schema.optional(Schema.Boolean),
+    agentsMayUpdateIssues: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-project-actions"),
     ...ProjectCommandFields,
@@ -1072,6 +1099,10 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("code-project-agent-default-branch-push-changed"),
+    project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-project-issue-updates-changed"),
     project: CodeProject,
   }).annotations(strict),
   Schema.Struct({
@@ -1372,6 +1403,11 @@ export const CodeProjectAgentDefaultBranchPushChanged = Schema.Struct({
 }).annotations(strict);
 export type CodeProjectAgentDefaultBranchPushChanged =
   typeof CodeProjectAgentDefaultBranchPushChanged.Type;
+/** Journaled once per change of either linked-issue choice. */
+export const CodeProjectIssueUpdatesChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectIssueUpdatesChanged = typeof CodeProjectIssueUpdatesChanged.Type;
 /** Journaled once per save so every window and a restarted host see the same list. */
 export const CodeProjectActionsChanged = Schema.Struct({ project: CodeProject }).annotations(
   strict,
@@ -1511,6 +1547,9 @@ export const decodeCodeProjectAgentPullRequestCommentsChanged = Schema.decodeUnk
 );
 export const decodeCodeProjectAgentDefaultBranchPushChanged = Schema.decodeUnknownSync(
   CodeProjectAgentDefaultBranchPushChanged,
+);
+export const decodeCodeProjectIssueUpdatesChanged = Schema.decodeUnknownSync(
+  CodeProjectIssueUpdatesChanged,
 );
 export const decodeCodeProjectActionsChanged = Schema.decodeUnknownSync(CodeProjectActionsChanged);
 export const decodeProjectProviderPolicyChanged = Schema.decodeUnknownSync(

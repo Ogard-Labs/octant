@@ -140,6 +140,9 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".provider-limits__window meter::-webkit-meter-bar",
   ".provider-limits__window meter::-webkit-meter-optimum-value",
   ".provider-limits__window meter::-moz-meter-bar",
+  // A pooled window's placeholder for an account with no reading stands in
+  // the meter track beside the other accounts' meters, so it keeps their shape.
+  ".provider-limits__segment-empty",
   // A slider's thumb, a scrollbar's thumb, and a sheet's grabber.
   ".octant-slider::-webkit-slider-thumb",
   ".octant-slider::-moz-range-thumb",

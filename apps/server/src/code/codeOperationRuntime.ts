@@ -102,6 +102,7 @@ import {
   type WindowId,
   type ProviderExecutionPolicy,
   type Project,
+  type LinkedIssueRef,
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
@@ -195,6 +196,7 @@ import {
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { PullRequestWatchPort } from "./pullRequestWatchPort";
+import type { PullRequestCiPort, PullRequestCiRerunPlanSummary } from "./pullRequestCiPort";
 import type { ProjectForgeChoices } from "./standingMergeAllowance";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import type {
@@ -226,6 +228,7 @@ import {
 import {
   CodeServiceError,
   type CodeForkPoint,
+  type CodeCheckoutCapture,
   type ManagedCodeThreadCreationPort,
 } from "./codeService";
 import { RepositoryTestRunner } from "./repositoryTestRunner";
@@ -361,6 +364,20 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
         ],
       }),
   };
+}
+
+/** What a turn lends the Linear and GitHub tools. */
+export interface CodeTrackerToolInput {
+  readonly windowId: WindowId;
+  readonly thread: CodeThread;
+  readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
+  /** Asks the person in the thread, showing the whole summary. */
+  readonly ask: (
+    summary: string,
+    signal?: AbortSignal,
+  ) => Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable">;
+  /** Whether the thread has read outside content under Strict. */
+  readonly readOutsideContent: () => boolean;
 }
 
 export interface CodeOperationRuntimeOptions {
@@ -500,10 +517,28 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<GhDeliveryTarget | undefined>;
   /** The standing merge permissions the person has stored for a thread; absent reads none. */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
+  /** The issues a thread is linked to; a pull request it opens names them as fixed. */
+  readonly linkedIssues?: (threadId: CodeThreadId) => ReadonlyArray<LinkedIssueRef>;
+  /** A thread's agent opened its pull request through the pull-request tool. */
+  readonly onPullRequestCreated?: (threadId: CodeThreadId) => void;
   /** The Project's stored choices for comments and default-branch pushes; absent reads neither. */
   readonly projectForgeChoices?: (thread: CodeThread) => ProjectForgeChoices;
+  /**
+   * Where a thread was moved into its own worktree from, when it was. A turn
+   * whose last session ran on that source checkout starts a new session on
+   * the worktree with the conversation handed over as text, instead of being
+   * refused for a session from another checkout.
+   */
+  readonly readThreadMove?: (threadId: CodeThreadId) =>
+    | {
+        readonly fromCheckoutId: CodeThread["checkoutId"];
+        readonly toCheckoutId: CodeThread["checkoutId"];
+      }
+    | undefined;
   /** A thread's watch on its own pull request; absent, the tool refuses watch and unwatch. */
   readonly pullRequestWatch?: PullRequestWatchPort;
+  /** CI logs and reruns of a thread's own pull request; absent, the tool refuses both. */
+  readonly pullRequestCi?: PullRequestCiPort;
   readonly reviewFiles: ReviewFindingFilePort;
   readonly evidence: CodeOperationEvidencePort;
   /** The images Code threads have staged for their next turn. */
@@ -527,6 +562,12 @@ export interface CodeOperationRuntimeOptions {
    * not bring back.
    */
   readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
+  /**
+   * The same turn request, when a person made it: the host's own turns (a
+   * wake, an approved plan's continuation, a routine) start through its
+   * routine scope and are left out, as linked issues move only for a person.
+   */
+  readonly onPersonTurnRequested?: (threadId: CodeThreadId) => void;
   /** A side task's report was admitted; its turn is about to be journaled. */
   readonly onSideTaskReportAdmitted?: CodeOperationServiceOptions["onSideTaskReportAdmitted"];
   /**
@@ -606,7 +647,7 @@ export interface CodeOperationRuntimeOptions {
     | "restoreWorkingTree"
     | "releaseCheckpoint"
   > &
-    Partial<Pick<GitMutationPort, "applyHunks" | "remoteHead">>;
+    Partial<Pick<GitMutationPort, "applyHunks" | "remoteHead" | "uncopyableNestedChanges">>;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   readonly supportsAcpClientCapabilities?: (thread: CodeThread) => boolean;
   /**
@@ -717,18 +758,13 @@ export interface CodeOperationRuntimeOptions {
    * (target `board`) of each turn.
    */
   readonly planner?: CodePlannerToolPort;
-  /** Optional Project-fixed, read-only GitHub tools composed per active turn. */
-  readonly githubReadTools?: (input: {
-    readonly windowId: WindowId;
-    readonly thread: CodeThread;
-    readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
-  }) => AppManagedToolSet | undefined;
-  /** Optional Project-fixed, read-only Linear tools composed per active turn. */
-  readonly linearReadTools?: (input: {
-    readonly windowId: WindowId;
-    readonly thread: CodeThread;
-    readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
-  }) => AppManagedToolSet | undefined;
+  /**
+   * Optional Project-fixed GitHub tools composed per active turn: reads, and
+   * updates to the thread's linked issues, which ask through `ask`.
+   */
+  readonly githubReadTools?: (input: CodeTrackerToolInput) => AppManagedToolSet | undefined;
+  /** Optional Project-fixed Linear tools composed per active turn, as for GitHub. */
+  readonly linearReadTools?: (input: CodeTrackerToolInput) => AppManagedToolSet | undefined;
   /**
    * The threads tool for one turn: a view of the other Code threads of this
    * thread's Project, messaging them where the host admits it, and the
@@ -741,7 +777,32 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readPosture: () => CodeThread["executionPolicy"];
     readonly planner?: CodePlannerToolPort;
+    /** Present only where this turn may ask to move its thread into a worktree. */
+    readonly worktreeMove?: {
+      readonly request: (
+        branchName: string | undefined,
+        signal?: AbortSignal,
+      ) => Promise<"scheduled" | "denied" | "cancelled" | "expired" | "unavailable">;
+    };
   }) => AppManagedToolSet | undefined;
+  /**
+   * Moves a thread into a worktree of its own, after a turn in which the
+   * person allowed its agent's request. The host's own move command decides
+   * and journals it; absent, the agent is never offered the move.
+   */
+  readonly moveThreadToWorktree?: (input: {
+    readonly windowId: WindowId;
+    readonly threadId: CodeThreadId;
+    readonly branchName?: string;
+    /** False when the turn stopped, was interrupted or failed: then nothing moves. */
+    readonly turnCompleted: boolean;
+  }) => Promise<void>;
+  /**
+   * Whether a window acts as the host's own person: a local window or a device
+   * the person paired, never a routine or a device the hub introduced. Absent
+   * reads as no, so what only the person may allow is never offered.
+   */
+  readonly actsAsPerson?: (windowId: WindowId) => boolean;
   /**
    * Lets the model offer out-of-scope work as a side task the person may
    * start, and the designated planner offer one to the Project board.
@@ -1148,6 +1209,8 @@ export interface CodeOperationRuntime {
     source: CodeThread,
     throughOperationId: string,
   ): Promise<CodeForkPoint>;
+  /** The thread's checkout as it stands now, captured as Git trees; see `forkPoint`. */
+  checkoutCapture(windowId: WindowId, source: CodeThread): Promise<CodeCheckoutCapture>;
   readEvidence(
     windowId: WindowId,
     threadId: CodeThreadId,
@@ -1663,7 +1726,7 @@ export function createCodeOperationRuntime(
     ...(options.onSideTaskReportAdmitted === undefined
       ? {}
       : { onSideTaskReportAdmitted: options.onSideTaskReportAdmitted }),
-    onScopedOperation: ({ command, executeOptions }) => {
+    onScopedOperation: ({ windowId, command, executeOptions }) => {
       // The service invokes this only after its authoritative scope check and
       // replay lookup, but before approval or the operation side effect. That
       // keeps inaccessible commands out of the durable runtime-work journal
@@ -1680,8 +1743,10 @@ export function createCodeOperationRuntime(
         command.kind === "start-provider-turn" &&
         executeOptions?.limitRecovery !== true &&
         command.delivery?.kind !== "side-task-report"
-      )
+      ) {
         options.onProviderTurnRequested?.(command.threadId);
+        if (!isRoutineHostScope(windowId)) options.onPersonTurnRequested?.(command.threadId);
+      }
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)
         observeRuntimeWorkOutcome(
@@ -1980,6 +2045,33 @@ export function createCodeOperationRuntime(
     leases: fileReviewLeases,
   });
 
+  // A fresh capture of a thread's checkout: Git objects only, nothing in the
+  // checkout itself changes.
+  const captureCheckoutNow = async (
+    windowId: WindowId,
+    source: CodeThread,
+  ): Promise<CodeForkPoint> => {
+    const checkout = options.persistence.readCodeCheckout(source.checkoutId);
+    if (checkout === undefined || checkout.availability !== "available") {
+      return { status: "refused", reason: "unavailable" };
+    }
+    const capture = git.checkpoint;
+    if (capture === undefined) return { status: "refused", reason: "unavailable" };
+    const root = await authority.resolveCheckoutRoot(windowId, source, checkout);
+    if (root === undefined) return { status: "refused", reason: "unavailable" };
+    const captured = await capture({
+      checkoutId: String(checkout.id),
+      checkoutRoot: root.checkoutRoot,
+      // Capturing writes only Git objects, which a Plan thread's own posture
+      // would refuse; the person asking for the fork or move is what authorizes it.
+      executionPolicy: mayWriteToRepository(source.executionPolicy)
+        ? source.executionPolicy
+        : "approval-gated",
+    }).catch(() => undefined);
+    return captured?.status === "captured"
+      ? forkPointFrom(captured.snapshot)
+      : { status: "refused", reason: "unavailable" };
+  };
   return {
     ownerApprovals: () => turns.ownerApprovals(),
     terminals: terminal,
@@ -2835,26 +2927,26 @@ export function createCodeOperationRuntime(
       if (choice.kind === "refused") return { status: "refused", reason: choice.reason };
       if (choice.kind === "checkpoint") return forkPointFrom(choice.checkpoint);
       // The named turn is the newest: the checkout as it stands now is its result.
-      const checkout = options.persistence.readCodeCheckout(source.checkoutId);
-      if (checkout === undefined || checkout.availability !== "available") {
+      return captureCheckoutNow(windowId, source);
+    },
+    checkoutCapture: async (windowId, source) => {
+      if (!(await options.windowAccess.canAccessProject(windowId, source.projectId))) {
         return { status: "refused", reason: "unavailable" };
       }
-      const capture = git.checkpoint;
-      if (capture === undefined) return { status: "refused", reason: "unavailable" };
+      const checkout = options.persistence.readCodeCheckout(source.checkoutId);
+      if (checkout === undefined || checkout.kind === "remote-root") {
+        return { status: "refused", reason: "unavailable" };
+      }
+      // A submodule's own changes and an untracked nested repository are
+      // recorded by a capture only as commit pointers; a move that claimed
+      // to copy them would lose them, so it names them and refuses instead.
       const root = await authority.resolveCheckoutRoot(windowId, source, checkout);
       if (root === undefined) return { status: "refused", reason: "unavailable" };
-      const captured = await capture({
-        checkoutId: String(checkout.id),
-        checkoutRoot: root.checkoutRoot,
-        // Capturing writes only Git objects, which a Plan thread's own posture
-        // would refuse; the person asking for the fork is what authorizes it.
-        executionPolicy: mayWriteToRepository(source.executionPolicy)
-          ? source.executionPolicy
-          : "approval-gated",
-      }).catch(() => undefined);
-      return captured?.status === "captured"
-        ? forkPointFrom(captured.snapshot)
-        : { status: "refused", reason: "unavailable" };
+      // A port that cannot tell refuses rather than claim a complete copy.
+      const nested = await mutation.uncopyableNestedChanges?.({ checkoutRoot: root.checkoutRoot });
+      if (nested === undefined) return { status: "refused", reason: "unavailable" };
+      if (nested.length > 0) return { status: "refused", reason: "nested-changes", paths: nested };
+      return captureCheckoutNow(windowId, source);
     },
     readEvidence: async (windowId, threadId, operationId, contentId, admissionCurrent) => {
       try {
@@ -3369,6 +3461,11 @@ export function threadOfActiveSession(
 }
 
 interface ActiveTurn {
+  /**
+   * A move into a worktree the person allowed during this turn. It runs when
+   * the turn ends, never under it: the move ends the session the turn is in.
+   */
+  pendingWorktreeMove?: { readonly branchName?: string };
   readonly inputsCurrent?: () => boolean;
   /**
    * A provider-switch or fork handoff this turn selected and has not
@@ -3472,6 +3569,11 @@ interface ActiveTurn {
       readonly origin?: string;
       /** The ask offered "Remember for this Project". */
       readonly canRememberForProject?: true;
+      /**
+       * Only a local window or a device the host's own person paired may
+       * allow this ask; anyone else's allow is refused. A denial stands.
+       */
+      readonly personOnly?: true;
       readonly finish: (outcome: CodeToolAskAnswer) => void;
     }
   >;
@@ -3849,9 +3951,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // disclosed handoff a provider switch takes, rather than wedging the
     // thread on a refusal it cannot act on. A rewind with turns kept takes
     // the same path: a session the turn will not resume.
+    // A thread the person moved into its own worktree left its session on the
+    // checkout it came from. Claude, Codex, Pi and OpenCode keep a session
+    // under the folder it ran in and copy one only for that folder, so the
+    // turn starts a new session in the worktree with the same disclosed text
+    // handoff a switch takes. The Octant Harness takes that text handoff too
+    // for now, though it could continue its own conversation natively.
+    const move =
+      previous?.kind === "provider-session-ready" &&
+      String(previous.checkoutId) !== String(input.thread.checkoutId)
+        ? this.#options.readThreadMove?.(input.thread.id)
+        : undefined;
+    const movedFromSession =
+      previous?.kind === "provider-session-ready" &&
+      move !== undefined &&
+      String(move.fromCheckoutId) === String(previous.checkoutId) &&
+      String(move.toCheckoutId) === String(input.thread.checkoutId);
     const providerSwitch =
       previous?.kind === "provider-session-ready" &&
       (rewind !== undefined ||
+        movedFromSession ||
         (command.toolCatalogHandoff === true &&
           resolvedDriver.toolCatalogContinuation !== undefined) ||
         String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
@@ -3861,7 +3980,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         : undefined;
     if (
       previous?.kind === "provider-session-ready" &&
-      String(previous.checkoutId) !== String(input.thread.checkoutId)
+      String(previous.checkoutId) !== String(input.thread.checkoutId) &&
+      !movedFromSession
     )
       return failStart(
         "This task's provider session belongs to a different checkout. Restore that selection or start a new task.",
@@ -4072,6 +4192,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       rewind === undefined &&
       forkOrigin === undefined &&
       !remoteThread &&
+      !movedFromSession &&
       providerSwitch !== undefined &&
       providerSwitch.resumeCursor !== undefined &&
       command.toolCatalogHandoff !== true &&
@@ -5423,6 +5544,61 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     }
   }
 
+  /**
+   * Asks the person to allow one CI rerun. The question names the pull
+   * request, the head, and every check the host planned, so an approval
+   * never covers a check the person did not see.
+   */
+  async #askCiRerunApproval(
+    active: ActiveTurn,
+    plan: PullRequestCiRerunPlanSummary,
+    signal?: AbortSignal,
+  ): Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable"> {
+    const shown = `Rerun failed CI on pull request #${plan.number} at ${plan.headSha.slice(0, 12)}?\n${plan.checks.join("\n")}`;
+    const summary = boundProviderSummary(shown);
+    if (summary === undefined || summary !== shown.trim()) return "unavailable";
+    return this.#askToolApproval(active, summary, undefined, signal);
+  }
+
+  /**
+   * Whether this turn's agent may ask to move its thread into a worktree: a
+   * turn a person attends, on the checkout the thread shares with its
+   * Project. A turn the host started on its own has nobody to ask.
+   */
+  #worktreeMoveOffered(active: ActiveTurn): boolean {
+    if (this.#options.moveThreadToWorktree === undefined) return false;
+    if (isRoutineHostScope(active.windowId)) return false;
+    // A device the hub introduced could start the turn and allow the ask
+    // itself, so the move is offered only to a turn the person started.
+    if (this.#options.actsAsPerson?.(active.windowId) !== true) return false;
+    return (
+      this.#options.persistence.readCodeCheckout(active.thread.checkoutId)?.kind ===
+      "existing-worktree"
+    );
+  }
+
+  /**
+   * Asks the person, at every level, to move this thread into a worktree of
+   * its own once the turn ends. The move ends the session and changes the
+   * checkout, so even Full access asks (maintainer decision, 2026-11-26).
+   */
+  async #requestWorktreeMove(
+    active: ActiveTurn,
+    branchName: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<"scheduled" | "denied" | "cancelled" | "expired" | "unavailable"> {
+    if (!this.#worktreeMoveOffered(active)) return "unavailable";
+    const shown = `Move this task into a new worktree${
+      branchName === undefined ? "" : ` on branch ${branchName}`
+    } when this turn ends? Its uncommitted changes are copied there and the Project's folder keeps them; the session ends and the next turn continues in the worktree.`;
+    const summary = boundProviderSummary(shown);
+    if (summary === undefined || summary !== shown.trim()) return "unavailable";
+    const answer = await this.#askToolApproval(active, summary, undefined, signal, true);
+    if (answer !== "approved") return answer;
+    active.pendingWorktreeMove = branchName === undefined ? {} : { branchName };
+    return "scheduled";
+  }
+
   async #askPullRequestApproval(
     active: ActiveTurn,
     command: PullRequestToolCommand,
@@ -5507,15 +5683,37 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       : { context, prompt: approvalPrompt(effect, scope.thread, scope.checkout, undefined) };
   }
 
+  #trackerToolInput(active: ActiveTurn): CodeTrackerToolInput {
+    return {
+      windowId: active.windowId,
+      thread: active.thread,
+      readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
+      ask: (summary, signal) => {
+        const bounded = boundProviderSummary(summary);
+        // An approval never covers text the person cannot read whole, and a
+        // device the hub introduced cannot allow a write under the host's
+        // tracker account: the ask stays open for the person.
+        return bounded === undefined || bounded !== summary.trim()
+          ? Promise.resolve("unavailable")
+          : this.#askToolApproval(active, bounded, undefined, signal, true);
+      },
+      // Under Strict only, as for a pull-request comment.
+      readOutsideContent: () =>
+        this.#options.readThreadExternalContentTaint?.(active.thread.id).externalContentIngested !==
+          false && this.#strict(active.thread.id),
+    };
+  }
+
   #askToolApproval(
     active: ActiveTurn,
     summary: string,
     origin: string | undefined,
     signal?: AbortSignal,
+    personOnly?: true,
   ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     // Without an offer the person cannot answer for the Project.
-    return this.#askInThread(active, summary, origin, signal).then((answer) =>
-      typeof answer === "object" ? "approved" : answer,
+    return this.#askInThread(active, summary, origin, signal, undefined, personOnly).then(
+      (answer) => (typeof answer === "object" ? "approved" : answer),
     );
   }
 
@@ -5525,6 +5723,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     origin: string | undefined,
     signal?: AbortSignal,
     offer?: { readonly canRememberForProject: true },
+    personOnly?: true,
   ): Promise<CodeToolAskAnswer> {
     if (signal?.aborted || active.abort.signal.aborted || active.toolApprovals.size >= 4)
       return Promise.resolve("cancelled");
@@ -5561,6 +5760,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           active.toolApprovals.set(String(approvalId), {
             ...(origin === undefined ? {} : { origin }),
             ...(offer === undefined ? {} : { canRememberForProject: true }),
+            ...(personOnly === undefined ? {} : { personOnly }),
             finish,
           });
           active.approvalPostures.set(String(approvalId), this.#approvalPosture(active));
@@ -5730,6 +5930,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     if (active !== undefined && toolApproval !== undefined) {
       if (input.decision === "approved" && turnPosture === "plan") return refusedInPlan;
+      // A device the hub introduced acts as an agent, so it cannot allow what
+      // only the person may; the ask stays open for the person.
+      if (
+        input.decision === "approved" &&
+        toolApproval.personOnly === true &&
+        (input.windowId === undefined || this.#options.actsAsPerson?.(input.windowId) !== true)
+      ) {
+        return turnState("failed", {
+          category: "failed",
+          message: "Only you, from a window or a device you paired, can allow this.",
+        });
+      }
       // The person's wait ends at the accepted answer, before the call it
       // held is released to act on it. This tracker note is ephemeral; the
       // journaled row below is the delivery receipt.
@@ -6306,6 +6518,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             });
       const browserProfiles = this.#options.browserProfiles;
       const pullRequestWatch = this.#options.pullRequestWatch;
+      const pullRequestCi = this.#options.pullRequestCi;
       sets.push(
         this.#options.computerUseTools?.({
           windowId: active.windowId,
@@ -6349,6 +6562,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               this.#options.projectForgeChoices?.(current).comments === true
             );
           },
+          ...(this.#options.linkedIssues === undefined
+            ? {}
+            : { linkedIssues: () => this.#options.linkedIssues?.(active.thread.id) ?? [] }),
+          onPullRequestCreated: () => this.#options.onPullRequestCreated?.(active.thread.id),
           // Under Strict only, as for the operation service above.
           threadReadOutsideContent: () =>
             this.#options.readThreadExternalContentTaint?.(active.thread.id)
@@ -6371,6 +6588,29 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     }),
                 },
               }),
+          ...(pullRequestCi === undefined
+            ? {}
+            : {
+                pullRequestCi: {
+                  logs: (input, signal) =>
+                    pullRequestCi.logs({
+                      ...input,
+                      windowId: active.windowId,
+                      threadId: active.thread.id,
+                      signal: signal ?? active.abort.signal,
+                    }),
+                  rerun: (input, signal) =>
+                    pullRequestCi.rerun({
+                      ...input,
+                      windowId: active.windowId,
+                      threadId: active.thread.id,
+                      signal: signal ?? active.abort.signal,
+                    }),
+                },
+              }),
+          pullRequestCiApproval: {
+            request: (plan, signal) => this.#askCiRerunApproval(active, plan, signal),
+          },
           terminalApproval: {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),
           },
@@ -6470,16 +6710,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ? {}
             : { android: this.#options.androidToolchain }),
         }),
-        this.#options.githubReadTools?.({
-          windowId: active.windowId,
-          thread: active.thread,
-          readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
-        }),
-        this.#options.linearReadTools?.({
-          windowId: active.windowId,
-          thread: active.thread,
-          readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
-        }),
+        this.#options.githubReadTools?.(this.#trackerToolInput(active)),
+        this.#options.linearReadTools?.(this.#trackerToolInput(active)),
         this.#options.threads?.({
           windowId: active.windowId,
           thread: active.thread,
@@ -6491,6 +6723,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 active.thread.executionPolicy,
             }),
           ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
+          ...(this.#worktreeMoveOffered(active)
+            ? {
+                worktreeMove: {
+                  request: (branchName, signal) =>
+                    this.#requestWorktreeMove(active, branchName, signal),
+                },
+              }
+            : {}),
         }),
         this.#options.contributedTools?.({
           windowId: active.windowId,
@@ -7161,6 +7401,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)
           this.#active.delete(String(active.thread.id));
+        // The move the person allowed during the turn runs now that its
+        // session is over; the host's move command decides it afresh.
+        const move = active.pendingWorktreeMove;
+        if (move !== undefined) {
+          void this.#options
+            .moveThreadToWorktree?.({
+              windowId: active.windowId,
+              threadId: active.thread.id,
+              ...(move.branchName === undefined ? {} : { branchName: move.branchName }),
+              turnCompleted: active.state === "completed",
+            })
+            .catch(() => undefined);
+        }
         // The turn that stopped, as it launched, so a reader acts on it and
         // not on whatever turn or model the thread has by then.
         const stopped: CodeStoppedTurn = {

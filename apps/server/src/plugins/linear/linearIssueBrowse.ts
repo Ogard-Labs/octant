@@ -7,6 +7,9 @@ import {
   LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION,
   LINEAR_ISSUE_GET_OPERATION,
   LINEAR_ISSUE_LIST_OPERATION,
+  LINEAR_ISSUE_COMMENT_OPERATION,
+  LINEAR_ISSUE_SET_STATE_OPERATION,
+  LINEAR_ISSUE_WORKFLOW_OPERATION,
   type LinearIssueDetail,
   type LinearIssueFilterOption,
   type LinearIssueFilterOptions,
@@ -15,6 +18,11 @@ import {
   type LinearIssueRow,
 } from "@octant/contracts/linear-issues";
 import type { IntegrationHostPort } from "@octant/plugin-api/integration";
+import {
+  commentLinearIssue,
+  readLinearIssueWorkflow,
+  setLinearIssueState,
+} from "./linearIssueWrites";
 import {
   LINEAR_ASSIGNMENT_SOURCE_OPERATION,
   executeLinearAssignmentSource,
@@ -122,6 +130,15 @@ export async function executeLinearIssueOperation(
   }
   if (operationId === LINEAR_ISSUE_FILTERS_OPERATION) {
     return listFilters(hostPort, signal);
+  }
+  if (operationId === LINEAR_ISSUE_WORKFLOW_OPERATION) {
+    return readLinearIssueWorkflow(hostPort, input, signal);
+  }
+  if (operationId === LINEAR_ISSUE_SET_STATE_OPERATION) {
+    return setLinearIssueState(hostPort, input, signal);
+  }
+  if (operationId === LINEAR_ISSUE_COMMENT_OPERATION) {
+    return commentLinearIssue(hostPort, input, signal);
   }
   return refused("Linear issue operations are not available.");
 }
@@ -558,6 +575,11 @@ export function linearIssueBrowseCapabilities(): ReadonlyArray<{
     { operationId: LINEAR_ISSUE_GET_OPERATION, available: true },
     { operationId: LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION, available: true },
     { operationId: LINEAR_ISSUE_FILTERS_OPERATION, available: true },
+    { operationId: LINEAR_ISSUE_WORKFLOW_OPERATION, available: true },
+    // Offered whatever the grant: the write itself refuses a read-only token
+    // with the reconnect message, which a missing capability could not say.
+    { operationId: LINEAR_ISSUE_SET_STATE_OPERATION, available: true },
+    { operationId: LINEAR_ISSUE_COMMENT_OPERATION, available: true },
   ];
 }
 

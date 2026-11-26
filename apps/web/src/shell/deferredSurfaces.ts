@@ -12,6 +12,12 @@ const RemotePairingView = lazy(() =>
 const LazyHostNoticeToasts = lazy(() =>
   import("../host/HostNoticeToasts").then((module) => ({ default: module.HostNoticeToasts })),
 );
+// A sidebar change's Undo notice loads after the window first renders.
+const LazyThreadRestUndoHost = lazy(() =>
+  import("../app/ThreadRestUndoToast").then((module) => ({
+    default: module.ThreadRestUndoHost,
+  })),
+);
 const ZenSurface = lazy(() =>
   import("../zen/ZenSurface").then((module) => ({ default: module.ZenSurface })),
 );
@@ -58,6 +64,7 @@ export {
   CoordinatorBoundsDialog,
   ProjectCreateDialog,
   LazyHostNoticeToasts,
+  LazyThreadRestUndoHost,
   RemotePairingView,
   RemoteTodoDraft,
   UsageWorkspace,

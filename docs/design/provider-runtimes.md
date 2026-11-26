@@ -3487,8 +3487,26 @@ variables). It is kept because it only stops the CLI updating itself
 mid-session, which the person controls through the provider's self-update
 switch. Following the FAQ's headless answer, Octant never runs `agy -p` (not
 even for `/usage`) and never rotates or switches Antigravity accounts by
-itself; one person's own sign-in serves their own threads. Discovery finds
-`agy` on the PATH. It speaks standard ACP over stdio, and Octant does nothing to the CLI's
+itself; one person's own sign-in serves their own threads. Instead, personal
+sign-in exposes an opt-in, reversible `statusLine` capture capability through
+the provider-neutral `ProviderLimitsCaptureCapability` seam on
+`ProviderContextFactsSource`: when the person clicks **Connect status line**
+in Provider Limits, Octant installs a Node-mode (`ELECTRON_RUN_AS_NODE=1`)
+capture script into `~/.gemini/antigravity-cli/settings.json` (preserving any
+symlink target, chaining any active prior `statusLine.command`, refusing to
+overwrite another Octant profile's installation, and setting
+`stack_with_default: true` when no active command existed). Whenever the person
+runs interactive `agy` (including via **Open agy in terminal**, which launches
+interactive `agy` in Terminal without `-p`), `agy` pipes its documented
+`statusLine` JSON to the bridge, which atomically writes only normalized quota
+buckets and `plan_tier` (`0600`) for Octant's file watcher and open panel poll
+to pick up within seconds. Individual model-family buckets (`gemini:five_hour`,
+`gemini:seven_day`, `claude_gpt:five_hour`, `claude_gpt:seven_day`) are
+displayed without setting an account-wide exhausted stop so one family's
+exhaustion never blocks unrelated models. **Disconnect** stays reachable even
+after switching sign-in to an API key or Agent Platform, and restores the prior
+`statusLine` entry only when the installed command is still unchanged.
+Discovery finds `agy` on the PATH. It speaks standard ACP over stdio, and Octant does nothing to the CLI's
 identity or sign-in: no spoofed `clientInfo`, no faked environment that moves
 where the CLI keeps its sign-in, and no call to Google's internal endpoints
 with the person's token. The CLI talks to Google itself.

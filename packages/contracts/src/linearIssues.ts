@@ -206,3 +206,63 @@ export const decodeLinearIssueDetail = Schema.decodeUnknownSync(LinearIssueDetai
 
 /** Decodes an unknown value as Linear issue filter options. */
 export const decodeLinearIssueFilterOptions = Schema.decodeUnknownSync(LinearIssueFilterOptions);
+
+/**
+ * Write operations. They reach Linear only through the plugin's operation
+ * port, and only with a token Linear granted the `write` scope; a read-only
+ * token is refused with {@link LINEAR_MISSING_WRITE_SCOPE} before any call.
+ */
+export const LINEAR_ISSUE_WORKFLOW_OPERATION = "read-issue-workflow";
+export const LINEAR_ISSUE_SET_STATE_OPERATION = "set-issue-state";
+export const LINEAR_ISSUE_COMMENT_OPERATION = "comment-issue";
+/**
+ * The writes the host alone makes, for a thread's linked issues and with
+ * its checks. The integration route refuses them from every client.
+ */
+export const LINEAR_HOST_ONLY_OPERATIONS: ReadonlyArray<string> = [
+  LINEAR_ISSUE_SET_STATE_OPERATION,
+  LINEAR_ISSUE_COMMENT_OPERATION,
+];
+
+/** The refusal a write answers when the stored Linear token may only read. */
+export const LINEAR_MISSING_WRITE_SCOPE =
+  "Linear lets Octant read only. Reconnect Linear in Settings › Integrations to allow updates.";
+
+/** The most UTF-8 bytes of a comment Octant posts on an issue. */
+export const MAX_TRACKER_COMMENT_BYTES = 4 * 1024;
+
+export const LinearWorkflowState = Schema.Struct({
+  id: LinearNodeId,
+  name: safeText(64),
+  type: safeText(32),
+  position: Schema.Number,
+}).annotations(strict);
+export type LinearWorkflowState = typeof LinearWorkflowState.Type;
+
+/** An issue's current state and every state of its team, for choosing where it moves. */
+export const LinearIssueWorkflow = Schema.Struct({
+  id: LinearNodeId,
+  identifier: LinearIssueIdentifier,
+  url: LinearIssueUrl,
+  state: LinearWorkflowState,
+  teamStates: Schema.Array(LinearWorkflowState).pipe(Schema.maxItems(100)),
+}).annotations(strict);
+export type LinearIssueWorkflow = typeof LinearIssueWorkflow.Type;
+
+export const LinearIssueSetStateInput = Schema.Struct({
+  id: LinearNodeId,
+  stateId: LinearNodeId,
+}).annotations(strict);
+export type LinearIssueSetStateInput = typeof LinearIssueSetStateInput.Type;
+
+export const LinearIssueCommentInput = Schema.Struct({
+  id: LinearNodeId,
+  body: Schema.NonEmptyTrimmedString.pipe(
+    Schema.filter((value) => utf8ByteLength(value) <= MAX_TRACKER_COMMENT_BYTES),
+  ),
+}).annotations(strict);
+export type LinearIssueCommentInput = typeof LinearIssueCommentInput.Type;
+
+export const decodeLinearIssueWorkflow = Schema.decodeUnknownSync(LinearIssueWorkflow);
+export const decodeLinearIssueSetStateInput = Schema.decodeUnknownSync(LinearIssueSetStateInput);
+export const decodeLinearIssueCommentInput = Schema.decodeUnknownSync(LinearIssueCommentInput);

@@ -19,7 +19,7 @@ const row = {
 };
 
 describe("the sibling threads contract", () => {
-  it("names one tool whose operations cover reading, messaging, the planner's board, and a coordinator's start", () => {
+  it("names one tool whose operations cover reading, messaging, the planner's board, a coordinator's start, and moving into a worktree", () => {
     expect(SIBLING_THREADS_TOOL_NAME).toBe("octant_threads");
     expect(ThreadsToolOperation.literals).toEqual([
       "help",
@@ -31,6 +31,7 @@ describe("the sibling threads contract", () => {
       "receipts",
       "board",
       "start",
+      "move-to-worktree",
     ]);
   });
 

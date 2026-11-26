@@ -32,6 +32,7 @@ import { ProviderGlyph } from "./ProviderGlyph";
 import { useModelToolVerifier } from "./ModelToolVerificationContext";
 import { ComposerBenchmarkHint, type ComposerBenchmarkScope } from "./ComposerBenchmarkHint";
 import { findSupportedReasoningOption, isComposerReasoningOption } from "./composerReasoningOption";
+import { pickerHasReadyInstance } from "./pickerReadiness";
 
 export { findSupportedReasoningOption, isComposerReasoningOption };
 
@@ -75,6 +76,13 @@ export interface ComposerModelPickerProps {
   readonly unselectedLabel?: string;
   /** Existing threads return the promise that confirms or refuses the model change. */
   readonly onSelect: (selection: ModelPickerSelection) => void | Promise<void>;
+  /**
+   * Shift-click (or Shift+Enter, Shift+Space) adds a model to, or takes it
+   * out of, the models a start composer also starts the prompt on, keeping
+   * the chosen one; they show checked beside it.
+   */
+  readonly onShiftSelect?: (selection: ModelPickerSelection) => void;
+  readonly alsoSelected?: ReadonlyArray<ModelPickerSelection>;
   readonly onOpenSettings?: () => void;
   /**
    * Empty `groups` can mean no instance is ready, or a Project policy hid
@@ -129,10 +137,7 @@ export function pickerHasListedModel(groups: ReadonlyArray<PickerGroup>): boolea
   return groups.some((group) => group.sections.some((section) => section.models.length > 0));
 }
 
-/** A ready or degraded instance can answer even when every model is hidden. */
-export function pickerHasReadyInstance(groups: ReadonlyArray<PickerGroup>): boolean {
-  return groups.some((group) => group.readiness === "ready" || group.readiness === "degraded");
-}
+export { pickerHasReadyInstance };
 
 function pickerHasBoundCurrent(groups: ReadonlyArray<PickerGroup>): boolean {
   return groups.some(
@@ -569,7 +574,13 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     const favoriteKey = modelFavoriteKey(group.instance.id, modelId);
     const favorited = favorites.has(favoriteKey);
     const selected =
-      props.selectedProviderInstanceId === group.instance.id && props.selectedModelId === modelId;
+      (props.selectedProviderInstanceId === group.instance.id &&
+        props.selectedModelId === modelId) ||
+      (props.alsoSelected ?? []).some(
+        (each) =>
+          String(each.providerInstanceId) === String(group.instance.id) &&
+          String(each.modelId) === String(modelId),
+      );
     const unavailable = picker.unavailableReason !== undefined;
     // The generic "all models" section adds nothing next to the provider name;
     // only informative sections get a suffix. The catalog is left out when a
@@ -606,7 +617,30 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           aria-selected={selected}
           className={`composer-model-picker__model${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
           disabled={unavailable || controlsDisabled}
-          onClick={() => chooseRow(row)}
+          onClick={(event) => {
+            const addTo = props.onShiftSelect;
+            if (event.shiftKey && addTo !== undefined && !unavailable && !controlsDisabled) {
+              addTo({ providerInstanceId: group.instance.id, modelId });
+              return;
+            }
+            chooseRow(row);
+          }}
+          onKeyDown={(event) => {
+            // Not every browser carries Shift into the click a key makes, so
+            // the keyboard's way to add a model is read from the key itself.
+            const addTo = props.onShiftSelect;
+            if (
+              addTo === undefined ||
+              !event.shiftKey ||
+              (event.key !== "Enter" && event.key !== " ") ||
+              unavailable ||
+              controlsDisabled
+            ) {
+              return;
+            }
+            event.preventDefault();
+            addTo({ providerInstanceId: group.instance.id, modelId });
+          }}
           role="option"
           title={picker.unavailableReason}
           type="button"
@@ -997,6 +1031,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           ) : null}
           <div
             aria-label="Models"
+            {...(props.onShiftSelect === undefined ? {} : { "aria-multiselectable": true })}
             className="composer-model-picker__models"
             role="listbox"
             ref={modelsElement}

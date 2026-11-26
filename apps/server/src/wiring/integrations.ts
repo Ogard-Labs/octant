@@ -23,6 +23,14 @@ import { LinearReadToolService } from "../plugins/linear/linearReadToolService";
 import { linearRoutineEventSources } from "../plugins/linear/linearRoutineEventSources";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "../github/githubReadToolService";
+import { GhIssueWritePort } from "../github/ghIssueWritePort";
+import { ThreadLinkedIssueStore } from "../trackerIssues/threadLinkedIssueStore";
+import { TrackerIssueWrites } from "../trackerIssues/trackerIssueWrites";
+import {
+  createTrackerIssuePort,
+  resolveLinearIdentifier,
+  type LinearOperationRunner,
+} from "../trackerIssues/trackerIssuePorts";
 import { TerminalSessionImports } from "../terminalSessions/terminalSessionImports";
 import { createTerminalSessionRouteHandler } from "../terminalSessionRoutes";
 import {
@@ -477,6 +485,42 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       ingestion: externalContentIngestionStore,
       uuid: randomUUID,
     });
+    // The issues a thread is linked to, and the tracker writes made for them.
+    // Linear is reached only through its plugin's operations and GitHub only
+    // through the host's `gh` issue port; neither holds a credential here.
+    const runLinearOperation: LinearOperationRunner = (operationId, input, signal) =>
+      linearIntegrationIsEffective()
+        ? integrationService.executeOperation(
+            "linear",
+            { kind: "operation", operationId, input },
+            signal,
+          )
+        : Promise.resolve({ kind: "refused", reason: "Connect Linear to authorize this host." });
+    const threadLinkedIssueStore = new ThreadLinkedIssueStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const linkedIssues = {
+      store: threadLinkedIssueStore,
+      writes: new TrackerIssueWrites({
+        store: threadLinkedIssueStore,
+        port: createTrackerIssuePort({
+          linear: runLinearOperation,
+          github:
+            options.ghExecutable === undefined
+              ? undefined
+              : new GhIssueWritePort({
+                  command: createGhCommandPort({ ghPath: options.ghExecutable }),
+                }),
+          githubIsEffective: githubIntegrationIsEffective,
+        }),
+      }),
+      resolveLinear: (identifier: string, signal: AbortSignal) =>
+        resolveLinearIdentifier(runLinearOperation, identifier, signal),
+    };
     // The person's own command-line homes, where those tools keep sessions.
     const claudeHome = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
     const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
@@ -561,6 +605,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       linearConnected,
       linearIssueContextService,
       linearReadToolService,
+      linkedIssues,
       linearRoutineEventSources: linearRoutineEventSources(
         integrationService,
         linearIntegrationIsEffective,

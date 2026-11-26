@@ -1,3 +1,4 @@
+import type { PersonSentTurns } from "../usage/usageLimitDefaults";
 import { randomUUID } from "node:crypto";
 import { assistantTranscript } from "../chat/assistantTranscript";
 import { createWorkTurnRouteHandler } from "../workTurnRoutes";
@@ -44,6 +45,8 @@ export type ZenDependencies = Pick<ServerStart, "persistence"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection"> & {
     /** The member's Act item for its hub, bound by the hub side after this is built. */
     readonly hubActScopeSlot: HubActScopeSlot;
+    /** Where the route records a turn the person sent, for the usage-limit defaults. */
+    readonly personSentTurns: PersonSentTurns;
   };
 
 export function wireZen(deps: ZenDependencies) {
@@ -320,6 +323,7 @@ export function wireZen(deps: ZenDependencies) {
   });
   const workTurnRoutes = createWorkTurnRouteHandler({
     service: workTurnService,
+    notePersonSentTurn: (turnId) => deps.personSentTurns.note("work", turnId),
     windowAuthorityStore,
     maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     hubActScope: hubActScopeSlot.current,

@@ -2,6 +2,7 @@ import { chmod, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
   HostRuntimePathError,
@@ -726,11 +727,28 @@ describe("waitForStorageReady", () => {
     const dir = await mkdtemp(join(tmpdir(), "octant-receipt-wake-"));
     const hostInfoPath = join(dir, "octant-host.json");
     let attempts = 0;
+    // macOS reports nothing for a change made before its directory watch is
+    // armed, which happens on another thread just after watch() returns: one
+    // publication during the first probe went unseen in about 1 of 20 tries
+    // under parallel load, and CI then timed out. Publishing again until the
+    // woken probe arrives makes the outcome depend only on the wake.
+    // The loop's failure is caught as soon as it starts, so a failed write
+    // fails this test below instead of surfacing as an unhandled rejection.
+    let publishing: Promise<void> = Promise.resolve();
+    let publishFailure: unknown;
+    let stopPublishing = false;
     try {
       const fetch = vi.fn(async () => {
         if (++attempts === 1) {
-          await writeFile(join(dir, "publishing"), "not proof of readiness");
-          await rename(join(dir, "publishing"), hostInfoPath);
+          publishing = (async () => {
+            while (!stopPublishing && attempts === 1) {
+              await writeFile(join(dir, "publishing"), "not proof of readiness");
+              await rename(join(dir, "publishing"), hostInfoPath);
+              await delay(20);
+            }
+          })().catch((error: unknown) => {
+            publishFailure = error;
+          });
           return new Response(null, { status: 503 });
         }
         return Response.json({
@@ -752,7 +770,10 @@ describe("waitForStorageReady", () => {
       ).resolves.toBeUndefined();
       expect(attempts).toBe(2);
     } finally {
+      stopPublishing = true;
+      await publishing;
       await rm(dir, { recursive: true, force: true });
+      expect(publishFailure).toBeUndefined();
     }
   });
 

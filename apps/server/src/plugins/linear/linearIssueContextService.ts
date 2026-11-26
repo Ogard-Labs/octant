@@ -59,7 +59,12 @@ export interface LinearIssueContextFields {
 }
 
 export type LinearIssueContextResult =
-  | { readonly status: "ready"; readonly framed: FramedExternalContent }
+  | {
+      readonly status: "ready";
+      readonly framed: FramedExternalContent;
+      /** The issue's public identifier, which a thread created from it is linked by. */
+      readonly identifier?: string;
+    }
   | {
       readonly status: "refused";
       readonly reason: LinearIssueContextRefusedReason;
@@ -134,6 +139,7 @@ export class LinearIssueContextService {
     });
     return {
       status: "ready",
+      identifier: detail.identifier,
       framed: frameExternalContentForModel({
         origin: "external-content",
         sourceLabel: ISSUE_CONTEXT_SOURCE_LABEL,

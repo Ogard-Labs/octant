@@ -323,7 +323,10 @@ export function settleVideoCostUsdMicros(
   options: Pick<VideoClipOptions, "resolution" | "audio">,
   input: { readonly imageCount: number },
 ): number {
-  if (usage === undefined) return estimateUsdMicros;
+  // A count that is not a finite amount of at least zero can only come from a
+  // broken report: pricing it could settle at NaN, below zero or without
+  // bound, so the reservation the person's limits admitted stands instead.
+  if (usage === undefined || !Object.values(usage).every(isUsableCount)) return estimateUsdMicros;
   // A cost the provider reports is what the person was billed.
   if (usage.costUsdMicros !== undefined) return Math.max(0, Math.round(usage.costUsdMicros));
   if (price.kind === "per-second" && usage.billedSeconds !== undefined) {
@@ -358,6 +361,10 @@ export function settleVideoCostUsdMicros(
     }
   }
   return estimateUsdMicros;
+}
+
+function isUsableCount(value: number | undefined): boolean {
+  return value === undefined || (Number.isFinite(value) && value >= 0);
 }
 
 /** A rough prompt token count for the estimate: about four characters a token, rounded up. */

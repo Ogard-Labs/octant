@@ -9,6 +9,8 @@ export interface OctantToastProps {
   readonly action?: {
     readonly label: string;
     readonly onSelect: () => void;
+    /** An action that acts where the person is, such as Undo, draws no leave-arrow. */
+    readonly inPlace?: boolean;
   };
   readonly onDismiss: () => void;
   /**
@@ -75,7 +77,7 @@ export function OctantToast({
                 variant="link"
               >
                 {action.label}
-                <span aria-hidden="true">↗</span>
+                {action.inPlace === true ? null : <span aria-hidden="true">↗</span>}
               </OctantButton>
             </>
           )}

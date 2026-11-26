@@ -332,6 +332,30 @@ describe("video generation policy", () => {
     ).toBe(100);
   });
 
+  it("settles at the estimate when a reported count is not a finite amount of at least zero", () => {
+    const options = { resolution: "720p", audio: false };
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(
+        settleVideoCostUsdMicros(omni.price, 696_540, { outputTokens: bad }, options, noImages),
+      ).toBe(696_540);
+      expect(
+        settleVideoCostUsdMicros(
+          omni.price,
+          696_540,
+          { outputTokens: 28_960, inputTokens: bad },
+          options,
+          noImages,
+        ),
+      ).toBe(696_540);
+      expect(
+        settleVideoCostUsdMicros(omni.price, 696_540, { costUsdMicros: bad }, options, noImages),
+      ).toBe(696_540);
+      expect(
+        settleVideoCostUsdMicros(timed.price, 1_000_000, { billedSeconds: bad }, options, noImages),
+      ).toBe(1_000_000);
+    }
+  });
+
   it("treats an unpublished price as unknown spend", () => {
     expect(
       estimateVideoCost(

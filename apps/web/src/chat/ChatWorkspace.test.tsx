@@ -1,5 +1,7 @@
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
-import { decodeChatAttachment } from "@octant/contracts/chat";
+import { composerQuoteText, REPLY_QUOTE_SOURCE } from "../composer/composerQuote";
+import { automationFollowUpTurnPrompt } from "@octant/contracts/automation";
+import { decodeChatAttachment, MAX_CHAT_TURN_ATTACHMENTS } from "@octant/contracts/chat";
 import type { ThreadMessageQueueResult } from "@octant/contracts";
 import {
   decodeChatBootstrap,
@@ -533,6 +535,118 @@ describe("Chat Stop", () => {
   });
 });
 
+describe("Chat usage-limit strip", () => {
+  const limited = (resetsAt: string | undefined, thread: Record<string, unknown> = {}) => {
+    const waiting = viewWithAttempt("waiting");
+    return decodeChatThreadView({
+      ...waiting,
+      thread: { ...waiting.thread, ...thread },
+      turns: waiting.turns.map((turn) => ({
+        ...turn,
+        attempts: turn.attempts.map((attempt) => ({
+          ...attempt,
+          usageLimit:
+            resetsAt === undefined ? { kind: "exhausted" } : { kind: "exhausted", resetsAt },
+        })),
+      })),
+    });
+  };
+
+  it("sends Resume now, Resume at reset and Snooze until reset through the host's commands", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async (_command: ChatCommand) => undefined);
+    render(
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({
+          activeView: limited(new Date(Date.now() + 30 * 60_000).toISOString()),
+          execute,
+        })}
+      />,
+    );
+    await waitFor(() => expect(document.querySelector(".usage-limit-strip")).not.toBeNull());
+    expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Resume now" }));
+    await user.click(screen.getByRole("button", { name: "Resume at reset" }));
+    await user.click(screen.getByRole("button", { name: "Snooze until reset" }));
+    await waitFor(() =>
+      expect(execute.mock.calls.map(([command]) => command.kind)).toEqual([
+        "retry-chat-turn",
+        "schedule-chat-usage-resume",
+        "snooze-chat-thread-at-usage-reset",
+      ]),
+    );
+  });
+
+  it("offers Cancel once the stop carries a scheduled resume", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined);
+    const resetsAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    render(
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({
+          activeView: limited(resetsAt, {
+            usageResume: {
+              record: {
+                threadId,
+                turnId,
+                attemptId,
+                providerInstanceId: providerId,
+                usageLimit: { kind: "exhausted", resetsAt },
+                resetsAt,
+                scheduledAt: now,
+              },
+              status: "scheduled",
+            },
+          }),
+          execute,
+        })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Cancel resume" }));
+    expect(screen.queryByRole("button", { name: "Resume at reset" })).toBeNull();
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "cancel-chat-usage-resume" }),
+      ),
+    );
+  });
+
+  it("draws no strip once the attempt is released from the limit", () => {
+    render(
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ activeView: viewWithAttempt("completed") })}
+      />,
+    );
+    expect(document.querySelector(".usage-limit-strip")).toBeNull();
+  });
+
+  it("draws no strip once a move to another account released the waiting attempt", async () => {
+    const resetsAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const workspace = (thread: Record<string, unknown>) => (
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ activeView: limited(resetsAt, thread) })}
+      />
+    );
+    const parked = render(workspace({}));
+    expect(await screen.findByRole("button", { name: "Resume now" })).toBeVisible();
+    parked.unmount();
+
+    render(workspace({ releasedStopId: attemptId }));
+    // Resume now would resend the stopped attempt on the account it moved to.
+    expect(await screen.findByLabelText("Message")).toBeVisible();
+    expect(document.querySelector(".usage-limit-strip")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume now" })).toBeNull();
+  });
+});
+
 describe("Chat questions", () => {
   it("docks a reply's pending question directly above the composer, not inside the reply", async () => {
     const waiting = viewWithAttempt("waiting");
@@ -679,6 +793,128 @@ describe("Chat host queue", () => {
     expect(base.discard).toHaveBeenCalledWith(
       expect.objectContaining({ attachmentId: upload.mock.calls[1]?.[0].attachmentId }),
     );
+  });
+
+  it("adds at most one message's worth of files dropped on an open thread's row", async () => {
+    const upload = vi.fn<ChatController["upload"]>(async (input) =>
+      decodeChatAttachment({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+        status: "finalized",
+        createdAt: now,
+      }),
+    );
+    render(
+      <ChatWorkspace
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ upload })}
+      />,
+    );
+    const { threadImageOffers, offerFilesToThread, threadImageOfferKey } =
+      await import("../composer/threadImageOffers");
+    // The composer subscribes once its offer store has loaded.
+    await waitFor(async () => {
+      const probe = await threadImageOffers.offer(
+        threadImageOfferKey("chat", threadId),
+        new File(["x"], "0.png", { type: "image/png" }),
+      );
+      expect(probe.status).toBe("added");
+    });
+    const say = vi.fn();
+    const files = Array.from(
+      { length: MAX_CHAT_TURN_ATTACHMENTS },
+      (_, index) => new File(["x"], `${index + 1}.png`, { type: "image/png" }),
+    );
+    await offerFilesToThread("chat", threadId, files, say);
+    // The probe files took a place each, so the last of the drop finds none.
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(MAX_CHAT_TURN_ATTACHMENTS));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(upload).toHaveBeenCalledTimes(MAX_CHAT_TURN_ATTACHMENTS);
+    expect(say).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `${MAX_CHAT_TURN_ATTACHMENTS}.png was not added. A message can hold ${MAX_CHAT_TURN_ATTACHMENTS} attachments.`,
+      ),
+    );
+  });
+
+  it("names a dropped file whose upload failed after a later file of the drop was added", async () => {
+    const upload = vi.fn<ChatController["upload"]>(async (input) => {
+      if (input.displayName === "broken.png") throw new Error("upload failed");
+      return decodeChatAttachment({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+        status: "finalized",
+        createdAt: now,
+      });
+    });
+    render(
+      <ChatWorkspace
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ upload })}
+      />,
+    );
+    const { offerFilesToThread } = await import("../composer/threadImageOffers");
+    const say = vi.fn();
+    const files = ["broken.png", "fine.png"].map(
+      (name) => new File(["x"], name, { type: "image/png" }),
+    );
+    await offerFilesToThread("chat", threadId, files, say);
+    await waitFor(() =>
+      expect(say).toHaveBeenCalledWith(
+        "broken.png was not added. broken.png could not be attached. Paste or choose it again to retry.",
+      ),
+    );
+  });
+
+  it("keeps Send closed while a drop moves past a refused file to the next", async () => {
+    const small = Promise.withResolvers<void>();
+    const upload = vi.fn<ChatController["upload"]>(async (input) => {
+      if (input.displayName === "huge.png") throw new Error("too large");
+      await small.promise;
+      return decodeChatAttachment({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+        status: "finalized",
+        createdAt: now,
+      });
+    });
+    // The host's discard never answers here, so the drop must not wait on it.
+    const discard = vi.fn<ChatController["discard"]>(() => new Promise(() => {}));
+    render(
+      <ChatWorkspace
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ upload, discard })}
+      />,
+    );
+    const { offerFilesToThread } = await import("../composer/threadImageOffers");
+    const files = ["huge.png", "small.png"].map(
+      (name) => new File(["x"], name, { type: "image/png" }),
+    );
+    void offerFilesToThread("chat", threadId, files, () => {});
+    await waitFor(() => expect(discard).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(upload.mock.calls.map(([input]) => input.displayName)).toEqual([
+        "huge.png",
+        "small.png",
+      ]),
+    );
+    // The draft has text, so only the drop's upload in flight keeps Send shut.
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    await act(async () => small.resolve());
+    await screen.findByText("small.png");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled());
   });
 
   it("keeps an uncertain enqueue separate from normal sending after the active turn finishes", async () => {
@@ -2258,50 +2494,185 @@ describe("ChatWorkspace", () => {
     expect(sendTurn).toHaveBeenLastCalledWith("Ship this plan", [lateAttachmentId], [], [], [], []);
   });
 
-  it("claims exactly the quoted chips after a quote is added during a send", async () => {
+  it("adds a reply selection to the draft as a quote chip and sends it as reference text", async () => {
     const user = userEvent.setup();
-    let resolveSend!: (sent: boolean) => void;
-    const sendTurn = vi.fn(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveSend = resolve;
-        }),
-    );
-    const controller = controllerFixture({
-      activeView: viewWithQuotableReplies(),
-      sendTurn,
-    });
-    render(<ChatWorkspace controller={controller} providerSnapshot={providerSnapshot()} />);
+    const sendTurn = vi.fn(async (_prompt: string) => true);
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView: viewWithQuotableReplies(),
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+            sendTurn,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
 
     await addQuoteFromTranscript(user, "First quote excerpt.");
-    await screen.findByText("Quote · First quote excerpt.");
+    await screen.findByRole("button", {
+      name: "Quote from an earlier reply in this thread: First quote excerpt.",
+    });
+    await user.click(screen.getByRole("button", { name: "Send message" }));
 
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    expect(sendTurn.mock.calls[0]?.[0]).toBe(
+      composerQuoteText({ source: REPLY_QUOTE_SOURCE, text: "First quote excerpt.", comment: "" }),
+    );
+  });
+
+  it("keeps a quote added while a send is in flight for the next message", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<boolean>();
+    const sendTurn = vi.fn((_prompt: string) => pending.promise);
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView: viewWithQuotableReplies(),
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+            sendTurn,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await addQuoteFromTranscript(user, "First quote excerpt.");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    expect(sendTurn.mock.calls[0]?.[0]).not.toContain("Second quote excerpt.");
 
     await addQuoteFromTranscript(user, "Second quote excerpt.");
-    await screen.findByText("Quote · Second quote excerpt.");
+    await act(async () => pending.resolve(true));
 
-    resolveSend(true);
-    await waitFor(() =>
-      expect(screen.queryByText("Quote · First quote excerpt.")).not.toBeInTheDocument(),
-    );
-    expect(screen.getByText("Quote · Second quote excerpt.")).toBeInTheDocument();
+    // The quote added during the send was not part of it, so it stays.
+    expect(
+      await screen.findByRole("button", {
+        name: "Quote from an earlier reply in this thread: Second quote excerpt.",
+      }),
+    ).toBeVisible();
+    expect(
+      (screen.getByRole("textbox", { name: "Message" }) as HTMLElement & { value: string }).value,
+    ).toContain("Second quote excerpt.");
+  });
 
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(sendTurn).toHaveBeenCalledTimes(2));
-    expect(sendTurn).toHaveBeenLastCalledWith(
-      expect.stringContaining("Second quote excerpt."),
-      [],
-      [],
-      [],
-      [],
-      [],
+  it("recalls the last sent prompt with ArrowUp, and not while an attachment waits", async () => {
+    const user = userEvent.setup();
+    const upload = vi.fn<ChatController["upload"]>(async (input) =>
+      decodeChatAttachment({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+        status: "finalized",
+        createdAt: now,
+      }),
     );
-    const lastMessage = String(
-      (sendTurn.mock.calls.at(-1) as ReadonlyArray<unknown> | undefined)?.[0] ?? "",
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView: viewWithQuotableReplies(),
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+            upload,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
+    const message = screen.getByLabelText("Message");
+    message.focus();
+    await user.keyboard("{ArrowUp}");
+    expect(message).toHaveValue("Second question.");
+    await user.keyboard("{ArrowDown}");
+    expect(message).toHaveValue("");
+
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["image"], "first.png", { type: "image/png" }),
     );
-    expect(lastMessage).not.toContain("First quote excerpt.");
+    await screen.findByText("first.png");
+    message.focus();
+    await user.keyboard("{ArrowUp}");
+    expect(message).toHaveValue("");
+  });
+
+  it("names a large pasted file in an empty prompt only once Chat attached it", async () => {
+    const upload = vi.fn<ChatController["upload"]>(async () => {
+      throw new Error("offline");
+    });
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView: viewWithQuotableReplies(),
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+            upload,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
+    const message = screen.getByLabelText("Message");
+    message.focus();
+    fireEvent.paste(message, {
+      clipboardData: {
+        getData: (type: string) => (type === "text/plain" ? "x".repeat(40 * 1024) : ""),
+        files: [],
+        items: [],
+        types: ["text/plain"],
+      },
+    });
+    await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/pasted-text-1\.txt could not be attached/)).toBeVisible();
+    expect(message).toHaveValue("");
+  });
+
+  it("skips a routine's scheduled follow-up when ArrowUp recalls the person's last prompt", async () => {
+    const user = userEvent.setup();
+    const view = viewWithQuotableReplies();
+    const activeView = decodeChatThreadView({
+      ...view,
+      contents: view.contents.map((content) =>
+        content.body === "Second question."
+          ? { ...content, body: automationFollowUpTurnPrompt("Check the deploy.") }
+          : content,
+      ),
+    });
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView,
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
+    const message = screen.getByLabelText("Message");
+    message.focus();
+    await user.keyboard("{ArrowUp}");
+    expect(message).toHaveValue("First question.");
   });
 
   it("keeps an attachment visible when authoritative discard fails", async () => {

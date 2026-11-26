@@ -1089,6 +1089,18 @@ export const ShellSettings = Schema.Struct({
    */
   threadWakeupsRunMissedOnReturn: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
+   * Whether the host arms a resume at the reset by itself when a provider's
+   * usage limit stops a turn a person sent from this computer or a device
+   * they paired, and the stop names its reset. Off, the default, a resume at
+   * the reset is only ever the person's choice on that stop. Never a billing
+   * stop, never a turn no person sent, never a provider that refuses the
+   * host's continuations. Absent is off: the field carries no default so the
+   * window's initial code stays inside its size budget.
+   */
+  usageLimitResumeAtResetByDefault: Schema.optional(Schema.Boolean),
+  /** The same, for hiding the thread until the reset; it starts nothing. Absent is off. */
+  usageLimitSnoozeUntilResetByDefault: Schema.optional(Schema.Boolean),
+  /**
    * How many wake turns a message may start on one thread in any hour, and
    * the hop count past which a message is carried but wakes nothing, for a
    * thread whose coordinator set no bounds of its own. Default to the former

@@ -133,6 +133,7 @@
     "./mobile-inbox-client": "./src/mobileInboxClient.ts",
     "./mobile-todo-client": "./src/mobileTodoClient.ts",
     "./mobile-code-operations-client": "./src/mobileCodeOperationsClient.ts",
+    "./mobile-thread-message-queue-client": "./src/mobileThreadMessageQueueClient.ts",
     "./mobile-push-token-client": "./src/mobilePushTokenClient.ts",
     "./zen-client": "./src/zenClient.ts",
     "./command-credentials-client": "./src/commandCredentialsClient.ts",

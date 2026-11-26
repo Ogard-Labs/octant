@@ -3,6 +3,12 @@ import { decodeBrowserThreadId } from "@octant/contracts";
 import { ownPullRequestsFromHistory } from "../code/codeThreadMetadataService";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
 import { MergedThreadPutAway, threadDeliversPullRequest } from "../code/mergedThreadPutAway";
+import { LinkedIssueWriteBack } from "../trackerIssues/linkedIssueWriteBack";
+import {
+  linkedIssueUpdatePort,
+  type LinkedIssueUpdatePort,
+} from "../trackerIssues/agentIssueUpdates";
+import { withPullRequestHandoffLine } from "@octant/domain/code-pull-request-switch-policy";
 import {
   FinishedReportSettle,
   managedChildWorkPending,
@@ -57,6 +63,7 @@ import {
   type CodeOperationRuntime,
   type CodeOperationRuntimeOptions,
   type CodeStoppedTurn,
+  type CodeTrackerToolInput,
   createCodeOperationRuntime,
 } from "../code/codeOperationRuntime";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
@@ -77,6 +84,8 @@ import {
 import { SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID } from "@octant/plugin-host/first-party-plugins";
 import { isFirstPartyIntegrationEffective } from "../github/githubIntegrationEffective";
 import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
+import type { PullRequestCiPort } from "../code/pullRequestCiPort";
+import { CODE_THREAD_MOVED_TO_WORKTREE, decodeCodeThreadMovedToWorktree } from "@octant/contracts";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -100,6 +109,7 @@ import {
   CodeThreadBoardService,
 } from "../code/codeThreadBoardService";
 import { CodeFollowUpService } from "../code/codeFollowUpService";
+import { runAllowedWorktreeMove } from "../code/agentWorktreeMove";
 import { FailingChecksFollowUps } from "../code/failingChecksFollowUps";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "../code/terminalProcessPort";
@@ -436,6 +446,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "githubExtensionSnapshot"
     | "githubReadToolService"
     | "linearReadToolService"
+    | "linkedIssues"
     | "peekCreateFromIssueFramed"
     | "siblingThreadsService"
     | "threadOutsideContentMarks"
@@ -590,6 +601,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     githubExtensionSnapshot,
     githubReadToolService,
     linearReadToolService,
+    linkedIssues,
     isCodeProviderModelAllowed,
     liveTurns,
     machineChangeFeed,
@@ -654,6 +666,33 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   return Effect.gen(function* () {
     // The coordinator service is wired after the Code runtime that reports
     // stopped turns to it; a stop before then has no worker to move.
+    // The linked-issue write-back is built after the turn runtime it listens
+    // to; a turn requested before then has nothing to move.
+    const linkedIssueTurnStarts: { current?: (threadId: string) => void } = {};
+    const linkedIssuePullRequestsCreated: { current?: (threadId: string) => void } = {};
+    // What a turn's Linear and GitHub tools need to update the thread's linked
+    // issues; the Project's choice and the links are read again at each write.
+    // Offered only to a turn whose thread has a linked issue: on any other
+    // every write would be refused, so the tools stay read-only there.
+    const agentIssueUpdates = (
+      input: CodeTrackerToolInput,
+    ): { readonly issueUpdates?: LinkedIssueUpdatePort } => {
+      const linked = () =>
+        linkedIssues.store.list(String(input.thread.id)).map((entry) => entry.issue);
+      if (linked().length === 0) return {};
+      return {
+        issueUpdates: linkedIssueUpdatePort({
+          linked,
+          projectAllowsUpdates: () => {
+            const project = persistence.readProject(input.thread.projectId);
+            return project?.type === "code" && project.agentsMayUpdateIssues === true;
+          },
+          readOutsideContent: input.readOutsideContent,
+          ask: input.ask,
+          writes: linkedIssues.writes,
+        }),
+      };
+    };
     const continueWorkerOnFallback: {
       current?: (
         threadId: CodeThreadId,
@@ -734,6 +773,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       }),
     );
     let pullRequestWatchService: PullRequestWatchPort | undefined;
+    let pullRequestCiService: PullRequestCiPort | undefined;
     // Areas built after this one add tools to a Code turn here, as they do to
     // a Chat thread, so the runtime never holds the services behind them.
     const codeToolContributors: Array<
@@ -1569,6 +1609,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
         },
+        // A wake or a routine is not a person asking: linked issues stay put.
+        onPersonTurnRequested: (threadId) => linkedIssueTurnStarts.current?.(String(threadId)),
         onSideTaskReportAdmitted: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteReportAdmitted(threadId);
         },
@@ -1620,6 +1662,33 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         },
         // The agent's ask to plan, or to leave Plan, changes the level the way
         // the person's own level menu does, for the window that approved it.
+        // The person allowed an agent's move during its turn; it runs after
+        // the turn, and the thread says what happened either way.
+        moveThreadToWorktree: (input) =>
+          runAllowedWorktreeMove(input, {
+            readThread: (threadId) => persistence.readCodeThread(threadId),
+            execute: async (windowId, command) => await codeService.execute(windowId, command),
+            notify: async (threadId, text) => {
+              const view = codeFollowUpService.read(threadId);
+              await codeFollowUpService.observeTrigger({
+                threadId,
+                sourceEventId: randomUUID(),
+                sourceSequence:
+                  Math.max(
+                    view.followUp?.triggerSequence ?? 0,
+                    view.followUp?.acknowledgedThroughSequence ?? 0,
+                  ) + 1,
+                reason: text,
+                origin: "automatic",
+                triggeredAt: new Date().toISOString(),
+              });
+            },
+          }),
+        actsAsPerson: (windowId) =>
+          !isRoutineHostScope(windowId) &&
+          !deps.isRestrictedDeviceScope(windowId) &&
+          (deps.isPairedDeviceScope(windowId) ||
+            deps.windowAuthorityStore.listWindowIds().includes(windowId)),
         changeThreadLevel: async ({ windowId, threadId, executionPolicy, planReturnPolicy }) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return false;
@@ -2071,18 +2140,28 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               extensionPackageStore.readVerifiedComponentText(target, target.componentId),
           }),
         }),
-        githubReadTools: ({ windowId, thread, readThread }) =>
+        linkedIssues: (threadId) =>
+          linkedIssues.store.list(String(threadId)).map((entry) => entry.issue),
+        onPullRequestCreated: (threadId) =>
+          linkedIssuePullRequestsCreated.current?.(String(threadId)),
+        githubReadTools: (input) =>
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
-            githubReadToolService.createToolSet({ windowId, thread, readThread }),
+            githubReadToolService.createToolSet({
+              windowId: input.windowId,
+              thread: input.thread,
+              readThread: input.readThread,
+              ...agentIssueUpdates(input),
+            }),
           ),
-        linearReadTools: ({ windowId, thread, readThread }) =>
+        linearReadTools: (input) =>
           linearReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             linearReadToolService.createToolSet({
-              windowId,
-              thread,
-              readThread,
+              windowId: input.windowId,
+              thread: input.thread,
+              readThread: input.readThread,
+              ...agentIssueUpdates(input),
               readProjectLinearTarget: () => {
-                const project = persistence.readProject(thread.projectId);
+                const project = persistence.readProject(input.thread.projectId);
                 return project?.type === "code" ? project.linearTarget : undefined;
               },
             }),
@@ -2102,8 +2181,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         // The facts come from the host's own records on every call. The
         // Code runtime, the decision reader, and the mention directory are
         // declared later in this startup; a turn runs only after they exist.
-        threads: ({ windowId, thread, readPosture, planner }) =>
+        threads: ({ windowId, thread, readPosture, planner, worktreeMove }) =>
           createThreadsTools({
+            ...(worktreeMove === undefined ? {} : { worktreeMove }),
             mode: "code",
             windowId,
             service: siblingThreadsService,
@@ -2197,6 +2277,26 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         forgeChanges: runtimeForgeChanges,
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
+        // A thread moves into its own worktree at most once (a worktree thread
+        // is refused), so its one move record is the one this reads.
+        readThreadMove: (threadId) => {
+          const [envelope] = persistence.journal.replayAggregateType({
+            aggregateType: "code-thread",
+            eventName: CODE_THREAD_MOVED_TO_WORKTREE,
+            payloadPrefix: { path: "threadId", prefix: String(threadId) },
+            afterSequence: 0,
+            limit: 1,
+          });
+          if (envelope === undefined) return undefined;
+          try {
+            const moved = decodeCodeThreadMovedToWorktree(envelope.payload);
+            return String(moved.threadId) === String(threadId)
+              ? { fromCheckoutId: moved.fromCheckoutId, toCheckoutId: moved.toCheckoutId }
+              : undefined;
+          } catch {
+            return undefined;
+          }
+        },
         resolveStrict: (threadId) => resolveThreadStrict(String(threadId)),
         resolveProviderCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,
@@ -2298,6 +2398,17 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             pullRequestWatchService === undefined
               ? { status: "not-watching" }
               : pullRequestWatchService.unwatch(input),
+        },
+        // Bound like the watch: the switch service is built after this runtime.
+        pullRequestCi: {
+          logs: async (input) =>
+            pullRequestCiService === undefined
+              ? { status: "unavailable", reason: "unavailable" }
+              : pullRequestCiService.logs(input),
+          rerun: async (input) =>
+            pullRequestCiService === undefined
+              ? { status: "unavailable", reason: "unavailable" }
+              : pullRequestCiService.rerun(input),
         },
         reviewFiles: {
           resolve: (input) => {
@@ -2455,6 +2566,110 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    // Keeps the issues linked to Code threads current when their Project asks,
+    // and offers Merge when ready on a linked thread's open pull request. It
+    // reads the same cached pull-request evidence the board shows; GitHub and
+    // Linear are written only through the tracker port.
+    const linkedIssueWriteBack =
+      hostCodeService === undefined
+        ? undefined
+        : new LinkedIssueWriteBack({
+            writes: linkedIssues.writes,
+            linked: (threadId) => linkedIssues.store.list(threadId),
+            threads: () => persistence.readCodeThreads(),
+            readThread: (threadId) => persistence.readCodeThread(decodeCodeThreadId(threadId)),
+            keepCurrent: (projectId) => {
+              const project = persistence.readProject(projectId);
+              return project?.type === "code" && project.keepLinkedIssuesCurrent === true;
+            },
+            pullRequest: async (thread) => {
+              const view = await codeThreadMetadataService.project([
+                {
+                  thread,
+                  projectProjectionPresent: persistence.readProject(thread.projectId) !== undefined,
+                },
+              ]);
+              const linked = view.threads[0]?.linkedPullRequest;
+              return linked?.kind === "linked" && linked.matchesDeliveryBranch
+                ? {
+                    state: linked.state,
+                    url: linked.url,
+                    number: linked.number,
+                    baseRepository: linked.baseRepository,
+                  }
+                : undefined;
+            },
+            mergedPullRequest: async (thread) => {
+              const own = ownPullRequestsFromHistory(
+                codeBoardEventStore.summaryForThread(thread.id),
+              );
+              const [merged] = projectPullRequestService.mergedPullRequestsForThread(
+                String(thread.id),
+                (pullRequest) =>
+                  threadDeliversPullRequest({
+                    thread,
+                    own,
+                    pullRequest,
+                    sameRepository: (projectId, left, right) =>
+                      pullRequestLinkService.areSameRepository(projectId, left, right),
+                  }),
+              );
+              return merged === undefined
+                ? undefined
+                : {
+                    state: "merged",
+                    url: `https://github.com/${merged.baseRepository}/pull/${String(merged.number)}`,
+                    number: merged.number,
+                    baseRepository: merged.baseRepository,
+                  };
+            },
+            offer: async (threadId, ref, line) => {
+              const previous = codeFollowUpService.read(decodeCodeThreadId(threadId)).followUp;
+              const lines =
+                previous?.state === "open" && previous.origin === "automatic"
+                  ? previous.reason.split("\n")
+                  : [];
+              // An Auto-fix notice for this pull request already says more.
+              if (lines.some((entry) => entry.toLowerCase().startsWith(`${ref.toLowerCase()} `)))
+                return true;
+              return await tellLinkedThread(threadId, ref, line);
+            },
+            tell: (threadId, key, line) => tellLinkedThread(threadId, key, line),
+          });
+    /**
+     * Adds one keyed line to the thread's Pull request updates follow-up.
+     * Answers false, writing nothing, while the person's own follow-up is
+     * open: replacing it would drop the reminder they set before they did it.
+     */
+    async function tellLinkedThread(threadId: string, key: string, line: string): Promise<boolean> {
+      const id = decodeCodeThreadId(threadId);
+      const previous = codeFollowUpService.read(id).followUp;
+      // Said once is enough, even after the person dismissed it.
+      if (previous?.reason.split("\n").includes(line) === true) return true;
+      if (previous?.state === "open" && previous.origin !== "automatic") return false;
+      const reason = withPullRequestHandoffLine(
+        previous?.state === "open" && previous.origin === "automatic" ? previous.reason : undefined,
+        key,
+        line,
+      );
+      if (reason === undefined) return true;
+      await codeFollowUpService.observeTrigger({
+        threadId: id,
+        sourceEventId: randomUUID(),
+        sourceSequence:
+          Math.max(previous?.triggerSequence ?? 0, previous?.acknowledgedThroughSequence ?? 0) + 1,
+        reason,
+        origin: "automatic",
+        triggeredAt: new Date().toISOString(),
+      });
+      return true;
+    }
+    if (linkedIssueWriteBack !== undefined) {
+      linkedIssueTurnStarts.current = (threadId) =>
+        void linkedIssueWriteBack.onTurnStarted(threadId).catch(() => undefined);
+      linkedIssuePullRequestsCreated.current = (threadId) =>
+        void linkedIssueWriteBack.onPullRequestCreated(threadId).catch(() => undefined);
+    }
     // The Project planner: one designated Code thread per Code Project that
     // may read the Project's board and propose work. A confirmed proposal
     // creates its thread through the ordinary creation command path below;
@@ -3093,6 +3308,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         enableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),
         disableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),
         observe: async () => ({ status: "unavailable" }),
+        readCiLogs: async () => ({ status: "unavailable" }),
+        planCiRerun: async () => ({ status: "unavailable" }),
+        rerunCi: async () => ({ status: "unavailable" }),
       },
       threads: {
         inspect: (threadId) => {
@@ -3176,6 +3394,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       uuid: randomUUID,
     });
     pullRequestWatchService = pullRequestSwitchService;
+    pullRequestCiService = {
+      logs: (input) => pullRequestSwitchService.ciLogs(input),
+      rerun: (input) => pullRequestSwitchService.ciRerun(input),
+    };
     bindPullRequestSwitchReconciler(pullRequestSwitchService);
     // Host-local and idle-free: the forge is read only while a switch or a watch is on.
     const pullRequestSwitchAbort = new AbortController();
@@ -3468,6 +3690,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeActiveWorkForWindow,
       codeTurnDecisions,
       mergedThreadPutAway,
+      linkedIssueWriteBack,
       contributeCodeTools,
       registerCodeEditDiagnostics,
       contributeServerCodeTools,

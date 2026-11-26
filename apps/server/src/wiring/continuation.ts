@@ -1,9 +1,14 @@
+import { UsageLimitDefaults, type PersonSentTurns } from "../usage/usageLimitDefaults";
+import { usageLimitDefaultCommands } from "../usage/usageLimitDefaultCommands";
+import { readAggregateVersion } from "../persistence/chatProjection";
 import { randomUUID } from "node:crypto";
 import {
   decodeChatSubmissionId,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeContextSubjectRef,
+  decodeProviderInstanceId,
+  personalSignInRefusals,
   decodeProviderSessionId,
   decodeUtcTimestamp,
   decodeWorkThreadId,
@@ -74,7 +79,7 @@ import {
   createWorkSideTaskReportDeliveryPort,
   noteRunningParent,
 } from "../sideTasks/sideTaskReportDeliveryPorts";
-import { defaultShellSettings, enabledModes } from "@octant/domain";
+import { defaultShellSettings, enabledModes, stopLeftToUsageLimitHandoff } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -84,8 +89,10 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
-export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
-  Pick<
+export type ContinuationDependencies = Pick<ServerStart, "persistence"> & {
+  /** The turns a person sent, which alone the usage-limit defaults cover. */
+  readonly personSentTurns: PersonSentTurns;
+} & Pick<
     AuthorityWiring,
     | "agentRunParentAuthority"
     | "agentRunPersistence"
@@ -271,6 +278,79 @@ export function wireContinuation(deps: ContinuationDependencies) {
       }),
     );
     usageResumeService.start();
+    // The person's usage-limit defaults: arm the resume or the snooze on a
+    // stop the person's own send hit, through each mode's ordinary command,
+    // as the host. The resume then fires through the scheduler above.
+    const usageLimitDefaults = new UsageLimitDefaults({
+      settings: () => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return {
+          resumeAtReset: settings.usageLimitResumeAtResetByDefault === true,
+          snoozeUntilReset: settings.usageLimitSnoozeUntilResetByDefault === true,
+        };
+      },
+      personSent: (mode, key) => deps.personSentTurns.sent(mode, key),
+      isStale: (error) =>
+        typeof error === "object" &&
+        error !== null &&
+        "failure" in error &&
+        (error as { readonly failure?: { readonly category?: unknown } }).failure?.category ===
+          "stale",
+      providerInstanceOf: (mode, threadId) => {
+        const providerInstanceId =
+          mode === "chat"
+            ? persistence.readChatThread(decodeChatThreadId(threadId))?.providerInstanceId
+            : mode === "work"
+              ? workThreadProjection.read(decodeWorkThreadId(threadId))?.providerInstanceId
+              : persistence.readCodeThread(decodeCodeThreadId(threadId))?.providerInstanceId;
+        return providerInstanceId === undefined ? undefined : String(providerInstanceId);
+      },
+      // The stop id is the one the handoff records: the Chat attempt, the
+      // Work turn, the Code provider-turn operation.
+      leftToAccountHandoff: (stop) => {
+        const stopId = stop.attemptId ?? stop.turnId;
+        const current =
+          stop.mode === "chat"
+            ? persistence.readChatThread(decodeChatThreadId(stop.threadId))
+            : stop.mode === "work"
+              ? workThreadProjection.read(decodeWorkThreadId(stop.threadId))
+              : persistence.readCodeThread(decodeCodeThreadId(stop.threadId));
+        if (current === undefined) return false;
+        const target = current.usageLimitHandoff?.providerInstanceId;
+        return stopLeftToUsageLimitHandoff({
+          thread: current,
+          stopId,
+          // Chat's handoff stays put while a model pool is on; Work and Code have none.
+          modelPoolOn: "multiModelPool" in current && current.multiModelPool !== undefined,
+          from: persistence.readProviderInstance(current.providerInstanceId),
+          to: target === undefined ? undefined : persistence.readProviderInstance(target),
+        });
+      },
+      refusesHostContinuations: (providerInstanceId) =>
+        personalSignInRefusals(
+          persistence.readProviderInstance(decodeProviderInstanceId(providerInstanceId)),
+        )?.refusesUnattendedRuns !== undefined,
+      clock: () => new Date(),
+      ...usageLimitDefaultCommands({
+        hostScope: ROUTINE_HOST_SCOPE_ID,
+        readVersion: (aggregateType, threadId) =>
+          readAggregateVersion(persistence.connection, aggregateType, threadId),
+        chat: { execute: (input, context) => chatService.execute(input, context) },
+        work: {
+          execute: (windowId, input, context) =>
+            deps.workThreadService.execute(windowId, input, context),
+        },
+        code: {
+          execute: (windowId, input, signal, context) =>
+            deps.codeService.execute(windowId, input, signal, context),
+        },
+      }),
+      onError: (message, error) => console.error(`[usage-limit defaults] ${message}`, error),
+    });
+    const unsubscribeUsageLimitDefaults = persistence.journal.subscribeCommitted((append) =>
+      usageLimitDefaults.onCommittedAppend(append),
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeUsageLimitDefaults()));
     // A finished subagent run owes its parent thread a journaled turn carrying
     // its result. The service watches committed appends and dispatches through
     // each mode's ordinary turn admission — the mark on that turn is what

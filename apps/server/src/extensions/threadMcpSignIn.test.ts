@@ -158,7 +158,7 @@ function fixture(
     (await reader({ kind: "thread-sign-in", mode, threadId, selections, references })).servers.map(
       (server) => server.serverName,
     );
-  return { read, selection, connections, draftEpoch };
+  return { read, reader, selection, connections, draftEpoch };
 }
 
 describe("servers a thread's next turn needs signed in", () => {
@@ -210,6 +210,27 @@ describe("servers a thread's next turn needs signed in", () => {
     await expect(
       fixture({ linear: { ...on, pluginDesired: false } }).read([], ["@linear"]),
     ).resolves.toEqual([]);
+  });
+
+  it("asks the host about only the servers the thread named", async () => {
+    const test = fixture();
+    await test.read([test.selection(linear, "linear")]);
+    expect(test.connections).toHaveBeenCalledWith(new Set([`${linear}/mcp`]));
+  });
+
+  it("says which of the draft's refused names name each server", async () => {
+    const test = fixture({ mode: "chat" });
+    const listing = await test.reader({
+      kind: "thread-sign-in",
+      mode: "chat",
+      threadId,
+      selections: [test.selection(docs, "docs")],
+      references: ["@linear", "@linear/mcp", "@nothing"],
+    });
+    expect(listing.servers).toEqual([
+      expect.objectContaining({ serverName: "linear", references: ["@linear", "@linear/mcp"] }),
+      expect.not.objectContaining({ references: expect.anything() }),
+    ]);
   });
 
   it("names the server a Work turn's new-task draft selected, which its resume sends again", async () => {

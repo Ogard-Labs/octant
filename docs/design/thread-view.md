@@ -122,7 +122,8 @@ the attempt can be finished that way.
   those of a turn waiting on a scheduled resume. A queued message counts until it
   starts running. An `@` name the composer refuses counts when the thread could
   use that server: one failed connection makes the composer refuse it, and signing
-  in selects it again. A server the person has switched off, not trusted, or not chosen for
+  in selects that server's names again, leaving the names of a server still
+  waiting as they are. A server the person has switched off, not trusted, or not chosen for
   this thread is never named, whatever state it is in.
 - A read-only thread, and a device that may not sign in, show nothing and ask
   nothing.
@@ -761,6 +762,105 @@ while the file-type glyph loads. An available image thumbnail takes the glyph's
 place. Long filenames truncate within the chip so its remove control stays
 reachable.
 
+### Quotes, recalled prompts and large pastes
+
+A quote is words taken from somewhere else, put in the prompt as one chip
+with the person's optional note (maintainer decision, 2026-11-26). Selecting
+text in a finished reply offers **Add to chat** in Chat, Work and Code (in
+Work and Code beside New thread from selection, under the reply and in its
+right-click menu). A terminal's **Add selection to chat** and the editor's
+**Send selection to agent** add the same chip, naming the terminal, or the
+file and its lines; the editor's request for one replacement block follows the
+chip as ordinary text.
+
+- The quote is the prompt's own text: a line that names its source and says
+  the words are for reference only, not instructions, then the words in a
+  fence longer than any backtick run inside them, then the person's note on a
+  line of its own that says it is theirs. The host receives plain text; there
+  is no quote type in any contract.
+- Only a quote Octant wrote in this window is a chip: one added by Add to chat
+  or a selection, one whose note was saved from the chip, or one copied out of
+  a composer and pasted back, which carries Octant's own clipboard type beside
+  the text. Text that only has a quote's shape (an agent's reply pasted in)
+  stays plain, visible text, so a "note" inside it can never sit behind a chip
+  as the person's own words. Copy, paste, stash and restore carry chips within
+  the window; after a reload a quote reads as the plain text it is.
+- The chip shows the start of the quote and, after a note mark, the start of
+  the note. Pressing it shows the whole quote, a **Your note** field with
+  **Save note**, and **Remove quote**; an Enter that commits an input method's
+  text does not save. Text typed right against a chip moves to its own line,
+  so the fence always closes, and a closing fence with words after it on its
+  line ends no quote.
+- Quoted words are another party's text, so a draft that holds a quote is
+  never counted as typed by the person, whatever is typed around it.
+- A draft stashed while Chat kept quotes beside the prompt restores them as
+  chips ahead of its text. A draft holding a quote of "an earlier reply in
+  this thread" restores only in its original composer, since in another
+  thread it would name that thread's history as the source.
+- The quoted words keep their trailing whitespace, so an editor selection's
+  final line break reaches the model with the rest of what a replacement
+  replaces.
+
+In a thread's empty composer with no attachments, uploads in progress or selected context, ArrowUp
+brings back the prompts the person sent in this thread, newest first, and
+ArrowDown walks forward again to an empty prompt. The arrows recall only while
+the recalled text is unedited and the caret is on its first line (ArrowUp) or
+last line (ArrowDown); once the person edits it, the arrows move the caret
+again. The prompts come from the loaded transcript; reports the host delivered
+and a routine's scheduled follow-ups are not the person's and are not recalled. A recalled prompt is not counted as
+typed until the person edits it.
+
+A paste of 32 KiB or more, or one that would take the prompt past the 200,000
+characters a message may hold, attaches as `pasted-text-<n>.txt` instead of
+filling the prompt, through the composer's own attach path: a Chat, Work or
+Code thread, and the Work and Code start screens. ⌘⇧V (Ctrl+Shift+V) pastes it
+inline anyway. Every composer sends only a prompt with words in it, so when
+the paste would be the whole prompt and the composer took the file, it leaves the editable line "See the
+attached `pasted-text-<n>.txt`." in its place. The Chat start screen keeps a
+large paste as text, because a first Chat message needs words: the thread's
+title is made from them.
+
+### Start and stay, and one prompt on several models
+
+On the Code start composer, ⌘↩ (Ctrl+↩) starts the thread and stays: the
+thread is created and its first turn started in the background, the window does
+not open it, and the composer is the next draft at once, keeping its Project,
+workspace and base branch, with a fresh branch name (maintainer decision,
+2026-11-26). Starts the composer stays on run one after another, and each
+adds its outcome to the list under the composer, with **Open** once the window
+lists the thread; a start that created nothing puts the prompt and its files
+back, while a thread that exists keeps its prompt in its own draft. A refused
+coordinator start does not open the thread either. Only the window's own Code
+start screen offers this (and several models, below), because only its create
+path can start a thread without opening it, on a named model; the paired
+to-do draft does not. The Chat and Work start composers do not start and stay
+yet: their create path opens the new thread and resets the draft as part of
+creating it, so ⌘↩ there sends as Enter does.
+
+Shift-click (or Shift+Enter or Shift+Space on a focused row) in the Code
+start composer's model picker adds a model beside the chosen one, up to four
+in all, and doing it again takes it out (maintainer decision D2, 2026-11-26).
+The chosen model stays chosen, and the model list is then a multi-select list
+for assistive technology. Before Send the composer says how many threads will
+start and on which models, with **Use one model** to go back, and Send reads
+**Start N threads**. Each model gets an ordinary create of its own, in a new
+worktree whatever the Project's habit, one after another; the first worktree
+keeps the branch the composer showed and each later one adds its model's
+name, numbered past any taken name or one this start already used. The
+prompt, its quotes and files, and the access and workspace choices go to
+every model; a model added beside the chosen one starts on its own default
+options and takes the plugin and connector choices only when it is of the
+same provider family, since both were made for the chosen model, and a model
+that cannot take the attached images is refused for itself by the host.
+Start and stay sends the plugin and connector chips and the **Create from**
+issue or terminal session with that start, to every model it starts on, and
+clears them from the next draft; a start that created nothing gives them back,
+the source only while the next draft has no prompt or source of its own. Several
+models need a chosen model to start beside. The host admits each one as it would any other, and the composer stays
+on the draft and lists each model's outcome: a refused model shows its reason
+and leaves the threads that started running. A reviewed planner proposal is one
+exact thread and starts on one model.
+
 ### Saved drafts
 
 The desktop and web composer in Chat, Work, and Code offers **Stash draft** and
@@ -1018,6 +1118,13 @@ read too, and a phone showing the thread settled looks for a turn it does not
 show every ten seconds. A message the runtime does not take stays in the queue for
 the next turn.
 
+On the paired phone, a Work or Code thread's composer stays editable while a
+turn runs; what the person sends then joins the host's queue and waits for
+that turn to end, since the host never steers a paired device's message. The
+queue shows above the phone's composer, and each message the host still holds
+unsent can be edited or removed there. Send now, and a choice between Steer
+and Queue, wait on the queue-control design on the issue that owns them.
+
 ## Scheduled wake-ups
 
 A Work or Code thread whose agent scheduled a wake-up shows one row per
@@ -1036,6 +1143,36 @@ the rows. The rows refresh on the thread's follow-up notices and on a slow
 visible-page interval. The turn a wake-up starts opens with the host heading
 `Wake-up you scheduled earlier in this thread:` above its prompt. The rules
 are in [Architecture: wake-ups](../architecture.md#modes-chat-work-and-code).
+
+## Usage-limit strip
+
+While a provider's own usage-limit signal holds a thread's latest turn, in
+Chat, Work and Code, one notice card stands above the composer: the provider
+account, **Usage limit**, **Rate limit** or **Billing problem**, and when the
+limit resets as a clock time and a distance ("resets 3:40 PM · in 42 min"),
+or "reset time not given" when the provider did not say. Its actions are
+**Resume now**, which sends the stopped turn's prompt again as the person's
+next turn through ordinary admission (Chat retries the parked attempt);
+**Resume at reset**, the per-thread opt-in, which becomes **Cancel resume**
+and reads "Resumes at 3:40 PM" once set; and **Snooze until reset**, offered
+until the thread carries a snooze of its own. Resume at reset and Snooze
+appear only while the reset is known and still ahead. A billing stop names
+the problem and offers nothing, since no clock clears it. A scheduled resume
+that did not run says why on the line and offers Resume at reset again. The
+strip goes once the turn leaves the limit, or once a move releases the stop.
+In Work and Code a change of account or model releases it, and Resume now
+would send the stopped prompt on what the thread moved to. In Chat only a
+change of account does, and Resume now, a retry of the parked attempt on that
+attempt's own account and model, would go back to the limited account; after a
+Chat model switch on the same account the strip and that retry stay. While
+a resume is still scheduled for a released stop (a Work or Code model-only
+change leaves it armed) the strip stays with Cancel resume alone. It never
+shows plan meters. The transcript keeps one quiet line per
+stop in Chat and Work, the provider's sentence and its reset as a clock time,
+and no actions. Code keeps that line for its latest provider turn only, once,
+not again beside its waiting row: an earlier stop's line goes when a later
+turn starts. The rules are in
+[Architecture: usage limits](../architecture.md#modes-chat-work-and-code).
 
 ## Live tasks
 

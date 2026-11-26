@@ -81,6 +81,7 @@ import {
   CodeProjectPermissionModeChanged,
   CodeProjectAutoReviewerChanged,
   CodeProjectAgentDefaultBranchPushChanged,
+  CodeProjectIssueUpdatesChanged,
   CodeProjectAgentMergeChanged,
   CodeProjectDelegatedCodeChanged,
   CodeProjectOwnToolchainChanged,
@@ -130,6 +131,13 @@ import {
   CodeProjectDesktopRecipeChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
+  CODE_THREAD_MOVED_TO_WORKTREE,
+  THREAD_LINKED_ISSUE_EVENT_NAMES,
+  ThreadIssueLinked,
+  ThreadIssueUnlinked,
+  TRACKER_ISSUE_WRITE_RECORDED,
+  TrackerIssueWriteRecorded,
+  CodeThreadMovedToWorktree,
   CodeFileReferenceUpdated,
   CodeRuntimeWorkUpdated,
   CodeReviewFindingUpdated,
@@ -660,6 +668,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       CodeProjectAgentDefaultBranchPushChanged,
     )
+    .register("project.code-issue-updates-changed@1", 1, CodeProjectIssueUpdatesChanged)
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
     .register(GUARDRAIL_LEVEL_LOWERED, 1, GuardrailLevelLowered)
     .register(GUARDRAIL_ACCESS_RAISED, 1, GuardrailLevelChange)
@@ -765,6 +774,10 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     })
     .register("code.checkout-observed@1", 1, CodeCheckoutObserved)
     .register("code.checkout-removed@1", 1, CodeCheckoutRemoved)
+    .register(CODE_THREAD_MOVED_TO_WORKTREE, 1, CodeThreadMovedToWorktree)
+    .register(THREAD_LINKED_ISSUE_EVENT_NAMES.linked, 1, ThreadIssueLinked)
+    .register(THREAD_LINKED_ISSUE_EVENT_NAMES.unlinked, 1, ThreadIssueUnlinked)
+    .register(TRACKER_ISSUE_WRITE_RECORDED, 1, TrackerIssueWriteRecorded)
     .register("code.file-reference-updated@1", 1, CodeFileReferenceUpdated)
     .register("code.runtime-work-updated@1", 1, CodeRuntimeWorkUpdated)
     .register("code.review-finding-updated@1", 1, CodeReviewFindingUpdated)

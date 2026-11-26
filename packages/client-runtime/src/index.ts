@@ -120,6 +120,7 @@ export * from "./mobileCodeCreateClient";
 export * from "./mobilePushTokenClient";
 export * from "./mobileProviderClient";
 export * from "./mobileWorkClient";
+export * from "./mobileThreadMessageQueueClient";
 export * from "./mobileProjectToolsClient";
 export * from "./mobileExtensionToolApprovalClient";
 export * from "./mobileBrowserApprovalClient";

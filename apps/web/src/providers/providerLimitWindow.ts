@@ -22,9 +22,15 @@ const KNOWN_WINDOWS: Readonly<Record<string, string>> = {
   monthly: "Monthly limit",
 };
 
+const KNOWN_SCOPES: Readonly<Record<string, string>> = {
+  gemini: "Gemini",
+  claude_gpt: "Claude & GPT",
+};
+
 export function providerLimitWindowName(window: string): ProviderLimitWindowName {
   const separator = window.lastIndexOf(":");
-  const scope = separator < 0 ? "" : window.slice(0, separator).trim();
+  const rawScope = separator < 0 ? "" : window.slice(0, separator).trim();
+  const scope = KNOWN_SCOPES[rawScope] ?? rawScope;
   const label = localWindowLabel(separator < 0 ? window : window.slice(separator + 1));
   return scope.length === 0 ? { label } : { label, scope };
 }

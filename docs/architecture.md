@@ -2809,6 +2809,57 @@ does not survive the move; the thread lands on its persisted posture. A thread
 that owns a managed worktree is refused, because that checkout is the thread's
 own tree rather than the Project's.
 
+**Moving a thread into its own worktree.** A thread on the checkout it shares
+with its Project can move onto a managed worktree of its own
+(`move-code-thread-to-worktree`; maintainer decision, 2026-11-26). The person
+starts it from the Branch row's "Move to a new worktree…", from a window or a
+device the host's own person paired; an agent asks through `octant_threads`'
+`move-to-worktree`, which asks the person at every level, Full access
+included, is refused in Plan, and is offered only to a turn a local window
+or a device the host's own person paired started (never one the host started
+on its own or a device the hub introduced, which could otherwise allow its
+own ask); only such a window may allow the ask. The move runs only after the
+agent's turn completed (a stopped, interrupted or failed turn moves nothing),
+and the thread is then marked for the person's follow-up with what happened:
+"Moved to worktree <branch>", or the refusal and its reason. The host captures the source
+checkout as Git trees (objects only, as a fork's fresh capture does), makes a
+managed worktree at the captured head on a new branch (the one the person
+named, otherwise one derived as for a fork), and lays the trees over it, so
+staged, unstaged and untracked work all arrive; the move writes none of the
+source checkout's files, so it keeps every change, and the dialog says so
+(Octant does not remove them there; a one-click reviewed Discard of them is
+not built). It refuses an archived or completed thread, a thread that already owns a
+worktree, a plain folder, a server Project's checkout, Plan, a task working
+in another of the Project's folders (a worktree of the main folder does not
+hold it, so the task would keep editing that folder), a running turn, and
+another thread's running turn on the same checkout, and reads the last
+two again inside the journal unit that records the move, so a turn started
+during the copy refuses it. A second move of the same thread is refused
+while the first runs. It refuses too, naming the paths, when a
+submodule has changes of its own or an untracked folder, at any depth below
+an untracked parent, is a repository of its own: a capture records either
+only as a commit pointer, so a copy would leave that work behind. The search
+for such folders walks at most 100,000 untracked entries per move, skipping
+folders Git ignores; past that it refuses rather than claim a full copy. A
+rolled-back creation removes its worktree forced (no thread ever owned it, so
+it holds only what creation put there, such as the copied changes the source
+still has) and deletes the branch it made while that branch still points at
+its start and no worktree holds it, so a retry under the same name is not
+refused as a collision. Only after the
+worktree holds the changes does it journal, in one unit, the new checkout's
+`code.checkout-observed@1` and, on the thread's aggregate,
+`code.thread-moved-to-worktree@1` (the checkout it left, the new one, the
+branch, the captured head and trees) followed by `code.thread-updated@1` with
+the new checkout and branch. Any earlier failure removes the new worktree and
+leaves the thread as it was. Grants are revoked as for a rebind. The thread
+keeps its id and history; its next turn finds its last session on the
+checkout the move record names and, because every provider keeps its session
+under the folder it ran in, starts a new session on the worktree with the
+same disclosed text handoff a provider switch takes (journaled as
+`context-handoff-attached`, reason `provider-switch`, with the same provider
+and model on both sides). A session from any other checkout is still
+refused.
+
 Archiving a Code thread, by a person or the host's completed-thread timer,
 keeps the thread and tells the host once the journal records it. The host then
 asks `ManagedWorktreeService.cleanup` to remove the thread's managed worktree
@@ -4683,6 +4734,47 @@ CI or reviewers should be woken, not left polling; maintainer request,
   the thread through the runtime's follow-up path; an extracted GitHub package
   satisfies the same port, and moving the switch service behind it is
   separate extraction work.
+- **CI logs and reruns.** The pull-request tool's `ci-logs` and `ci-rerun`
+  reach only the thread's own linked pull request, resolved and authorized by
+  the host exactly as for a watch (an archived or completed thread is
+  refused), through a second port (`PullRequestCiPort`) the composition root
+  binds to the switch service (maintainer decision, 2026-11-26). Every read
+  compares the pull request's node id with the link's and refuses a number
+  that now names another pull request. `ci-logs` reads every check on the
+  current head with `gh pr checks`; only a check whose link is a job in the
+  same repository's Actions counts as one, and only when its run's head is
+  the current head and the run lists that job (anything else is reported as
+  an outside service's check or another commit's: a commit status may pair
+  the head's run with any job of the repository). For each such failed job (at most four per read, or
+  the one named) it reads `gh run view --job <id> --log-failed`, keeping a
+  rolling 256 KB tail, so a log past `gh`'s 1 MiB output limit still yields
+  its end (a cancelled job with no failed step gives its whole log instead),
+  then the last `tailLines` lines (1 to 2,000, 200 by default)
+  within 32 KB in all, with the host's secret redaction applied. A check with
+  no log says why: still running (`gh` gives no job's log until its whole
+  run finishes), expired (GitHub's 410), not an Actions
+  job, another commit's, or passed. Check names are flattened to one line.
+  `ci-logs` never asks; its result marks the thread as having read outside
+  content. `ci-rerun` first plans on the current head: every run must have
+  that head's SHA, have finished, and have fewer than three reruns (GitHub's
+  own run attempt counts them, so the cap survives a restart and counts
+  reruns started elsewhere). The cap is read per workflow run, a deliberate
+  narrow reading of "three per check per head" (maintainer decision,
+  2026-11-26): every rerun of any check in a run raises that run's attempt,
+  so a run holding several checks can reach the cap before each check has
+  had three reruns of its own. Counting per job would need a journal event
+  or a read of every attempt's jobs, and the stricter cap fails closed. Below
+  Full access the person is then asked with the pull request, head and
+  checks named; Full access does not ask. After the answer the forge reads
+  the pull request and every planned run again and refuses a superseded
+  head, a run that has started meanwhile, one that reached the limit, or
+  one whose attempt changed since the plan (someone else reran it, so the
+  jobs `--failed` would rerun are not the ones the approval named), so two
+  approvals asked at once start at most one rerun past it; then it runs
+  `gh run rerun <run> --failed`, or `gh run rerun --job <id>` for one named
+  check. A named check that two workflows share reruns each failed job of
+  that name, never whichever GitHub listed first. Plan refuses both. A rerun adds no event of its own: the tool call
+  and any approval are journaled on the thread.
 - **Record.** Every switch change and every wake appends one event on the
   `code-project-pull-request-switches` aggregate type, each its own aggregate:
   `code.project-pull-request-merge-when-ready-recorded@1` (enabled with method
@@ -4804,11 +4896,34 @@ take is refused rather than ignored.
   fresh snapshot before anything is read: `issues-read` for `issues`, `issue`,
   and `search`, which go through GitHub's Issues endpoints that serve pull
   requests too, `pull-requests-read` for `pull-requests`, and `projects-read`
-  for `projects`. It changes nothing on GitHub. A successful read is journaled
+  for `projects`. Reads change nothing on GitHub. A successful read is journaled
   as outside content (`github-issues`, `github-pull-requests`,
   `github-projects`, `github-issue`, `github-pull-request`, or
   `github-search`) before the model receives it, and a read that cannot be
   journaled is withheld.
+- **Linked issues.** On a thread linked to issues, the same family adds
+  `comment` and `close` (as completed) for a linked issue of the delivery
+  repository, and `octant_linear` adds `set-state` and `comment` for a linked
+  Linear issue. Reach is the thread's linked issues only. The server decides
+  before any call, after the same per-call authorization a read gets: Plan
+  refuses, Full access writes, and below it the person is asked with the
+  whole text unless the Project's Agents may update linked
+  issues is on and the thread has read no outside content under Strict
+  (`decideAgentIssueUpdate`, the pull-request comment rule). Only a window
+  on the host or a device the person paired may allow the ask, and the links
+  are read again once it is allowed. The tools reach the host's checks and
+  writes through one injected port (`LinkedIssueUpdatePort`), never the
+  tracker services themselves, and the Linear plugin's write operations are
+  refused on the client-facing integration route. A GitHub write
+  needs the GitHub integration effective and first proves triage or push
+  permission on the repository;
+  a Linear write needs the `write` scope. Each attempt is journaled as
+  `tracker.issue-write-recorded@1`, a comment by digest only. When the
+  Project's Keep linked issues up to date is on, the host makes the same
+  writes at the thread's moments (In Progress, In Review, Done with a merge
+  comment) and never moves an issue backwards
+  ([Workspace](design/workspace.md#linked-issues-kept-current)). Merge when
+  ready stays the person's act: the thread's follow-up only offers it.
 
 **Delivery (publishing to a user-owned target) is dormant.** The ship service
 and its journaled events exist, but the host wires no target source, no
@@ -5663,8 +5778,11 @@ new task in the Project, the composer left ready to send — keys on that
 stated category, never on the absence of a request or a limit, which a
 different parked wait could also satisfy.
 
-A stop that disclosed `resetsAt` additionally offers an explicit per-thread
-opt-in: Resume when the limit resets. A billing stop never offers it, and a
+While the stop is the thread's latest turn, the composer's
+[usage-limit strip](design/thread-view.md#usage-limit-strip) offers Resume
+now (the person's ordinary send of the stopped prompt), and a stop that
+disclosed `resetsAt` additionally offers an explicit per-thread
+opt-in: Resume at reset. A billing stop never offers it, and a
 stop that preserved no resumable provider state — the parked Chat attempt's or
 Work turn's `resumeCursor`, or the Code turn's journaled evidence — cannot
 take it. Accepting journals `usage-resume.scheduled@1` on the thread's own
@@ -5680,8 +5798,9 @@ bound all hold unchanged. The dispatch settles by appending
 `usage-resume.settled@1` plus the mode's `thread-updated` in one commit; the
 outcome it records (`dispatched`, `invalidated`, or `failed` with the refusal
 detail) stays on the thread until a newer thread event replaces it.
-The old stop's notice describes a dispatched recovery as started, rather than
-implying that the resumed turn is still running after it settles.
+The old stop's transcript line records a dispatched recovery as resumed at
+the reset, rather than implying that the resumed turn is still running after
+it settles.
 Cancellation, a manual retry, archival, a provider change, or any superseding
 turn transition settles a stale recovery as `invalidated` rather than letting
 it fire against newer state; a dispatch the admission path refuses settles as
@@ -5703,6 +5822,34 @@ beyond the host's own running process, and no billing automation. A host that wa
 rescans `status = scheduled` rows on return and dispatches the still-valid
 ones; a record that cannot be re-validated settles `invalidated` and never
 re-arms.
+
+The person may make either recovery their standing default (maintainer
+decision, 2026-11-26): the host settings **Resume at reset by default** and
+**Snooze until reset by default**, both off by default. A host service watches
+committed appends for a journaled usage-limit stop and, when a setting is on,
+runs the mode's ordinary `schedule-*-usage-resume` or
+`snooze-*-thread-at-usage-reset` command as the host, the resume record carrying
+`origin: "default"` and journaled as the `system` actor; a command that lost a
+version race to another write on the thread is tried once more. It arms each
+stopped turn (in Chat, each attempt) at most once, whatever reset it is
+journaled with later, so a default the person cancels stays cancelled, and
+only a stop that names a reset still ahead on a turn a person sent: the Chat,
+Work and Code routes record a turn when its sender is the person at a window
+or a device they paired (never an outside agent's grant or a device only the
+hub introduced), in the running host's memory, so a turn a routine, wake-up,
+agent, delivery or queued message started, or one sent before a restart, is
+never covered. A Chat retry continues the same turn, so Chat records the
+attempt the person's send or retry admitted: the scheduler's own retry is not
+one, and a default resume that stops again never arms another. The
+resume is never armed on a provider account whose sign-in refuses the host's
+continuations. Neither default arms on a stop the thread's usage-limit account
+handoff owns: a move already released the stop, or the handoff would move the
+thread for it now. A handoff its policy refuses (the account is off or gone, a
+model pool is on, the thread is already on that account) or one that already
+stopped on this stop moves nothing, so the defaults still apply. The handoff's provider change waits on the new account's validation, and
+a default written meanwhile took the thread's version, so the change was
+refused and the thread stayed on the limited account. Nothing else changes: the resume fires through the same
+scheduler, inspection and ordinary turn admission as a person's opt-in.
 
 **Wake-ups a thread's agent schedules.** A provider runtime that can wake
 its model later (Claude Code's `ScheduleWakeup` and `CronCreate`) keeps no
@@ -8076,7 +8223,16 @@ ls-remote` against the thread's remote and the GitHub reads they already
   too. Any read of the conversation while this window's own send streams a
   turn, such as the one a rename from another window brings, keeps that turn's
   rows and tool steps as shown, because the send's stream writes the reply
-  row it created and a second stream of the turn is refused. The steered messages are held apart from the transcript and only ever grow, so the read
+  row it created and a second stream of the turn is refused. Reading an open
+  thread again in place (a rename, a retry) keeps the transcript an earlier
+  read of it loaded when that read fails, and says the history could not be
+  refreshed, so a reply this window's send streams keeps its row; a first read
+  that fails for a thread kept from an earlier visit clears it and where Load
+  earlier had got to, so the next read starts the thread as a first open
+  does, and for a fork reads its first inherited page too. A stream commits
+  all the reasoning it has shown since the turn's start, not the chunks since
+  its last commit, so a read that already holds a chunk the stream has not
+  shown yet does not show it twice. The steered messages are held apart from the transcript and only ever grow, so the read
   cannot roll back the reply, tool steps or tasks the stream is writing, and
   a slower read of the conversation cannot take a shown message away. Reading
   on every `code-navigation` notice was rejected because most of those say
@@ -9401,7 +9557,13 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   host credential service. Connect opens a short-lived loopback listener on
   `127.0.0.1:52693` (`/oauth/linear/callback`, fallbacks 52694 and 52695) for
   the consent redirect, then closes it. Connect fails closed when the public
-  client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
+  client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset. Connect asks for the
+  `read,write` scopes; the host records the scopes Linear granted from the
+  token response and hands them to the plugin beside the opaque reference, so
+  a connection made before `write` was asked for stays read-only and its
+  writes fail closed with a reconnect message until the person reconnects.
+  GitHub issue writes use the host's `gh` login only; Octant stores no forge
+  token ([Reading GitHub](#modes-chat-work-and-code)).
 
 ### Sees images
 
@@ -15236,9 +15398,15 @@ Ready rather than Connected. States, most decisive first: Off (package or
 server switched off), Needs sign-in (sign-in-again, consent pending, an attempt
 whose status or cancellation is not confirmed, client
 setup required for a registered-client connector, or a
-catalog connector that signs in and has no sign-in while not connected;
-signed out alone is only an offer, since a hosted server that takes a key or
-nothing reports it too), Connecting, Not connecting (the newest fact is a
+catalog connector that signs in and has no sign-in while not connected, or a
+signed-out server the person typed in by hand, not a catalog connector or
+local setup, whose last `initialize` was refused with a Bearer challenge naming
+its resource metadata (RFC 9728) at an address discovery reads (https without
+credentials, or http on this computer), read by the same parser sign-in discovery
+uses on its own `initialize` probe; cancelling a first sign-in keeps that
+refusal, since no grant changed; signed out alone is only an offer, since a
+hosted server that takes a key or nothing reports it too, and a bare 401, or a
+refusal only of the tool list, stays Not connecting), Connecting, Not connecting (the newest fact is a
 failed attempt or closed transport, with its reason), Connected, Blocked (a
 lifecycle block such as quarantine, or a sign-in connector on a host whose
 sign-in is refused, such as one without the credential broker), Ready. A server with sessions in several
@@ -15261,7 +15429,10 @@ servers those are (`/api/extensions/connections`, `thread-sign-in`) from the
 thread's mode and id, the selections the next turn would carry, and the `@` names
 its draft could not select: the Project's pins (Work and Code), those selections
 and those names, each put through the checks the turn itself makes against the
-thread's own activation. It does not ask the sessions, because a turn drops a
+thread's own activation. It reads the listing of those servers alone, and
+says, for each one it names, which of the draft's refused names are that
+server's, so the composer selects only those again once it is signed in. It does
+not ask the sessions, because a turn drops a
 server whose connection failed, the composer refuses it, and a missing sign-in is
 what makes it fail. A thread whose turns carry no extension tools (a Project on
 a server, Strict on Windows, or in Work and Code a model known not to carry

@@ -988,6 +988,70 @@ describe("App", () => {
     expect(screen.queryByRole("article", { name: "Your message" })).not.toBeInTheDocument();
   });
 
+  it("starts a Code thread with ⌘↩ without opening it, and reports its refusal to the composer that stayed", async () => {
+    const user = userEvent.setup();
+    const base = codes();
+    const initial = await base.bootstrap();
+    let createdThread = initial.threads[0];
+    const codeApi: CodeClient = {
+      ...base,
+      bootstrap: vi.fn(async () => ({
+        ...initial,
+        threads: createdThread === undefined ? initial.threads : [createdThread],
+      })),
+      execute: vi.fn<CodeClient["execute"]>(async (command) => {
+        if (command.kind === "prepare-code-project-checkout") {
+          const checkout = initial.checkouts[0];
+          if (checkout === undefined || createdThread === undefined)
+            throw new Error("Missing fixture");
+          return {
+            kind: "checkout-prepared",
+            bindingRevisionId: createdThread.bindingRevisionId,
+            checkout,
+          };
+        }
+        if (command.kind === "create-code-thread") {
+          createdThread = command.thread;
+          return { kind: "thread-created", thread: command.thread };
+        }
+        throw new Error(`Unexpected ${command.kind}`);
+      }),
+      putEvidence: vi.fn(async () => {
+        throw new Error("Evidence storage unavailable");
+      }),
+    };
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeDraftShellBootstrap(projectId))}
+      />,
+    );
+    const prompt = await screen.findByRole("textbox", { name: "First message" });
+    await user.type(prompt, "Stay right here");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    await waitFor(() =>
+      expect(codeApi.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "create-code-thread" }),
+      ),
+    );
+    await waitFor(() => expect(codeApi.putEvidence).toHaveBeenCalled());
+    // The first turn failed after the thread was made: the refusal is the
+    // stayed composer's to show, on the model's row, not the draft's alert.
+    expect(await screen.findByText(/^GPT-5: (?!started)/)).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Workspace pane: Stay right here" })).toBeNull();
+    // The thread exists and keeps the prompt in its own draft, so the start
+    // composer stays the fresh draft.
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("");
+  });
+
   it("tells the user why a Code draft bound to a vanished Project cannot start, and creates nothing", async () => {
     const user = userEvent.setup();
     const codeApi = codesRecordingCreates();

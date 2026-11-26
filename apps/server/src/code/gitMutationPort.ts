@@ -6,7 +6,7 @@ import {
 import { execFile as nodeExecFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, readdir } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { MAX_CODE_GIT_HUNK_PATCH_BYTES, type ProviderExecutionPolicy } from "@octant/contracts";
 
@@ -191,6 +191,51 @@ const liveDependencies: GitMutationDependencies = {
 type GitMutationPolicy = {
   readonly executionPolicy?: ProviderExecutionPolicy;
 };
+
+/** Entries one move may look through below its untracked folders before it gives up. */
+const MAX_UNTRACKED_ENTRIES_WALKED = 100_000;
+
+/**
+ * The repositories of their own at or below an untracked folder, which Git
+ * status lists as that folder alone. Folders Git ignores are skipped, as a
+ * capture skips them; `ignored` answers which of a level's folders those are.
+ * The budget is shared by every folder of one move, and a walk past it
+ * answers undefined, so the move is refused rather than claiming a full copy.
+ */
+async function nestedRepositoriesBelow(
+  checkoutRoot: string,
+  folder: string,
+  ignored: (paths: ReadonlyArray<string>) => Promise<ReadonlySet<string> | undefined>,
+  budget: { walked: number },
+): Promise<ReadonlyArray<string> | undefined> {
+  const found: string[] = [];
+  let level = [folder];
+  while (level.length > 0) {
+    const next: string[] = [];
+    for (const relative of level) {
+      let entries;
+      try {
+        entries = await readdir(join(checkoutRoot, relative), { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      if (entries.some((entry) => entry.name === ".git")) {
+        found.push(relative);
+        continue;
+      }
+      for (const entry of entries) {
+        budget.walked += 1;
+        if (budget.walked > MAX_UNTRACKED_ENTRIES_WALKED) return undefined;
+        if (entry.isDirectory() && !entry.isSymbolicLink()) next.push(`${relative}/${entry.name}`);
+      }
+    }
+    if (next.length === 0) break;
+    const skipped = await ignored(next);
+    if (skipped === undefined) return undefined;
+    level = next.filter((path) => !skipped.has(path));
+  }
+  return found;
+}
 
 export class GitMutationPort {
   readonly #dependencies: GitMutationDependencies;
@@ -1032,6 +1077,88 @@ export class GitMutationPort {
   }
 
   /**
+   * The paths whose changes a working-tree capture cannot carry: a submodule
+   * with uncommitted or untracked changes of its own, and an untracked folder
+   * that is a repository of its own. `add -A` records each only as a commit
+   * pointer, so laying a capture down elsewhere would silently leave that
+   * work behind. Sorted; undefined when the checkout could not be read.
+   */
+  async uncopyableNestedChanges(
+    input: { readonly checkoutRoot: string },
+    signal?: AbortSignal,
+  ): Promise<ReadonlyArray<string> | undefined> {
+    const status = await this.#run(
+      [
+        "-C",
+        input.checkoutRoot,
+        "status",
+        "--porcelain=v2",
+        "-z",
+        // `normal` keeps the listing small: an untracked folder is one entry,
+        // and the walk below looks inside it for a repository of its own.
+        "--untracked-files=normal",
+        "--ignore-submodules=none",
+      ],
+      signal,
+      undefined,
+      "approval-gated",
+    );
+    if (status.exitCode !== 0) return undefined;
+    const found = new Set<string>();
+    const budget = { walked: 0 };
+    const records = status.stdout.split("\0");
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index] ?? "";
+      if (record.startsWith("1 ") || record.startsWith("2 ")) {
+        const fields = record.split(" ");
+        const submodule = fields[2] ?? "";
+        // `S<c><m><u>`: m and u are the submodule's own tracked and untracked changes.
+        const path = fields.slice(record.startsWith("1 ") ? 8 : 9).join(" ");
+        if (submodule.startsWith("S") && (submodule[2] === "M" || submodule[3] === "U")) {
+          found.add(path);
+        }
+        // A rename's original path follows as its own record.
+        if (record.startsWith("2 ")) index += 1;
+        continue;
+      }
+      if (record.startsWith("? ") && record.endsWith("/")) {
+        const nested = await nestedRepositoriesBelow(
+          input.checkoutRoot,
+          record.slice(2, -1),
+          (paths) => this.#ignoredPaths(input.checkoutRoot, paths, signal),
+          budget,
+        );
+        if (nested === undefined) return undefined;
+        for (const path of nested) found.add(path);
+      }
+    }
+    return [...found].sort();
+  }
+
+  /** Which of these checkout-relative paths Git ignores; undefined when Git could not say. */
+  async #ignoredPaths(
+    checkoutRoot: string,
+    paths: ReadonlyArray<string>,
+    signal?: AbortSignal,
+  ): Promise<ReadonlySet<string> | undefined> {
+    const result = await this.#run(
+      ["-C", checkoutRoot, "check-ignore", "--stdin", "-z"],
+      signal,
+      undefined,
+      "approval-gated",
+      paths.map((path) => `${asPlainPath(path)}\0`).join(""),
+    );
+    // Exit 1 is Git's "none of them is ignored".
+    if (result.exitCode !== 0 && result.exitCode !== 1) return undefined;
+    return new Set(
+      result.stdout
+        .split("\0")
+        .filter((path) => path !== "")
+        .map((path) => (path.startsWith("./:") ? path.slice(2) : path)),
+    );
+  }
+
+  /**
    * Put the checkout's files back the way a snapshot recorded them.
    *
    * Both trees are proven to exist before anything is written, and the real
@@ -1169,7 +1296,7 @@ export class GitMutationPort {
       // pathname at a time, which is affordable here: the candidates are only
       // the snapshot's untracked files, not the whole tree.
       const checked = await this.#run(
-        ["-C", checkoutRoot, "check-ignore", "-q", "--", path],
+        ["-C", checkoutRoot, "check-ignore", "-q", "--", asPlainPath(path)],
         signal,
         undefined,
         executionPolicy,
@@ -1711,4 +1838,14 @@ function validBranchRef(ref: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A path Git would otherwise read as pathspec magic. An untracked folder named
+ * `:build` was checked as `build`, so a nested repository inside it was taken
+ * for ignored and missed. `./` keeps the name literal; `check-ignore` echoes
+ * the path it was given, so callers strip the prefix again.
+ */
+function asPlainPath(path: string): string {
+  return path.startsWith(":") ? `./${path}` : path;
 }

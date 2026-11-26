@@ -620,6 +620,40 @@ export function changeCodeProjectAgentPullRequestComments(
 }
 
 /**
+ * Change either of a Code Project's two linked-issue choices: whether the host
+ * keeps the issues linked to its threads current, and whether agents below
+ * Full access update those issues without asking. Absence reads as off.
+ * Rejects a non-Code Project, a command naming neither, and a no-op change.
+ */
+export function changeCodeProjectIssueUpdates(
+  project: Project,
+  change: {
+    readonly keepLinkedIssuesCurrent?: boolean | undefined;
+    readonly agentsMayUpdateIssues?: boolean | undefined;
+  },
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have linked-issue settings");
+  }
+  const keep = change.keepLinkedIssuesCurrent ?? project.keepLinkedIssuesCurrent ?? false;
+  const agents = change.agentsMayUpdateIssues ?? project.agentsMayUpdateIssues ?? false;
+  if (
+    keep === (project.keepLinkedIssuesCurrent ?? false) &&
+    agents === (project.agentsMayUpdateIssues ?? false)
+  ) {
+    reject("invalid-lifecycle", "Code Project linked-issue settings are already selected");
+  }
+  return {
+    ...project,
+    keepLinkedIssuesCurrent: keep,
+    agentsMayUpdateIssues: agents,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
  * Let a push to the default branch go ahead without the person's approval for
  * that one act, or stop that. Absence reads as disabled. Rejects a non-Code
  * Project and a no-op change, as the merge setting does.

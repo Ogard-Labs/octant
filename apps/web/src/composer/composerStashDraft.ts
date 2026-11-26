@@ -3,7 +3,6 @@ import type { CodeReviewFindingReference } from "@octant/contracts/code-operatio
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { SideChatDraftReturnReference } from "@octant/contracts/side-chat-return";
 import type { ThreadMentionChip } from "../chat/ThreadMentionPicker";
-import type { TranscriptQuoteChip } from "../chat/quoteSelection";
 import type { ComposerExtensionSelection } from "./composerExtensionSelection";
 import type { ComposerDraftMode, ComposerThreadDraft } from "./composerThreadDraftStore";
 import type { NewTaskCreateFromSelection } from "./useNewTaskPrompt";
@@ -25,11 +24,22 @@ export interface ComposerStashTodo {
   readonly listHostId: string;
 }
 
+/**
+ * A reply quoted before quotes became part of the prompt's own text. Only
+ * drafts stashed then carry one; restoring such a draft writes it into the
+ * text as a quote chip (see `planComposerStashRestore`).
+ */
+export interface StashedReplyQuote {
+  readonly id: string;
+  readonly turnId: string;
+  readonly text: string;
+}
+
 interface ComposerStashContextValue {
   readonly thread: ThreadMentionChip;
   readonly file: string;
   readonly extension: ComposerExtensionSelection;
-  readonly quote: TranscriptQuoteChip;
+  readonly quote: StashedReplyQuote;
   readonly preview: PreviewContextSelection;
   readonly canvas: CanvasContextSelection;
   readonly "side-chat": SideChatDraftReturnReference | null;
