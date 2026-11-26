@@ -901,12 +901,6 @@
   font-size: var(--oct-text-xs);
 }
 
-@keyframes chat-status-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (max-width: 680px) {
   .chat-welcome__suggestions {
     gap: var(--oct-space-1);
@@ -1130,10 +1124,6 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
   font-variant-numeric: tabular-nums;
 }
 
-.composer-voice__spin {
-  animation: chat-status-spin var(--oct-motion-spin) linear infinite;
-}
-
 .composer-voice__error {
   overflow: hidden;
   max-width: 28ch;
@@ -1144,8 +1134,7 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-voice__button[data-recording="true"],
-  .composer-voice__spin {
+  .composer-voice__button[data-recording="true"] {
     animation: none;
   }
 }

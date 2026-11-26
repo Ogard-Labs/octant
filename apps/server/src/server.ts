@@ -31,11 +31,12 @@ import {
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
-import { resolveSpeechEndpoint } from "@octant/domain";
+import { resolveSpeechEndpoint, resolveTranscriptionEndpoint } from "@octant/domain";
 import {
   makeOpenAiCompatibleSpeechAdapter,
   transcriptionPreferencesOf,
 } from "./speech/speechAdapter";
+import { createAppleSpeechEngine } from "./speech/appleSpeechEngine";
 import type { NarrationForTurn } from "./speech/narrationTool";
 import type { TranscriptionForTurn } from "./speech/transcriptionTool";
 import { CredentialRequests } from "./credentials/credentialRequests";
@@ -383,6 +384,10 @@ export function startOctantServer(
       remoteDelegationHolder,
       runtimeOutsideContentMarks,
       sideTasks,
+      sideTaskReports,
+      sideTaskReportAdmission,
+      threadUnfinishedWork,
+      threadUnfinishedWorkHost,
       finishedReceipts,
       spendCeiling,
       spendCeilingHolder,
@@ -695,8 +700,8 @@ export function startOctantServer(
         uuid: randomUUID,
         recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
         endpoint: () =>
-          resolveSpeechEndpoint(
-            persistence.readShellSettings()?.settings.voice.transcription,
+          resolveTranscriptionEndpoint(
+            persistence.readShellSettings()?.settings.voice ?? {},
             persistence.readProviderInstances(),
           ),
         preferences: () =>
@@ -827,6 +832,7 @@ export function startOctantServer(
       runningWorkTurnAccess,
       runningWorkTurnSandbox,
       sideTasks,
+      sideTaskReports,
       finishedReceipts,
       threadFollowUpSuggestions,
       toolEgressRules,
@@ -870,6 +876,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      threadUnfinishedWork,
       hubActScopeSlot,
       isPairedDeviceScope,
       projectMemoryAccess,
@@ -1197,6 +1204,7 @@ export function startOctantServer(
       selectCodeConversation,
       siblingThreadsService,
       sideTasks,
+      sideTaskReportAdmission,
       finishedReceipts,
       gitObservationPort,
       goalService,
@@ -1298,6 +1306,7 @@ export function startOctantServer(
       threadNotesRoutes,
       workspacePresetRoutes,
     } = yield* wireChat({
+      threadUnfinishedWork,
       imageDescriber,
       resolveThreadStrict,
       verifyModelToolsOnFirstUse,
@@ -1350,6 +1359,7 @@ export function startOctantServer(
       runtimeOutsideContentMarks,
       shellService,
       sideTasks,
+      sideTaskReportAdmission,
       skillDiscoveryService,
       spendCeiling,
       threadOutsideContentMarks,
@@ -1388,6 +1398,8 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      threadUnfinishedWork,
+      threadUnfinishedWorkHost,
       threadSecretFacts,
       narrationForTurn,
       hubActScopeSlot,
@@ -1477,6 +1489,7 @@ export function startOctantServer(
       routineProposalService,
       sideTaskHost,
       sideTasks,
+      sideTaskReportAdmission,
       finishedReceipts,
       gitObservationPort,
       nativeHarnessApprovals,
@@ -1498,6 +1511,9 @@ export function startOctantServer(
       shieldServerStore,
     });
     const { restartRecovery } = yield* wireContinuation({
+      threadUnfinishedWorkHost,
+      codeService,
+      workThreadService,
       hostDrain,
       threadWakeups,
       workThreadWakeupPort,
@@ -1521,6 +1537,7 @@ export function startOctantServer(
       liveTurns,
       persistence,
       routeCodeService,
+      sideTaskReports,
       threadMessageQueue,
       workThreadProjection,
       workTurnProjection,
@@ -1599,6 +1616,10 @@ export function startOctantServer(
       workTurnProjection,
       workTurnService,
     });
+    const localSpeechEngine = createAppleSpeechEngine(
+      options.speechHelperPath === undefined ? {} : { helperPath: options.speechHelperPath },
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(() => localSpeechEngine.dispose()));
     const {
       imageRoutes,
       videoRoutes,
@@ -1613,6 +1634,7 @@ export function startOctantServer(
       workResearchRoutes,
     } = wireWorkFiles({
       isAuthenticatedPairedDeviceSessionCurrent,
+      localSpeechEngine,
       speechGates,
       credentialResolver,
       imageGenerationOffers,

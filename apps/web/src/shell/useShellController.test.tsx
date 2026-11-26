@@ -3371,9 +3371,7 @@ describe("useShellController", () => {
     await act(async () => reload.resolve(initialBootstrap()));
     await act(async () => command);
     expect(result.current.status).toBe("ready");
-    expect(result.current.announcement).toBe(
-      "Shell state changed concurrently. Reloaded authoritative state.",
-    );
+    expect(result.current.announcement).toBe("This window was out of date and has been reloaded.");
   });
 
   it("reports a settings write the host discarded, even once the reload clears", async () => {
@@ -3455,7 +3453,7 @@ describe("useShellController", () => {
 
       expect(fetch).toHaveBeenCalledTimes(3);
       expect(result.current.status).toBe("ready");
-      expect(result.current.announcement).toMatch(/outcome was uncertain/i);
+      expect(result.current.announcement).toMatch(/could not confirm your last action/i);
       if (mutationKind === "workspace") {
         expect(result.current.workspace?.activeMode).toBe("chat");
       } else {
@@ -3523,7 +3521,7 @@ describe("useShellController", () => {
     await act(async () => reload.resolve(recovered));
     await act(async () => newer);
     expect(result.current.workspace?.activeMode).toBe("chat");
-    expect(result.current.announcement).toMatch(/reloaded authoritative state/i);
+    expect(result.current.announcement).toMatch(/out of date and has been reloaded/i);
   });
 
   it("reloads a committed workspace after response loss before running queued settings", async () => {
@@ -3703,7 +3701,9 @@ describe("useShellController", () => {
     expect(client.bootstrap).toHaveBeenCalledTimes(2);
     expect(client.execute).toHaveBeenCalledOnce();
     expect(result.current.status).toBe("disconnected");
-    expect(result.current.announcement).toMatch(/queued shell operations were cancelled.*retry/i);
+    expect(result.current.announcement).toMatch(
+      /pending actions were cancelled.*reconnect, then try them again/i,
+    );
 
     await act(async () => result.current.retry());
     expect(result.current.status).toBe("ready");

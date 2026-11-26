@@ -76,8 +76,10 @@ opens with Model endpoints, every endpoint Octant calls over an API itself
 by model roles ([Model endpoints: Model roles](model-endpoints.md#model-roles)), helper agents, and Navigator's models; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Voice &
-images holds transcription (one Transcribe with menu: Off, each endpoint's
-transcription model, Other model…), the dictation Language and Your
+images holds transcription (one Transcribe with menu: Off, Apple Speech on
+this Mac where the host can run it, each endpoint's transcription model,
+Other model…; Apple Speech shows whether its model is on this Mac and a
+Download model button that fetches it on request), the dictation Language and Your
 dictionary, speech, the Microphone dictation records from on this computer, a Test
 microphone row that plays a
 short clip back on this computer, the image profiles, custom image

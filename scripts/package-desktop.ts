@@ -53,6 +53,7 @@ import {
 import { buildSandboxScope } from "./build-sandbox-scope";
 import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildDeviceHelper } from "./build-device-helper";
+import { buildSpeechHelper } from "./build-speech-helper";
 import { buildBrowserTextInput } from "./build-browser-text-input";
 import { buildDesktopPeerStatus } from "./build-desktop-peer-status";
 import { buildDesktopPeerLinux } from "./build-desktop-peer-linux";
@@ -405,6 +406,7 @@ export const REQUIRED_DARWIN_HELPER_FILES = [
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
   "Octant.app/Contents/Resources/native/octant-sandbox-scope",
   "Octant.app/Contents/Resources/native/octant-device-helper",
+  "Octant.app/Contents/Resources/native/octant-speech-helper",
   "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
   "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
   "Octant.app/Contents/Resources/native/cua-driver",
@@ -465,6 +467,7 @@ export const PACKAGED_EXECUTABLE_FILES = [
   "native/octant-code-file-helper",
   "native/octant-sandbox-scope",
   "native/octant-device-helper",
+  "native/octant-speech-helper",
   "native/cua-driver",
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
   DARWIN_LANGUAGE_SERVER_BINARY,
@@ -576,6 +579,7 @@ export const PACKAGED_ARM64_FILES = [
   "native/octant-code-file-helper",
   "native/octant-sandbox-scope",
   "native/octant-device-helper",
+  "native/octant-speech-helper",
   "native/cua-driver",
   "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
   "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
@@ -596,6 +600,7 @@ export const FORBIDDEN_PACKAGED_FILES = [
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-code-file-helper",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-sandbox-scope",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-device-helper",
+  "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-speech-helper",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-desktop-peer-status.node",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-browser-text-input.node",
 ] as const;
@@ -605,6 +610,7 @@ export const FORBIDDEN_LINUX_HELPER_PATTERNS = [
   /(?:^|\/)octant-code-file-helper$/,
   /(?:^|\/)octant-sandbox-scope$/,
   /(?:^|\/)octant-device-helper$/,
+  /(?:^|\/)octant-speech-helper$/,
   /(?:^|\/)octant-desktop-peer-status\.node$/,
   /(?:^|\/)octant-browser-text-input\.node$/,
 ] as const;
@@ -632,6 +638,7 @@ const ALLOWED_DARWIN_NATIVE_PAYLOADS = new Set([
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
   "Octant.app/Contents/Resources/native/octant-sandbox-scope",
   "Octant.app/Contents/Resources/native/octant-device-helper",
+  "Octant.app/Contents/Resources/native/octant-speech-helper",
   "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
   "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
@@ -1538,6 +1545,12 @@ async function packageDarwinDesktop(
     resolve(repositoryRoot, "apps/desktop/native/device-helper"),
     join(nativeResources, "octant-device-helper"),
   );
+  // A package never quietly ships without it: a build that skipped the helper
+  // would look like a Mac that cannot dictate on its own.
+  if (
+    (await buildSpeechHelper(undefined, join(nativeResources, "octant-speech-helper"))) !== "built"
+  )
+    throw new Error("Packaging Octant for macOS needs an Xcode with the macOS 26 SDK installed.");
   for (const relativePath of PACKAGED_EXECUTABLE_FILES) {
     await access(join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`)), 1);
   }

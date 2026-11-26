@@ -106,7 +106,10 @@ export function createWorkAgentResultDeliveryPort(
           delivery,
         });
         return result.kind === "accepted"
-          ? agentResultDeliveryReceipt(delivery, result.turn.delivery)
+          ? agentResultDeliveryReceipt(
+              delivery,
+              result.turn.delivery?.kind === "agent-result" ? result.turn.delivery : undefined,
+            )
           : {
               kind: "refused",
               detail:
@@ -189,7 +192,10 @@ export function createCodeAgentResultDeliveryPort(
         });
         return result.kind === "provider-turn-state" &&
           (result.state === "running" || result.state === "waiting" || result.state === "completed")
-          ? agentResultDeliveryReceipt(delivery, result.delivery)
+          ? agentResultDeliveryReceipt(
+              delivery,
+              result.delivery?.kind === "agent-result" ? result.delivery : undefined,
+            )
           : {
               kind: "refused",
               detail:

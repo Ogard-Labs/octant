@@ -138,7 +138,7 @@ export function useProjectController(options: ProjectControllerOptions) {
         setState(bootstrap);
         setStatus("ready");
         if (reason === "conflict") {
-          announce("Project changed concurrently. Reloaded authoritative state.");
+          announce("This Project changed elsewhere, so it was reloaded.");
         } else if (reason === "refresh") {
           announce("Project availability refreshed.");
         }
@@ -184,7 +184,7 @@ export function useProjectController(options: ProjectControllerOptions) {
         setMemoryStatus("ready");
         advanceMemoryRevision();
         if (reason === "conflict") {
-          announce("Project memory changed concurrently. Reloaded authoritative memory.");
+          announce("Project memory changed elsewhere, so it was reloaded.");
         }
       } catch (error) {
         if (!mounted.current || request !== memoryRequestGeneration.current) return;

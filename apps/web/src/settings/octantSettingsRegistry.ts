@@ -50,7 +50,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("resource-cpuTargetPercent"),
-          label: "CPU target",
+          label: "CPU limit for new work",
           scope: "host",
           keywords: "cpu utilization load headroom target",
         },
@@ -642,7 +642,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("sidebar-background"),
           label: "Sidebar background",
           scope: "app",
-          keywords: "sidebar background preset gradient overlay color opacity",
+          keywords: "sidebar background preset gradient overlay colour color opacity",
         },
       ],
     },
@@ -1197,7 +1197,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Transcribe with",
           scope: "app",
           keywords:
-            "voice transcription transcribe speech to text microphone dictation whisper stt model off",
+            "voice transcription transcribe speech to text microphone dictation whisper stt model off apple speech on-device local mac offline download model",
         },
         {
           id: settingId("dictation-language"),

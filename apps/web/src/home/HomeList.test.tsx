@@ -106,7 +106,7 @@ describe("the start list's cached paint", () => {
     expect(within(needs).getByText("Review the cache")).toBeVisible();
     expect(within(needs).queryByRole("button", { name: /Review the cache/ })).toBeNull();
     expect(within(needs).getByRole("button", { name: "See all in Needs you" })).toBeDisabled();
-    expect(needs.querySelector(".spinner")).not.toBeNull();
+    expect(needs.querySelector("svg.octant-spinner")).not.toBeNull();
   });
 
   it("replaces the stored rows in place with the fresh answer and makes them live", async () => {
@@ -121,7 +121,7 @@ describe("the start list's cached paint", () => {
     expect(after).toBe(before);
     expect(within(after).queryByText("Old title")).toBeNull();
     expect(within(after).getByRole("button", { name: /Fresh title/ })).toBeEnabled();
-    expect(after.querySelector(".spinner")).toBeNull();
+    expect(after.querySelector("svg.octant-spinner")).toBeNull();
     const kept = readHomeListCache(storage, SCOPE);
     expect(kept?.[0]?.rows[0]?.title).toBe("Fresh title");
   });

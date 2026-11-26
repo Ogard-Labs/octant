@@ -255,7 +255,7 @@ describe("CodeThreadBoard", () => {
     );
 
     expect(screen.getByText("Thread 01")).toBeVisible();
-    expect(screen.queryByText("Loading the board.")).toBeNull();
+    expect(screen.queryByText("Loading board")).toBeNull();
     expect(loadBoard).toHaveBeenCalledTimes(1);
   });
 
@@ -680,7 +680,7 @@ describe("CodeThreadBoard", () => {
       "data-executing",
       "true",
     );
-    expect(inProgress.querySelector(".board-status-mark__spin")).not.toBeNull();
+    expect(inProgress.querySelector(".board-status-mark svg.octant-spinner")).not.toBeNull();
     const ready = screen.getByRole("region", { name: "Ready (0)" });
     expect(ready.querySelector(".board-status-mark__dot")).toHaveAttribute("data-fill", "hollow");
     const waiting = screen.getByRole("region", { name: "Waiting (0)" });
@@ -696,7 +696,7 @@ describe("CodeThreadBoard", () => {
     );
     render(<CodeThreadBoard loadBoard={idle} projects={projects} storage={memoryStorage()} />);
     const idleColumn = await screen.findByRole("region", { name: "In progress (1)" });
-    expect(idleColumn.querySelector(".board-status-mark__spin")).toBeNull();
+    expect(idleColumn.querySelector(".board-status-mark svg.octant-spinner")).toBeNull();
     expect(idleColumn.querySelector(".board-status-mark__dot")).toHaveAttribute(
       "data-fill",
       "solid",
@@ -731,16 +731,16 @@ describe("CodeThreadBoard", () => {
 
     const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
     expect(within(waiting).getByText("Recovering thread")).toBeVisible();
-    expect(within(waiting).getByText(/Project projection missing/)).toBeVisible();
+    expect(within(waiting).getByText(/Project data missing/)).toBeVisible();
     expect(screen.queryByRole("region", { name: /Recovery/ })).not.toBeInTheDocument();
     // The reason truncates in a box of its own. As bare text in the flex fact
     // it could not take an ellipsis and was cut mid-letter; the full sentence
     // stays on the fact's title.
-    const reason = within(waiting).getByText(/Project projection missing/);
+    const reason = within(waiting).getByText(/Project data missing/);
     expect(reason).toHaveClass("fact__text");
     expect(reason.parentElement).toHaveAttribute(
       "title",
-      expect.stringMatching(/Project projection missing/),
+      expect.stringMatching(/Project data missing/),
     );
   });
 
@@ -893,7 +893,7 @@ describe("CodeThreadBoard", () => {
     expect(article.querySelector(".board-card-eyebrow")).toHaveTextContent("Project A");
     const facts = article.querySelector(".board-card-facts");
     if (facts === null) throw new Error("Expected card facts");
-    expect(facts).toHaveTextContent(/Project projection missing/);
+    expect(facts).toHaveTextContent(/Project data missing/);
     expect(facts).not.toHaveTextContent("Current checkout");
     expect(facts).not.toHaveTextContent("3 of 7 tasks");
     const meta = article.querySelector(".board-card-meta");

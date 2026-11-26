@@ -34,6 +34,7 @@ export function VoiceTip(props: VoiceTipProps) {
   const current = props.links.settings?.transcription;
   const transcriptionInUse =
     transcription !== undefined &&
+    props.links.settings?.transcriptionEngine === undefined &&
     current !== undefined &&
     String(current.providerInstanceId) === String(props.instanceId) &&
     String(current.modelId) === transcription;

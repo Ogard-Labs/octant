@@ -987,7 +987,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 <OctantEmpty
                   layout="line"
                   icon={<GitPullRequest size={20} />}
-                  title="Choose a pull request to read it."
+                  title="Select a pull request to read it"
                 />
               ) : null
             ) : (

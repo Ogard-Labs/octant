@@ -36,6 +36,7 @@ import {
   type WorkStatusDatedItem,
   type WorkTurnState,
   type WorkTurnAccepted,
+  type ThreadMessageSteered,
   type WorkTurnUpdated,
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
@@ -53,6 +54,7 @@ import {
 } from "@octant/contracts";
 import type { FinishedReportSettleOutcome } from "../finishedReceipts/finishedReportSettle";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
+import { journalThreadMessageSteered } from "../messageQueue/threadMessageSteeredRecord";
 import {
   clipTranscriptSearchSnippet,
   normalizeSearchText,
@@ -96,6 +98,10 @@ import {
 import {
   completedThreadArchiveDue,
   decideCompleteThread,
+  restAfterReport,
+  restAfterReportFailure,
+  unfinishedWorkRefusal,
+  type ThreadUnfinishedWork,
   decideSnoozeThread,
 } from "@octant/domain/thread-completion-policy";
 import {
@@ -220,6 +226,8 @@ export interface WorkThreadServiceDependencies {
     readonly listForThread: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
     /** Takes a fork's carried turns once they are journaled; absent, a fork is refused. */
     readonly apply?: (event: WorkTurnAccepted | WorkTurnUpdated) => void;
+    /** Takes what the person sent into a carried turn while it ran. */
+    readonly applySteeredMessage?: (record: ThreadMessageSteered) => void;
   };
   /** Whether a thread is marked as having taken in outside content now. */
   readonly isMarked?: (threadId: WorkThreadId) => boolean;
@@ -283,6 +291,8 @@ export interface WorkThreadServiceDependencies {
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
   /** The person's Settings choice to put a thread away once it is marked Done; absent is off. */
   readonly putAwayWhenDone?: () => boolean;
+  /** A side task or child run the thread started that is not done, which holds every settle. */
+  readonly unfinishedWork?: (threadId: string) => ThreadUnfinishedWork | undefined;
 }
 
 /**
@@ -348,11 +358,13 @@ export class WorkThreadService {
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
   readonly #putAwayWhenDone: () => boolean;
+  readonly #unfinishedWork: WorkThreadServiceDependencies["unfinishedWork"];
 
   constructor(dependencies: WorkThreadServiceDependencies) {
     this.#moveHold = dependencies.moveHold;
     this.#readLatestFinishedReceipt = dependencies.readLatestFinishedReceipt;
     this.#putAwayWhenDone = dependencies.putAwayWhenDone ?? (() => false);
+    this.#unfinishedWork = dependencies.unfinishedWork;
     this.#persistence = dependencies.persistence;
     this.#projects = dependencies.projects;
     this.#projection = dependencies.projection;
@@ -746,9 +758,11 @@ export class WorkThreadService {
       for (const thread of threads) {
         const lifecycle = thread.lifecycle === "archived" ? "archived" : "active";
         for (const turn of this.#turnProjection.listForThread(thread.id)) {
-          const body = [turn.prompt, turn.response ?? ""].find((text) =>
-            text.toLowerCase().includes(needle),
-          );
+          const body = [
+            turn.prompt,
+            ...(turn.steeredMessages ?? []).map((message) => message.body),
+            turn.response ?? "",
+          ].find((text) => text.toLowerCase().includes(needle));
           if (body === undefined) continue;
           if (hits.length === MAX_CHAT_TRANSCRIPT_SEARCH_HITS) {
             return { query: trimmed, hits, truncated: true };
@@ -788,8 +802,14 @@ export class WorkThreadService {
     const decision = decideCompleteThread({
       lifecycle: current.lifecycle,
       ...(await this.#restSignals(current.id)),
+      unfinishedWork: this.#unfinishedWork?.(String(current.id)),
     });
-    if (decision.status === "refused") return { status: "skipped", reason: "busy" };
+    if (decision.status === "refused") {
+      return {
+        status: "skipped",
+        reason: decision.reason === "unfinished-work" ? "child-work" : "busy",
+      };
+    }
     // The read above awaited the runtime; a person's change meanwhile wins.
     const latest = this.#projection.read(threadId);
     if (latest === undefined || latest.version !== current.version) {
@@ -1175,13 +1195,15 @@ export class WorkThreadService {
           this.#readLatestFinishedReceipt?.(String(current.id)),
         );
         // Marking Done also puts the thread away when Settings says so, unless
-        // a turn still runs or waits on the person: the mark stands either way.
+        // a turn still runs or waits on the person, or a side task or child run
+        // is not done: the mark stands either way.
         const markedAt = decodeTimestamp(this.#clock());
         const putAway =
           this.#putAwayWhenDone() &&
           decideCompleteThread({
             lifecycle: current.lifecycle,
             ...(await this.#restSignals(current.id)),
+            unfinishedWork: this.#unfinishedWork?.(String(current.id)),
           }).status !== "refused";
         const confirmed = decodeWorkThread({
           ...(putAway ? { ...withoutThreadRest(current), completedAt: markedAt } : current),
@@ -1603,9 +1625,18 @@ export class WorkThreadService {
           : undefined;
       const updatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "complete-work-thread" && restSignals !== undefined) {
-        const decision = decideCompleteThread({ lifecycle: current.lifecycle, ...restSignals });
+        const decision = decideCompleteThread({
+          lifecycle: current.lifecycle,
+          ...restSignals,
+          unfinishedWork: this.#unfinishedWork?.(String(current.id)),
+        });
         if (decision.status === "refused") {
-          throw this.#failure("invalid", WORK_COMPLETE_REFUSALS[decision.reason]);
+          throw this.#failure(
+            "invalid",
+            decision.reason === "unfinished-work"
+              ? unfinishedWorkRefusal(decision.work)
+              : WORK_COMPLETE_REFUSALS[decision.reason],
+          );
         }
       }
       // The wake time of a limit-owned snooze comes from the journaled limit
@@ -2201,6 +2232,45 @@ export class WorkThreadService {
   }
 
   /**
+   * A side task's report is about to start a turn here. The thread is not
+   * settled any more; a snooze the person set keeps holding.
+   */
+  noteReportAdmitted(threadId: WorkThreadId): void {
+    this.#changeRestAsHost(threadId, (thread) => restAfterReport(thread));
+  }
+
+  /** The turn a side task's report started here failed, so a person's snooze ends. */
+  noteReportTurnFailed(threadId: WorkThreadId): void {
+    this.#changeRestAsHost(threadId, (thread) => restAfterReportFailure(thread));
+  }
+
+  #changeRestAsHost(
+    threadId: WorkThreadId,
+    rested: (
+      thread: WorkThread,
+    ) => Omit<WorkThread, "completedAt" | "snooze"> &
+      Pick<Partial<WorkThread>, "completedAt" | "snooze">,
+  ): void {
+    const current = this.#projection.read(threadId);
+    if (current === undefined) return;
+    const rest = rested(current);
+    if (rest.completedAt === current.completedAt && rest.snooze === current.snooze) return;
+    const updated = decodeWorkThread({
+      ...rest,
+      version: current.version + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    this.#append(
+      current.id,
+      current.version,
+      "work.thread-updated@1",
+      { kind: "thread-updated", thread: updated },
+      "system",
+    );
+    this.#projection.apply({ kind: "thread-updated", thread: updated });
+  }
+
+  /**
    * Carries out the person's "on a usage limit, hand off to" opt-in once the
    * thread's latest turn has stopped. The move is the ordinary provider
    * change, made by the host under the person's standing choice, so the next
@@ -2481,7 +2551,7 @@ export class WorkThreadService {
         ...(turn.failure === undefined ? {} : { failure: turn.failure }),
         updatedAt: turn.updatedAt,
       };
-      return { accepted, updated };
+      return { accepted, updated, steeredMessages: turn.steeredMessages ?? [] };
     });
     // The fork carries the source's conversation, so what the source read is
     // in the fork's context from its first turn. A source a person cleared
@@ -2493,6 +2563,7 @@ export class WorkThreadService {
             contentReference: `work-fork-${String(source.id)}-${String(command.throughRequestId)}`,
           }
         : undefined;
+    let steered: ReadonlyArray<ThreadMessageSteered> = [];
     const journalFork = () => {
       this.#append(
         fork.id,
@@ -2505,6 +2576,21 @@ export class WorkThreadService {
         this.#appendTurn(copy.accepted.requestId, 0, "work.turn-accepted@1", copy.accepted);
         this.#appendTurn(copy.accepted.requestId, 1, "work.turn-updated@1", copy.updated);
       }
+      // Journaled beside its turn, not in it, so each is copied as a record of
+      // the fork's own turn; without them the fork forgets what the person
+      // said while a carried turn ran.
+      steered = copies.flatMap((copy) =>
+        copy.steeredMessages.map((message) =>
+          journalThreadMessageSteered(this.#persistence.journal, {
+            mode: "work",
+            threadId: String(fork.id),
+            turnKey: String(copy.accepted.requestId),
+            ...message,
+            uuid: this.#uuid,
+            actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          }),
+        ),
+      );
     };
     if (mark === undefined) this.#inUnit(journalFork);
     else {
@@ -2524,6 +2610,7 @@ export class WorkThreadService {
       turnProjection.apply?.(copy.accepted);
       turnProjection.apply?.(copy.updated);
     }
+    for (const record of steered) turnProjection.applySteeredMessage?.(record);
     return { kind: "thread-created", thread: fork };
   }
 

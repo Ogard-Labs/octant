@@ -833,9 +833,9 @@ export function App(props: AppProps) {
         <OctantEmpty
           layout="page"
           eyebrow="Desktop session"
-          message="Open this renderer from the Octant desktop application."
+          message="Open Octant from the desktop app."
           state="warning"
-          title="Octant launch configuration is unavailable"
+          title="Octant could not start in this window"
         />
       </main>
     );
@@ -848,7 +848,6 @@ export function App(props: AppProps) {
           <OctantEmpty
             layout="page"
             eyebrow="Browser session"
-            message="Establishing the authenticated Octant browser session."
             state="loading"
             title="Opening Octant"
           />
@@ -864,7 +863,7 @@ export function App(props: AppProps) {
           <OctantEmpty
             layout="page"
             eyebrow="Browser session"
-            message="Octant opens a browser session only from the one-time link that the desktop app or `octant web` creates; typing the address is not enough."
+            message="A browser window needs a one-time link, so typing the address is not enough."
             state="warning"
             title="Open Octant from the desktop app or run `octant web`"
           />
@@ -879,9 +878,9 @@ export function App(props: AppProps) {
             <OctantEmpty
               layout="page"
               eyebrow="Project authority"
-              message="Octant could not establish the window identity for this browser session."
+              message="Open Octant again from the desktop app or with `octant web`."
               state="warning"
-              title="Project authority is unavailable"
+              title="Octant could not open this window"
             />
           </main>
         );
@@ -906,10 +905,10 @@ export function App(props: AppProps) {
           eyebrow="Project authority"
           message={
             launchSession.failureMessage ??
-            "Retry from `octant web` or the Octant desktop application to establish this window session."
+            "Open Octant again from the desktop app or with `octant web`."
           }
           state="warning"
-          title="Project authority is unavailable"
+          title="Octant could not open this window"
         />
       </main>
     );
@@ -921,9 +920,9 @@ export function App(props: AppProps) {
         <OctantEmpty
           layout="page"
           eyebrow="Project authority"
-          message="Retry from the Octant desktop application to establish this window session."
+          message="Open Octant again from the desktop app."
           state="warning"
-          title="Project authority is unavailable"
+          title="Octant could not open this window"
         />
       </main>
     );
@@ -935,9 +934,9 @@ export function App(props: AppProps) {
         <OctantEmpty
           layout="page"
           eyebrow="Desktop session"
-          message="Open this renderer from the Octant desktop application."
+          message="Open Octant from the desktop app."
           state="warning"
-          title="Octant launch configuration is unavailable"
+          title="Octant could not start in this window"
         />
       </main>
     );
@@ -6873,7 +6872,6 @@ function LaunchedShell(
         <OctantEmpty
           layout="page"
           eyebrow="Workspace"
-          message="Loading authoritative shell state."
           state="loading"
           title="Loading Octant workspace"
         />
@@ -6886,9 +6884,8 @@ function LaunchedShell(
         <OctantEmpty
           layout="page"
           eyebrow="Workspace"
-          message="A command outcome may have changed this workspace. Loading authoritative state."
           state="loading"
-          title="Reloading shell state"
+          title="Reloading workspace"
         />
       </main>
     );
@@ -6933,7 +6930,6 @@ function LaunchedShell(
         <OctantEmpty
           layout="page"
           eyebrow="Workspace"
-          message="Loading authoritative shell state."
           state="loading"
           title="Loading Octant workspace"
         />

@@ -121,11 +121,7 @@ export function ArchiveView(props: ArchiveViewProps) {
       )}
 
       {chatArchive.kind === "loading" && props.entries.length === 0 ? (
-        <OctantEmpty
-          message="Loading archived threads from this host."
-          state="loading"
-          title="Loading archive"
-        />
+        <OctantEmpty state="loading" title="Loading archive" />
       ) : entries.length === 0 ? (
         <OctantEmpty
           layout="line"

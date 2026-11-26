@@ -16,6 +16,7 @@ import {
 } from "./codeThreadControllers";
 import CodeWorkspaceTab from "./CodeWorkspaceTab";
 import { createCodeReadCursorStore } from "./useCodeController";
+import { ThreadActivityRevisionsContext } from "../polling/ThreadActivityRevisions";
 
 function ProviderRequestReader(props: {
   readonly controllers: ReturnType<typeof createCodeThreadControllers>;
@@ -326,6 +327,396 @@ describe("CodeThreadControllerSlots", () => {
     },
   );
 
+  it("reads what the person sent into an open thread's running turn when the window hears a queue change", async () => {
+    const registry = createCodeThreadControllers();
+    const steeredMessages = [{ messageId: "m1", body: "Skip the backfill.", steeredAt: now }];
+    const turn = {
+      operationId: "70000000-0000-4000-8000-000000000001",
+      providerInstanceId: "50000000-0000-4000-8000-000000000001",
+      modelId: "model-a",
+      prompt: { contentId: "p", digest: "a".repeat(64), byteLength: 1 },
+      assistant: [],
+      status: "incomplete",
+      startedAt: now,
+      updatedAt: now,
+    };
+    let held: object = turn;
+    const conversationWindow = vi.fn(async (threadId: unknown) => ({
+      version: 1,
+      threadId,
+      turns: String(threadId) === String(threadA) ? [held] : [],
+      hasEarlier: false,
+      hasLater: false,
+    }));
+    const api = {
+      ...client(),
+      conversationWindow,
+      operationContent: vi.fn(async () => new TextEncoder().encode("Add the index")),
+      subscribeOperation: vi.fn((_t: unknown, _o: unknown, _c: unknown, signal: AbortSignal) =>
+        idleStream(signal),
+      ),
+    } as unknown as CodeClient;
+    const readCursorStore = createCodeReadCursorStore();
+    const tree = (threadMessageQueue: number) => (
+      <ThreadActivityRevisionsContext.Provider
+        value={{ browserCaptures: 0, toolApprovals: 0, threadFollowUps: 0, threadMessageQueue }}
+      >
+        <CodeThreadControllerSlots
+          client={api}
+          navigationBootstrap={bootstrap()}
+          readCursorStore={readCursorStore}
+          registry={registry}
+          threadIds={[threadA, threadB]}
+        />
+      </ThreadActivityRevisionsContext.Provider>
+    );
+    const view = render(tree(1));
+    await waitFor(() => {
+      expect(registry.get(threadA)?.turnStatus).toBe("running");
+      expect(registry.get(threadB)?.conversationHistory).toBe("loaded");
+    });
+    const readsOf = (threadId: CodeThreadId) =>
+      conversationWindow.mock.calls.filter(([id]) => String(id) === String(threadId)).length;
+    const idleReads = readsOf(threadB);
+
+    held = { ...turn, steeredMessages };
+    view.rerender(tree(2));
+
+    await waitFor(() =>
+      expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({ steeredMessages }),
+    );
+    // A thread with no running turn has nothing to take in.
+    expect(readsOf(threadB)).toBe(idleReads);
+  });
+
+  it("follows a turn another window started in a thread this window opened idle, with what the person sent into it", async () => {
+    const registry = createCodeThreadControllers();
+    const steeredMessages = [{ messageId: "m1", body: "Skip the backfill.", steeredAt: now }];
+    const turn = {
+      operationId: "70000000-0000-4000-8000-000000000002",
+      providerInstanceId: "50000000-0000-4000-8000-000000000001",
+      modelId: "model-a",
+      prompt: { contentId: "p", digest: "a".repeat(64), byteLength: 1 },
+      assistant: [],
+      status: "incomplete",
+      steeredMessages,
+      startedAt: now,
+      updatedAt: now,
+    };
+    let turnsOfA: ReadonlyArray<object> = [];
+    const conversationWindow = vi.fn(async (threadId: unknown) => ({
+      version: 1,
+      threadId,
+      turns: String(threadId) === String(threadA) ? turnsOfA : [],
+      hasEarlier: false,
+      hasLater: false,
+    }));
+    const subscribeOperation = vi.fn((_t: unknown, _o: unknown, _c: unknown, signal: AbortSignal) =>
+      idleStream(signal),
+    );
+    const api = {
+      ...client(),
+      conversationWindow,
+      operationContent: vi.fn(async () => new TextEncoder().encode("Add the index")),
+      subscribeOperation,
+    } as unknown as CodeClient;
+    const readCursorStore = createCodeReadCursorStore();
+    const idle = bootstrap();
+    const tree = (navigationBootstrap: CodeBootstrap) => (
+      <CodeThreadControllerSlots
+        client={api}
+        navigationBootstrap={navigationBootstrap}
+        readCursorStore={readCursorStore}
+        registry={registry}
+        threadIds={[threadA, threadB]}
+      />
+    );
+    const view = render(tree(idle));
+    await waitFor(() => {
+      expect(registry.get(threadA)?.conversationHistory).toBe("loaded");
+      expect(registry.get(threadB)?.conversationHistory).toBe("loaded");
+    });
+    expect(registry.get(threadA)?.turnStatus).toBe("idle");
+    const readsOf = (threadId: CodeThreadId) =>
+      conversationWindow.mock.calls.filter(([id]) => String(id) === String(threadId)).length;
+    const idleReadsOfB = readsOf(threadB);
+    const idleReadsOfA = readsOf(threadA);
+
+    // Another window started a turn and the runtime took a message into it.
+    // The window's thread list is all this one hears of it.
+    turnsOfA = [turn];
+    const working = (sequence: number): CodeBootstrap => ({
+      ...idle,
+      activity: [{ threadId: threadA, lastSequence: sequence }] as never,
+      runtime: [{ threadId: threadA, executing: true }] as never,
+    });
+    view.rerender(tree(working(5)));
+
+    await waitFor(() => {
+      expect(registry.get(threadA)?.turnStatus).toBe("running");
+      expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({
+        role: "assistant",
+        steeredMessages,
+      });
+    });
+    await waitFor(() => expect(subscribeOperation).toHaveBeenCalledOnce());
+    const followedReads = readsOf(threadA);
+    expect(followedReads).toBeGreaterThan(idleReadsOfA);
+
+    // More activity on a turn already followed reads nothing again and opens
+    // no second stream.
+    view.rerender(tree(working(9)));
+    await act(async () => undefined);
+    expect(subscribeOperation).toHaveBeenCalledOnce();
+    expect(readsOf(threadB)).toBe(idleReadsOfB);
+  });
+
+  describe("a turn started elsewhere", () => {
+    const providerTurn = (operationId: string, status: string, extra: object = {}) => ({
+      operationId,
+      providerInstanceId: "50000000-0000-4000-8000-000000000001",
+      modelId: "model-a",
+      prompt: { contentId: "p", digest: "a".repeat(64), byteLength: 1 },
+      assistant: [],
+      status,
+      startedAt: now,
+      updatedAt: now,
+      ...extra,
+    });
+    const asked = "70000000-0000-4000-8000-000000000003";
+    const next = "70000000-0000-4000-8000-000000000004";
+
+    function host(
+      initial: ReadonlyArray<object>,
+      stream?: (operationId: string, signal: AbortSignal) => AsyncGenerator | undefined,
+    ) {
+      const held = { turnsOfA: initial };
+      const conversationWindow = vi.fn(
+        async (threadId: unknown, _options?: { readonly limit?: number }) => ({
+          version: 1,
+          threadId,
+          turns: String(threadId) === String(threadA) ? held.turnsOfA : [],
+          hasEarlier: false,
+          hasLater: false,
+        }),
+      );
+      const subscribeOperation = vi.fn(
+        (_t: unknown, operationId: unknown, _c: unknown, signal: AbortSignal) =>
+          stream?.(String(operationId), signal) ??
+          (String(operationId) === asked
+            ? (async function* () {
+                // The host replays a turn that waits on the person and ends it.
+                yield {
+                  threadId: threadA,
+                  operationId: asked,
+                  cursor: 1,
+                  occurredAt: now,
+                  event: { kind: "operation-state", state: "waiting" },
+                };
+              })()
+            : idleStream(signal)),
+      );
+      const api = {
+        ...client(),
+        conversationWindow,
+        operationContent: vi.fn(async () => new TextEncoder().encode("Add the index")),
+        subscribeOperation,
+      } as unknown as CodeClient;
+      return { api, conversationWindow, held, subscribeOperation };
+    }
+
+    const working = (sequence: number): CodeBootstrap => ({
+      ...bootstrap(),
+      activity: [{ threadId: threadA, lastSequence: sequence }] as never,
+      runtime: [{ threadId: threadA, executing: true }] as never,
+    });
+
+    function open(api: CodeClient, navigationBootstrap: CodeBootstrap) {
+      const registry = createCodeThreadControllers();
+      const readCursorStore = createCodeReadCursorStore();
+      const tree = (current: CodeBootstrap) => (
+        <CodeThreadControllerSlots
+          client={api}
+          navigationBootstrap={current}
+          readCursorStore={readCursorStore}
+          registry={registry}
+          threadIds={[threadA]}
+        />
+      );
+      const view = render(tree(navigationBootstrap));
+      return { registry, rerender: (current: CodeBootstrap) => view.rerender(tree(current)) };
+    }
+
+    it("follows the next turn in a thread whose last turn waits on the person", async () => {
+      const { api, held, subscribeOperation } = host([providerTurn(asked, "waiting")]);
+      const { registry, rerender } = open(api, bootstrap());
+      await waitFor(() => expect(registry.get(threadA)?.turnStatus).toBe("waiting"));
+
+      const steeredMessages = [{ messageId: "m2", body: "Use staging.", steeredAt: now }];
+      held.turnsOfA = [
+        providerTurn(asked, "completed"),
+        providerTurn(next, "incomplete", { steeredMessages }),
+      ];
+      rerender(working(7));
+
+      await waitFor(() => {
+        expect(registry.get(threadA)?.turnStatus).toBe("running");
+        expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({ steeredMessages });
+      });
+      await waitFor(() =>
+        expect(subscribeOperation).toHaveBeenLastCalledWith(
+          threadA,
+          next,
+          expect.anything(),
+          expect.anything(),
+        ),
+      );
+    });
+
+    it("shows a turn that started and finished elsewhere between two reads of the list", async () => {
+      const { api, conversationWindow, held } = host([providerTurn(asked, "completed")]);
+      const settled = (sequence: number): CodeBootstrap => ({
+        ...bootstrap(),
+        activity: [{ threadId: threadA, lastSequence: sequence }] as never,
+      });
+      const { registry, rerender } = open(api, settled(2));
+      await waitFor(() => expect(registry.get(threadA)?.conversationHistory).toBe("loaded"));
+      const steeredMessages = [{ messageId: "m3", body: "Keep the old name.", steeredAt: now }];
+      held.turnsOfA = [
+        providerTurn(asked, "completed"),
+        providerTurn(next, "completed", { steeredMessages }),
+      ];
+      // The list never said the thread was working; only its activity moved.
+      rerender(settled(9));
+      await waitFor(() =>
+        expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({
+          operationId: next,
+          steeredMessages,
+        }),
+      );
+      // Activity on a turn already shown takes one look at the newest turn and
+      // reads nothing whole again.
+      const wholeReads = () =>
+        conversationWindow.mock.calls.filter(([, options]) => (options?.limit ?? 0) > 2).length;
+      const before = wholeReads();
+      rerender(settled(11));
+      await waitFor(() =>
+        expect(conversationWindow).toHaveBeenLastCalledWith(
+          threadA,
+          { limit: 1 },
+          expect.anything(),
+        ),
+      );
+      expect(wholeReads()).toBe(before);
+    });
+
+    it("looks again on its own when its look at a settled thread failed", async () => {
+      const { api, conversationWindow, held } = host([providerTurn(asked, "completed")]);
+      const settled = (sequence: number): CodeBootstrap => ({
+        ...bootstrap(),
+        activity: [{ threadId: threadA, lastSequence: sequence }] as never,
+      });
+      const { registry, rerender } = open(api, settled(2));
+      await waitFor(() => expect(registry.get(threadA)?.conversationHistory).toBe("loaded"));
+      held.turnsOfA = [providerTurn(asked, "completed"), providerTurn(next, "completed")];
+      conversationWindow.mockRejectedValueOnce(new Error("offline"));
+      // The list moves once and then says the same thing on every refresh.
+      rerender(settled(9));
+      await waitFor(
+        () =>
+          expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({ operationId: next }),
+        { timeout: 8_000 },
+      );
+    }, 12_000);
+
+    it("looks again when the read that opened the thread failed, though the list never moves", async () => {
+      const { api, conversationWindow } = host([providerTurn(asked, "completed")]);
+      conversationWindow.mockRejectedValueOnce(new Error("offline"));
+      const settled: CodeBootstrap = {
+        ...bootstrap(),
+        activity: [{ threadId: threadA, lastSequence: 4 }] as never,
+      };
+      const { registry } = open(api, settled);
+      await waitFor(
+        () => {
+          expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({ operationId: asked });
+          expect(registry.get(threadA)?.conversationHistory).toBe("loaded");
+        },
+        { timeout: 8_000 },
+      );
+    }, 12_000);
+
+    it("reads a thread with no turns again when the read that opened it failed", async () => {
+      const { api, conversationWindow } = host([]);
+      conversationWindow.mockRejectedValueOnce(new Error("offline"));
+      const { registry } = open(api, {
+        ...bootstrap(),
+        activity: [{ threadId: threadA, lastSequence: 4 }] as never,
+      });
+      await waitFor(() => expect(registry.get(threadA)?.conversationHistory).toBe("loaded"));
+    });
+
+    it("streams the queued turn that follows the one this view followed", async () => {
+      let finishFirst = () => {};
+      const firstEnds = new Promise<void>((resolve) => {
+        finishFirst = resolve;
+      });
+      const { api, held, subscribeOperation } = host(
+        [providerTurn(asked, "incomplete")],
+        (operationId) =>
+          operationId === asked
+            ? (async function* () {
+                await firstEnds;
+                yield {
+                  threadId: threadA,
+                  operationId: asked,
+                  cursor: 1,
+                  occurredAt: now,
+                  event: { kind: "operation-state", state: "completed" },
+                };
+              })()
+            : undefined,
+      );
+      const { registry } = open(api, bootstrap());
+      await waitFor(() => expect(registry.get(threadA)?.turnStatus).toBe("running"));
+
+      // The next queued message became a turn before this view saw the first end.
+      held.turnsOfA = [providerTurn(asked, "completed"), providerTurn(next, "incomplete")];
+      finishFirst();
+
+      await waitFor(() =>
+        expect(subscribeOperation).toHaveBeenLastCalledWith(
+          threadA,
+          next,
+          expect.anything(),
+          expect.anything(),
+        ),
+      );
+      expect(registry.get(threadA)?.turnStatus).toBe("running");
+      await act(() => new Promise((resolve) => setTimeout(resolve, 2_500)));
+      expect(
+        subscribeOperation.mock.calls.filter(([, operationId]) => String(operationId) === next),
+      ).toHaveLength(1);
+    }, 10_000);
+
+    it("reads nothing more for a thread the list already says is working when it opens", async () => {
+      const { api, conversationWindow, subscribeOperation } = host([
+        providerTurn(next, "incomplete"),
+      ]);
+      const { registry, rerender } = open(api, working(3));
+      await waitFor(() => expect(registry.get(threadA)?.turnStatus).toBe("running"));
+      rerender(working(4));
+      await act(async () => undefined);
+      // Only the open's own read takes the whole window; the turn's poll
+      // looks at one turn.
+      const wholeReads = conversationWindow.mock.calls.filter(
+        ([, options]) => (options?.limit ?? 0) > 2,
+      );
+      expect(wholeReads).toHaveLength(1);
+      expect(subscribeOperation).toHaveBeenCalledOnce();
+    });
+  });
+
   it("gives every open Code thread its own view instead of one shared with the front tab", async () => {
     const registry = createCodeThreadControllers();
     render(
@@ -606,6 +997,28 @@ describe("switching between Code threads the window has loaded", () => {
     frames.length = 0;
     return { frames, host, readCursorStore, registry, replies, show };
   }
+
+  it("still reads again a thread it drew from what it kept when that first read fails", async () => {
+    const opened = await openBoth();
+    const conversationWindow = opened.host.client.conversationWindow;
+    if (conversationWindow === undefined) throw new Error("A windowed host reads windows.");
+    const reads = vi.mocked(conversationWindow);
+    const readsOfA = () => reads.mock.calls.filter(([id]) => String(id) === String(threadA)).length;
+    const before = readsOfA();
+    reads.mockRejectedValueOnce(new Error("The host did not answer."));
+    // The list says the thread moved, so the failed read leaves something to look at.
+    opened.show(threadA, {
+      navigationBootstrap: {
+        ...bootstrap(),
+        activity: [{ threadId: threadA, lastSequence: 3 }] as never,
+      },
+    });
+    expect(screen.getByText("Reply from the first thread")).toBeInTheDocument();
+
+    await waitFor(() => expect(opened.registry.get(threadA)?.conversationHistory).toBe("loaded"));
+    expect(readsOfA() - before).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Reply from the first thread")).toBeInTheDocument();
+  });
 
   it("loads again, as at a first open, on a host that can only read a thread whole", async () => {
     const opened = await openBoth("whole");

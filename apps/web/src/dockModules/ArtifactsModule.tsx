@@ -50,7 +50,7 @@ export function ArtifactDockList(props: {
   return (
     <div className="artifact-table artifact-table--dock">
       <ArtifactTableHead />
-      <ul className="artifact-table__rows">
+      <ul className="surface-table__rows">
         {props.entries.map((entry) => (
           <ArtifactTableRow
             key={String(entry.canvasId)}

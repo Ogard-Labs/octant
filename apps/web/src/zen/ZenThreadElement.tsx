@@ -29,7 +29,7 @@ export function ZenThreadElement(props: ZenThreadElementProps) {
         <strong>Source unavailable</strong>
         <p>{`${capitalize(props.sourceContext.mode)} · ${props.sourceContext.projectId ?? "unfiled"}`}</p>
         <code>{String(props.sourceContext.threadId)}</code>
-        <p>Octant kept the exact source identity and did not retarget by name.</p>
+        <p>Octant kept this exact thread and did not swap in another with the same name.</p>
       </div>
     );
   }

@@ -1245,6 +1245,6 @@ function deliveryTargetLabel(kind: CodeBoardCard["outcomeKind"]): string {
 
 function recoveryReasonLabel(reason: CodeThreadMetadataRecoveryReason): string {
   return reason === "project-projection-missing"
-    ? "Project projection missing"
-    : "Operation journal rebuild required";
+    ? "Project data missing"
+    : "History needs rebuilding";
 }

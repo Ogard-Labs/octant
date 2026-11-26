@@ -1,17 +1,21 @@
 import { decodeVideoJobId } from "@octant/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MobileThreadVideos } from "@octant/client-runtime/video-generation-client";
-import { cacheVideoClip } from "./videoClipCache";
+import { File } from "expo-file-system";
+import { cacheVideoClip, reclaimVideoClipCache } from "./videoClipCache";
 
 const calls = vi.hoisted(() => [] as string[]);
+const cached = vi.hoisted(() => ({ list: (): ReadonlyArray<unknown> => [] }));
 vi.mock("expo-file-system", () => ({
-  Paths: { cache: "app-cache" },
+  Paths: { cache: { toString: () => "app-cache", list: () => cached.list() } },
   File: class {
     readonly uri: string;
+    readonly name: string;
     exists = false;
 
     constructor(directory: string, name: string) {
       this.uri = `${directory}/${name}`;
+      this.name = name;
     }
     create() {
       calls.push("create");
@@ -63,5 +67,27 @@ describe("the disposable video file", () => {
       cacheVideoClip(client, { jobId, size: 3, signal: controller.signal }),
     ).rejects.toThrow();
     expect(calls).toEqual(["create", "write 1", "close", "delete"]);
+  });
+
+  it("is deleted at the next launch when the system ended the app during playback", () => {
+    const file = (name: string, remove = () => void calls.push(`reclaim ${name}`)) =>
+      Object.assign(new File("app-cache", name), { delete: remove });
+    cached.list = () => [
+      file("octant-video-1.mp4", () => {
+        throw new Error("The file is locked.");
+      }),
+      file("octant-video-2.mp4"),
+      file("picked-photo.mp4"),
+      { name: "octant-video-folder.mp4", delete: () => calls.push("reclaim a folder") },
+    ];
+    reclaimVideoClipCache();
+    expect(calls).toEqual(["reclaim octant-video-2.mp4"]);
+  });
+
+  it("does not stop the app from opening when its cache cannot be read", () => {
+    cached.list = () => {
+      throw new Error("The cache folder is unavailable.");
+    };
+    expect(() => reclaimVideoClipCache()).not.toThrow();
   });
 });

@@ -252,6 +252,7 @@ describe("Gemini video driver", () => {
       const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });
       expect(await adapter.poll("v1_abc", new AbortController().signal)).toEqual({
         status: "running",
+        usage: { outputTokens: 46_376, inputTokens: 12 },
       });
     },
   );
@@ -272,6 +273,32 @@ describe("Gemini video driver", () => {
         : new Response(null, { status: 503 }),
     );
     const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });
+    expect(await adapter.poll("v1_abc", new AbortController().signal)).toEqual({
+      status: "running",
+      usage: { outputTokens: 46_376, inputTokens: 12 },
+    });
+  });
+
+  it.each([
+    null,
+    {},
+    { total_tokens: "many" },
+    { total_output_tokens: 46_376.5 },
+    { total_output_tokens: -1, total_input_tokens: 12 },
+    { total_output_tokens: 46_336, total_thought_tokens: Number.MAX_SAFE_INTEGER },
+  ])("reports no usage when Google states none it can settle from (%j)", async (usage) => {
+    const recorder = ports((request) =>
+      request.url.endsWith("/interactions/v1_abc")
+        ? Response.json(
+            completedInteraction({
+              usage,
+              steps: [{ type: "model_output", content: [{ type: "video", uri: "files/clip-9" }] }],
+            }),
+          )
+        : new Response(null, { status: 503 }),
+    );
+    const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });
+    // An empty count would replace one Google reported with an earlier check.
     expect(await adapter.poll("v1_abc", new AbortController().signal)).toEqual({
       status: "running",
     });

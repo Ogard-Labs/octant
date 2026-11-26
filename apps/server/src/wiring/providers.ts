@@ -259,6 +259,10 @@ import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
 import { AgentToolingDiscovery } from "../extensions/agentToolingDiscovery";
 import { McpServerSignIn } from "../extensions/mcpServerSignIn";
 import { listMcpServerConnections } from "../extensions/mcpServerConnections";
+import {
+  createThreadMcpSignInReader,
+  createThreadMcpSignInThreads,
+} from "../extensions/threadMcpSignIn";
 import { githubRoutineEventSources } from "../extensions/githubRoutineEventSources";
 import { ExtensionProjectPinStore } from "../extensions/extensionProjectPinStore";
 import { BundledPluginSwitchStore } from "../extensions/bundledPluginSwitchStore";
@@ -1516,6 +1520,50 @@ export function wireProviders(deps: ProvidersDependencies) {
       (await mcpPlanReadOnlyRoutes(request)) ??
       (await blockedToolsRoutes(request)) ??
       (await providerToolingCommandRoutes(request));
+    const listServerConnections = () =>
+      listMcpServerConnections({
+        snapshot: () => extensionLifecycleService.snapshot(),
+        observations: () => agentPluginMcpSessionManager.connectionObservations(),
+        // Asked as a reader: a local window's status read polls a pending
+        // sign-in and may finish it, which a listing must never do.
+        signInStatus: (extensionId, componentId) =>
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.status(extensionId, componentId, "remote-device"),
+          ),
+        readConfiguration: (packageState, componentId) =>
+          extensionPackageStore.readVerifiedConfiguration(
+            {
+              extensionId: packageState.extensionId,
+              packageId: packageState.packageId,
+              version: packageState.version,
+              digest: packageState.digest,
+            },
+            componentId,
+          ),
+      });
+    const threadMcpSignIns = createThreadMcpSignInReader({
+      snapshot: () => extensionApiService.snapshot(),
+      resolveEffectiveState: (snapshot, query) =>
+        extensionActivationService.resolve(snapshot, query),
+      connections: listServerConnections,
+      thread: createThreadMcpSignInThreads({
+        readChatThread: (threadId) => persistence.readChatThread(threadId),
+        readWorkThread: (threadId) => workThreadProjection.read(threadId),
+        readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+        driverKind: (providerInstanceId) =>
+          persistence.readProviderInstance(providerInstanceId)?.driverKind,
+        onServer: (projectId) => serverProjectStore.project(projectId) !== undefined,
+        strict: (threadId) => deps.resolveThreadStrict(threadId),
+        carriesAppManagedTools: (thread) =>
+          browserToolTransport(
+            providerRuntimeRegistry.observedState(thread.providerInstanceId),
+            String(thread.modelId),
+            appToolThreadLevel(thread),
+          ),
+        pinnedExtensionIds,
+        platform: process.platform,
+      }),
+    });
     const extensionRoutes = createExtensionRouteHandler({
       service: extensionApiService,
       windowAuthorityStore,
@@ -1591,27 +1639,8 @@ export function wireProviders(deps: ProvidersDependencies) {
           ),
       },
       mcpServerConnections: {
-        list: () =>
-          listMcpServerConnections({
-            snapshot: () => extensionLifecycleService.snapshot(),
-            observations: () => agentPluginMcpSessionManager.connectionObservations(),
-            // Asked as a reader: a local window's status read polls a pending
-            // sign-in and may finish it, which a listing must never do.
-            signInStatus: (extensionId, componentId) =>
-              signInOrUnavailable(extensionId, componentId, (signIn) =>
-                signIn.status(extensionId, componentId, "remote-device"),
-              ),
-            readConfiguration: (packageState, componentId) =>
-              extensionPackageStore.readVerifiedConfiguration(
-                {
-                  extensionId: packageState.extensionId,
-                  packageId: packageState.packageId,
-                  version: packageState.version,
-                  digest: packageState.digest,
-                },
-                componentId,
-              ),
-          }),
+        list: listServerConnections,
+        forThread: threadMcpSignIns,
         reconnect: async (extensionId, componentId) => {
           const installed = extensionLifecycleService
             .snapshot()

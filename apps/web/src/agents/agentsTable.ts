@@ -1,16 +1,15 @@
 import type { AgentRunCenterSummary, AgentRunLifecycleStatus } from "@octant/contracts";
 import { isAgentRunActiveStatus } from "@octant/domain";
 import { compactSpan } from "../automation/automationTable";
+import type { OctantStatusTone } from "../ui/base/OctantStatusDot";
 import { formatAgentRunTokenCount } from "./agentRunGraphFacts";
-
-export type AgentStatusTone = "active" | "success" | "failure" | "quiet";
 
 /**
  * The dot beside a status word. Failed and interrupted runs share the danger
  * tone because both are a run the reader may need to retry; a cancelled run
- * was the reader's own choice and stays quiet.
+ * was the reader's own choice and stays neutral.
  */
-export function agentStatusTone(status: AgentRunLifecycleStatus): AgentStatusTone {
+export function agentStatusTone(status: AgentRunLifecycleStatus): OctantStatusTone {
   switch (status) {
     case "queued":
     case "starting":
@@ -21,9 +20,9 @@ export function agentStatusTone(status: AgentRunLifecycleStatus): AgentStatusTon
       return "success";
     case "failed":
     case "interrupted":
-      return "failure";
+      return "danger";
     case "cancelled":
-      return "quiet";
+      return "neutral";
   }
 }
 

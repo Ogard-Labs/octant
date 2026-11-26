@@ -384,7 +384,7 @@ describe("thread utility dock content", () => {
 
   it("opens Review for the Code thread without a workspace diff tab", async () => {
     render(<ThreadUtilityDockContent {...props()} surface="review" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Git observation is unavailable");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Git status is unavailable");
     expect(screen.queryByText(/code-diff/)).not.toBeInTheDocument();
   });
 

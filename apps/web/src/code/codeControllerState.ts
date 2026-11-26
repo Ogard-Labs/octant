@@ -101,6 +101,11 @@ export interface CodeConversationMessage {
    */
   readonly executionPolicy?: ProviderExecutionPolicy;
   /**
+   * Set only on a turn the host journaled as a report delivery, so the
+   * transcript attributes the message to the report rather than the person.
+   */
+  readonly delivery?: CodeConversationTurn["delivery"];
+  /**
    * What changed in the checkout while this turn ran. Present on an assistant
    * message whose turn the host observed; absent means "not observed", which
    * is not the same as "nothing changed".
@@ -583,6 +588,7 @@ async function projectConversationTurns(
       ...(turn.describedImages === undefined ? {} : { describedImages: turn.describedImages }),
       ...(turn.checkpoint === undefined ? {} : { checkpoint: turn.checkpoint }),
       ...(turn.executionPolicy === undefined ? {} : { executionPolicy: turn.executionPolicy }),
+      ...(turn.delivery === undefined ? {} : { delivery: turn.delivery }),
     });
     const parts: string[] = [];
     for (const reference of turn.assistant) {
@@ -655,6 +661,65 @@ async function projectConversationTurns(
     });
   }
   return { messages, activity };
+}
+
+/** The person's messages each running turn took in, by its operation. */
+export type CodeSteeredMessages = ReadonlyMap<
+  string,
+  NonNullable<CodeConversationTurn["steeredMessages"]>
+>;
+
+/**
+ * What `turns` hold beyond what is already held. A turn's steered messages
+ * only grow, so the longer list is the newer read and nothing is taken away.
+ */
+export function holdSteeredMessages(
+  held: CodeSteeredMessages,
+  turns: ReadonlyArray<CodeConversationTurn>,
+): CodeSteeredMessages {
+  const newer = turns.flatMap(({ operationId, steeredMessages = [] }) =>
+    steeredMessages.length > (held.get(String(operationId))?.length ?? 0)
+      ? [[String(operationId), steeredMessages] as const]
+      : [],
+  );
+  return newer.length === 0 ? held : new Map([...held, ...newer]);
+}
+
+/**
+ * A read of the conversation with the rows of the turn this window's own send
+ * streams kept as shown. That stream writes its reply row by the id it gave
+ * it, so the host's copy of the turn in its place would stop the reply growing
+ * and take back the text streamed so far.
+ */
+export function keepStreamedTurn(
+  read: ReadonlyArray<CodeConversationMessage>,
+  shown: ReadonlyArray<CodeConversationMessage>,
+  operationId: string | undefined,
+): ReadonlyArray<CodeConversationMessage> {
+  if (operationId === undefined) return read;
+  const ofTurn = (message: CodeConversationMessage) =>
+    message.operationId !== undefined && String(message.operationId) === operationId;
+  const live = shown.filter(ofTurn);
+  if (live.length === 0) return read;
+  const at = read.findIndex(ofTurn);
+  const rest = read.filter((message) => !ofTurn(message));
+  return at < 0 ? [...rest, ...live] : [...rest.slice(0, at), ...live, ...rest.slice(at)];
+}
+
+/** The transcript with the held messages on their replies; nothing else of it changes. */
+export function withSteeredMessages(
+  conversation: ReadonlyArray<CodeConversationMessage>,
+  held: CodeSteeredMessages,
+): ReadonlyArray<CodeConversationMessage> {
+  if (held.size === 0) return conversation;
+  return conversation.map((message) => {
+    const steeredMessages =
+      message.role === "assistant" ? held.get(String(message.operationId)) : undefined;
+    return steeredMessages !== undefined &&
+      steeredMessages.length > (message.steeredMessages?.length ?? 0)
+      ? { ...message, steeredMessages }
+      : message;
+  });
 }
 
 async function readConversationEvidence(

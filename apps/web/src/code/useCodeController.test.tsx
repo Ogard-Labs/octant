@@ -3330,6 +3330,468 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  describe("a message the person sent into a running turn", () => {
+    const operationId = "70000000-0000-4000-8000-000000000040";
+    const steered = (index: number, body: string) => ({
+      messageId: `60000000-0000-4000-8000-00000000005${index}`,
+      body,
+      steeredAt: now as never,
+    });
+
+    /**
+     * A thread whose newest turn runs. The host's recorded turn never holds
+     * what the stream already showed, so any read that rewrote the transcript
+     * would roll the reply, the tool step and the task list back.
+     */
+    function runningThread() {
+      const turn = {
+        ...conversationTurn(operationId, "60000000-0000-4000-8000-000000000001"),
+        status: "incomplete" as const,
+      };
+      const host = windowedHost({ [String(ids.thread)]: { turns: [turn] } });
+      const queue: unknown[] = [];
+      let wake = () => {};
+      const emit = (cursor: number, event: unknown) => {
+        queue.push({ threadId: ids.thread, operationId, cursor, occurredAt: now, event });
+        wake();
+      };
+      async function* frames(signal: AbortSignal) {
+        while (!signal.aborted) {
+          const next = queue.shift();
+          if (next !== undefined) {
+            yield next as never;
+            // The host ends an operation's stream with the operation.
+            if (JSON.stringify(next).includes('"kind":"operation-state"')) return;
+            continue;
+          }
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+      }
+      const say = (cursor: number, contentId: string) =>
+        emit(cursor, {
+          kind: "provider-content",
+          channel: "message",
+          content: { contentId, digest: "b".repeat(64), byteLength: 8 },
+        });
+      const client = fakeClient({
+        ...host.client,
+        operationContent: vi.fn(async (_threadId, _operationId, contentId) =>
+          new TextEncoder().encode(contentId === "part-1" ? "First half" : ", second half"),
+        ) as never,
+        subscribeOperation: vi.fn((_threadId, _operationId, _cursor, signal) =>
+          frames(signal),
+        ) as never,
+      });
+      const hold = (messages: ReadonlyArray<ReturnType<typeof steered>>, turnOf = operationId) => {
+        const stored = host.threads[String(ids.thread)];
+        stored?.turns.splice(0, 1, {
+          ...turn,
+          operationId: turnOf,
+          steeredMessages: messages,
+        } as never);
+      };
+      return { client, emit, hold, host, say };
+    }
+
+    const reply = (
+      messages: ReadonlyArray<{ readonly role: string; readonly operationId?: unknown }>,
+    ) => messages.find((message) => message.role === "assistant") as never;
+
+    it("shows at once when the queue changes, with the reply, tool steps and tasks streamed so far", async () => {
+      const { client, emit, hold, say } = runningThread();
+      const { result, rerender, unmount } = renderHook(
+        ({ revision }) =>
+          useCodeController({
+            activeThreadId: ids.thread,
+            client,
+            messageQueueRevision: revision,
+            navigationRefreshMs: 0,
+            reconnectDelayMs: 60_000,
+          }),
+        { initialProps: { revision: 1 } },
+      );
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      act(() => {
+        say(1, "part-1");
+        emit(2, {
+          kind: "tool-activity",
+          toolCallId: "call-1",
+          toolName: "Read",
+          state: "completed",
+          summary: "src/index.ts",
+        });
+      });
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({ text: "First half" }),
+      );
+      await waitFor(() => expect(result.current.turnActivity.get(operationId)).toBeDefined());
+      const activity = result.current.turnActivity.get(operationId);
+
+      hold([steered(1, "Skip the backfill."), steered(2, "Use staging.")]);
+      rerender({ revision: 2 });
+
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({
+          text: "First half",
+          status: "incomplete",
+          steeredMessages: [{ body: "Skip the backfill." }, { body: "Use staging." }],
+        }),
+      );
+      expect(result.current.turnActivity.get(operationId)).toBe(activity);
+      expect(result.current.turnStatus).toBe("running");
+
+      // The stream goes on from where it was, and a read that started before
+      // the message was taken does not take it away again.
+      hold([steered(1, "Skip the backfill.")]);
+      act(() => say(3, "part-2"));
+      rerender({ revision: 3 });
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({
+          text: "First half, second half",
+          steeredMessages: [{ body: "Skip the backfill." }, { body: "Use staging." }],
+        }),
+      );
+      unmount();
+    });
+
+    it("opens no second stream for a turn this window sends just after the turn it followed ended", async () => {
+      const { client, emit, host } = runningThread();
+      const sentTurns: string[] = [];
+      const sent = fakeClient({
+        ...client,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => {
+          sentTurns.push(String(command.operationId));
+          host.threads[String(ids.thread)]?.turns.push({
+            ...conversationTurn(command.operationId, "60000000-0000-4000-8000-000000000002"),
+            status: "incomplete",
+          } as never);
+          return {
+            kind: "provider-turn-state",
+            operationId: command.operationId,
+            state: "running",
+          };
+        }) as never,
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client: sent,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      // Let the followed turn's poll back off, so it is asleep when it ends.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 900)));
+      const stored = host.threads[String(ids.thread)];
+      stored?.turns.splice(0, 1, { ...stored.turns[0], status: "completed" } as never);
+      act(() => emit(1, { kind: "operation-state", state: "completed" }));
+      await waitFor(() => expect(result.current.turnStatus).toBe("idle"));
+
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(sentTurns).toHaveLength(1));
+      // The poll wakes to the sent turn running with no stream of its own.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 2_500)));
+      const streamsOfSent = vi
+        .mocked(client.subscribeOperation)
+        .mock.calls.filter(([, operationId]) => String(operationId) === sentTurns[0]);
+      expect(streamsOfSent).toHaveLength(1);
+      unmount();
+    });
+
+    it("keeps streaming the reply of a turn this window sent, in one stream, when a thread event arrives while it runs", async () => {
+      const { client, emit, host, say } = runningThread();
+      host.threads[String(ids.thread)]?.turns.splice(0, 1);
+      let renamed = () => {};
+      const rename = new Promise<void>((resolve) => {
+        renamed = resolve;
+      });
+      async function* threadEvents(signal: AbortSignal) {
+        await rename;
+        yield {
+          threadId: ids.thread,
+          sequence: 2,
+          event: { kind: "thread-updated", thread: thread(2) },
+        } as never;
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      }
+      const sentTurns: string[] = [];
+      const sent = fakeClient({
+        ...client,
+        subscribe: vi.fn((_threadId, _cursor, signal) => threadEvents(signal)) as never,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => {
+          sentTurns.push(String(command.operationId));
+          host.threads[String(ids.thread)]?.turns.push({
+            ...conversationTurn(command.operationId, "60000000-0000-4000-8000-000000000002"),
+            status: "incomplete",
+          } as never);
+          return {
+            kind: "provider-turn-state",
+            operationId: command.operationId,
+            state: "running",
+          };
+        }) as never,
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client: sent,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      act(() => say(1, "part-1"));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({ text: "First half" }),
+      );
+      act(() =>
+        emit(2, {
+          kind: "tool-activity",
+          toolCallId: "call-1",
+          toolName: "Read",
+          state: "completed",
+          summary: "src/index.ts",
+        }),
+      );
+      await waitFor(() =>
+        expect(result.current.turnActivity.get(sentTurns[0] ?? "")).toBeDefined(),
+      );
+      const activity = result.current.turnActivity.get(sentTurns[0] ?? "");
+      const reads = vi.mocked(host.client.conversationWindow).mock.calls.length;
+      // Another window renames the thread while this window's turn runs.
+      renamed();
+      await waitFor(() =>
+        expect(vi.mocked(host.client.conversationWindow).mock.calls.length).toBeGreaterThan(reads),
+      );
+      await act(async () => undefined);
+      // The reload neither takes back what streamed nor stops what follows.
+      expect(reply(result.current.conversation)).toMatchObject({ text: "First half" });
+      expect(result.current.turnActivity.get(sentTurns[0] ?? "")).toBe(activity);
+      act(() => say(3, "part-2"));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({
+          text: "First half, second half",
+          status: "incomplete",
+        }),
+      );
+      expect(
+        result.current.conversation.filter((message) => message.role === "assistant"),
+      ).toHaveLength(1);
+      const streamsOfSent = vi
+        .mocked(client.subscribeOperation)
+        .mock.calls.filter(([, operationId]) => String(operationId) === sentTurns[0]);
+      expect(streamsOfSent).toHaveLength(1);
+      unmount();
+    });
+
+    it("shows in a turn this window sent, which no conversation read follows", async () => {
+      const { client, hold, host, say } = runningThread();
+      host.threads[String(ids.thread)]?.turns.splice(0, 1);
+      const sent = fakeClient({
+        ...client,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => ({
+          kind: "provider-turn-state",
+          operationId: command.operationId,
+          state: "running",
+        })) as never,
+      });
+      const { result, rerender, unmount } = renderHook(
+        ({ revision }) =>
+          useCodeController({
+            activeThreadId: ids.thread,
+            client: sent,
+            messageQueueRevision: revision,
+            navigationRefreshMs: 0,
+            reconnectDelayMs: 60_000,
+          }),
+        { initialProps: { revision: 1 } },
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      act(() => say(1, "part-1"));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({ text: "First half" }),
+      );
+
+      const row: { readonly operationId: string } = reply(result.current.conversation);
+      hold([steered(1, "Skip the backfill.")], row.operationId);
+      rerender({ revision: 2 });
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({
+          text: "First half",
+          steeredMessages: [{ body: "Skip the backfill." }],
+        }),
+      );
+      unmount();
+    });
+
+    it("shows once a turn this window sent ends, when the read its queue change asked for failed, and reads no more after", async () => {
+      const { client, emit, hold, host, say } = runningThread();
+      host.threads[String(ids.thread)]?.turns.splice(0, 1);
+      const sent = fakeClient({
+        ...client,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => ({
+          kind: "provider-turn-state",
+          operationId: command.operationId,
+          state: "running",
+        })) as never,
+      });
+      const { result, rerender, unmount } = renderHook(
+        ({ revision }) =>
+          useCodeController({
+            activeThreadId: ids.thread,
+            client: sent,
+            messageQueueRevision: revision,
+            navigationRefreshMs: 0,
+            reconnectDelayMs: 60_000,
+          }),
+        { initialProps: { revision: 1 } },
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      act(() => say(1, "part-1"));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({ text: "First half" }),
+      );
+      const row: { readonly operationId: string } = reply(result.current.conversation);
+      hold([steered(1, "Skip the backfill.")], row.operationId);
+      vi.mocked(host.client.conversationWindow).mockRejectedValueOnce(new Error("offline"));
+      rerender({ revision: 2 });
+      await act(async () => undefined);
+      expect(reply(result.current.conversation)).not.toHaveProperty("steeredMessages");
+
+      act(() => emit(2, { kind: "operation-state", state: "completed" }));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({
+          text: "First half",
+          status: "completed",
+          steeredMessages: [{ body: "Skip the backfill." }],
+        }),
+      );
+      const reads = vi.mocked(host.client.conversationWindow).mock.calls.length;
+      rerender({ revision: 3 });
+      await act(async () => undefined);
+      expect(host.client.conversationWindow).toHaveBeenCalledTimes(reads);
+      unmount();
+    });
+
+    it("shows without a change feed, as a paired browser reads, on the running turn's own poll", async () => {
+      const { client, hold, say } = runningThread();
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client,
+          navigationRefreshMs: 60_000,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      act(() => say(1, "part-1"));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({ text: "First half" }),
+      );
+      hold([steered(1, "Skip the backfill.")]);
+      await waitFor(
+        () =>
+          expect(reply(result.current.conversation)).toMatchObject({
+            text: "First half",
+            steeredMessages: [{ body: "Skip the backfill." }],
+          }),
+        { timeout: 3_000 },
+      );
+      unmount();
+    });
+
+    it("opens no second stream for a turn this window sent when the thread list says the thread is working", async () => {
+      const { client, host, say } = runningThread();
+      host.threads[String(ids.thread)]?.turns.splice(0, 1);
+      // The host answers the send only when the test says so.
+      let answer = () => {};
+      const sent = fakeClient({
+        ...client,
+        executeOperation: vi.fn(
+          (command: CodeOperationCommand) =>
+            new Promise((resolve) => {
+              answer = () =>
+                resolve({
+                  kind: "provider-turn-state",
+                  operationId: command.operationId,
+                  state: "running",
+                });
+            }),
+        ) as never,
+      });
+      const working = (sequence: number): CodeBootstrap => ({
+        ...bootstrap(1, sequence),
+        runtime: [{ threadId: ids.thread, executing: true }] as never,
+      });
+      const { result, rerender, unmount } = renderHook(
+        ({ navigationBootstrap }) =>
+          useCodeController({
+            activeThreadId: ids.thread,
+            client: sent,
+            navigation: { bootstrap: navigationBootstrap },
+            navigationRefreshMs: 0,
+            reconnectDelayMs: 60_000,
+          }),
+        { initialProps: { navigationBootstrap: bootstrap() } },
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(sent.executeOperation).toHaveBeenCalledOnce());
+      const readsBeforeAnswer = vi.mocked(host.client.conversationWindow).mock.calls.length;
+      // The list hears of the turn while the host has not answered the send.
+      rerender({ navigationBootstrap: working(4) });
+      await act(async () => undefined);
+      expect(result.current.turnStatus).toBe("sending");
+      expect(host.client.conversationWindow).toHaveBeenCalledTimes(readsBeforeAnswer);
+      act(() => answer());
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      rerender({ navigationBootstrap: working(6) });
+      act(() => say(1, "part-1"));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({ text: "First half" }),
+      );
+      expect(client.subscribeOperation).toHaveBeenCalledOnce();
+      unmount();
+    });
+
+    it("reads nothing more for a thread with no running turn", async () => {
+      const host = windowedHost({
+        [String(ids.thread)]: {
+          turns: [conversationTurn(operationId, "60000000-0000-4000-8000-000000000001")],
+        },
+      });
+      const client = fakeClient(host.client);
+      const { result, rerender, unmount } = renderHook(
+        ({ revision }) =>
+          useCodeController({
+            activeThreadId: ids.thread,
+            client,
+            messageQueueRevision: revision,
+            navigationRefreshMs: 0,
+            reconnectDelayMs: 60_000,
+          }),
+        { initialProps: { revision: 1 } },
+      );
+      await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+      rerender({ revision: 2 });
+      await act(async () => undefined);
+      expect(host.client.conversationWindow).toHaveBeenCalledOnce();
+      unmount();
+    });
+  });
+
   it("reloads authoritative conversation state before replaying an operation stream gap", async () => {
     const promptId = "60000000-0000-4000-8000-000000000034";
     const operationId = "70000000-0000-4000-8000-000000000034";

@@ -132,6 +132,7 @@ import { canvasRecipeFillTurn } from "../canvas/canvasRecipeFill";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
+import { McpSignInNotice } from "../transcript/McpSignInNotice";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
   useThreadActivityRevision,
@@ -601,12 +602,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         <div className="chat-workspace__load-state">
           <OctantEmpty
             action={{ label: "Retry chat", onClick: props.controller.retry }}
-            message={
-              props.controller.errorMessage ??
-              (props.controller.status === "disconnected"
-                ? "The host connection is unavailable."
-                : "Reading this thread from the host.")
-            }
+            {...(props.controller.errorMessage !== undefined
+              ? { message: props.controller.errorMessage }
+              : props.controller.status === "disconnected"
+                ? { message: "The host connection is unavailable." }
+                : {})}
             role={props.controller.status === "disconnected" ? "alert" : "status"}
             state={props.controller.status === "disconnected" ? "disconnected" : "loading"}
             title={
@@ -1714,6 +1714,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               onEdit={readOnly ? undefined : (command) => void props.controller.execute(command)}
             />
           )}
+          <McpSignInNotice
+            className="chat-workspace__tool-approval thread-column"
+            client={readOnly ? undefined : props.extensionClient}
+            mode="chat"
+            receipts={pendingExtensionSelections}
+            onResolveReference={extensionDraft.resolveReference}
+            queued={messageQueue.snapshot?.items}
+            // Retry and Regenerate send the latest turn's selections again.
+            selections={activeChatTurns(view.turns).at(-1)?.extensionSelections ?? []}
+            threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
+            turnActive={turnActive}
+          />
           <ExtensionToolApprovalPrompt
             className="chat-workspace__tool-approval thread-column"
             client={readOnly ? undefined : props.extensionClient}

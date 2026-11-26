@@ -119,7 +119,7 @@ export function ThemeAppearanceEditor(props: {
       <SettingsSection
         className="settings-theme-editor__scheme-section"
         id="settings-color-scheme"
-        title="Color scheme"
+        title="Colour scheme"
       >
         <div className="setgroup">
           <div

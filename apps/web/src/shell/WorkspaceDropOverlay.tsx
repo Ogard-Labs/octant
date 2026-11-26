@@ -31,7 +31,7 @@ export function WorkspaceDragStatus(props: { readonly drag: WorkspaceSurfaceDrag
   const destination = props.drag.destination;
   const message =
     destination === null
-      ? `Dragging ${props.drag.source.title}. No drop target.`
+      ? `Dragging ${props.drag.source.title}. Nothing to drop it on here.`
       : destination.kind === "composer"
         ? `Attach ${props.drag.source.title} as context. The draft will not be sent.`
         : destination.kind === "edge"

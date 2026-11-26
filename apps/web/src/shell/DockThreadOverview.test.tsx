@@ -71,6 +71,8 @@ describe("the thread dock overview", () => {
     const servers = within(screen.getByRole("region", { name: "Local servers" }));
     expect(servers.getByText("vite")).toBeVisible();
     expect(servers.getByText(":5377")).toBeVisible();
+    // The dot is decoration, so the row says the state in words too.
+    expect(servers.getByText("Listening")).toBeInTheDocument();
 
     const context = within(screen.getByRole("region", { name: "Context" }));
     expect(context.getByText("37%")).toBeVisible();

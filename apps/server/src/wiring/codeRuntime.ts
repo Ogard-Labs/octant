@@ -414,6 +414,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "nativeHarnessRoutingStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
+    | "sideTaskReportAdmission"
     | "finishedReceipts"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
@@ -628,6 +629,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     serverProjectStore,
     shieldServerStore,
     sideTasks,
+    sideTaskReportAdmission,
     finishedReceipts,
     gitObservationPort,
     goalService,
@@ -1282,6 +1284,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
         gitMutationPort,
         agentRuns: agentRunPersistence,
+        sideTaskReports: sideTaskReportAdmission,
         resolveSelectedExtensions,
         pinnedExtensionIds,
         threadDesktopDestination,
@@ -1542,6 +1545,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
+        },
+        onSideTaskReportAdmitted: (threadId) => {
+          if (codeService instanceof CodeService) codeService.noteReportAdmitted(threadId);
         },
         onUsageLimitStop: async (threadId, stopped) => {
           if (codeService instanceof CodeService)

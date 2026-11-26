@@ -57,6 +57,7 @@ import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import { OctantKbd } from "../ui/base/OctantKbd";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
@@ -1002,9 +1003,9 @@ function SettingsSearchField(props: {
         value={props.value}
       />
       {props.value === "" ? (
-        <kbd aria-hidden="true" className="settings-view__search-shortcut">
+        <OctantKbd className="settings-view__search-shortcut" decorative>
           {isApplePlatform() ? "⌘F" : "Ctrl+F"}
-        </kbd>
+        </OctantKbd>
       ) : (
         <OctantIconButton
           className="settings-view__search-clear"
@@ -1441,13 +1442,14 @@ function ActiveSectionContent({
               onDetailChange={onHarnessEndpointChange}
               voice={{
                 settings: props.settings.voice,
-                onUseForTranscription: (providerInstanceId, modelId) =>
+                onUseForTranscription: (providerInstanceId, modelId) => {
+                  // Choosing an endpoint here replaces Apple Speech, as the
+                  // Transcribe with menu does.
+                  const { transcriptionEngine: _engine, ...voice } = props.settings.voice;
                   props.onSettingsChange({
-                    voice: {
-                      ...props.settings.voice,
-                      transcription: { providerInstanceId, modelId },
-                    },
-                  }),
+                    voice: { ...voice, transcription: { providerInstanceId, modelId } },
+                  });
+                },
                 onOpenVoice: () =>
                   onApplyDeepLink({ section: "voice", setting: settingId("transcription") }),
               }}
@@ -3469,7 +3471,7 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
         <div className="setgroup">
           {isAvailable("sidebar-background") ? (
             <SettingRow
-              description="A preset gradient behind the sidebar, or none. Adjust the overlay color and opacity for readability."
+              description="A preset gradient behind the sidebar, or none. Adjust the overlay colour and opacity for readability."
               focused={focusedSetting === settingId("sidebar-background")}
               label="Sidebar background"
               scope="app"
@@ -3836,9 +3838,9 @@ function SidebarBackgroundSettings({
         </div>
       ) : null}
       <label className="settings-view__field">
-        <span>Overlay color</span>
+        <span>Overlay colour</span>
         <OctantInput
-          aria-label="Sidebar overlay color"
+          aria-label="Sidebar overlay colour"
           disabled={suspended}
           className="settings-view__text-input"
           onChange={(event) =>

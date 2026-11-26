@@ -205,6 +205,8 @@ export interface StartOctantServerOptions {
   readonly githubAuthenticationPort?: GhAuthenticationPort;
   readonly ghExecutable?: string;
   readonly codeFileHelperPath?: string;
+  /** The packaged desktop's on-device speech helper. */
+  readonly speechHelperPath?: string;
   /** The packaged desktop's `octant` for a terminal with a Browser grant. */
   readonly terminalLauncher?: TerminalLauncher;
   readonly createCodeFileHelperTransport?: (path: string) => FileHelperProcessTransport;

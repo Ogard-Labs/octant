@@ -1,3 +1,5 @@
+import { readCodeThreadFollowUp } from "../persistence/codeProjection";
+import { CodeService } from "../code/codeService";
 import { createCredentialTool } from "../credentials/credentialTool";
 import { workThreadSecrets, type ThreadSecretTurnFacts } from "./threadSecrets";
 import { cleanedUpWorktreeOf } from "../code/cleanedUpWorktrees";
@@ -118,6 +120,7 @@ import {
   continueInThread,
   forkThroughOfferingTurn,
   offeringTurnStanding,
+  createSideTaskChildStanding,
   sideTaskChildState,
 } from "../sideTasks/sideTaskThreads";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
@@ -222,6 +225,9 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "managedWorktreeReceipts"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
+    | "sideTaskReportAdmission"
+    | "threadUnfinishedWork"
+    | "threadUnfinishedWorkHost"
     | "finishedReceipts"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
@@ -402,6 +408,9 @@ export function wireWork(deps: WorkDependencies) {
     sideTaskHost,
     routineProposalService,
     sideTasks,
+    sideTaskReportAdmission,
+    threadUnfinishedWork,
+    threadUnfinishedWorkHost,
     finishedReceipts,
     gitObservationPort,
     nativeHarnessApprovals,
@@ -548,6 +557,7 @@ export function wireWork(deps: WorkDependencies) {
       putAwayWhenDone: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings())
           .putAwayThreadsWhenDone,
+      unfinishedWork: threadUnfinishedWork,
       persistence,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       projects: projectService,
@@ -716,11 +726,13 @@ export function wireWork(deps: WorkDependencies) {
       forgeChanges: runtimeForgeChanges,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
+      sideTaskReports: sideTaskReportAdmission,
       contextHarness,
       resolveSelectedExtensions,
       pinnedExtensionIds,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
+      onReportAdmitted: (threadId) => workThreadService.noteReportAdmitted(threadId),
       onUsageLimitStop: (threadId) => workThreadService.handOffAfterUsageLimit(threadId),
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),
       persistence: {
@@ -2229,6 +2241,21 @@ export function wireWork(deps: WorkDependencies) {
         };
       },
     };
+    // The same facts the receipt shows, read by the host for itself: which
+    // window asks to settle a thread does not change what its child is doing.
+    threadUnfinishedWorkHost.childStanding = createSideTaskChildStanding({
+      chatRow: (threadId) => chatService.navigationRow(decodeChatThreadId(threadId)),
+      workThread: (threadId) => workThreadProjection.read(decodeWorkThreadId(threadId)),
+      workRuntime: (threadId) => observeWorkThreadRuntime(decodeWorkThreadId(threadId)),
+      codeThread: (threadId) => persistence.readCodeThread(decodeCodeThreadId(threadId)),
+      codeActivity: (threadId) =>
+        codeService instanceof CodeService
+          ? codeService.threadActivity(decodeCodeThreadId(threadId))
+          : {},
+      codeFollowUpOpen: (threadId) =>
+        readCodeThreadFollowUp(persistence.connection, decodeCodeThreadId(threadId))?.state ===
+        "open",
+    });
     restartContinuation.current = async ({ threadId, windowId, mode }) => {
       if (mode === "chat") chatService.settleCutOffTurns(decodeChatThreadId(threadId));
       const recoveryIdentity = nativeHarnessSessions.recoveryIdentity(threadId);

@@ -262,6 +262,16 @@ describe("Runway video driver", () => {
     });
   });
 
+  it("reports no usage for a cancelled task Runway states no charge for, so the estimate settles", async () => {
+    const adapter = runwayVideoDriver.create({
+      profile,
+      ports: ports(() => Response.json({ id: taskId, status: "CANCELLED" })).ports,
+    });
+    expect(await adapter.poll(taskId, new AbortController().signal)).toEqual({
+      status: "cancelled",
+    });
+  });
+
   it("passes the caller's signal to the DELETE so an abort ends a stuck request", async () => {
     const sent: Array<VideoHttpRequest> = [];
     const adapter = runwayVideoDriver.create({

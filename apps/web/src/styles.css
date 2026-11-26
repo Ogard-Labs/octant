@@ -1759,13 +1759,6 @@ html[data-octant-native-host="true"]
   white-space: nowrap;
 }
 
-.workspace-pane__status .spinner {
-  width: 10px;
-  height: 10px;
-  border-width: 1.5px;
-  vertical-align: 0;
-}
-
 .workspace-drop-overlay {
   position: absolute;
   z-index: 4;
@@ -2307,16 +2300,6 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   display: none;
 }
 
-.shell-state__spinner {
-  animation: octant-spin 1s linear infinite;
-}
-
-@keyframes octant-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .folder-picker {
   --octant-dialog-width: 520px;
   --octant-dialog-height: min(720px, 84vh);
@@ -2623,10 +2606,6 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shell-state__spinner {
-    animation: none;
-  }
-
   .remote-pairing * {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
@@ -3243,9 +3222,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .composer-model-picker__hint {
   flex: 0 0 24px;
   width: 24px;
-  color: var(--oct-meta);
-  font: inherit;
-  font-size: var(--oct-text-xs);
   text-align: end;
 }
 
@@ -4168,30 +4144,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .draft-thread__context-strip .host-selector__select {
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
-}
-
-.host-selector__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--octant-text-muted);
-  flex-shrink: 0;
-}
-
-.host-selector__dot--healthy {
-  background: var(--octant-success-text);
-}
-
-.host-selector__dot--stale {
-  background: var(--octant-warning-text);
-}
-
-.host-selector__dot--connecting {
-  background: var(--octant-text-muted);
-}
-
-.host-selector__dot--disconnected {
-  background: var(--octant-danger-text);
 }
 
 .host-selector__health {

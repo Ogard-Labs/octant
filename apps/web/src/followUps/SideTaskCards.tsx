@@ -30,11 +30,12 @@ import "./follow-up-suggestions.css";
 
 type StartedResult = Extract<SideTaskResult, { readonly kind: "side-task-started" }>;
 type SideTaskAction = "start" | "continue" | "dismiss";
+type SideTaskBusyAction = SideTaskAction | "reporting";
 
 export interface SideTaskProviderProps {
   /** Absent where a pane has no local thread to offer from; the provider then holds nothing. */
   readonly client?:
-    | Pick<SideTaskClient, "sideTasks" | "start" | "continueHere" | "dismiss">
+    | Pick<SideTaskClient, "sideTasks" | "start" | "continueHere" | "dismiss" | "setReporting">
     | undefined;
   readonly threadId?: string | undefined;
   /** Opens the thread a start created; the prompt is set only when it was not sent. */
@@ -53,11 +54,13 @@ export interface SideTaskProviderProps {
 
 interface SideTasksValue {
   readonly tasks: ReadonlyArray<SideTask>;
-  readonly busy: { readonly id: string; readonly action: SideTaskAction } | undefined;
+  readonly busy: { readonly id: string; readonly action: SideTaskBusyAction } | undefined;
   readonly messages: ReadonlyMap<string, string>;
   readonly unconfirmedActions: ReadonlyMap<string, string>;
   readonly deliveries: ReadonlyMap<string, NonNullable<SideTask["continuedDelivery"]>>;
   readonly act: (task: SideTask, action: SideTaskAction, context?: SideTaskContext) => void;
+  /** Stops or resumes the reports a started child owes this thread. */
+  readonly setReporting: (task: SideTask, on: boolean) => void;
   readonly open: (task: SideTask) => void;
 }
 
@@ -143,8 +146,12 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
     });
   }, []);
 
-  const act = useCallback(
-    (task: SideTask, action: SideTaskAction, context?: SideTaskContext) => {
+  const perform = useCallback(
+    (
+      task: SideTask,
+      action: SideTaskBusyAction,
+      work: (actedFor: string, id: string) => Promise<SideTaskResult>,
+    ) => {
       const id = String(task.offer.id);
       if (
         client === undefined ||
@@ -159,12 +166,7 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
       setMessage(id, undefined);
       void (async () => {
         try {
-          const result =
-            action === "start"
-              ? await client.start(actedFor, id, context)
-              : action === "continue"
-                ? await client.continueHere(actedFor, id)
-                : await client.dismiss(actedFor, id);
+          const result = await work(actedFor, id);
           // The person still asked for the new thread, so it opens either way;
           // only this pane's cards and messages belong to the thread it shows.
           if (result.kind === "side-task-started") {
@@ -207,6 +209,28 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
     [client, load, setMessage, threadId, unconfirmedActions],
   );
 
+  const act = useCallback(
+    (task: SideTask, action: SideTaskAction, context?: SideTaskContext) => {
+      if (client === undefined) return;
+      perform(task, action, (actedFor, id) =>
+        action === "start"
+          ? client.start(actedFor, id, context)
+          : action === "continue"
+            ? client.continueHere(actedFor, id)
+            : client.dismiss(actedFor, id),
+      );
+    },
+    [client, perform],
+  );
+
+  const setReporting = useCallback(
+    (task: SideTask, on: boolean) => {
+      if (client === undefined) return;
+      perform(task, "reporting", (actedFor, id) => client.setReporting(actedFor, id, on));
+    },
+    [client, perform],
+  );
+
   const open = useCallback((task: SideTask) => {
     if (task.startedThreadId === undefined) return;
     latestOnStarted.current?.(
@@ -228,8 +252,8 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
     () =>
       client === undefined
         ? undefined
-        : { tasks, busy, messages, unconfirmedActions, deliveries, act, open },
-    [act, busy, client, deliveries, messages, unconfirmedActions, open, tasks],
+        : { tasks, busy, messages, unconfirmedActions, deliveries, act, setReporting, open },
+    [act, busy, client, deliveries, messages, setReporting, unconfirmedActions, open, tasks],
   );
   return <SideTasksContext value={value}>{props.children}</SideTasksContext>;
 }
@@ -328,6 +352,20 @@ function SideTaskCard(props: { readonly task: SideTask; readonly running: boolea
                     : task.childState === "attention"
                       ? "Needs you"
                       : "Finished"}
+                </>
+              )}
+              {task.reporting === undefined || task.startedThreadId === undefined ? null : (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  <OctantButton
+                    disabled={value.busy !== undefined || unconfirmedAction !== undefined}
+                    onClick={() => value.setReporting(task, task.reporting === "stopped")}
+                    size={null}
+                    type="button"
+                    variant="link"
+                  >
+                    {task.reporting === "stopped" ? "Resume reporting" : "Stop reporting"}
+                  </OctantButton>
                 </>
               )}
               {task.startedThreadId === undefined ? null : (

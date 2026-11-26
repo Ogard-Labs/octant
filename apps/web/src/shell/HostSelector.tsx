@@ -9,6 +9,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Cloud } from "../ui/icons";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantStatusDot, type OctantStatusTone } from "../ui/base/OctantStatusDot";
 
 export interface HostSelectorProps {
   /** Product wording for the destination choice. Host is the system term;
@@ -42,18 +43,18 @@ const healthLabels: Record<HostHealth, string> = {
   unavailable: "Host unavailable",
 };
 
-function dotClass(health: HostHealth): string {
+function dotTone(health: HostHealth): OctantStatusTone {
   switch (health) {
     case "healthy":
-      return "host-selector__dot--healthy";
+      return "success";
     case "stale":
-      return "host-selector__dot--stale";
+      return "warning";
     case "connecting":
-      return "host-selector__dot--connecting";
+      return "neutral";
     case "incompatible":
     case "unauthorized":
     case "unavailable":
-      return "host-selector__dot--disconnected";
+      return "danger";
   }
 }
 
@@ -108,7 +109,7 @@ function HostStatusLabel(props: {
       {props.environment ? (
         <Cloud aria-hidden="true" className="host-selector__environment-icon" size={14} />
       ) : (
-        <span aria-hidden="true" className={`host-selector__dot ${dotClass(props.health)}`} />
+        <OctantStatusDot tone={dotTone(props.health)} />
       )}
       <span className="host-selector__name">{props.displayName}</span>
       <span className="host-selector__health">{healthLabel}</span>
@@ -211,7 +212,7 @@ export function HostSelector(props: HostSelectorProps) {
       {environment ? (
         <Cloud aria-hidden="true" className="host-selector__environment-icon" size={14} />
       ) : (
-        <span aria-hidden="true" className={`host-selector__dot ${dotClass(health)}`} />
+        <OctantStatusDot tone={dotTone(health)} />
       )}
       <label className="host-selector__label">
         <span className="host-selector__label-text">{accessibleLabel}</span>

@@ -9,6 +9,7 @@ import {
   decodeCodeCheckoutId,
   decodeCodeRelativePath,
 } from "@octant/contracts/code";
+import { decodeExtensionSelection } from "@octant/contracts/extensions";
 import { PlanClientFailure, type PlanClient } from "@octant/client-runtime/plan-client";
 import type { CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -125,6 +126,95 @@ describe("Babysitting a pull request", () => {
     await user.click(await dialog.findByRole("button", { name: "Stop babysitting" }));
     expect(set).toHaveBeenCalledWith({ kind: "disable", target, threadId });
     expect(code.sendFollowUp).not.toHaveBeenCalled();
+  });
+});
+
+describe("Signing in to a server from a Code thread", () => {
+  it("offers sign-in to a server this thread's next turn needs", async () => {
+    const awaiting = vi.fn(async () => ({
+      servers: [
+        {
+          extensionId: "44000000-0000-4000-8000-000000000011",
+          packageId: "44000000-0000-4000-8000-000000000012",
+          componentId: "mcp",
+          packageName: "Linear",
+          serverName: "Linear",
+          transport: "streamable-http",
+          state: "needs-sign-in",
+        },
+      ],
+    }));
+    const extensionClient = {
+      toolGrantsAvailable: true,
+      snapshot: vi.fn(async () => ({ packages: [] })),
+      listToolApprovals: vi.fn(async () => []),
+      mcpServersAwaitingSignIn: awaiting,
+      mcpServerSignIn: vi.fn(async () => ({ kind: "signed-out" })),
+    };
+    render(
+      <CodeThreadWorkspace
+        controller={controller({})}
+        extensionClient={extensionClient as never}
+        threadId={threadId}
+      />,
+    );
+    const notice = await screen.findByRole(
+      "status",
+      { name: "Linear needs sign-in" },
+      { timeout: 10_000 },
+    );
+    expect(await within(notice).findByRole("button", { name: "Sign in" })).toBeEnabled();
+    expect(awaiting).toHaveBeenCalledWith(
+      { mode: "code", threadId, selections: [], references: [] },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("asks about the servers a queued message carries", async () => {
+    const scope = { mode: "code", threadId } as const;
+    const selection = decodeExtensionSelection({
+      kind: "plugin",
+      extensionId: "44000000-0000-4000-8000-000000000011",
+      packageId: "44000000-0000-4000-8000-000000000012",
+      componentId: "mcp",
+      packageVersion: "1.0.0",
+      packageDigest: `sha256:${"a".repeat(64)}`,
+      catalogEpoch: `sha256:${"b".repeat(64)}`,
+      origin: { kind: "draft", reference: "linear" },
+    });
+    const host = queueTestHost();
+    await host.execute({
+      kind: "enqueue",
+      scope,
+      requestId: crypto.randomUUID(),
+      messageId: crypto.randomUUID(),
+      expectedVersion: 0,
+      payload: { mode: "code", prompt: "Look it up", extensionSelections: [selection] },
+    } as never);
+    const awaiting = vi.fn(async () => ({ servers: [] }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ turnStatus: "running" })}
+        extensionClient={
+          {
+            toolGrantsAvailable: true,
+            snapshot: vi.fn(async () => ({ packages: [] })),
+            listToolApprovals: vi.fn(async () => []),
+            mcpServersAwaitingSignIn: awaiting,
+          } as never
+        }
+        messageQueueClient={host}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(
+      () =>
+        expect(awaiting).toHaveBeenCalledWith(
+          { ...scope, selections: [selection], references: [] },
+          expect.any(AbortSignal),
+        ),
+      { timeout: 10_000 },
+    );
   });
 });
 
@@ -4061,6 +4151,21 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     expect(screen.getByRole("heading", { name: "Loading Code thread" })).toBeVisible();
+    // A loading state is its title alone: no sentence repeats it underneath.
+    expect(document.querySelector('[data-slot="empty-description"]')).toBeNull();
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={{
+          ...controller(),
+          activeView: undefined,
+          status: "conflict-reload",
+        }}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Reloading Code thread" })).toBeVisible();
+    expect(document.querySelector('[data-slot="empty-description"]')).toBeNull();
 
     rerender(
       <CodeThreadWorkspace

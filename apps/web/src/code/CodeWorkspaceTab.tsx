@@ -187,11 +187,7 @@ export default function CodeWorkspaceTab(props: {
             onPointerEnter: preloadDeferredAdapter,
           })}
     >
-      <Suspense
-        fallback={
-          <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
-        }
-      >
+      <Suspense fallback={<OctantEmpty state="loading" title="Loading workspace" />}>
         <CodeWorkspace
           {...(props.revealOperationId === undefined
             ? {}

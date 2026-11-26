@@ -161,6 +161,10 @@ import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-tar
 import {
   completedThreadArchiveDue,
   decideCompleteThread,
+  restAfterReport,
+  restAfterReportFailure,
+  unfinishedWorkRefusal,
+  type ThreadUnfinishedWork,
   decideSnoozeThread,
 } from "@octant/domain/thread-completion-policy";
 import { THREAD_MOVE_REFUSALS, decideThreadMove } from "@octant/domain/thread-project-move-policy";
@@ -807,6 +811,8 @@ export interface CodeServiceOptions {
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
   /** The person's Settings choice to put a thread away once it is done; absent is off. */
   readonly putAwayWhenDone?: () => boolean;
+  /** A side task or child run the thread started that is not done, which holds every settle. */
+  readonly unfinishedWork?: (threadId: string) => ThreadUnfinishedWork | undefined;
   readonly gitHistory?: Pick<GitHistoryPort, "read">;
   /**
    * The history of a thread in a server Project, read by Git on its server,
@@ -1115,7 +1121,7 @@ export type MergedThreadPutAwayOutcome =
   | { readonly status: "put-away" | "recorded" }
   | {
       readonly status: "skipped";
-      readonly reason: "not-found" | "not-active" | "already-put-away" | "busy";
+      readonly reason: "not-found" | "not-active" | "already-put-away" | "busy" | "child-work";
     };
 
 const COMPLETE_REFUSALS = {
@@ -1236,6 +1242,7 @@ export class CodeService {
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
   readonly #putAwayWhenDone: () => boolean;
+  readonly #unfinishedWork: ((threadId: string) => ThreadUnfinishedWork | undefined) | undefined;
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #turnAwaiting: CodeServiceOptions["turnAwaiting"];
@@ -1311,6 +1318,7 @@ export class CodeService {
     this.#turnAwaiting = options.turnAwaiting;
     this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
     this.#putAwayWhenDone = options.putAwayWhenDone ?? (() => false);
+    this.#unfinishedWork = options.unfinishedWork;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
@@ -1615,18 +1623,37 @@ export class CodeService {
     return planner !== undefined && String(planner) === String(thread.id);
   }
 
+  /** Whether a thread's turn runs or waits on the person, as its sidebar row says. */
+  threadActivity(threadId: CodeThreadId): {
+    readonly executing: boolean;
+    readonly awaitingInput: boolean;
+  } {
+    const { executing, awaitingKind } = this.#turnActivity(threadId);
+    return { executing, awaitingInput: awaitingKind !== undefined };
+  }
+
+  #turnActivity(threadId: CodeThreadId) {
+    // A provider turn parked on a question keeps its `running` work record,
+    // so the live read is what tells a waiting turn from an executing one.
+    const asked = this.#turnAwaiting?.(String(threadId));
+    const activity = boardRuntimeActivityFromWorks(
+      this.#persistence.readCodeRuntimeWorks(threadId),
+      { turnParkedOnPerson: asked !== undefined },
+    );
+    // A turn parked on the agent's own approval is owed by the person, not
+    // executing, the same as the board reads it. The thread keeps saying so
+    // after a restart took the turn: the approval stays until it is resumed.
+    const awaitingKind =
+      this.#awaitsHarnessApproval?.(String(threadId)) === true ? ("approval" as const) : asked;
+    return { executing: activity.executing && awaitingKind === undefined, awaitingKind };
+  }
+
   #visibleRuntime(
     threads: ReadonlyArray<CodeThread>,
     pullRequests: ThreadBoardPullRequestSnapshot | undefined,
   ): ReadonlyArray<CodeNavigationRuntime> {
     return threads.map((thread) => {
-      // A provider turn parked on a question keeps its `running` work record,
-      // so the live read is what tells a waiting turn from an executing one.
-      const asked = this.#turnAwaiting?.(String(thread.id));
-      const activity = boardRuntimeActivityFromWorks(
-        this.#persistence.readCodeRuntimeWorks(thread.id),
-        { turnParkedOnPerson: asked !== undefined },
-      );
+      const { executing, awaitingKind } = this.#turnActivity(thread.id);
       const checkout = this.#persistence.readCodeCheckout(thread.checkoutId);
       const checkoutChip = codeNavigationCheckoutChip(checkout);
       // The board's three for clients that know only `pullRequestSummaries`,
@@ -1642,15 +1669,10 @@ export class CodeService {
       const hasPullRequests =
         pullRequestSummaries !== undefined &&
         (pullRequestSummaries.items.length > 0 || pullRequestSummaries.hiddenCount > 0);
-      // A turn parked on the agent's own approval is owed by the person, not
-      // executing, the same as the board reads it. The thread keeps saying so
-      // after a restart took the turn: the approval stays until it is resumed.
-      const awaitingKind =
-        this.#awaitsHarnessApproval?.(String(thread.id)) === true ? "approval" : asked;
       const parked = awaitingKind !== undefined;
       return {
         threadId: thread.id,
-        executing: activity.executing && !parked,
+        executing,
         // Only what the person is asked now. The board's `awaitingInput` also
         // counts a turn stopped at a usage limit and an unconfirmed Git step;
         // here it would list them as approvals and end the thread's snooze.
@@ -3166,9 +3188,15 @@ export class CodeService {
           lifecycle: current.lifecycle,
           executing: restSignals.executing,
           awaitingInput: restSignals.awaitingInput,
+          unfinishedWork: this.#unfinishedWork?.(String(current.id)),
         });
         if (decision.status === "refused") {
-          throw this.#failure("invalid", COMPLETE_REFUSALS[decision.reason]);
+          throw this.#failure(
+            "invalid",
+            decision.reason === "unfinished-work"
+              ? unfinishedWorkRefusal(decision.work)
+              : COMPLETE_REFUSALS[decision.reason],
+          );
         }
       }
       // The wake time of a limit-owned snooze comes from the journaled limit
@@ -3409,7 +3437,8 @@ export class CodeService {
                                         // says so, unless a turn is still running or waits on
                                         // the person: then the mark stands and the row stays.
                                         const putAway =
-                                          this.#putAwayWhenDone() && this.#mayPutAwayDone(current);
+                                          this.#putAwayWhenDone() &&
+                                          this.#holdsSettle(current) === undefined;
                                         return {
                                           ...(putAway
                                             ? {
@@ -3515,23 +3544,52 @@ export class CodeService {
    * the neutral reset, and never on a turn the thread did not ask for.
    */
   noteProviderTurnRequested(threadId: CodeThreadId): void {
+    this.#changeRest(threadId, (thread) => withoutRest(thread));
+  }
+
+  /**
+   * A side task's report is about to start a turn here. The thread is not
+   * settled any more; a snooze the person set keeps holding.
+   */
+  noteReportAdmitted(threadId: CodeThreadId): void {
+    this.#changeRest(threadId, restAfterReport, "system");
+  }
+
+  /** The turn a side task's report started here failed, so a person's snooze ends. */
+  noteReportTurnFailed(threadId: CodeThreadId): void {
+    this.#changeRest(threadId, (thread) => restAfterReportFailure(thread), "system");
+  }
+
+  #changeRest(
+    threadId: CodeThreadId,
+    rested: (
+      thread: CodeThread,
+    ) => Omit<CodeThread, "completedAt" | "snooze"> &
+      Pick<Partial<CodeThread>, "completedAt" | "snooze">,
+    actorKind?: "system",
+  ): void {
     // The person's own Complete or Snooze may land a moment before their
     // message does, so one version race is expected and re-read once; any
     // other failure propagates and refuses the turn.
     for (let attempt = 0; ; attempt += 1) {
       const current = this.#persistence.readCodeThread(threadId);
       if (current === undefined) return;
-      if (current.completedAt === undefined && current.snooze === undefined) return;
+      const rest = rested(current);
+      if (rest.completedAt === current.completedAt && rest.snooze === current.snooze) return;
       const next = decodeCodeThread({
-        ...withoutRest(current),
+        ...rest,
         version: current.version + 1,
         updatedAt: decodeTimestamp(this.#clock()),
       });
       try {
-        this.#append("code-thread", current.id, current.version, "code.thread-updated@1", {
-          kind: "thread-updated",
-          thread: next,
-        });
+        this.#append(
+          "code-thread",
+          current.id,
+          current.version,
+          "code.thread-updated@1",
+          { kind: "thread-updated", thread: next },
+          actorKind,
+        );
         return;
       } catch (error) {
         if (!(error instanceof ConcurrencyConflict) || attempt > 0) throw error;
@@ -3633,9 +3691,8 @@ export class CodeService {
     );
     if (unrecorded.length === 0) return { status: "skipped", reason: "already-put-away" };
     const alreadyPutAway = current.completedAt !== undefined;
-    if (!alreadyPutAway && !this.#mayPutAwayDone(current)) {
-      return { status: "skipped", reason: "busy" };
-    }
+    const held = alreadyPutAway ? undefined : this.#holdsSettle(current);
+    if (held !== undefined) return { status: "skipped", reason: held };
     const updatedAt = decodeTimestamp(this.#clock());
     const next = decodeCodeThread({
       ...(alreadyPutAway
@@ -3676,7 +3733,8 @@ export class CodeService {
     if (current === undefined) return { status: "skipped", reason: "not-found" };
     if (current.lifecycle !== "active") return { status: "skipped", reason: "not-active" };
     if (current.completedAt !== undefined) return { status: "skipped", reason: "already-settled" };
-    if (!this.#mayPutAwayDone(current)) return { status: "skipped", reason: "busy" };
+    const held = this.#holdsSettle(current);
+    if (held !== undefined) return { status: "skipped", reason: held };
     const updatedAt = decodeTimestamp(this.#clock());
     const next = decodeCodeThread({
       ...withoutPinned(withoutRest(current)),
@@ -3696,24 +3754,26 @@ export class CodeService {
   }
 
   /**
-   * Whether a thread that is done may also be put away now. A turn's runtime
-   * work alone misses two states: a live turn the work journal has not caught
-   * up with, and an agent's harness approval that outlived a restart which
-   * ended its turn. Either keeps the row in view, since it still needs the
-   * person or is still working.
+   * What keeps a thread that is done in view now, if anything. A turn's
+   * runtime work alone misses two states: a live turn the work journal has not
+   * caught up with, and an agent's harness approval that outlived a restart
+   * which ended its turn. Either keeps the row in view, since it still needs
+   * the person or is still working, and so does a side task or child run the
+   * thread started that is not done.
    */
-  #mayPutAwayDone(thread: CodeThread): boolean {
+  #holdsSettle(thread: CodeThread): "busy" | "child-work" | undefined {
     const signals = boardRuntimeActivityFromWorks(
       this.#persistence.readCodeRuntimeWorks(thread.id),
     );
-    return (
-      decideCompleteThread({
-        lifecycle: thread.lifecycle,
-        executing: signals.executing || this.#liveTurns?.read(String(thread.id)) !== undefined,
-        awaitingInput:
-          signals.awaitingInput || this.#awaitsHarnessApproval?.(String(thread.id)) === true,
-      }).status !== "refused"
-    );
+    const decision = decideCompleteThread({
+      lifecycle: thread.lifecycle,
+      executing: signals.executing || this.#liveTurns?.read(String(thread.id)) !== undefined,
+      awaitingInput:
+        signals.awaitingInput || this.#awaitsHarnessApproval?.(String(thread.id)) === true,
+      unfinishedWork: this.#unfinishedWork?.(String(thread.id)),
+    });
+    if (decision.status !== "refused") return undefined;
+    return decision.reason === "unfinished-work" ? "child-work" : "busy";
   }
 
   async *subscribe(

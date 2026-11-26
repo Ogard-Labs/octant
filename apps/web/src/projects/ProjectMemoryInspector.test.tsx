@@ -354,7 +354,7 @@ describe("ProjectMemoryInspector", () => {
     expect(props.onRetry).toHaveBeenCalledWith(sourceProjectId);
 
     rerender(<ProjectMemoryInspector {...props} memory={memory} status="conflict-reload" />);
-    expect(screen.getByRole("status")).toHaveTextContent("Reloading authoritative memory");
+    expect(screen.getByRole("status")).toHaveTextContent("Reloading Project memory");
 
     rerender(
       <ProjectMemoryInspector
@@ -405,6 +405,6 @@ describe("ProjectMemoryInspector", () => {
       .querySelector(".project-memory-status-stack");
     expect(stack?.children).toHaveLength(2);
     expect(stack?.children[1]).toHaveAttribute("role", "status");
-    expect(stack?.children[1]).toHaveTextContent("Reloading authoritative memory");
+    expect(stack?.children[1]).toHaveTextContent("Reloading Project memory");
   });
 });

@@ -813,6 +813,6 @@ function activeFilterSummary(filters: FilterState): string {
 
 function recoveryReasonLabel(reason: WorkBoardRecoveryReason): string {
   return reason === "project-projection-missing"
-    ? "Project projection missing"
+    ? "Project data missing"
     : "Binding revision mismatch";
 }

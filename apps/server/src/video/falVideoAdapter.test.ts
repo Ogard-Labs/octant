@@ -190,6 +190,59 @@ describe("fal video driver", () => {
     }
   });
 
+  it.each(["api.fal.ai", "fal.ai"])(
+    "ends discovery when it is cancelled while the body of %s is still arriving",
+    async (stalledHost) => {
+      const controller = new AbortController();
+      const reading = Promise.withResolvers<void>();
+      const cancelled = vi.fn();
+      const adapter = falVideoDriver.create({
+        profile: { ...profile, modelIds: [veo] },
+        ports: makeVideoGenerationPorts({
+          instanceId: String(profile.instanceId),
+          providerHosts: ["api.fal.ai", "fal.ai"],
+          credentialResolver: { has: async () => true, resolve: async () => "fixture-key" },
+          fetch: async (input) => {
+            if (new URL(String(input)).hostname !== stalledHost) {
+              return script()({
+                url: String(input),
+                method: "GET",
+                auth: { header: "authorization", scheme: "Key" },
+              });
+            }
+            return new Response(
+              new ReadableStream<Uint8Array>(
+                {
+                  pull(stream) {
+                    stream.enqueue(new TextEncoder().encode('{"partial":'));
+                    reading.resolve();
+                    return new Promise(() => undefined);
+                  },
+                  cancel: cancelled,
+                },
+                { highWaterMark: 0 },
+              ),
+              { headers: { "content-type": "application/json" } },
+            );
+          },
+        }),
+      });
+      const pending = adapter.models(controller.signal).then(
+        () => "answered",
+        () => "rejected",
+      );
+      await reading.promise;
+      controller.abort();
+      expect(
+        await Promise.race([
+          pending,
+          new Promise((resolve) => setTimeout(() => resolve("still reading"), 1_000)),
+        ]),
+      ).toBe("rejected");
+      expect(cancelled).toHaveBeenCalled();
+    },
+  );
+
   it("keeps every promise of the video seam", async () => {
     await expect(
       runVideoGenerationConformance({

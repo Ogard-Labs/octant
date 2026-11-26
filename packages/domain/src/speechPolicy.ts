@@ -6,6 +6,7 @@ import {
   type SettingsDeepLink,
   type SpeechCapabilityStatus,
   type SpeechEndpointRef,
+  type SpeechLocalEngineStatus,
   type SpeechSynthesisEndpointRef,
   type SpeechSynthesisVoice,
   type VoiceDictionaryTerm,
@@ -117,16 +118,66 @@ export function speechCapabilityStatus(
   }
 }
 
-/** Both directions at once, as the status endpoint reports them. */
+/**
+ * The endpoint a recording may be sent to. With an on-device engine chosen
+ * there is none, whatever endpoint Settings still hold, so no caller can send
+ * a recording off this computer by reading the endpoint alone.
+ */
+export function resolveTranscriptionEndpoint(
+  settings: VoiceSettings,
+  instances: ReadonlyArray<ProviderInstance>,
+): SpeechEndpointResolution {
+  if (settings.transcriptionEngine !== undefined) {
+    return {
+      status: "unavailable",
+      reason: "Speech is turned into text on this computer, so no recording is sent to a provider.",
+    };
+  }
+  return resolveSpeechEndpoint(settings.transcription, instances);
+}
+
+/**
+ * Said while the model is on its way. A window that reads it keeps asking, so
+ * the microphone appears when the download ends wherever it was started.
+ */
+export const LOCAL_SPEECH_DOWNLOADING_REASON = "Apple's speech model is still downloading.";
+
+/** What stands between the on-device engine and a transcript, in a sentence; none when ready. */
+export function localSpeechProblem(status: SpeechLocalEngineStatus): string | undefined {
+  switch (status.status) {
+    case "ready":
+      return undefined;
+    case "unsupported":
+      return status.reason;
+    case "unsupported-language":
+      return "Apple Speech has no on-device model for this language. Choose another language in Voice settings.";
+    case "not-downloaded":
+      return "Apple's speech model for this language is not on this Mac. Download it in Voice settings.";
+    case "downloading":
+      return LOCAL_SPEECH_DOWNLOADING_REASON;
+    case "download-failed":
+      return "Apple's speech model could not be downloaded. Try again in Voice settings.";
+    case "failed":
+      return "Apple Speech did not answer on this Mac.";
+  }
+}
+
+/** Why a paired device cannot dictate while the host's own engine is chosen. */
+export const LOCAL_SPEECH_PAIRED_REASON =
+  "Apple Speech works only in Octant's windows on the Mac itself.";
+
+/**
+ * Both directions at once, as the status endpoint reports them. `local` is
+ * what the host's own engine said; a caller that has not asked it passes
+ * nothing and is told it is not ready.
+ */
 export function speechStatusOf(
   settings: VoiceSettings,
   instances: ReadonlyArray<ProviderInstance>,
+  local: SpeechLocalEngineStatus = { status: "failed" },
 ): { readonly transcription: SpeechCapabilityStatus; readonly synthesis: SpeechCapabilityStatus } {
   return {
-    transcription: speechCapabilityStatus(
-      resolveSpeechEndpoint(settings.transcription, instances),
-      VOICE_TRANSCRIPTION_TARGET,
-    ),
+    transcription: transcriptionStatusOf(settings, instances, local),
     synthesis: speechCapabilityStatus(
       resolveSpeechEndpoint(settings.synthesis, instances),
       VOICE_SYNTHESIS_TARGET,
@@ -134,18 +185,43 @@ export function speechStatusOf(
   };
 }
 
+function transcriptionStatusOf(
+  settings: VoiceSettings,
+  instances: ReadonlyArray<ProviderInstance>,
+  local: SpeechLocalEngineStatus,
+): SpeechCapabilityStatus {
+  if (settings.transcriptionEngine === undefined) {
+    return speechCapabilityStatus(
+      resolveTranscriptionEndpoint(settings, instances),
+      VOICE_TRANSCRIPTION_TARGET,
+    );
+  }
+  const reason = localSpeechProblem(local);
+  return reason === undefined
+    ? { status: "ready", engine: settings.transcriptionEngine }
+    : { status: "unavailable", reason, settingsTarget: VOICE_TRANSCRIPTION_TARGET };
+}
+
 /**
- * What a paired device is told. Transcription is the host's own answer; read
- * aloud stays with the computer, so synthesis is always `unavailable` there,
- * whatever Settings holds, and the phone never offers a control the host
- * refuses.
+ * What a paired device is told. An on-device engine serves only the host's own
+ * windows, so with one chosen a device has no transcription; otherwise
+ * transcription is the host's own answer. Read aloud stays with the computer,
+ * so synthesis is always `unavailable` there, whatever Settings holds, and the
+ * phone never offers a control the host refuses.
  */
 export function pairedDeviceSpeechStatusOf(
   settings: VoiceSettings,
   instances: ReadonlyArray<ProviderInstance>,
 ): { readonly transcription: SpeechCapabilityStatus; readonly synthesis: SpeechCapabilityStatus } {
   return {
-    transcription: speechStatusOf(settings, instances).transcription,
+    transcription:
+      settings.transcriptionEngine === undefined
+        ? speechStatusOf(settings, instances).transcription
+        : {
+            status: "unavailable",
+            reason: LOCAL_SPEECH_PAIRED_REASON,
+            settingsTarget: VOICE_TRANSCRIPTION_TARGET,
+          },
     synthesis: {
       status: "unavailable",
       reason: "Read-aloud is available only on the computer itself.",

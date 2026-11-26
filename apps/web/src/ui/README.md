@@ -17,6 +17,9 @@ them inside feature stylesheets.
 | `OctantContextMenu`                              | Right-click menus mirroring the same items                        |
 | `OctantDialog`                                   | Modal dialogs (opaque)                                            |
 | `OctantTooltip`                                  | Tooltips (opaque for legibility)                                  |
+| `OctantSpinner`                                  | Every "this is running" mark; never animate a glyph by hand       |
+| `OctantKbd`                                      | Keyboard chords: a boxed cap, or a bare hint at the end of a row  |
+| `OctantStatusDot`                                | A state's dot beside the word that says the state                 |
 
 `ui/shadcn` contains the owned shadcn recipe implementations; import product
 primitives from `ui/base`, not from `ui/shadcn`, inside features. The recipes

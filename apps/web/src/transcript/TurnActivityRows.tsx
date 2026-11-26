@@ -12,7 +12,6 @@ import {
   Clock3,
   FileText,
   Globe,
-  LoaderCircle,
   Pencil,
   Plug,
   Search,
@@ -45,6 +44,7 @@ import {
   type ToolKind,
 } from "./toolKinds";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 import { PublishedPageCard } from "./PublishedPageCard";
 import { RoutineReceiptCard } from "./RoutineReceiptCard";
 import { PublishedSnapshot } from "./PublishedSnapshot";
@@ -146,12 +146,12 @@ function outcomeLabel(row: DisclosureRow, settled = false): string {
  * so a running tool and a running turn spin the same way and a finished one
  * carries the same check.
  */
-function outcomeIcon(row: DisclosureRow, settled: boolean) {
+function outcomeIcon(row: DisclosureRow, settled: boolean): IconComponent | "running" {
   if (unfinishedTool(row, settled)) return Circle;
   switch (row.state) {
     case "started":
     case "running":
-      return LoaderCircle;
+      return "running";
     case "pending":
       return Circle;
     case "waiting":
@@ -161,6 +161,15 @@ function outcomeIcon(row: DisclosureRow, settled: boolean) {
     case "failed":
       return X;
   }
+}
+
+/** The status slot's mark: the one spinner while running, else the outcome's glyph. */
+function StatusMark(props: { readonly icon: IconComponent | "running" }) {
+  if (props.icon === "running") {
+    return <OctantSpinner className="turn-activity__status-icon" size={14} />;
+  }
+  const Icon = props.icon;
+  return <Icon aria-hidden="true" className="turn-activity__status-icon" size={14} />;
 }
 
 /** The leading mark of a tool row: what kind of work it was, in the muted ink. */
@@ -543,7 +552,7 @@ function ExploreGroup(props: {
       : failed > 0
         ? `${failed} failed`
         : "done";
-  const StateIcon = running ? LoaderCircle : unfinished ? Circle : failed > 0 ? X : Check;
+  const stateIcon = running ? "running" : unfinished ? Circle : failed > 0 ? X : Check;
   // A failed call stays in view, as a failed row does, whatever the level.
   const open = props.open || failed > 0;
   return (
@@ -567,7 +576,7 @@ function ExploreGroup(props: {
         <span className="turn-activity__name">{item.label}</span>
         <span className="turn-activity__status">
           <span className="visually-hidden turn-activity__outcome">{outcome}</span>
-          <StateIcon aria-hidden="true" className="turn-activity__status-icon" size={14} />
+          <StatusMark icon={stateIcon} />
         </span>
       </summary>
       <div className="turn-activity__toolchain">{props.children}</div>
@@ -664,7 +673,7 @@ function ActivityDisclosure(props: {
   readonly canvasPreview?: (preview: ThreadCanvasPreviewReceipt) => ReactNode;
 }) {
   const { row } = props;
-  const StateIcon = outcomeIcon(row, props.settled);
+  const stateIcon = outcomeIcon(row, props.settled);
   const KindIcon = rowKindIcon(row);
   const preview =
     row.kind === "tool" ? toolPreview(toolKind(row.toolName), row.summary) : undefined;
@@ -713,7 +722,7 @@ function ActivityDisclosure(props: {
           <span className="visually-hidden turn-activity__outcome">
             {outcomeLabel(row, props.settled)}
           </span>
-          <StateIcon aria-hidden="true" className="turn-activity__status-icon" size={14} />
+          <StatusMark icon={stateIcon} />
         </span>
       </summary>
       <div className="turn-activity__body">

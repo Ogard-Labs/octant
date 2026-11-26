@@ -151,6 +151,52 @@ describe("video generation policy", () => {
     });
   });
 
+  it.each([
+    ["per-second", timed, false],
+    ["token-priced", omni, true],
+  ] as const)(
+    "refuses a %s combination with no rate and starts on one that has it",
+    (_kind, model, audio) => {
+      const priced = { durationSeconds: 8, resolution: "720p", aspectRatio: "16:9", audio };
+      const unpriced = { ...priced, resolution: model.resolutions.at(-1) ?? "" };
+      expect(checkVideoClipOptions(model, priced, noInputs)).toEqual({ status: "allowed" });
+      expect(checkVideoClipOptions(model, unpriced, noInputs)).toMatchObject({
+        status: "refused",
+        reason: expect.stringContaining("has no price for 8 s at"),
+      });
+      expect(estimateVideoCost(model.price, unpriced, { promptTokens: 0, imageCount: 0 })).toEqual({
+        kind: "no-rate",
+      });
+      // The declared default itself has no rate, so the clip starts on one that does.
+      expect(
+        defaultVideoClipOptions({ ...model, defaultResolution: unpriced.resolution })?.resolution,
+      ).not.toBe(unpriced.resolution);
+    },
+  );
+
+  it("keeps a per-second rate that names one audio choice off the other", () => {
+    const model = decodeVideoModelCapabilities({
+      ...timed,
+      audio: "optional",
+      defaultAudio: true,
+      price: {
+        kind: "per-second",
+        rates: [{ resolution: "1080p", audio: false, usdMicrosPerSecond: 100_000 }],
+      },
+    });
+    expect(defaultVideoClipOptions(model)).toMatchObject({ resolution: "1080p", audio: false });
+    expect(
+      checkVideoClipOptions(
+        model,
+        { durationSeconds: 8, resolution: "1080p", aspectRatio: "16:9", audio: true },
+        noInputs,
+      ),
+    ).toEqual({
+      status: "refused",
+      reason: "Timed Model has no price for 8 s at 1080p with audio.",
+    });
+  });
+
   it("prefers a flat rate that names the chosen audio over one that omits it", () => {
     const options = { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true };
     expect(estimateVideoCost(flat.price, options, { promptTokens: 0, imageCount: 0 })).toEqual({

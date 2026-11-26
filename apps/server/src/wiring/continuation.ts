@@ -65,6 +65,15 @@ import {
   createCodeAgentResultDeliveryPort,
   createWorkAgentResultDeliveryPort,
 } from "../agentRun/agentResultDeliveryPorts";
+import { CodeService } from "../code/codeService";
+import { SideTaskReportFailureWake } from "../sideTasks/sideTaskReportFailureWake";
+import { SideTaskReportDeliveryService } from "../sideTasks/sideTaskReportDeliveryService";
+import {
+  createChatSideTaskReportDeliveryPort,
+  createCodeSideTaskReportDeliveryPort,
+  createWorkSideTaskReportDeliveryPort,
+  noteRunningParent,
+} from "../sideTasks/sideTaskReportDeliveryPorts";
 import { defaultShellSettings, enabledModes } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -86,12 +95,17 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<
     AgentRunsWiring,
-    "agentRunOrchestration" | "capacityScheduler" | "externalContentIngestionStore"
+    | "agentRunOrchestration"
+    | "capacityScheduler"
+    | "externalContentIngestionStore"
+    | "sideTaskReports"
+    | "threadUnfinishedWorkHost"
   > &
   Pick<WorkspaceWiring, "contextHarness"> &
   Pick<
     CodeRuntimeWiring,
     | "codeOperationRuntime"
+    | "codeService"
     | "coordinatorService"
     | "coordinatorWakes"
     | "routeCodeService"
@@ -101,7 +115,11 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
   Pick<HarnessWiring, "liftRestartRecovery" | "hostDrain"> &
   Pick<
     WorkWiring,
-    "goalLoopService" | "threadMessageQueue" | "workTurnService" | "workThreadWakeupPort"
+    | "goalLoopService"
+    | "threadMessageQueue"
+    | "workThreadService"
+    | "workTurnService"
+    | "workThreadWakeupPort"
   > &
   Pick<
     FoundationsWiring,
@@ -345,6 +363,132 @@ export function wireContinuation(deps: ContinuationDependencies) {
       }),
     );
     agentResultDeliveryService.start();
+    // A turn that ends in a side-task child owes its offering thread a
+    // journaled turn carrying the report. The service watches committed
+    // appends and dispatches through each mode's ordinary turn admission —
+    // the mark on that turn is what keeps a replayed delivery from minting a
+    // second one, and a parent that can never take the reports settles them
+    // as refused rather than retrying forever.
+    const compacting = (
+      aggregateType: "chat-thread" | "work-thread" | "code-thread",
+      threadId: string,
+    ): boolean =>
+      contextHarness.compactionRunning(
+        decodeContextSubjectRef({ aggregateType, aggregateId: threadId }),
+      );
+    const codeTurnInProgress = (threadId: string): boolean =>
+      deps.codeOperationRuntime?.turnInProgress?.(threadId) === true;
+    const sideTaskReportDeliveryService = new SideTaskReportDeliveryService({
+      journal: persistence.journal,
+      reports: deps.sideTaskReports,
+      clock: () => new Date(),
+      childDeleted: (childThreadId) => {
+        const lifecycle = persistence.readChatThread(decodeChatThreadId(childThreadId))?.lifecycle;
+        return lifecycle === "deleting" || lifecycle === "deleted";
+      },
+      ports: {
+        chat: noteRunningParent(
+          createChatSideTaskReportDeliveryPort({
+            readThread: (threadId) => persistence.readChatThread(threadId),
+            readThreadView: (threadId) => persistence.readChatThreadView(threadId),
+            chat: chatService,
+          }),
+          (threadId) =>
+            chatService.isTurnActive(decodeChatThreadId(threadId)) ||
+            compacting("chat-thread", threadId),
+        ),
+        work: noteRunningParent(
+          createWorkSideTaskReportDeliveryPort({
+            uuid: randomUUID,
+            isEnabled: () =>
+              enabledModes(
+                persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+              ).includes("work"),
+            readThread: (threadId) => workThreadProjection.read(threadId),
+            listTurns: (threadId) => workTurnProjection.listForThread(threadId),
+            startFirstTurn: (windowId, input) => workTurnService.startFirstTurn(windowId, input),
+          }),
+          (threadId) => {
+            const status = workTurnProjection
+              .listForThread(decodeWorkThreadId(threadId))
+              .at(-1)?.status;
+            return (
+              status === "accepted" || status === "running" || compacting("work-thread", threadId)
+            );
+          },
+        ),
+        code: noteRunningParent(
+          createCodeSideTaskReportDeliveryPort({
+            uuid: randomUUID,
+            readThread: (threadId) => persistence.readCodeThread(threadId),
+            busy: (threadId) => codeTurnInProgress(String(threadId)),
+            compacting: (threadId) => compacting("code-thread", String(threadId)),
+            turnDeliveryMarks: (threadId) => {
+              const history = deps.codeBoardEventStore.historyForThread(
+                decodeCodeThreadId(threadId),
+              );
+              if (history.status !== "ok") throw new Error("Code delivery history is unavailable.");
+              return history.frames.flatMap(({ event }) =>
+                event.kind === "conversation-turn-started" && event.delivery !== undefined
+                  ? [event.delivery]
+                  : [],
+              );
+            },
+            ...(routeCodeService.stageEvidence === undefined
+              ? {}
+              : { stageEvidence: routeCodeService.stageEvidence }),
+            ...(routeCodeService.executeOperation === undefined
+              ? {}
+              : { executeOperation: routeCodeService.executeOperation }),
+          }),
+          (threadId) => codeTurnInProgress(threadId) || compacting("code-thread", threadId),
+        ),
+      },
+      onError: (message, error) => console.error(`[side-task-report] ${message}`, error),
+    });
+    const unsubscribeSideTaskReportDelivery = persistence.journal.subscribeCommitted((append) =>
+      sideTaskReportDeliveryService.onCommittedAppend(append),
+    );
+    const reportFailureWake = new SideTaskReportFailureWake({
+      chatTurnMark: (threadId, turnId) =>
+        persistence.readChatThreadView(threadId)?.turns.find((turn) => String(turn.id) === turnId)
+          ?.delivery,
+      workTurnMark: (requestId) => workTurnProjection.lookup(requestId)?.delivery,
+      codeTurnMark: (threadId, operationId) => {
+        // A turn journals its start before anything its provider does.
+        const opening = deps.codeBoardEventStore.replay({
+          threadId,
+          operationId,
+          afterCursor: 0,
+          limit: 256,
+        });
+        if (opening.status !== "ok") return undefined;
+        for (const { event } of opening.frames) {
+          if (event.kind === "conversation-turn-started") return event.delivery;
+        }
+        return undefined;
+      },
+      wakeChat: (threadId) => chatService.noteReportTurnFailed(threadId),
+      wakeWork: (threadId) => deps.workThreadService.noteReportTurnFailed(threadId),
+      wakeCode: (threadId) => {
+        if (deps.codeService instanceof CodeService)
+          deps.codeService.noteReportTurnFailed(threadId);
+      },
+      onError: (message, error) => console.error(`[side-task-report] ${message}`, error),
+    });
+    const unsubscribeReportFailureWake = persistence.journal.subscribeCommitted((append) =>
+      reportFailureWake.onCommittedEvents(append.events),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeReportFailureWake();
+        unsubscribeSideTaskReportDelivery();
+        sideTaskReportDeliveryService.stop();
+      }),
+    );
+    deps.threadUnfinishedWorkHost.reportsHeld = (parentThreadId) =>
+      sideTaskReportDeliveryService.heldFor(parentThreadId);
+    sideTaskReportDeliveryService.start();
     const agentRunDependencyScheduler = new AgentRunDependencyScheduler({
       agentRuns: agentRunPersistence,
       orchestration: agentRunOrchestration,

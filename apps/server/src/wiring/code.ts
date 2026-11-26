@@ -633,6 +633,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "finishedReceipts"
     | "managedWorktreeReceipts"
     | "threadAwaitsHarnessApproval"
+    | "threadUnfinishedWork"
   > &
   Pick<
     IntegrationsWiring,
@@ -682,6 +683,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
 export function wireCode(deps: CodeDependencies) {
   const {
     threadAwaitsHarnessApproval,
+    threadUnfinishedWork,
     bindingReceiptStore,
     cacheStats,
     codeBoardEventStore,
@@ -1055,6 +1057,7 @@ export function wireCode(deps: CodeDependencies) {
           moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
           liveTurns,
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
+          unfinishedWork: threadUnfinishedWork,
           turnAwaiting: (threadId) => codeOperationRuntime?.turnAwaiting?.(threadId),
           readLatestFinishedReceipt: (threadId) => finishedReceipts.latest(threadId),
           putAwayWhenDone: () =>

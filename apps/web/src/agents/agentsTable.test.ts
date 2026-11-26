@@ -46,10 +46,10 @@ describe("agent table cells", () => {
     expect(usageCell({ usageQuality: "stale" })).toEqual({ primary: "", secondary: "" });
   });
 
-  it("gives failed and interrupted runs one tone and a cancelled run a quiet one", () => {
-    expect(agentStatusTone("failed")).toBe("failure");
-    expect(agentStatusTone("interrupted")).toBe("failure");
-    expect(agentStatusTone("cancelled")).toBe("quiet");
+  it("gives failed and interrupted runs one tone and a cancelled run a neutral one", () => {
+    expect(agentStatusTone("failed")).toBe("danger");
+    expect(agentStatusTone("interrupted")).toBe("danger");
+    expect(agentStatusTone("cancelled")).toBe("neutral");
     expect(agentStatusTone("waiting")).toBe("active");
     expect(agentStatusTone("completed")).toBe("success");
   });

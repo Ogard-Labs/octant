@@ -21,6 +21,7 @@ import {
   SANDBOX_SCOPE_SIGNING_PATH,
   signAndNotarizeDesktop,
   SIGNING_ORDER,
+  SPEECH_HELPER_SIGNING_PATH,
 } from "./sign-desktop";
 import {
   PACKAGED_ARM64_FILES,
@@ -247,21 +248,27 @@ describe("signAndNotarizeDesktop", () => {
     }
   });
 
-  it("signs the sandbox helper without Octant's entitlements before sealing the app", async () => {
-    const argv = await record();
-    const signed = argv.filter(
-      (command) => command[0] === "/usr/bin/codesign" && command.includes("--sign"),
-    );
-    const targets = signed.map((command) => command[command.length - 1]);
-    const index = targets.indexOf(`/repo/out/Octant.app/${SANDBOX_SCOPE_SIGNING_PATH}`);
+  it.each([
+    { helper: "sandbox", path: SANDBOX_SCOPE_SIGNING_PATH },
+    { helper: "speech", path: SPEECH_HELPER_SIGNING_PATH },
+  ])(
+    "signs the $helper helper without Octant's entitlements before sealing the app",
+    async ({ path }) => {
+      const argv = await record();
+      const signed = argv.filter(
+        (command) => command[0] === "/usr/bin/codesign" && command.includes("--sign"),
+      );
+      const targets = signed.map((command) => command[command.length - 1]);
+      const index = targets.indexOf(`/repo/out/Octant.app/${path}`);
 
-    expect(index).toBeGreaterThanOrEqual(0);
-    expect(index).toBeLessThan(targets.indexOf("/repo/out/Octant.app"));
-    expect(signed[index]).toEqual(
-      expect.arrayContaining(["--sign", "Developer ID", "--options", "runtime", "--timestamp"]),
-    );
-    expect(signed[index]).not.toContain("--entitlements");
-  });
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(index).toBeLessThan(targets.indexOf("/repo/out/Octant.app"));
+      expect(signed[index]).toEqual(
+        expect.arrayContaining(["--sign", "Developer ID", "--options", "runtime", "--timestamp"]),
+      );
+      expect(signed[index]).not.toContain("--entitlements");
+    },
+  );
 
   it("signs the bundled language server with the hardened runtime and no entitlements before sealing the app", async () => {
     // Notarization refuses an executable in the bundle that lacks a Developer

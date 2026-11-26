@@ -28,6 +28,8 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/secret-stores/command-bindings", method: "GET" },
   { path: "/api/secret-stores/command-bindings", method: "POST" },
   { path: "/api/speech/synthesis", method: "POST" },
+  { path: "/api/speech/local-engine", method: "GET" },
+  { path: "/api/speech/local-engine", method: "POST" },
   { path: "/api/desktop/agent-access", method: "GET" },
   { path: "/api/desktop/agent-access/commands", method: "POST" },
 ] as const;

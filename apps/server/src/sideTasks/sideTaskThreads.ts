@@ -4,12 +4,15 @@ import {
   decodeThreadMessageQueueScope,
   decodeWindowId,
   type CodeCommand,
+  type ChatNavigationThread,
   type CodeCommandResult,
+  type CodeThread,
   type OctantMode,
   type SideTaskChildState,
   type SideTaskOffer,
   type ThreadMessageQueueRefusalReason,
   type WindowId,
+  type WorkThread,
   type WorkThreadCommandResult,
 } from "@octant/contracts";
 import type { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
@@ -315,4 +318,62 @@ export function sideTaskChildState(
     return "attention";
   }
   return "quiet";
+}
+
+/** What the host reads of a started child for itself, whatever window asks. */
+export interface SideTaskChildReaders {
+  /** The child's sidebar row; absent once it is archived, deleted or gone. */
+  readonly chatRow: (
+    threadId: string,
+  ) => Pick<ChatNavigationThread, "executing" | "awaitingInput" | "followUpOpen"> | undefined;
+  readonly workThread: (threadId: string) => Pick<WorkThread, "lifecycle"> | undefined;
+  readonly workRuntime: (threadId: string) => {
+    readonly executing: boolean;
+    readonly awaitingInput?: boolean | undefined;
+  };
+  readonly codeThread: (threadId: string) => Pick<CodeThread, "lifecycle"> | undefined;
+  readonly codeActivity: (threadId: string) => {
+    readonly executing?: boolean;
+    readonly awaitingInput?: boolean;
+  };
+  readonly codeFollowUpOpen: (threadId: string) => boolean;
+}
+
+/**
+ * What a started child is doing, in the receipt's words, or `closed` once it
+ * is archived, deleted or purged and can do nothing more.
+ */
+export function createSideTaskChildStanding(
+  readers: SideTaskChildReaders,
+): (child: {
+  readonly mode: OctantMode;
+  readonly threadId: string;
+}) => SideTaskChildState | "closed" {
+  return ({ mode, threadId }) => {
+    if (mode === "chat") {
+      const row = readers.chatRow(threadId);
+      if (row === undefined) return "closed";
+      return (
+        sideTaskChildState({
+          executing: row.executing,
+          awaitingInput: row.awaitingInput === true,
+          followUp: row.followUpOpen,
+        }) ?? "closed"
+      );
+    }
+    if (mode === "work") {
+      if (readers.workThread(threadId)?.lifecycle !== "active") return "closed";
+      const { executing, awaitingInput } = readers.workRuntime(threadId);
+      return sideTaskChildState({ executing, awaitingInput: awaitingInput === true }) ?? "closed";
+    }
+    const thread = readers.codeThread(threadId);
+    if (thread === undefined || thread.lifecycle === "archived") return "closed";
+    return (
+      sideTaskChildState({
+        ...readers.codeActivity(threadId),
+        followUp: readers.codeFollowUpOpen(threadId),
+        lifecycle: thread.lifecycle,
+      }) ?? "closed"
+    );
+  };
 }

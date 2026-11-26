@@ -1634,12 +1634,7 @@ function CodeThreadTabSurface(props: {
   const controller = useCodeThreadController(props.controllers, props.tab.threadId as CodeThreadId);
   if (controller === undefined) {
     return (
-      <OctantEmpty
-        eyebrow="Code workspace"
-        message="Opening this thread's own Code state."
-        state="loading"
-        title="Preparing this Code thread"
-      />
+      <OctantEmpty eyebrow="Code workspace" state="loading" title="Preparing this Code thread" />
     );
   }
   return <>{props.children(controller)}</>;
@@ -1739,13 +1734,10 @@ function renderCodeTab(
   const coordinatorWorkers = coordinatorWorkersSourceFor(tab, props);
   const content = (
     <Suspense
+      // The spinner is hidden from a screen reader, so the title says it: the
+      // tab's name alone read as a state with nothing happening in it.
       fallback={
-        <OctantEmpty
-          eyebrow="Code workspace"
-          message="Loading the selected Code surface."
-          state="loading"
-          title={tab.title}
-        />
+        <OctantEmpty eyebrow="Code workspace" state="loading" title={`Loading ${tab.title}`} />
       }
     >
       <CodeWorkspaceTab
@@ -1892,11 +1884,7 @@ function renderCodeTab(
           {...threadBrowserPreview(props, paneId, String(tab.threadId))}
           threadId={tab.threadId as never}
         >
-          <Suspense
-            fallback={
-              <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
-            }
-          >
+          <Suspense fallback={<OctantEmpty state="loading" title="Loading workspace" />}>
             <CodeThreadEnvironment
               active={paneIsActive(props, paneId)}
               threadMove={threadMoveEnvironmentFor(props, "code")}
@@ -2527,11 +2515,7 @@ function renderNonCodeTab(
     return (
       <WorkThreadDisplayBoundary key={tab.id}>
         {({ displayReady, onDisplayReadyChange }) => (
-          <Suspense
-            fallback={
-              <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
-            }
-          >
+          <Suspense fallback={<OctantEmpty state="loading" title="Loading workspace" />}>
             <WorkThreadEnvironment
               active={paneIsActive(props, paneId)}
               threadMove={threadMoveEnvironmentFor(props, "work")}
@@ -2586,11 +2570,7 @@ function renderNonCodeTab(
                 {...threadBrowserPreview(props, paneId, String(tab.threadId))}
                 threadId={tab.threadId as never}
               >
-                <Suspense
-                  fallback={
-                    <OctantEmpty message="Loading work." state="loading" title="Loading work" />
-                  }
-                >
+                <Suspense fallback={<OctantEmpty state="loading" title="Loading work" />}>
                   <WorkThreadWorkspace
                     projects={props.projects}
                     {...(props.workDefaultStrict === true ? { workDefaultStrict: true } : {})}
@@ -2703,20 +2683,14 @@ function renderNonCodeTab(
   }
   if (tab.kind === "preview") {
     return (
-      <Suspense
-        fallback={
-          <OctantEmpty message="Loading preview." state="loading" title="Loading preview" />
-        }
-      >
+      <Suspense fallback={<OctantEmpty state="loading" title="Loading preview" />}>
         <PreviewWorkspaceTab key={tab.id} tab={tab} client={props.previewClient} />
       </Suspense>
     );
   }
   if (tab.kind === "canvas") {
     return (
-      <Suspense
-        fallback={<OctantEmpty message="Loading canvas." state="loading" title="Loading canvas" />}
-      >
+      <Suspense fallback={<OctantEmpty state="loading" title="Loading canvas" />}>
         <CanvasWorkspaceTab
           key={tab.id}
           client={props.canvasClient}
@@ -2751,11 +2725,7 @@ function renderNonCodeTab(
         title="Browser is unavailable"
       />
     ) : (
-      <Suspense
-        fallback={
-          <OctantEmpty message="Loading browser." state="loading" title="Loading browser" />
-        }
-      >
+      <Suspense fallback={<OctantEmpty state="loading" title="Loading browser" />}>
         <BrowserWorkspace
           key={tab.id}
           canDrawOnPage
@@ -2841,11 +2811,7 @@ function renderNonCodeTab(
     }
     const availability = props.availabilityByProject.get(project.id);
     return (
-      <Suspense
-        fallback={
-          <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
-        }
-      >
+      <Suspense fallback={<OctantEmpty state="loading" title="Loading workspace" />}>
         <ProjectOverview
           {...(props.onOpenSandboxRestrictionsSettings === undefined
             ? {}
@@ -3622,11 +3588,7 @@ function ChatThreadWorkspace(props: {
     ],
   );
   return (
-    <Suspense
-      fallback={
-        <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
-      }
-    >
+    <Suspense fallback={<OctantEmpty state="loading" title="Loading workspace" />}>
       <ChatThreadEnvironment
         {...(props.threadMove === undefined ? {} : { threadMove: props.threadMove })}
         {...(props.active === undefined ? {} : { active: props.active })}
@@ -3651,9 +3613,7 @@ function ChatThreadWorkspace(props: {
         projects={props.projects}
         tab={props.tab}
       >
-        <Suspense
-          fallback={<OctantEmpty message="Loading chat." state="loading" title="Loading chat" />}
-        >
+        <Suspense fallback={<OctantEmpty state="loading" title="Loading chat" />}>
           <ChatWorkspace
             controller={controller}
             providerGroups={providerGroups}
@@ -3915,11 +3875,7 @@ function WorkProjectOverviewSlot(props: {
   );
   return (
     <NewTaskDraftScopeContext.Provider value={`work-overview:${String(props.projectId)}`}>
-      <Suspense
-        fallback={
-          <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
-        }
-      >
+      <Suspense fallback={<OctantEmpty state="loading" title="Loading workspace" />}>
         <WorkOverview
           projectId={props.projectId}
           {...(props.researchClient === undefined

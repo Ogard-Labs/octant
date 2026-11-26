@@ -49,6 +49,27 @@ describe("createSpeechClient", () => {
     }
   });
 
+  it("reads the on-device engine and asks for its model in the language shown", async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      Response.json(
+        init?.method === "POST"
+          ? { status: "downloading", language: "fr-FR", fraction: 0 }
+          : { status: "not-downloaded", language: "fr-FR" },
+      ),
+    );
+    const client = createSpeechClient({
+      baseUrl: "http://127.0.0.1:3100",
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      windowCapability: "cap",
+    });
+    expect(await client.localEngine("fr")).toEqual({ status: "not-downloaded", language: "fr-FR" });
+    expect(await client.downloadLocalModel()).toMatchObject({ status: "downloading" });
+    expect(fetch.mock.calls.map(([url, init]) => [String(url), init?.method])).toEqual([
+      ["http://127.0.0.1:3100/api/speech/local-engine?language=fr", "GET"],
+      ["http://127.0.0.1:3100/api/speech/local-engine", "POST"],
+    ]);
+  });
+
   it("carries the host's refusal category and Settings link on a failure", async () => {
     const client = createSpeechClient({
       baseUrl: "http://127.0.0.1:3100",

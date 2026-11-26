@@ -226,12 +226,7 @@ export function ThreadBoardBody<
   if (props.board.status === "loading") {
     return (
       <div className="code-board__body">
-        <OctantEmpty
-          eyebrow={props.copy.eyebrow}
-          message="Loading the board."
-          state="loading"
-          title="Loading"
-        />
+        <OctantEmpty eyebrow={props.copy.eyebrow} state="loading" title="Loading board" />
       </div>
     );
   }

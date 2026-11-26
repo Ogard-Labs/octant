@@ -406,10 +406,6 @@
   color: var(--oct-fg-2);
 }
 
-.subagent-status-icon--working {
-  animation: oct-spin var(--oct-motion-spin) linear infinite;
-}
-
 /* The attached tray participates in layout so it cannot cover the preceding
    task list or transcript. Its height follows wrapped text and expansion. */
 .composer-subagents {
@@ -741,7 +737,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .subagent-status-icon--working,
   .composer-subagents__chevron,
   .composer-subagents {
     animation: none;

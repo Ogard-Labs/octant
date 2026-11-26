@@ -20,6 +20,7 @@ import {
   type AggregateVersion,
   type UtcTimestamp,
   decodeThreadWorkingDirectory,
+  decodeUtcTimestamp,
   decodeProjectExtraFolder,
   decodeWorkThread,
   decodeProviderModel,
@@ -2321,6 +2322,78 @@ describe("WorkThreadService", () => {
     });
   });
 
+  it("settles no Work thread whose side task is not done: Settle says why, Mark done only marks, and the host leaves it alone", async () => {
+    const unfinishedWork = vi.fn(
+      () => ({ kind: "side-task-report", title: "Fix the docs" }) as const,
+    );
+    const held = serviceFixture({
+      threads: [thread()],
+      putAwayWhenDone: () => true,
+      unfinishedWork,
+    });
+    await expect(
+      held.service.execute(ids.window, {
+        kind: "complete-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid",
+        message: expect.stringMatching(/side task “Fix the docs” has a report/),
+      },
+    });
+    await expect(held.service.settleFinishedThread(ids.thread)).resolves.toEqual({
+      status: "skipped",
+      reason: "child-work",
+    });
+    expect(unfinishedWork).toHaveBeenCalledWith(String(ids.thread));
+    const marked = await held.service.execute(ids.window, {
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      deliveryTarget: "Draft brief",
+    });
+    if (!("thread" in marked)) throw new Error("Expected the marked thread.");
+    expect(marked.thread).toMatchObject({ completionConfirmed: true });
+    expect(marked.thread).not.toHaveProperty("completedAt");
+  });
+
+  it("names a running child run instead of the turn a Work thread reads as running for it", async () => {
+    const held = serviceFixture({
+      threads: [thread()],
+      observeRuntime: () => ({ executing: true, awaitingInput: false }),
+      unfinishedWork: () => ({ kind: "child-run", title: "Compare the exports" }),
+    });
+    await expect(
+      held.service.execute(ids.window, {
+        kind: "complete-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        message: expect.stringMatching(/child run “Compare the exports” is still running/),
+      },
+    });
+  });
+
+  it("keeps a person's snooze when a side task's report starts a Work turn, and brings a settled thread back", () => {
+    const at = decodeUtcTimestamp(now);
+    const snooze = { until: decodeUtcTimestamp("2099-01-01T00:00:00.000Z"), at };
+    const fixture = serviceFixture({ threads: [thread({ completedAt: at, snooze })] });
+    fixture.service.noteReportAdmitted(ids.thread);
+    expect(fixture.projection.read(ids.thread)).toMatchObject({ snooze });
+    expect(fixture.projection.read(ids.thread)).not.toHaveProperty("completedAt");
+
+    fixture.service.noteTurnRequested(ids.thread);
+    expect(fixture.projection.read(ids.thread)).not.toHaveProperty("snooze");
+
+    const failed = serviceFixture({ threads: [thread({ snooze })] });
+    failed.service.noteReportTurnFailed(ids.thread);
+    expect(failed.projection.read(ids.thread)).not.toHaveProperty("snooze");
+  });
+
   it("keeps an evidence note an older client sends with the mark", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
 
@@ -2855,6 +2928,7 @@ function serviceFixture(
     readonly isMarked?: WorkThreadServiceDependencies["isMarked"];
     readonly readLatestFinishedReceipt?: WorkThreadServiceDependencies["readLatestFinishedReceipt"];
     readonly putAwayWhenDone?: WorkThreadServiceDependencies["putAwayWhenDone"];
+    readonly unfinishedWork?: WorkThreadServiceDependencies["unfinishedWork"];
     readonly uuid?: () => string;
     readonly serverProjects?: WorkThreadServiceDependencies["serverProjects"];
   } = {},
@@ -2955,6 +3029,7 @@ function serviceFixture(
       : { linearIssueContext: options.linearIssueContext }),
     ...(options.observeRuntime === undefined ? {} : { observeRuntime: options.observeRuntime }),
     ...(options.putAwayWhenDone === undefined ? {} : { putAwayWhenDone: options.putAwayWhenDone }),
+    ...(options.unfinishedWork === undefined ? {} : { unfinishedWork: options.unfinishedWork }),
     ...(options.projectDueReminder === undefined
       ? {}
       : { projectDueReminder: options.projectDueReminder }),
@@ -3777,6 +3852,46 @@ describe("forking a Work thread from one of its turns", () => {
     expect(fixture.record).not.toHaveBeenCalled();
   });
 
+  it("carries what the person sent into a carried turn while it ran, and no later turn's", async () => {
+    const fixture = forkFixture();
+    const steered = (turnKey: typeof first, messageId: string, body: string) =>
+      fixture.turns.applySteeredMessage({
+        kind: "thread-message-steered",
+        mode: "work",
+        threadId: ids.thread as never,
+        turnKey: String(turnKey),
+        messageId,
+        body,
+        steeredAt: now,
+      });
+    steered(first, "72000000-0000-4000-8000-000000000071", "Skip the appendix.");
+    steered(first, "72000000-0000-4000-8000-000000000072", "Cite sources.");
+    steered(second, "72000000-0000-4000-8000-000000000073", "Add a chart.");
+
+    await fixture.service.execute(ids.window, forkThrough(first));
+    const carried = fixture.turns.listForThread(forkId);
+    expect(carried.map((turn) => turn.steeredMessages?.map((message) => message.body))).toEqual([
+      ["Skip the appendix.", "Cite sources."],
+    ]);
+    // Journaled for the fork's own turn, inside the unit that creates it, so a
+    // restart rebuilds what the live fork shows.
+    const journaled = fixture.persistence.journal.append.mock.calls.flatMap(([request]) =>
+      request.events.flatMap((event: { readonly eventName: string; readonly payload: unknown }) =>
+        event.eventName === "thread.message-steered@1" ? [event.payload] : [],
+      ),
+    );
+    expect(journaled).toEqual([
+      expect.objectContaining({
+        threadId: forkId,
+        turnKey: String(carried[0]?.requestId),
+        body: "Skip the appendix.",
+        steeredAt: now,
+      }),
+      expect.objectContaining({ threadId: forkId, body: "Cite sources." }),
+    ]);
+    expect(fixture.persistence.journal.transaction).toHaveBeenCalledOnce();
+  });
+
   it("marks a fork of a marked source before it exists", async () => {
     const fixture = forkFixture({ marked: true });
 
@@ -3899,6 +4014,34 @@ describe("searching Work message text", () => {
       [String(archivedId), "archived", "The release moved to Friday.", [{ start: 4, end: 11 }]],
     ]);
     expect(String(result.hits[0]?.turnId)).toBe("72000000-0000-4000-8000-000000000301");
+  });
+
+  it("finds what the person sent into a running turn, after its prompt and before its reply", async () => {
+    const fixture = serviceFixture({
+      turns: [
+        {
+          ...searchTurn({
+            threadId: ids.thread,
+            index: 1,
+            prompt: "Draft the brief",
+            response: "Left the appendix out.",
+          }),
+          steeredMessages: [
+            {
+              messageId: "72000000-0000-4000-8000-000000000391",
+              body: "Skip the appendix",
+              steeredAt: now,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      (await fixture.service.searchTranscript(ids.window, "appendix")).hits.map(
+        (hit) => hit.snippet,
+      ),
+    ).toEqual(["Skip the appendix"]);
   });
 
   it("searches no thread whose Project is not an active Work Project", async () => {

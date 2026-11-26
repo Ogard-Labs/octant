@@ -4,9 +4,11 @@ import {
   addVoiceDictionaryTerms,
   admitRemoteTranscription,
   listSpeechEligibleInstances,
+  LOCAL_SPEECH_PAIRED_REASON,
   pairedDeviceSpeechStatusOf,
   REMOTE_TRANSCRIPTION_BUDGET,
   resolveSpeechEndpoint,
+  resolveTranscriptionEndpoint,
   speechStatusOf,
   transcriptionPromptOf,
   VOICE_SYNTHESIS_TARGET,
@@ -157,6 +159,55 @@ describe("speech endpoint policy", () => {
     });
     expect(pairedDeviceSpeechStatusOf({}, instances).transcription).toEqual({
       status: "unconfigured",
+      settingsTarget: VOICE_TRANSCRIPTION_TARGET,
+    });
+  });
+});
+
+describe("on-device transcription", () => {
+  const endpoint = { providerInstanceId: compatibleId as never, modelId: "whisper-1" as never };
+  const local = { transcriptionEngine: "apple-speech" as const, transcription: endpoint };
+
+  it("keeps the endpoint for everyone who has not chosen the on-device engine", () => {
+    expect(resolveTranscriptionEndpoint({ transcription: endpoint }, instances)).toMatchObject({
+      status: "ready",
+      modelId: "whisper-1",
+    });
+    expect(
+      speechStatusOf({ transcription: endpoint }, instances, {
+        status: "ready",
+        language: "nb-NO" as never,
+      }).transcription,
+    ).toEqual({ status: "ready", providerInstanceId: compatibleId, modelId: "whisper-1" });
+  });
+
+  it("offers no endpoint while the on-device engine is chosen, though one is still saved", () => {
+    expect(resolveTranscriptionEndpoint(local, instances).status).toBe("unavailable");
+    for (const status of [
+      { status: "unsupported", reason: "Apple Speech needs macOS 26." },
+      { status: "unsupported-language" },
+      { status: "not-downloaded", language: "nb-NO" as never },
+      { status: "downloading", language: "nb-NO" as never, fraction: 0.5 },
+      { status: "download-failed", language: "nb-NO" as never },
+      { status: "failed" },
+    ] as const) {
+      expect(speechStatusOf(local, instances, status).transcription).toEqual({
+        status: "unavailable",
+        reason: expect.stringMatching(/Apple/),
+        settingsTarget: VOICE_TRANSCRIPTION_TARGET,
+      });
+    }
+    expect(speechStatusOf(local, instances).transcription.status).toBe("unavailable");
+  });
+
+  it("is ready once the model is on the computer, and never for a paired device", () => {
+    expect(
+      speechStatusOf(local, instances, { status: "ready", language: "nb-NO" as never })
+        .transcription,
+    ).toEqual({ status: "ready", engine: "apple-speech" });
+    expect(pairedDeviceSpeechStatusOf(local, instances).transcription).toEqual({
+      status: "unavailable",
+      reason: LOCAL_SPEECH_PAIRED_REASON,
       settingsTarget: VOICE_TRANSCRIPTION_TARGET,
     });
   });

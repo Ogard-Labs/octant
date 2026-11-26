@@ -4,6 +4,8 @@ import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   GithubCatalogueFreshness,
   GithubCatalogueUnavailable,
+  GithubIssueClosedReason,
+  GithubIssueClosedReasonFilter,
   GithubIssueDetail,
   GithubIssueRow,
   GithubIssueStateFilter,
@@ -14,6 +16,7 @@ import {
   ChevronDown,
   CircleCheck,
   CircleDot,
+  CircleSlash,
   FolderGit2,
   Search,
   SquarePen,
@@ -159,6 +162,21 @@ const STATE_FILTERS: ReadonlyArray<{
   { value: "all", label: "All" },
 ];
 
+const CLOSED_REASON_FILTERS: ReadonlyArray<{
+  readonly value: GithubIssueClosedReasonFilter | undefined;
+  readonly label: string;
+}> = [
+  { value: undefined, label: "All closed" },
+  { value: "completed", label: "Completed" },
+  { value: "not-planned", label: "Not planned" },
+];
+
+const CLOSED_REASON_WORDS: Readonly<Record<GithubIssueClosedReason, string>> = {
+  completed: "Closed as completed",
+  "not-planned": "Closed as not planned",
+  duplicate: "Closed as duplicate",
+};
+
 export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
   const { client } = props;
   // Recent repositories decide the opening scope: with any, the page opens on
@@ -168,6 +186,8 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
   const [repository, setRepository] = useState<GithubRepositoryRow>();
   const [repositoryPickerOpen, setRepositoryPickerOpen] = useState(false);
   const [stateFilter, setStateFilter] = useState<GithubIssueStateFilter>("open");
+  // Only meaningful while Closed is chosen; leaving it forgets the reason.
+  const [closedReason, setClosedReason] = useState<GithubIssueClosedReasonFilter>();
   const [sort, setSort] = useState<IssueSort>(DEFAULT_ISSUE_SORT);
   const storage = props.storage ?? defaultBoardStorage();
   const [grouped, setGrouped] = useState<boolean>(
@@ -246,6 +266,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
           name: repository.name,
           pageSize: PAGE_SIZE,
           state: stateFilter,
+          ...(closedReason === undefined ? {} : { closedReason }),
           ...(debouncedSearch === "" ? {} : { search: debouncedSearch }),
           ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
         });
@@ -300,7 +321,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
         });
       }
     },
-    [client, debouncedSearch, repository, stateFilter],
+    [client, closedReason, debouncedSearch, repository, stateFilter],
   );
 
   useEffect(() => {
@@ -323,13 +344,14 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
     setDetail({ kind: "idle" });
     void readIssuesAcrossRepositories(client, recents, {
       state: stateFilter,
+      ...(closedReason === undefined ? {} : { closedReason }),
       search: debouncedSearch,
       pageSize: ACROSS_PAGE_SIZE,
     }).then((result) => {
       if (operation !== acrossGeneration.current) return;
       setAcross({ kind: "ready", result });
     });
-  }, [acrossEpoch, client, debouncedSearch, recents, scope, stateFilter]);
+  }, [acrossEpoch, client, closedReason, debouncedSearch, recents, scope, stateFilter]);
 
   useEffect(() => {
     if (selected === undefined) {
@@ -529,7 +551,10 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
           aria-pressed={stateFilter === filter.value}
           className="pr-page__chip"
           key={filter.value}
-          onClick={() => setStateFilter(filter.value)}
+          onClick={() => {
+            setStateFilter(filter.value);
+            if (filter.value !== "closed") setClosedReason(undefined);
+          }}
           type="button"
           variant="bare"
         >
@@ -538,6 +563,24 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
       ))}
     </div>
   );
+
+  const closedReasonChips =
+    stateFilter !== "closed" ? null : (
+      <div aria-label="Closed reason" className="pr-page__chips" role="group">
+        {CLOSED_REASON_FILTERS.map((filter) => (
+          <OctantButton
+            aria-pressed={closedReason === filter.value}
+            className="pr-page__chip"
+            key={filter.label}
+            onClick={() => setClosedReason(filter.value)}
+            type="button"
+            variant="bare"
+          >
+            {filter.label}
+          </OctantButton>
+        ))}
+      </div>
+    );
 
   const listContent =
     scope !== undefined && !browsing ? (
@@ -694,6 +737,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
                 </label>
               </div>
               {stateChips}
+              {closedReasonChips}
             </>
           ) : null}
           {listContent}
@@ -750,14 +794,20 @@ function AcrossNotes(props: {
   );
 }
 
-function IssueStateBadge(props: { readonly state: GithubIssueRow["state"] }) {
+function issueStateWords(issue: Pick<GithubIssueRow, "state" | "stateReason">): string {
+  if (issue.state === "open") return "Open";
+  return issue.stateReason === undefined ? "Closed" : CLOSED_REASON_WORDS[issue.stateReason];
+}
+
+function IssueStateBadge(props: { readonly issue: Pick<GithubIssueRow, "state" | "stateReason"> }) {
+  const { state } = props.issue;
   return (
     <OctantBadge
       className="github-issue-browser__state"
-      data-state={props.state}
-      variant={props.state === "open" ? "success" : "secondary"}
+      data-state={state}
+      variant={state === "open" ? "success" : "secondary"}
     >
-      {props.state === "open" ? "Open" : "Closed"}
+      {issueStateWords(props.issue)}
     </OctantBadge>
   );
 }
@@ -781,17 +831,20 @@ const IssueRow = memo(function IssueRow(props: {
         : {})}
       selected={props.selected}
       selection="current"
-      state={issueStateGlyph(row.state)}
+      state={issueStateGlyph(row)}
       title={row.title}
       updatedAt={row.updatedAt}
     />
   );
 });
 
-function issueStateGlyph(state: GithubIssueRow["state"]): WorkListState {
-  return state === "open"
-    ? { label: "Open", tone: "open", Icon: CircleDot }
-    : { label: "Closed", tone: "closed", Icon: CircleCheck };
+function issueStateGlyph(issue: Pick<GithubIssueRow, "state" | "stateReason">): WorkListState {
+  const label = issueStateWords(issue);
+  if (issue.state === "open") return { label, tone: "open", Icon: CircleDot };
+  // A check reads as done. Work that was declined or filed twice was not, so it
+  // takes a different shape, not only different words.
+  const notDone = issue.stateReason === "not-planned" || issue.stateReason === "duplicate";
+  return { label, tone: "closed", Icon: notDone ? CircleSlash : CircleCheck };
 }
 
 function groupIssuesByRepository(rows: ReadonlyArray<RepositoryIssueRow>): ReadonlyArray<{
@@ -820,7 +873,7 @@ function IssueDetailPane(props: {
 }) {
   const { detail, selected } = props;
   if (detail.kind === "idle") {
-    return <OctantEmpty layout="line" title="Select an issue to read it." />;
+    return <OctantEmpty layout="line" title="Select an issue to read it" />;
   }
   if (detail.kind === "loading") {
     return <OctantEmpty layout="line" title="Loading issue…" />;
@@ -859,6 +912,7 @@ function IssueDetailPane(props: {
                   number: issue.number,
                   title: issue.title,
                   state: issue.state,
+                  ...(issue.stateReason === undefined ? {} : { stateReason: issue.stateReason }),
                   author: issue.author,
                   updatedAt: issue.updatedAt,
                   url: issue.url,
@@ -884,7 +938,7 @@ function IssueDetailPane(props: {
       <div className="pr-detail__body" data-tab="summary">
         <header className="pr-detail__head">
           <p className="pr-detail__kicker">
-            <IssueStateBadge state={issue.state} />
+            <IssueStateBadge issue={issue} />
             <span className="oct-meta">
               {selected === undefined ? "" : `${selected.owner}/${selected.name} `}#{issue.number}
             </span>

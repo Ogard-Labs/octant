@@ -195,6 +195,7 @@ import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceCompos
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { SentMessageText } from "../transcript/SentMessageText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
+import { SideTaskReportCards } from "../agents/SideTaskReportCards";
 import { SteeredMessages } from "../messageQueue/SteeredMessages";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
@@ -224,6 +225,7 @@ import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
+import { McpSignInNotice } from "../transcript/McpSignInNotice";
 import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { SideTaskInline, sideTasksAfterTurn, useThreadSideTasks } from "../followUps/SideTaskCards";
 import {
@@ -3003,13 +3005,21 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               if (row.kind === "message") {
                 if (row.entry.role === "user") {
                   if (row.delivered === true) {
+                    const reportDelivery = row.turn.delivery?.kind === "side-task-report";
                     return withRowHandoff(
                       row.handoff,
-                      <article aria-label="Subagent results" className="turn-child-result">
-                        <ChildResultCards
-                          providerGroups={props.providerGroups}
-                          text={row.entry.text}
-                        />
+                      <article
+                        aria-label={reportDelivery ? "Report from side task" : "Subagent results"}
+                        className="turn-child-result"
+                      >
+                        {reportDelivery ? (
+                          <SideTaskReportCards text={row.entry.text} />
+                        ) : (
+                          <ChildResultCards
+                            providerGroups={props.providerGroups}
+                            text={row.entry.text}
+                          />
+                        )}
                       </article>,
                     );
                   }
@@ -3345,6 +3355,24 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           </div>
         )}
 
+        <McpSignInNotice
+          className="thread-column"
+          client={readOnly ? undefined : props.extensionClient}
+          mode="work"
+          onResolveReference={extensionDraft.resolveReference}
+          receipts={extensionDraft.receipts}
+          queued={messageQueue.snapshot?.items}
+          // A resume scheduled at a usage limit sends its turn's selections again.
+          selections={
+            (thread?.usageResume?.status === "scheduled"
+              ? turns.find(
+                  (turn) => String(turn.turnId) === String(thread.usageResume?.record.turnId),
+                )?.extensionSelections
+              : undefined) ?? []
+          }
+          threadId={String(props.threadId)}
+          turnActive={turnRunning}
+        />
         <ExtensionToolApprovalPrompt
           className="thread-column"
           client={readOnly ? undefined : props.extensionClient}

@@ -1951,6 +1951,7 @@ export class ChatTurnRunner {
                     yield* input.persistAttempt(currentAttempt);
                     terminalOutcome = "completed";
                     providerEndedTurn = true;
+                    yield* observeCompleted();
                     return;
                   }
                   yield* persistOutcome("interrupted", {

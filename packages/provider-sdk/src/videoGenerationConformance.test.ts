@@ -37,13 +37,36 @@ const asFailure = (error: unknown) =>
     : videoFailure("provider-failed", "The provider request failed.");
 
 /** A task-polling provider written only against the seam. */
-function taskDriver(options: { readonly checkFirst: boolean }): VideoGenerationDriver {
+function taskDriver(options: {
+  readonly checkFirst: boolean;
+  /** Reads the models from the provider, honoring or ignoring the caller's signal. */
+  readonly catalog?: "honors-signal" | "ignores-signal" | "carries-on";
+}): VideoGenerationDriver {
   return {
     driverKind: "gemini-video",
     providerName: "Example Video",
     providerHosts: ["video.example.test"],
     create: ({ ports }) => ({
-      models: async () => [capabilities],
+      models: async (signal) => {
+        if (options.catalog === undefined) return [capabilities];
+        const read = async () =>
+          decodeVideoModelCapabilities(
+            jsonField(
+              await readVideoJson(
+                await ports.request({
+                  url: "https://video.example.test/v1/models",
+                  method: "GET",
+                  auth: { header: "authorization", scheme: "Bearer" },
+                  ...(signal === undefined || options.catalog === "ignores-signal"
+                    ? {}
+                    : { signal }),
+                }),
+              ),
+              "model",
+            ),
+          );
+        return [await (options.catalog === "carries-on" ? read().catch(read) : read())];
+      },
       start: async (request) => {
         if (options.checkFirst) {
           const refusal = refuseOutsideDeclaration([capabilities], request);
@@ -120,6 +143,7 @@ function script(): (request: VideoHttpRequest) => Response {
   return (request) => {
     if (request.method === "POST") return Response.json({ id: "task-1" });
     if (request.method === "DELETE") return new Response(null, { status: 204 });
+    if (request.url.endsWith("/models")) return Response.json({ model: capabilities });
     polls += 1;
     return Response.json(
       polls < 2
@@ -159,6 +183,23 @@ describe("video generation conformance", () => {
     await expect(
       runVideoGenerationConformance(fixture(taskDriver({ checkFirst: false }))),
     ).rejects.toThrow("a cancelled request did not fail as interrupted");
+  });
+
+  it("accepts a driver whose networked catalog read ends when it is cancelled", async () => {
+    await expect(
+      runVideoGenerationConformance(
+        fixture(taskDriver({ checkFirst: true, catalog: "honors-signal" })),
+      ),
+    ).resolves.toMatchObject({ discoveryStopsWhenCancelled: true });
+  });
+
+  it.each([
+    ["ignores-signal", "a cancelled discovery did not end"],
+    ["carries-on", "a cancelled discovery made another call to the provider"],
+  ] as const)("refuses a driver whose catalog read %s when cancelled", async (catalog, reason) => {
+    await expect(
+      runVideoGenerationConformance(fixture(taskDriver({ checkFirst: true, catalog }))),
+    ).rejects.toThrow(reason);
   });
 
   it("names a refused option in plain words before anything is sent", () => {

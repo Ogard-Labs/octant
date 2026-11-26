@@ -49,7 +49,7 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
       setTargets(result.targets);
       setMessage(
         result.targets.length === 0
-          ? "No active Work or Code targets on this host."
+          ? "No active Work or Code threads or Projects on this host."
           : "Choose the Work thread, Code thread or Code Project to change.",
       );
     } else setMessage(result.message);
@@ -99,13 +99,13 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
           </OctantButton>
           {targets.length === 0 ? null : (
             <label>
-              Recovery target
+              Thread or Project
               <OctantSelectField
-                aria-label="Recovery target"
+                aria-label="Thread or Project"
                 disabled={busy}
                 value={targetKey}
                 options={[
-                  { id: "", label: "Choose a target" },
+                  { id: "", label: "Choose a thread or Project" },
                   ...targets.map((target) => ({
                     id: JSON.stringify(target.posture.subject),
                     label: `${target.posture.subject.kind === "project" ? "Project" : target.posture.subject.kind === "work-thread" ? "Work thread" : "Thread"}: ${target.title}`,

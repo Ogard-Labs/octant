@@ -3936,7 +3936,8 @@ With **Settle threads when they're done** on (the default), Mark done on a
 Work or Code thread also settles it, the host settles a Work or Code thread
 once the turn that filed its passing finished report completes, and the host
 settles a Code thread once a pull request it delivers merged, read from
-cached evidence only; none of them marks a thread Done, and Un-settle brings it
+cached evidence only; none of them settles a thread whose side tasks or child
+runs are not done, none marks a thread Done, and Un-settle brings it
 back
 ([Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion)).
 
@@ -7886,9 +7887,56 @@ ls-remote` against the thread's remote and the GitHub reads they already
   frame was lost and a goal-loop round on the same feed still waits for the
   turn to settle; a feed that did lose its place ends as before. A separate
   frame for the message was rejected because an older client cannot decode a
-  frame kind it does not know. An open desktop Code transcript shows the
-  message when the turn settles or the transcript is read again; showing it
-  there at once is a follow-up. When the running turn is
+  frame kind it does not know. An open desktop Code transcript has no such
+  frame and its operation stream carries no steered message either, so it
+  takes the message in when the window hears the `thread-message-queue` change
+  the message leaves the queue with: an open thread whose running turn this
+  view follows reads its two newest turns and takes only their
+  `steeredMessages` from that read. A view that loaded the thread settled does
+  not follow a turn started in another window, a Zen card, a split pane or by
+  an agent, because a provider turn is journaled on the operation and the
+  thread's own stream never hears of it. It learns of one from the thread
+  list, which the window re-reads on the `code-navigation` notice a turn start
+  raises (a paired browser on its list refresh): when the list says the open
+  thread is working at an activity sequence the view has not looked at, the
+  view reads the conversation once and follows the turn through the same poll
+  and operation stream a read at open starts. When the activity moved but the
+  list says the thread is settled, as for a turn that started and finished
+  between two reads of the list, the view looks at the newest turn alone and
+  reads the conversation only for a turn it does not show or one that runs; a
+  host without the window read gets no such look. This costs one light read
+  in each open view of the thread whenever its activity moves while settled,
+  including once after each turn the view itself followed or sent. A queued
+  turn that becomes the newest as the followed one ends is read once by the
+  followed turn's poll and streamed in its place, unless it is a turn this
+  window is sending or streams itself. It does not look while it follows a
+  running turn, is sending one itself, or is still on its first read, so it
+  never opens a second stream or reopens a turn it settled; a turn waiting on
+  the person does not stop it looking, and a look that fails is tried again
+  five seconds later, since a settled thread's activity may not move again;
+  a first read of the thread that failed leaves its activity to be looked at
+  too. Any read of the conversation while this window's own send streams a
+  turn, such as the one a rename from another window brings, keeps that turn's
+  rows and tool steps as shown, because the send's stream writes the reply
+  row it created and a second stream of the turn is refused. The steered messages are held apart from the transcript and only ever grow, so the read
+  cannot roll back the reply, tool steps or tasks the stream is writing, and
+  a slower read of the conversation cannot take a shown message away. Reading
+  on every `code-navigation` notice was rejected because most of those say
+  nothing about the open thread; a new operation event or frame was rejected
+  because an older client cannot decode it. A paired browser's Code surface
+  subscribes to no change feed, so it takes the messages in on the running
+  turn's own poll (within about two seconds) and on its five-second list
+  refresh. Each such read costs the host the two turns' fold, the thread's
+  steered-message records and, on a thread with earlier turns, one usage row
+  per earlier turn, so one queue change costs a window one read per open Code
+  thread whose running turn it follows; a turn found through a read is polled
+  at the same price every two seconds anyway. The phone holds no stream of a
+  Code turn, so it re-reads the thread on a short cadence while its newest
+  turn runs or a turn waits. While it shows the newest turns settled, it looks
+  at the newest turn alone, without its text, every ten seconds while in
+  front (the price of one poll), and refreshes once when the host's newest
+  turn is not the one it shows, even one that already finished, or runs or
+  waits again; an anchored search page does not look. When the running turn is
   one the queue admitted itself, that message stays at the head as
   `accepted` until its turn settles, and the message behind it is offered to
   that turn under the same checks, one at a time, in order. A message
@@ -7918,9 +7966,17 @@ ls-remote` against the thread's remote and the GitHub reads they already
   context and a thread export carry each steered message as a user message
   of its turn, after that turn's prompt, with the time it was sent, under the
   same limits and redaction as the turn's other messages. The conversation a
-  Code compaction's handover summary reads carries them too, in the order
-  they were sent, after their turn's prompt, each under a source of its own
-  that names the turn and the message. The message is not marked as dispatching
+  Work or Code thread's compaction summary reads, a Code handover summary's
+  included, and the earlier-turn context a Work turn rebuilds carry them too,
+  in the order they were sent, after their turn's prompt, each under a source
+  of its own that names the turn and the message; every other message keeps
+  its source, so a saved summary still covers what it covered. A `#thread`
+  mention, a Side Chat's source and an agent's read of another thread carry
+  them as user lines of their turn, message search finds them with their
+  turn's prompt, and a Work fork copies those of the turns it carries. A turn
+  a rewind removed takes its messages with it in all of these. Search indexes
+  a message when it is journaled, so one sent before this rule is found after
+  the next index rebuild. The message is not marked as dispatching
   before the steer: a restart while the runtime takes it also ends the turn
   that took it, and the still-queued message then follows the ordinary
   restart rules rather than being lost. Which runtimes steer is the provider
@@ -8861,6 +8917,32 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and `/api/speech/synthesis` behind window authority, sniffs and bounds the
   audio, persists nothing, and reports each direction `ready`, `unconfigured`,
   or `unavailable` with the Settings link that fixes it.
+  **Apple Speech on this Mac** is a Transcribe with choice (Voice settings'
+  `transcriptionEngine`; absent keeps the endpoint, so nothing changes for
+  anyone who does not pick it). It runs on the host, not in the window: the
+  desktop app passes its signed `octant-speech-helper` (macOS 26 or later,
+  Apple's `SpeechAnalyzer` with `DictationTranscriber`) to its own host only,
+  so a headless, Linux or Windows host, an older macOS, and a host the app did
+  not start report it `unsupported` and Settings does not offer it. While it is
+  chosen the host calls no transcription endpoint for anyone: it serves only
+  the host's own windows, refuses a paired phone or browser and reports it
+  transcription `unavailable` (their recording would otherwise leave the
+  device it was made on for another computer), and an agent's
+  `octant_transcribe` is not offered. Reason: "turned into text on this Mac"
+  stays true only where the window and the engine are on the same Mac. The
+  window decodes its clip and sends 16 kHz mono 16-bit PCM in a plain WAV (at
+  most 130 seconds); the host checks every header field and hands the samples
+  to one helper process per request over stdin, with the language (absent: the
+  Mac's own first language) and the dictionary as `contextualStrings`. Nothing
+  is written to a file or log; the helper exits when its stdin closes, so a
+  cancelled dictation, a stopped host or a crashed host leaves none running,
+  and a helper that crashes, stalls past 110 seconds or answers something
+  unreadable fails only that request. Dictations share the same two host
+  slots. Apple's speech model is fetched by macOS from Apple only when the
+  person presses Download in Voice settings, with progress and failure shown
+  there and the fetch named in the host data map; no audio or text is sent.
+  The helper uses no `SFSpeechRecognizer`, so Apple's speech recognition
+  permission is not asked; the microphone permission is the app's, as before.
   An attended Work or Code agent outside Plan can use `octant_transcribe`
   only when its provider carries Octant tools and transcription is ready.
   The host checks that a file under the turn's current folder contains supported
@@ -12467,10 +12549,53 @@ These are the only places a prompt is sent for the person, and only on their
 click. If a new thread's first message does not go out, the thread stays and
 the prompt waits in its composer.
 
+A thread started from a side task reports back. The `thread-side-task-reports`
+aggregate, keyed by the child thread, records every turn that ends there as a
+`side-task-report-owed` event: detection in the harness's turn hooks owes a
+completion report carrying the reply (bounded and marked truncated when cut)
+and owes a failure or cancellation its outcome alone, and a completed turn is
+never owed twice at its end. `SideTaskReportStore`
+hydrates the aggregate so owed reports survive a restart, and the person's
+Stop/Resume control on the receipt journals `side-task-reporting-stopped` /
+`-resumed` on the same record; a stopped child owes nothing. A
+`SideTaskReportDeliveryService` watches the journal for owed events and armed
+parents, coalesces owed reports per offering thread (bounded per delivery),
+and asks the mode's port to begin a turn carrying the `side-task-report`
+delivery mark — Chat through `deliver-chat-side-task-report`, Work and Code
+through their ordinary start commands. Delivery admission in each mode service
+verifies every named report is still owed to that thread, so a forged or
+replayed mark cannot mint a delivery, and records the batch as outside content
+as its last step before journaling the turn: a parent that is still busy is
+never marked for a report it has not taken, the provider never reads one
+unmarked, and a mark that cannot be recorded refuses the turn. Only the
+parent's latest turn can hold a report back; one that stopped at a usage limit
+stops counting once a newer turn takes over. A turn that already carries the
+mark settles its reports without a second dispatch. A refused dispatch is tried
+again when the parent commits (a Work turn's end among them) and on a timer,
+because every refusal but one names a standing a person can change: busy,
+archived, marked Done, paused, the mode off, or a sign-in that runs only turns
+a person sends. A parent that no longer exists is the exception: its reports
+settle as `side-task-report-refused` with the reason journaled. Purging either
+thread erases the child's report aggregate and drops whatever was still owed;
+deleting a Chat child settles its owed reports as refused.
+
+The parent's rest follows the report only once it is admitted, in the same step
+that records the outside-content mark: a settled parent comes back, a person's
+snooze stays (`restAfterReport`), and a refused retry changes neither.
+`SideTaskReportFailureWake` reads each mode's journaled turn end and drops that
+snooze when the turn a report started failed. Every settle asks
+`createThreadUnfinishedWork` first: the host's own read of the started children
+(the facts the receipt shows, past the bounds a window's list keeps), the
+reports still owed, and the running child runs. The delivery service tells it
+which reports the parent's own state keeps out (`heldFor`), so they hold no
+settle; the rule is in
+[Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion).
+
 **Work fork.** `fork-work-thread` creates a Work thread in the source's
 Project on the source's provider and model, with a `forkedFrom` origin naming
 the source thread and a finished Work turn, and copies the source's turns
-through that point as carried turns in one journal unit with its creation.
+through that point as carried turns in one journal unit with its creation,
+each with the messages the person sent into it while it ran.
 The host checks, as for a Code fork, that the source's Project is readable by
 the confirming window and that every carried turn exists and has settled. The
 fork's first own turn on a provider that keeps its own session starts a new
@@ -14828,7 +14953,8 @@ successful connect (kept after an idle close), and the installed `mcp.json`
 read from disk for the transport. Reading it never connects, signs in,
 discovers endpoints or lists tools, so a server no task has used yet reads
 Ready rather than Connected. States, most decisive first: Off (package or
-server switched off), Needs sign-in (sign-in-again, consent pending, client
+server switched off), Needs sign-in (sign-in-again, consent pending, an attempt
+whose status or cancellation is not confirmed, client
 setup required for a registered-client connector, or a
 catalog connector that signs in and has no sign-in while not connected;
 signed out alone is only an offer, since a hosted server that takes a key or
@@ -14847,6 +14973,23 @@ connects again on its next turn. Reconnect connects nothing itself and never
 replays a failed call; it is the person's act, at a local window or a device the host's own person paired (maintainer decision, 2026-11-12; any other device session may read the listing only). Rationale: connecting from
 Settings would discover tools outside a task's authority, so the person's
 action only clears what blocks the next authorized connect.
+
+A thread says so itself when its next turn would get a server that reads Needs
+sign-in, and carries the same sign-in control
+([Thread view](design/thread-view.md#server-sign-in)). The host decides which
+servers those are (`/api/extensions/connections`, `thread-sign-in`) from the
+thread's mode and id, the selections the next turn would carry, and the `@` names
+its draft could not select: the Project's pins (Work and Code), those selections
+and those names, each put through the checks the turn itself makes against the
+thread's own activation. It does not ask the sessions, because a turn drops a
+server whose connection failed, the composer refuses it, and a missing sign-in is
+what makes it fail. A thread whose turns carry no extension tools (a Project on
+a server, Strict on Windows, or in Work and Code a model known not to carry
+Octant's tools) names none. The answer is told only to a principal the sign-in routes admit, a local
+window or a device the host's own person paired; every other device session is
+refused, so it is never shown a sign-in it cannot do. The read writes nothing,
+and no address, code or token passes through it: the sign-in and its one-time
+relay are the routes below, unchanged.
 
 For an existing host-owned HTTP OAuth session, an approved explicit invocation
 checks the exact retained grant owner again before dispatch. Credential access
@@ -22311,7 +22454,9 @@ defers, and it owns the architectural rules behind it.
 Silicon technical preview with the provider-neutral plugin/skill marketplace.
 It needs macOS 15 Sequoia or later: the app bundle declares 15.0 because the
 bundled Simulator accessibility and camera tools need it, while the core
-helpers declare 14.0 and are covered by the app's floor. Macs on macOS 14
+helpers declare 14.0 and are covered by the app's floor. The speech helper
+declares macOS 26 and is started only there; packaging builds it with an
+installed Xcode that has the macOS 26 SDK and fails without one. Macs on macOS 14
 must not update past the last version released before this requirement. The
 update feed does not guard against it (maintainer decision, 2026-11-22): an
 older installed copy on macOS 14 can still download a newer build, through the

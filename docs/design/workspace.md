@@ -677,7 +677,41 @@ the person or a turn that was running at snooze time ends). The sidebar files
 both in collapsed shelves below the Project groups and derives snooze
 visibility from the clock; no host timer wakes a snooze. The Work and Code
 boards leave out completed threads until they are reopened. A person sending a
-thread a turn reopens or wakes it on the server. One host sweep archives
+thread a turn reopens or wakes it on the server.
+
+**A thread is not settled before its side tasks and child work are done**
+(maintainer decision, 2026-11-25). The host decides this for every way of
+settling, in Chat, Work and Code: a person's Settle is refused with a sentence
+naming what is not done, Mark done marks without settling, and the finished
+report and merged pull request passes below leave the thread alone. Not done is
+a started side task whose thread works or needs the person (its receipt's
+Working and Needs you), one whose report is still owed here, or a child run
+that still runs, Octant-managed or the provider's own. A provider's child
+counts by its last report since this host started, because a report is not
+proof of a process and a host that stopped took its children along. A finished
+child run whose result is only unread does not refuse a person's Settle; the
+two passes still leave such a thread alone. Done is a child that is quiet with
+no report owed, or archived, deleted or purged. Only the thread's own children
+count, an offer nobody started never holds it, and stopping a child's reports
+does not make a working child done. A report the parent's own state keeps from
+being delivered (a Work thread marked Done, a mode that is off, a Code worktree
+that was cleaned up) does not hold the settle, so there is always a way out; a
+report waiting only for the thread's running turn does, since that turn's end
+delivers it. A settle skipped for this is not tried again on a timer. A child
+the person continues after the parent settled brings the parent back with its
+report.
+
+**A side task's report keeps the parent's snooze** (maintainer decision,
+2026-11-25). Its turn runs while the parent stays hidden until the same wake
+time, in Chat, Work and Code. Besides the wakes above, the snooze ends early
+when that turn fails; one that completes, or that the person stops, wakes
+nothing, and a usage-limit snooze keeps its own rules. A snooze that had
+already ended with the turn it was set during is dropped when the report's turn
+starts, so that turn does not hide the thread again. A report the thread cannot
+take yet changes neither rest, however often it is retried. Managed child
+results are not changed by this.
+
+One host sweep archives
 completed threads of every mode once their completion is older than the
 `completedThreadArchiveAfterDays` shell setting (default seven days, `null`
 for never), re-deciding against each mode's authoritative record and
@@ -4018,9 +4052,25 @@ The Issues surface is laid out as the Pull requests page is: a 384px list
 column with the title and count, the Repository control in the same place and
 at the same fixed width (All repositories, or one repository, from the picker),
 Sort, a search field at the column's width, and Open, Closed and All as the
-same chips; rows are the shared row (state glyph, title, one meta line). The
-reading pane shares the pull request pane's columns: the text column (720px) and
-a 260px facts column, centred together with a 32px gap, and the action (Start a
+same chips; rows are the shared row (state glyph, title, one meta line).
+
+A closed issue says why it was closed, as GitHub reports it: the state pill and
+the row glyph's name read Closed as completed, Closed as not planned or Closed
+as duplicate, and a not-planned or duplicate issue takes a struck-circle glyph
+instead of the check, so the difference is not carried by colour. An issue
+GitHub gives no reason for, or a reason this host does not know, reads plain
+Closed with the check. While Closed is chosen a second row of the same chips
+offers All closed, Completed and Not planned; it applies to one repository and
+to All repositories alike, and leaving Closed forgets the choice. GitHub's
+repository issue list cannot filter by reason, so Completed and Not planned read
+through GitHub's issue search, which has its own tighter rate limit; the list
+ends at search's first 1,000 results.
+GitHub Project status is not shown, because reading it needs access the sign-in
+does not ask for. Pull requests keep their own states.
+
+The reading
+pane shares the pull request pane's columns: the text column (720px) and a
+260px facts column, centred together with a 32px gap, and the action (Start a
 Code thread) at the facts column's right edge. The title, state pill and meta
 line sit above the description, which is rendered as markdown by the same
 renderer as a pull request's description, with its task list as read-only

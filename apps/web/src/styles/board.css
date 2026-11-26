@@ -253,18 +253,6 @@ ul.board-col-body {
   box-shadow: inset 0 0 0 1.5px currentColor;
 }
 
-.board-status-mark__spin,
-.board-card-live__spin {
-  animation: octant-spin var(--oct-motion-spin) linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .board-status-mark__spin,
-  .board-card-live__spin {
-    animation: none;
-  }
-}
-
 :root[data-octant-style="colour"] .board-status-mark[data-status="in-progress"] {
   color: var(--octant-palette-orange);
 }
@@ -353,10 +341,6 @@ ul.board-col-body {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   line-height: 1.3;
-}
-
-.board-card-live__spin {
-  flex: 0 0 auto;
 }
 
 .board-card-live__text {

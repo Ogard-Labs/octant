@@ -237,6 +237,43 @@ describe("CodeOverview", () => {
     );
   });
 
+  it("draws a thread that is still loading as its title alone, and a failed one with its reason", () => {
+    const { rerender } = render(
+      <CodeOverview
+        controller={{ ...controller(), activeView: undefined, status: "loading" }}
+        threadId={ids.thread as never}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Loading Code thread" })).toBeVisible();
+    expect(document.querySelector('[data-slot="empty-description"]')).toBeNull();
+
+    rerender(
+      <CodeOverview
+        controller={{ ...controller(), activeView: undefined, status: "conflict-reload" }}
+        threadId={ids.thread as never}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Reloading Code thread" })).toBeVisible();
+    expect(document.querySelector('[data-slot="empty-description"]')).toBeNull();
+
+    rerender(
+      <CodeOverview
+        controller={{
+          ...controller(),
+          activeView: undefined,
+          // A failed read leaves Code connected: the controller keeps "ready"
+          // for every category but a lost or unavailable service.
+          errorCategory: "failed",
+          errorMessage: "This thread could not be read.",
+          status: "ready",
+        }}
+        threadId={ids.thread as never}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Code thread unavailable" })).toBeVisible();
+    expect(screen.getByText("This thread could not be read.")).toBeVisible();
+  });
+
   it("renders only authoritative thread, checkout, policy, and delivery facts", () => {
     const onOpenReview = vi.fn();
     const onOpenSurface = vi.fn();
@@ -523,7 +560,7 @@ describe("CodeOverview", () => {
       />,
     );
     expect(screen.queryByText("feature/controller")).not.toBeInTheDocument();
-    expect(screen.getByText("Code projections unavailable")).toBeVisible();
+    expect(screen.getByText("Project overview unavailable")).toBeVisible();
   });
 
   it("renders no placeholder for a facet the host did not report", async () => {
@@ -731,7 +768,7 @@ describe("CodeOverview", () => {
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Code transport disconnected.");
-    expect(screen.getByText("Code projections unavailable")).toBeVisible();
+    expect(screen.getByText("Project overview unavailable")).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "First message" })).not.toBeInTheDocument();
   });
 });

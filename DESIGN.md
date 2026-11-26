@@ -92,6 +92,18 @@ computer" and "credential store" otherwise. Vocabulary: `Project`, `thread`,
 implementation / Pull request / Merged). The word "target" does not appear in
 the interface.
 
+**Plain words.** A sentence in the interface says what the person is waiting
+for, what happened, or what to do next, in the words they use for it. It never
+names the mechanism: nothing is "authoritative", no type's name from the code
+appears (`AgentRun`), and "shell state" and "projection" give way to what
+the person sees (the workspace, a Project's data). A loading state is its title
+alone ("Loading workspace"); a line under the spinner stays only where it says
+what the title cannot: what to do with a draft while the window reconnects,
+that the host will be asked to approve a browser being paired, and that the
+browser's key stays on its device. Until 2026-11-25 the first sentence the app
+showed was "Loading authoritative shell state.", and thirty loading states
+repeated their title as a message (maintainer request).
+
 Avoid dashboard walls, neon developer styling, permanent low-frequency
 controls, oversized setup cards, pill-shaped controls and invented data. The
 one decorative thing is the [application ground](docs/design/application-ground.md).
@@ -621,20 +633,21 @@ its fills from the float (`--octant-float-control`, `-hover`, `-pressed`,
 
 ### Motion
 
-| Token                    | Value                            | Use                                |
-| ------------------------ | -------------------------------- | ---------------------------------- |
-| `--oct-motion-fast`      | 150ms                            | Feedback; an overlay arriving      |
-| `--oct-motion-base`      | 200ms                            | Geometry; a switch thumb           |
-| `--oct-dur-fast`         | 100ms                            | An overlay leaving                 |
-| `--oct-motion-panel`     | 300ms                            | The sidebar sliding open or closed |
-| `--oct-motion-spin`      | 900ms                            | A spinner turn                     |
-| `--oct-motion-pulse`     | 1.6s                             | A live dot                         |
-| `--oct-motion-flowing`   | 36s                              | The Flowing ground's CSS fallback  |
-| `--oct-motion-ground-in` | 1200ms                           | A drawn ground fading in           |
-| `--oct-ease-standard`    | `ease`                           | Ordinary transitions               |
-| `--oct-ease-motion`      | `cubic-bezier(0.22, 1, 0.36, 1)` | Overlays arriving                  |
-| `--oct-ease-color`       | `cubic-bezier(0.4, 0, 0.2, 1)`   | Overlays leaving, colour           |
-| `--oct-ease-panel`       | `cubic-bezier(0.32, 0.72, 0, 1)` | The sidebar's slide                |
+| Token                    | Value                            | Use                                 |
+| ------------------------ | -------------------------------- | ----------------------------------- |
+| `--oct-motion-fast`      | 150ms                            | Feedback; an overlay arriving       |
+| `--oct-motion-base`      | 200ms                            | Geometry; a switch thumb            |
+| `--oct-dur-fast`         | 100ms                            | An overlay leaving                  |
+| `--oct-motion-panel`     | 300ms                            | The sidebar sliding open or closed  |
+| `--oct-motion-spin`      | 900ms                            | A spinner turn                      |
+| `--oct-motion-crawl`     | 2s                               | A spinner turn under reduced motion |
+| `--oct-motion-pulse`     | 1.6s                             | A live dot                          |
+| `--oct-motion-flowing`   | 36s                              | The Flowing ground's CSS fallback   |
+| `--oct-motion-ground-in` | 1200ms                           | A drawn ground fading in            |
+| `--oct-ease-standard`    | `ease`                           | Ordinary transitions                |
+| `--oct-ease-motion`      | `cubic-bezier(0.22, 1, 0.36, 1)` | Overlays arriving                   |
+| `--oct-ease-color`       | `cubic-bezier(0.4, 0, 0.2, 1)`   | Overlays leaving, colour            |
+| `--oct-ease-panel`       | `cubic-bezier(0.32, 0.72, 0, 1)` | The sidebar's slide                 |
 
 - **Overlays** (menu, context menu, select, combobox, popover, tooltip, hover
   card, dialog, sheet, their scrims) fade in over 150ms and out over 100ms. A
@@ -654,7 +667,9 @@ its fills from the float (`--octant-float-control`, `-hover`, `-pressed`,
   is `--oct-disabled-opacity` (0.75), no hover fill, no pointer events.
 - **Reduced motion** (system or setting) removes every transition and holds
   every drawn ground on a still frame. Running state always has a word or shape
-  as well as motion.
+  as well as motion. A spinner is the one thing that keeps moving, one slow
+  turn per `--oct-motion-crawl`, because a frozen spinner reads as a hung
+  app; a live dot holds still.
 
 ### Focus
 
@@ -1111,9 +1126,10 @@ is costly to render mounts only while open.
   or `status`). Giving it a `state` (`disconnected`, `loading`, `neutral`,
   `warning`) draws that state's glyph instead of an icon and takes `action` as
   `{ label, onClick, glyph? }`, one secondary button with a retry glyph by
-  default; a loading state spins its glyph, is a `status` region and may omit
-  `message`. **page** (`layout="page"` with a `state`) is a state that is the
-  whole window. **line** (`layout="line"`) is the quiet single line a page shows
+  default; a loading state spins its glyph, is a `status` region and is its
+  title alone; the few lines kept under a spinner are named in Plain words
+  under [Principles](#principles). **page** (`layout="page"` with a `state`) is a
+  state that is the whole window. **line** (`layout="line"`) is the quiet single line a page shows
   when it has nothing on it: `title`, `detail`, `icon`, `action` and `tone`
   (`page` or `lane`). Parts Root, Header, Content, Description, Eyebrow, Media,
   Title stay exported for composed states.
@@ -1153,6 +1169,22 @@ is costly to render mounts only while open.
   danger border; disabled 0.75. Glass: no fill at rest, so nothing changes.
 - **Do** pass `unstyled` when the feature draws the frame (a toolbar search, a
   stepper's middle). **Don't** repaint a field from a feature stylesheet.
+
+### OctantKbd
+
+- **Purpose.** Every keyboard chord the interface shows.
+- **Anatomy.** A `kbd` in one of two forms. **cap** (the default) is the boxed
+  key: in a sentence, a tooltip, a field, Review's actions and the command
+  palette's shortcut badge. **bare** is the quiet chord at the end of a row (a
+  sidebar row, the model picker), where a box on every row would read as a
+  column of buttons. `decorative` hides it from a screen reader where the
+  control's own name or description already says the chord.
+- **Tokens.** 12px in the meta ink, regular weight, in the face of the text it
+  stands in, as a native menu sets its shortcuts. The cap adds 0 by 4px
+  padding, one `--oct-border` line and `--oct-radius-sm`.
+- **Don't** set its ink, face, size or box from a feature stylesheet, which may
+  only place it. The hand-drawn hints used three typefaces in seven paints
+  (counted 2026-11-25).
 
 ### OctantMenu
 
@@ -1263,6 +1295,42 @@ is costly to render mounts only while open.
 - **Tokens.** A 4px round track in `--octant-divider-strong` (3:1 on a card in
   both modes); a 14px round thumb in the primary with a 2px page-colour ring.
 - **States.** Disabled 0.75; grab cursor while dragging. Native range keys.
+
+### OctantSpinner
+
+- **Purpose.** Every "this is running" mark: a loading state, a running turn,
+  tool row, task or thread, a busy button.
+- **Anatomy.** The open ring (`LoaderCircle`) at `size` 12, 14, 16 (the
+  default) or 20, in the ink of the control it stands in. It is decoration
+  beside a word that says what is running; `label` names the wait where
+  nothing beside it does.
+- **Tokens.** One turn per `--oct-motion-spin`, from the one keyframe
+  `oct-spin` and the one rule `.octant-spinner`.
+- **States.** Under reduced motion, from the system or from the setting, it
+  turns once per `--oct-motion-crawl`: a frozen spinner reads as a hung
+  app. Until 2026-11-25 one spinner did that and the rest stopped.
+- **Don't** animate a glyph from a feature stylesheet or switch a spin on from
+  a parent's state attribute; render the spinner for that state. The one
+  thing that turns by another keyframe is a model endpoint's status ring.
+
+### OctantStatusDot
+
+- **Purpose.** The dot that says what state something is in: an agent run, a
+  host's connection, a listening server, an active filter.
+- **Anatomy.** A filled circle, 8px beside a row's text or 6px (`small`) in a
+  chip or a dense list. `tone` is `neutral` (resting or unknown, the
+  default), `active` (running or connected with nothing to report), or a
+  status role: `success`, `warning`, `danger`, `accent`. `live` breathes
+  while the thing it marks is going on.
+- **Tokens.** Neutral is the ink at 22% and active at 45%, so the dot lands at
+  the same weight on any fill and on glass; a status takes `--oct-success`,
+  `--oct-warn`, `--oct-danger` or `--oct-accent`. The pulse is
+  `--oct-motion-pulse`, and holds still under reduced motion.
+- **Accessibility.** Always hidden from a screen reader: colour never carries a
+  state alone, so the word beside the dot is what is read.
+- **Don't** use it for a ring, a meter, an unread mark, a swatch, a pager or a
+  chart mark, or for one of the categorical palette hues; those are meanings
+  of their own and keep their own marks.
 
 ### OctantSwitch
 
@@ -1622,6 +1690,7 @@ Surface (measure 880px, or wide)
   surface-toolbar search · filters · view switch
   SurfaceSection  section label over a hairline
     surface-row   label + detail left, control right
+  surface-table   a head naming the columns once, rows on its columns
   OctantEmpty layout="line"
                   a 20px mark, one line, one outline button
   SurfaceLoading  the page in outline
@@ -1823,6 +1892,34 @@ button. Chips above a composer are 24px; Work's starter chips
 are the one borderless 28px chip, and Code Home's prompt suggestions are the
 suggestion card (see Start screen).
 
+**Page table.** A page that lists things with several facts each (Agents,
+Artifacts, Automations) draws them as one table, `surface-table` in
+`styles/surface-table.css`, which those pages import so the window's first
+paint does not carry it. A 32px head in the Meta role names the columns once, and
+each row is a hairline rail on the head's own columns. The page sets
+`--surface-table-columns`: the name column takes the room and the trailing
+columns have fixed widths, so a status changing or a figure ticking changes a
+cell's words and never moves a column. A row's name is the Row label over a
+Meta line, each cut to one line, and a row is as tall as those two lines with
+8px above and below. The button that opens a row
+(`surface-table__open`) has no padding or border of its own, so its words
+stand under the head's; where it spans several columns (`--cells`) it lays its
+cells on the row's columns, and `--top` starts cells of one line and of two on
+one line. In a narrow pane the page drops its least important columns first,
+so the name keeps the room: Agents lets run time and usage go at 840px, and
+Artifacts the edited time at 800px. A page names its columns and draws its
+cells; it never redraws the head, the rail, the hover or the open button.
+Until 2026-11-25 the three pages each drew this by hand: three row heights, a
+15px and a 14px label, and on Artifacts a name 9px right of its head, a 34px
+search field and view switch beside the others' 28px, and underlined tabs
+(maintainer request).
+
+**A name keeps its room.** Text that follows a name on its line (a path, a
+latest line) starts from no width and takes what the name leaves
+(`flex: 1 1 0`). Letting it start from its own width with a large shrink factor
+still takes a fraction of a pixel from the name, and an ellipsis needs a whole
+letter's room: the Environment section showed "Octa…" beside 190px of path.
+
 Rows are hairline rails, never cards. They reserve stable gutters for marks;
 hover actions fade in over a slot already kept for them (a thread row's slot
 holds its age; a section head's actions keep their width), so nothing beside
@@ -1929,11 +2026,13 @@ but never repaint a shared control.
 | `theme/visualLanguageContract.test.ts`                                               | Radii from tokens; the framed panel's outline, gap, clip and pane lines; flat resting surfaces; one hairline and one drop on floats; the composer pill, outline and float shadow; one focus edge                                                                                                                                                          |
 | `theme/roundThingsContract.test.ts`                                                  | The pill token only on round things                                                                                                                                                                                                                                                                                                                       |
 | `theme/sharedControlPaintContract.test.ts`                                           | Composer-row controls quiet; the composer and a Settings group flat                                                                                                                                                                                                                                                                                       |
-| `theme/surfaceLanguageContract.test.ts`                                              | Faces; each type role defined once; one page shell                                                                                                                                                                                                                                                                                                        |
+| `theme/surfaceLanguageContract.test.ts`                                              | Faces; each type role defined once; one page shell; one page table                                                                                                                                                                                                                                                                                        |
 | `theme/alignmentContract.test.ts`                                                    | Band gaps and insets, rail faces, dock bar, Settings rhythm, the one hairline                                                                                                                                                                                                                                                                             |
 | `theme/composerColumnsContract.test.ts`, `theme/interfaceTypographyContract.test.ts` | Composer columns; interface typography reach                                                                                                                                                                                                                                                                                                              |
+| `ui/smallMarksContract.test.ts`                                                      | One spin keyframe and one rule that turns it; no `kbd` outside `OctantKbd` and no hint's ink, face or box in a feature stylesheet; the migrated state dots only placed, never redrawn                                                                                                                                                                     |
 | `ui/iconScaleContract.test.ts`, `ui/focusOwnershipContract.test.ts`                  | Icon sizes and stroke; focus ownership                                                                                                                                                                                                                                                                                                                    |
 | `theme/translucencyContract.test.ts`                                                 | One coat on the shell and clear panes under glass; dense float with no backdrop filter under host glass; no backdrop filter on a surface inside a translucent shell; opaque under reduced transparency and increased contrast; the coat floors computed from the role colours                                                                             |
+| `theme/plainWordsContract.test.ts`                                                   | No sentence a person can read says "target", "authoritative" or a type's name from the code; a loading state carries no message                                                                                                                                                                                                                           |
 | `gallery/Gallery.test.tsx`                                                           | Every adapter appears in the component gallery or is listed with a reason                                                                                                                                                                                                                                                                                 |
 | `visualCheck/visualCheck.chromium.test.ts` (workflow `visual-check.yml`)             | The key screens still draw as their baselines in `apps/web/visual-baselines` (see Visual check below)                                                                                                                                                                                                                                                     |
 

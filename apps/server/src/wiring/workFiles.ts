@@ -30,6 +30,7 @@ import { createVideoRouteHandler } from "../video/videoRoutes";
 import { videoOfferDecisionRules } from "../video/videoOfferDecisionRules";
 import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
 import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
+import type { AppleSpeechEngine } from "../speech/appleSpeechEngine";
 import { createSpeechRouteHandler } from "../speech/speechRoutes";
 import { narrationDecision } from "../speech/narrationTool";
 import { transcriptionDecision } from "../speech/transcriptionTool";
@@ -82,7 +83,10 @@ export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence">
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<CodeWiring, "roots"> &
   Pick<WorkWiring, "workThreadService"> &
-  Readonly<{ workThreadProjection: WorkThreadProjection }> &
+  Readonly<{
+    localSpeechEngine: AppleSpeechEngine;
+    workThreadProjection: WorkThreadProjection;
+  }> &
   Pick<ContextWiring, "windowCanOpenThread"> &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<FoundationsWiring, "workArtifactProjection" | "workTurnProjection">;
@@ -196,6 +200,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   });
   const speechRoutes = createSpeechRouteHandler({
     gates: deps.speechGates,
+    localEngine: deps.localSpeechEngine,
     readVoiceSettings: () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings()).voice,
     listInstances: () => persistence.readProviderInstances(),

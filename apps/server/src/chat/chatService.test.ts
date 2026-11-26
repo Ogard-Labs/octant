@@ -1,6 +1,6 @@
 import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
 import { videoOfferDecisionRules } from "../video/videoOfferDecisionRules";
-import { decodeChatThreadId, decodeEventActor } from "@octant/contracts";
+import { decodeChatThreadId, decodeEventActor, decodeSideTaskReportOwed } from "@octant/contracts";
 import {
   decodeImageGenerationScopeId,
   decodeProviderInstance,
@@ -172,6 +172,10 @@ import { ResearchRouter } from "./research/researchRouter";
 import { ThreadWorkService } from "./threadWorkService";
 import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { createChatAgentResultDeliveryPort } from "./chatAgentResultDeliveryPort";
+import { createChatSideTaskReportDeliveryPort } from "../sideTasks/sideTaskReportDeliveryPorts";
+import { SideTaskReportDeliveryService } from "../sideTasks/sideTaskReportDeliveryService";
+import { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
+import { createSideTaskReportDetection } from "../sideTasks/sideTaskReports";
 import { ChatService, ChatServiceError, type ChatServiceOptions } from "./chatService";
 import { createCheckpointChatPort } from "../checkpoint/threadCheckpointPorts";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
@@ -436,6 +440,13 @@ function openFixture(options?: {
       runId: import("@octant/contracts").AgentRunId,
     ) => import("@octant/contracts").AgentRun | undefined;
     readonly resultText: (runId: import("@octant/contracts").AgentRunId) => string | undefined;
+  };
+  readonly unfinishedWork?: ChatServiceOptions["unfinishedWork"];
+  readonly sideTaskReports?: {
+    readonly reportsForParent: (
+      parentThreadId: string,
+    ) => ReadonlyArray<import("../sideTasks/sideTaskReportStore").SideTaskReportEntry>;
+    readonly recordIngestion: () => boolean;
   };
   readonly gatherMultiModelRuntimeFacts?: (input: {
     readonly pool: import("@octant/contracts/multi-model-pool").MultiModelPool;
@@ -893,6 +904,8 @@ function openFixture(options?: {
       ? {}
       : { gatherMultiModelRuntimeFacts: options.gatherMultiModelRuntimeFacts }),
     ...(options?.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
+    ...(options?.sideTaskReports === undefined ? {} : { sideTaskReports: options.sideTaskReports }),
+    ...(options?.unfinishedWork === undefined ? {} : { unfinishedWork: options.unfinishedWork }),
     ...(options?.issueContext === undefined ? {} : { issueContext: options.issueContext }),
     ...(options?.linearIssueContext === undefined
       ? {}
@@ -11841,6 +11854,30 @@ describe("completing and snoozing a Chat thread", () => {
     expect(service.read(thread.id).thread).not.toHaveProperty("completedAt");
   });
 
+  it("refuses to settle a Chat whose side task needs the person, says which, and settles it once that is done", async () => {
+    let work: ReturnType<NonNullable<ChatServiceOptions["unfinishedWork"]>> = {
+      kind: "side-task-attention",
+      title: "Fix the docs",
+    };
+    const { service } = openFixture({ unfinishedWork: () => work });
+    const thread = await createThread(service);
+    const settle = () =>
+      service.execute({
+        kind: "complete-chat-thread",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+      });
+    await expect(settle()).rejects.toMatchObject({
+      failure: {
+        category: "invalid",
+        message: expect.stringMatching(/side task “Fix the docs” needs you/),
+      },
+    });
+    expect(service.read(thread.id).thread).not.toHaveProperty("completedAt");
+    work = undefined;
+    await expect(settle()).resolves.toMatchObject({ thread: { completedAt: now } });
+  });
+
   it("snoozes a thread until a time ahead, wakes it by hand, and refuses a wake time already gone", async () => {
     const { service, persistence } = openFixture();
     const thread = await createThread(service);
@@ -12790,6 +12827,225 @@ describe("agent result delivery", () => {
       runIds: [run.id],
     });
     expect(fixture.service.read(created.thread.id).turns).toHaveLength(2);
+  });
+
+  it("delivers a side-task child's completed Chat reply to its parent's provider exactly once", async () => {
+    let reports: SideTaskReportStore;
+    let detection: ReturnType<typeof createSideTaskReportDetection>;
+    const fixture = openFixture({
+      sideTaskReports: {
+        reportsForParent: (id) => reports.reportsForParent(id),
+        recordIngestion: () => true,
+      },
+      nativeHarness: {
+        contextFor: () => [],
+        turnStarted: () => undefined,
+        turnCompleted: async (input) => detection.turnCompleted(input),
+        turnEnded: (scope, turn) => {
+          if (turn !== undefined) detection.turnEnded(scope.threadId, turn);
+        },
+      },
+    });
+    const create = async (title: string) => {
+      const result = await fixture.service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title,
+      });
+      if (result.kind !== "thread-created") throw new Error("Expected a Chat thread.");
+      return result.thread;
+    };
+    let parent = await create("Parent");
+    const child = await create("Child");
+    // The person hid the parent until later; a report runs under that snooze.
+    const snoozed = await fixture.service.execute({
+      kind: "snooze-chat-thread",
+      threadId: parent.id,
+      expectedVersion: parent.version,
+      until: "2099-01-01T00:00:00.000Z",
+    });
+    if (snoozed.kind !== "thread-updated") throw new Error("Expected the snoozed thread.");
+    parent = snoozed.thread;
+    reports = new SideTaskReportStore({
+      journal: fixture.persistence.journal,
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+      actor: decodeEventActor({ kind: "local-user", actorId: ids.actor }),
+    });
+    detection = createSideTaskReportDetection({
+      parentOf: (id) => (id === child.id ? parent.id : undefined),
+      offerFor: () => ({ title: "Fix stale install docs", mode: "chat" }),
+      reports,
+      now: () => now,
+    });
+    const chat = createChatSideTaskReportDeliveryPort({
+      readThread: (id) => fixture.service.read(id).thread,
+      readThreadView: (id) => fixture.service.read(id),
+      chat: fixture.service,
+    });
+    const service = new SideTaskReportDeliveryService({
+      reports,
+      journal: fixture.persistence.journal,
+      ports: { chat, work: chat, code: chat },
+      childDeleted: () => false,
+      clock: () => new Date(now),
+    });
+    const unsubscribe = fixture.persistence.journal.subscribeCommitted((append) =>
+      service.onCommittedAppend(append),
+    );
+    try {
+      service.start();
+      await fixture.service.execute({
+        kind: "send-chat-turn",
+        threadId: child.id,
+        expectedVersion: child.version,
+        prompt: "Check the docs.",
+      });
+      await until(() => reports.reportsForParent(parent.id)[0]?.state === "delivered");
+      const reportId = reports.reportsForParent(parent.id)[0]?.report.reportId;
+      const delivery = fixture.service.read(parent.id).turns[0];
+      expect(delivery?.delivery).toEqual({ kind: "side-task-report", reportIds: [reportId] });
+      expect(fixture.service.read(parent.id).thread.snooze).toEqual(parent.snooze);
+      expect(fixture.fakeDriver.sentTurns[1]?.prompt).toContain('"text":"Fixture response"');
+      const replay = {
+        kind: "deliver-chat-side-task-report",
+        threadId: parent.id,
+        expectedVersion: parent.version,
+        reportIds: [reportId],
+      };
+      await expect(fixture.service.execute(replay)).resolves.toMatchObject({
+        kind: "turn-created",
+        turn: { id: delivery?.id },
+      });
+      await expect(
+        fixture.service.execute(replay, { windowId: decodeWindowId(ids.actor) }),
+      ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+      expect(fixture.service.read(parent.id).turns).toHaveLength(1);
+      fixture.service.noteReportTurnFailed(parent.id);
+      expect(fixture.service.read(parent.id).thread).not.toHaveProperty("snooze");
+    } finally {
+      unsubscribe();
+      service.stop();
+    }
+  });
+
+  it("marks a Chat parent as having read a side-task report only once it takes the report, and before its provider does", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const order: string[] = [];
+    const driver = {
+      acquire: () =>
+        Effect.sync(() => {
+          const queue = Effect.runSync(Queue.unbounded<never>());
+          return {
+            subscribe: Effect.succeed(Stream.fromQueue(queue)),
+            start: (input: { readonly sessionId: string }) =>
+              Effect.succeed({ sessionId: input.sessionId }),
+            send: (input: { readonly sessionId: string }) =>
+              Effect.gen(function* () {
+                const emit = (event: Record<string, unknown>) =>
+                  Queue.offer(queue, { sessionId: input.sessionId, ...event } as never);
+                order.push("provider");
+                yield* Effect.promise(() => gate);
+                yield* emit({ kind: "text-delta", text: "Done." });
+                yield* emit({ kind: "usage", inputTokens: 10, outputTokens: 5 });
+                yield* emit({ kind: "completed" });
+              }),
+            interrupt: () => Effect.void,
+            stop: () => Effect.void,
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          };
+        }),
+    } as unknown as ProviderDriver;
+    let parentThreadId = "";
+    let recorded = true;
+    const reportId = "00000000-0000-4000-8000-0000000000d2";
+    const fixture = openFixture({
+      driver,
+      sideTaskReports: {
+        reportsForParent: () => [
+          {
+            childThreadId: "00000000-0000-4000-8000-0000000000d3",
+            state: "owed",
+            report: decodeSideTaskReportOwed({
+              reportId,
+              parentThreadId,
+              parentMode: "chat",
+              title: "Fix stale install docs",
+              outcome: "completed",
+              text: "The docs are updated.",
+              endedAt: now,
+              owedAt: now,
+            }),
+          },
+        ],
+        recordIngestion: () => {
+          order.push("marked");
+          return recorded;
+        },
+      },
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Parent",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const parentId = created.thread.id;
+    parentThreadId = String(parentId);
+    const deliver = () =>
+      fixture.service.execute({
+        kind: "deliver-chat-side-task-report",
+        threadId: parentId,
+        expectedVersion: fixture.service.read(parentId).thread?.version,
+        reportIds: [reportId],
+      });
+    const sending = fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: parentId,
+      expectedVersion: created.thread.version,
+      prompt: "Check the docs.",
+    });
+    await until(() => order.includes("provider"));
+    await expect(deliver()).rejects.toMatchObject({ failure: { category: "waiting" } });
+    expect(order).toEqual(["provider"]);
+
+    release();
+    await sending;
+    await until(
+      () => fixture.service.read(parentId).turns[0]?.attempts.at(-1)?.outcome === "completed",
+    );
+    recorded = false;
+    await expect(deliver()).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(fixture.service.read(parentId).turns).toHaveLength(1);
+
+    recorded = true;
+    await deliver();
+    expect(order).toEqual(["provider", "marked", "marked", "provider"]);
+  });
+
+  it("refuses a side-task report delivery the journaled entries do not owe", async () => {
+    const fixture = openFixture({
+      sideTaskReports: { reportsForParent: () => [], recordIngestion: () => true },
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Parent",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await expect(
+      fixture.service.execute({
+        kind: "deliver-chat-side-task-report",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        reportIds: ["00000000-0000-4000-8000-0000000000d1"],
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
   it("refuses a delivery that names a run the thread never owned or an unfinished run", async () => {

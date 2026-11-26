@@ -36,7 +36,21 @@ const MAX_STEERED_RECORDS_PER_THREAD = 1_000;
 
 /** Journals the person's message as steered into the turn named by `turnKey`. */
 export function journalThreadMessageSteered(
-  journal: Pick<Journal, "append">,
+  journal: {
+    readonly append: (request: {
+      readonly aggregate: { readonly aggregateType: string; readonly aggregateId: string };
+      readonly expectedVersion: number;
+      readonly events: ReadonlyArray<{
+        readonly eventId: string;
+        readonly eventName: string;
+        readonly eventVersion: 1;
+        readonly correlationId: string;
+        readonly actor: EventActor;
+        readonly occurredAt: string;
+        readonly payload: ThreadMessageSteered;
+      }>;
+    }) => unknown;
+  },
   input: {
     readonly mode: ThreadMessageSteered["mode"];
     readonly threadId: string;
