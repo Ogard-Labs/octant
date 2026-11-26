@@ -918,6 +918,44 @@ export class AppleToolchainService {
     return refresh;
   }
 
+  /**
+   * The Simulator's state as the host's device list says now, written into the
+   * cached lists, or undefined when the list cannot be read or does not name
+   * it. Xcode boots a Simulator for a test without the cache seeing it, so a
+   * helper's cleanup reads this rather than the cache before it decides a
+   * Simulator it held is off.
+   */
+  async simulatorStateNow(
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+    context: AppleExecutionContext,
+  ): Promise<AppleSimulatorRecord["state"] | undefined> {
+    const listed = await this.#command(
+      ["xcrun", "simctl", "list", "devices", "available", "--json"],
+      context,
+      DISCOVERY_TIMEOUT_MS,
+      new AbortController().signal,
+    );
+    if (!succeeded(listed)) return undefined;
+    let state: AppleSimulatorRecord["state"] | undefined;
+    try {
+      state = parseSimulators(text(listed.stdout)).find(
+        (record) => String(record.simulatorId) === String(simulatorId),
+      )?.state;
+    } catch {
+      return undefined;
+    }
+    if (state === undefined) return undefined;
+    const withState = (records: ReadonlyArray<AppleSimulatorRecord>) =>
+      records.map((record) =>
+        String(record.simulatorId) === String(simulatorId) ? { ...record, state } : record,
+      );
+    this.#lastSimulators = withState(this.#lastSimulators);
+    for (const [key, entry] of this.#discovery)
+      this.#discovery.set(key, { ...entry, simulators: withState(entry.simulators) });
+    this.#sequence += 1;
+    return state;
+  }
+
   /** Adds Simulators the device list names that no cached list has; known ones keep their state. */
   async #addListedSimulators(context: AppleExecutionContext, signal: AbortSignal): Promise<void> {
     const listed = await this.#command(

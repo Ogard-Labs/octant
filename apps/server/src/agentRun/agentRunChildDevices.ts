@@ -264,7 +264,13 @@ const hostAction = (input: Pick<ChildCodeToolInput, "uuid">, device: ChildBooted
 
 type Apple = Pick<
   AppleToolchainService,
-  "discover" | "execute" | "cancel" | "snapshot" | "readScreenshotArtifact" | "readLogArtifact"
+  | "discover"
+  | "execute"
+  | "cancel"
+  | "snapshot"
+  | "readScreenshotArtifact"
+  | "readLogArtifact"
+  | "simulatorStateNow"
 >;
 
 const appleHostContext = (
@@ -284,21 +290,26 @@ const appleHostContext = (
 /**
  * Shuts down a Simulator a child run booted, as the host, and answers whether
  * it is now off. A refused or timed-out shutdown answers false, so the record
- * a restart recovers it from is kept.
+ * a restart recovers it from is kept. One the host's device list shows off
+ * is settled: a run whose build failed never booted it, and keeping its record
+ * let a later restart shut down the Simulator once the person booted it.
  */
 export async function shutDownChildSimulator(
-  apple: Pick<AppleToolchainService, "execute">,
+  apple: Pick<AppleToolchainService, "execute" | "simulatorStateNow">,
   device: ChildBootedDevice,
   input: { readonly artifactRoot: string; readonly uuid: () => string },
 ): Promise<boolean> {
+  const context = appleHostContext(device, input.artifactRoot);
+  const now = await apple
+    .simulatorStateNow(device.deviceId as never, context)
+    .catch(() => undefined);
+  if (now === "shutdown") return true;
   const request: AppleSimulatorRequest = {
     ...hostAction(input, device),
     kind: "shutdown",
     simulatorId: device.deviceId as never,
   };
-  const evidence = await apple
-    .execute(request, appleHostContext(device, input.artifactRoot))
-    .catch(() => undefined);
+  const evidence = await apple.execute(request, context).catch(() => undefined);
   return evidence?.outcome === "succeeded";
 }
 
@@ -452,7 +463,13 @@ function testsOnUnnamedSimulator(inputJson: string): boolean {
 
 type Android = Pick<
   AndroidToolchainService,
-  "discover" | "execute" | "cancel" | "snapshot" | "readScreenshotArtifact" | "readLogArtifact"
+  | "discover"
+  | "execute"
+  | "cancel"
+  | "snapshot"
+  | "readScreenshotArtifact"
+  | "readLogArtifact"
+  | "listsUnnamedEmulator"
 >;
 
 const androidHostContext = (
@@ -470,10 +487,12 @@ const androidHostContext = (
 
 /**
  * Shuts down an emulator a child run booted, as the host, and answers whether
- * it is now off: powered off, or not among the emulators adb sees running.
+ * it is now off: powered off, or not among the emulators adb sees running
+ * while adb lists none it cannot name. Discovery calls an offline emulator
+ * off, so "not booted" alone dropped the record of one that may still run.
  */
 export async function shutDownChildEmulator(
-  android: Pick<AndroidToolchainService, "discover" | "execute">,
+  android: Pick<AndroidToolchainService, "discover" | "execute" | "listsUnnamedEmulator">,
   device: ChildBootedDevice,
   input: { readonly artifactRoot: string; readonly uuid: () => string },
 ): Promise<boolean> {
@@ -487,10 +506,11 @@ export async function shutDownChildEmulator(
     emulatorId: device.deviceId as never,
   };
   const evidence = await android.execute(request, context).catch(() => undefined);
+  if (evidence?.outcome === "succeeded") return true;
   return (
-    evidence?.outcome === "succeeded" ||
-    (evidence?.outcome === "invalid-destination" &&
-      evidence.diagnostics.some((note) => note.message === "destination-not-booted"))
+    evidence?.outcome === "invalid-destination" &&
+    evidence.diagnostics.some((note) => note.message === "destination-not-booted") &&
+    !(await android.listsUnnamedEmulator(context).catch(() => true))
   );
 }
 

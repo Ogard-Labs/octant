@@ -97,7 +97,10 @@ its asks appear on the parent's thread.
   no longer holds its grant. Devices a child booted are listed on disk and shut
   down when the host next starts; a device stays listed until a shutdown is
   confirmed, so one that refused or timed out is tried again at the next
-  start. Terminals, debug sessions and language servers are already reaped
+  start. A Simulator the host's device list shows off is no longer listed, so
+  a restart never shuts down one the person booted after a helper's build
+  failed; an emulator reported not booted stays listed while adb shows one it
+  cannot name, such as an offline emulator. Terminals, debug sessions and language servers are already reaped
   then. A child opens no device pane, and its results say none is shown.
 
 | Tool                                                                | Child run                                                                                                                                                                                                                                                                                                 |

@@ -71,6 +71,8 @@ function input(overrides: Parameters<typeof childHost>[0] = {}): ChildDeviceTool
 function appleService(
   initial: "shutdown" | "booted" = "shutdown",
   fails: ReadonlyArray<string> = [],
+  // What the host's device list says now, which Xcode can change without the cache seeing it.
+  host: { state: "shutdown" | "booted" | undefined } = { state: undefined },
 ) {
   let state = initial;
   const executed: Array<{ kind: string; context: Record<string, unknown> }> = [];
@@ -84,8 +86,20 @@ function appleService(
     })),
     readScreenshotArtifact: vi.fn(),
     readLogArtifact: vi.fn(),
+    simulatorStateNow: vi.fn(async () => {
+      if (host.state !== undefined) state = host.state;
+      return host.state ?? state;
+    }),
     execute: vi.fn(async (request: { kind: string }, context: Record<string, unknown>) => {
       executed.push({ kind: request.kind, context });
+      // As the Apple policy does: an off Simulator is refused, not shut down.
+      if (request.kind === "shutdown" && state === "shutdown" && !fails.includes("shutdown"))
+        return {
+          outcome: "invalid-destination",
+          kind: request.kind,
+          artifacts: [],
+          diagnostics: [{ severity: "error", message: "destination-not-booted" }],
+        };
       if (context["approvalValid"] !== true && context["executionPolicy"] !== "full-access")
         return { outcome: "unauthorized", kind: request.kind, artifacts: [], diagnostics: [] };
       if (fails.includes(request.kind))
@@ -179,7 +193,7 @@ describe("a Code child's Simulators", () => {
 
   it("are shut down with the run after a failed test on one that was off", async () => {
     // Xcode may boot the Simulator before the test fails, and the cached state still reads shutdown.
-    const service = appleService("shutdown", ["test"]);
+    const service = appleService("shutdown", ["test"], { state: "booted" });
     const child = input({ policy: "full-access" });
     const tools = apple(child, service);
     await tools?.execute(
@@ -192,6 +206,24 @@ describe("a Code child's Simulators", () => {
     );
     await tools?.close?.();
     expect(service.executed.map((entry) => entry.kind)).toEqual(["test", "shutdown"]);
+  });
+
+  it("forget one the run never booted, when a failed build left it off, so a restart cannot shut down the person's own", async () => {
+    const service = appleService("shutdown", ["test"], { state: "shutdown" });
+    const child = input({ policy: "full-access" });
+    const tools = apple(child, service);
+    await tools?.execute(
+      call("octant_apple", {
+        operation: "test",
+        projectPath: "App.xcodeproj",
+        scheme: "App",
+        simulatorId: DEVICE,
+      }),
+    );
+    await tools?.close?.();
+    expect(await new ChildBootedDeviceLedger(join(directory, "devices.json")).leftOver()).toEqual(
+      [],
+    );
   });
 
   it("say no pane shows a running one, since a child opens none", async () => {
@@ -282,6 +314,39 @@ describe("a Code child's emulators", () => {
         artifacts: [],
         diagnostics: [],
       })),
+    };
+    const child = input();
+    const tools = childAndroidTools({ ...child, android: service as never, artifactRoot: "/a" });
+    await tools?.execute(call("octant_android", { operation: "boot", emulatorId: "Pixel_9" }));
+    await tools?.close?.();
+    expect(
+      await new ChildBootedDeviceLedger(join(directory, "devices.json")).leftOver(),
+    ).toMatchObject([{ platform: "android", deviceId: "Pixel_9" }]);
+  });
+
+  it("stay on disk for a restart when adb lists an emulator it cannot yet name", async () => {
+    const service = {
+      discover: vi.fn(async () => undefined),
+      cancel: vi.fn(async () => true),
+      snapshot: vi.fn(() => ({
+        sdk: { available: true },
+        emulators: [{ emulatorId: "Pixel_9", name: "Pixel 9", state: "shutdown" }],
+        active: [],
+      })),
+      readScreenshotArtifact: vi.fn(),
+      readLogArtifact: vi.fn(),
+      // An offline emulator: discovery calls it off, while it may still be running.
+      listsUnnamedEmulator: vi.fn(async () => true),
+      execute: vi.fn(async (request: { kind: string }, _context: unknown) =>
+        request.kind === "shutdown"
+          ? {
+              outcome: "invalid-destination",
+              kind: request.kind,
+              artifacts: [],
+              diagnostics: [{ severity: "error", message: "destination-not-booted" }],
+            }
+          : { outcome: "succeeded", kind: request.kind, artifacts: [], diagnostics: [] },
+      ),
     };
     const child = input();
     const tools = childAndroidTools({ ...child, android: service as never, artifactRoot: "/a" });

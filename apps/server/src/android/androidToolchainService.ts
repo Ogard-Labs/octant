@@ -1499,6 +1499,22 @@ export class AndroidToolchainService {
     return false;
   }
 
+  /**
+   * Whether adb lists an emulator it cannot name yet (offline, or not yet
+   * authorized), or cannot be read at all. Discovery calls such an emulator
+   * off, though it may still be running, so a helper's cleanup does not take
+   * "not booted" as proof that the one it held has stopped.
+   */
+  async listsUnnamedEmulator(context: AndroidExecutionContext): Promise<boolean> {
+    const adb = this.#sdk.adbPath;
+    if (adb === undefined) return true;
+    const devices = await this.#command([adb, "devices"], context, 10_000);
+    if (!succeeded(devices)) return true;
+    const output = text(devices.stdout);
+    const ready = parseAdbDevices(output);
+    return parseAdbListedSerials(output).some((serial) => !ready.includes(serial));
+  }
+
   /** Whether the serial stayed off adb, for long enough to mean it, within the settle budget. */
   async #waitUntilStopped(
     serial: string,
