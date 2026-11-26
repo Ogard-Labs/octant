@@ -626,6 +626,28 @@ describe("signing in to a hosted MCP server", () => {
     );
   });
 
+  it("follows only the resource metadata of the server's Bearer challenge", async () => {
+    const { oauth } = fakeOauth();
+    const issuer = issuerFetch().fetchImpl;
+    const fetched: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      fetched.push(String(input));
+      if (String(input) === SERVER)
+        return new Response(null, {
+          status: 401,
+          headers: {
+            "www-authenticate": `Basic resource_metadata="https://elsewhere.example.test/meta", Bearer resource_metadata = "${new URL(SERVER).origin}/.well-known/oauth-protected-resource/mcp"`,
+          },
+        });
+      return issuer(input, init);
+    }) as typeof fetch;
+    const { service } = await signIn({ fetchImpl, oauth });
+    expect((await service.begin(EXTENSION, COMPONENT, "local-window")).kind).toBe(
+      "awaiting-consent",
+    );
+    expect(fetched).not.toContain("https://elsewhere.example.test/meta");
+  });
+
   it("tells the sessions no grant changed when cancelling a first sign-in", async () => {
     const { oauth } = fakeOauth();
     const invalidate = vi.fn(async () => undefined);

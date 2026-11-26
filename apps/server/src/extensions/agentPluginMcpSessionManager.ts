@@ -756,8 +756,8 @@ export class AgentPluginMcpSessionManager {
   /**
    * `grant: "unchanged"` is a sign-out that found no grant, such as cancelling
    * a first sign-in. The server's refusal that offered the sign-in still
-   * stands then, so it is kept: dropping it made the thread stop offering
-   * Sign in until another turn failed the same way.
+   * stands then, so it is kept while it is the newest fact: dropping it made
+   * the thread stop offering Sign in until another turn failed the same way.
    */
   async invalidateAuthentication(
     extensionId: string,
@@ -777,12 +777,23 @@ export class AgentPluginMcpSessionManager {
         if (this.#connections.get(key) === connection) this.#connections.delete(key);
       }
     for (const [key, target] of this.#desired) if (matches(target)) this.#desired.delete(key);
+    // Kept only while it is still the component's newest fact, so a cancel
+    // never brings back an older refusal over a later failure or connection.
+    let newest:
+      | { readonly key: string; readonly at: string; readonly offered: boolean }
+      | undefined;
     for (const [key, failure] of this.#failures)
-      if (
-        matches(failure.target) &&
-        !(change?.grant === "unchanged" && failure.signInOffered === true)
-      )
-        this.#failures.delete(key);
+      if (matches(failure.target) && (newest === undefined || newest.at < failure.at))
+        newest = { key, at: failure.at, offered: failure.signInOffered === true };
+    const lastConnected = this.#lastConnected.get(authenticationKey(identity))?.at;
+    const kept =
+      change?.grant === "unchanged" &&
+      newest?.offered === true &&
+      (lastConnected === undefined || lastConnected < newest.at)
+        ? newest.key
+        : undefined;
+    for (const [key, failure] of this.#failures)
+      if (matches(failure.target) && key !== kept) this.#failures.delete(key);
     const closing: Promise<void>[] = [];
     for (const [key, record] of this.#sessions)
       if (matches(record)) closing.push(this.#close(key, record));

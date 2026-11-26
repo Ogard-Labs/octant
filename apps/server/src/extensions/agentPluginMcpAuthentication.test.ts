@@ -759,4 +759,33 @@ describe("a signed-out server the person added by hand", () => {
     await subject.invalidateAuthentication(EXTENSION, "mcp-remote");
     expect(subject.connectionObservations()).toEqual([]);
   });
+
+  it("does not bring back an older sign-in offer over a newer failure when a sign-out changed no grant", async () => {
+    const actual =
+      await vi.importActual<typeof import("./agentPluginMcpClient")>("./agentPluginMcpClient");
+    connect.mockImplementation(actual.connectAgentPluginMcpSession);
+    let challenge: string | undefined = `Bearer resource_metadata="${METADATA}"`;
+    let tick = 0;
+    const subject = manager(async () => true, {
+      fetch: Object.assign(
+        async () =>
+          new Response(null, {
+            status: 401,
+            headers: challenge === undefined ? {} : { "www-authenticate": challenge },
+          }),
+        { preconnect: () => undefined },
+      ),
+      isUserAddedSource: () => true,
+      addedByHandSource: () => true,
+      now: () => new Date(Date.UTC(2026, 10, 2, 0, 0, tick++)),
+    });
+    await subject.reconcile(effective());
+    challenge = undefined;
+    await subject.reconcile(effective("mcp-remote", "17000000-0000-4000-8000-000000000098"));
+    expect(subject.connectionObservations()).toEqual([
+      expect.not.objectContaining({ signInOffered: true }),
+    ]);
+    await subject.invalidateAuthentication(EXTENSION, "mcp-remote", { grant: "unchanged" });
+    expect(subject.connectionObservations()).toEqual([]);
+  });
 });
