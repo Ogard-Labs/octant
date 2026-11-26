@@ -784,6 +784,7 @@ App-owned tools are capability families with one tool per object. Every runtime 
 - Where a runtime keeps its own tool list, omission is per session, so the cached prefix changes only when a tool arrives.
 - Late, duplicate or cancelled answers are refused.
 - Every runtime gets one line per offered first-party tool saying when to use it (maintainer request, 2026-11-17); a first-party tool without one fails the build ([Agent tools](agent-tools.md#how-tools-reach-a-model)).
+- The size of the instructions and tool definitions Octant gives each runtime, first prompt and later turns, is measured in-process and held to a checked-in budget with no headroom; CI fails on any difference (maintainer request, 2026-11-25).
 
 Status: Built. Detail: [Architecture: Process topology](../architecture.md#process-topology).
 

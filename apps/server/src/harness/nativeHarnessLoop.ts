@@ -1796,7 +1796,7 @@ function personWrittenInstructions(block: ProviderContextBlock): boolean {
   );
 }
 
-function splitInstructions(context: ReadonlyArray<ProviderContextBlock> | undefined): {
+export function splitInstructions(context: ReadonlyArray<ProviderContextBlock> | undefined): {
   readonly system: ReadonlyArray<string>;
   readonly rest: ReadonlyArray<ProviderContextBlock>;
 } {
@@ -1809,7 +1809,7 @@ function splitInstructions(context: ReadonlyArray<ProviderContextBlock> | undefi
   };
 }
 
-function composeSystem(
+export function composeSystem(
   instructions: ReadonlyArray<string>,
   tools: ReadonlyArray<ProviderToolDefinition>,
 ): string | undefined {

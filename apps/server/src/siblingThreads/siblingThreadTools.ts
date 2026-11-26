@@ -385,7 +385,7 @@ const HELP_LINES: Readonly<Record<ThreadsToolOperation, string>> = {
  * name exactly the operations this turn is offered, so a model never meets an
  * operation it would only be refused.
  */
-function threadsToolDefinition(
+export function threadsToolDefinition(
   operations: ReadonlyArray<ThreadsToolOperation>,
 ): ProviderToolDefinition {
   const offers = new Set(operations);

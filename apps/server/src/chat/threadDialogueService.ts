@@ -189,7 +189,7 @@ export class ThreadDialogueService {
   }
 }
 
-const THREAD_DIALOGUE_TOOL_DEFINITION: ProviderToolDefinition = {
+export const THREAD_DIALOGUE_TOOL_DEFINITION: ProviderToolDefinition = {
   name: THREAD_DIALOGUE_TOOL,
   description:
     "Ask a Chat thread the user mentioned in this message one bounded question or instruction, and wait for its reply. Use it only when the user asks you to coordinate with that thread, never to act on it otherwise; under Strict a turn is limited to the count set in Settings (three by default; the answer says when the limit is reached), and the thread you ask cannot ask onward. Waiting means that thread is busy: tell the user rather than retrying. Put the reply you get in your own answer.",

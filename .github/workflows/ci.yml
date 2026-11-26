@@ -151,6 +151,9 @@ jobs:
       - run: bun run --cwd apps/server browser:uploads:smoke
       - run: bun run style:check
       - run: bun run decisions:check
+      # The instructions and tool definitions Octant gives each runtime, against
+      # the recorded budget.
+      - run: bun run prompt-size:check
       # Cap Turbo concurrency so parallel TypeScript 7.0 compilers do not OOM
       # the 16 GB ubuntu-24.04 runner now that `typecheck` no longer serializes behind `^build`.
       - run: bun run typecheck --concurrency=3 --filter=!@octant/desktop --filter=!@octant/scripts

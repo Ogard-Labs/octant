@@ -1,10 +1,11 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import { BROWSER_TOOL_HOST_LINE } from "@octant/plugin-host/browser-use";
 import { describe, expect, it } from "vitest";
 import { CANVAS_DELIVERY_INSTRUCTIONS } from "../canvas/canvasDeliveryInstructions";
 import { appToolHostLines } from "./appToolHostLines";
+import { firstPartyToolNames } from "./firstPartyToolNames.test-support";
 
 const offered = (...names: ReadonlyArray<string>) => names.map((name) => ({ name }));
 
@@ -70,33 +71,6 @@ const NOT_GUIDED: Readonly<Record<string, string>> = {
 };
 
 const REPOSITORY = join(import.meta.dirname, "../../../..");
-const SOURCE_ROOTS = [
-  "apps/server/src",
-  "packages/contracts/src",
-  "packages/plugin-host/src",
-  "packages/provider-sdk/src",
-];
-
-function sourceFiles(directory: string): ReadonlyArray<string> {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) return entry.name === "node_modules" ? [] : sourceFiles(path);
-    return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
-  });
-}
-
-/** Every complete `octant_*` string literal in shipped first-party source. */
-function firstPartyToolNames(): ReadonlyArray<string> {
-  const names = new Set<string>();
-  for (const root of SOURCE_ROOTS)
-    for (const file of sourceFiles(join(REPOSITORY, root)))
-      for (const match of readFileSync(file, "utf8").matchAll(
-        /["'`](octant_[a-z]+(?:_[a-z]+)*)["'`]/g,
-      ))
-        if (match[1] !== undefined) names.add(match[1]);
-  return [...names].sort();
-}
-
 const unguided = (names: ReadonlyArray<string>) =>
   names.filter((name) => appToolHostLines(offered(name)).length === 0 && !(name in NOT_GUIDED));
 

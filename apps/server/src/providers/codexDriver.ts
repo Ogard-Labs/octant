@@ -1309,7 +1309,7 @@ function codexRestatedMaterial(
     : `${heading}\n\n${renderProviderContextSections(material)}`;
 }
 
-function codexDynamicTools(
+export function codexDynamicTools(
   tools: ReadonlyArray<ProviderToolDefinition> | undefined,
 ): readonly CodexDynamicToolSpec[] | undefined {
   if (tools === undefined || tools.length === 0) return undefined;

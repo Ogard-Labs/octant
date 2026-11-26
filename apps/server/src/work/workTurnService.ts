@@ -222,7 +222,7 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
  * holds it once and a provider's cached prompt prefix is never invalidated by
  * it.
  */
-const STATUS_UPKEEP_INSTRUCTION = `This Project keeps its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; it is in your context. When this turn changes where the work stands, update ${WORK_STATUS_FILE_NAME} before you finish: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today. Leave it unchanged for questions and conversation.`;
+export const STATUS_UPKEEP_INSTRUCTION = `This Project keeps its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; it is in your context. When this turn changes where the work stands, update ${WORK_STATUS_FILE_NAME} before you finish: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today. Leave it unchanged for questions and conversation.`;
 
 /** Identifies the status file's block, so a newer version replaces the one a session holds. */
 const STATUS_FILE_CONTEXT_KEY = "work-status-file";
