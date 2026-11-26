@@ -1543,6 +1543,63 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   line-height: var(--oct-line-detail);
 }
 
+/* What a row says beyond its one sentence waits behind More, the row's third
+   line. The control spans the row's first two lines only, so opening this adds
+   height below the sentence and leaves the control where it was. */
+.setrow-more {
+  grid-column: 1;
+  max-width: 62ch;
+  margin-top: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-line-detail);
+}
+
+.setrow-more__summary {
+  width: fit-content;
+  gap: var(--oct-space-1);
+  border-radius: var(--oct-radius-sm);
+}
+
+.setrow-more__summary:hover,
+.setrow-more[open] > .setrow-more__summary {
+  color: var(--octant-text-secondary);
+}
+
+.setrow-more__body {
+  padding-top: var(--oct-space-1);
+}
+
+.setrow-more__body > :is(p, ul) {
+  margin: 0;
+}
+
+.setrow-more__body > * + * {
+  margin-top: var(--oct-space-1);
+}
+
+/* The default a setting had, named beside its control once the value differs.
+   While the control shows the default the note is hidden but keeps its width:
+   appearing, it would narrow the sentence's column and rewrap it under the
+   pointer. */
+.setrow-control:has(> .setrow-default) {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+}
+
+.setrow-default {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.setrow-default[data-at-default="true"] {
+  visibility: hidden;
+}
+
 /* The app's own primitives reach the same column. A switch is not a value
    control — it keeps its natural size and lands on the column's right edge like
    every other control does. A segmented choice is sized by its segments too:

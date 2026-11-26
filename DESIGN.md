@@ -1766,7 +1766,14 @@ The kit is `settings/primitives.tsx`; contents are in
 - **Row**: at least 52px, 12 by 16px inset, label 14px, detail 13px, control at
   the trailing edge at 28px (`--oct-settings-control-height`), its text 13px
   (`--oct-text-detail`) on every page, a field, a select and a button alike. A compact row is
-  36px, one line.
+  36px, one line. The detail is one sentence; what the row has to say beyond it
+  (the mechanism, an exception, the rest of a safety condition) waits behind
+  **More**, a quiet disclosure on a third line under the sentence, which opens
+  below it and moves nothing beside it. A value control (a stepper, a select)
+  whose setting has a default names it beside the control in meta ink,
+  "Default 8", once the value differs; while the value is the default the note
+  keeps its width, hidden, so the sentence never rewraps. A switch needs no
+  default note: its sentence says what on does.
 - **Rhythm**: a 32px gutter, 24px between sections, 48px under the last, 12px
   under a label and under a note.
 - **Actions**: the secondary button; one main action may be primary; extras
