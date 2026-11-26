@@ -2981,6 +2981,63 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("offers a restore's way back only on the thread and checkout the restore ran on", async () => {
+    const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) };
+    const replacement = "40000000-0000-4000-8000-000000000002";
+    const client = fakeClient();
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.checkout.id).toBe(ids.checkout));
+
+    // The thread moves to another checkout while a restore sent to the old
+    // one is still running; its result arrives after the new view is in.
+    const rebound = {
+      ...view(2),
+      checkout: { ...checkout(), id: replacement as never },
+      thread: { ...thread(2), checkoutId: replacement as never },
+    };
+    vi.mocked(client.thread).mockImplementation(async () => rebound);
+    vi.mocked(client.bootstrap).mockImplementation(async () => ({
+      ...bootstrap(2),
+      checkouts: [rebound.checkout],
+      threads: [rebound.thread],
+    }));
+    vi.mocked(client.execute).mockResolvedValueOnce({
+      kind: "thread-checkout-rebind",
+      threadId: ids.thread,
+      outcome: { status: "rebound", thread: rebound.thread, checkout: rebound.checkout },
+    } as never);
+    await act(async () => {
+      await result.current.rebindThreadCheckout(ids.thread);
+    });
+    await waitFor(() => expect(result.current.activeView?.checkout.id).toBe(replacement));
+
+    act(() => {
+      result.current.noteRestoreUndo(checkpoint, {
+        threadId: ids.thread,
+        checkoutId: ids.checkout as never,
+      });
+    });
+    expect(result.current.restoreUndo).toBeUndefined();
+    // Nor is another thread's way back offered on this one.
+    act(() => {
+      result.current.noteRestoreUndo(checkpoint, {
+        threadId: "10000000-0000-4000-8000-000000000002" as CodeThreadId,
+        checkoutId: replacement as never,
+      });
+    });
+    expect(result.current.restoreUndo).toBeUndefined();
+    act(() => {
+      result.current.noteRestoreUndo(checkpoint, {
+        threadId: ids.thread,
+        checkoutId: replacement as never,
+      });
+    });
+    expect(result.current.restoreUndo).toEqual(checkpoint);
+    unmount();
+  });
+
   it("keeps the thread's usage and restore point when a later page of reading it again fails on a host read whole", async () => {
     const [older, newer] = turnsOf("own", 2);
     const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) };

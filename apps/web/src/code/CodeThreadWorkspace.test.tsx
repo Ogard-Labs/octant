@@ -2043,8 +2043,12 @@ describe("CodeThreadWorkspace", () => {
     await waitFor(() =>
       expect(screen.getByRole("textbox", { name: /message/i })).toHaveValue("rewrite the parser"),
     );
-    // The way back from the file restore is kept where Undo restore reads it.
-    expect(noteRestoreUndo).toHaveBeenCalledWith(checkpoint);
+    // The way back from the file restore is kept where Undo restore reads it,
+    // bound to the thread and checkout the rewind ran on.
+    expect(noteRestoreUndo).toHaveBeenCalledWith(
+      checkpoint,
+      expect.objectContaining({ threadId, checkoutId: expect.anything() }),
+    );
   });
 
   it("rewinds only the conversation without asking for an approval", async () => {
