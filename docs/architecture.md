@@ -6860,6 +6860,13 @@ and no other window's space, is reachable through it.
 
 ## Persistence
 
+The host records a Code Project's lasting conversation with
+`code.project-conversation-bound@1` on the Project-keyed
+`code-project-conversation` aggregate. Its first append and the Code thread
+creation commit atomically. Window access to the Project guards resolution.
+[Coordinator threads](design/coordinator-threads.md#project-owned-conversation)
+owns dispatch, reporting, and lifecycle.
+
 ```mermaid
 flowchart LR
   cmd["Command<br/>(validated by contracts)"] --> policy["Domain policy<br/>mode · capability · authority"]

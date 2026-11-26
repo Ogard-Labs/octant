@@ -694,6 +694,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
         data-surface-kind={surface.kind}
         data-workspace-can-split={canSplit ? "true" : "false"}
         data-workspace-pane-id={pane.paneId}
+        tabIndex={-1}
         onBeforeInputCapture={() => props.onActivatePane(pane.paneId)}
         onKeyDownCapture={(event) => activateUnlessClosing(event.target)}
         onPointerDownCapture={(event) => activateUnlessClosing(event.target)}

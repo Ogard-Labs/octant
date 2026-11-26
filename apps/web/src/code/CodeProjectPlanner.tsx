@@ -29,7 +29,9 @@ export function CodeProjectPlanner(
   const [review, setReview] = useState<PlannerProposalReview>();
   const threads = (props.controller.bootstrap?.threads ?? []).filter(
     (thread) =>
-      String(thread.projectId) === String(props.projectId) && thread.lifecycle !== "archived",
+      !props.controller.bootstrap?.projectConversationIds?.includes(thread.id) &&
+      String(thread.projectId) === String(props.projectId) &&
+      thread.lifecycle !== "archived",
   );
   const selected = threads.find((thread) => String(thread.id) === chosen) ?? threads[0];
   const designation = (command: CodePlannerCommand) =>

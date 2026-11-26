@@ -224,7 +224,11 @@ export type ShellActions = {
     service: RunningService,
     target: LocalServerOpenTarget,
   ) => Promise<void>;
-  readonly openSelectedProject: (project: ProjectSummary) => Promise<void>;
+  readonly openCodeWorkerBeside: ShellController["openCodeWorkerBeside"];
+  readonly openSelectedProject: (
+    project: ProjectSummary,
+    destination?: "conversation" | "overview",
+  ) => Promise<void>;
   readonly openSettings: ShellController["openSettings"];
   readonly openSideChat: ShellController["openSideChat"];
   readonly openSidebarList: (view: "activity" | "completed") => void;

@@ -53,7 +53,12 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
-import { readCodeThread, readCodeThreads } from "../persistence/codeProjection";
+import {
+  readCodeThread,
+  readCodeThreads,
+  readCodePlannerDesignation,
+  readCodePlannerProposals,
+} from "../persistence/codeProjection";
 import { projectReportsReader } from "./projectReports";
 import { lstat } from "node:fs/promises";
 import {
@@ -1258,22 +1263,6 @@ describe("CodeService commands", () => {
         expectedVersion: 1,
         coordinator: true,
       });
-      const open = (windowId: typeof ids.window, projectId: ProjectId) =>
-        host.service.execute(windowId, {
-          kind: "open-code-project-conversation",
-          projectId,
-          model,
-        });
-      const [first, second] = await Promise.all([
-        open(ids.window, ids.project),
-        open(decodeWindowId(randomUUID()), ids.project),
-      ]);
-      expect(first).toEqual(second);
-      if (first.kind !== "project-conversation-opened") throw new Error("missing conversation");
-      expect(first.thread.id).not.toEqual(ids.thread);
-      expect(first.thread.messageWake).toBeUndefined();
-      expect(readCodeThreads(host.connection)).toHaveLength(2);
-      expect(projectReportsReader(host.connection).projectReports(ids.project)).toEqual([]);
       const worker = thread({
         id: decodeCodeThreadId(randomUUID()),
         coordinatorThreadId: ids.thread,
@@ -1306,6 +1295,52 @@ describe("CodeService commands", () => {
         kind: "thread-created",
         thread: worker,
       });
+      const planner = thread({
+        id: decodeCodeThreadId(randomUUID()),
+        title: "Release planning",
+        coordinator: true,
+      });
+      append("code-thread", planner.id, 0, "code.thread-created@1", {
+        kind: "thread-created",
+        thread: planner,
+      });
+      append("code-planner", ids.project, 0, "code.planner-designation-updated@1", {
+        kind: "planner-designation-updated",
+        designation: {
+          kind: "designated",
+          projectId: ids.project,
+          plannerThreadId: planner.id,
+          designatedAt: now,
+        },
+      });
+      append("code-planner-proposal", operationId, 0, "code.planner-proposal-updated@1", {
+        kind: "planner-proposal-updated",
+        proposal: {
+          id: operationId,
+          projectId: ids.project,
+          plannerThreadId: planner.id,
+          title: "Review release notes",
+          intent: "Review the release notes.",
+          status: "pending",
+          proposedAt: now,
+        },
+      });
+      const open = (windowId: typeof ids.window, projectId: ProjectId) =>
+        host.service.execute(windowId, {
+          kind: "open-code-project-conversation",
+          projectId,
+          model,
+        });
+      const [first, second] = await Promise.all([
+        open(ids.window, ids.project),
+        open(decodeWindowId(randomUUID()), ids.project),
+      ]);
+      expect(first).toEqual(second);
+      if (first.kind !== "project-conversation-opened") throw new Error("missing conversation");
+      expect(first.thread.id).not.toEqual(ids.thread);
+      expect(first.thread.messageWake).toBeUndefined();
+      expect(readCodeThreads(host.connection)).toHaveLength(4);
+      expect(projectReportsReader(host.connection).projectReports(ids.project)).toEqual([]);
       const observe = (version: number, state: string) =>
         append("code-runtime", operationId, version, "code.runtime-work-updated@1", {
           kind: "runtime-work-updated",
@@ -1360,9 +1395,17 @@ describe("CodeService commands", () => {
         }),
       ).toEqual(first);
       expect(await report()).toEqual(waiting);
+      expect(readCodePlannerDesignation(host.connection, ids.project)).toMatchObject({
+        plannerThreadId: planner.id,
+      });
+      expect(readCodePlannerProposals(host.connection, ids.project)).toMatchObject([
+        { proposal: { plannerThreadId: planner.id, status: "pending" } },
+      ]);
+      expect(readCodeThread(host.connection, worker.id)?.coordinatorThreadId).toBe(ids.thread);
       expect(readCodeThread(host.connection, ids.thread)?.coordinator).toBe(true);
       for (const command of [
         { kind: "mark-code-thread-done" },
+        { kind: "propose-code-delivery-outcome", outcomeKind: "opened-pr" },
         { kind: "change-code-thread-lifecycle", lifecycle: "archived" },
         { kind: "set-code-thread-coordinator", coordinator: false },
       ]) {

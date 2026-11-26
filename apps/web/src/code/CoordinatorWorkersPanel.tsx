@@ -16,6 +16,7 @@ import "./coordinator-workers.css";
 export interface CoordinatorWorkersSource {
   readonly rows: ReadonlyArray<CoordinatorWorkerRow>;
   readonly onOpenWorker: (threadId: string) => void;
+  readonly onOpenBeside?: ((threadId: string) => void) | undefined;
 }
 
 /**
@@ -85,6 +86,8 @@ export function CoordinatorWorkersToggle(props: {
  * worker is listed nowhere new by being open (docs/design/workspace.md#coordinators).
  */
 export function WorkerOfStrip(props: {
+  readonly backLabel?: string;
+  readonly onOpenProject?: () => void;
   readonly coordinatorTitle: string;
   readonly onBack: () => void;
 }) {
@@ -101,8 +104,13 @@ export function WorkerOfStrip(props: {
         type="button"
         variant="ghost"
       >
-        Back to coordinator
+        {props.backLabel ?? "Back to coordinator"}
       </OctantButton>
+      {props.onOpenProject && (
+        <OctantButton type="button" variant="ghost" size="sm" onClick={props.onOpenProject}>
+          Back to Project
+        </OctantButton>
+      )}
     </span>
   );
 }
@@ -295,29 +303,41 @@ export function CoordinatorWorkersPanel(props: {
 export function CoordinatorWorkerCards(props: {
   readonly rows: ReadonlyArray<CoordinatorWorkerRow>;
   readonly onOpenWorker: (threadId: string) => void;
+  readonly onOpenBeside?: ((threadId: string) => void) | undefined;
 }) {
   if (props.rows.length === 0) return null;
   return (
     <div className="coordinator-worker-cards thread-column">
       {props.rows.map((row) => (
-        <OctantButton
-          aria-label={`Worker ${row.title}, ${COORDINATOR_WORKER_STATE_WORDS[row.state]}`}
-          className="coordinator-worker-card"
-          data-state={row.state}
-          key={row.threadId}
-          onClick={() => props.onOpenWorker(row.threadId)}
-          type="button"
-          variant="bare"
-        >
-          <WorkerMark size={14} />
-          <span className="coordinator-worker-card__title" title={row.title}>
-            {row.title}
-          </span>
-          <span className="coordinator-worker-card__model">{row.modelLabel}</span>
-          <span className="coordinator-worker-card__state">
-            {COORDINATOR_WORKER_STATE_WORDS[row.state]}
-          </span>
-        </OctantButton>
+        <div key={row.threadId} className="coordinator-worker-card-actions">
+          <OctantButton
+            aria-label={`Worker ${row.title}, ${COORDINATOR_WORKER_STATE_WORDS[row.state]}`}
+            className="coordinator-worker-card"
+            data-state={row.state}
+            onClick={() => props.onOpenWorker(row.threadId)}
+            type="button"
+            variant="bare"
+          >
+            <WorkerMark size={14} />
+            <span className="coordinator-worker-card__title" title={row.title}>
+              {row.title}
+            </span>
+            <span className="coordinator-worker-card__model">{row.modelLabel}</span>
+            <span className="coordinator-worker-card__state">
+              {COORDINATOR_WORKER_STATE_WORDS[row.state]}
+            </span>
+          </OctantButton>
+          {props.onOpenBeside && (
+            <OctantButton
+              size="sm"
+              variant="ghost"
+              aria-label={`Open ${row.title} beside the Project`}
+              onClick={() => props.onOpenBeside?.(row.threadId)}
+            >
+              Open beside
+            </OctantButton>
+          )}
+        </div>
       ))}
     </div>
   );

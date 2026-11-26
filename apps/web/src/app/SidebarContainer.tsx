@@ -725,11 +725,12 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
           ? {
               railPins: {
                 projects: railPinnedProjects.map((project) => ({
+                  unread: props.navigation.unreadCodeProjects.has(String(project.id)),
                   id: String(project.id),
                   name: project.name,
                   active:
                     activeProjectId !== undefined && String(activeProjectId) === String(project.id),
-                  onOpen: () => void openSelectedProject(project),
+                  onOpen: () => void openSelectedProject(project, "conversation"),
                 })),
                 onUnpin: (projectId: string) => {
                   const project = railPinnedProjects.find((p) => String(p.id) === projectId);

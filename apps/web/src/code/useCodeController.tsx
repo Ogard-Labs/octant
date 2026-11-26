@@ -268,6 +268,7 @@ export interface CodeThreadNavigationItem {
   readonly lineageParentThreadId?: string;
   /** Present on a coordinator thread (docs/design/coordinator-threads.md). */
   readonly coordinator?: true;
+  readonly projectConversation?: true;
   /**
    * The thread is its Project's designated planner, which reads as a
    * coordinator whose starts always need approval. Its role follows the
@@ -379,10 +380,14 @@ const EMPTY_THREAD_USAGE: CodeThreadUsage = { limits: [] };
 
 /** A navigation read's planner list replaces the bootstrap's; an older host's absent list clears it. */
 function withNavigationPlanners(current: CodeBootstrap, next: CodeNavigation): CodeBootstrap {
-  const { plannerThreadIds: _previous, ...rest } = current;
-  return next.plannerThreadIds === undefined
-    ? rest
-    : { ...rest, plannerThreadIds: next.plannerThreadIds };
+  const { plannerThreadIds: _previous, projectConversationIds: _conversations, ...rest } = current;
+  return {
+    ...rest,
+    ...(next.plannerThreadIds === undefined ? {} : { plannerThreadIds: next.plannerThreadIds }),
+    ...(next.projectConversationIds === undefined
+      ? {}
+      : { projectConversationIds: next.projectConversationIds }),
+  };
 }
 
 /**
@@ -1157,6 +1162,7 @@ export function useCodeController(options: CodeControllerOptions) {
             samePollingData(currentBootstrap.threads, next.threads) &&
             samePollingData(currentBootstrap.activity, next.activity) &&
             samePollingData(currentBootstrap.runtime, next.runtime) &&
+            samePollingData(currentBootstrap.projectConversationIds, next.projectConversationIds) &&
             samePollingData(currentBootstrap.plannerThreadIds, next.plannerThreadIds)
           )
         ) {
@@ -1174,6 +1180,7 @@ export function useCodeController(options: CodeControllerOptions) {
           samePollingData(current.threads, next.threads) &&
           samePollingData(current.activity, next.activity) &&
           samePollingData(current.runtime, next.runtime) &&
+          samePollingData(current.projectConversationIds, next.projectConversationIds) &&
           samePollingData(current.plannerThreadIds, next.plannerThreadIds)
         ) {
           return current;
@@ -2561,6 +2568,16 @@ export function useCodeController(options: CodeControllerOptions) {
   // How far each thread's own journaled activity has reached. A provider turn
   // never touches the thread aggregate, so this — not `thread.version` — is the
   // only number that moves when one runs or finishes.
+  const reportSequences = useMemo(
+    () =>
+      new Map(bootstrap?.activity?.map((row) => [row.threadId, row.projectReportSequence ?? 0])),
+    [bootstrap?.activity],
+  );
+  const markProjectReportsRead = useCallback(
+    (id: CodeThreadId, sequence: number) =>
+      readCursorStore.markDeferred(`project-reports:${id}`, sequence),
+    [readCursorStore],
+  );
   const activityByThread = useMemo(() => {
     const byThread = new Map<string, number>();
     for (const entry of bootstrap?.activity ?? []) {
@@ -2639,6 +2656,9 @@ export function useCodeController(options: CodeControllerOptions) {
           const planner =
             thread.coordinatorThreadId === undefined && plannerThreadIds.has(String(thread.id));
           return {
+            ...(bootstrap?.projectConversationIds?.includes(thread.id) === true
+              ? { projectConversation: true as const }
+              : {}),
             executionPolicy: thread.executionPolicy,
             lifecycle: thread.lifecycle,
             projectId: thread.projectId,
@@ -2650,6 +2670,8 @@ export function useCodeController(options: CodeControllerOptions) {
             followUp: followUps.get(String(thread.id))?.followUp?.state === "open",
             unread:
               markedUnreadThreads.has(String(thread.id)) ||
+              (reportSequences.get(thread.id) ?? 0) >
+                (readCursors.get(`project-reports:${thread.id}`) ?? 0) ||
               (activityByThread.get(String(thread.id)) ?? 0) >
                 (readCursors.get(String(thread.id)) ?? 0),
             ...(runtime?.executing === true ? { executing: true } : {}),
@@ -2697,6 +2719,7 @@ export function useCodeController(options: CodeControllerOptions) {
         // the moment anything else ran, which is the opposite of pinning it.
         .sort((left, right) => Number(right.pinned ?? false) - Number(left.pinned ?? false)),
     [
+      reportSequences,
       activityByThread,
       bootstrap,
       followUps,
@@ -4330,6 +4353,7 @@ export function useCodeController(options: CodeControllerOptions) {
     editorDrafts,
     execute,
     markFollowUp,
+    markProjectReportsRead,
     markThreadRead,
     navigation,
     pendingDraft,

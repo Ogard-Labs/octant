@@ -212,12 +212,12 @@ const CODE_READ_CURSOR_STORAGE_KEY = "octant.code.readCursors.v1";
  * — and survives a relaunch, so a thread the user read yesterday does not come
  * back unread today.
  */
-export type CodeReadCursorStore = ReadCursorStore<CodeThreadId>;
+export type CodeReadCursorStore = ReadCursorStore<CodeThreadId | `project-reports:${CodeThreadId}`>;
 
 export function createCodeReadCursorStore(
   storage?: Pick<Storage, "getItem" | "setItem"> | undefined,
 ): CodeReadCursorStore {
-  return createReadCursorStore<CodeThreadId>({
+  return createReadCursorStore<CodeThreadId | `project-reports:${CodeThreadId}`>({
     storageKey: CODE_READ_CURSOR_STORAGE_KEY,
     ...(storage === undefined ? {} : { storage }),
   });
@@ -389,6 +389,14 @@ export function applyResult(current: CodeBootstrap | undefined, result: CodeComm
       return { ...current, checkouts: replaceById(current.checkouts, result.checkout) };
     case "settings-updated":
       return { ...current, settings: result.settings };
+    case "project-conversation-opened":
+      return {
+        ...current,
+        threads: replaceById(current.threads, result.thread),
+        projectConversationIds: [
+          ...new Set([...(current.projectConversationIds ?? []), result.thread.id]),
+        ],
+      };
     case "thread-created":
     case "thread-updated":
       return { ...current, threads: replaceById(current.threads, result.thread) };

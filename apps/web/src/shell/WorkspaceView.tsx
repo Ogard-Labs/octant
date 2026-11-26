@@ -1,3 +1,8 @@
+import { CodeProjectWork } from "../projects/CodeProjectWork";
+import {
+  rememberProjectDestination,
+  type CodeProjectDestination,
+} from "../projects/codeProjectDestination";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import type { PreparationTarget } from "../projects/WorktreePreparationDialog";
 import type { SandboxRestrictionsScope } from "@octant/contracts/sandbox-policy";
@@ -304,6 +309,17 @@ export type RevealedThreadTurn =
     };
 
 export interface WorkspaceViewProps {
+  readonly projectWorkRevision?: number;
+  readonly onOpenCodeWorkerBeside?: (
+    pane: PaneId,
+    threadId: CodeThreadId,
+    title: string,
+    projectId: ProjectId,
+  ) => Promise<void>;
+  readonly onOpenProjectDestination?: (
+    project: ProjectSummary,
+    destination: CodeProjectDestination,
+  ) => Promise<void>;
   readonly appleToolchainClient?: AppleToolchainClient;
   /** The host's paired iPhones and iPads, shown in the Apple workbench. */
   readonly agentRunClient?: AgentRunClient;
@@ -1689,6 +1705,39 @@ function latestSettledTurn(
   )?.operationId;
 }
 
+function projectDestinations(
+  project: ProjectSummary,
+  current: CodeProjectDestination,
+  props: WorkspaceViewProps,
+) {
+  if (
+    project.type !== "code" ||
+    project.lifecycle !== "active" ||
+    props.onOpenProjectDestination === undefined
+  )
+    return null;
+  return (
+    <nav className="project-destinations" aria-label="Project views">
+      {(["conversation", "overview"] as const).map((destination) => (
+        <OctantButton
+          key={destination}
+          type="button"
+          size="sm"
+          aria-current={destination === current ? "page" : undefined}
+          variant={destination === current ? "secondary" : "ghost"}
+          onClick={() => {
+            rememberProjectDestination(project.id, destination);
+            if (destination !== current)
+              void props.onOpenProjectDestination?.(project, destination);
+          }}
+        >
+          {destination === "conversation" ? "Conversation" : "Overview"}
+        </OctantButton>
+      ))}
+    </nav>
+  );
+}
+
 function renderCodeTab(
   tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>,
   props: WorkspaceViewProps,
@@ -1752,6 +1801,48 @@ function renderCodeTab(
   const coordinatorProposals = coordinatorProposalsFor(tab, props, codeController, project);
   const coordinatorWorkerAsks = coordinatorWorkerAsksFor(tab, props);
   const coordinatorWorkers = coordinatorWorkersSourceFor(tab, props);
+  const projectConversation =
+    tab.kind === "code-overview" &&
+    props.codeController.bootstrap?.projectConversationIds?.includes(tab.threadId) === true;
+  if (projectConversation && project?.lifecycle !== "active") {
+    return (
+      <OctantEmpty
+        state="warning"
+        title={
+          project?.lifecycle === "archived" ? "This Project is archived" : "Project unavailable"
+        }
+        message={
+          project?.lifecycle === "archived"
+            ? "Restore the Project to continue its conversation."
+            : "Refresh Projects to reopen this conversation."
+        }
+      />
+    );
+  }
+  const openBeside = (id: CodeThreadId, title: string) => {
+    if (project === undefined) return;
+    if (props.isNarrow || props.onOpenCodeWorkerBeside === undefined)
+      props.onOpenCodeThread(id, title, project.id);
+    else void props.onOpenCodeWorkerBeside(paneId, id, title, project.id);
+  };
+  const report =
+    projectConversation && project !== undefined ? (
+      <CodeProjectWork
+        key={project.id}
+        projectId={project.id}
+        conversationId={tab.threadId}
+        onRead={props.codeController.markProjectReportsRead}
+        client={codeController.client}
+        revision={props.projectWorkRevision ?? 0}
+        reportSequence={
+          props.codeController.bootstrap?.activity.find((row) => row.threadId === tab.threadId)
+            ?.projectReportSequence ?? 0
+        }
+        threads={props.codeController.navigation}
+        onOpen={(id, title) => props.onOpenCodeThread(id, title, project.id)}
+        onOpenBeside={openBeside}
+      />
+    ) : undefined;
   const content = (
     <Suspense
       // The spinner is hidden from a screen reader, so the title says it: the
@@ -1785,7 +1876,22 @@ function renderCodeTab(
         onOpenCodeThread={props.onOpenCodeThread}
         {...(coordinatorProposals === undefined ? {} : { coordinatorProposals })}
         {...(coordinatorWorkerAsks === undefined ? {} : { coordinatorWorkerAsks })}
-        {...(coordinatorWorkers === undefined ? {} : { coordinatorWorkers })}
+        {...(report === undefined ? {} : { projectReport: report })}
+        {...(coordinatorWorkers === undefined
+          ? {}
+          : {
+              coordinatorWorkers: projectConversation
+                ? {
+                    ...coordinatorWorkers,
+                    onOpenBeside: (id: string) => {
+                      const worker = props.codeController.navigation.find(
+                        (thread) => String(thread.threadId) === id,
+                      );
+                      if (worker !== undefined) openBeside(worker.threadId, worker.title);
+                    },
+                  }
+                : coordinatorWorkers,
+            })}
         {...(props.onNewThreadInProject === undefined
           ? {}
           : { onNewThreadInProject: props.onNewThreadInProject })}
@@ -1869,6 +1975,17 @@ function renderCodeTab(
       />
     </Suspense>
   );
+  if (projectConversation && project !== undefined) {
+    return (
+      <section className="project-conversation">
+        <header>
+          <h2>{project.name}</h2>
+          {projectDestinations(project, "conversation", props)}
+        </header>
+        {content}
+      </section>
+    );
+  }
   // Auxiliary Code surfaces (terminal, file, diff, tests, …) share the
   // thread rail and Browser/Computer Use preview with the thread tab;
   // mounting them per split pane just repeats the same rail and
@@ -2869,6 +2986,7 @@ function renderNonCodeTab(
     const availability = props.availabilityByProject.get(project.id);
     return (
       <Suspense fallback={<OctantEmpty state="loading" title="Loading workspace" />}>
+        {projectDestinations(project, "overview", props)}
         <ProjectOverview
           {...(props.onOpenSandboxRestrictionsSettings === undefined
             ? {}

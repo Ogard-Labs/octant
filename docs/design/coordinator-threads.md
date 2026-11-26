@@ -27,6 +27,29 @@ counts that survive a restart are built. None of it has run against a real
 provider or on the desktop app; whether each runtime's own tools honour
 Strict's read-only gate is a maintainer live check.
 
+## Project-owned conversation
+
+Each active Code Project has one lasting conversation. The host binds the
+Project to its own coordinator on first open, at expected version zero, in the
+same journal transaction as thread creation. Concurrent opens and restarts
+resolve the committed binding. Opening and reading start no provider turn.
+Existing named coordinators and planner designations keep their threads and
+proposals. The Project conversation consumes no named coordinator slot.
+
+Questions are answered inline. Distinct executable assignments use separate
+workers, and revisions go to the original worker. Each confirmed assignment
+links to the worker. Propose for approval uses the ordinary coordinator cards.
+A replayed start resolves its original assignment. The Project coordinator
+can see Project work and cannot direct a different coordinator’s worker.
+
+The Project conversation has no delivery or Done action. Its backing Code
+thread carries checkout and delivery defaults for the workers it starts. The
+Project owns its lifecycle. Settled worker turns supply reports linked to the
+worker, including blockers and decisions. Reports derive from journaled turns,
+so recovery preserves their identity without another provider call. Activity
+updates the roster. Reading a report spends unread, and the worker retains each
+unanswered request until the person answers it.
+
 ## What a coordinator is
 
 - **A role on a Code thread.** A person makes a coordinator either with

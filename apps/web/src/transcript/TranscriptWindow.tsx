@@ -60,6 +60,8 @@ export interface TranscriptWindowProps<T> {
   readonly compactionSubject?: ContextSubjectRef;
   /** Identifies the thread so leaving and returning restores this scroll offset. */
   readonly restoreKey: string;
+  /** Identifies readable content in the trail before the thread has a first turn. */
+  readonly emptyContentKey?: string;
   readonly estimateSize?: number;
   readonly overscan?: number;
   readonly gap?: number;
@@ -187,7 +189,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const viewStore = useContext(WorkspaceViewStateContext);
   const savedView = viewStore?.read(`transcript:${restoreKey}`);
   const revealKey = props.revealKey;
-  const firstKey = items[0] === undefined ? undefined : itemKey(items[0], 0);
+  const firstKey = items[0] === undefined ? props.emptyContentKey : itemKey(items[0], 0);
   const remembered =
     (viewStore === undefined ? scrollMemory.get(restoreKey) : undefined) ??
     (savedView?.kind === "transcript"

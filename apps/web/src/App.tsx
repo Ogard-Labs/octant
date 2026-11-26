@@ -1,4 +1,8 @@
 import {
+  rememberedProjectDestination,
+  type CodeProjectDestination,
+} from "./projects/codeProjectDestination";
+import {
   noteTypedComposerText,
   threadDraftScope,
   typedSendClaim,
@@ -1252,6 +1256,7 @@ function LaunchedShell(
    * window is not yet allowed to have, which is the refusal this whole path
    * exists to remove.
    */
+  const projectOpenRequest = useRef(0);
   const draftProjectBinding = useRef<Promise<void> | undefined>(undefined);
   const [draftProjectSelection, setDraftProjectSelection] = useState<
     Partial<Readonly<Record<OctantMode, ProjectId>>>
@@ -5821,53 +5826,59 @@ function LaunchedShell(
     };
     const codeProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
       codeController.status === "ready"
-        ? codeController.navigation.map((thread) => ({
-            threadId: String(thread.threadId),
-            title: thread.title,
-            projectId: String(thread.projectId),
-            providerInstanceId: String(thread.providerInstanceId),
-            ...(thread.modelId === undefined ? {} : { modelId: thread.modelId }),
-            ...(thread.createdAt === undefined ? {} : { createdAt: thread.createdAt }),
-            // The lifecycle used to ride along as a badge on every row, which
-            // said "active" beside almost every thread and told the reader
-            // nothing. The status dot carries it instead.
-            activity: codeThreadActivity(thread),
-            ...(thread.awaitingKind === undefined ? {} : { awaitingKind: thread.awaitingKind }),
-            ...(thread.turnStartedAt === undefined ? {} : { turnStartedAt: thread.turnStartedAt }),
-            ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
-            ...(thread.limited === undefined ? {} : { limited: thread.limited }),
-            ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
-            ...(thread.pullRequestSummaries === undefined
-              ? {}
-              : { pullRequests: thread.pullRequestSummaries }),
-            ...(thread.touchedIssues === undefined ? {} : { touchedIssues: thread.touchedIssues }),
-            ...(thread.linkedIssues === undefined ? {} : { linkedIssues: thread.linkedIssues }),
-            ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
-            ...(thread.unread === undefined ? {} : { unread: thread.unread }),
-            ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
-            ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
-            ...(thread.lineageParentThreadId === undefined
-              ? {}
-              : { lineageParentThreadId: thread.lineageParentThreadId }),
-            ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
-            ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
-            ...(thread.markedDone === true ? { markedDone: true } : {}),
-            ...(thread.coordinator === true ? { coordinator: true } : {}),
-            ...(thread.planner === true ? { planner: true } : {}),
-            ...workerLineage(thread.coordinatorThreadId),
-            ...(thread.coordinatorChoice === undefined
-              ? {}
-              : { coordinatorChoice: thread.coordinatorChoice }),
-            ...(thread.messageWake === true ? { messageWake: true } : {}),
-            ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
-            ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
-            ...threadRest(thread, {
-              now: snoozeClockNow,
-              awaitingInput:
-                thread.awaitingInput === true ||
-                (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
-            }),
-          }))
+        ? codeController.navigation
+            .filter((thread) => thread.projectConversation !== true)
+            .map((thread) => ({
+              threadId: String(thread.threadId),
+              title: thread.title,
+              projectId: String(thread.projectId),
+              providerInstanceId: String(thread.providerInstanceId),
+              ...(thread.modelId === undefined ? {} : { modelId: thread.modelId }),
+              ...(thread.createdAt === undefined ? {} : { createdAt: thread.createdAt }),
+              // The lifecycle used to ride along as a badge on every row, which
+              // said "active" beside almost every thread and told the reader
+              // nothing. The status dot carries it instead.
+              activity: codeThreadActivity(thread),
+              ...(thread.awaitingKind === undefined ? {} : { awaitingKind: thread.awaitingKind }),
+              ...(thread.turnStartedAt === undefined
+                ? {}
+                : { turnStartedAt: thread.turnStartedAt }),
+              ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
+              ...(thread.limited === undefined ? {} : { limited: thread.limited }),
+              ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
+              ...(thread.pullRequestSummaries === undefined
+                ? {}
+                : { pullRequests: thread.pullRequestSummaries }),
+              ...(thread.touchedIssues === undefined
+                ? {}
+                : { touchedIssues: thread.touchedIssues }),
+              ...(thread.linkedIssues === undefined ? {} : { linkedIssues: thread.linkedIssues }),
+              ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
+              ...(thread.unread === undefined ? {} : { unread: thread.unread }),
+              ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
+              ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
+              ...(thread.lineageParentThreadId === undefined
+                ? {}
+                : { lineageParentThreadId: thread.lineageParentThreadId }),
+              ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+              ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+              ...(thread.markedDone === true ? { markedDone: true } : {}),
+              ...(thread.coordinator === true ? { coordinator: true } : {}),
+              ...(thread.planner === true ? { planner: true } : {}),
+              ...workerLineage(thread.coordinatorThreadId),
+              ...(thread.coordinatorChoice === undefined
+                ? {}
+                : { coordinatorChoice: thread.coordinatorChoice }),
+              ...(thread.messageWake === true ? { messageWake: true } : {}),
+              ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
+              ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
+              ...threadRest(thread, {
+                now: snoozeClockNow,
+                awaitingInput:
+                  thread.awaitingInput === true ||
+                  (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
+              }),
+            }))
         : [];
     // Work rows rest the same way Code rows do; the host's runtime says when a
     // thread waits on the person, which the builder already turned into
@@ -5964,6 +5975,11 @@ function LaunchedShell(
       }
     }
     return {
+      unreadCodeProjects: new Set(
+        codeController.navigation
+          .filter((t) => t.projectConversation === true && t.unread)
+          .map((t) => String(t.projectId)),
+      ),
       codeProjectThreads,
       codeSidebarThreads,
       liveThreadTitles,
@@ -6339,6 +6355,7 @@ function LaunchedShell(
       openChatThread: controller.openChatThread,
       openCodeSurface: controller.openCodeSurface,
       openCodeThread: controller.openCodeThread,
+      openCodeWorkerBeside: controller.openCodeWorkerBeside,
       openCreatedFollowUp,
       openCrossContextInNewWindow: controller.openCrossContextInNewWindow,
       openDockTab,
@@ -7398,10 +7415,49 @@ function LaunchedShell(
     },
   });
 
-  async function openSelectedProject(project: ProjectSummary) {
+  async function openSelectedProject(
+    project: ProjectSummary,
+    destination?: CodeProjectDestination,
+  ) {
     closeThreadSearch();
     closeWorkspaceReaders();
-    await controller.openProject(project.id, project.type, project.name);
+    const request = ++projectOpenRequest.current;
+    const conversation =
+      project.type === "code" &&
+      project.lifecycle === "active" &&
+      (destination ?? rememberedProjectDestination(project.id)) === "conversation";
+    const needsProjectSurface =
+      !conversation || activeMode !== "code" || activeProjectId !== project.id;
+    if (needsProjectSurface) await controller.openProject(project.id, project.type, project.name);
+    if (!conversation || projectOpenRequest.current !== request) return;
+    const selection = resolveDraftProviderSelection(
+      codeProviderGroups,
+      codeDraftPreferredSelection,
+    );
+    const fallback = codeProviderChoices[0];
+    const model =
+      selection ??
+      (fallback === undefined
+        ? undefined
+        : { providerInstanceId: fallback.instanceId, modelId: fallback.modelId });
+    const opened = await codeController.execute({
+      kind: "open-code-project-conversation",
+      projectId: project.id,
+      ...(model === undefined
+        ? {}
+        : { model: { providerInstanceId: model.providerInstanceId, modelId: model.modelId } }),
+    });
+    if (projectOpenRequest.current !== request) return;
+    if (opened?.kind !== "project-conversation-opened") {
+      if (!needsProjectSurface)
+        await controller.openProject(project.id, project.type, project.name);
+      setThreadExportNotice(
+        codeController.lastExecuteError.current?.message ??
+          "The Project conversation could not be opened.",
+      );
+      return;
+    }
+    await controller.openCodeThread(opened.thread.id, project.name, undefined, project.id);
   }
 
   function openProjects() {

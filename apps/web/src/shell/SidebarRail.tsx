@@ -13,6 +13,7 @@ import { ProjectIcon } from "../projects/ProjectIcon";
 import type { SidebarNavigationDescriptorId } from "./navigationModel";
 
 export interface SidebarRailProject {
+  readonly unread?: boolean;
   readonly id: string;
   readonly name: string;
   readonly active: boolean;
@@ -245,7 +246,11 @@ export function SidebarRail(props: SidebarRailProps) {
           )}
           {visibleProjects.map(({ project, pinned }) => {
             const tile = (
-              <RailButton active={project.active} label={project.name} onSelect={project.onOpen}>
+              <RailButton
+                active={project.active}
+                label={project.unread ? `${project.name}, unread` : project.name}
+                onSelect={project.onOpen}
+              >
                 <ProjectIcon
                   fallback={
                     <span aria-hidden="true" className="sidebar-rail__project">
@@ -255,6 +260,11 @@ export function SidebarRail(props: SidebarRailProps) {
                   projectId={String(project.id)}
                   size={16}
                 />
+                {project.unread && (
+                  <span className="project-rail-unread" aria-hidden="true">
+                    ●
+                  </span>
+                )}
               </RailButton>
             );
             const unpin = props.onUnpinProject;

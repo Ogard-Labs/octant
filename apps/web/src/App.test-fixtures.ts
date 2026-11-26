@@ -48,7 +48,12 @@ import {
   decodeChatThreadView,
   type ChatThread,
 } from "@octant/contracts/chat";
-import { decodeCodeThreadId } from "@octant/contracts/code";
+import {
+  decodeCodeThreadActivity,
+  decodeCodeProjectReport,
+  decodeCodeThread,
+  decodeCodeThreadId,
+} from "@octant/contracts/code";
 import { decodeComputerUseSessionView } from "@octant/contracts/computer-use";
 
 /**
@@ -520,6 +525,62 @@ export function codes(): CodeClient {
     thread: vi.fn(async () => ({ checkout, lastSequence: 0, thread }) as never),
     readFollowUp: vi.fn(async (threadId) => ({ threadId, followUpVersion: 0 }) as never),
     executeFollowUp: vi.fn(),
+  };
+}
+
+export async function projectConversationCodes(): Promise<CodeClient> {
+  const api = codes();
+  const bootstrap = await api.bootstrap();
+  const view = await api.thread(codeThreadId);
+  const conversation = decodeCodeThread({
+    ...view.thread,
+    id: "00000000-0000-4000-8000-000000000891",
+    title: "Octant",
+    coordinator: true,
+  });
+  const worker = decodeCodeThread({
+    ...view.thread,
+    title: "Fix updater retries",
+    coordinatorThreadId: conversation.id,
+  });
+  const threads = [worker, conversation];
+  const projectConversationIds = [conversation.id];
+  const report = decodeCodeProjectReport({
+    workerId: worker.id,
+    operationId: "00000000-0000-4000-8000-000000000892",
+    sequence: 2,
+    title: worker.title,
+    state: "completed",
+    summary: "Retry coverage now includes interrupted downloads.",
+    updatedAt: worker.updatedAt,
+  });
+  const activity = [
+    decodeCodeThreadActivity({
+      threadId: conversation.id,
+      lastSequence: 0,
+      projectReportSequence: report.sequence,
+    }),
+  ];
+  const runtime = [
+    {
+      threadId: worker.id,
+      executing: false,
+      awaitingInput: true as const,
+      awaitingKind: "user-input" as const,
+    },
+  ];
+  return {
+    ...api,
+    bootstrap: async () => ({ ...bootstrap, threads, projectConversationIds, activity, runtime }),
+    navigation: async () => ({ threads, projectConversationIds, activity, runtime }),
+    thread: async (id) => ({ ...view, thread: id === conversation.id ? conversation : worker }),
+    execute: vi.fn<CodeClient["execute"]>(async (command, signal) => {
+      if (command.kind === "open-code-project-conversation")
+        return { kind: "project-conversation-opened", thread: conversation };
+      if (command.kind === "read-code-project-reports")
+        return { kind: "project-reports", reports: [report] };
+      return api.execute(command, signal);
+    }),
   };
 }
 

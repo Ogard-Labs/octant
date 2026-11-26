@@ -277,6 +277,7 @@ type WorkspaceIntent =
     }
   | {
       readonly kind: "split-pane";
+      readonly reuseVisible?: true;
       readonly targetPaneId: PaneId;
       readonly orientation: "horizontal" | "vertical";
       readonly placement: "before" | "after";
@@ -705,6 +706,45 @@ export function useShellController(options: ShellControllerOptions) {
         ...(projectId === undefined ? {} : { projectId }),
       },
     });
+  }
+
+  async function openCodeWorkerBeside(
+    paneId: PaneId,
+    threadId: CodeThreadId,
+    title: string,
+    projectId: ProjectId,
+  ): Promise<void> {
+    const surface: WorkspaceTab = {
+      kind: "code-overview",
+      mode: "code",
+      id: newTabId(),
+      threadId,
+      title,
+    };
+    const committed = await enqueueMutation({
+      kind: "workspace",
+      intent: {
+        kind: "split-pane",
+        targetPaneId: paneId,
+        orientation: "horizontal",
+        placement: "after",
+        surface,
+        projectId,
+        reuseVisible: true,
+      },
+    });
+    if (!committed) return;
+    const layout = committedShell.current?.workspace.layouts.code;
+    const opened = layout && findVisibleSurfacePane(layout, surface);
+    if (opened !== undefined)
+      requestAnimationFrame(() => {
+        const pane = document.querySelector<HTMLElement>(
+          `[data-workspace-pane-id="${opened.paneId}"]`,
+        );
+        (
+          pane?.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]') ?? pane
+        )?.focus({ preventScroll: true });
+      });
   }
 
   async function openWorkThread(
@@ -1458,6 +1498,7 @@ export function useShellController(options: ShellControllerOptions) {
     openDraftThread,
     openChatThread,
     openCodeThread,
+    openCodeWorkerBeside,
     openWorkThread,
     openCodeSurface,
     openPreview,
@@ -2025,6 +2066,8 @@ function createWorkspaceMutation(
           : requestedSurface;
       refuseCrossAuthority(latest.workspace, mode, surface, intent.projectId);
       const existing = findVisibleSurfacePane(layout, surface);
+      if (intent.reuseVisible && existing !== undefined)
+        return createWorkspaceMutation(latest, { kind: "activate-pane", paneId: existing.paneId });
       return {
         operation: {
           kind: "split-pane",

@@ -83,6 +83,7 @@ import {
   openSidebarProject,
   otherProjectId,
   projectBootstrap,
+  projectConversationCodes,
   projectId,
   projectWindowCapability,
   projects,
@@ -5656,6 +5657,61 @@ describe("App", () => {
     expect(screen.queryByRole("dialog", { name: "Right sidebar" })).toBeNull();
   });
 
+  it("opens the pinned conversation by keyboard and keeps the ordinary Project's Overview choice", async () => {
+    const user = userEvent.setup();
+    const codeApi = await projectConversationCodes();
+    const shell = codeShellBootstrap();
+    const key = `octant.code.project-destination.${projectId}`;
+    localStorage.removeItem(key);
+    try {
+      render(
+        <App
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          codeClient={codeApi}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          shellClient={client({
+            ...shell,
+            settings: {
+              ...shell.settings,
+              sidebarCollapsedPresentation: "always",
+              sidebarPinnedProjects: [projectId],
+            },
+          })}
+          providerClient={providersWithToolModel()}
+        />,
+      );
+      const rail = await screen.findByRole("navigation", { name: "Destinations" });
+      const pin = await within(rail).findByRole("button", { name: "Octant, unread" });
+      pin.focus();
+      await user.keyboard("{Enter}");
+      const views = await screen.findByRole("navigation", { name: "Project views" });
+      await waitFor(() =>
+        expect(within(views).getByRole("button", { name: "Conversation" })).toHaveAttribute(
+          "aria-current",
+          "page",
+        ),
+      );
+      expect(
+        await screen.findByText("Retry coverage now includes interrupted downloads."),
+      ).toBeVisible();
+      await waitFor(() => expect(pin).toHaveAccessibleName("Octant"));
+      expect(screen.getByText(/Needs you \(1\)/)).toBeVisible();
+      await user.click(within(views).getByRole("button", { name: "Overview" }));
+      expect(await screen.findByDisplayValue("Octant")).toBeVisible();
+      await user.click(pin);
+      expect(
+        await screen.findByText("Retry coverage now includes interrupted downloads."),
+      ).toBeVisible();
+      await openSidebarProject(user, "Octant");
+      expect(await screen.findByDisplayValue("Octant")).toBeVisible();
+      expect(localStorage.getItem(key)).toBe("overview");
+    } finally {
+      localStorage.removeItem(key);
+    }
+  });
+
   it("does not disclose a thread environment for a Project overview", async () => {
     const user = userEvent.setup();
     render(
@@ -6607,7 +6663,7 @@ describe("App", () => {
     // one centered, mode-scoped thread finder.
     await user.click(screen.getByRole("button", { name: "Search" }));
     await user.type(screen.getByRole("searchbox", { name: "Filter threads" }), "{Enter}");
-    const search = screen.getByRole("combobox", { name: "Search threads" });
+    const search = await screen.findByRole("combobox", { name: "Search threads" });
     expect(search).toBeVisible();
     await waitFor(() => expect(search).toHaveFocus());
     expect(screen.getByRole("dialog", { name: "Search threads" })).toBeVisible();

@@ -393,6 +393,7 @@ export interface CodeThreadWorkspaceProps {
    * A coordinator's proposed workers, shown above the composer with the other
    * prompts that wait for the person's decision. Absent on any other thread.
    */
+  readonly projectReport?: ReactNode;
   readonly coordinatorProposals?: ReactNode;
   /**
    * A coordinator's workers' pending approvals and questions, drawn as rows at
@@ -2164,7 +2165,29 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </OctantAlert>
         ) : null}
 
-        {messages.length === 0 && pendingMessage === null ? (
+        {messages.length === 0 && pendingMessage === null && props.projectReport !== undefined ? (
+          <TranscriptWindow
+            ariaLabel="Project conversation"
+            className="code-thread-workspace__conversation transcript-scroll"
+            items={[]}
+            itemKey={String}
+            renderItem={() => null}
+            emptyContentKey={String(props.threadId)}
+            restoreKey={String(props.threadId)}
+            align="start"
+            role="log"
+            trail={
+              <div className="code-thread-workspace__transcript thread-column">
+                {props.controller.conversationHistory === "loading" ? (
+                  <OctantEmpty state="loading" title="Loading conversation" />
+                ) : (
+                  <OctantEmpty state="neutral" title="What needs doing in this Project?" />
+                )}
+                {props.projectReport}
+              </div>
+            }
+          />
+        ) : messages.length === 0 && pendingMessage === null ? (
           <div
             className="code-thread-workspace__conversation transcript-scroll"
             role="log"
@@ -2252,12 +2275,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   workerCardPlacement === undefined ? null : (
                     <CoordinatorWorkerCards
                       onOpenWorker={props.coordinatorWorkers.onOpenWorker}
+                      onOpenBeside={props.coordinatorWorkers.onOpenBeside}
                       rows={props.coordinatorWorkers.rows.filter(
                         (row) => !workerCardPlacement.placed.has(row.threadId),
                       )}
                     />
                   )}
                   {props.coordinatorWorkerAsks}
+                  {props.projectReport}
                 </>
               }
               className="code-thread-workspace__conversation transcript-scroll"
@@ -2299,6 +2324,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         {props.coordinatorWorkers === undefined ? null : (
                           <CoordinatorWorkerCards
                             onOpenWorker={props.coordinatorWorkers.onOpenWorker}
+                            onOpenBeside={props.coordinatorWorkers.onOpenBeside}
                             rows={workerCardPlacement?.byRow.get(message.id) ?? []}
                           />
                         )}

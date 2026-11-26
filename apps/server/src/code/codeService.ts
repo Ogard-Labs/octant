@@ -2197,7 +2197,10 @@ export class CodeService {
         return { kind: "worktree-source-previewed", preview };
       }
       if (command.kind === "read-code-project-reports") {
-        if (!(await this.#access.canAccessProject(authenticatedWindowId, command.projectId)))
+        if (
+          isRoutineHostScope(authenticatedWindowId) ||
+          !(await this.#access.canAccessProject(authenticatedWindowId, command.projectId))
+        )
           throw this.#failure("unauthorized", "This window cannot read the Project conversation.");
         const project = this.#persistence.readProject?.(command.projectId);
         if (
@@ -3107,6 +3110,8 @@ export class CodeService {
         current.coordinator === true &&
         projectConversationId(this.#persistence.journal, current.projectId) === current.id &&
         [
+          "propose-code-delivery-outcome",
+          "confirm-code-delivery-outcome",
           "mark-code-thread-done",
           "change-code-thread-lifecycle",
           "complete-code-thread",
