@@ -117,6 +117,7 @@
     "./host-export": "./src/hostExport.ts",
     "./integration": "./src/integration.ts",
     "./linear-issues": "./src/linearIssues.ts",
+    "./thread-linked-issues": "./src/threadLinkedIssues.ts",
     "./linear-issue-context": "./src/linearIssueContext.ts",
     "./remote-access": "./src/remoteAccess.ts",
     "./access-activity": "./src/accessActivity.ts",

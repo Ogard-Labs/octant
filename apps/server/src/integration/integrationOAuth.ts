@@ -59,10 +59,12 @@ export interface IntegrationOAuthHost {
     readonly scope: string;
     readonly revokeEndpoint: string;
   }) => Promise<IntegrationRevokeResult>;
-  readonly requestCredential: (
-    scope: string,
-  ) => Promise<
-    | { readonly kind: "granted"; readonly reference: string }
+  readonly requestCredential: (scope: string) => Promise<
+    | {
+        readonly kind: "granted";
+        readonly reference: string;
+        readonly scopes?: ReadonlyArray<string>;
+      }
     | { readonly kind: "refused"; readonly reason: string }
     | { readonly kind: "unavailable"; readonly reason: string }
   >;
@@ -300,6 +302,13 @@ export function createIntegrationOAuthHost(options: {
     }
     if (!(await options.vault.has(id))) {
       return { kind: "unavailable", reason: "No credential is stored for this integration." };
+    }
+    // The scopes the provider granted at connect time, from its token
+    // response, so a plugin can refuse a write a read-only grant cannot make
+    // before it calls out. A personal key carries none the host can know.
+    if (id === oauthId) {
+      const scopes = grantedScopes((await readOAuth())?.scope);
+      if (scopes !== undefined) return { kind: "granted", reference: id, scopes };
     }
     return { kind: "granted", reference: id };
   };
@@ -540,6 +549,13 @@ function decodeStoredTokens(raw: string): StoredOAuthTokens | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Splits a token response's `scope` (comma or space separated); empty is unknown. */
+function grantedScopes(scope: string | undefined): ReadonlyArray<string> | undefined {
+  if (scope === undefined) return undefined;
+  const scopes = [...new Set(scope.split(/[\s,]+/).filter((item) => item.length > 0))];
+  return scopes.length === 0 ? undefined : scopes.slice(0, 64);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

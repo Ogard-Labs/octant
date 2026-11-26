@@ -533,6 +533,41 @@ export function useProjectController(options: ProjectControllerOptions) {
   }
 
   /**
+   * Change one of a Code Project's two linked-issue choices: whether Octant
+   * keeps the issues linked to its threads current, and whether agents below
+   * Full access update them without asking. The server accepts either only
+   * from the host's own person.
+   */
+  async function setCodeIssueUpdates(
+    projectId: ProjectId,
+    change:
+      | { readonly keepLinkedIssuesCurrent: boolean }
+      | { readonly agentsMayUpdateIssues: boolean },
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    const keep = "keepLinkedIssuesCurrent" in change;
+    const enabled = keep ? change.keepLinkedIssuesCurrent : change.agentsMayUpdateIssues;
+    const current = keep ? project.keepLinkedIssuesCurrent : project.agentsMayUpdateIssues;
+    if ((current ?? false) === enabled) return true;
+    return execute(
+      {
+        kind: "change-code-project-issue-updates",
+        projectId,
+        expectedVersion: project.version,
+        ...change,
+      },
+      keep
+        ? enabled
+          ? "Octant now moves this Project's linked issues as their threads progress."
+          : "Octant no longer changes this Project's linked issues."
+        : enabled
+          ? "Agents may now update their thread's linked issues without asking."
+          : "Below Full access, agents now ask before each update to a linked issue.",
+    );
+  }
+
+  /**
    * Opt a Work Project into (or out of) the STATUS.md Octant keeps in its
    * folder. The server refuses it for the default-folder Project.
    */
@@ -1219,6 +1254,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodeOwnToolchain,
     setCodeAgentPullRequestComments,
     setCodeAgentDefaultBranchPush,
+    setCodeIssueUpdates,
     setProviderPolicy,
     setNativeProviders,
     setAgentMemoryWrites,

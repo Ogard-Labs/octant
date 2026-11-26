@@ -313,7 +313,8 @@ An `issues` read of closed issues may name `closedReason` (`completed` or
 
 Create from an issue frames redacted issue text through
 `apps/server/src/context/externalContentFraming.ts` and appends
-`thread.external-content-ingested@1`.
+`thread.external-content-ingested@1`. A Code thread created from an issue is
+also linked to it ([Linked issues](#linked-issues)).
 
 ## Terminal sessions
 
@@ -371,6 +372,51 @@ missing issues, redacts secret shapes before returning text, and records
 
 The behavior rules for both integrations are in
 [Workspace: boards and integrations](workspace.md#boards-and-integrations).
+
+## Linked issues
+
+Code commands `link-code-thread-issue { threadId, reference }` and
+`unlink-code-thread-issue { threadId, issue }` answer `thread-issue-links`
+with the thread's links or a refusal (`invalid-reference`, `not-found`,
+`too-many`, `not-linked`, `linear-unavailable`). Only a person may send them; a
+routine or the host's own actor is refused. Links are journaled on the
+`thread-linked-issues` aggregate (aggregate id = thread id) as
+`thread.issue-linked@1 { threadId, issue, source, linkedAt }` and
+`thread.issue-unlinked@1 { threadId, issue }`, where `issue` is
+`{ forge: "github", owner, repository, number }` or
+`{ forge: "linear", identifier, issueId }`; at most ten per thread. Creating a
+Code thread from an issue links it with `source: "created-from"` right after
+the thread's own events. Navigation rows carry `linkedIssues`.
+
+Tracker writes go only through the integration seams:
+
+- Linear plugin operations `read-issue-workflow` (the issue's state and its
+  team's states, `read` scope), `set-issue-state { id, stateId }` (GraphQL
+  `issueUpdate`) and `comment-issue { id, body }` (`commentCreate`). New
+  connections ask for `read,write`. The host records the scopes Linear granted
+  at connect time and hands them to the plugin with the credential reference
+  (`IntegrationCredentialRequestResult.scopes`); a token without `write`, and a
+  write Linear refuses as forbidden, answers `refused` with the fixed
+  remediation "Linear lets Octant read only. Reconnect Linear in Settings ›
+  Integrations to allow updates." (`missing-scope`) before any call.
+- GitHub `GhIssueWritePort`: `gh issue comment --body-file -` (the body on
+  stdin) and `gh issue close --reason completed`, through the host's `gh`
+  login. Each write first proves `issues-write` on the repository from its
+  permissions (triage or push); without it the write fails closed as
+  `missing-capability`. Nothing reopens, relabels or reassigns.
+
+Every attempt, by the host or the agent, appends
+`tracker.issue-write-recorded@1 { threadId, issue, action, target?, stateId?,
+outcome, reason?, commentDigest?, actor }` on the `tracker-issue-writes`
+aggregate. A comment's text is never journaled; `commentDigest` is its SHA-256.
+A thread purge takes both aggregates with the thread.
+
+Project settings `keepLinkedIssuesCurrent` and `agentsMayUpdateIssues` change
+through `change-code-project-issue-updates`, journaled as
+`project.code-issue-updates-changed@1`; the route accepts it only from the
+host's own person. The write-back runs on a turn request and on a two-minute
+pass over the cached pull-request evidence the board shows; it never reads
+GitHub for the pass itself.
 
 ### Admitted original input details
 

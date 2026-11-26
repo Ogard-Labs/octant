@@ -22,6 +22,8 @@ import type {
   ThreadBoardPullRequestIdentity,
   ThreadBoardPullRequestSummaries,
   ThreadTouchedIssues,
+  LinkedIssueRef,
+  ThreadLinkedIssue,
   WorkspaceTab,
 } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
@@ -35,6 +37,7 @@ import {
   GitCommitHorizontal,
   GitFork,
   GitPullRequest,
+  Link2,
   MoreHorizontal,
   Paperclip,
   Plus,
@@ -83,6 +86,10 @@ import type { MoveToWorktreeAnswer } from "./MoveToWorktreeDialog";
 // Moving is rare, so its dialog loads only when the person opens it.
 const MoveToWorktreeDialog = lazy(() =>
   import("./MoveToWorktreeDialog").then((module) => ({ default: module.MoveToWorktreeDialog })),
+);
+// So is linking an issue by hand; the row is all the first frame carries.
+const LinkedIssuesDialog = lazy(() =>
+  import("./LinkedIssuesDialog").then((module) => ({ default: module.LinkedIssuesDialog })),
 );
 import type { CodeBranchPreviewOutcome, SwitchCodeBranchOutcome } from "../code/switchCodeBranch";
 import { CODE_DELIVERY_OUTCOME_OPTIONS } from "../code/composer/CodeDeliveryOutcomeSelector";
@@ -204,6 +211,10 @@ export interface CodeThreadEnvironmentProps {
   readonly threadPullRequests?: ThreadBoardPullRequestSummaries;
   /** The issues the thread's tool calls wrote to, listed under its pull requests. */
   readonly threadIssues?: ThreadTouchedIssues;
+  /** The issues this thread works on; with the two callbacks, the person links and unlinks them. */
+  readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
+  readonly onLinkIssue?: (reference: string) => Promise<string | undefined>;
+  readonly onUnlinkIssue?: (issue: LinkedIssueRef) => Promise<string | undefined>;
   /** Opens a page outside Octant: a touched issue, or a pull request's checks or conflicts. */
   readonly onOpenThreadPage?: (url: string) => void;
   /** Opens one of this thread's pull requests in the app. Absent leaves its rows inert. */
@@ -305,6 +316,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   // move itself withdrew it.
   const latestMoveToWorktree = useRef(props.onMoveToWorktree);
   latestMoveToWorktree.current = props.onMoveToWorktree;
+  const [linkedIssuesOpen, setLinkedIssuesOpen] = useState(false);
   const onExecute = props.onExecute;
   const fetchLocalRefs = useCallback(async (): Promise<ReadonlyArray<CodeWorktreeRef>> => {
     if (onExecute === undefined || project === undefined) return [];
@@ -654,6 +666,17 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               summaries={props.threadPullRequests}
             />
             <EnvironmentThreadIssues issues={props.threadIssues} onOpen={props.onOpenThreadPage} />
+            {props.onLinkIssue === undefined ? null : (
+              <EnvironmentRow
+                icon={Link2}
+                label={
+                  (props.linkedIssues?.length ?? 0) === 0
+                    ? "Link an issue…"
+                    : `Linked issues (${String(props.linkedIssues?.length ?? 0)})`
+                }
+                onClick={() => setLinkedIssuesOpen(true)}
+              />
+            )}
           </EnvironmentCard>
         }
         mode="code"
@@ -928,6 +951,16 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           {props.children}
         </CodeCheckoutProvider>
       </div>
+      {linkedIssuesOpen && props.onLinkIssue !== undefined && props.onUnlinkIssue !== undefined ? (
+        <Suspense fallback={null}>
+          <LinkedIssuesDialog
+            linkedIssues={props.linkedIssues ?? []}
+            onClose={() => setLinkedIssuesOpen(false)}
+            onLink={props.onLinkIssue}
+            onUnlink={props.onUnlinkIssue}
+          />
+        </Suspense>
+      ) : null}
       {moveToWorktree !== undefined ? (
         <Suspense fallback={null}>
           <MoveToWorktreeDialog

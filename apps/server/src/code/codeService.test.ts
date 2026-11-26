@@ -2298,6 +2298,39 @@ describe("CodeService commands", () => {
     expect(elsewhere.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("creating a thread from an issue links it", async () => {
+    const link = vi.fn(() => ({ status: "linked" as const, linkedIssues: [] }));
+    const fixture = serviceFixture({
+      threads: [],
+      project: rememberedFullAccessProject,
+      issueContext: {
+        prepare: vi.fn(async () => ({ status: "ready", framed: {} }) as never),
+        bindCreatedThread: vi.fn(() => ({ kind: "recorded" }) as never),
+        peekFramedForFirstTurn: vi.fn(),
+        consumeFramedForFirstTurn: vi.fn(),
+        takeFramedForFirstTurn: vi.fn(),
+      },
+      linkedIssues: {
+        list: () => [],
+        link,
+        unlink: vi.fn(),
+        resolveLinear: vi.fn(),
+      },
+    });
+
+    await fixture.service.execute(ids.window, {
+      kind: "create-code-thread",
+      thread: thread({ executionPolicy: "approval-gated" }),
+      issueContext: { owner: "octant", name: "octant", number: 7 },
+    } as never);
+
+    expect(link).toHaveBeenCalledWith(
+      String(ids.thread),
+      { forge: "github", owner: "octant", repository: "octant", number: 7 },
+      "created-from",
+    );
+  });
+
   it("refuses a thread that starts from both an issue and a terminal session", async () => {
     const terminalSessions = {
       prepare: vi.fn<TerminalSessionImportPort["prepare"]>(),
@@ -6944,6 +6977,8 @@ function serviceFixture(
     readonly content?: CodeContentStoreOptions;
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
     readonly touchedIssues?: CodeServiceOptions["touchedIssues"];
+    readonly linkedIssues?: CodeServiceOptions["linkedIssues"];
+    readonly issueContext?: CodeServiceOptions["issueContext"];
     readonly readLatestFinishedReceipt?: CodeServiceOptions["readLatestFinishedReceipt"];
     readonly putAwayWhenDone?: CodeServiceOptions["putAwayWhenDone"];
     readonly unfinishedWork?: CodeServiceOptions["unfinishedWork"];
@@ -7093,6 +7128,8 @@ function serviceFixture(
       : { serverGitHistory: options.serverGitHistory }),
     ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
     ...(options.touchedIssues === undefined ? {} : { touchedIssues: options.touchedIssues }),
+    ...(options.linkedIssues === undefined ? {} : { linkedIssues: options.linkedIssues }),
+    ...(options.issueContext === undefined ? {} : { issueContext: options.issueContext }),
     ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
     ...(options.awaitsHarnessApproval === undefined
       ? {}

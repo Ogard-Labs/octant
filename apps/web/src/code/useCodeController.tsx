@@ -75,6 +75,7 @@ import {
   ThreadBoardPullRequestSummaries,
   type ThreadBoardPullRequestIdentity,
   ThreadTouchedIssues,
+  ThreadLinkedIssue,
   type ThreadLiveStep,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -218,6 +219,8 @@ export interface CodeThreadNavigationItem {
   readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
   /** The issues the thread's tool calls wrote to; absent when it has none. */
   readonly touchedIssues?: ThreadTouchedIssues;
+  /** The issues the thread works on; absent when none is linked. */
+  readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
   readonly executing?: boolean;
   /** An approval or a question waits on the person; the thread is parked, not working. */
   readonly awaitingInput?: boolean;
@@ -2480,6 +2483,7 @@ export function useCodeController(options: CodeControllerOptions) {
         };
         readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
         readonly touchedIssues?: ThreadTouchedIssues;
+        readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
         readonly turnStartedAt?: string;
         readonly liveStep?: ThreadLiveStep;
       }
@@ -2495,6 +2499,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
         ...(pullRequestSummaries === undefined ? {} : { pullRequestSummaries }),
         ...(entry.touchedIssues === undefined ? {} : { touchedIssues: entry.touchedIssues }),
+        ...(entry.linkedIssues === undefined ? {} : { linkedIssues: entry.linkedIssues }),
       });
     }
     return byThread;
@@ -2563,6 +2568,7 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(runtime?.touchedIssues === undefined
               ? {}
               : { touchedIssues: runtime.touchedIssues }),
+            ...(runtime?.linkedIssues === undefined ? {} : { linkedIssues: runtime.linkedIssues }),
             ...(thread.pinned === true ? { pinned: true } : {}),
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),

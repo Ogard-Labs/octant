@@ -6353,6 +6353,7 @@ function LaunchedShell(
       setCodeAgentMerge: projectController.setCodeAgentMerge,
       setCodeAgentPullRequestComments: projectController.setCodeAgentPullRequestComments,
       setCodeAgentDefaultBranchPush: projectController.setCodeAgentDefaultBranchPush,
+      setCodeIssueUpdates: projectController.setCodeIssueUpdates,
       setCodePullRequestsOpen,
       setDockSidecarsByThread,
       setDockStatesByThread,

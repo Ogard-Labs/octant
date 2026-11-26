@@ -102,6 +102,7 @@ import {
   type WindowId,
   type ProviderExecutionPolicy,
   type Project,
+  type LinkedIssueRef,
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
@@ -365,6 +366,20 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
   };
 }
 
+/** What a turn lends the Linear and GitHub tools. */
+export interface CodeTrackerToolInput {
+  readonly windowId: WindowId;
+  readonly thread: CodeThread;
+  readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
+  /** Asks the person in the thread, showing the whole summary. */
+  readonly ask: (
+    summary: string,
+    signal?: AbortSignal,
+  ) => Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable">;
+  /** Whether the thread has read outside content under Strict. */
+  readonly readOutsideContent: () => boolean;
+}
+
 export interface CodeOperationRuntimeOptions {
   readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
   readonly checkoutObserved?: CodeOperationServiceOptions["checkoutObserved"];
@@ -502,6 +517,8 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<GhDeliveryTarget | undefined>;
   /** The standing merge permissions the person has stored for a thread; absent reads none. */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
+  /** The issues a thread is linked to; a pull request it opens names them as fixed. */
+  readonly linkedIssues?: (threadId: CodeThreadId) => ReadonlyArray<LinkedIssueRef>;
   /** The Project's stored choices for comments and default-branch pushes; absent reads neither. */
   readonly projectForgeChoices?: (thread: CodeThread) => ProjectForgeChoices;
   /**
@@ -733,18 +750,13 @@ export interface CodeOperationRuntimeOptions {
    * (target `board`) of each turn.
    */
   readonly planner?: CodePlannerToolPort;
-  /** Optional Project-fixed, read-only GitHub tools composed per active turn. */
-  readonly githubReadTools?: (input: {
-    readonly windowId: WindowId;
-    readonly thread: CodeThread;
-    readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
-  }) => AppManagedToolSet | undefined;
-  /** Optional Project-fixed, read-only Linear tools composed per active turn. */
-  readonly linearReadTools?: (input: {
-    readonly windowId: WindowId;
-    readonly thread: CodeThread;
-    readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
-  }) => AppManagedToolSet | undefined;
+  /**
+   * Optional Project-fixed GitHub tools composed per active turn: reads, and
+   * updates to the thread's linked issues, which ask through `ask`.
+   */
+  readonly githubReadTools?: (input: CodeTrackerToolInput) => AppManagedToolSet | undefined;
+  /** Optional Project-fixed Linear tools composed per active turn, as for GitHub. */
+  readonly linearReadTools?: (input: CodeTrackerToolInput) => AppManagedToolSet | undefined;
   /**
    * The threads tool for one turn: a view of the other Code threads of this
    * thread's Project, messaging them where the host admits it, and the
@@ -5661,6 +5673,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       : { context, prompt: approvalPrompt(effect, scope.thread, scope.checkout, undefined) };
   }
 
+  #trackerToolInput(active: ActiveTurn): CodeTrackerToolInput {
+    return {
+      windowId: active.windowId,
+      thread: active.thread,
+      readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
+      ask: (summary, signal) => {
+        const bounded = boundProviderSummary(summary);
+        // An approval never covers text the person cannot read whole.
+        return bounded === undefined || bounded !== summary.trim()
+          ? Promise.resolve("unavailable")
+          : this.#askToolApproval(active, bounded, undefined, signal);
+      },
+      // Under Strict only, as for a pull-request comment.
+      readOutsideContent: () =>
+        this.#options.readThreadExternalContentTaint?.(active.thread.id).externalContentIngested !==
+          false && this.#strict(active.thread.id),
+    };
+  }
+
   #askToolApproval(
     active: ActiveTurn,
     summary: string,
@@ -6519,6 +6550,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               this.#options.projectForgeChoices?.(current).comments === true
             );
           },
+          ...(this.#options.linkedIssues === undefined
+            ? {}
+            : { linkedIssues: () => this.#options.linkedIssues?.(active.thread.id) ?? [] }),
           // Under Strict only, as for the operation service above.
           threadReadOutsideContent: () =>
             this.#options.readThreadExternalContentTaint?.(active.thread.id)
@@ -6663,16 +6697,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ? {}
             : { android: this.#options.androidToolchain }),
         }),
-        this.#options.githubReadTools?.({
-          windowId: active.windowId,
-          thread: active.thread,
-          readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
-        }),
-        this.#options.linearReadTools?.({
-          windowId: active.windowId,
-          thread: active.thread,
-          readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
-        }),
+        this.#options.githubReadTools?.(this.#trackerToolInput(active)),
+        this.#options.linearReadTools?.(this.#trackerToolInput(active)),
         this.#options.threads?.({
           windowId: active.windowId,
           thread: active.thread,

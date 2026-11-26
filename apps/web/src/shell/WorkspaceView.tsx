@@ -172,7 +172,12 @@ import type { LocalServerClient } from "@octant/client-runtime";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { BrowserContextId, BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { LocalServerOpenTarget } from "@octant/contracts";
-import type { CodeThreadWorktreeMoveRefusal } from "@octant/contracts";
+import type {
+  CodeThreadIssueLinkRefusal,
+  CodeThreadWorktreeMoveRefusal,
+  LinkedIssueRef,
+  ThreadLinkedIssue,
+} from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import {
   openDedicatedBrowserContext,
@@ -3469,10 +3474,30 @@ function threadPullRequestProps(
   readonly onOpenThreadPullRequestOnGithub?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly threadIssues?: ThreadTouchedIssues;
   readonly onOpenThreadPage: (url: string) => void;
+  readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
+  readonly onLinkIssue: (reference: string) => Promise<string | undefined>;
+  readonly onUnlinkIssue: (issue: LinkedIssueRef) => Promise<string | undefined>;
 } {
   const entry = codeController.navigation?.find((item) => String(item.threadId) === threadId);
   const summaries = entry?.pullRequestSummaries;
   const issues = entry?.touchedIssues;
+  const linkedIssues = entry?.linkedIssues;
+  const changeLinks = async (
+    command:
+      | { readonly kind: "link-code-thread-issue"; readonly reference: string }
+      | { readonly kind: "unlink-code-thread-issue"; readonly issue: LinkedIssueRef },
+  ): Promise<string | undefined> => {
+    const result = await codeController.execute({
+      ...command,
+      threadId: decodeCodeThreadId(threadId),
+    });
+    if (result?.kind !== "thread-issue-links") {
+      return codeController.lastExecuteError.current?.message ?? "The issue was not changed.";
+    }
+    return result.outcome.status === "refused"
+      ? issueLinkRefusalMessage(result.outcome.reason)
+      : undefined;
+  };
   const openTab = props.onOpenThreadPullRequestTab;
   const open =
     openTab === undefined
@@ -3483,6 +3508,9 @@ function threadPullRequestProps(
   return {
     ...(summaries === undefined ? {} : { threadPullRequests: summaries }),
     ...(issues === undefined ? {} : { threadIssues: issues }),
+    ...(linkedIssues === undefined ? {} : { linkedIssues }),
+    onLinkIssue: (reference) => changeLinks({ kind: "link-code-thread-issue", reference }),
+    onUnlinkIssue: (issue) => changeLinks({ kind: "unlink-code-thread-issue", issue }),
     onOpenThreadPage: (url: string) => openExternalUrl(hostBridge, url),
     ...(open === undefined ? {} : { onOpenThreadPullRequest: open }),
     onOpenThreadPullRequestOnGithub: (identity: ThreadBoardPullRequestIdentity) => {
@@ -3978,6 +4006,22 @@ function draftAutoReview(props: WorkspaceViewProps): {
   });
   if (autoReview === undefined) return {};
   return autoReview.status === "reviewer" ? { autoSupported: true, autoReview } : { autoReview };
+}
+
+/** Why the host did not link or unlink an issue, in the person's words. */
+function issueLinkRefusalMessage(reason: CodeThreadIssueLinkRefusal): string {
+  switch (reason) {
+    case "invalid-reference":
+      return "Type #12, owner/repo#12 or a Linear identifier such as ENG-12.";
+    case "not-found":
+      return "Linear has no issue with that identifier.";
+    case "too-many":
+      return "A task links at most ten issues. Unlink one first.";
+    case "not-linked":
+      return "That issue is not linked to this task.";
+    case "linear-unavailable":
+      return "Linear could not be reached. Check Settings › Integrations.";
+  }
 }
 
 /** Why the host did not move a thread into its own worktree, in the person's words. */

@@ -41,6 +41,7 @@ import {
   ThreadNavigationPullRequestSummaries,
 } from "./threadBoardPullRequests";
 import { ThreadTouchedIssues } from "./threadTouchedIssues";
+import { LinkedIssueRef, ThreadLinkedIssues } from "./threadLinkedIssues";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -1194,6 +1195,22 @@ export const CodeCommand = Schema.Union(
    * the user's, never inferred from a matching filesystem root: what authority
    * a thread holds only changes because someone asked.
    */
+  /**
+   * Link an issue to the thread, from a reference the person typed:
+   * `#12` (the thread's delivery repository), `owner/repo#12`, or a Linear
+   * identifier such as `ENG-12`. Links live on their own aggregate, so no
+   * thread version is expected.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("link-code-thread-issue"),
+    threadId: CodeThreadId,
+    reference: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unlink-code-thread-issue"),
+    threadId: CodeThreadId,
+    issue: LinkedIssueRef,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("rebind-code-thread-checkout"),
     ...CodeThreadCommandFields,
@@ -1774,6 +1791,32 @@ export const CodeThreadMovedToWorktree = Schema.Struct({
 export type CodeThreadMovedToWorktree = typeof CodeThreadMovedToWorktree.Type;
 export const decodeCodeThreadMovedToWorktree = Schema.decodeUnknownSync(CodeThreadMovedToWorktree);
 
+/** Why a link or unlink did not change the thread's issues; each is an expected answer. */
+export const CodeThreadIssueLinkRefusal = Schema.Literal(
+  "invalid-reference",
+  "not-found",
+  "too-many",
+  "not-linked",
+  "linear-unavailable",
+);
+export type CodeThreadIssueLinkRefusal = typeof CodeThreadIssueLinkRefusal.Type;
+
+export const CodeThreadIssueLinksResult = Schema.Struct({
+  kind: Schema.Literal("thread-issue-links"),
+  threadId: CodeThreadId,
+  outcome: Schema.Union(
+    Schema.Struct({
+      status: Schema.Literal("linked", "unlinked", "unchanged"),
+      linkedIssues: ThreadLinkedIssues,
+    }).annotations(strict),
+    Schema.Struct({
+      status: Schema.Literal("refused"),
+      reason: CodeThreadIssueLinkRefusal,
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type CodeThreadIssueLinksResult = typeof CodeThreadIssueLinksResult.Type;
+
 /**
  * A refusal here is an expected answer, not a fault: the Project may be
  * unreadable or the thread may already be where it belongs. Carrying it as a
@@ -1839,6 +1882,7 @@ export const CodeCommandResult = Schema.Union(
   CodeWorktreeBranchSuggestionDeclined,
   CodeThreadCheckoutRebound,
   CodeThreadMovedToWorktreeResult,
+  CodeThreadIssueLinksResult,
   CodeForkContextMerged,
 );
 export type CodeCommandResult = typeof CodeCommandResult.Type;
@@ -1924,6 +1968,8 @@ export const CodeNavigationRuntime = Schema.Struct({
   threadPullRequests: Schema.optional(ThreadNavigationPullRequestSummaries),
   /** The issues the thread's tool calls wrote to, newest first; absent when none. */
   touchedIssues: Schema.optional(ThreadTouchedIssues),
+  /** The issues the thread works on, oldest link first; absent when none. */
+  linkedIssues: Schema.optional(ThreadLinkedIssues),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
 }).annotations(strict);

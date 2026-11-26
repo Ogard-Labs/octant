@@ -641,6 +641,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "githubIssueContextService"
     | "linearConnected"
     | "linearIssueContextService"
+    | "linkedIssues"
     | "onGithubPullRequestsUnreadable"
     | "terminalSessionImports"
   > &
@@ -697,6 +698,7 @@ export function wireCode(deps: CodeDependencies) {
     isProjectPolicyTargetAllowed,
     linearConnected,
     linearIssueContextService,
+    linkedIssues,
     liveTurns,
     machineChangeFeed,
     terminalSessionImports,
@@ -1259,6 +1261,13 @@ export function wireCode(deps: CodeDependencies) {
             issuesFor: (threadId) =>
               touchedIssuesFromHistory(codeBoardEventStore.summaryForThread(threadId)),
             linearConnected,
+          },
+          linkedIssues: {
+            list: (threadId) => linkedIssues.store.list(threadId),
+            link: (threadId, issue, source, actor) =>
+              linkedIssues.store.link(threadId, issue, source, actor),
+            unlink: (threadId, issue, actor) => linkedIssues.store.unlink(threadId, issue, actor),
+            resolveLinear: (identifier, signal) => linkedIssues.resolveLinear(identifier, signal),
           },
         });
       // Revocation is wired at construction, before any window can hold a watch.

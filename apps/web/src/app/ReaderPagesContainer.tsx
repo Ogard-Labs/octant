@@ -84,6 +84,7 @@ export interface ReaderPagesContainerProps {
     | "setCodeAgentMerge"
     | "setCodeAgentPullRequestComments"
     | "setCodeAgentDefaultBranchPush"
+    | "setCodeIssueUpdates"
     | "setCodePullRequestsOpen"
     | "setGithubIssuesOpen"
     | "setImageLibraryOpen"
@@ -704,6 +705,28 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
               ),
             setEnabled: (projectId, enabled) =>
               actions.setCodeAgentDefaultBranchPush(projectId, enabled ? "enabled" : "disabled"),
+          },
+          keepLinkedIssuesCurrent: {
+            enabledFor: (projectId) =>
+              projects.some(
+                (project) =>
+                  String(project.id) === String(projectId) &&
+                  project.type === "code" &&
+                  project.keepLinkedIssuesCurrent === true,
+              ),
+            setEnabled: (projectId, enabled) =>
+              actions.setCodeIssueUpdates(projectId, { keepLinkedIssuesCurrent: enabled }),
+          },
+          agentsMayUpdateIssues: {
+            enabledFor: (projectId) =>
+              projects.some(
+                (project) =>
+                  String(project.id) === String(projectId) &&
+                  project.type === "code" &&
+                  project.agentsMayUpdateIssues === true,
+              ),
+            setEnabled: (projectId, enabled) =>
+              actions.setCodeIssueUpdates(projectId, { agentsMayUpdateIssues: enabled }),
           },
         }}
         {...(selectedProjectPullRequestKey === undefined ? {} : { selectedProjectPullRequestKey })}

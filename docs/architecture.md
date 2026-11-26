@@ -4810,11 +4810,27 @@ take is refused rather than ignored.
   fresh snapshot before anything is read: `issues-read` for `issues`, `issue`,
   and `search`, which go through GitHub's Issues endpoints that serve pull
   requests too, `pull-requests-read` for `pull-requests`, and `projects-read`
-  for `projects`. It changes nothing on GitHub. A successful read is journaled
+  for `projects`. Reads change nothing on GitHub. A successful read is journaled
   as outside content (`github-issues`, `github-pull-requests`,
   `github-projects`, `github-issue`, `github-pull-request`, or
   `github-search`) before the model receives it, and a read that cannot be
   journaled is withheld.
+- **Linked issues.** On a thread linked to issues, the same family adds
+  `comment` and `close` (as completed) for a linked issue of the delivery
+  repository, and `octant_linear` adds `set-state` and `comment` for a linked
+  Linear issue. Reach is the thread's linked issues only. The server decides
+  before any call: Plan refuses, Full access writes, and below it the person
+  is asked with the whole text unless the Project's Agents may update linked
+  issues is on and the thread has read no outside content under Strict
+  (`decideAgentIssueUpdate`, the pull-request comment rule). A GitHub write
+  first proves `issues-write` (triage or push permission) on the repository;
+  a Linear write needs the `write` scope. Each attempt is journaled as
+  `tracker.issue-write-recorded@1`, a comment by digest only. When the
+  Project's Keep linked issues up to date is on, the host makes the same
+  writes at the thread's moments (In Progress, In Review, Done with a merge
+  comment) and never moves an issue backwards
+  ([Workspace](design/workspace.md#linked-issues-kept-current)). Merge when
+  ready stays the person's act: the thread's follow-up only offers it.
 
 **Delivery (publishing to a user-owned target) is dormant.** The ship service
 and its journaled events exist, but the host wires no target source, no
@@ -9378,7 +9394,13 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   host credential service. Connect opens a short-lived loopback listener on
   `127.0.0.1:52693` (`/oauth/linear/callback`, fallbacks 52694 and 52695) for
   the consent redirect, then closes it. Connect fails closed when the public
-  client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
+  client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset. Connect asks for the
+  `read,write` scopes; the host records the scopes Linear granted from the
+  token response and hands them to the plugin beside the opaque reference, so
+  a connection made before `write` was asked for stays read-only and its
+  writes fail closed with a reconnect message until the person reconnects.
+  GitHub issue writes use the host's `gh` login only; Octant stores no forge
+  token ([Reading GitHub](#modes-chat-work-and-code)).
 
 ### Sees images
 

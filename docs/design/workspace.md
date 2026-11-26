@@ -2538,7 +2538,8 @@ GitHub tab attaches only `{ owner, name, number }` to the draft. At creation the
 reauthorizes `issues-read`, frames redacted issue text as external content,
 and journals that ingestion
 ([details](host-reads-and-commands.md#github-issues)). Refusal fails creation visibly. The
-resulting thread is ordinary Chat, Work, or Code with no GitHub write-back.
+resulting thread is ordinary Chat, Work, or Code; a Code thread is also linked to the issue
+(see [Linked issues](#linked-issues-kept-current) below).
 Disabled GitHub, missing capability, and unauthorized or rate-limited states
 fail closed. See
 [security/github-repository-onboarding-threat-model.md](../security/github-repository-onboarding-threat-model.md).
@@ -2584,7 +2585,46 @@ Selecting a row attaches only `{ id }`. At creation the server reauthorizes
 through the Integration port, frames redacted issue text
 (`identifier`, status, description, comments, links) as external content and
 journals that ingestion ([details](host-reads-and-commands.md#linear-issues)).
-Refusal fails creation visibly. No Linear write-back path exists.
+Refusal fails creation visibly. A Code thread made this way is linked to the issue.
+
+<a id="linked-issues-kept-current"></a>
+**Linked issues kept current.** A Code thread works on up to ten linked
+issues: the one it was created from (`created-from`) and any the person links
+from the environment's **Link an issue…** row (`#12` in the delivery
+repository, `owner/repo#12`, or a Linear identifier such as `ENG-12`, which
+the host resolves through the Linear plugin). The row opens a lazily loaded
+dialog that lists the links with **Unlink**. Links are journaled as
+`thread.issue-linked@1` and `thread.issue-unlinked@1` on their own
+`thread-linked-issues` aggregate; only a person may change them.
+
+Each Code Project's Pull requests settings menu has two switches, both off by
+default and set only by the host's own person:
+
+- **Keep linked issues up to date.** The host moves each linked issue forward:
+  In Progress when a person asks the thread for a turn, In Review once the
+  thread's pull request is open, and Done with the comment "Merged in
+  `<url>`." once its merge is observed. Linear states are chosen from the
+  team's own states (the `started` state named In Progress, else the first by
+  position; a `started` state whose name says review, else the move is
+  skipped; the `completed` state named Done, else the first). GitHub has only
+  open and closed, so In Progress and In Review are skipped and Done closes the
+  issue as completed. The host never moves an issue backwards, and writes each
+  moment once per thread and issue. Every attempt is journaled as
+  `tracker.issue-write-recorded@1`, with a comment's SHA-256 digest, never its
+  text. A refused write (a Linear connection that may only read, a GitHub
+  login without triage access) adds one line naming the remedy to the thread's
+  Pull request updates follow-up.
+- **Agents may update linked issues.** The agent's `set-state` and `comment`
+  operations ([agent tools](agent-tools.md)) skip the ask below Full access on
+  a thread that has read no outside content, as Agents may comment on pull
+  requests does for pull requests.
+
+A pull request a linked thread opens through its tool carries `Fixes #N`
+(or `Fixes owner/repo#N`, or `Fixes ENG-12`) for each linked issue its body
+does not already name. Once it is open, the thread's Pull request updates
+follow-up offers **Merge when ready…**, which the person confirms; the host
+reads the head at that moment and turns on GitHub's own auto-merge. Nothing
+here merges, and Merge when ready stays the person's act.
 
 Composer `Create from…` also has a Terminal tab in a Work or Code draft with a
 Project, for a local window. It lists the newest Claude Code and Codex sessions

@@ -6,9 +6,16 @@ import {
   type ThreadFinishedReceipt,
   type ThreadTouchedIssue,
   type ThreadTouchedIssues,
+  type CodeThreadIssueLinkRefusal,
+  type CodeThreadIssueLinksResult,
+  type LinkedIssueRef,
+  type LinkedIssueSource,
+  type ThreadLinkedIssue,
   MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS,
 } from "@octant/contracts";
 import { composeThreadTouchedIssues } from "@octant/domain/thread-board-pull-request-policy";
+import { parseLinkedIssueReference } from "@octant/domain/tracker-issue-write-policy";
+import type { LinkIssueOutcome, UnlinkIssueOutcome } from "../trackerIssues/threadLinkedIssueStore";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
@@ -991,6 +998,31 @@ export interface CodeServiceOptions {
    * Linear). Absent, no row carries touched issues.
    */
   readonly touchedIssues?: CodeNavigationTouchedIssueSource;
+  /**
+   * The issues each thread is linked to, and the way to link and unlink them.
+   * Absent, threads carry no links and the link commands are unavailable.
+   */
+  readonly linkedIssues?: CodeLinkedIssuesPort;
+}
+
+/** A thread's issue links, on their own journal aggregate. */
+export interface CodeLinkedIssuesPort {
+  list(threadId: string): ReadonlyArray<ThreadLinkedIssue>;
+  link(
+    threadId: string,
+    issue: LinkedIssueRef,
+    source: LinkedIssueSource,
+    actor?: EventActor,
+  ): LinkIssueOutcome;
+  unlink(threadId: string, issue: LinkedIssueRef, actor?: EventActor): UnlinkIssueOutcome;
+  /** A Linear identifier's node id, read through the Linear plugin. */
+  resolveLinear(
+    identifier: string,
+    signal: AbortSignal,
+  ): Promise<
+    | { readonly status: "found"; readonly issueId: string }
+    | { readonly status: "not-found" | "unavailable" }
+  >;
 }
 
 export interface CodeNavigationTouchedIssueSource {
@@ -1261,6 +1293,7 @@ export class CodeService {
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
   readonly #touchedIssues: CodeNavigationTouchedIssueSource | undefined;
+  readonly #linkedIssues: CodeLinkedIssuesPort | undefined;
   readonly #readLatestFinishedReceipt:
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
@@ -1336,6 +1369,7 @@ export class CodeService {
     this.#waitForThreadChange = options.waitForThreadChange;
     this.#pullRequests = options.pullRequests;
     this.#touchedIssues = options.touchedIssues;
+    this.#linkedIssues = options.linkedIssues;
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#turnAwaiting = options.turnAwaiting;
@@ -1703,12 +1737,81 @@ export class CodeService {
         ...(checkoutChip === undefined ? {} : { checkoutChip }),
         ...(hasPullRequests ? { pullRequestSummaries, threadPullRequests } : {}),
         ...this.#touchedIssuesFor(thread, pullRequests),
+        ...this.#linkedIssuesFor(thread),
         // Rides on the row the caller was already allowed to see: `threads`
         // is the authority-filtered list, so a window never learns what a
         // thread it cannot browse is running.
         ...(parked ? {} : this.#liveTurns?.read(String(thread.id))),
       };
     });
+  }
+
+  #linkedIssuesFor(thread: CodeThread): {
+    readonly linkedIssues?: ReadonlyArray<ThreadLinkedIssue>;
+  } {
+    try {
+      const linkedIssues = this.#linkedIssues?.list(String(thread.id)) ?? [];
+      return linkedIssues.length === 0 ? {} : { linkedIssues };
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Links or unlinks one issue at the person's request. A typed `#12` is the
+   * thread's delivery repository; a Linear identifier is resolved to its node
+   * id through the Linear plugin, which also proves the issue exists.
+   */
+  async #changeIssueLinks(
+    current: CodeThread,
+    command: Extract<
+      CodeCommand,
+      { readonly kind: "link-code-thread-issue" | "unlink-code-thread-issue" }
+    >,
+    actor: EventActor | undefined,
+  ): Promise<CodeThreadIssueLinksResult> {
+    const links = this.#linkedIssues;
+    const refused = (reason: CodeThreadIssueLinkRefusal): CodeThreadIssueLinksResult => ({
+      kind: "thread-issue-links",
+      threadId: current.id,
+      outcome: { status: "refused", reason },
+    });
+    if (links === undefined)
+      throw this.#failure("unavailable", "Issue links are unavailable here.");
+    const threadId = String(current.id);
+    if (command.kind === "unlink-code-thread-issue") {
+      const outcome = links.unlink(threadId, command.issue, actor);
+      return outcome.status === "refused"
+        ? refused(outcome.reason)
+        : {
+            kind: "thread-issue-links",
+            threadId: current.id,
+            outcome: { status: "unlinked", linkedIssues: outcome.linkedIssues },
+          };
+    }
+    const parsed = parseLinkedIssueReference(
+      command.reference,
+      current.deliveryTarget.proposedBaseRepository,
+    );
+    if (parsed === undefined) return refused("invalid-reference");
+    let issue: LinkedIssueRef;
+    if (parsed.forge === "linear") {
+      const resolved = await links.resolveLinear(parsed.identifier, new AbortController().signal);
+      if (resolved.status !== "found") {
+        return refused(resolved.status === "not-found" ? "not-found" : "linear-unavailable");
+      }
+      issue = { forge: "linear", identifier: parsed.identifier, issueId: resolved.issueId };
+    } else {
+      issue = parsed;
+    }
+    const outcome = links.link(threadId, issue, "person", actor);
+    return outcome.status === "refused"
+      ? refused(outcome.reason)
+      : {
+          kind: "thread-issue-links",
+          threadId: current.id,
+          outcome: { status: outcome.status, linkedIssues: outcome.linkedIssues },
+        };
   }
 
   /**
@@ -2735,6 +2838,22 @@ export class CodeService {
       // never as the person.
       if (command.kind === "mark-code-thread-done" && isRoutineHostScope(authenticatedWindowId)) {
         throw this.#failure("unauthorized", "Only a person can mark a Code thread Done.");
+      }
+      if (
+        command.kind === "link-code-thread-issue" ||
+        command.kind === "unlink-code-thread-issue"
+      ) {
+        // A link decides which issues the host and the agent may write to, so
+        // it is the person's act; a routine or the host's own timer cannot.
+        if (isRoutineHostScope(authenticatedWindowId) || actor?.kind === "system") {
+          throw this.#failure("unauthorized", "Only a person can link or unlink an issue.");
+        }
+        const linkedThread = this.#persistence.readCodeThread(command.threadId);
+        if (linkedThread === undefined) {
+          throw this.#failure("invalid", "Code thread was not found.");
+        }
+        await this.#authorizeThread(authenticatedWindowId, linkedThread);
+        return await this.#changeIssueLinks(linkedThread, command, actor);
       }
       if (
         command.kind === "unlink-code-thread-pull-request" &&
@@ -6090,6 +6209,34 @@ export class CodeService {
       } catch {
         // The thread is already journaled; taint recording must not invert create.
       }
+    }
+    // A thread made from an issue works on that issue: link the two, so the
+    // host and the agent may keep it current. Like the mark above, a failed
+    // link must not undo the thread it belongs to.
+    try {
+      if (prepared.github.status === "ready" && command.issueContext !== undefined) {
+        this.#linkedIssues?.link(
+          threadId,
+          {
+            forge: "github",
+            owner: command.issueContext.owner,
+            repository: command.issueContext.name,
+            number: command.issueContext.number,
+          },
+          "created-from",
+        );
+      }
+      const identifier =
+        prepared.linear.status === "ready" ? prepared.linear.identifier : undefined;
+      if (identifier !== undefined && command.linearIssueContext !== undefined) {
+        this.#linkedIssues?.link(
+          threadId,
+          { forge: "linear", identifier, issueId: command.linearIssueContext.id },
+          "created-from",
+        );
+      }
+    } catch {
+      // The person can still link it by hand from the thread.
     }
   }
 

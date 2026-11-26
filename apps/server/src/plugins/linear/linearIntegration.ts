@@ -165,7 +165,7 @@ async function observeAuthentication(
   // A refused OAuth credential is an expired grant. Do not consult a personal
   // API key — that fallback is forbidden.
   if (oauth.kind === "granted") {
-    return identitySnapshot(hostPort, oauth.reference, "oauth", signal);
+    return identitySnapshot(hostPort, oauth.reference, "oauth", signal, oauth.scopes);
   }
   const personal = await hostPort.requestCredential("personal-api-key");
   if (personal.kind === "granted") {
@@ -181,6 +181,7 @@ async function identitySnapshot(
   reference: string,
   source: "oauth" | "personal-api-key",
   signal?: AbortSignal,
+  grantedScopes?: ReadonlyArray<string>,
 ): Promise<IntegrationAuthenticationSnapshot> {
   const personalFlag = source === "personal-api-key" ? { personalCredentialStored: true } : {};
   const result = await graphqlWithReference(
@@ -212,7 +213,7 @@ async function identitySnapshot(
       ...personalFlag,
     };
   }
-  const account = readIdentity(result.body, source);
+  const account = readIdentity(result.body, source, grantedScopes);
   if (account === undefined) {
     return {
       state: "unavailable",
@@ -232,6 +233,7 @@ async function identitySnapshot(
 function readIdentity(
   body: unknown,
   source: "oauth" | "personal-api-key",
+  grantedScopes: ReadonlyArray<string> | undefined,
 ): IntegrationAccount | undefined {
   if (!isRecord(body) || !isRecord(body.data)) return undefined;
   const viewer = isRecord(body.data.viewer) ? body.data.viewer : undefined;
@@ -244,7 +246,10 @@ function readIdentity(
   return {
     login,
     source,
-    scopes: [...LINEAR_OAUTH_SCOPES],
+    // What Linear granted when the host recorded it, so Settings can tell a
+    // read-only connection from one that may update issues. Unknown claims
+    // read only, the least any connection has.
+    scopes: [...(grantedScopes ?? ["read"])],
     ...(displayName === undefined ? {} : { displayName }),
     ...(workspace === undefined ? {} : { workspace }),
   };

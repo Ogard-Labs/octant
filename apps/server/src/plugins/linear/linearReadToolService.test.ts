@@ -286,3 +286,91 @@ describe("LinearReadToolService", () => {
     ).toEqual({ result: { error: "thread-stale" }, isError: true });
   });
 });
+
+describe("LinearReadToolService issue updates", () => {
+  const linked = { forge: "linear" as const, identifier: "OCT-42", issueId: "issue-1" };
+
+  function updateHarness(input: {
+    readonly executionPolicy: CodeThread["executionPolicy"];
+    readonly projectAllowsUpdates?: boolean;
+  }) {
+    const thread = makeThread({ executionPolicy: input.executionPolicy });
+    const ask = vi.fn(async () => "approved" as const);
+    const writes = {
+      agentSetState: vi.fn(async () => ({ status: "applied" as const })),
+      agentComment: vi.fn(async () => ({ status: "applied" as const })),
+    };
+    const toolSet = new LinearReadToolService({
+      reader: { snapshot: vi.fn(async () => READY_SNAPSHOT), executeOperation: vi.fn() },
+      ingestion: { record: vi.fn() },
+    }).createToolSet({
+      windowId: WINDOW_ID,
+      thread,
+      readThread: () => thread,
+      readProjectLinearTarget: () => TARGET,
+      issueUpdates: {
+        linked: () => [linked],
+        projectAllowsUpdates: () => input.projectAllowsUpdates === true,
+        readOutsideContent: () => false,
+        ask,
+        writes,
+      },
+    });
+    const run = (value: unknown) =>
+      toolSet.execute({ name: LINEAR_READ_TOOL_NAME, inputJson: JSON.stringify(value) });
+    return { run, ask, writes };
+  }
+
+  it("the agent cannot set the state of an issue that is not linked to its thread", async () => {
+    const { run, writes, ask } = updateHarness({ executionPolicy: "full-access" });
+    expect(await run({ operation: "set-state", identifier: "OCT-7", state: "Done" })).toMatchObject(
+      {
+        result: { error: "issue-not-linked" },
+        isError: true,
+      },
+    );
+    expect(ask).not.toHaveBeenCalled();
+    expect(writes.agentSetState).not.toHaveBeenCalled();
+  });
+
+  it("refuses in Plan, writes at Full access without asking, and asks below it", async () => {
+    const plan = updateHarness({ executionPolicy: "plan" });
+    expect(
+      await plan.run({ operation: "comment", identifier: "OCT-42", body: "Started." }),
+    ).toMatchObject({ result: { error: "plan-mode-read-only" }, isError: true });
+    expect(plan.writes.agentComment).not.toHaveBeenCalled();
+
+    const full = updateHarness({ executionPolicy: "full-access" });
+    expect(
+      await full.run({ operation: "set-state", identifier: "oct-42", state: "In Review" }),
+    ).toMatchObject({ isError: false });
+    expect(full.ask).not.toHaveBeenCalled();
+    expect(full.writes.agentSetState).toHaveBeenCalledWith(
+      String(makeThread().id),
+      linked,
+      "In Review",
+      undefined,
+    );
+
+    const gated = updateHarness({ executionPolicy: "approval-gated" });
+    await gated.run({ operation: "comment", identifier: "OCT-42", body: "Rotate token=abc123" });
+    expect(gated.ask).toHaveBeenCalledWith(
+      "Comment on OCT-42 under your name?\n\nRotate [redacted]",
+      undefined,
+    );
+    expect(gated.writes.agentComment).toHaveBeenCalledWith(
+      String(makeThread().id),
+      linked,
+      "Rotate [redacted]",
+      undefined,
+    );
+
+    const allowed = updateHarness({
+      executionPolicy: "approval-gated",
+      projectAllowsUpdates: true,
+    });
+    await allowed.run({ operation: "comment", identifier: "OCT-42", body: "Started." });
+    expect(allowed.ask).not.toHaveBeenCalled();
+    expect(allowed.writes.agentComment).toHaveBeenCalledOnce();
+  });
+});

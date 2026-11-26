@@ -17,6 +17,11 @@ import type {
   ExternalContentIngestionStore,
 } from "../context/externalContentIngestionStore";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import {
+  runAgentIssueUpdate,
+  type AgentIssueAction,
+  type AgentIssueUpdates,
+} from "../trackerIssues/agentIssueUpdates";
 
 const MAX_TOOL_INPUT_BYTES = 4 * 1024;
 /** Agent pages stay small; providers iterate with cursors instead. */
@@ -53,6 +58,41 @@ const githubReadDefinition = {
   },
 } as const;
 
+/**
+ * The same tool on a turn that may update its thread's linked issues: a
+ * comment, and close as completed, on a linked issue of this repository only.
+ */
+const githubUpdateDefinition = {
+  ...githubReadDefinition,
+  description: githubReadDefinition.description.replace(
+    "and it changes nothing on GitHub.",
+    "and it changes only issues linked to this thread: comment comments on one and close closes one as completed; below Full access each asks the person unless the Project allows it, and Plan refuses both.",
+  ),
+  inputSchema: {
+    ...githubReadDefinition.inputSchema,
+    properties: {
+      ...githubReadDefinition.inputSchema.properties,
+      operation: {
+        type: "string",
+        enum: [
+          "issues",
+          "pull-requests",
+          "projects",
+          "issue",
+          "search",
+          "comment",
+          "close",
+          "help",
+        ],
+      },
+      body: { type: "string", minLength: 1, maxLength: 4096 },
+    },
+  },
+} as const;
+
+const GITHUB_UPDATE_HELP =
+  "comment takes number (an issue of this repository linked to this thread) and body (up to 4 KB; credential-shaped text is redacted) and posts under the person's GitHub name. close takes number and closes that linked issue as completed; nothing reopens, relabels or reassigns. Both reach only this thread's linked issues; Plan refuses them, Full access does not ask, and below it the person is asked unless the Project lets agents update linked issues and the thread has read no outside content.";
+
 const GITHUB_READ_HELP = [
   "Every operation reads this Code Project's delivery repository; none takes a repository, host, or endpoint.",
   "issues and pull-requests take state (open when omitted, closed, or all), pageSize (1 to 30, 20 when omitted), and cursor; projects takes pageSize and cursor. Rows carry number, title, state, author, updatedAt, and url, never bodies. A closed issue also carries stateReason (completed, not-planned, or duplicate) when GitHub gives one.",
@@ -73,6 +113,8 @@ export interface GithubReadToolContext {
   readonly windowId: WindowId;
   readonly thread: CodeThread;
   readonly readThread: (windowId: WindowId, threadId: CodeThread["id"]) => CodeThread | undefined;
+  /** Present on a turn whose agent may update its thread's linked issues. */
+  readonly issueUpdates?: AgentIssueUpdates;
 }
 
 /**
@@ -102,14 +144,17 @@ export class GithubReadToolService {
   createToolSet(context: GithubReadToolContext): AppManagedToolSet {
     const allowlist = context.thread.toolConstraints ?? [];
     return withToolFamilyHelp(this.#readTools(context, allowlist), {
-      [GITHUB_READ_TOOL_NAME]: GITHUB_READ_HELP,
+      [GITHUB_READ_TOOL_NAME]:
+        context.issueUpdates === undefined
+          ? GITHUB_READ_HELP
+          : `${GITHUB_READ_HELP} ${GITHUB_UPDATE_HELP}`,
     });
   }
 
   #readTools(context: GithubReadToolContext, allowlist: ReadonlyArray<string>): AppManagedToolSet {
     return {
       definitions: isToolAllowedByAllowlist(allowlist, GITHUB_READ_TOOL_NAME)
-        ? [githubReadDefinition]
+        ? [context.issueUpdates === undefined ? githubReadDefinition : githubUpdateDefinition]
         : [],
       execute: async ({ name, inputJson, signal }) => {
         if (signal?.aborted) return failure("tool-interrupted");
@@ -127,6 +172,25 @@ export class GithubReadToolService {
         });
         if (profileConstraint.status === "refused") {
           return failure("profile-tool-refused", profileConstraint.reason);
+        }
+        const update =
+          context.issueUpdates === undefined ? undefined : parseGithubUpdateInput(inputJson);
+        if (update !== undefined && context.issueUpdates !== undefined) {
+          const repository = boundRepository(current ?? context.thread);
+          if (repository === undefined) return failure("repository-unavailable");
+          return runAgentIssueUpdate({
+            turnThread: context.thread,
+            current,
+            issue: {
+              forge: "github",
+              owner: repository.owner,
+              repository: repository.name,
+              number: update.number,
+            },
+            action: update.action,
+            updates: context.issueUpdates,
+            ...(signal === undefined ? {} : { signal }),
+          });
         }
         const input = parseGithubReadInput(inputJson);
         if (input === undefined) return failure("invalid-github-input");
@@ -375,6 +439,29 @@ function threadAuthority(
     return "stale";
   }
   return "current";
+}
+
+function parseGithubUpdateInput(
+  value: string,
+): { readonly number: number; readonly action: AgentIssueAction } | undefined {
+  if (Buffer.byteLength(value, "utf8") > 2 * MAX_TOOL_INPUT_BYTES) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+  const record: Record<string, unknown> = { ...parsed };
+  const { operation, number } = record;
+  if (operation !== "comment" && operation !== "close") return undefined;
+  const allowed = operation === "close" ? ["operation", "number"] : ["operation", "number", "body"];
+  if (Object.keys(record).some((key) => !allowed.includes(key))) return undefined;
+  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1) return undefined;
+  if (operation === "close") return { number, action: { kind: "set-state", state: "closed" } };
+  return typeof record.body === "string"
+    ? { number, action: { kind: "comment", body: record.body } }
+    : undefined;
 }
 
 function boundRepository(

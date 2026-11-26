@@ -22,6 +22,32 @@ export function readyPullRequestNotice(headSha: string): string {
   return `ready to merge at ${headSha}`;
 }
 
+/**
+ * The follow-up line that offers Merge when ready on a linked issue's open
+ * pull request. The person turns it on; nothing here merges.
+ */
+export const MERGE_WHEN_READY_OFFER =
+  "is open for its linked issue. Turn on Merge when ready to land it once its checks pass.";
+
+/**
+ * A thread's one "Pull request updates" follow-up with `line` in it: each
+ * key (a pull request or an issue reference) keeps only its newest line.
+ * Answers undefined when the follow-up already says exactly that.
+ */
+export function withPullRequestHandoffLine(
+  previous: string | undefined,
+  key: string,
+  line: string,
+): string | undefined {
+  const lines =
+    previous !== undefined && previous.startsWith(PULL_REQUEST_HANDOFF_HEADING)
+      ? previous.slice(PULL_REQUEST_HANDOFF_HEADING.length).split("\n")
+      : [];
+  if (lines.includes(line)) return undefined;
+  const kept = lines.filter((entry) => !entry.toLowerCase().startsWith(`${key.toLowerCase()} `));
+  return PULL_REQUEST_HANDOFF_HEADING + [...kept, line].join("\n");
+}
+
 export type PullRequestMergeWhenReadyFold =
   | { readonly status: "off" }
   | {

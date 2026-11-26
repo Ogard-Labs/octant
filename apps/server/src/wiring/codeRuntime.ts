@@ -3,6 +3,9 @@ import { decodeBrowserThreadId } from "@octant/contracts";
 import { ownPullRequestsFromHistory } from "../code/codeThreadMetadataService";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
 import { MergedThreadPutAway, threadDeliversPullRequest } from "../code/mergedThreadPutAway";
+import { LinkedIssueWriteBack } from "../trackerIssues/linkedIssueWriteBack";
+import type { AgentIssueUpdates } from "../trackerIssues/agentIssueUpdates";
+import { withPullRequestHandoffLine } from "@octant/domain/code-pull-request-switch-policy";
 import {
   FinishedReportSettle,
   managedChildWorkPending,
@@ -57,6 +60,7 @@ import {
   type CodeOperationRuntime,
   type CodeOperationRuntimeOptions,
   type CodeStoppedTurn,
+  type CodeTrackerToolInput,
   createCodeOperationRuntime,
 } from "../code/codeOperationRuntime";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
@@ -439,6 +443,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "githubExtensionSnapshot"
     | "githubReadToolService"
     | "linearReadToolService"
+    | "linkedIssues"
     | "peekCreateFromIssueFramed"
     | "siblingThreadsService"
     | "threadOutsideContentMarks"
@@ -593,6 +598,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     githubExtensionSnapshot,
     githubReadToolService,
     linearReadToolService,
+    linkedIssues,
     isCodeProviderModelAllowed,
     liveTurns,
     machineChangeFeed,
@@ -657,6 +663,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   return Effect.gen(function* () {
     // The coordinator service is wired after the Code runtime that reports
     // stopped turns to it; a stop before then has no worker to move.
+    // The linked-issue write-back is built after the turn runtime it listens
+    // to; a turn requested before then has nothing to move.
+    const linkedIssueTurnStarts: { current?: (threadId: string) => void } = {};
+    // What a turn's Linear and GitHub tools need to update the thread's linked
+    // issues; the Project's choice and the links are read again at each write.
+    const agentIssueUpdates = (input: CodeTrackerToolInput): AgentIssueUpdates => ({
+      linked: () => linkedIssues.store.list(String(input.thread.id)).map((entry) => entry.issue),
+      projectAllowsUpdates: () => {
+        const project = persistence.readProject(input.thread.projectId);
+        return project?.type === "code" && project.agentsMayUpdateIssues === true;
+      },
+      readOutsideContent: input.readOutsideContent,
+      ask: input.ask,
+      writes: linkedIssues.writes,
+    });
     const continueWorkerOnFallback: {
       current?: (
         threadId: CodeThreadId,
@@ -1572,6 +1593,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
+          linkedIssueTurnStarts.current?.(String(threadId));
         },
         onSideTaskReportAdmitted: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteReportAdmitted(threadId);
@@ -2102,18 +2124,26 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               extensionPackageStore.readVerifiedComponentText(target, target.componentId),
           }),
         }),
-        githubReadTools: ({ windowId, thread, readThread }) =>
+        linkedIssues: (threadId) =>
+          linkedIssues.store.list(String(threadId)).map((entry) => entry.issue),
+        githubReadTools: (input) =>
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
-            githubReadToolService.createToolSet({ windowId, thread, readThread }),
+            githubReadToolService.createToolSet({
+              windowId: input.windowId,
+              thread: input.thread,
+              readThread: input.readThread,
+              issueUpdates: agentIssueUpdates(input),
+            }),
           ),
-        linearReadTools: ({ windowId, thread, readThread }) =>
+        linearReadTools: (input) =>
           linearReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             linearReadToolService.createToolSet({
-              windowId,
-              thread,
-              readThread,
+              windowId: input.windowId,
+              thread: input.thread,
+              readThread: input.readThread,
+              issueUpdates: agentIssueUpdates(input),
               readProjectLinearTarget: () => {
-                const project = persistence.readProject(thread.projectId);
+                const project = persistence.readProject(input.thread.projectId);
                 return project?.type === "code" ? project.linearTarget : undefined;
               },
             }),
@@ -2518,6 +2548,93 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    // Keeps the issues linked to Code threads current when their Project asks,
+    // and offers Merge when ready on a linked thread's open pull request. It
+    // reads the same cached pull-request evidence the board shows; GitHub and
+    // Linear are written only through the tracker port.
+    const linkedIssueWriteBack =
+      hostCodeService === undefined
+        ? undefined
+        : new LinkedIssueWriteBack({
+            writes: linkedIssues.writes,
+            linked: (threadId) => linkedIssues.store.list(threadId),
+            threads: () => persistence.readCodeThreads(),
+            readThread: (threadId) => persistence.readCodeThread(decodeCodeThreadId(threadId)),
+            keepCurrent: (projectId) => {
+              const project = persistence.readProject(projectId);
+              return project?.type === "code" && project.keepLinkedIssuesCurrent === true;
+            },
+            pullRequest: async (thread) => {
+              const view = await codeThreadMetadataService.project([
+                {
+                  thread,
+                  projectProjectionPresent: persistence.readProject(thread.projectId) !== undefined,
+                },
+              ]);
+              const linked = view.threads[0]?.linkedPullRequest;
+              if (linked?.kind === "linked" && linked.matchesDeliveryBranch) {
+                return {
+                  state: linked.state,
+                  url: linked.url,
+                  number: linked.number,
+                  baseRepository: linked.baseRepository,
+                };
+              }
+              // A merge made outside Octant reaches the refresh cache first.
+              const own = ownPullRequestsFromHistory(
+                codeBoardEventStore.summaryForThread(thread.id),
+              );
+              const [merged] = projectPullRequestService.mergedPullRequestsForThread(
+                String(thread.id),
+                (pullRequest) =>
+                  threadDeliversPullRequest({
+                    thread,
+                    own,
+                    pullRequest,
+                    sameRepository: (projectId, left, right) =>
+                      pullRequestLinkService.areSameRepository(projectId, left, right),
+                  }),
+              );
+              return merged === undefined
+                ? undefined
+                : {
+                    state: "merged",
+                    url: `https://github.com/${merged.baseRepository}/pull/${String(merged.number)}`,
+                    number: merged.number,
+                    baseRepository: merged.baseRepository,
+                  };
+            },
+            tell: async (threadId, key, line) => {
+              const id = decodeCodeThreadId(threadId);
+              const previous = codeFollowUpService.read(id).followUp;
+              // Said once is enough, even after the person dismissed it.
+              if (previous?.reason.split("\n").includes(line) === true) return;
+              const reason = withPullRequestHandoffLine(
+                previous?.state === "open" && previous.origin === "automatic"
+                  ? previous.reason
+                  : undefined,
+                key,
+                line,
+              );
+              if (reason === undefined) return;
+              await codeFollowUpService.observeTrigger({
+                threadId: id,
+                sourceEventId: randomUUID(),
+                sourceSequence:
+                  Math.max(
+                    previous?.triggerSequence ?? 0,
+                    previous?.acknowledgedThroughSequence ?? 0,
+                  ) + 1,
+                reason,
+                origin: "automatic",
+                triggeredAt: new Date().toISOString(),
+              });
+            },
+          });
+    if (linkedIssueWriteBack !== undefined) {
+      linkedIssueTurnStarts.current = (threadId) =>
+        void linkedIssueWriteBack.onTurnStarted(threadId).catch(() => undefined);
+    }
     // The Project planner: one designated Code thread per Code Project that
     // may read the Project's board and propose work. A confirmed proposal
     // creates its thread through the ordinary creation command path below;
@@ -3538,6 +3655,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeActiveWorkForWindow,
       codeTurnDecisions,
       mergedThreadPutAway,
+      linkedIssueWriteBack,
       contributeCodeTools,
       registerCodeEditDiagnostics,
       contributeServerCodeTools,

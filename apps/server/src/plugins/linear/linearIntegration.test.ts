@@ -131,6 +131,9 @@ describe("Linear integration plugin", () => {
         { operationId: "get-issue", available: true },
         { operationId: "get-issue-by-identifier", available: true },
         { operationId: "list-issue-filters", available: true },
+        { operationId: "read-issue-workflow", available: true },
+        { operationId: "set-issue-state", available: true },
+        { operationId: "comment-issue", available: true },
       ],
     });
     expect(

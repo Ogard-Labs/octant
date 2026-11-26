@@ -12,6 +12,7 @@ import type {
   CodeOperationResult,
   CodeProjectPullRequestSwitchTarget,
   CodeThread,
+  LinkedIssueRef,
   ToolActionAuthority,
   WindowId,
 } from "@octant/contracts";
@@ -4317,6 +4318,7 @@ describe("the pull request as an agent tool", () => {
     standingMerge?: () => "project" | "routine" | undefined,
     projectAllowsComments?: () => boolean,
     threadReadOutsideContent?: () => boolean,
+    linkedIssues?: () => ReadonlyArray<LinkedIssueRef>,
   ) {
     const request = vi.fn(async () =>
       answer === "approved"
@@ -4352,9 +4354,35 @@ describe("the pull request as an agent tool", () => {
       ...(standingMerge === undefined ? {} : { standingMerge }),
       ...(projectAllowsComments === undefined ? {} : { projectAllowsComments }),
       ...(threadReadOutsideContent === undefined ? {} : { threadReadOutsideContent }),
+      ...(linkedIssues === undefined ? {} : { linkedIssues }),
     });
     return { tools, request, executeOperation };
   }
+
+  it("names each linked issue as fixed in the body of the pull request it opens", async () => {
+    const { tools, executeOperation } = pullRequestTools(
+      {},
+      "approved",
+      undefined,
+      undefined,
+      undefined,
+      () => [
+        { forge: "github", owner: "octant", repository: "octant", number: 12 },
+        { forge: "linear", identifier: "ENG-7", issueId: "lin-1" },
+      ],
+    );
+    await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Add the parser", body: "Parser." }),
+    });
+    expect(executeOperation).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "create-pull-request",
+        body: "Parser.\n\nFixes #12\nFixes ENG-7",
+      }),
+    );
+  });
 
   it("opens a stacked draft in a Full-access thread without asking", async () => {
     const { tools, request, executeOperation } = pullRequestTools();

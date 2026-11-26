@@ -135,6 +135,10 @@ interface ProjectSetting {
 interface AgentForgeChoices {
   readonly comments: ProjectSetting;
   readonly defaultBranchPush: ProjectSetting;
+  /** Octant moves the issues linked to the Project's threads; off by default. */
+  readonly keepLinkedIssuesCurrent?: ProjectSetting;
+  /** Agents below Full access update their thread's linked issues without asking. */
+  readonly agentsMayUpdateIssues?: ProjectSetting;
 }
 
 export interface CodeProjectPullRequestsProps {
@@ -1198,6 +1202,41 @@ function ProjectSettingsItems(props: {
           }
         >
           Agents may comment on pull requests
+        </OctantMenuCheckboxItem>
+      )}
+      {props.agentForgeChoices?.keepLinkedIssuesCurrent === undefined ? null : (
+        <OctantMenuCheckboxItem
+          aria-label={`Keep ${project.projectName} linked issues up to date`}
+          checked={props.agentForgeChoices.keepLinkedIssuesCurrent.enabledFor(project.projectId)}
+          // It writes to GitHub and Linear, so it closes on one activation too.
+          closeOnClick
+          disabled={props.busy}
+          label="Keep linked issues up to date"
+          onCheckedChange={(enabled) =>
+            void props.agentForgeChoices?.keepLinkedIssuesCurrent?.setEnabled(
+              project.projectId,
+              enabled,
+            )
+          }
+        >
+          Keep linked issues up to date
+        </OctantMenuCheckboxItem>
+      )}
+      {props.agentForgeChoices?.agentsMayUpdateIssues === undefined ? null : (
+        <OctantMenuCheckboxItem
+          aria-label={`Let agents update ${project.projectName} linked issues`}
+          checked={props.agentForgeChoices.agentsMayUpdateIssues.enabledFor(project.projectId)}
+          closeOnClick
+          disabled={props.busy}
+          label="Agents may update linked issues"
+          onCheckedChange={(enabled) =>
+            void props.agentForgeChoices?.agentsMayUpdateIssues?.setEnabled(
+              project.projectId,
+              enabled,
+            )
+          }
+        >
+          Agents may update linked issues
         </OctantMenuCheckboxItem>
       )}
       <OctantMenuItem

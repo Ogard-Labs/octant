@@ -1,0 +1,119 @@
+import type { CodeThread, ThreadLinkedIssue } from "@octant/contracts";
+import { linkedIssueLabel } from "@octant/contracts";
+import { MERGE_WHEN_READY_OFFER } from "@octant/domain/code-pull-request-switch-policy";
+import type { TrackerIssueWrites } from "./trackerIssueWrites";
+
+/** As often as the merged-thread pass: the pull-request evidence it reads is cached. */
+export const LINKED_ISSUE_WRITE_BACK_INTERVAL_MS = 2 * 60 * 1_000;
+
+/** The thread's own pull request as the host's cached evidence shows it; GitHub is never called. */
+export interface LinkedThreadPullRequest {
+  readonly state: "open" | "merged" | "closed";
+  readonly url: string;
+  readonly number: number;
+  /** `owner/name`. */
+  readonly baseRepository: string;
+}
+
+export interface LinkedIssueWriteBackOptions {
+  readonly writes: Pick<TrackerIssueWrites, "advance">;
+  readonly linked: (threadId: string) => ReadonlyArray<ThreadLinkedIssue>;
+  readonly threads: () => ReadonlyArray<CodeThread>;
+  readonly readThread: (threadId: string) => CodeThread | undefined;
+  /** The Project's "Keep linked issues up to date"; off writes nothing. */
+  readonly keepCurrent: (projectId: CodeThread["projectId"]) => boolean;
+  readonly pullRequest: (thread: CodeThread) => Promise<LinkedThreadPullRequest | undefined>;
+  /** Adds one keyed line to the thread's "Pull request updates" follow-up. */
+  readonly tell: (threadId: string, key: string, line: string) => Promise<void>;
+  readonly intervalMs?: number;
+}
+
+/**
+ * Keeps the issues linked to a Code thread current, when its Project asks:
+ * In Progress when a turn starts, In Review once the thread's pull request is
+ * open, Done with a comment once it merged. It also offers Merge when ready
+ * on a linked thread's open pull request, which the person turns on; the
+ * offer writes nothing outside Octant, so it does not wait for the switch.
+ * Passes never overlap, and one failing thread does not end a pass.
+ */
+export class LinkedIssueWriteBack {
+  readonly #options: LinkedIssueWriteBackOptions;
+  readonly #intervalMs: number;
+  #timer: ReturnType<typeof setTimeout> | undefined;
+  #running = false;
+  #stopped = false;
+
+  constructor(options: LinkedIssueWriteBackOptions) {
+    this.#options = options;
+    this.#intervalMs = Math.max(options.intervalMs ?? LINKED_ISSUE_WRITE_BACK_INTERVAL_MS, 1_000);
+  }
+
+  start(): void {
+    if (this.#stopped || this.#timer !== undefined || this.#running) return;
+    void this.#runPassThenSchedule();
+  }
+
+  stop(): void {
+    this.#stopped = true;
+    if (this.#timer !== undefined) clearTimeout(this.#timer);
+    this.#timer = undefined;
+  }
+
+  /** A person asked the thread for a turn: its linked issues are In Progress. */
+  async onTurnStarted(threadId: string): Promise<void> {
+    const thread = this.#options.readThread(threadId);
+    if (thread === undefined || !this.#options.keepCurrent(thread.projectId)) return;
+    if (this.#options.linked(threadId).length === 0) return;
+    await this.#advance(threadId, "in-progress");
+  }
+
+  /** One pass over every thread with linked issues. Exposed so a test can drive it. */
+  async pass(): Promise<void> {
+    for (const thread of this.#options.threads()) {
+      if (this.#stopped) return;
+      const threadId = String(thread.id);
+      try {
+        const linked = this.#options.linked(threadId);
+        if (linked.length === 0) continue;
+        const pullRequest = await this.#options.pullRequest(thread);
+        if (pullRequest === undefined || pullRequest.state === "closed") continue;
+        const ref = `${pullRequest.baseRepository}#${String(pullRequest.number)}`;
+        if (pullRequest.state === "open") {
+          await this.#options.tell(threadId, ref, `${ref} ${MERGE_WHEN_READY_OFFER}`);
+        }
+        if (!this.#options.keepCurrent(thread.projectId)) continue;
+        if (pullRequest.state === "open") await this.#advance(threadId, "in-review");
+        else await this.#advance(threadId, "done", pullRequest.url);
+      } catch {
+        // This thread's alone; the next pass decides it again.
+      }
+    }
+  }
+
+  async #advance(
+    threadId: string,
+    moment: "in-progress" | "in-review" | "done",
+    url?: string,
+  ): Promise<void> {
+    const notices = await this.#options.writes.advance(threadId, moment, url);
+    for (const notice of notices) {
+      await this.#options.tell(threadId, linkedIssueLabel(notice.issue), notice.message);
+    }
+  }
+
+  async #runPassThenSchedule(): Promise<void> {
+    this.#running = true;
+    try {
+      await this.pass();
+    } catch {
+      // One unreadable pass must not end the timer.
+    } finally {
+      this.#running = false;
+    }
+    if (this.#stopped) return;
+    this.#timer = setTimeout(() => {
+      this.#timer = undefined;
+      void this.#runPassThenSchedule();
+    }, this.#intervalMs);
+  }
+}
