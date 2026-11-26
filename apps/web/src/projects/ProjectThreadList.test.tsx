@@ -51,7 +51,8 @@ const identity12 = { projectId, repositoryOwner: "octant", repositoryName: "octa
 /** The info card loads on the first approach to a row, so it can open a moment before its content. */
 function linkedIssue(identifier: string) {
   return {
-    issue: { forge: "linear", identifier, issueId: "node" },
+    // The link store keys a Linear link by its node id, so each has its own.
+    issue: { forge: "linear", identifier, issueId: `node-${identifier}` },
     source: "created-from",
     linkedAt: "2026-11-24T08:00:00.000Z",
   };
@@ -1566,7 +1567,9 @@ describe("ProjectThreadRows", () => {
 
   it("counts linked issues toward the five its details card names", async () => {
     const user = userEvent.setup();
-    const items = Array.from({ length: 4 }, (_, index) => ({
+    // Written issues are counted as hidden only past the entry's bound of a
+    // hundred, so these seven all arrive as items.
+    const items = Array.from({ length: 7 }, (_, index) => ({
       forge: "linear",
       identifier: `OCT-${String(index + 10)}`,
       observedAt: "2026-11-24T09:00:00.000Z",
@@ -1578,7 +1581,7 @@ describe("ProjectThreadRows", () => {
           {
             ...thread,
             linkedIssues: [linkedIssue("OCT-1"), linkedIssue("OCT-2")],
-            touchedIssues: { items, hiddenCount: 2 },
+            touchedIssues: { items, hiddenCount: 0 },
           } as never,
         ]}
       />,
@@ -1588,7 +1591,7 @@ describe("ProjectThreadRows", () => {
     const group = within(await findThreadDetails()).getByRole("group", { name: "Issues" });
 
     expect(within(group).getAllByRole("img")).toHaveLength(5);
-    expect(group).toHaveTextContent("+3 more");
+    expect(group).toHaveTextContent("+4 more");
   });
 
   it("offers both pull-request destinations from the row menus for keyboard and coarse pointers", async () => {
