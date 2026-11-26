@@ -32,6 +32,7 @@
     "./shield-server-policy": "./src/shieldServerPolicy.ts",
     "./shield-evaluation-fixtures": "./src/shieldEvaluationFixtures.ts",
     "./shield-watcher-policy": "./src/shieldWatcherPolicy.ts",
+    "./provider-availability-policy": "./src/providerAvailabilityPolicy.ts",
     "./thread-board-policy": "./src/threadBoardPolicy.ts",
     "./turn-decision-policy": "./src/turnDecisionPolicy.ts",
     "./pull-request-stack-policy": "./src/pullRequestStackPolicy.ts",

@@ -17,7 +17,14 @@ import { formatDateTime, type TimestampFormatPreference } from "../theme/timesta
 import { OctantButton } from "../ui/base/OctantButton";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { driverLabel } from "../providers/providerSettingsPresentation";
-import { poolProviderLimits, type PooledProvider, type PooledWindow } from "./pooledProviderLimits";
+import {
+  poolProviderLimits,
+  rateWindowShare,
+  shownPercent,
+  windowReadings,
+  type PooledProvider,
+  type PooledWindow,
+} from "./pooledProviderLimits";
 import {
   limitForecast,
   outlookPhrase,
@@ -53,6 +60,8 @@ export function ProviderUsageLimitsPanel(props: {
     readonly client: ProviderUsageLimitsClient;
     readonly snapshot?: ProviderUsageLimitsSnapshot;
     readonly message?: string;
+    /** The snapshot is kept from before a refresh request that failed. */
+    readonly refreshFailed?: boolean;
     readonly busy: boolean;
   }>();
   const sequence = useRef(0);
@@ -60,6 +69,7 @@ export function ProviderUsageLimitsPanel(props: {
   const current = reading?.client === props.client ? reading : undefined;
   const snapshot = current?.snapshot;
   const message = current?.message;
+  const refreshFailed = current?.refreshFailed === true;
   const busy = current?.busy ?? true;
   const [now, setNow] = useState(Date.now);
   const [captures, setCaptures] = useState<Readonly<Record<string, ProviderLimitsCaptureStatus>>>(
@@ -92,8 +102,9 @@ export function ProviderUsageLimitsPanel(props: {
       setReading((previous) => ({
         client: props.client,
         busy: true,
+        // Kept figures stay kept ones while the next read is still out.
         ...(refresh && previous?.client === props.client && previous.snapshot !== undefined
-          ? { snapshot: previous.snapshot }
+          ? { snapshot: previous.snapshot, refreshFailed: previous.refreshFailed === true }
           : {}),
       }));
       try {
@@ -108,7 +119,7 @@ export function ProviderUsageLimitsPanel(props: {
           client: props.client,
           busy: false,
           ...(refresh && previous?.client === props.client && previous.snapshot !== undefined
-            ? { snapshot: previous.snapshot }
+            ? { snapshot: previous.snapshot, refreshFailed: true }
             : {}),
           message: refresh
             ? "Provider limits could not be refreshed. Last successful values remain visible."
@@ -300,10 +311,13 @@ export function ProviderUsageLimitsPanel(props: {
     () =>
       // A provider with no window to draw keeps its accounts on their own
       // rows, where a quota warning is not hidden behind Each account.
-      poolProviderLimits({ entries: visible ?? [], instances: props.instances, now }).filter(
-        (provider) => provider.accounts.length > 1 && provider.windows.length > 0,
-      ),
-    [visible, props.instances, now],
+      poolProviderLimits({
+        entries: visible ?? [],
+        instances: props.instances,
+        now,
+        refreshFailed,
+      }).filter((provider) => provider.accounts.length > 1 && provider.windows.length > 0),
+    [visible, props.instances, now, refreshFailed],
   );
   const pooledIds = new Set(
     pooled.flatMap((provider) => provider.accounts.map((account) => String(account.id))),
@@ -340,6 +354,7 @@ export function ProviderUsageLimitsPanel(props: {
         <ul className="surface-list provider-limits__list">
           {pooled.map((provider) => (
             <PooledProviderRow
+              refreshFailed={refreshFailed}
               compact={props.compact === true}
               entries={visible}
               key={provider.driverKind}
@@ -378,7 +393,7 @@ export function ProviderUsageLimitsPanel(props: {
                       : scopeDetail}
                   </span>
                   {props.compact === true ? null : (
-                    <LimitHeadline now={now} readings={entryReadings(entry, now)} />
+                    <LimitHeadline now={now} readings={entryReadings(entry, now, refreshFailed)} />
                   )}
                 </div>
                 <div className="surface-row__control">
@@ -391,6 +406,7 @@ export function ProviderUsageLimitsPanel(props: {
                       <EntryDetails
                         entry={entry}
                         now={now}
+                        refreshFailed={refreshFailed}
                         runtime={
                           instance === undefined ? "This runtime" : driverLabel(instance.driverKind)
                         }
@@ -531,6 +547,7 @@ function PooledProviderRow(props: {
   readonly provider: PooledProvider;
   readonly entries: ReadonlyArray<ProviderUsageLimitsEntry>;
   readonly now: number;
+  readonly refreshFailed: boolean;
 }) {
   const first = props.provider.accounts[0];
   const runtime = driverLabel(props.provider.driverKind as ProviderInstance["driverKind"]);
@@ -564,7 +581,12 @@ function PooledProviderRow(props: {
               return entry === undefined ? null : (
                 <div className="provider-limits__account" key={String(account.id)}>
                   <p className="oct-row-label">{account.displayName}</p>
-                  <EntryDetails entry={entry} now={props.now} runtime={runtime} />
+                  <EntryDetails
+                    entry={entry}
+                    now={props.now}
+                    refreshFailed={props.refreshFailed}
+                    runtime={runtime}
+                  />
                 </div>
               );
             })}
@@ -607,7 +629,7 @@ function PooledWindowBar(props: { readonly window: PooledWindow; readonly now: n
                 data-state={segment.exhausted ? "exhausted" : "reading"}
                 max={100}
                 min={0}
-                value={segment.remainingPercent ?? 0}
+                value={shownPercent(segment.remainingPercent ?? 0)}
               />
               <PaceMarker
                 account={segment.account}
@@ -655,12 +677,14 @@ function segmentReading(
   if (segment.awaitingUpdate) return `Awaiting updated limits${segment.stale ? " · stale" : ""}`;
   // The account is spent even when this window still reports a share left:
   // Codex flags the account, not the window that ran out.
+  const shown =
+    segment.remainingPercent === undefined ? undefined : shownPercent(segment.remainingPercent);
   const share = segment.exhausted
-    ? segment.remainingPercent !== undefined && segment.remainingPercent > 0
-      ? `Limit reached · ${segment.remainingPercent}% of this window left`
+    ? shown !== undefined && shown > 0
+      ? `Limit reached · ${shown}% of this window left`
       : "Limit reached"
-    : segment.remainingPercent !== undefined
-      ? `${segment.remainingPercent}% left`
+    : shown !== undefined
+      ? `${shown}% left`
       : "Remaining not reported";
   const reset =
     segment.resetsAt === undefined
@@ -760,10 +784,12 @@ function EntryDetails({
   entry,
   runtime,
   now,
+  refreshFailed,
 }: {
   readonly entry: ProviderUsageLimitsEntry;
   readonly runtime: string;
   readonly now: number;
+  readonly refreshFailed: boolean;
 }) {
   const timestampFormat = useTimestampFormat();
   if (entry.status === "unavailable") {
@@ -786,7 +812,11 @@ function EntryDetails({
       {limits === undefined ? (
         <p>Unavailable</p>
       ) : (
-        <LimitBuckets limits={limits} now={now} stale={entry.status === "failed"} />
+        <LimitBuckets
+          limits={limits}
+          now={now}
+          stale={entry.status === "failed" || refreshFailed}
+        />
       )}
       <p className="provider-limits__updated">
         Last updated {formatTime(limits?.updatedAt ?? entry.observedAt, timestampFormat)}
@@ -831,25 +861,28 @@ function LimitBuckets({
           stale={stale}
         />
       ))}
-      {limits.rateLimitWindows?.map((window) => (
-        <QuotaWindow
-          key={window.window}
-          label={windowLabel(window.window)}
-          now={now}
-          pace={{
-            window: window.window,
-            observedAt: window.observedAt,
-            exhausted: window.status === "exhausted",
-            stale,
-          }}
-          status={capitalize(window.status)}
-          {...(window.utilization === undefined
-            ? {}
-            : { remainingPercent: Math.floor((1 - window.utilization) * 100 + 1e-9) })}
-          {...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt })}
-          {...(window.overage === undefined ? {} : { overage: overageCopy(window.overage) })}
-        />
-      ))}
+      {limits.rateLimitWindows?.map((window) => {
+        const share = rateWindowShare(window);
+        return (
+          <QuotaWindow
+            key={window.window}
+            label={windowLabel(window.window)}
+            now={now}
+            pace={{
+              window: window.window,
+              observedAt: window.observedAt,
+              exhausted: share.exhausted,
+              stale,
+            }}
+            status={capitalize(window.status)}
+            {...(share.remainingPercent === undefined
+              ? {}
+              : { remainingPercent: share.remainingPercent })}
+            {...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt })}
+            {...(window.overage === undefined ? {} : { overage: overageCopy(window.overage) })}
+          />
+        );
+      })}
       {limits.retry.status === "active" ? (
         <p className="provider-limits__warning">
           Retry window until {formatTime(limits.retry.until, timestampFormat)}
@@ -877,7 +910,7 @@ function LimitBucket(props: {
         exhausted: props.bucket.remaining <= 0,
         stale: props.stale,
       }}
-      remainingPercent={Math.floor((props.bucket.remaining / props.bucket.limit) * 100)}
+      remainingPercent={(props.bucket.remaining / props.bucket.limit) * 100}
       detail={`${props.bucket.remaining.toLocaleString("en")} remaining of ${props.bucket.limit.toLocaleString("en")} ${props.label}`}
       {...(props.bucket.resetsAt === undefined ? {} : { resetsAt: props.bucket.resetsAt })}
     />
@@ -913,7 +946,12 @@ function QuotaWindow(props: {
       </div>
       {remaining === undefined ? null : (
         <span className="provider-limits__track">
-          <meter aria-label={`${props.label} remaining`} min={0} max={100} value={remaining} />
+          <meter
+            aria-label={`${props.label} remaining`}
+            min={0}
+            max={100}
+            value={shownPercent(remaining)}
+          />
           <PaceMarker forecast={forecast} />
         </span>
       )}
@@ -925,7 +963,7 @@ function QuotaWindow(props: {
               ? props.status === "Exhausted"
                 ? "Limit reached"
                 : "Remaining capacity not reported"
-              : `${remaining}% left`}
+              : `${shownPercent(remaining)}% left`}
         </span>
         {props.resetsAt === undefined || expired ? null : (
           <time dateTime={props.resetsAt} title={formatTime(props.resetsAt, timestampFormat)}>
@@ -980,6 +1018,7 @@ interface HeadlineReading extends LimitWindowReading {
 function entryReadings(
   entry: ProviderUsageLimitsEntry,
   now: number,
+  refreshFailed: boolean,
 ): ReadonlyArray<HeadlineReading> {
   const limits =
     entry.status === "available"
@@ -988,43 +1027,10 @@ function entryReadings(
         ? entry.staleLimits
         : undefined;
   if (limits === undefined) return [];
-  const stale = entry.status === "failed";
-  const windows = (limits.rateLimitWindows ?? []).map(
-    (window): HeadlineReading => ({
-      window: window.window,
-      observedAt: window.observedAt,
-      exhausted: window.status === "exhausted",
-      stale,
-      ...(window.utilization === undefined
-        ? {}
-        : { remainingPercent: Math.floor((1 - window.utilization) * 100 + 1e-9) }),
-      ...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt }),
-    }),
-  );
-  const buckets = (
-    [
-      ["requests", limits.requests],
-      ["tokens", limits.tokens],
-      ["concurrent", limits.concurrency],
-    ] as const
-  ).flatMap(
-    ([window, bucket]): ReadonlyArray<HeadlineReading> =>
-      bucket.status === "unavailable"
-        ? []
-        : [
-            {
-              window,
-              observedAt: limits.updatedAt,
-              exhausted: bucket.remaining <= 0,
-              stale,
-              remainingPercent: Math.floor((bucket.remaining / bucket.limit) * 100),
-              ...(bucket.resetsAt === undefined ? {} : { resetsAt: bucket.resetsAt }),
-            },
-          ],
-  );
-  return [...windows, ...buckets].filter(
-    (reading) => reading.resetsAt === undefined || Date.parse(reading.resetsAt) > now,
-  );
+  const stale = entry.status === "failed" || refreshFailed;
+  return windowReadings(limits)
+    .filter((reading) => reading.resetsAt === undefined || Date.parse(reading.resetsAt) > now)
+    .map((reading) => ({ ...reading, stale }));
 }
 
 function pooledReadings(provider: PooledProvider): ReadonlyArray<HeadlineReading> {
@@ -1046,22 +1052,30 @@ function LimitHeadline(props: {
   readonly readings: ReadonlyArray<HeadlineReading>;
   readonly now: number;
 }) {
-  const rank = (reading: HeadlineReading) =>
-    reading.exhausted ? -1 : (reading.remainingPercent ?? Number.POSITIVE_INFINITY);
+  // A stop leads. Codex flags every window of a stopped account, so among
+  // stopped windows the one with the least left leads: the full one, if any is.
   const lead = [...props.readings]
     .filter((reading) => reading.exhausted || reading.remainingPercent !== undefined)
-    .sort((a, b) => rank(a) - rank(b))[0];
+    .sort(
+      (a, b) =>
+        Number(b.exhausted) - Number(a.exhausted) ||
+        (a.remainingPercent ?? 0) - (b.remainingPercent ?? 0),
+    )[0];
   if (lead === undefined) return null;
   const forecast = limitForecast(lead, props.now);
+  // A stop with room in every window is the account's: naming one would blame it.
+  const noneFull = lead.exhausted && shownPercent(lead.remainingPercent ?? 0) > 0;
   const detail = [
     ...(lead.account === undefined ? [] : [lead.account]),
-    windowLabel(lead.window),
+    noneFull ? "No window reported full" : windowLabel(lead.window),
     ...(lead.stale ? ["last reading, refresh failed"] : []),
   ].join(" · ");
   return (
     <div className="provider-limits__headline">
       <div>
-        <strong>{lead.exhausted ? "Limit reached" : `${lead.remainingPercent}% left`}</strong>
+        <strong>
+          {lead.exhausted ? "Limit reached" : `${shownPercent(lead.remainingPercent ?? 0)}% left`}
+        </strong>
         {forecast.trend === undefined || forecast.trend === "even" ? null : (
           <span className="provider-limits__trend" data-trend={forecast.trend}>
             {forecast.trend === "faster" ? (

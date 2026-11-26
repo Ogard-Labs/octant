@@ -1,3 +1,4 @@
+import { shownPercent } from "./pooledProviderLimits";
 import { windowHours } from "./railUsageReading";
 
 /**
@@ -68,12 +69,15 @@ export function limitForecast(reading: LimitWindowReading, now: number): LimitFo
   const remaining = reading.remainingPercent;
   if (reading.stale || remaining === undefined) return marker;
   const used = 100 - Math.max(0, Math.min(100, remaining));
-  const back = used > 0 ? { back: { percent: used, inMs: resetMs - now } } : {};
+  // What comes back is counted from the share as shown, so the two add to 100.
+  const returning = 100 - shownPercent(100 - used);
+  const back = returning > 0 ? { back: { percent: returning, inMs: resetMs - now } } : {};
   const observed = reading.observedAt === undefined ? now : Date.parse(reading.observedAt);
   const elapsed =
     lengthMs === undefined ? undefined : elapsedShare(resetMs, lengthMs, Math.min(observed, now));
-  // A spent account has nothing left to pace, whatever share one window reports.
-  if (reading.exhausted || lengthMs === undefined || elapsed === undefined) {
+  // A spent account or allowance has nothing left to pace, whatever share one
+  // window of a stopped account still reports.
+  if (reading.exhausted || used >= 100 || lengthMs === undefined || elapsed === undefined) {
     return { ...marker, ...back };
   }
   if (elapsed < EARLIEST_PACED_SHARE) return { ...marker, ...back };

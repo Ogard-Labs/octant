@@ -67,8 +67,9 @@ export function UsageTokenBar(props: { readonly totals: LocalUsageHistoryTokenTo
             <span className="provider-history__token-swatch" data-token={part.key} aria-hidden />
             <span>{part.label}</span>
             <strong>{part.value === undefined ? "Unavailable" : compactTokens(part.value)}</strong>
-            {part.value !== undefined &&
-            part.coverage !== undefined &&
+            {/* The host withholds a partly measured total, so the count stands alone. */}
+            {part.coverage !== undefined &&
+            part.coverage.measured > 0 &&
             part.coverage.measured < part.coverage.total ? (
               <small>
                 {part.coverage.measured.toLocaleString("en")} of{" "}

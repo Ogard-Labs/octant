@@ -343,6 +343,35 @@ describe("Local provider usage history", () => {
     );
   });
 
+  it("says how many requests measured a token type whose total is withheld", async () => {
+    const base = history();
+    // The host publishes a type's total only when every request measured it.
+    const { cacheReadInputTokens: _withheld, ...partial } = base.totals;
+    const totals = {
+      ...partial,
+      componentCoverage: { ...partial.componentCoverage, cacheRead: { measured: 1, total: 2 } },
+    };
+    render(<ProviderUsageHistoryWorkspace client={{ load: async () => ({ ...base, totals }) }} />);
+    const types = await screen.findByRole("list", { name: "Token types" });
+    expect(types).toHaveTextContent("Cache readUnavailable1 of 2 requests measured");
+    // A type no request measured has no count to report.
+    expect(types).not.toHaveTextContent("0 of 2 requests measured");
+  });
+
+  it("keeps sub-cent costs apart on the chart's ticks and readout", async () => {
+    const base = history();
+    const cost = { ...base.cost, apiEstimateUsd: 0.0011475 };
+    const days = base.days.map((row) => ({ ...row, cost }));
+    const { container } = render(
+      <ProviderUsageHistoryWorkspace client={{ load: async () => ({ ...base, days }) }} />,
+    );
+    expect(await screen.findByRole("img", { name: /Sep 9.*Codex \$0\.0011/ })).toBeVisible();
+    const ticks = [...container.querySelectorAll(".provider-history__tick")].map(
+      (tick) => tick.textContent,
+    );
+    expect(ticks).toEqual(["$0", "$0.0005", "$0.001", "$0.0015"]);
+  });
+
   it("ranks each model with a bar for its share", async () => {
     const base = history();
     const model = base.models[0];
@@ -582,5 +611,19 @@ describe("Provider usage history chart layout", () => {
     // chevron, stretching it to 100% by 240px and pushing the Overview card open.
     expect(css).not.toMatch(/\.provider-history__chart svg\b/);
     expect(css).toMatch(/\.provider-history__chart > svg \{\s*width: 100%;\s*height: 240px;/);
+  });
+
+  it("gives every provider its own line and swatch pattern under Mono", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "providerUsageHistory.css"), "utf8");
+    const mono = (series: number, property: string) =>
+      new RegExp(
+        `:root\\[data-octant-style="mono"\\][^{]*\\[data-series="${series}"\\][^{]*\\{[^}]*${property}: ([^;]+);`,
+      ).exec(css)?.[1];
+    // Series 0 is the one solid line and round swatch; the rest differ in pattern.
+    for (const property of ["stroke-dasharray", "background"]) {
+      const patterns = [1, 2, 3, 4, 5].map((series) => mono(series, property));
+      expect(patterns).not.toContain(undefined);
+      expect(new Set(patterns).size).toBe(5);
+    }
   });
 });

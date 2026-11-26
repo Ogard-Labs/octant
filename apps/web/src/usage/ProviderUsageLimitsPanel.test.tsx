@@ -547,9 +547,11 @@ describe("ProviderUsageLimitsPanel", () => {
         "value",
         "0",
       );
-      expect(screen.getByText("0% left")).toBeVisible();
+      expect(screen.getByText("0% left", { selector: "strong" })).toBeVisible();
+      expect(screen.getByText("0% left", { selector: "span" })).toBeVisible();
       expect(screen.getByText("Pay as you go on")).toBeVisible();
       expect(screen.queryByText("Account limit reached")).not.toBeInTheDocument();
+      expect(screen.queryByText("Limit reached")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -1144,6 +1146,8 @@ describe("Provider limits pace and forecast", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
+  /** The line under the headline figure, which says whose window it is. */
+  const headlineDetail = () => document.querySelector(".provider-limits__headline > span");
 
   it("the pace marker sits at the share of the window already elapsed", async () => {
     // 1h 15m of five hours has passed: a quarter of the window.
@@ -1205,6 +1209,65 @@ describe("Provider limits pace and forecast", () => {
     expect(screen.getByText("5-hour window · last reading, refresh failed")).toBeVisible();
   });
 
+  it("still forecasts a run-out for a window with under one percent left", async () => {
+    // Four of five hours gone, 99.2% used: the last 0.8% lasts about two minutes.
+    await renderAt(
+      windows([{ window: "five_hour", utilization: 0.992, resetsAt: "2026-08-23T13:00:00.000Z" }]),
+    );
+    expect(screen.getByText("0% left", { selector: "strong" })).toBeVisible();
+    expect(screen.getByText("Runs out in about 2m, before the reset")).toBeVisible();
+    expect(screen.queryByText(/May have run out/)).toBeNull();
+    expect(screen.getByText("+100% back in 1h 0m")).toBeVisible();
+  });
+
+  it("names the full window when the provider flags every window as reached", async () => {
+    await renderAt(
+      windows([
+        { window: "five_hour", status: "exhausted", utilization: 0.4 },
+        { window: "seven_day", status: "exhausted", utilization: 1 },
+      ]),
+    );
+    expect(screen.getByText("Limit reached", { selector: "strong" })).toBeVisible();
+    expect(headlineDetail()).toHaveTextContent(/^7-day window$/);
+  });
+
+  it("blames no window for an account stop when none of them is full", async () => {
+    await renderAt(
+      windows([
+        { window: "five_hour", status: "exhausted", utilization: 0.4 },
+        { window: "seven_day", status: "exhausted", utilization: 0.9 },
+      ]),
+    );
+    expect(screen.getByText("Limit reached", { selector: "strong" })).toBeVisible();
+    expect(headlineDetail()).toHaveTextContent(/^No window reported full$/);
+  });
+
+  it("drops the forecasts when a refresh request fails and keeps the last figures", async () => {
+    const client = windows([
+      { window: "five_hour", utilization: 0.8, resetsAt: "2026-08-23T14:30:00.000Z" },
+    ]);
+    let reachable = false;
+    await renderAt({
+      list: client.list,
+      refresh: async () => {
+        if (!reachable) throw new Error("unreachable");
+        return client.refresh();
+      },
+    });
+    expect(screen.getByText("Runs out in about 38m, before the reset")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh provider limits" }));
+    await screen.findByText(/could not be refreshed/);
+    expect(screen.queryByText(/ back in |Runs out|Lasts until|an even pace/)).toBeNull();
+    expect(screen.getByText("20% left", { selector: "strong" })).toBeVisible();
+    expect(screen.getByText("5-hour window · last reading, refresh failed")).toBeVisible();
+    expect(screen.getByRole("img", { name: /Even spending/ })).toBeInTheDocument();
+
+    reachable = true;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh provider limits" }));
+    expect(await screen.findByText(/^Runs out in about 3[78]m/)).toBeVisible();
+  });
+
   it("keeps the provider limits explanation behind an info mark", async () => {
     await renderAt(windows([{ window: "five_hour", utilization: 0.4 }]));
     expect(screen.queryByText(/can include usage from other apps/)).toBeNull();
@@ -1214,12 +1277,93 @@ describe("Provider limits pace and forecast", () => {
 });
 
 describe("Pooled provider limits headline", () => {
+  const second = {
+    ...provider,
+    id: "22222222-2222-4222-8222-222222222222" as ProviderInstanceId,
+    displayName: "Second account",
+  } as ProviderInstance;
+  /** Two accounts of one provider, each with one limit window. */
+  function pooled(
+    observedAt: string,
+    windows: ReadonlyArray<Record<string, unknown>>,
+  ): ProviderUsageLimitsSnapshot {
+    return decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: observedAt,
+      entries: [provider, second].map((account, index) => ({
+        providerInstanceId: account.id,
+        status: "available",
+        source: "provider-runtime",
+        observedAt,
+        limits: {
+          providerInstanceId: account.id,
+          scope: "account",
+          requests: { status: "unavailable" },
+          tokens: { status: "unavailable" },
+          concurrency: { status: "unavailable" },
+          retry: { status: "inactive" },
+          quota: "available",
+          source: "observed-evidence",
+          confidence: "high",
+          updatedAt: observedAt,
+          rateLimitWindows: [{ status: "allowed", observedAt, ...windows[index] }],
+        },
+      })),
+    });
+  }
+
+  it("shows a pooled account on pay as you go as spent rather than stopped", async () => {
+    const data = pooled(new Date().toISOString(), [
+      { window: "monthly", utilization: 0.2 },
+      {
+        window: "monthly",
+        status: "exhausted",
+        utilization: 1,
+        overage: { status: "allowed", disabledReason: "Pay as you go on" },
+      },
+    ]);
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[provider, second].map(
+          (account) => ({ ...account, driverKind: "mistral-vibe" }) as ProviderInstance,
+        )}
+      />,
+    );
+    expect(await screen.findByText("0% left", { selector: "strong" })).toBeVisible();
+    expect(
+      screen.getByRole("meter", { name: "Second account, Monthly window remaining" }),
+    ).toHaveAttribute("data-state", "reading");
+    expect(screen.queryByText(/Limit reached/)).toBeNull();
+  });
+
+  it("drops every account's forecast when a refresh request fails", async () => {
+    const resetsAt = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
+    const data = pooled(new Date().toISOString(), [
+      { window: "five_hour", utilization: 0.2, resetsAt },
+      { window: "five_hour", utilization: 0.7, resetsAt },
+    ]);
+    render(
+      <ProviderUsageLimitsPanel
+        client={{
+          list: async () => data,
+          refresh: async () => {
+            throw new Error("unreachable");
+          },
+        }}
+        instances={[provider, second]}
+      />,
+    );
+    await screen.findByText("30% left", { selector: "strong" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh provider limits" }));
+    await screen.findByText(/could not be refreshed/);
+    expect(screen.queryByText(/ back in |Runs out|Lasts until|an even pace/)).toBeNull();
+    expect(
+      screen.getByText("Second account · 5-hour window · last reading, refresh failed"),
+    ).toBeVisible();
+  });
+
   it("leads with the account closest to running out and names it, never an average", async () => {
-    const second = {
-      ...provider,
-      id: "22222222-2222-4222-8222-222222222222" as ProviderInstanceId,
-      displayName: "Second account",
-    } as ProviderInstance;
     const resetsAt = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
     const observedAt = new Date().toISOString();
     const data = decodeProviderUsageLimitsSnapshot({

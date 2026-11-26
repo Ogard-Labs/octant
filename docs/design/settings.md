@@ -421,8 +421,14 @@ window's length as its name states it, its reset time and when it was read. A
 window with no reset shows neither; a window whose length is not named (monthly,
 overage, request and token buckets) gets only what comes back; a spent window
 and the first twentieth of a window get no pace; and a reading kept after a
-failed refresh gets only the marker. No plan size, vendor usage endpoint or
-credential is involved. A provider with more than one account on this computer
+failed refresh, whether the host reported the failure or the refresh request
+itself failed, gets only the marker. The forecast works from the unrounded
+share; only what is shown is rounded down. A window the provider flags
+exhausted while extra usage is still allowed (pay as you go, overage) reads 0%
+left and is not called a limit reached. When the provider stops an account and
+flags every window, the headline names the window with the least left, and says
+No window reported full when each still has a share. No plan size, vendor usage
+endpoint or credential is involved. A provider with more than one account on this computer
 reads as one row (maintainer decision, 2026-11-26): each limit window is one
 bar with one segment per account, side by side and ordered by which refills
 first, and the bar names the soonest reset. There is no averaged share, since
@@ -789,7 +795,9 @@ History leads with the total and provider list beside a daily chart. Each
 provider row adds a second line with its share of the selected measure and the
 other measure ("63% of cost · 5.17B tokens"); an unknown share reads Share
 unavailable. The chart draws one smooth filled area per provider in that
-provider's colour (ink under Mono), over round tick values from zero. The curve
+provider's colour (ink under Mono, where each line and its legend swatch carry
+their own pattern), over round tick values from zero. A tick or cost under a
+cent keeps enough digits not to read as zero. The curve
 never leaves the range between two neighbouring days. A day with no record is
 zero; a record with no price is unknown and leaves a gap, and a provider with no
 priced record is not drawn under Cost. Pointing at a day shows its readings in
