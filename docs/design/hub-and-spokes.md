@@ -3060,8 +3060,8 @@ card, and the standby's copy (slice 26) are not built yet.
   with it (`octant-visitor-proof`: time, nonce, signature over method and
   path, 60 seconds of skew, each nonce once); the spoke binds the link to the
   first key that opens it with the secret and refuses every other key. A
-  first open that meets a busy hub, a rate limit, or no answer tries again
-  on its own, waiting 3 seconds and doubling to a minute as the stream does.
+  first open that meets a busy hub, a rate limit, or no answer within 30
+  seconds tries again on its own, waiting 3 seconds and doubling to a minute as the stream does.
   The secret leaves the address bar only once the link opens, has ended, or
   is open in another browser; after a 401 (a skewed clock) or a 404 (a grant
   that has not reached the hub yet) it stays, so a reload can still open

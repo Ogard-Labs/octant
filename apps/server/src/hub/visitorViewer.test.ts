@@ -41,7 +41,9 @@ function memoryIndexedDb() {
 }
 
 /** Runs the viewer's script against a page at `/v/link-1#k=secret` and the given answers. */
-function openViewer(answer: (path: string, call: number) => Response) {
+function openViewer(
+  answer: (path: string, call: number, signal?: AbortSignal) => Response | Promise<Response>,
+) {
   const script = [...visitorViewer().assets.values()].find((asset) =>
     asset.type.startsWith("text/javascript"),
   );
@@ -75,13 +77,13 @@ function openViewer(answer: (path: string, call: number) => Response) {
     { getElementById: (id: string) => elements[id], title: "" },
     { pathname: `/v/${LINK_ID}`, hash: "#k=secret" },
     { replaceState },
-    async (path: string) => {
+    async (path: string, init?: { readonly signal?: AbortSignal }) => {
       calls.push(path);
-      return answer(path, calls.filter((called) => called === path).length);
+      return answer(path, calls.filter((called) => called === path).length, init?.signal);
     },
     memoryIndexedDb(),
-    // The viewer's waits between tries run at once here.
-    (resume: () => void) => setTimeout(resume, 0),
+    // The viewer's waits run a thousand times faster here.
+    (resume: () => void, ms: number) => setTimeout(resume, ms / 1000),
   );
   return { status, calls, replaceState };
 }
@@ -131,4 +133,17 @@ describe("the visitor viewer's first open", () => {
       expect(viewer.replaceState).toHaveBeenCalledOnce();
     },
   );
+
+  it("gives up on a first open that hangs, and tries again", async () => {
+    const viewer = openViewer((path, call, signal) => {
+      if (path !== OPEN) return ended();
+      if (call > 1) return Response.json({ scope: "read" });
+      // A front that holds the connection open and never answers.
+      return new Promise((_, reject) =>
+        signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+      );
+    });
+    await vi.waitFor(() => expect(viewer.status.textContent).toBe("This link has ended."));
+    expect(viewer.calls.filter((path) => path === OPEN)).toHaveLength(2);
+  });
 });

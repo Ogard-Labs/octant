@@ -146,11 +146,18 @@ const SCRIPT = String.raw`
     const path = "/v/" + linkId + "/open";
     let wait = 3000;
     for (;;) {
+      // A front that holds the connection open without answering would stall
+      // the page; each try ends after 30 seconds, well past the hub's own wait
+      // for the spoke, and counts as no answer.
+      const deadline = new AbortController();
+      const timer = setTimeout(() => deadline.abort(), 30000);
       const response = await fetch(path, {
         method: "POST",
         headers: { ...(await signed("POST", path)), "content-type": "application/json" },
         body: JSON.stringify({ secret }),
+        signal: deadline.signal,
       }).catch(() => undefined);
+      clearTimeout(timer);
       if (response !== undefined) {
         const final = response.ok ? undefined : await ended(response);
         if (response.ok || final !== undefined) return { response, final };
