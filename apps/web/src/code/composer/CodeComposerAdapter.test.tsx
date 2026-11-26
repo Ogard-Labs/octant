@@ -1,5 +1,6 @@
 import { nativeFolderTransfer } from "../../composer/folderDrop.test-fixture";
 import { decodeProviderInstance, decodeProviderModelId } from "@octant/contracts";
+import { decodeExtensionSelection } from "@octant/contracts/extensions";
 import type { PickerGroup } from "@octant/domain";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -158,6 +159,53 @@ describe("CodeComposerAdapter", () => {
     expect(await screen.findAllByText(/started\./)).toHaveLength(2);
   });
 
+  it("⌘↩ sends a staged plugin choice with that start only, and leaves the next draft without it", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn((_input: CodeComposerSubmitInput) => true);
+    const drafts = createNewTaskDrafts();
+    drafts.writeExtensionReceipts("code:pane", [
+      {
+        reference: "@review",
+        label: "Review",
+        selection: decodeExtensionSelection({
+          kind: "plugin",
+          extensionId: "00000000-0000-4000-8000-000000000301",
+          packageId: "00000000-0000-4000-8000-000000000302",
+          componentId: "review",
+          packageVersion: "1.0.0",
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "00000000-0000-4000-8000-000000000201" },
+        }),
+        status: { kind: "selected" },
+      },
+    ]);
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="code:pane">
+          <CodeComposerAdapter
+            {...defaultProps}
+            onCreateThread={onCreateThread}
+            startsInBackground
+          />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>,
+    );
+    expect(screen.getByRole("button", { name: "Remove Review extension" })).toBeVisible();
+    const prompt = screen.getByRole("textbox", { name: "First message" });
+    await user.type(prompt, "Review the parser");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0].extensionSelections).toHaveLength(1);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Remove Review extension" })).toBeNull(),
+    );
+    await user.type(prompt, "Fix the logout bug");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(2));
+    expect(onCreateThread.mock.calls[1]?.[0]).not.toHaveProperty("extensionSelections");
+  });
+
   it("offers neither ⌘↩ start-and-stay nor several models where the create path cannot carry them", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn((_input: CodeComposerSubmitInput) => true);
@@ -246,6 +294,8 @@ describe("CodeComposerAdapter", () => {
     expect(second?.deliveryTarget.branchIntent).toBe(
       `${String(first?.deliveryTarget.branchIntent)}-model-two`,
     );
+    // Options chosen for the first model are not guessed onto the second.
+    expect(second).not.toHaveProperty("modelOptionValues");
   });
 
   it("keeps a reviewed proposal exact and names the create-and-start decision", async () => {

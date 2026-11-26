@@ -1137,8 +1137,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       const models: ReadonlyArray<ModelPickerSelection | undefined> = fanningOut
         ? [primaryModel, ...extraModels]
         : [primaryModel];
+      const sentReceipts = extensionDraft.stagedReceipts;
       setPrompt("");
       images.clearAfterAccepted();
+      // Chips beside the prompt leave with it, or the next draft would carry
+      // a plugin or connector choice into threads it was never chosen for.
+      extensionDraft.clear();
       setShortId(newShortId());
       const run = async () => {
         const threadMentionIds = await threadMentions.resolveForSend();
@@ -1148,8 +1152,22 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           branch: string,
         ): Promise<CodeDraftStartOutcome> => {
           let reported: CodeDraftStartOutcome | undefined;
+          // A model added beside the chosen one starts on its own default
+          // options, and takes the plugin and connector choices only from
+          // the same provider family: both were made for the chosen model.
+          const added = selection !== primaryModel;
+          const { modelOptionValues: _options, extensionSelections: _extensions, ...shared } = base;
           const created = await props.onCreateThread({
-            ...base,
+            ...shared,
+            ...(added || base.modelOptionValues === undefined
+              ? {}
+              : { modelOptionValues: base.modelOptionValues }),
+            ...(base.extensionSelections === undefined ||
+            (added &&
+              providerFamilyForThread(providerGroups, selection?.providerInstanceId) !==
+                selectedFamily)
+              ? {}
+              : { extensionSelections: base.extensionSelections }),
             ...(fanningOut ? { workspace: "managed-worktree" as const } : {}),
             deliveryTarget: { ...base.deliveryTarget, branchIntent: branch },
             ...(selection === undefined ? {} : { providerSelection: selection }),
@@ -1188,6 +1206,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         ) {
           setPrompt((current) => (current === "" ? sentPrompt : current));
           if (staged.length > 0) images.restore(staged);
+          if (sentReceipts.length > 0) extensionDraft.restore(sentReceipts);
         }
       };
       stayStarts.current = stayStarts.current.then(run, run).catch(() => undefined);
@@ -1216,6 +1235,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       extraModels,
       startsInBackground,
       takenNames,
+      providerGroups,
+      selectedFamily,
       props,
     ],
   );

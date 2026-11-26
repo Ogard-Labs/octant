@@ -843,7 +843,14 @@ start and on which models, with **Use one model** to go back, and Send reads
 **Start N threads**. Each model gets an ordinary create of its own, in a new
 worktree whatever the Project's habit, one after another; the first worktree
 keeps the branch the composer showed and each later one adds its model's
-name, numbered past any taken name or one this start already used. Several
+name, numbered past any taken name or one this start already used. The
+prompt, its quotes and files, and the access and workspace choices go to
+every model; a model added beside the chosen one starts on its own default
+options and takes the plugin and connector choices only when it is of the
+same provider family, since both were made for the chosen model, and a model
+that cannot take the attached images is refused for itself by the host.
+Start and stay sends the plugin and connector chips with that start and
+clears them from the next draft. Several
 models need a chosen model to start beside. The host admits each one as it would any other, and the composer stays
 on the draft and lists each model's outcome: a refused model shows its reason
 and leaves the threads that started running. A reviewed planner proposal is one
