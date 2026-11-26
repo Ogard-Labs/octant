@@ -3054,18 +3054,32 @@ person's work without any service Octant runs (maintainer decision,
 
 #### Webhook triggers
 
-- **An endpoint is a routine trigger.** A routine on a spoke may take a
-  `webhook` trigger. The spoke mints the endpoint and its secret, shows the
-  secret once, and seals it to the hub and to each standby (decision H33).
-  Rotating the secret or the URL ends the old one. The spoke keeps a log of
-  recent deliveries.
-- **Verify, queue, forward.** The acting hub verifies each delivery's
+Built for a hub and its spokes (slice 24); the standby's part is slice 26.
+
+- **An endpoint is a routine's event source.** The spoke contributes a
+  Webhook source on the ordinary integration-event trigger, and a routine
+  names one of the spoke's endpoints in it, so a webhook routine takes the
+  same run-first claims, framing, allowance, busy and output holds, and
+  Review/Re-arm as any event routine. The spoke mints the endpoint (Standard
+  Webhooks or GitHub signing) and its secret, shows the secret once, and keeps
+  a log of recent deliveries; rotating gives a new URL and secret and ends the
+  old pair at once. `octant hub webhook create|list|rotate|remove` and the
+  loopback administration routes do this; a window screen for it is not built.
+- **Sealed to the hub.** The hub keeps a P-256 sealing key in its state file
+  and hands it out signed with its host identity key; a spoke takes it only
+  when the signer's fingerprint is the roster's key for the hub, so no roster
+  field is added and the identity key is never used for key agreement. The
+  spoke then hands the hub every endpoint with its secret sealed to that key,
+  only while its person ticks Public; unticking it withdraws them all.
+- **Verify, queue, forward.** The acting hub checks each delivery's
   signature and timestamp on the raw bytes before it queues anything, and
-  drops a forged or stale one. It forwards the original bytes and headers to
-  the spoke, which verifies them again with its own copy of the secret and
-  starts the routine only if the delivery id has no claim in its journal. A
-  delivery whose spoke is asleep is held and sends a wake
-  ([Wake service](#wake-service)).
+  answers a forged one 401, a stale one 400, a repeat of one it still holds
+  200, an oversized one 413, the sixty-first in a minute 429, and a full queue 503. It holds a delivery in its state file at most 24 hours, then drops it
+  and counts it as expired, and journals counts, never a payload. It hands the
+  original bytes and headers to the spoke, which checks them again with its
+  own secret, judging the timestamp at the time the hub received it, and
+  accepts a delivery only if none of its dedupe keys (the delivery id, and for
+  GitHub also the body's digest, kept seven days) is already claimed.
 - **GitHub deliveries carry no signed timestamp.** GitHub signs only the body,
   and its delivery id is not covered by the signature, so the timestamp window
   applies to Standard Webhooks alone. A GitHub delivery is claimed under both
@@ -3074,10 +3088,18 @@ person's work without any service Octant runs (maintainer decision,
   that time starts nothing. A replay of a captured body after seven days is
   accepted residual risk: it is bounded like a leaked secret, to the defined
   routine and outside content. Stripe signatures are deferred.
+- **Waking a sleeping spoke.** While a spoke does not answer, the hub sends
+  it a Wake-on-LAN packet at most every five minutes, only when the wake
+  service is on and the spoke's own person entered its address, and hands
+  the delivery on when it returns ([Wake service](#wake-service)). The
+  routine reads it at its next look, at most its poll interval later.
 - **A payload never changes authority.** The routine's own task, Project,
-  profile, and allowance apply, and the payload arrives as framed outside
-  content. A run a webhook starts never runs at Full access: Code is
-  approval-gated at most and Work runs at its default level (decision H34).
+  profile, and allowance apply, and the payload arrives as the event's data,
+  framed as outside content, cut at 2,048 characters. A routine whose trigger
+  is the Webhook source cannot follow its Project's level or name one above
+  Ask first, checked when it is saved and again before every occurrence, so a
+  run a webhook starts never runs at Full access: Code is approval-gated at
+  most and Work runs at its default level (decision H34).
 
 #### Your own devices through the hub
 
@@ -4511,6 +4533,11 @@ limits, and the device relay's channel design.
     the run-first claim ledger keyed by delivery id; the routine's allowance
     and decision H34. Acceptance: a delivery to a sleeping spoke wakes it and
     runs once on return; a payload never changes the routine's authority.
+    Built as [Webhook triggers](#webhook-triggers) records, as a Webhook
+    source on the integration-event trigger rather than a new trigger kind;
+    tested by server tests and a two-host loopback smoke with a fake
+    Wake-on-LAN socket. Not built: a window screen for endpoints (the CLI and
+    loopback routes make them), and the standby's copy (slice 26).
     **Linux container: yes**; a real GitHub delivery is a maintainer gate.
 25. **Visitor links.** Share with visitor and Stop sharing, expiry, the
     redacted live projection, and comment Requests with Send and Dismiss on

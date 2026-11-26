@@ -65,6 +65,10 @@ export const HubMembershipChange = Schema.Literal(
   "direct-push-switch-changed",
   "public-entrance-switch-changed",
   "public-funnel-changed",
+  "webhook-endpoint-created",
+  "webhook-endpoint-removed",
+  "webhook-endpoints-received",
+  "webhook-deliveries-expired",
   "direct-push-environment-changed",
   "direct-push-credential-changed",
   "provision-switch-changed",
@@ -139,6 +143,8 @@ export const HubMembershipChangedPayload = Schema.Struct({
   wakeReason: Schema.optional(HubWakeReason),
   /** For a new hub accepted without a person: why. */
   followReason: Schema.optional(HubFollowReason),
+  /** For a webhook change: how many endpoints or deliveries it concerned, never a payload or a secret. */
+  webhookCount: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /** For a push forward or refusal: the size of the delivery request in bytes, never its content. */
   pushBytes: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /** For a push refusal: why. */

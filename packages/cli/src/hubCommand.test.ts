@@ -1396,3 +1396,49 @@ describe("disk encryption reading", () => {
     ).toBe("unknown");
   });
 });
+
+describe("octant hub webhook", () => {
+  it("reads create, list, rotate and remove", () => {
+    expect(
+      resolveHubCliCommand(["webhook", "create"], { scheme: "github", label: "Pushes" }),
+    ).toEqual({ action: "webhook", mode: "create", scheme: "github", label: "Pushes" });
+    expect(resolveHubCliCommand(["webhook", "create"], {})).toEqual({
+      action: "webhook",
+      mode: "create",
+      scheme: "standard-webhooks",
+      label: "Webhook",
+    });
+    expect(resolveHubCliCommand(["webhook", "list"], {})).toEqual({
+      action: "webhook",
+      mode: "list",
+    });
+    expect(resolveHubCliCommand(["webhook", "rotate", "AAAAAAAAAAAAAAAAAAAAAA"], {})).toEqual({
+      action: "webhook",
+      mode: "rotate",
+      endpointId: "AAAAAAAAAAAAAAAAAAAAAA",
+    });
+    expect(resolveHubCliCommand(["webhook", "create"], { scheme: "stripe" })).toBeUndefined();
+    expect(resolveHubCliCommand(["webhook", "remove"], {})).toBeUndefined();
+  });
+
+  it("prints a new endpoint's secret once, with its path", async () => {
+    const created = await fixture(() =>
+      ok({
+        status: "created",
+        endpointId: "AAAAAAAAAAAAAAAAAAAAAA",
+        secret: "whsec_c2VjcmV0",
+        path: "/hooks/AAAAAAAAAAAAAAAAAAAAAA",
+        published: true,
+      }),
+    );
+    expect(
+      await created.run({ action: "webhook", mode: "create", scheme: "github", label: "Pushes" }),
+    ).toBe(0);
+    expect(created.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/webhooks/create",
+      body: { scheme: "github", label: "Pushes" },
+    });
+    expect(created.text()).toContain("whsec_c2VjcmV0");
+    expect(created.text()).toContain("/hooks/AAAAAAAAAAAAAAAAAAAAAA");
+  });
+});

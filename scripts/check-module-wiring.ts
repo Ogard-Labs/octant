@@ -83,14 +83,6 @@ const IGNORED_DIRECTORIES = new Set([
  */
 export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   [
-    "packages/domain/src/hubPublicPolicy.ts",
-    "The public entrance's pure delivery and visitor-link rules, read only by publicEntranceCrypto.ts until the webhook receiver and visitor links on the hub call them. Remove when the webhook receiver imports it.",
-  ],
-  [
-    "apps/server/src/hub/publicEntranceCrypto.ts",
-    "The public entrance's visitor-link, webhook-signature and sealing crypto, built with its contracts ahead of the features that call it (webhook triggers and visitor links on the hub). Remove when the webhook receiver imports it.",
-  ],
-  [
     "apps/desktop/src/browserDownloadSource.native-smoke.ts",
     "Isolated Electron main entry bundled by scripts/smoke-browser-download-source.ts for the CI-only native HTTPS redirect proof. Remove when the smoke is retired or this entry is imported by product code.",
   ],
@@ -720,9 +712,12 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/hub/sign-in-outcome",
     "/api/hub/window-guest",
     "/api/hub/public/forward",
+    "/api/hub/public/sealing-key",
+    "/api/hub/public/webhook-endpoints",
+    "/api/hub/public/webhook-delivery",
   ].map((endpoint): [string, string] => [
     endpoint,
-    "Member-to-member request that a hub, standby, or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts, failoverService.ts, wakeService.ts, spokeWakeService.ts, pushService.ts, spokePushService.ts, provisionService.ts, spokeProvisionService.ts, signInService.ts, spokeSignInService.ts, publicEntranceForwarding.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
+    "Member-to-member request that a hub, standby, or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts, failoverService.ts, wakeService.ts, spokeWakeService.ts, pushService.ts, spokePushService.ts, provisionService.ts, spokeProvisionService.ts, signInService.ts, spokeSignInService.ts, publicEntranceForwarding.ts, hubWebhookService wiring in wiring/remote.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
   ]),
   [
     "/api/hub/usage",

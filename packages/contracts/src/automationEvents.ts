@@ -6,6 +6,15 @@ const text = (maximum: number) => Schema.NonEmptyTrimmedString.pipe(Schema.maxLe
 const digest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
 const count = Schema.Int.pipe(Schema.nonNegative());
 
+/**
+ * The webhook source a spoke contributes for its own endpoints. A routine names
+ * one endpoint in the filter `endpoint`; deliveries arrive as events whose data
+ * is the sender's payload, framed as outside content like any event's.
+ */
+export const AUTOMATION_WEBHOOK_INTEGRATION_ID = "octant.webhooks";
+export const AUTOMATION_WEBHOOK_SOURCE_ID = "endpoint";
+export const AUTOMATION_WEBHOOK_ENDPOINT_FILTER = "endpoint";
+
 export const AutomationIntegrationEventTrigger = Schema.Struct({
   kind: Schema.Literal("integration-event"),
   integrationId: text(256),

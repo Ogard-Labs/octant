@@ -7,6 +7,7 @@ import type {
   Project,
   ProviderInstance,
 } from "@octant/contracts";
+import { automationLevelFitsTrigger } from "@octant/contracts";
 
 /**
  * Live host facts the dispatcher revalidates against the immutable definition
@@ -62,7 +63,8 @@ export function revalidateAutomationAuthority(input: {
     snapshot.authorityProfile.requested.executionPolicy === "full-access" ||
     snapshot.authorityProfile.effective.executionPolicy === "full-access" ||
     input.run.authoritySnapshot.effective.executionPolicy === "full-access" ||
-    input.run.authoritySnapshot.requested.executionPolicy === "full-access"
+    input.run.authoritySnapshot.requested.executionPolicy === "full-access" ||
+    !automationLevelFitsTrigger(snapshot)
   ) {
     return blocked(
       "full-access-ineligible",
