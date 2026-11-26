@@ -20,11 +20,20 @@ function writeBack(input: {
   readonly pullRequest?: LinkedThreadPullRequest;
   readonly merged?: LinkedThreadPullRequest;
   readonly offerShown?: boolean;
+  readonly tellShown?: () => boolean;
+  readonly notices?: ReadonlyArray<{
+    readonly issue: ThreadLinkedIssue["issue"];
+    readonly message: string;
+  }>;
 }) {
-  const advance = vi.fn(
-    async (..._args: ReadonlyArray<unknown>): Promise<ReadonlyArray<never>> => [],
-  );
-  const tell = vi.fn(async () => undefined);
+  let notices = input.notices ?? [];
+  const advance = vi.fn(async (..._args: ReadonlyArray<unknown>) => {
+    // A refusal's notice comes once, as the writes give it.
+    const once = notices;
+    notices = [];
+    return once;
+  });
+  const tell = vi.fn(async (..._args: ReadonlyArray<unknown>) => input.tellShown?.() ?? true);
   const offer = vi.fn(async () => input.offerShown ?? true);
   const service = new LinkedIssueWriteBack({
     writes: { advance },
@@ -119,6 +128,32 @@ describe("LinkedIssueWriteBack", () => {
     await service.pass();
     await service.pass();
     expect(offer).toHaveBeenCalledTimes(2);
+  });
+
+  it("tells a refused write's remedy after the person's own follow-up is done, not never", async () => {
+    let personsFollowUpOpen = true;
+    const { service, tell } = writeBack({
+      keepCurrent: true,
+      pullRequest: open,
+      tellShown: () => !personsFollowUpOpen,
+      notices: [
+        {
+          issue: { forge: "linear", identifier: "ENG-7", issueId: "lin-1" },
+          message: "ENG-7 was not updated: reconnect Linear.",
+        },
+      ],
+    });
+    await service.pass();
+    expect(tell).toHaveBeenCalledTimes(1);
+    personsFollowUpOpen = false;
+    await service.pass();
+    expect(tell).toHaveBeenLastCalledWith(
+      String(thread.id),
+      "ENG-7",
+      "ENG-7 was not updated: reconnect Linear.",
+    );
+    await service.pass();
+    expect(tell).toHaveBeenCalledTimes(2);
   });
 
   it("a turn the person starts lets the next pass retry a refused moment", async () => {

@@ -2634,9 +2634,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 return true;
               return await tellLinkedThread(threadId, ref, line);
             },
-            tell: async (threadId, key, line) => {
-              await tellLinkedThread(threadId, key, line);
-            },
+            tell: (threadId, key, line) => tellLinkedThread(threadId, key, line),
           });
     /**
      * Adds one keyed line to the thread's Pull request updates follow-up.

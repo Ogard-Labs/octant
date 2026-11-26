@@ -30,8 +30,12 @@ export interface LinkedIssueWriteBackOptions {
    * open, so this one wins.
    */
   readonly mergedPullRequest: (thread: CodeThread) => Promise<LinkedThreadPullRequest | undefined>;
-  /** Adds one keyed line to the thread's "Pull request updates" follow-up. */
-  readonly tell: (threadId: string, key: string, line: string) => Promise<void>;
+  /**
+   * Adds one keyed line to the thread's "Pull request updates" follow-up.
+   * Answers false when it held the line back (a follow-up the person set is
+   * open); the line is told at a later pass instead.
+   */
+  readonly tell: (threadId: string, key: string, line: string) => Promise<boolean>;
   /**
    * Adds the Merge when ready offer unless the follow-up already has a line
    * for that pull request: an Auto-fix notice (its own Merge action among
@@ -58,6 +62,12 @@ export class LinkedIssueWriteBack {
   #stopped = false;
   /** Pull requests offered Merge when ready since start, so a dismissed offer stays dismissed. */
   readonly #offered = new Set<string>();
+  /**
+   * Refusal lines a thread's follow-up could not take yet. The writes record
+   * a refusal once and never repeat its notice, so a line held back here is
+   * the only copy left.
+   */
+  readonly #heldNotices = new Map<string, Array<{ readonly key: string; readonly line: string }>>();
   /** Threads with a new trigger since the last pass: their refused or failed moments are retried. */
   readonly #retryRequested = new Set<string>();
 
@@ -102,6 +112,7 @@ export class LinkedIssueWriteBack {
       if (this.#stopped) return;
       const threadId = String(thread.id);
       try {
+        await this.#tellHeld(threadId);
         const linked = this.#options.linked(threadId);
         if (linked.length === 0) continue;
         const recorded = await this.#options.pullRequest(thread);
@@ -140,9 +151,25 @@ export class LinkedIssueWriteBack {
     url?: string,
   ): Promise<void> {
     const notices = await this.#options.writes.advance(threadId, moment, url, options);
+    const held = this.#heldNotices.get(threadId) ?? [];
     for (const notice of notices) {
-      await this.#options.tell(threadId, linkedIssueLabel(notice.issue), notice.message);
+      const key = linkedIssueLabel(notice.issue);
+      if (!(await this.#options.tell(threadId, key, notice.message))) {
+        held.push({ key, line: notice.message });
+      }
     }
+    if (held.length > 0) this.#heldNotices.set(threadId, held);
+  }
+
+  async #tellHeld(threadId: string): Promise<void> {
+    const held = this.#heldNotices.get(threadId);
+    if (held === undefined) return;
+    const still = [];
+    for (const notice of held) {
+      if (!(await this.#options.tell(threadId, notice.key, notice.line))) still.push(notice);
+    }
+    if (still.length === 0) this.#heldNotices.delete(threadId);
+    else this.#heldNotices.set(threadId, still);
   }
 
   async #runPassThenSchedule(): Promise<void> {

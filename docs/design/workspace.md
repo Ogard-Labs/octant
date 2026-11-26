@@ -2624,11 +2624,15 @@ Linear issues with no GitHub repository):
   only for an issue whose In Review the host recorded, that is, the switch
   was on while the pull request was open, so turning the switch on does not
   close the issues of threads that merged before, which a person may have
-  reopened, even after a follow-up turn records In Progress. Every attempt is journaled as
+  reopened, even after a follow-up turn records In Progress. The cost: a
+  pull request opened and merged outside Octant between two passes (about
+  two minutes apart) was never seen open, so its issues are left as they
+  are. Every attempt is journaled as
   `tracker.issue-write-recorded@1`, with a comment's SHA-256 digest, never its
   text. A refused write (a Linear connection that may only read, a GitHub
   login without triage access) adds one line naming the remedy to the thread's
-  Pull request updates follow-up. GitHub writes need Octant's GitHub
+  Pull request updates follow-up; while a follow-up the person set is open,
+  the line waits and is added after they finish it. GitHub writes need Octant's GitHub
   integration on as well as the `gh` login.
   Not built: per-moment Linear state overrides in Project settings (the
   team's own states are always used), and a **Reconnect** button beside the
