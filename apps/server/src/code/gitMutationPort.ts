@@ -6,7 +6,7 @@ import {
 import { execFile as nodeExecFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, readdir } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { MAX_CODE_GIT_HUNK_PATCH_BYTES, type ProviderExecutionPolicy } from "@octant/contracts";
 
@@ -191,6 +191,45 @@ const liveDependencies: GitMutationDependencies = {
 type GitMutationPolicy = {
   readonly executionPolicy?: ProviderExecutionPolicy;
 };
+
+/** Entries one move may look through below untracked folders before it gives up. */
+const MAX_UNTRACKED_ENTRIES_WALKED = 100_000;
+
+/**
+ * The repositories of their own at or below an untracked folder, which Git
+ * status lists as that folder alone. A walk too large to finish answers
+ * undefined, so the move is refused rather than claiming a full copy.
+ */
+async function nestedRepositoriesBelow(
+  checkoutRoot: string,
+  folder: string,
+): Promise<ReadonlyArray<string> | undefined> {
+  const found: string[] = [];
+  const pending = [folder];
+  let walked = 0;
+  while (pending.length > 0) {
+    const relative = pending.pop();
+    if (relative === undefined) break;
+    let entries;
+    try {
+      entries = await readdir(join(checkoutRoot, relative), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    if (entries.some((entry) => entry.name === ".git")) {
+      found.push(relative);
+      continue;
+    }
+    for (const entry of entries) {
+      walked += 1;
+      if (walked > MAX_UNTRACKED_ENTRIES_WALKED) return undefined;
+      if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        pending.push(`${relative}/${entry.name}`);
+      }
+    }
+  }
+  return found;
+}
 
 export class GitMutationPort {
   readonly #dependencies: GitMutationDependencies;
@@ -1049,10 +1088,9 @@ export class GitMutationPort {
         "status",
         "--porcelain=v2",
         "-z",
-        // `normal` collapses an untracked folder into one entry, hiding a
-        // repository deeper inside it; `all` lists files one by one and still
-        // stops at a nested repository, listing it as a folder.
-        "--untracked-files=all",
+        // `normal` keeps the listing small: an untracked folder is one entry,
+        // and the walk below looks inside it for a repository of its own.
+        "--untracked-files=normal",
         "--ignore-submodules=none",
       ],
       signal,
@@ -1077,13 +1115,9 @@ export class GitMutationPort {
         continue;
       }
       if (record.startsWith("? ") && record.endsWith("/")) {
-        const path = record.slice(2, -1);
-        try {
-          await access(join(input.checkoutRoot, path, ".git"));
-          found.add(path);
-        } catch {
-          // An ordinary untracked folder: a capture carries its files.
-        }
+        const nested = await nestedRepositoriesBelow(input.checkoutRoot, record.slice(2, -1));
+        if (nested === undefined) return undefined;
+        for (const path of nested) found.add(path);
       }
     }
     return [...found].sort();

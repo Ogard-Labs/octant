@@ -5256,7 +5256,36 @@ export class CodeService {
    * revoked, as for a rebind. Anything that fails earlier removes the new
    * worktree and leaves the thread where it was.
    */
+  /**
+   * Threads with a move in flight. Two moves of one thread would make the
+   * same worktree, and the loser's rollback would remove the one the winner
+   * just bound the thread to.
+   */
+  readonly #movingToWorktree = new Set<string>();
+
   async #moveToWorktree(
+    windowId: WindowId,
+    current: CodeThread,
+    command: Extract<CodeCommand, { readonly kind: "move-code-thread-to-worktree" }>,
+    actor: EventActor | undefined,
+  ): Promise<CodeCommandResult> {
+    const key = String(current.id);
+    if (this.#movingToWorktree.has(key)) {
+      return {
+        kind: "thread-moved-to-worktree",
+        threadId: current.id,
+        outcome: { status: "refused", reason: "turn-running" },
+      };
+    }
+    this.#movingToWorktree.add(key);
+    try {
+      return await this.#moveToWorktreeOnce(windowId, current, command, actor);
+    } finally {
+      this.#movingToWorktree.delete(key);
+    }
+  }
+
+  async #moveToWorktreeOnce(
     windowId: WindowId,
     current: CodeThread,
     command: Extract<CodeCommand, { readonly kind: "move-code-thread-to-worktree" }>,

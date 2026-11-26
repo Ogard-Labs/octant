@@ -1210,7 +1210,7 @@ describe("CodeThreadEnvironment branch and move actions", () => {
       message:
         "Changes inside vendor/lib cannot be copied into a worktree. Commit them there first; nothing was moved.",
     }));
-    const { user } = await openBranchMenuClicked({
+    const { user, rerender } = await openBranchMenuClicked({
       checkoutKind: "existing-worktree",
       onMoveToWorktree,
     });
@@ -1220,6 +1220,28 @@ describe("CodeThreadEnvironment branch and move actions", () => {
     expect(await within(dialog).findByText(/vendor\/lib/)).toBeInTheDocument();
     expect(dialog).not.toHaveTextContent("Moved to worktree");
     expect(dialog).not.toHaveTextContent("still has them");
+    // The thread refreshed to a new version; a retry sends that one.
+    const retried = vi.fn(async () => ({ status: "moved" as const, branch: "octant/moved-2" }));
+    rerender(
+      <CodeThreadEnvironment
+        environmentOpen
+        checkoutKind="existing-worktree"
+        onMoveToWorktree={retried}
+        onNewThreadInProject={vi.fn()}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    const again = within(
+      screen.getByRole("dialog", { name: "Move to a new worktree" }),
+    ).queryByRole("button", { name: "Move" });
+    if (again === null) throw new Error("a refused move offers Move again");
+    await user.click(again);
+    expect(retried).toHaveBeenCalledOnce();
+    expect(onMoveToWorktree).toHaveBeenCalledOnce();
   });
 
   it("offers no move for a thread that already owns a worktree, and greys it while a turn runs or in Plan", async () => {

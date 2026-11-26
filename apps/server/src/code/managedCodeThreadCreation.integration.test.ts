@@ -22,6 +22,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { approvedWorkingFolderChoices } from "../approvedWorkingFolders";
 import { createCheckpointCodePort } from "../checkpoint/threadCheckpointPorts";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
@@ -1565,6 +1566,36 @@ describe("moving a thread into its own worktree", () => {
       await fixture.codeService.execute(windowId, { ...move, expectedVersion: elsewhere.version }),
     ).toMatchObject({ outcome: { status: "refused", reason: "working-folder" } });
     expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+
+    // The main folder chosen by its own id is the checkout the worktree is made from.
+    const mainFolder = approvedWorkingFolderChoices(project as never).find(
+      (folder) => folder.kind === "main",
+    );
+    if (mainFolder === undefined) throw new Error("no main folder");
+    const inMain = decodeCodeThread({ ...sourceThread(), workingFolderId: mainFolder.id });
+    const main = moving({ threads: [inMain] });
+    expect(
+      await main.codeService.execute(windowId, { ...move, expectedVersion: inMain.version }),
+    ).toMatchObject({ outcome: { status: "moved" } });
+  });
+
+  it("refuses a second move of a thread while its first is still running", async () => {
+    let release: () => void = () => undefined;
+    const fixture = moving({
+      applySourceFiles: vi.fn(
+        () =>
+          new Promise<"applied">((resolve) => {
+            release = () => resolve("applied");
+          }),
+      ),
+    });
+    const first = fixture.codeService.execute(windowId, move);
+    await vi.waitFor(() => expect(fixture.git.addWorktree).toHaveBeenCalled());
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "turn-running" },
+    });
+    release();
+    expect(await first).toMatchObject({ outcome: { status: "moved" } });
   });
 
   it("removes a rolled-back worktree that holds the copied changes, so a retry succeeds", async () => {

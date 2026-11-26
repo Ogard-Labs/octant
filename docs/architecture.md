@@ -2766,7 +2766,8 @@ in another of the Project's folders (a worktree of the main folder does not
 hold it, so the task would keep editing that folder), a running turn, and
 another thread's running turn on the same checkout, and reads the last
 two again inside the journal unit that records the move, so a turn started
-during the copy refuses it. It refuses too, naming the paths, when a
+during the copy refuses it. A second move of the same thread is refused
+while the first runs. It refuses too, naming the paths, when a
 submodule has changes of its own or an untracked folder, at any depth below
 an untracked parent, is a repository of its own: a capture records either
 only as a commit pointer, so a copy would leave that work behind. A

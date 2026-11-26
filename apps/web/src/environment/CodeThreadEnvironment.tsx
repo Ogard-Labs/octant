@@ -300,6 +300,11 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   const [moveToWorktree, setMoveToWorktree] = useState<
     CodeThreadEnvironmentProps["onMoveToWorktree"] | undefined
   >(undefined);
+  // A retry after a refusal must send the thread's current version, which
+  // only the latest callback carries; the held one is the fallback once the
+  // move itself withdrew it.
+  const latestMoveToWorktree = useRef(props.onMoveToWorktree);
+  latestMoveToWorktree.current = props.onMoveToWorktree;
   const onExecute = props.onExecute;
   const fetchLocalRefs = useCallback(async (): Promise<ReadonlyArray<CodeWorktreeRef>> => {
     if (onExecute === undefined || project === undefined) return [];
@@ -927,7 +932,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         <Suspense fallback={null}>
           <MoveToWorktreeDialog
             onClose={() => setMoveToWorktree(undefined)}
-            onMove={moveToWorktree}
+            onMove={(branchName) => (latestMoveToWorktree.current ?? moveToWorktree)(branchName)}
             sourceLabel="the Project's folder"
           />
         </Suspense>
