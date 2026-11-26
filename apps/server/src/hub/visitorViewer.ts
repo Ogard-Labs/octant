@@ -17,7 +17,6 @@ const SCRIPT = String.raw`
   const form = document.getElementById("comment");
   const linkId = location.pathname.split("/")[2] || "";
   const secret = new URLSearchParams(location.hash.slice(1)).get("k");
-  if (secret !== null) history.replaceState(null, "", location.pathname);
   const say = (text) => { status.textContent = text; };
   const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)))
     .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -28,6 +27,22 @@ const SCRIPT = String.raw`
     open.onsuccess = () => resolve(open.result);
     open.onerror = () => reject(open.error);
   });
+  const remember = async (key, value) => {
+    const db = await store();
+    await new Promise((resolve) => {
+      const put = db.transaction("keys", "readwrite").objectStore("keys").put(value, key);
+      put.onsuccess = resolve;
+      put.onerror = resolve;
+    });
+  };
+  const recall = async (key) => {
+    const db = await store();
+    return new Promise((resolve) => {
+      const request = db.transaction("keys").objectStore("keys").get(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(undefined);
+    });
+  };
   const held = async () => {
     const db = await store();
     const get = (key) => new Promise((resolve) => {
@@ -83,11 +98,25 @@ const SCRIPT = String.raw`
     }));
   };
 
-  const ENDS = { 410: "This link has ended.", 403: "This link is open in another browser.", 404: "This link does not exist." };
+  // Only these answers end the link; anything else (a busy hub, a spoke
+  // waking up, a rate limit) is retried.
+  const ENDS = {
+    410: "This link has ended.",
+    403: "This link is open in another browser.",
+    404: "This link does not exist.",
+    401: "This link could not be checked. Make sure this device's clock is set correctly, then reload.",
+  };
+  const ended = async (response) => {
+    if (response.status === 403) {
+      const reason = await response.json().then((body) => body.error, () => undefined);
+      if (reason === "not-bound") return "Open this link from the full address you were sent.";
+    }
+    return ENDS[response.status];
+  };
   const follow = async () => {
     const path = "/v/" + linkId + "/stream";
     const response = await fetch(path, { headers: await signed("GET", path), cache: "no-store" });
-    if (!response.ok || response.body === null) return ENDS[response.status] || "The owner's computer cannot be reached.";
+    if (!response.ok || response.body === null) return ended(response);
     const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = "";
     for (;;) {
@@ -113,14 +142,21 @@ const SCRIPT = String.raw`
         headers: { ...(await signed("POST", path)), "content-type": "application/json" },
         body: JSON.stringify({ secret }),
       });
-      if (!response.ok) return say(ENDS[response.status] || "This link could not be opened.");
+      const final = response.ok ? undefined : await ended(response);
+      // The secret leaves the address bar once the link is opened or has
+      // ended; after a passing failure it stays, so a reload can try again.
+      if (response.ok || final !== undefined) history.replaceState(null, "", location.pathname);
+      if (!response.ok) return say(final || "This link could not be opened. Reload to try again.");
       const opened = await response.json();
-      if (opened.scope === "comment") form.hidden = false;
+      await remember("scope:" + linkId, opened.scope);
     }
+    if ((await recall("scope:" + linkId)) === "comment") form.hidden = false;
+    let wait = 3000;
     for (;;) {
-      const ended = await follow().catch(() => undefined);
-      if (ended !== undefined) return say(ended);
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const end = await follow().catch(() => undefined);
+      if (end !== undefined) return say(end);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      wait = Math.min(wait * 2, 60000);
     }
   };
 
@@ -142,7 +178,7 @@ const SCRIPT = String.raw`
     if (response.ok) field.value = "";
   });
 
-  void run();
+  run().catch(() => say("This browser cannot keep the key this link needs. Private browsing may be the cause."));
 })();
 `;
 
@@ -163,6 +199,7 @@ main { padding-top: 16px; padding-bottom: 24px; display: grid; gap: 12px; }
 .who { margin: 0 0 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
 .text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 form { padding-bottom: 32px; display: grid; gap: 8px; }
+[hidden] { display: none !important; }
 textarea { width: 100%; min-height: 84px; font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 button { justify-self: start; font: inherit; font-weight: 600; color: var(--on-accent); background: var(--accent); border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
 .note { margin: 0; color: var(--muted); font-size: 13px; }

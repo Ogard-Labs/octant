@@ -434,5 +434,38 @@ describe("the viewer page", () => {
     expect(script?.body).toContain("textContent");
     expect(script?.body).not.toContain("innerHTML");
     expect(script?.body).toContain('generateKey({ name: "ECDSA", namedCurve: "P-256" }, false');
+    // The comment form is hidden by default; a display rule on it must not
+    // override that, or a read-only link would show a comment box.
+    const style = [...viewer.assets.values()].find((asset) => asset.type.startsWith("text/css"));
+    expect(style?.body).toContain("[hidden] { display: none !important; }");
+    expect(viewer.page).toMatch(/<form id="comment"[^>]*hidden/);
+  });
+
+  it("serves only the viewer's own assets, with no inline script on the page", async () => {
+    const context = world();
+    const viewer = visitorViewer();
+    const hub = new HubVisitorService({
+      state: memoryState({ visitorHub: { enabled: true, grants: [] } }),
+      serving: () => true,
+      hubMemberId: () => HUB,
+      rosterFingerprintFor: () => undefined,
+      ask: async (_spoke, fetched) => context.spoke.fetch(fetched, HUB),
+      record: () => undefined,
+      now: () => NOW,
+      viewer,
+    });
+    const handlers = hub.handlers();
+    const asset = (name: string) =>
+      handlers.visitorAsset?.({
+        ...request("visitor-page", "AAAAAAAAAAAAAAAAAAAAAA", new Map()),
+        params: { asset: name },
+      });
+    const [known] = viewer.assets.keys();
+    expect((await asset(known ?? ""))?.status).toBe(200);
+    expect((await asset("0123456789abcdef.js"))?.status).toBe(404);
+    const page = await handlers.visitorPage?.(
+      request("visitor-page", "AAAAAAAAAAAAAAAAAAAAAA", new Map()),
+    );
+    expect(String(page?.body)).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/);
   });
 });
