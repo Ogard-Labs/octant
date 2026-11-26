@@ -15,6 +15,7 @@
     "src/hub/hubAndSpokes.guest.smoke.test.ts",
     "src/hub/hubAndSpokes.owners.smoke.test.ts",
     "src/hub/hubAndSpokes.windowComputers.smoke.test.ts",
+    "src/remote/pairedHistory.smoke.test.ts",
     "src/remote/remoteExitEvidenceADriver.ts",
     "src/remote/remotePairingCode.smoke.test.ts",
     "src/remote/remoteServerForwarder.twoHost.test.ts"
