@@ -1931,27 +1931,32 @@ function sendSheetHTML() {
 
 /* ============================== screens by route ============================== */
 
-const SCREEN_BUILDERS = {
-  home: homeScreen,
-  threads: threadsScreen,
-  list: (key) => countScreen(key || "needs"),
-  inbox: inboxScreen,
-  prs: prsScreen,
-  bots: botsScreen,
-  thread: (id) => threadScreen(id || "sync"),
-  pr: () => prScreen(),
-  bot: (id) => botScreen(id || "bugscout"),
-  settings: settingsScreen,
-  computer: (id) => computerScreen(id || "studio"),
-  pair: pairScreen,
-  lock: lockScreen,
-  homescreen: widgetScreen,
-  "android-notification": androidNotifScreen,
-};
+// A Map, so a route name read from the address (#/constructor) finds no
+// builder rather than a property every object has.
+const SCREEN_BUILDERS = new Map(
+  Object.entries({
+    home: homeScreen,
+    threads: threadsScreen,
+    list: (key) => countScreen(key || "needs"),
+    inbox: inboxScreen,
+    prs: prsScreen,
+    bots: botsScreen,
+    thread: (id) => threadScreen(id || "sync"),
+    pr: () => prScreen(),
+    bot: (id) => botScreen(id || "bugscout"),
+    settings: settingsScreen,
+    computer: (id) => computerScreen(id || "studio"),
+    pair: pairScreen,
+    lock: lockScreen,
+    homescreen: widgetScreen,
+    "android-notification": androidNotifScreen,
+  }),
+);
 function buildScreen(routeStr) {
   const { name, arg } = parseRoute(routeStr);
-  const builder = SCREEN_BUILDERS[name];
-  if (!builder) return homeScreen();
+  const builder = SCREEN_BUILDERS.get(name);
+  // An address naming no screen opens Home, built like any other screen.
+  if (!builder) return buildScreen("home");
   const html = ["thread", "bot", "computer", "list"].includes(name) ? builder(arg) : builder();
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
