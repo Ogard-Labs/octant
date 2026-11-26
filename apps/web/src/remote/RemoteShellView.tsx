@@ -287,6 +287,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           }
           props.onReset();
         }}
+        standing={standing}
       />
 
       <div className="settings-section-stack">

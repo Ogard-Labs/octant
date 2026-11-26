@@ -1219,6 +1219,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 ? { typedByPerson: true as const }
                 : {}),
               ...(operation.kind === "start-provider-turn" ||
+              // An answer is kept for the session or the Project only while the
+              // device still holds the level it asked with.
+              operation.kind === "answer-provider-approval" ||
               requiresLiveCodeReviewAuthority(operation) ||
               // A switch may wait behind another Git mutation in the queue;
               // its admission is asked again when its turn to run arrives.

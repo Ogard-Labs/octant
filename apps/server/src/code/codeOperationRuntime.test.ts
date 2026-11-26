@@ -4620,14 +4620,18 @@ describe("CodeOperationRuntime", () => {
       requestId: "question-2",
       answer: "A",
     });
-    await fixture.runtime.execute(windowId, {
-      kind: "answer-provider-approval",
-      operationId: operationId(12),
-      threadId,
-      checkoutId,
-      approvalId: approval!.event.approvalId,
-      decision: "approved",
-    });
+    await fixture.runtime.execute(
+      windowId,
+      {
+        kind: "answer-provider-approval",
+        operationId: operationId(12),
+        threadId,
+        checkoutId,
+        approvalId: approval!.event.approvalId,
+        decision: "approved",
+      },
+      { initiator: "user" },
+    );
     await fixture.runtime.execute(windowId, {
       kind: "cancel-provider-turn",
       operationId: operationId(13),
@@ -4644,6 +4648,7 @@ describe("CodeOperationRuntime", () => {
       sessionId,
       requestId: "provider-approval-1",
       approved: true,
+      persistence: "current-session",
     });
     expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
     await fixture.runtime.close();
@@ -5114,71 +5119,87 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
-  it("answers an approval requested by a narrowed turn on a broader thread", async () => {
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const connection = providerConnection(queue);
-    const fixture = runtimeFixture({
-      provider: providerDriver(connection),
-      approvalValidator: false,
-    });
-    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
-    const startOperation = operationId(14);
+  it.each([
+    [
+      "keeps the allow for the session when the host's own person answers",
+      "user",
+      { persistence: "current-session" },
+    ],
+    ["keeps anyone else's allow to this one call", "agent", { scope: "once" }],
+  ] as const)(
+    "answers an approval requested by a narrowed turn on a broader thread: %s",
+    async (_name, initiator, kept) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+      });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+      const startOperation = operationId(14);
 
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "start-provider-turn",
-        operationId: startOperation,
-        threadId,
-        checkoutId,
-        sessionId,
-        prompt: fixture.prompt,
-        executionPolicy: "approval-gated",
-      }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
-    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
-    await Effect.runPromise(
-      Queue.offer(
-        queue,
-        providerEvent({
-          kind: "approval-request",
-          requestId: "provider-approval-narrowed",
-          action: "write",
-          description: "Modify src/a.ts",
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: startOperation,
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+          executionPolicy: "approval-gated",
         }),
-      ),
-    );
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "provider-approval-narrowed",
+            action: "write",
+            description: "Modify src/a.ts",
+          }),
+        ),
+      );
 
-    let frames: readonly OperationFrame[] = [];
-    await vi.waitFor(async () => {
-      frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
-      expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
-    });
-    const approval = frames.find(
-      (
-        frame,
-      ): frame is OperationFrame & { event: { kind: "approval-requested"; approvalId: string } } =>
-        frame.event.kind === "approval-requested",
-    );
-    expect(approval).toBeDefined();
-    if (approval === undefined) return;
+      let frames: readonly OperationFrame[] = [];
+      await vi.waitFor(async () => {
+        frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+        expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
+      });
+      const approval = frames.find(
+        (
+          frame,
+        ): frame is OperationFrame & {
+          event: { kind: "approval-requested"; approvalId: string };
+        } => frame.event.kind === "approval-requested",
+      );
+      expect(approval).toBeDefined();
+      if (approval === undefined) return;
 
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(15),
-        threadId,
-        checkoutId,
-        approvalId: approval.event.approvalId,
-        decision: "approved",
-      }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
-    expect(connection.answerApproval).toHaveBeenCalledWith({
-      sessionId,
-      requestId: "provider-approval-narrowed",
-      approved: true,
-    });
-    fixture.close();
-  });
+      await expect(
+        fixture.runtime.execute(
+          windowId,
+          {
+            kind: "answer-provider-approval",
+            operationId: operationId(15),
+            threadId,
+            checkoutId,
+            approvalId: approval.event.approvalId,
+            decision: "approved",
+          },
+          { initiator },
+        ),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      expect(connection.answerApproval).toHaveBeenCalledWith({
+        sessionId,
+        requestId: "provider-approval-narrowed",
+        approved: true,
+        ...kept,
+      });
+      fixture.close();
+    },
+  );
 
   it("refuses an allow answered after the thread's posture changed, asks again, and still delivers a denial", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
@@ -5227,14 +5248,18 @@ describe("CodeOperationRuntime", () => {
       decision: "approved" | "denied",
       operation: number,
     ) =>
-      fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(operation),
-        threadId,
-        checkoutId,
-        approvalId,
-        decision,
-      });
+      fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-approval",
+          operationId: operationId(operation),
+          threadId,
+          checkoutId,
+          approvalId,
+          decision,
+        },
+        { initiator: "user" },
+      );
 
     // Asked under Ask first; the person then hands prompts to the reviewer.
     const first = await ask("provider-approval-before-auto", 0);
@@ -5254,6 +5279,7 @@ describe("CodeOperationRuntime", () => {
       sessionId,
       requestId: "provider-approval-before-auto",
       approved: true,
+      persistence: "current-session",
     });
 
     // Narrowed to Plan while asked: the allow is refused, the denial is delivered.
@@ -5400,14 +5426,18 @@ describe("CodeOperationRuntime", () => {
     });
     if (approvalId === undefined) throw new Error("Expected a provider approval");
     await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(32),
-        threadId,
-        checkoutId,
-        approvalId,
-        decision: "approved",
-      }),
+      fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-approval",
+          operationId: operationId(32),
+          threadId,
+          checkoutId,
+          approvalId,
+          decision: "approved",
+        },
+        { initiator: "user" },
+      ),
     ).resolves.toMatchObject({ state: "running" });
     // The driver reads the host's default, which may keep answers for the
     // session; this thread's own setting must still hold the allow to one call.
@@ -5471,14 +5501,18 @@ describe("CodeOperationRuntime", () => {
       decision: "approved" | "denied",
       operation: number,
     ) =>
-      fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(operation),
-        threadId,
-        checkoutId,
-        approvalId,
-        decision,
-      });
+      fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-approval",
+          operationId: operationId(operation),
+          threadId,
+          checkoutId,
+          approvalId,
+          decision,
+        },
+        { initiator: "user" },
+      );
 
     // Asked while the turn runs gated with grants for this session; the person
     // then switches the thread to Full access remembered for the Project.
@@ -5804,17 +5838,22 @@ describe("CodeOperationRuntime", () => {
     fixture.access.mockResolvedValue(true);
 
     await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(902),
-        ...approval.answer,
-        decision: "approved",
-      }),
+      fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-approval",
+          operationId: operationId(902),
+          ...approval.answer,
+          decision: "approved",
+        },
+        { initiator: "user" },
+      ),
     ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
     expect(connection.answerApproval).toHaveBeenCalledWith({
       sessionId,
       requestId: "provider-approval-listed",
       approved: true,
+      persistence: "current-session",
     });
     expect((await fixture.runtime.pendingRequests?.(windowId))?.map((r) => r.kind)).toEqual([
       "question",

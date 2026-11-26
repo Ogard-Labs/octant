@@ -1181,6 +1181,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       extraFolders = [],
       attachmentsFolder,
       sandboxPolicy,
+      permissionPersistence: threadPersistence,
     }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
@@ -1215,6 +1216,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         resumeIdentities,
         factories,
         readOnlyFolders,
+        threadPersistence === "project-default",
       );
     },
   };
@@ -1229,6 +1231,8 @@ function makeConnection(
   factories: Factories,
   /** Folders the agent reads and never writes: the thread's attachments folder. */
   readOnlyFolders: ReadonlyArray<string> = [],
+  /** The thread keeps no answer, so it never takes up a process that may hold one. */
+  keepsNoAnswers = false,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   const { profile } = options;
   const name = profile.displayName;
@@ -1933,6 +1937,9 @@ function makeConnection(
             input.nativeSetup ?? null,
             options.authentication,
             input.tools,
+            // An agent's process holds the `allow_always` it was sent, so the
+            // next turn starts another once approvals hold for one call each.
+            keepsNoAnswers,
           ]);
           const nativeKey = (identity: string) =>
             JSON.stringify(["acp-native", profile.kind, identity]);
@@ -2877,11 +2884,12 @@ function makeConnection(
             // person keeps answers for the session, so it stops asking for
             // that call, as Octant would; never for a one-call answer (an
             // automatic reviewer's, or one on a child's behalf), and never
-            // when answers are kept only as the Project's default.
+            // when answers are kept only as the Project's default. The
+            // answer's own persistence, the thread's, comes before the host's.
             const remembers =
               input.scope !== "once" &&
               pending.allowAlwaysOptionId !== undefined &&
-              permissionPersistence(options) === "current-session";
+              (input.persistence ?? permissionPersistence(options)) === "current-session";
             const allowOptionId =
               remembers && pending.allowAlwaysOptionId !== undefined
                 ? pending.allowAlwaysOptionId
@@ -2896,7 +2904,7 @@ function makeConnection(
               return Effect.fail(
                 failure(
                   "unsupported",
-                  `${name} only offers Always allow here. Approve it for this session, or deny it.`,
+                  `${name} only offers Always allow here. Approve it where approvals are kept for the session, at the computer or a Full device, or deny it.`,
                 ),
               );
             }
