@@ -447,6 +447,7 @@ export function startOctantServer(
       githubIssueContextService,
       githubReadToolService,
       linearReadToolService,
+      linkedIssues,
       linearRoutineEventSources,
       githubRoutes,
       integrationRoutes,
@@ -921,6 +922,7 @@ export function startOctantServer(
       gitObservationPort,
       linearConnected,
       linearIssueContextService,
+      linkedIssues,
       terminalSessionImports,
       liveTurns,
       machineChangeFeed,
@@ -1089,6 +1091,7 @@ export function startOctantServer(
       codeActiveWorkForWindow,
       codeTurnDecisions,
       mergedThreadPutAway,
+      linkedIssueWriteBack,
       contributeCodeTools,
       registerCodeEditDiagnostics,
       contributeServerCodeTools,
@@ -1181,6 +1184,7 @@ export function startOctantServer(
       githubExtensionSnapshot,
       githubReadToolService,
       linearReadToolService,
+      linkedIssues,
       isCodeProviderModelAllowed,
       liveTurns,
       machineChangeFeed,
@@ -2561,6 +2565,7 @@ export function startOctantServer(
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
           mergedThreadPutAway?.start();
+          linkedIssueWriteBack?.start();
           worktreeReclaimSweep.start();
           idleCompactions.start();
           stopBenchmarkRunner = benchmarkRunner.start();
@@ -2669,6 +2674,7 @@ export function startOctantServer(
           }
           completedThreadArchiveSweep.stop();
           mergedThreadPutAway?.stop();
+          linkedIssueWriteBack?.stop();
           worktreeReclaimSweep.stop();
           idleCompactions.stop();
           personMemorySweep.stop();

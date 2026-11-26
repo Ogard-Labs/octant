@@ -1029,6 +1029,24 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // A link decides which issues the host and the agent may write to
+          // under the host's own tracker accounts, so it is the person's act;
+          // a device only the hub introduced acts as an agent here.
+          if (
+            (command?.kind === "link-code-thread-issue" ||
+              command?.kind === "unlink-code-thread-issue") &&
+            (callerAuthority !== "local-window" || agentGrantSession)
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message:
+                  "Only you, from a window or a device you paired, can link or unlink a task's issues.",
+              },
+              403,
+              origin,
+            );
+          }
           // Whether the host may continue a turn by itself after a restart is
           // the person's choice about this computer's unattended work, at a
           // window on it or on a device they paired.

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import type { CodeClient } from "@octant/client-runtime";
 import {
+  MERGE_WHEN_READY_OFFER,
   PULL_REQUEST_HANDOFF_HEADING,
   readyPullRequestNotice,
 } from "@octant/domain/code-pull-request-switch-policy";
@@ -23,6 +24,13 @@ import {
   pullRequestControlsLoadMessage,
   switchRefusalCopy,
 } from "./ProjectPullRequestSupport";
+
+// The offer appears only on a thread linked to an issue, so it loads on demand.
+const MergeWhenReadyOffer = lazy(() =>
+  import("./MergeWhenReadyOffer").then((module) => ({ default: module.MergeWhenReadyOffer })),
+);
+
+const OFFER_LINE = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)#(\d+) /;
 
 function pullRequestRef(row: CodeProjectPullRequestRow) {
   return `${row.repositoryOwner}/${row.repositoryName}#${row.number}`;
@@ -231,10 +239,14 @@ function ThreadHandoffLine({
   client,
   line,
   match,
+  offerClient,
+  projectId,
 }: {
   readonly client: BabysitClient;
   readonly line: string;
   readonly match: ReadyHandoff | undefined;
+  readonly offerClient: CodeClient;
+  readonly projectId: ProjectId;
 }) {
   // A successful merge removes the row from the open-PR list. The receipt belongs to the notice.
   const [receipt, setReceipt] = useState<string>();
@@ -246,6 +258,25 @@ function ThreadHandoffLine({
         </span>
       </li>
     );
+  const offer = line.endsWith(MERGE_WHEN_READY_OFFER) ? OFFER_LINE.exec(line) : null;
+  if (offer?.[1] !== undefined && offer[2] !== undefined && offer[3] !== undefined) {
+    return (
+      <li>
+        <span>{line}</span>{" "}
+        <Suspense fallback={null}>
+          <MergeWhenReadyOffer
+            client={offerClient}
+            target={{
+              projectId,
+              repositoryOwner: offer[1],
+              repositoryName: offer[2],
+              number: Number(offer[3]),
+            }}
+          />
+        </Suspense>
+      </li>
+    );
+  }
   if (!match)
     return <li>{line.replace(` ${readyPullRequestNotice("")}`, " was ready to merge at ")}</li>;
   const { row, sha } = match;
@@ -348,6 +379,8 @@ export function ThreadWatchHandoff({
               line={line}
               match={actions.get(line)}
               client={client}
+              offerClient={client}
+              projectId={projectId}
             />
           ))}
       </ul>

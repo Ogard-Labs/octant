@@ -136,6 +136,11 @@ export const IntegrationCredentialRequestResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("granted"),
     reference: safeText(256),
+    /**
+     * The scopes the provider granted, when the host recorded them at connect
+     * time. Absent means unknown (a personal key), never "none".
+     */
+    scopes: Schema.optional(Schema.Array(safeText(128)).pipe(Schema.maxItems(64))),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("refused"),

@@ -180,6 +180,17 @@ export interface ProjectOverviewProps {
    * host accepts it only from a window on its own machine.
    */
   readonly onOwnToolchainChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  /**
+   * A Code Project's two linked-issue switches. They are here as well as in
+   * the Pull requests menu, which lists only Projects with a GitHub
+   * repository, so a Project working on Linear issues alone reaches them.
+   */
+  readonly onCodeIssueUpdatesChange?: (
+    projectId: ProjectId,
+    change:
+      | { readonly keepLinkedIssuesCurrent: boolean }
+      | { readonly agentsMayUpdateIssues: boolean },
+  ) => Promise<boolean>;
   /** Marks the Project as taking delegated Code work from hub members; the host accepts it only from its own person. */
   readonly onDelegatedCodeChange?: (
     projectId: ProjectId,
@@ -916,6 +927,14 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 onChange={(enabled) => props.onOwnToolchainChange?.(props.project.id, enabled)}
               />
             ) : null}
+            {props.project.type === "code" && props.onCodeIssueUpdatesChange !== undefined ? (
+              <LinkedIssueSettings
+                agentsMayUpdate={props.project.agentsMayUpdateIssues === true}
+                disabled={archived || connectionStale}
+                keepCurrent={props.project.keepLinkedIssuesCurrent === true}
+                onChange={(change) => props.onCodeIssueUpdatesChange?.(props.project.id, change)}
+              />
+            ) : null}
             {props.project.type === "code" && props.onDelegatedCodeChange !== undefined ? (
               <DelegatedCodeSetting
                 key={`${String(props.project.id)}-delegated-code`}
@@ -1142,6 +1161,63 @@ function OwnToolchainSetting(props: {
             setPending(true);
             void Promise.resolve(props.onChange(enabled)).finally(() => setPending(false));
           }}
+        />
+      </div>
+    </section>
+  );
+}
+
+/** The Project's two linked-issue switches, each set only by the host's own person. */
+function LinkedIssueSettings(props: {
+  readonly disabled: boolean;
+  readonly keepCurrent: boolean;
+  readonly agentsMayUpdate: boolean;
+  readonly onChange: (
+    change:
+      | { readonly keepLinkedIssuesCurrent: boolean }
+      | { readonly agentsMayUpdateIssues: boolean },
+  ) => Promise<boolean> | undefined;
+}) {
+  // Each command asserts the Project version it read, so one change at a time.
+  const [pending, setPending] = useState(false);
+  const keepId = useId();
+  const agentsId = useId();
+  const change = (next: Parameters<typeof props.onChange>[0]) => {
+    setPending(true);
+    void Promise.resolve(props.onChange(next)).finally(() => setPending(false));
+  };
+  return (
+    <section className="project-overview-inspector">
+      <div className="project-overview-inspector__row">
+        <div>
+          <h3>Keep linked issues up to date</h3>
+          <p id={keepId}>
+            Octant moves each task's linked GitHub and Linear issues to In Progress, In Review and
+            Done as the task goes.
+          </p>
+        </div>
+        <OctantSwitch
+          checked={props.keepCurrent}
+          describedBy={keepId}
+          disabled={props.disabled || pending}
+          label="Keep linked issues up to date"
+          onCheckedChange={(enabled) => change({ keepLinkedIssuesCurrent: enabled })}
+        />
+      </div>
+      <div className="project-overview-inspector__row">
+        <div>
+          <h3>Agents may update linked issues</h3>
+          <p id={agentsId}>
+            Below Full access, an agent moves or comments on its task's linked issues without
+            asking.
+          </p>
+        </div>
+        <OctantSwitch
+          checked={props.agentsMayUpdate}
+          describedBy={agentsId}
+          disabled={props.disabled || pending}
+          label="Agents may update linked issues"
+          onCheckedChange={(enabled) => change({ agentsMayUpdateIssues: enabled })}
         />
       </div>
     </section>

@@ -133,6 +133,20 @@ describe("integration authentication routes", () => {
     expect(new TextEncoder().encode(text).byteLength).toBeLessThanOrEqual(512 * 1_024);
   });
 
+  it("refuses a Linear issue write from any client, the local window included", async () => {
+    const handler = createHandler();
+    for (const operationId of ["set-issue-state", "comment-issue"]) {
+      const value = new Request("http://127.0.0.1/api/integrations/linear/operations", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://127.0.0.1" },
+        body: JSON.stringify({ kind: "operation", operationId, input: { id: "lin-1" } }),
+      });
+      bindLocalWindow(value);
+      expect((await handler(value))?.status).toBe(403);
+    }
+    expect(service.executeOperation).not.toHaveBeenCalled();
+  });
+
   it("allows a remote device to read issues and refuses authentication-shaped bodies", async () => {
     const handler = createHandler();
     const read = new Request("http://127.0.0.1/api/integrations/linear/operations", {

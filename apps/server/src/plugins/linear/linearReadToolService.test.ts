@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CodeThread, ProjectLinearTarget, WindowId } from "@octant/contracts";
+import { linkedIssueUpdatePort } from "../../trackerIssues/agentIssueUpdates";
+import type { CodeThread, LinkedIssueRef, ProjectLinearTarget, WindowId } from "@octant/contracts";
 import type { IntegrationAuthenticationSnapshot } from "@octant/contracts/integration";
 import {
   LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION,
@@ -284,5 +285,138 @@ describe("LinearReadToolService", () => {
         inputJson: JSON.stringify({ operation: "list" }),
       }),
     ).toEqual({ result: { error: "thread-stale" }, isError: true });
+  });
+});
+
+describe("LinearReadToolService issue updates", () => {
+  const linked = { forge: "linear" as const, identifier: "OCT-42", issueId: "issue-1" };
+
+  function updateHarness(input: {
+    readonly executionPolicy: CodeThread["executionPolicy"];
+    readonly projectAllowsUpdates?: boolean;
+    readonly lifecycle?: CodeThread["lifecycle"];
+  }) {
+    const thread = makeThread({ executionPolicy: input.executionPolicy });
+    const current =
+      input.lifecycle === undefined ? thread : { ...thread, lifecycle: input.lifecycle };
+    let links: ReadonlyArray<LinkedIssueRef> = [linked];
+    const ask = vi.fn(async (_summary: string, _signal?: AbortSignal) => "approved" as const);
+    const writes = {
+      agentSetState: vi.fn(async () => ({ status: "applied" as const })),
+      agentComment: vi.fn(async () => ({ status: "applied" as const })),
+    };
+    const toolSet = new LinearReadToolService({
+      reader: { snapshot: vi.fn(async () => READY_SNAPSHOT), executeOperation: vi.fn() },
+      ingestion: { record: vi.fn() },
+    }).createToolSet({
+      windowId: WINDOW_ID,
+      thread,
+      readThread: () => current,
+      readProjectLinearTarget: () => TARGET,
+      issueUpdates: linkedIssueUpdatePort({
+        linked: () => links,
+        projectAllowsUpdates: () => input.projectAllowsUpdates === true,
+        readOutsideContent: () => false,
+        ask,
+        writes,
+      }),
+    });
+    const run = (value: unknown) =>
+      toolSet.execute({ name: LINEAR_READ_TOOL_NAME, inputJson: JSON.stringify(value) });
+    return {
+      run,
+      ask,
+      writes,
+      unlink: () => {
+        links = [];
+      },
+    };
+  }
+
+  it("refuses an approved update when the person unlinked the issue while the card waited", async () => {
+    const gated = updateHarness({ executionPolicy: "approval-gated" });
+    gated.ask.mockImplementation(async () => {
+      gated.unlink();
+      return "approved" as const;
+    });
+    expect(
+      await gated.run({ operation: "comment", identifier: "OCT-42", body: "Started." }),
+    ).toMatchObject({ result: { error: "issue-not-linked" }, isError: true });
+    expect(gated.writes.agentComment).not.toHaveBeenCalled();
+  });
+
+  it("the agent cannot set the state of an issue that is not linked to its thread", async () => {
+    const { run, writes, ask } = updateHarness({ executionPolicy: "full-access" });
+    expect(await run({ operation: "set-state", identifier: "OCT-7", state: "Done" })).toMatchObject(
+      {
+        result: { error: "issue-not-linked" },
+        isError: true,
+      },
+    );
+    expect(ask).not.toHaveBeenCalled();
+    expect(writes.agentSetState).not.toHaveBeenCalled();
+  });
+
+  it("refuses in Plan, writes at Full access without asking, and asks below it", async () => {
+    const plan = updateHarness({ executionPolicy: "plan" });
+    expect(
+      await plan.run({ operation: "comment", identifier: "OCT-42", body: "Started." }),
+    ).toMatchObject({ result: { error: "plan-mode-read-only" }, isError: true });
+    expect(plan.writes.agentComment).not.toHaveBeenCalled();
+
+    const full = updateHarness({ executionPolicy: "full-access" });
+    expect(
+      await full.run({ operation: "set-state", identifier: "oct-42", state: "In Review" }),
+    ).toMatchObject({ isError: false });
+    expect(full.ask).not.toHaveBeenCalled();
+    expect(full.writes.agentSetState).toHaveBeenCalledWith(
+      String(makeThread().id),
+      linked,
+      "In Review",
+      undefined,
+    );
+
+    const gated = updateHarness({ executionPolicy: "approval-gated" });
+    await gated.run({ operation: "comment", identifier: "OCT-42", body: "Rotate token=abc123" });
+    expect(gated.ask).toHaveBeenCalledWith(
+      "Comment on OCT-42 under your name?\n\nRotate [redacted]",
+      undefined,
+    );
+    expect(gated.writes.agentComment).toHaveBeenCalledWith(
+      String(makeThread().id),
+      linked,
+      "Rotate [redacted]",
+      undefined,
+    );
+
+    const allowed = updateHarness({
+      executionPolicy: "approval-gated",
+      projectAllowsUpdates: true,
+    });
+    await allowed.run({ operation: "comment", identifier: "OCT-42", body: "Started." });
+    expect(allowed.ask).not.toHaveBeenCalled();
+    expect(allowed.writes.agentComment).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a comment too long to show whole in the approval before asking", async () => {
+    const gated = updateHarness({ executionPolicy: "approval-gated" });
+    expect(
+      await gated.run({ operation: "comment", identifier: "OCT-42", body: "x".repeat(3_000) }),
+    ).toMatchObject({ result: { error: "comment-too-long-to-approve" }, isError: true });
+    expect(gated.ask).not.toHaveBeenCalled();
+    expect(gated.writes.agentComment).not.toHaveBeenCalled();
+
+    // Without an ask, the full 4 KB is allowed.
+    const full = updateHarness({ executionPolicy: "full-access" });
+    await full.run({ operation: "comment", identifier: "OCT-42", body: "x".repeat(3_000) });
+    expect(full.writes.agentComment).toHaveBeenCalledOnce();
+  });
+
+  it("an archived thread's agent cannot update its linked issue", async () => {
+    const archived = updateHarness({ executionPolicy: "full-access", lifecycle: "archived" });
+    expect(
+      await archived.run({ operation: "set-state", identifier: "OCT-42", state: "Done" }),
+    ).toMatchObject({ isError: true });
+    expect(archived.writes.agentSetState).not.toHaveBeenCalled();
   });
 });

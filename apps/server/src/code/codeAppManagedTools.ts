@@ -86,7 +86,9 @@ import {
   type AndroidEmulatorId,
   type AndroidEmulatorRequest,
   type AndroidRuntimeSnapshot,
+  type LinkedIssueRef,
 } from "@octant/contracts";
+import { withLinkedIssueReferences } from "@octant/domain/tracker-issue-write-policy";
 import {
   clampTurnAccessPosture,
   decideProfileToolConstraint,
@@ -506,6 +508,10 @@ export interface CodeAppManagedToolsOptions {
    * choice the tool only names it; the host reads it again before posting.
    */
   readonly projectAllowsComments?: () => boolean;
+  /** The issues linked to this thread, which a pull request it opens names as fixed. */
+  readonly linkedIssues?: () => ReadonlyArray<LinkedIssueRef>;
+  /** The thread opened its pull request: the host moves its linked issues to In Review. */
+  readonly onPullRequestCreated?: () => void;
   /**
    * Whether this thread has read outside content under Strict. Such a thread
    * asks before each post below Full access whatever the Project chose;
@@ -948,7 +954,13 @@ async function pullRequestTool(
           kind: "create-pull-request",
           ...scope,
           title: input.title,
-          body: input.body,
+          // The issues the thread is linked to close with the merge; the
+          // person approves the body with those lines already in it.
+          body: withLinkedIssueReferences({
+            body: input.body,
+            issues: options.linkedIssues?.() ?? [],
+            baseRepository: options.thread.deliveryTarget.proposedBaseRepository,
+          }),
           ...(input.draft === undefined ? {} : { draft: input.draft }),
           ...(input.base === undefined ? {} : { baseBranch: input.base }),
           authorization: { kind: "full-access" },
@@ -1035,6 +1047,7 @@ async function pullRequestTool(
       pullRequestRefusal(result.failureCode),
     );
   }
+  if (input.operation === "create" && result.state === "created") options.onPullRequestCreated?.();
   return {
     result: {
       status:

@@ -602,6 +602,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         (command.kind === "change-code-project-agent-merge" ||
           command.kind === "change-code-project-agent-pull-request-comments" ||
           command.kind === "change-code-project-agent-default-branch-push" ||
+          command.kind === "change-code-project-issue-updates" ||
           command.kind === "change-project-agent-memory-writes") &&
         principal !== undefined &&
         !principalActsAsHostPerson(principal)
@@ -616,7 +617,9 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
                   ? "Whether agents may comment on pull requests is set on the host."
                   : command.kind === "change-code-project-agent-default-branch-push"
                     ? "Whether agents may push to the default branch is set on the host."
-                    : "Whether agents may write Project memory without asking is set on the host.",
+                    : command.kind === "change-code-project-issue-updates"
+                      ? "Whether Octant updates linked issues is set on the host."
+                      : "Whether agents may write Project memory without asking is set on the host.",
           },
           403,
           origin,

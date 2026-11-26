@@ -57,6 +57,7 @@ import {
   changeCodeProjectDesktopRecipe,
   changeCodeProjectNewThreadWorkspace,
   changeCodeProjectAgentDefaultBranchPush,
+  changeCodeProjectIssueUpdates,
   changeCodeProjectAgentMerge,
   changeCodeProjectOwnToolchain,
   changeCodeProjectAgentPullRequestComments,
@@ -945,6 +946,10 @@ export class ProjectService implements ProjectServiceApi {
           );
           kind = "code-project-agent-default-branch-push-changed";
           eventName = "project.code-agent-default-branch-push-changed@1";
+        } else if (command.kind === "change-code-project-issue-updates") {
+          project = changeCodeProjectIssueUpdates(current, command, timestamp);
+          kind = "code-project-issue-updates-changed";
+          eventName = "project.code-issue-updates-changed@1";
         } else if (command.kind === "change-code-project-actions") {
           project = changeCodeProjectActions(current, command.actions, timestamp);
           kind = "code-project-actions-changed";

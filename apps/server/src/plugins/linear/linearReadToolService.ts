@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CodeThread, ProjectLinearTarget, WindowId } from "@octant/contracts";
+import type { CodeThread, LinkedIssueRef, ProjectLinearTarget, WindowId } from "@octant/contracts";
 import type {
   IntegrationAuthenticationSnapshot,
   IntegrationExecutionResult,
@@ -61,6 +61,34 @@ const linearReadDefinition = {
   },
 } as const;
 
+/**
+ * The same tool on a turn that may update its thread's linked issues: two more
+ * operations, each reaching only those issues and asking where the guardrail
+ * level says to.
+ */
+const linearUpdateDefinition = {
+  ...linearReadDefinition,
+  description: linearReadDefinition.description.replace(
+    "this tool cannot read another team or change anything in Linear.",
+    "this tool cannot read another team. set-state moves, and comment comments on, an issue linked to this thread only; below Full access each asks the person unless the Project allows it, and Plan refuses both.",
+  ),
+  inputSchema: {
+    ...linearReadDefinition.inputSchema,
+    properties: {
+      ...linearReadDefinition.inputSchema.properties,
+      operation: {
+        type: "string",
+        enum: ["list", "get", "search", "set-state", "comment", "help"],
+      },
+      state: { type: "string", minLength: 1, maxLength: 64 },
+      body: { type: "string", minLength: 1, maxLength: 4096 },
+    },
+  },
+} as const;
+
+const LINEAR_UPDATE_HELP =
+  "set-state takes identifier (an issue linked to this thread, such as ENG-42) and state, the name or type of one of its team's states (for example In Review, or completed). comment takes identifier and body (up to 4 KB; credential-shaped text is redacted) and posts under the person's name. Both reach only this thread's linked issues; Plan refuses them, Full access does not ask, and below it the person is asked unless the Project lets agents update linked issues and the thread has read no outside content.";
+
 const LINEAR_READ_HELP = [
   "Every operation reads this Code Project's bound Linear team (and Linear project when configured); none takes a team, project, or workspace.",
   "list takes optional state (open when omitted, closed, or all), assignee (all when omitted, me, or unassigned), pageSize (1 to 30, 20 when omitted), and cursor. Rows carry id, identifier, title, state, assignee, and url, never bodies.",
@@ -79,9 +107,31 @@ export interface LinearReadToolReader {
   ) => Promise<IntegrationExecutionResult>;
 }
 
+/**
+ * The host's port for an agent's write to one of its thread's linked issues:
+ * the links, and one call that decides, asks and writes. Present on a turn
+ * whose agent may update them.
+ */
+export interface LinearIssueUpdatePort {
+  readonly linked: () => ReadonlyArray<LinkedIssueRef>;
+  readonly update: (input: {
+    readonly turnThread: CodeThread;
+    readonly current: CodeThread | undefined;
+    readonly issue: LinkedIssueRef;
+    readonly action:
+      | { readonly kind: "set-state"; readonly state: string }
+      | { readonly kind: "comment"; readonly body: string };
+    readonly signal?: AbortSignal;
+  }) => Promise<{ readonly result: unknown; readonly isError: boolean }>;
+}
+
+type IssueUpdateAction = Parameters<LinearIssueUpdatePort["update"]>[0]["action"];
+
 export interface LinearReadToolContext {
   readonly windowId: WindowId;
   readonly thread: CodeThread;
+  /** Present on a turn whose agent may update its thread's linked issues. */
+  readonly issueUpdates?: LinearIssueUpdatePort;
   readonly readThread: (windowId: WindowId, threadId: CodeThread["id"]) => CodeThread | undefined;
   readonly readProjectLinearTarget: () => ProjectLinearTarget | undefined;
 }
@@ -110,7 +160,10 @@ export class LinearReadToolService {
   createToolSet(context: LinearReadToolContext): AppManagedToolSet {
     const allowlist = context.thread.toolConstraints ?? [];
     return withToolFamilyHelp(this.#readTools(context, allowlist), {
-      [LINEAR_READ_TOOL_NAME]: LINEAR_READ_HELP,
+      [LINEAR_READ_TOOL_NAME]:
+        context.issueUpdates === undefined
+          ? LINEAR_READ_HELP
+          : `${LINEAR_READ_HELP} ${LINEAR_UPDATE_HELP}`,
     });
   }
 
@@ -119,7 +172,7 @@ export class LinearReadToolService {
     return {
       definitions:
         bound && isToolAllowedByAllowlist(allowlist, LINEAR_READ_TOOL_NAME)
-          ? [linearReadDefinition]
+          ? [context.issueUpdates === undefined ? linearReadDefinition : linearUpdateDefinition]
           : [],
       execute: async ({ name, inputJson, signal }) => {
         if (signal?.aborted) return failure("tool-interrupted");
@@ -135,6 +188,36 @@ export class LinearReadToolService {
         });
         if (profileConstraint.status === "refused") {
           return failure("profile-tool-refused", profileConstraint.reason);
+        }
+        const update =
+          context.issueUpdates === undefined ? undefined : parseLinearUpdateInput(inputJson);
+        if (update !== undefined && context.issueUpdates !== undefined) {
+          // A write is authorized on every call as a read is: the thread must
+          // be live and the Project still bound to an effective Linear.
+          const writeDecision = decideLinearAgentRead({
+            mode: "code",
+            threadLifecycle: current?.lifecycle ?? "missing",
+            threadAuthority: threadAuthority(context.thread, current),
+            projectLinearTarget: context.readProjectLinearTarget(),
+            snapshot: await this.#reader.snapshot(signal ?? new AbortController().signal),
+            snapshotFreshness: "fresh",
+            providerToolPolicy: "allowed",
+          });
+          if (writeDecision.decision === "deny") {
+            return failure(writeDecision.code, writeDecision.remediation);
+          }
+          const issue = context.issueUpdates
+            .linked()
+            .find((linked) => linked.forge === "linear" && linked.identifier === update.identifier);
+          return context.issueUpdates.update({
+            turnThread: context.thread,
+            current,
+            // An identifier the thread is not linked to still reaches the
+            // policy, which refuses it by name; the node id is never guessed.
+            issue: issue ?? { forge: "linear", identifier: update.identifier, issueId: "unlinked" },
+            action: update.action,
+            ...(signal === undefined ? {} : { signal }),
+          });
         }
         const input = parseLinearReadInput(inputJson);
         if (input === undefined) return failure("invalid-linear-input");
@@ -420,6 +503,37 @@ function parseLinearReadInput(value: string): LinearReadToolInput | undefined {
     ...(pageSize === undefined ? {} : { pageSize }),
     ...(cursor === undefined ? {} : { cursor }),
   };
+}
+
+function parseLinearUpdateInput(
+  value: string,
+): { readonly identifier: string; readonly action: IssueUpdateAction } | undefined {
+  if (Buffer.byteLength(value, "utf8") > 2 * MAX_TOOL_INPUT_BYTES) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (!isPlainRecord(parsed)) return undefined;
+  const { operation, identifier } = parsed;
+  if (operation !== "set-state" && operation !== "comment") return undefined;
+  const allowed =
+    operation === "set-state"
+      ? ["operation", "identifier", "state"]
+      : ["operation", "identifier", "body"];
+  if (Object.keys(parsed).some((key) => !allowed.includes(key))) return undefined;
+  if (typeof identifier !== "string") return undefined;
+  const normalized = identifier.trim().toUpperCase();
+  if (!IDENTIFIER_PATTERN.test(normalized)) return undefined;
+  if (operation === "set-state") {
+    return typeof parsed.state === "string" && parsed.state.trim().length > 0
+      ? { identifier: normalized, action: { kind: "set-state", state: parsed.state.trim() } }
+      : undefined;
+  }
+  return typeof parsed.body === "string"
+    ? { identifier: normalized, action: { kind: "comment", body: parsed.body } }
+    : undefined;
 }
 
 function issueBelongsToTarget(detail: LinearIssueDetail, target: ProjectLinearTarget): boolean {
