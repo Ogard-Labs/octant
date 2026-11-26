@@ -78,8 +78,13 @@ export function rateWindowShare(
 ): Pick<WindowReading, "remainingPercent" | "exhausted"> {
   const flagged = window.status === "exhausted";
   const continues = flagged && overageAllowsContinuedUse(window.overage);
-  const remaining =
-    window.utilization === undefined ? (continues ? 0 : undefined) : (1 - window.utilization) * 100;
+  // A spent allowance that overage lets work go on past has nothing included
+  // left, whatever share the utilization still shows; it is not a stop.
+  const remaining = continues
+    ? 0
+    : window.utilization === undefined
+      ? undefined
+      : (1 - window.utilization) * 100;
   return {
     ...(remaining === undefined ? {} : { remainingPercent: remaining }),
     exhausted: flagged && !continues,
