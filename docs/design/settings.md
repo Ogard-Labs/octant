@@ -84,6 +84,9 @@ has a Composer group after Available modes with **Suggest my next message** (on
 by default) and one switch each for Chat, Work, and Code (all on by default;
 greyed while the main switch is off, keeping their choice for when it comes
 back), which control the composer's Tab suggestion ([Thread view](thread-view.md)),
+and **While a turn runs** (Steer or Queue, Steer by default, kept on this
+device only), which says what a Work or Code message sent during a turn does
+([Thread view](thread-view.md#message-queue-and-stop)),
 and ends on Notifications (what Octant sends while a person is away); Permissions holds the files no agent may touch, then the provider tools the person blocked,
 then the network places and servers agents may reach (Network limits, Safe
 networks, Servers), then what a person has already allowed (remembered
