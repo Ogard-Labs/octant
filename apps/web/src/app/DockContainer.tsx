@@ -114,6 +114,7 @@ export interface DockContainerProps {
     | "openProjectPullRequestChat"
     | "openSettings"
     | "openSubagent"
+    | "openSubagentInAgents"
     | "persistBottomPanelPresentation"
     | "selectChatThread"
     | "selectCodeThread"
@@ -212,6 +213,7 @@ export interface DockContainerProps {
   readonly requestedAgentReview?: {
     readonly threadKey: string;
     readonly request: AgentResultReviewRequest;
+    readonly fromSubagentTab?: true;
   };
   readonly requestedAgentView?: {
     readonly threadKey: string;
@@ -385,7 +387,17 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
           ? {
               requestedAgentReview: requestedAgentReview.request,
               onAgentReviewBack: () => {
-                actions.openSubagent(String(requestedAgentReview.request.packet.runId));
+                // A saved review returns where it was opened: the Agents page,
+                // or, from a subagent's own tab, that tab, still open beside it.
+                if (requestedAgentReview.fromSubagentTab === true) {
+                  // The tab is in the workspace beside the dock. Only on a
+                  // narrow window, where the dock is a modal over it, does
+                  // returning to the tab mean closing the dock; a wide one
+                  // keeps the person's other tools in view.
+                  if (isNarrow) actions.closeDock();
+                } else {
+                  actions.openSubagentInAgents(String(requestedAgentReview.request.packet.runId));
+                }
                 actions.setRequestedAgentReview(undefined);
               },
             }

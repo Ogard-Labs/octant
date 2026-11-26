@@ -299,7 +299,7 @@ function sanitizeSurface(value: unknown, mode: "chat" | "work" | "code"): unknow
     if (mode === "chat") return welcomeInPlace();
     return decodeOrWelcome(value, welcomeInPlace);
   }
-  if (value.kind === "side-chat" || value.kind === "preview") {
+  if (value.kind === "side-chat" || value.kind === "preview" || value.kind === "agent-run") {
     return decodeOrWelcome(value, welcomeInPlace);
   }
   if (value.kind === "canvas") {

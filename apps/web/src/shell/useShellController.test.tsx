@@ -37,6 +37,7 @@ import {
   filesCloseTabScope,
   registerFilesCloseEntry,
 } from "../code/filesCloseGuard";
+import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { useShellController } from "./useShellController";
 import { SHELL_SETTINGS_WRITTEN } from "./shellSettingsNotifications";
 
@@ -949,6 +950,35 @@ describe("useShellController", () => {
         (pane) => pane.surface.kind === "browser",
       ),
     ).toHaveLength(1);
+  });
+
+  it("opens a subagent beside its thread, keeping the thread in view, and reuses that pane for the next", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const parentThreadId = decodeAgentRunParentThreadId(String(threadId));
+    await act(async () =>
+      result.current.openAgentRun({
+        mode: "code",
+        title: "Find the flaky test",
+        parentThreadId,
+        runId: decodeAgentRunId("22222222-2222-4222-8222-222222222221"),
+      }),
+    );
+    await act(async () =>
+      result.current.openAgentRun({
+        mode: "code",
+        title: "Read the changelog",
+        parentThreadId,
+        runId: decodeAgentRunId("22222222-2222-4222-8222-222222222222"),
+      }),
+    );
+
+    const shown = panes(result.current.workspace!.layouts.code).map((pane) => pane.surface);
+    expect(shown.filter((surface) => surface.kind === "code-overview")).toMatchObject([
+      { threadId },
+    ]);
+    expect(shown.filter((surface) => surface.kind === "agent-run")).toMatchObject([
+      { title: "Read the changelog", parentThreadId },
+    ]);
   });
 
   it("leaves a second thread's pane alone when the first thread's Browser appears", async () => {

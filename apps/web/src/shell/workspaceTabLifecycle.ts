@@ -1,5 +1,5 @@
-import type { ChatThreadId } from "@octant/contracts/chat";
-import type { CodeThreadId } from "@octant/contracts/code";
+import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
+import { decodeCodeThreadId, type CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
 import type {
   PaneId,
@@ -51,6 +51,11 @@ export function activeChatThreadTabId(
   activePaneId: PaneId,
 ): ChatThreadId | undefined {
   const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  if (surface?.kind === "agent-run" && surface.mode === "chat") {
+    // A subagent's pane belongs to the thread that started it, so the dock
+    // and its tools stay on that thread while the subagent is in front.
+    return decodeChatThreadId(String(surface.parentThreadId));
+  }
   return surface?.kind === "chat-thread" ? surface.threadId : undefined;
 }
 
@@ -85,6 +90,10 @@ export function activeCodeThreadTabId(
   const surface = findWorkspacePane(layout, activePaneId)?.surface;
   const focused = localCodeThreadTabId(surface);
   if (focused !== undefined) return focused;
+  if (surface?.kind === "agent-run" && surface.mode === "code") {
+    // The subagent's own parent, not whichever Code thread is first in view.
+    return decodeCodeThreadId(String(surface.parentThreadId));
+  }
   switch (surface?.kind) {
     case "browser":
     case "files":
@@ -161,6 +170,9 @@ export function activeWorkThreadTabId(
   activePaneId: PaneId,
 ): string | undefined {
   const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  if (surface?.kind === "agent-run" && surface.mode === "work") {
+    return String(surface.parentThreadId);
+  }
   return surface?.kind === "work-thread" && surface.hostId === undefined
     ? String(surface.threadId)
     : undefined;

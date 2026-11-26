@@ -15,6 +15,7 @@ import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { useRegisterComposerMenuAction } from "./ComposerMenuActions";
 import { ThreadStatsBlock } from "../threadStats/ThreadStats";
 import { ThreadNotesRows } from "../threadNotes/ThreadNotes";
+import { ThreadInfoSubagents } from "../agents/ThreadInfoSubagents";
 
 interface ThreadInfoPanel {
   /** Opens the panel, for a control elsewhere that leads to one of its rows. */
@@ -163,6 +164,7 @@ export function ThreadInfo(props: {
         >
           <ThreadStatsBlock />
           {props.children}
+          <ThreadInfoSubagents />
           {props.notes === undefined ? null : (
             <ThreadNotesRows onInsert={props.notes.onInsert} threadId={props.notes.threadId} />
           )}

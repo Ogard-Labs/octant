@@ -6,6 +6,31 @@ const runId = decodeAgentRunId("11111111-1111-4111-8111-111111111111");
 const occurredAt = "2026-08-23T00:00:00.000Z" as never;
 
 describe("AgentRunLiveConversationStore", () => {
+  it("keeps a subagent's tool steps where they started, with their finish after", () => {
+    const store = new AgentRunLiveConversationStore();
+    store.begin(runId);
+    store.appendTool(
+      runId,
+      { toolCallId: "call-1", toolName: "Bash", state: "started", summary: "bun run test" },
+      occurredAt,
+      1,
+    );
+    store.appendText(runId, "Running the tests.", occurredAt);
+    store.appendTool(
+      runId,
+      { toolCallId: "call-1", toolName: "Bash", state: "failed", summary: "2 tests failed" },
+      occurredAt,
+      1,
+    );
+    const entries = store.read({ runId })?.entries ?? [];
+    expect(entries.map((entry) => entry.kind)).toEqual(["tool", "assistant", "tool"]);
+    expect(entries.map((entry) => entry.tool?.state)).toEqual(["started", undefined, "failed"]);
+    // A reader holding the start meets the finish after its cursor.
+    expect(
+      store.read({ runId, afterSequence: 2 })?.entries.map((entry) => entry.tool?.state),
+    ).toEqual(["failed"]);
+  });
+
   it("keeps a bounded replayable snapshot and reports truncation", () => {
     const store = new AgentRunLiveConversationStore();
     store.begin(runId);

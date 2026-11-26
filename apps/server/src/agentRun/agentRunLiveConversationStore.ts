@@ -3,6 +3,7 @@ import {
   MAX_AGENT_RUN_CONVERSATION_ENTRIES,
   MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS,
   type AgentRunConversationEntry,
+  type AgentRunConversationTool,
   type ProviderChildActivityEvent,
   type AgentRunConversationReadStatus,
   type AgentRunId,
@@ -89,6 +90,35 @@ export class AgentRunLiveConversationStore {
 
   appendStatus(runId: AgentRunId, text: string, occurredAt: UtcTimestamp): void {
     this.#append(runId, text, occurredAt, "status");
+  }
+
+  /**
+   * A tool step the child took: its start and its finish are each an entry,
+   * and a reader folds the finish into the start by call id. The start keeps
+   * its place, so a step reads where it began both live and in a later
+   * snapshot, even when a reply arrived while it ran.
+   */
+  appendTool(
+    runId: AgentRunId,
+    tool: AgentRunConversationTool,
+    occurredAt: UtcTimestamp,
+    generation: number,
+  ): void {
+    if (this.#closed) return;
+    const state = this.#state(runId);
+    if (state === undefined || state.status !== "live") return;
+    const entry: AgentRunConversationEntry = {
+      sequence: state.nextSequence++,
+      kind: "tool",
+      text: tool.summary ?? tool.toolName,
+      occurredAt,
+      generation,
+      tool,
+    };
+    state.entries.push(entry);
+    state.bytes += entryBytes(entry);
+    this.#trim(state);
+    this.#publish(runId);
   }
 
   appendChildActivity(

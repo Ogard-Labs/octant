@@ -18,7 +18,9 @@ import {
   decodeProviderSessionId,
   decodeProviderResumeCursor,
   decodeUtcTimestamp,
+  MAX_AGENT_RUN_CONVERSATION_TOOL_SUMMARY_CHARACTERS,
   type AgentRun,
+  type AgentRunConversationTool,
   type AgentRunWorkingTime,
   type AgentRunAuthority,
   type AgentRunResultEvidence,
@@ -402,6 +404,12 @@ export interface AgentRunSessionRuntimeOptions {
   readonly onTextDelta?: (input: {
     readonly runId: AgentRunId;
     readonly text: string;
+    readonly occurredAt: UtcTimestamp;
+  }) => void;
+  /** Each tool step the child takes, for its conversation. A failing observer never stops the child. */
+  readonly onToolActivity?: (input: {
+    readonly run: AgentRun;
+    readonly tool: AgentRunConversationTool;
     readonly occurredAt: UtcTimestamp;
   }) => void;
   /**
@@ -1197,6 +1205,7 @@ export function createAgentRunSessionRuntime(
             shutdownTimeoutMs,
             shutdown,
             onTextDelta: options.onTextDelta,
+            onToolActivity: options.onToolActivity,
             onChildActivity: options.onChildActivity,
             outsideContentMarks: options.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
             onUserMessage: options.onUserMessage,
@@ -1575,6 +1584,7 @@ interface ManagedSessionInput {
   readonly shutdownTimeoutMs: number;
   readonly shutdown: SessionShutdown;
   readonly onTextDelta?: AgentRunSessionRuntimeOptions["onTextDelta"];
+  readonly onToolActivity?: AgentRunSessionRuntimeOptions["onToolActivity"];
   readonly onChildActivity?: AgentRunSessionRuntimeOptions["onChildActivity"];
   readonly outsideContentMarks: RuntimeOutsideContentMarking;
   readonly onUserMessage?: AgentRunSessionRuntimeOptions["onUserMessage"];
@@ -2170,6 +2180,8 @@ function collectSessionEvents(
         Effect.forkScoped(
           effect.pipe(Effect.catchAll((failure) => Deferred.fail(interactionFailure, failure))),
         );
+      // A step's finish names only its call, so the name its start gave is kept.
+      const toolNames = new Map<string, string>();
       const collection = events.pipe(
         Stream.filter((event) => event.sessionId === input.sessionId),
         Stream.takeUntil(
@@ -2233,6 +2245,20 @@ function collectSessionEvents(
                 verified: false,
               });
               return;
+            }
+            if (
+              event.kind === "tool-start" ||
+              event.kind === "tool-success" ||
+              event.kind === "tool-failure"
+            ) {
+              const tool = conversationTool(event, toolNames);
+              if (tool !== undefined) {
+                try {
+                  input.onToolActivity?.({ run: input.run, tool, occurredAt: event.occurredAt });
+                } catch {
+                  // A transient observer must never interrupt provider collection.
+                }
+              }
             }
             if (
               event.kind === "child-agent-activity" &&
@@ -2625,4 +2651,42 @@ function validResumeCursor(
   } catch {
     return false;
   }
+}
+
+/**
+ * One tool step as a subagent's conversation keeps it: the runtime's name for
+ * the tool, its state, and one bounded line. A finish whose start was never
+ * seen has no name to show and is left out.
+ */
+function conversationTool(
+  event: Extract<ProviderRuntimeEvent, { kind: "tool-start" | "tool-success" | "tool-failure" }>,
+  toolNames: Map<string, string>,
+): AgentRunConversationTool | undefined {
+  const toolCallId = event.toolCallId.slice(0, 255).trim();
+  if (toolCallId.length === 0) return undefined;
+  if (event.kind === "tool-start") toolNames.set(toolCallId, event.toolName);
+  const toolName = toolNames.get(toolCallId)?.slice(0, 256).trim();
+  if (toolName === undefined || toolName.length === 0) return undefined;
+  const line =
+    event.kind === "tool-start"
+      ? event.argument
+      : event.kind === "tool-success"
+        ? event.summary
+        : event.message;
+  const summary = line
+    ?.split("\n")[0]
+    ?.slice(0, MAX_AGENT_RUN_CONVERSATION_TOOL_SUMMARY_CHARACTERS)
+    .trim();
+  if (event.kind !== "tool-start") toolNames.delete(toolCallId);
+  return {
+    toolCallId,
+    toolName,
+    state:
+      event.kind === "tool-start"
+        ? "started"
+        : event.kind === "tool-success"
+          ? "completed"
+          : "failed",
+    ...(summary === undefined || summary.length === 0 ? {} : { summary }),
+  };
 }

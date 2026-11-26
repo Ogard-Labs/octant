@@ -938,6 +938,19 @@ export class AgentRunOrchestrationService {
     // A child waiting for a provider slot has not opened a session either, so
     // there is no saved conversation to check.
     const waitingOnSlot = this.waitsForProviderSlot(current);
+    // A run held before it starts has no session for a message to reach:
+    // releasing the hold starts it on its original task. A message sent now
+    // would be reported delivered and never read, so it is refused and the
+    // person's words stay with them.
+    if ((waitingOnDependencies || waitingOnSlot) && input?.message !== undefined) {
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: waitingOnDependencies
+          ? "This subagent has not started yet: it waits for another subagent to finish. Send your message once it runs."
+          : "This subagent has not started yet: it waits for room at its provider. Send your message once it runs.",
+      };
+    }
     const readiness =
       waitingOnDependencies || waitingOnSlot
         ? undefined

@@ -230,6 +230,9 @@ export type ShellActions = {
   readonly openSidebarList: (view: "activity" | "completed") => void;
   readonly openSkillsSettings: () => void;
   readonly openSubagent: NonNullable<WorkspaceViewProps["onOpenSubagent"]>;
+  /** Opens a subagent on the Agents page in the dock, where a saved review returns. */
+  readonly openSubagentInAgents: (runId?: string) => void;
+  readonly reviewSubagentChanges: NonNullable<WorkspaceViewProps["onReviewSubagentChanges"]>;
   readonly openSubagentRequest: (request: ChildPendingRequest) => void;
   readonly openSurface: ShellController["openSurface"];
   readonly openThreadBoard: () => void;
@@ -364,7 +367,12 @@ export type ShellActions = {
   >;
   readonly setRequestedAgentReview: Dispatch<
     SetStateAction<
-      { readonly threadKey: string; readonly request: AgentResultReviewRequest } | undefined
+      | {
+          readonly threadKey: string;
+          readonly request: AgentResultReviewRequest;
+          readonly fromSubagentTab?: true;
+        }
+      | undefined
     >
   >;
   readonly setRequestedAgentView: Dispatch<

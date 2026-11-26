@@ -42,6 +42,7 @@ import {
   type WorkspaceTab,
   type WorkspaceTabId,
 } from "@octant/contracts";
+import type { AgentRunId, AgentRunParentThreadId } from "@octant/contracts";
 import type { CanvasId } from "@octant/contracts/canvas";
 import type {
   PreviewHostId,
@@ -176,6 +177,14 @@ export interface PreviewTabInput {
   readonly boundCodeThreadId?: CodeThreadId;
 }
 
+/** A subagent to open as a thread of its own, from the thread that started it. */
+export interface AgentRunTabInput {
+  readonly mode: OctantMode;
+  readonly title: string;
+  readonly parentThreadId: AgentRunParentThreadId;
+  readonly runId: AgentRunId;
+}
+
 export interface CanvasTabInput {
   readonly mode: OctantMode;
   readonly title: string;
@@ -247,6 +256,10 @@ type WorkspaceIntent =
   | {
       readonly kind: "open-side-chat";
       readonly sidecar: SideChatSidecar;
+    }
+  | {
+      readonly kind: "open-agent-run";
+      readonly tab: AgentRunTabInput;
     }
   | { readonly kind: "focus-pane"; readonly paneId: PaneId }
   | {
@@ -832,6 +845,14 @@ export function useShellController(options: ShellControllerOptions) {
       await enqueueMutation({ kind: "workspace", intent: { kind: "set-mode", mode: tab.mode } });
     }
     await enqueueMutation({ kind: "workspace", intent: { kind: "open-preview", tab } });
+  }
+
+  /** Opens a subagent as a thread of its own, in the pane the person is working in. */
+  async function openAgentRun(tab: AgentRunTabInput): Promise<void> {
+    if (authoritative?.workspace.activeMode !== tab.mode) {
+      await enqueueMutation({ kind: "workspace", intent: { kind: "set-mode", mode: tab.mode } });
+    }
+    await enqueueMutation({ kind: "workspace", intent: { kind: "open-agent-run", tab } });
   }
 
   async function openCanvas(tab: CanvasTabInput): Promise<void> {
@@ -1441,6 +1462,7 @@ export function useShellController(options: ShellControllerOptions) {
     openCodeSurface,
     openPreview,
     openCanvas,
+    openAgentRun,
     openProject,
     openSideChat,
     openSettings,
@@ -1833,6 +1855,58 @@ function createWorkspaceMutation(
         activatedSurfaceId: existing?.surface.id ?? surface.id,
       };
     }
+    case "open-agent-run": {
+      if (intent.tab.mode !== mode) {
+        throw {
+          category: "invalid",
+          message: "This subagent belongs to a different mode than the active workspace.",
+        };
+      }
+      const surface: WorkspaceTab = {
+        kind: "agent-run",
+        id: newTabId(),
+        mode,
+        title: intent.tab.title,
+        parentThreadId: intent.tab.parentThreadId,
+        runId: intent.tab.runId,
+      };
+      // The host lets a window read a run only while a pane shows its parent
+      // thread, so the subagent opens beside the parent, never over it. A pane
+      // already showing one of that thread's subagents takes the next one.
+      const existing =
+        findVisibleSurfacePane(layout, surface) ??
+        findAgentRunPane(layout, String(intent.tab.parentThreadId));
+      const parent = findThreadPane(layout, String(intent.tab.parentThreadId));
+      if (existing === undefined && parent !== undefined) {
+        return {
+          operation: {
+            kind: "split-pane",
+            mode,
+            targetPaneId: parent.paneId,
+            surface,
+            splitNodeId: newLayoutNodeId(),
+            newPaneNodeId: newLayoutNodeId(),
+            newPaneId: newPaneId(),
+            orientation: "horizontal",
+            placement: "after",
+            ratio: 0.5 as SplitRatio,
+          },
+          message: `${intent.tab.title} opened beside its thread.`,
+          activatedSurfaceId: surface.id,
+        };
+      }
+      return {
+        operation: {
+          kind: "open-surface",
+          mode,
+          paneId: (existing ?? preferredPane(latest.workspace, mode)).paneId,
+          surface,
+        },
+        message:
+          existing === undefined ? `${intent.tab.title} opened.` : `${intent.tab.title} selected.`,
+        activatedSurfaceId: surface.id,
+      };
+    }
     case "open-side-chat": {
       if (intent.sidecar.sourceMode !== mode) {
         throw {
@@ -2209,6 +2283,38 @@ function findDraftPane(
     return matches ? layout : undefined;
   }
   return findDraftPane(layout.first, projectId) ?? findDraftPane(layout.second, projectId);
+}
+
+/** A pane showing one of this thread's subagents. */
+function findAgentRunPane(
+  layout: WorkspaceLayoutNode,
+  parentThreadId: string,
+): WorkspacePane | undefined {
+  if (layout.kind === "pane") {
+    return layout.surface.kind === "agent-run" &&
+      String(layout.surface.parentThreadId) === parentThreadId
+      ? layout
+      : undefined;
+  }
+  return (
+    findAgentRunPane(layout.first, parentThreadId) ??
+    findAgentRunPane(layout.second, parentThreadId)
+  );
+}
+
+/** A pane showing the thread itself, in Chat, Work or Code. */
+function findThreadPane(layout: WorkspaceLayoutNode, threadId: string): WorkspacePane | undefined {
+  if (layout.kind === "pane") {
+    const surface = layout.surface;
+    const shown =
+      surface.kind === "chat-thread" || surface.kind === "work-thread"
+        ? String(surface.threadId)
+        : surface.kind === "code-overview"
+          ? String(surface.threadId)
+          : undefined;
+    return shown === threadId ? layout : undefined;
+  }
+  return findThreadPane(layout.first, threadId) ?? findThreadPane(layout.second, threadId);
 }
 
 function findSideChatPane(

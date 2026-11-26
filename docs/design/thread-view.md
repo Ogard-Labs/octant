@@ -620,7 +620,7 @@ activity. Each row also shows how long the child has run, measured from its requ
 first sight of a provider's own) to its last update and ticking while it works,
 the same rule as the transcript's row, at the trailing edge in a slot of fixed
 width: a finished child's time stops where it stopped. Raw identifiers and
-workspace paths belong in details. Rows open the child in Agents. Only managed active children offer
+workspace paths belong in details. Rows open the child as a thread of its own (below). Only managed active children offer
 Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
 narrow widths, disclosures work with the keyboard and retain visible focus,
 and expanded lists have bounded height.
@@ -633,7 +633,7 @@ the picker names them ("Sonnet 5.5 High"; nothing when the run reported no
 model), how long it has run (from its request or first sight to its last
 update, ticking while it works), and its state mark at the trailing edge, in a
 slot that keeps its width so nothing moves when a run finishes. The row is one
-button that opens the child in Agents, as the card's rows do: Enter or Space on
+button that opens the child as a thread of its own, as the card's rows do: Enter or Space on
 it opens too, its name is the task and its state, and it keeps its look on
 hover and press. A subagent
 belongs to the turn that was running when it started, because the host links
@@ -689,6 +689,57 @@ the child, generation, workspace and capture time; its partial and binary conten
 states stay explicit. It offers no staging, discard or parent-checkout editor
 controls. Unavailable capture stays unavailable. Evidence references are disclosed
 on request rather than presented as unsupported navigation links.
+
+### A subagent as a thread
+
+A subagent Octant started opens as a thread of its own, in a pane beside the
+thread that started it; the next subagent of that thread opens in the same pane
+(maintainer decision, 2026-11-26). Its header reads "Subagent
+of" and then the parent thread's title, which leads back to that thread. Under
+it are the task as the title, and the state mark and word, the role, the
+model and the age. The transcript reads like any thread:
+
+- the brief it was given is the first message, right-aligned as the person's
+  own;
+- its replies are left-aligned answers;
+- the tool steps it took between them are activity rows, as a thread's are,
+  folded the same way;
+- a note the person sent it is a message of theirs;
+- a resume, the working-time limit and other host notes are quiet lines;
+- its result cards close the list.
+
+All of it is live while it runs. A subagent's tool steps are kept in its
+conversation, one bounded entry each: the runtime's name for the tool, its
+state and one line (what it was asked, or what it reported), never the call's
+input or output. A step's start and finish are each kept, and the finish is
+folded into the start, so a step reads where it began, live and after a
+reload alike. Past the conversation's bound the oldest entries go, and the tab
+says so.
+
+The normal composer sits under the transcript and uses only the run's existing
+commands and authority:
+
+- while the subagent runs, a message steers it, and Stop beside Send stops it;
+- once it finished, or waits with its session parked (a provider wait or a
+  usage limit), or stopped where it can pick up again, a message continues it
+  (Resume with the message);
+- a run that failed or was interrupted also offers Retry above the composer,
+  as the Agents page does.
+- a run held before it starts (waiting for another subagent, or for room at
+  its provider) takes no message until it runs: releasing the hold starts it
+  on its original task, so the host refuses a message there rather than report
+  it delivered and drop it.
+
+A subagent the provider runs itself is read only: a line, "Runs inside the
+provider. Octant can read it but not steer it.", stands where the composer
+would. A provider's own child that Octant only observes, and is not a run,
+still opens on the Agents page.
+
+The tab keeps the run and its parent thread, not the conversation or any
+authority. Every read checks the run against its parent thread again, and a
+run that is gone or that the window may no longer read restores as an
+unavailable page that still leads back to the parent. The Agents page stays
+the full list.
 
 ## Suggested follow-ups
 

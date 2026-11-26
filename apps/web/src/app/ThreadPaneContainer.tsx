@@ -134,6 +134,7 @@ export interface ThreadPaneContainerProps {
     | "openRoutine"
     | "openReviewForThread"
     | "openSubagent"
+    | "reviewSubagentChanges"
     | "refuseUnlessCreatableDestination"
     | "resetNewTaskDraft"
     | "selectProjectPullRequestIdentity"
@@ -415,6 +416,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     openSettings,
     openSideChat,
     openSubagent,
+    reviewSubagentChanges,
     openSurface,
     openThreadBrowser,
     openWorkThread,
@@ -715,6 +717,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     agentRunClient={agentRunClient}
                     nativeHarnessClient={nativeHarnessClient}
                     onOpenSubagent={openSubagent}
+                    onReviewSubagentChanges={reviewSubagentChanges}
                     {...(workerRequestSource === undefined ? {} : { workerRequestSource })}
                     onOpenAgents={openSubagent}
                     chatClient={chatClient}

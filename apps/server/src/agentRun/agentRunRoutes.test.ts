@@ -1135,6 +1135,59 @@ describe("agentRunRoutes", () => {
     });
   });
 
+  it("marks a run the host holds before it starts by its record, not by its reason text", async () => {
+    const { handler, persistence, token, orchestration } = createHandler();
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Verify the parser",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
+    const read = async () => {
+      const response = await handler(
+        new Request(`http://127.0.0.1/api/agent-runs/parent-summary?parentThreadId=${ids.thread}`, {
+          headers: { "x-octant-window-capability": token },
+        }),
+      );
+      return ((await response!.json()) as { entries: Array<Record<string, unknown>> }).entries[0];
+    };
+    const wait = (recoveryReason: string) => {
+      const current = persistence.getById(accepted.run.id);
+      if (current === undefined) throw new Error("Missing run");
+      const result = persistence.applyCommand({
+        kind: "wait-agent-run",
+        runId: accepted.run.id,
+        expectedVersion: current.version,
+        recoveryReason,
+      });
+      expect(result.kind).toBe("run-updated");
+    };
+    expect(await read()).not.toHaveProperty("heldBeforeStart");
+    for (const kind of ["start-agent-run", "mark-agent-run-running"] as const) {
+      const current = persistence.getById(accepted.run.id);
+      if (current === undefined) throw new Error("Missing run");
+      persistence.applyCommand({ kind, runId: accepted.run.id, expectedVersion: current.version });
+    }
+    // A provider-slot wait is the host's own record; its reason text alone,
+    // which a provider's own wait can share, marks nothing.
+    wait("Waiting for a free request slot");
+    const slot = vi.spyOn(orchestration, "waitsForProviderSlot").mockReturnValue(false);
+    expect(await read()).not.toHaveProperty("heldBeforeStart");
+    slot.mockReturnValue(true);
+    expect(await read()).toMatchObject({ heldBeforeStart: true });
+    slot.mockRestore();
+  });
+
   it("returns parent summary for an authenticated window", async () => {
     const { handler, persistence, token } = createHandler();
     const accepted = persistence.requestRun({

@@ -1484,6 +1484,24 @@ describe("AgentRun dependency graphs", () => {
     });
   });
 
+  it("refuses a message for a run still waiting on its dependencies, and leaves it waiting", async () => {
+    const { persistence, orchestration, starts, admit, run } = graphHarness();
+    const first = run(requestIds[0]);
+    const dependent = admit(requestIds[1], [String(first)]);
+    const waiting = persistence.getById(dependent.id);
+    if (waiting === undefined) throw new Error("The dependent is gone.");
+    expect(
+      await orchestration.resume(dependent.id, waiting.version, authority, {
+        message: "Only verify the parser.",
+      }),
+    ).toMatchObject({
+      kind: "run-command-failed",
+      message: expect.stringContaining("has not started yet"),
+    });
+    expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("waiting");
+    expect(starts).not.toContain(String(dependent.id));
+  });
+
   it("holds a run parked before a restart even once its dependencies complete, until a person resumes it", async () => {
     const { persistence, starts, admit, run, restart } = graphHarness();
     const first = run(requestIds[0]);

@@ -32,7 +32,12 @@ import {
   type OutsideContentThread,
 } from "../composer/OutsideContentNotice";
 import { TaskAccessContext, type TaskAccessContextValue } from "../code/TaskAccessDetails";
-import { LOCAL_HOST_ID, decodeContextSubjectRef } from "@octant/contracts";
+import {
+  LOCAL_HOST_ID,
+  decodeChatThreadId,
+  decodeContextSubjectRef,
+  decodeWorkThreadId,
+} from "@octant/contracts";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import {
   FollowUpSuggestionContext,
@@ -143,7 +148,13 @@ import type { AutomationClient, UsageDashboardClient } from "@octant/client-runt
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
+import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
+
+// A subagent's tab draws a whole transcript; it loads with the first one opened.
+const SubagentThread = lazy(() =>
+  import("../agents/SubagentThread").then((module) => ({ default: module.SubagentThread })),
+);
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadSubagentsProvider } from "../agents/threadSubagents";
 import { ThreadHarnessCards } from "../harness/ThreadHarnessCards";
@@ -302,6 +313,8 @@ export interface WorkspaceViewProps {
   readonly nativeHarnessClient?: NativeHarnessClient;
   /** Opens the Agents tool; with a run id, on that subagent's page. */
   readonly onOpenSubagent?: (runId?: string) => void;
+  /** Opens a subagent result's captured comparison in Review, from its own tab. */
+  readonly onReviewSubagentChanges?: (request: AgentResultReviewRequest) => void;
   /**
    * The window's pending-request reader, for a coordinator's composer to list
    * its workers' requests. Absent in a window that cannot read them (remote).
@@ -2822,6 +2835,9 @@ function renderNonCodeTab(
       />
     );
   }
+  if (tab.kind === "agent-run") {
+    return <SubagentTab key={tab.id} props={props} tab={tab} />;
+  }
   if (tab.kind === "side-chat") {
     return (
       <SideChatWorkspaceTab
@@ -4062,4 +4078,70 @@ function worktreeMoveRefusalMessage(
     case "unavailable":
       return "The worktree could not be created. Nothing was moved.";
   }
+}
+
+/**
+ * A subagent's own tab. Its header names the thread that started it, read from
+ * the window's own thread lists, and leads back to that thread in its mode.
+ */
+function SubagentTab(props: {
+  readonly props: WorkspaceViewProps;
+  readonly tab: Extract<WorkspaceTab, { readonly kind: "agent-run" }>;
+}) {
+  const view = props.props;
+  const tab = props.tab;
+  const parentId = String(tab.parentThreadId);
+  if (view.agentRunClient === undefined) {
+    return (
+      <OctantEmpty
+        eyebrow="Subagent"
+        message="This window cannot read subagents."
+        state="warning"
+        title={tab.title}
+      />
+    );
+  }
+  const parent =
+    tab.mode === "code"
+      ? (view.codeController.navigation ?? []).find(
+          (thread) => String(thread.threadId) === parentId,
+        )
+      : undefined;
+  const workParent =
+    tab.mode === "work"
+      ? view.workThreads?.find((thread) => String(thread.id) === parentId)
+      : undefined;
+  const parentTitle = parent?.title ?? workParent?.title;
+  const openParent = (): void => {
+    if (tab.mode === "code") {
+      view.onOpenCodeThread(
+        decodeCodeThreadId(parentId),
+        parentTitle ?? "Thread",
+        parent?.projectId,
+      );
+    } else if (tab.mode === "chat") {
+      view.onOpenChatThread?.(decodeChatThreadId(parentId), parentTitle ?? "Thread");
+    } else if (workParent !== undefined) {
+      view.onOpenWorkThread?.(decodeWorkThreadId(parentId), workParent.projectId, workParent.title);
+    }
+  };
+  const canOpenParent =
+    tab.mode === "code" ||
+    (tab.mode === "chat" && view.onOpenChatThread !== undefined) ||
+    (workParent !== undefined && view.onOpenWorkThread !== undefined);
+  return (
+    <Suspense fallback={<OctantEmpty state="loading" title="Loading subagent" />}>
+      <SubagentThread
+        client={view.agentRunClient}
+        parentThreadId={tab.parentThreadId}
+        runId={String(tab.runId)}
+        title={tab.title}
+        {...(parentTitle === undefined ? {} : { parentTitle })}
+        {...(canOpenParent ? { onOpenParent: openParent } : {})}
+        {...(tab.mode !== "code" || view.onReviewSubagentChanges === undefined
+          ? {}
+          : { onReviewChanges: view.onReviewSubagentChanges })}
+      />
+    </Suspense>
+  );
 }

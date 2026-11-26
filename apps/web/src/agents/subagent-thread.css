@@ -1,0 +1,108 @@
+/* A subagent opened as a thread: the thread view's column, transcript and
+   composer, under a header that names the thread it belongs to. */
+.subagent-thread {
+  display: grid;
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.subagent-thread__header {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding-block: var(--oct-space-4) var(--oct-space-3);
+}
+
+.subagent-thread__lineage {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.subagent-thread__parent,
+.subagent-thread__parent-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-thread__parent {
+  color: var(--oct-fg-2);
+}
+
+.subagent-thread__title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-base);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-thread__status {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.subagent-thread__state {
+  color: var(--oct-fg-2);
+}
+
+.subagent-thread__transcript {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.subagent-thread__turns {
+  display: grid;
+  gap: var(--oct-space-5);
+  margin-block: 0;
+  padding-block: var(--oct-space-3) var(--oct-space-6);
+  padding-inline: 0;
+  list-style: none;
+}
+
+.subagent-thread__note,
+.subagent-thread__read-only {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.subagent-thread__footer {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding-block: var(--oct-space-2) var(--oct-space-4);
+}
+
+.subagent-thread__read-only {
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  text-align: center;
+}
+
+.subagent-thread__retry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.subagent-thread__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
