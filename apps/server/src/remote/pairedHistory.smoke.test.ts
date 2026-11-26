@@ -373,9 +373,9 @@ it.each([
             }).ensure(address);
             if (certificate.status !== "ready") throw new Error(certificate.code);
 
-            const projectThreads = persistence.connection.transaction(() =>
+            const projectThreads = persistence.journal.transaction(() =>
               seedProjectHistory(persistence, total),
-            )();
+            );
             let localFetch: ServeOptions["fetch"] | undefined;
             let remoteFetch: ServeOptions["fetch"] | undefined;
             let peer = 0;
@@ -465,7 +465,7 @@ it.each([
                   }),
                 );
               const addTurns = seedChat(persistence);
-              persistence.connection.transaction(() => addTurns(total))();
+              persistence.journal.transaction(() => addTurns(total));
               const ticketResponse = await admin("pairing-tickets", { sourceClass: "tailscale" });
               expect(ticketResponse.status).toBe(201);
               const { ticket } = await ticketResponse.json();
