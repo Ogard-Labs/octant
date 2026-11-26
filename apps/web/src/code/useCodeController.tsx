@@ -615,9 +615,10 @@ export function useCodeController(options: CodeControllerOptions) {
   const [conversationHistory, setConversationHistory] = useState<
     "loading" | "loaded" | "unavailable"
   >("loading");
-  // Read by an activation, which sets the state to loading before it reads.
-  const conversationHistoryNow = useRef(conversationHistory);
-  conversationHistoryNow.current = conversationHistory;
+  // How the last read of the transcript ended, read by an activation: each
+  // sets the state to loading first, and one may start while another reads.
+  const settledHistory = useRef(conversationHistory);
+  if (conversationHistory !== "loading") settledHistory.current = conversationHistory;
   const [followUps, setFollowUps] = useState<ReadonlyMap<string, CodeThreadFollowUpView>>(
     () => new Map(),
   );
@@ -1657,8 +1658,7 @@ export function useCodeController(options: CodeControllerOptions) {
       // A thread read again in place (a rename, a retry) shows the transcript
       // this activation's earlier read loaded, not one kept from a visit.
       const reloadsShown =
-        conversationThreadKey.current === String(threadId) &&
-        conversationHistoryNow.current === "loaded";
+        conversationThreadKey.current === String(threadId) && settledHistory.current === "loaded";
       setConversationHistory("loading");
       // The first read covers the thread as the list described it now.
       const activityAtOpen = threadListActivity(bootstrapRef.current, threadId)?.sequence ?? -1;
@@ -1674,6 +1674,7 @@ export function useCodeController(options: CodeControllerOptions) {
         let conversationIncomplete = false;
         let conversationOperationId: CodeOperationId | undefined;
         let openingReadFailed = false;
+        let keptShownTranscript = false;
         try {
           const hydrated = await conversationRead;
           conversationIncomplete = hydrated?.incomplete === true;
@@ -1694,6 +1695,7 @@ export function useCodeController(options: CodeControllerOptions) {
           if (!isActive(request, threadGeneration, mounted)) return;
           openingReadFailed = true;
           if (reloadsShown) {
+            keptShownTranscript = true;
             // What a read loaded stays, as when a refresh fails: emptying it
             // would also take the row a reply this window sends streams into.
             setConversationHistory("loaded");
@@ -1721,7 +1723,10 @@ export function useCodeController(options: CodeControllerOptions) {
             );
             if (!isActive(request, threadGeneration, mounted)) return;
             inheritedConversation.current = inherited.messages;
-            setConversation((current) => [...inherited.messages, ...current]);
+            // A kept transcript already starts with the inherited turns.
+            if (!keptShownTranscript) {
+              setConversation((current) => [...inherited.messages, ...current]);
+            }
             setTurnActivity((current) => new Map([...inherited.activity, ...current]));
           } catch {
             if (!isActive(request, threadGeneration, mounted)) return;

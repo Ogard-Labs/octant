@@ -2804,6 +2804,72 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("shows a fork's source history once when reading the fork again fails on a host read whole", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000010";
+    const parentId = "10000000-0000-4000-8000-000000000099" as CodeThreadId;
+    const forkConversation = vi.fn(async (threadId: unknown) => ({
+      version: 3 as const,
+      threadId,
+      turns: [],
+      nextCursor: 0,
+      hasMore: false,
+    }));
+    const client = fakeClient({
+      thread: vi.fn(async (threadId) =>
+        threadId === parentId
+          ? { ...view(1), thread: { ...view(1).thread, id: parentId } }
+          : {
+              ...view(1),
+              thread: {
+                ...view(1).thread,
+                forkedFrom: { threadId: parentId, throughOperationId: operationId },
+              },
+            },
+      ),
+      conversation: vi.fn(async (threadId) =>
+        threadId === parentId
+          ? {
+              version: 3,
+              threadId: parentId,
+              turns: [
+                {
+                  ...conversationTurn(operationId, "60000000-0000-4000-8000-000000000010"),
+                  assistant: [
+                    {
+                      contentId: "60000000-0000-4000-8000-000000000011",
+                      digest: "b".repeat(64),
+                      byteLength: 12,
+                    },
+                  ],
+                },
+              ],
+              nextCursor: 1,
+              hasMore: false,
+            }
+          : forkConversation(threadId),
+      ) as never,
+      operationContents: vi.fn(async (request) => ({
+        threadId: request.threadId,
+        items: request.items.map((item: object) => ({ ...item, text: "source text" })),
+      })) as never,
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.conversation).toHaveLength(2));
+
+    forkConversation.mockRejectedValueOnce(new Error("offline"));
+    act(() => {
+      result.current.refreshConversation();
+    });
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+    );
+    await act(async () => undefined);
+    expect(result.current.conversation).toHaveLength(2);
+    unmount();
+  });
+
   it("keeps a fork readable when its source history is unavailable", async () => {
     const promptId = "60000000-0000-4000-8000-000000000010";
     const replyId = "60000000-0000-4000-8000-000000000011";
@@ -3727,6 +3793,40 @@ describe("useCodeController", () => {
           text: "First half, second half",
         }),
       );
+      unmount();
+    });
+
+    it("keeps the transcript when a reload fails while an earlier reload of the thread still reads", async () => {
+      const { client, host } = runningThread();
+      const stored = host.threads[String(ids.thread)]?.turns;
+      stored?.splice(0, 1, { ...stored[0], status: "completed" } as never);
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+      const shown = result.current.conversation;
+
+      vi.mocked(host.client.conversationWindow)
+        .mockImplementationOnce(() => new Promise(() => undefined))
+        .mockRejectedValueOnce(new Error("offline"));
+      act(() => {
+        result.current.refreshConversation();
+      });
+      expect(result.current.conversationHistory).toBe("loading");
+      act(() => {
+        result.current.refreshConversation();
+      });
+
+      await waitFor(() =>
+        expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+      );
+      expect(result.current.conversation).toEqual(shown);
+      expect(result.current.conversationHistory).toBe("loaded");
       unmount();
     });
 
