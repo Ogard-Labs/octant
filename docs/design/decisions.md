@@ -2398,6 +2398,7 @@ Status: Built. Detail: [Architecture: Security and authority, Side Chat reads](.
 Child runs receive equal-or-narrower authority than the parent, clamped server-side.
 
 - Code children require a verified isolated worktree receipt. A transport that cannot carry app-managed tools fails the start rather than dropping the tool.
+- A child inherits its parent's Octant tools by default, each rebuilt for its own run, workspace and level and checked on every call against the parent's live grant. It never gets a tool its parent was not offered or its parent's window or identity, keeps every approval the lead would need, gets none that asks where nobody can answer, and stops what it started when its run ends or loses its grant. Tools that act for the thread itself are not inherited (maintainer decision, 2026-11-17). Detail: [Agent tools: Child runs](agent-tools.md#child-runs).
 - Under Strict a source turn sends at most three thread messages, a count Settings › Limits changes; outside Strict there is no limit ([Octant's own limits become settings](#octants-own-limits-become-settings)).
 - Key providers' native subagents are journaled and use the parent's approval path; a provider whose children would bypass it gets them only at Full access (maintainer decision, 2026-11-14).
 - Outside Strict a helper runs at the lower of the running turn's and the thread's level, and the person's answer is kept as the parent's setting says; a reviewer's allow holds for one call (maintainer decision, 2026-11-25). Under Strict a helper keeps every Strict protection.

@@ -93,6 +93,10 @@ import {
 } from "../plugins/computerUse/computerUsePlugin";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
+import type { ToolActionAuthority } from "@octant/contracts";
+import { ChildComputerOwners, childComputerTools } from "../agentRun/agentRunChildAskTools";
+import type { AgentRunChildToolHost } from "../agentRun/agentRunChildTools";
+import { deriveToolHostId } from "../browser/browserAuthorityResolver";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { UsageWiring } from "./usage";
 import type { FoundationsWiring } from "./foundations";
@@ -143,7 +147,12 @@ export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<
     AgentRunsWiring,
-    "externalContentIngestionStore" | "managedWorktreeReceipts" | "threadStandingAnswers"
+    | "childResources"
+    | "childToolHost"
+    | "contributeChildTools"
+    | "externalContentIngestionStore"
+    | "managedWorktreeReceipts"
+    | "threadStandingAnswers"
   > &
   Pick<UsageWiring, "validationEventStore"> &
   Pick<
@@ -157,6 +166,9 @@ export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence
 export function wireComputerUse(deps: ComputerUseDependencies) {
   const {
     browserAuthority,
+    childResources,
+    childToolHost,
+    contributeChildTools,
     externalContentIngestionStore,
     machineChangeFeed,
     managedWorktreeReceipts,
@@ -476,14 +488,30 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     }
   };
   const leasingOffered = desktopProviders().some((entry) => entry.effective);
+  // A child run operates this Mac as its own owner, under its run id: it holds
+  // none of its parent's grants, and its parent holds none of its own.
+  const childOwners = new ChildComputerOwners();
+  const childOwner = (owner: ComputerUseOwner) => childOwners.get(owner.threadId);
+  const threadOf = (owner: ComputerUseOwner) => childOwner(owner)?.parentThreadId ?? owner.threadId;
+  const childComputerAuthority = (child: AgentRunChildToolHost): ToolActionAuthority | undefined =>
+    child.projectId === undefined || !child.current()
+      ? undefined
+      : {
+          hostId: deriveToolHostId(persistence.dataDirectory),
+          mode: child.mode,
+          projectId: child.projectId,
+          providerInstanceId: child.target.providerInstanceId,
+          extension: { kind: "core" },
+        };
   const computerUseTools =
     computerUseDesktop === undefined && !leasingOffered
       ? undefined
       : createComputerUseToolService({
           asksFromPairedWindow: (owner) =>
-            owner.mode === "code" &&
-            deps.isPairedDeviceScope(owner.windowId) &&
-            !deps.isRestrictedDeviceScope(owner.windowId),
+            childOwner(owner) !== undefined ||
+            (owner.mode === "code" &&
+              deps.isPairedDeviceScope(owner.windowId) &&
+              !deps.isRestrictedDeviceScope(owner.windowId)),
           ...(computerUseDesktop === undefined ? {} : { desktop: computerUseDesktop }),
           ...(!leasingOffered
             ? {}
@@ -497,9 +525,23 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
           now: processAuthorityTime,
           settings: () =>
             (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse,
-          authority: (owner) =>
-            browserAuthority.resolve(decodeBrowserThreadId(owner.threadId), owner.mode),
+          authority: (owner) => {
+            const child = childOwner(owner);
+            return child === undefined
+              ? browserAuthority.resolve(decodeBrowserThreadId(owner.threadId), owner.mode)
+              : childComputerAuthority(child);
+          },
           ownerIsCurrent: (owner) => {
+            const child = childOwner(owner);
+            if (child !== undefined)
+              return (
+                child.current() &&
+                child.attended() &&
+                String(child.window() ?? "") === String(owner.windowId) &&
+                String(child.target.providerInstanceId) === String(owner.providerInstanceId) &&
+                String(child.target.modelId) === String(owner.modelId) &&
+                child.executionPolicy === owner.executionPolicy
+              );
             const current =
               owner.mode === "chat"
                 ? persistence.readChatThread(decodeChatThreadId(owner.threadId))
@@ -524,8 +566,9 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
               )
             );
           },
+          // A child's host has already applied its parent's profile.
           toolConstraints: (owner) =>
-            owner.mode === "code"
+            owner.mode === "code" && childOwner(owner) === undefined
               ? (persistence.readCodeThread(decodeCodeThreadId(owner.threadId))?.toolConstraints ??
                 [])
               : [],
@@ -535,20 +578,26 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
           // running turn its own level, either of which may sit below the
           // thread's (a routine under a lower ceiling); Chat has no Full access.
           fullAccess: (owner) =>
-            owner.mode === "code"
-              ? owner.executionPolicy === "full-access" &&
-                persistence.readCodeThread(decodeCodeThreadId(owner.threadId))?.executionPolicy ===
-                  "full-access"
-              : owner.mode === "work" &&
-                workThreadProjection.read(decodeWorkThreadId(owner.threadId))?.access ===
-                  "full-access" &&
-                (deps.runningWorkTurnAccess(owner.threadId) ?? "full-access") === "full-access",
+            childOwner(owner) !== undefined
+              ? owner.executionPolicy === "full-access"
+              : owner.mode === "code"
+                ? owner.executionPolicy === "full-access" &&
+                  persistence.readCodeThread(decodeCodeThreadId(owner.threadId))
+                    ?.executionPolicy === "full-access"
+                : owner.mode === "work" &&
+                  workThreadProjection.read(decodeWorkThreadId(owner.threadId))?.access ===
+                    "full-access" &&
+                  (deps.runningWorkTurnAccess(owner.threadId) ?? "full-access") === "full-access",
           externalContentIngested: (owner) =>
             readThreadExternalContentTaint(persistence.connection, owner.threadId)
+              .externalContentIngested ||
+            // A child's own marks count beside its parent's.
+            readThreadExternalContentTaint(persistence.connection, threadOf(owner))
               .externalContentIngested,
-          strict: (owner) => deps.resolveThreadStrict(owner.threadId),
+          strict: (owner) => deps.resolveThreadStrict(threadOf(owner)),
           outsideContent: (owner) =>
-            readApprovalOutsideContent(persistence.connection, owner.threadId),
+            readApprovalOutsideContent(persistence.connection, owner.threadId) ??
+            readApprovalOutsideContent(persistence.connection, threadOf(owner)),
           projectAppRemembered: (projectId, appId) =>
             computerUseAppRemembered(
               (persistence.readShellSettings()?.settings ?? defaultShellSettings())
@@ -576,13 +625,18 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
                 desktopFileTransferRemembered(settings.rememberedDesktopFileTransfers, projectId),
               (service, input) => service.rememberDesktopFileTransfer({ ...input, projectId }),
             ),
-          threadTitle: (owner) =>
-            (owner.mode === "chat"
-              ? persistence.readChatThread(decodeChatThreadId(owner.threadId))?.title
-              : owner.mode === "code"
-                ? persistence.readCodeThread(decodeCodeThreadId(owner.threadId))?.title
-                : workThreadProjection.read(decodeWorkThreadId(owner.threadId))?.title) ??
-            "this task",
+          threadTitle: (owner) => {
+            const threadId = threadOf(owner);
+            const title =
+              owner.mode === "chat"
+                ? persistence.readChatThread(decodeChatThreadId(threadId))?.title
+                : owner.mode === "code"
+                  ? persistence.readCodeThread(decodeCodeThreadId(threadId))?.title
+                  : workThreadProjection.read(decodeWorkThreadId(threadId))?.title;
+            return childOwner(owner) === undefined
+              ? (title ?? "this task")
+              : `a helper of ${title ?? "this task"}`;
+          },
           record: (() => {
             const recorder = createComputerUseValidationEvidenceRecorder({
               eventStore: validationEventStore,
@@ -632,6 +686,27 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
           owner.leaseId === undefined ? COMPUTER_USE_TOOL_HELP : DISPOSABLE_DESKTOP_TOOL_HELP,
         );
   };
+  contributeChildTools((input) => {
+    const host = childToolHost(input, "octant_computer");
+    const windowId = host?.window();
+    if (host === undefined || windowId === undefined || !host.attended()) return undefined;
+    childOwners.hold(host);
+    return childComputerTools({
+      host,
+      resources: childResources,
+      tools: computerToolsFor(
+        {
+          windowId,
+          threadId: host.runId,
+          mode: host.mode,
+          ...host.target,
+          executionPolicy: host.executionPolicy,
+        },
+        (summary, signal) => host.ask({ summary, approvalClass: "child-computer", signal }),
+        { executionPolicy: host.executionPolicy },
+      ),
+    });
+  });
   let lastComputerSettings = "";
   let computerSettingsTail = Promise.resolve();
   const syncComputerUseSettings = () => {

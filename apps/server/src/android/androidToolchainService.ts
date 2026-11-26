@@ -1499,6 +1499,45 @@ export class AndroidToolchainService {
     return false;
   }
 
+  /**
+   * Whether an emulator that discovery calls off may still be this AVD,
+   * running: adb lists a serial it cannot name over adbd (offline, or not yet
+   * authorized), and that emulator's console names this AVD or cannot say, or
+   * adb cannot be read at all. Discovery calls such an emulator off, so a
+   * helper's cleanup does not take "not booted" alone as proof that the one it
+   * held has stopped; an offline emulator of another AVD keeps no record, or
+   * a restart shut down the stopped one once the person had booted it.
+   */
+  async mayStillRun(
+    emulatorId: AndroidEmulatorRecord["emulatorId"],
+    context: AndroidExecutionContext,
+  ): Promise<boolean> {
+    const adb = this.#sdk.adbPath;
+    if (adb === undefined) return true;
+    const devices = await this.#command([adb, "devices"], context, 10_000);
+    if (!succeeded(devices)) return true;
+    const output = text(devices.stdout);
+    const ready = parseAdbDevices(output);
+    for (const serial of parseAdbListedSerials(output)) {
+      if (ready.includes(serial)) continue;
+      // The console answers while adbd does not; it needs the console token,
+      // which a confined launch may not have, and then this cannot say.
+      const named = await this.#command([adb, "-s", serial, "emu", "avd", "name"], context, 5_000);
+      // Only a console that names an AVD and says OK rules this one out. adb
+      // exits 0 on a refused console too ("KO: authentication required"),
+      // which read as another AVD and dropped the record of one still running.
+      if (!succeeded(named)) return true;
+      const lines = text(named.stdout)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      const avd = lines[0];
+      if (avd === undefined || lines[1] !== "OK" || !/^[A-Za-z0-9._-]+$/.test(avd)) return true;
+      if (avd === String(emulatorId)) return true;
+    }
+    return false;
+  }
+
   /** Whether the serial stayed off adb, for long enough to mean it, within the settle budget. */
   async #waitUntilStopped(
     serial: string,

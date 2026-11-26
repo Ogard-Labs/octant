@@ -19,6 +19,9 @@ import {
   decodeCodeCheckoutId,
   decodeCodeFileId,
   decodeCodeThreadId,
+  type CodeCheckoutId,
+  type CodeThread,
+  type CodeThreadId,
   decodeProjectId,
   decodeWorkThreadId,
   decodeWindowId,
@@ -150,7 +153,10 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
       ServerPreviewTunnels,
       "hasRelayGrant" | "openRelayStream" | "reconcile"
     >;
-  } & Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
+  } & Pick<
+    AgentRunsWiring,
+    "childCodeThreads" | "externalContentIngestionStore" | "managedWorktreeReceipts"
+  > &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
     CodeWiring,
@@ -193,6 +199,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
   const {
+    childCodeThreads,
     hubActScopeSlot,
     browserAuthority,
     workThreadProjection,
@@ -250,6 +257,24 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       return { device: metadata.dev.toString(10), inode: metadata.ino.toString(10) };
     },
   });
+  // A Code child run is read by its own id, in its own worktree, at its own
+  // level; it has no extra folders, and its parent's Strict value holds for it.
+  const codeOrChildThread = (id: CodeThreadId) =>
+    persistence.readCodeThread(id) ?? childCodeThreads.readThread(id);
+  const codeOrChildCheckout = (id: CodeCheckoutId) =>
+    persistence.readCodeCheckout(id) ?? childCodeThreads.readCheckout(id);
+  const isChildThread = (thread: CodeThread) =>
+    childCodeThreads.parentOf(String(thread.id)) !== undefined;
+  const strictThreadOf = (threadId: string) => childCodeThreads.parentOf(threadId) ?? threadId;
+  const resolveCodeOrChildRoot: typeof resolveRootWithExtraFolders = (
+    scopeId,
+    thread,
+    checkout,
+    path,
+  ) =>
+    isChildThread(thread)
+      ? childCodeThreads.resolveRoot(thread, path)
+      : resolveRootWithExtraFolders(scopeId, thread, checkout, path);
   return Effect.gen(function* () {
     // A person's own shell at a Work or Code Project's root, with no thread.
     // It shares the Code runtime's terminals, so one receipt store, reconcile,
@@ -772,13 +797,15 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     });
     const languageService = new CodeLanguageService({
       authority: {
-        readThread: persistence.readCodeThread,
-        readThreads: persistence.readCodeThreads,
-        readCheckout: persistence.readCodeCheckout,
+        readThread: codeOrChildThread,
+        readThreads: () => [...persistence.readCodeThreads(), ...childCodeThreads.readThreads()],
+        readCheckout: codeOrChildCheckout,
         // Read for every proxy decision, so it cannot wait on a receipt file:
         // a managed worktree's folder is the one its receipt must name, which
         // derives from the repository root and the thread.
         readThreadFolder: (thread) => {
+          const childFolder = childCodeThreads.folderOf(String(thread.id));
+          if (childFolder !== undefined) return childFolder;
           const project = persistence.readProject(thread.projectId);
           const checkout = persistence.readCodeCheckout(thread.checkoutId);
           if (project?.type !== "code" || checkout === undefined) return undefined;
@@ -802,13 +829,17 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         // Read from the level the turn runs at (window session grant clamped
         // to any active turn posture), never only the thread's stored level.
         effectiveThread: (scopeId, thread) => {
+          if (isChildThread(thread)) return childCodeThreads.effectiveFor(String(scopeId), thread);
           const session = codeSessionAuthority.effectiveThread(scopeId, thread);
           return codeOperationRuntime?.threadWithActiveTurnPosture?.(session) ?? session;
         },
-        resolveRoot: resolveRootWithExtraFolders,
+        resolveRoot: resolveCodeOrChildRoot,
       },
       approvals: languageServerApprovals,
-      threadTainted: (threadId) => toolEgressRules.threadTainted(String(threadId)),
+      // A child's own reads count beside its parent's.
+      threadTainted: (threadId) =>
+        toolEgressRules.threadTainted(String(threadId)) ||
+        toolEgressRules.threadTainted(strictThreadOf(String(threadId))),
       components: () => [...bundledLanguageServers("effective"), ...installedLanguageServers()],
       turnedOffComponents: () => bundledLanguageServers("turned-off"),
       // Read on every request, so the Project's choice holds from the event
@@ -819,7 +850,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       },
       processes: languageServerProcesses,
       platform: languageServerHostPlatform(process.platform),
-      threadStrict: (threadId) => deps.resolveThreadStrict(String(threadId)),
+      threadStrict: (threadId) => deps.resolveThreadStrict(strictThreadOf(String(threadId))),
       cacheRoot: join(persistence.dataDirectory, "code", "language-server-cache"),
       watcher: codeFileWatch,
     });
@@ -888,6 +919,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             egress: createDebugSessionEgress({
               journal: persistence.journal,
               rules: toolEgressRules,
+              parentThreadOf: childCodeThreads.parentOf,
               endpoint: debugEgressEndpoint,
               hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
               uuid: randomUUID,
@@ -898,11 +930,14 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     const debugStateRoot = join(persistence.dataDirectory, "code", "debug-session-state");
     const debugService = new CodeDebugService({
       authority: {
-        readThread: persistence.readCodeThread,
-        readCheckout: persistence.readCodeCheckout,
+        readThread: codeOrChildThread,
+        readCheckout: codeOrChildCheckout,
         canAccessProject: canAccessCodeProject,
-        effectiveThread: (scopeId, thread) => codeSessionAuthority.effectiveThread(scopeId, thread),
-        resolveRoot: resolveRootWithExtraFolders,
+        effectiveThread: (scopeId, thread) =>
+          isChildThread(thread)
+            ? childCodeThreads.effectiveFor(String(scopeId), thread)
+            : codeSessionAuthority.effectiveThread(scopeId, thread),
+        resolveRoot: resolveCodeOrChildRoot,
       },
       approvals: debugConfigurationApprovals,
       adapters: installedDebugAdapterComponents({
@@ -917,7 +952,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       },
       records: debugSessionRecords,
       platform: languageServerHostPlatform(process.platform),
-      threadStrict: (threadId) => deps.resolveThreadStrict(String(threadId)),
+      threadStrict: (threadId) => deps.resolveThreadStrict(strictThreadOf(String(threadId))),
       stateRoot: debugStateRoot,
       uuid: randomUUID,
     });
@@ -1372,6 +1407,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       debugConfigurationApprovals,
       debugService,
       languageServerApprovals,
+      languageService,
       localServerRoutes,
       pairedMergeUnlockSlot,
       projectTerminals,

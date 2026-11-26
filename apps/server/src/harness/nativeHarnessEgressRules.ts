@@ -660,7 +660,9 @@ export class ToolEgressRules {
       ...sandboxProxyPolicy(policy),
       taint: () => ({
         threadTainted: this.#tainted(String(launch.threadId)),
-        parentTainted: false,
+        // A child run's program answers to its parent's marks beside its own.
+        parentTainted:
+          launch.parentThreadId !== undefined && this.#tainted(String(launch.parentThreadId)),
       }),
       rules: () => (policy === undefined ? this.#rulesFor(launch) : admittedRules),
       clock: this.#options.clock,

@@ -235,6 +235,19 @@ export function createAgentRunChildWorktreePort(input: {
     | { readonly status: "verified"; readonly identity: string }
     | { readonly status: "refused"; readonly reason: string }
   >;
+  /**
+   * The commit a child's own worktree stands on now, or undefined when the
+   * folder is not the one its run owns. Prepares nothing, so it can be asked
+   * on every call of a child's tool.
+   */
+  readonly ownedHead: (request: {
+    readonly requestId: string;
+    readonly parentThreadId: string;
+    readonly repositoryId: string;
+    readonly repositoryRoot: string;
+    readonly worktreeRoot: string;
+    readonly signal: AbortSignal;
+  }) => Promise<string | undefined>;
 } {
   async function available(receipt: ManagedWorktreeReceipt): Promise<boolean> {
     const observation = await input.repository
@@ -262,6 +275,47 @@ export function createAgentRunChildWorktreePort(input: {
     );
   }
   return {
+    ownedHead: async (request) => {
+      try {
+        const lookup = agentRunChildWorktreeLookup({
+          repositoryId: request.repositoryId,
+          repositoryRoot: request.repositoryRoot,
+          childThreadId: deriveAgentRunChildWorktreeThreadId(
+            request.parentThreadId,
+            request.requestId,
+          ),
+        });
+        if (
+          request.worktreeRoot !== lookup.canonicalWorktreePath ||
+          request.worktreeRoot === request.repositoryRoot
+        )
+          return undefined;
+        const receipt = await input.findActive(lookup);
+        if (receipt?.state !== "ready") return undefined;
+        const observation = await input.repository.observe(request.repositoryRoot, request.signal);
+        if (
+          observation.status !== "available" ||
+          observation.repositoryId !== request.repositoryId ||
+          observation.repositoryRoot !== request.repositoryRoot
+        )
+          return undefined;
+        const targets = observation.worktrees.filter(
+          (worktree) =>
+            worktree.status === "present" &&
+            worktree.canonicalPath === lookup.canonicalWorktreePath,
+        );
+        const target = targets.length === 1 ? targets[0] : undefined;
+        return target === undefined ||
+          target.detached ||
+          target.locked !== undefined ||
+          target.prunable !== undefined ||
+          target.branch !== receipt.refIntent
+          ? undefined
+          : target.head;
+      } catch {
+        return undefined;
+      }
+    },
     preparationReceipt: async (request) => {
       const childThreadId = deriveAgentRunChildWorktreeThreadId(
         request.parentThreadId,

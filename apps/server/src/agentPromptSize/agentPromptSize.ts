@@ -13,7 +13,10 @@ import {
   type ProviderContextBlock,
   type ProviderToolDefinition,
 } from "@octant/contracts";
-import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
+import {
+  OCTANT_CREDENTIAL_TOOL,
+  OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS,
+} from "@octant/contracts/credential-request";
 import {
   PAST_THREADS_TOOL_DEFINITION,
   REMEMBER_PERSON_TOOL_DEFINITION,
@@ -59,7 +62,7 @@ import {
 } from "../code/codeAppManagedTools";
 import { REPORT_FINISHED_TOOL_DEFINITION } from "../finishedReceipts/finishedReceiptTools";
 import { followUpSuggestionInstructionsFor } from "../followUps/followUpSuggestionInstructions";
-import { githubUpdateDefinition } from "../github/githubReadToolService";
+import { githubReadDefinition, githubUpdateDefinition } from "../github/githubReadToolService";
 import {
   harnessTodayInstruction,
   nativeHarnessInstructions,
@@ -285,6 +288,8 @@ const ALL_MEDIA = [
   TRANSCRIBE_MEDIA_TOOL_PLUGIN,
 ];
 
+const CHILD_MEDIA = [CREATE_IMAGE_MEDIA_TOOL_PLUGIN, LOOK_MEDIA_TOOL_PLUGIN];
+
 /** The `octant_*` tools (and Chat's search) the widest turn of a context carries. */
 function octantTools(context: AgentPromptContext): ReadonlyArray<ProviderToolDefinition> {
   switch (context) {
@@ -346,18 +351,32 @@ function octantTools(context: AgentPromptContext): ReadonlyArray<ProviderToolDef
         REPORT_FINISHED_TOOL_DEFINITION,
       ];
     case "chat-child":
-      return [PAST_THREADS_TOOL_DEFINITION];
+      return [PAST_THREADS_TOOL_DEFINITION, projectMemoryDefinition];
     case "work-child":
       return [
         PAST_THREADS_TOOL_DEFINITION,
         canvasTool("work", "run"),
         delegatedBrowserToolDefinition({ uploads: false, downloads: false }),
+        MAC_TOOL,
+        projectMemoryDefinition,
+        ...mediaTools("work", CHILD_MEDIA),
       ];
     case "code-child":
       return [
         PAST_THREADS_TOOL_DEFINITION,
         canvasTool("code", "run"),
         delegatedBrowserToolDefinition({ uploads: false, downloads: false }),
+        MAC_TOOL,
+        projectMemoryDefinition,
+        ...mediaTools("code", CHILD_MEDIA),
+        // A helper reads its lead's repository but never updates issues.
+        githubReadDefinition,
+        CODE_LANGUAGE_TOOL_DEFINITION,
+        terminalDefinition,
+        CODE_DEBUG_TOOL_DEFINITION,
+        appleDefinition,
+        androidDefinition,
+        OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS,
       ];
   }
 }
