@@ -399,16 +399,22 @@ export class ThreadMessageQueueService {
         const { waitsForNextTurn: _waits, ...rest } = item;
         const sent = { ...rest, revision: decodeAggregateVersion(item.revision + 1) };
         const others = state.items.filter((value) => value !== item);
-        // Messages already on their way, or offered to the turn, keep their
-        // place and stay ahead of it. One offered to the turn can sit behind a
-        // message waiting for the next turn, so the message goes right after
-        // the last of them rather than before the first that can move.
-        const lastFixed = others.findLastIndex(
-          (value) => value.status !== "queued" || this.#steering.has(value.messageId),
-        );
-        const at = lastFixed + 1;
+        // Messages already on their way, or offered to the turn, stay ahead
+        // of it, and it goes ahead of every message that can still move. One
+        // offered to the turn can sit behind a message waiting for the next
+        // turn; that one moves back behind the message sent now, so the next
+        // turn still starts with it (a paired phone's Send now never steers).
+        const onTheirWay = (value: (typeof others)[number]) =>
+          value.status !== "queued" || this.#steering.has(value.messageId);
         const outcome = this.#store.write(
-          { ...state, items: [...others.slice(0, at), sent, ...others.slice(at)] },
+          {
+            ...state,
+            items: [
+              ...others.filter(onTheirWay),
+              sent,
+              ...others.filter((value) => !onTheirWay(value)),
+            ],
+          },
           { command, ...actor },
         );
         // A runtime that would not take it before is asked again on this press.

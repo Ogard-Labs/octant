@@ -1077,10 +1077,12 @@ describe("durable ordinary thread queue", () => {
     );
     expect(sent.status).toBe("applied");
     if (sent.status !== "applied") return;
+    // Behind the message already offered, and ahead of the one waiting, so
+    // the next turn starts with it if it is not steered first.
     expect(sent.snapshot.items.map((item) => item.messageId)).toEqual([
-      waiting.messageId,
       offered.messageId,
       later.messageId,
+      waiting.messageId,
     ]);
     await f.service.tick();
     expect(steer).toHaveBeenCalledOnce();
