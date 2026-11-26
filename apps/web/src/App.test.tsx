@@ -4505,7 +4505,7 @@ describe("App", () => {
         if (olderChat === undefined) throw new Error("Expected Chat navigation");
         await user.click(olderChat);
       }
-      const tray = await screen.findByRole("group", { name: "Subagents" });
+      let tray = await screen.findByRole("group", { name: "Subagents" });
       if (openedFrom === "composer tray") {
         await user.click(within(tray).getByRole("button", { name: /Subagents,.*Show them/ }));
         await user.click(within(tray).getByRole("button", { name: /Inspect parser.*Opens it/ }));
@@ -4516,12 +4516,22 @@ describe("App", () => {
         await user.click(await within(dock).findByRole("button", { name: /Inspect parser/ }));
       }
 
-      const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
-      expect(await within(dock).findByRole("region", { name: "Subagent" })).toBeVisible();
+      if (openedFrom === "composer tray") {
+        // A row in the composer's card opens the subagent as a thread of its
+        // own, beside its parent; View all still opens the Agents list.
+        expect(await screen.findByRole("region", { name: "Subagent" })).toBeVisible();
+        // Opening beside the thread splits its pane, which draws the thread's
+        // composer again.
+        tray = await screen.findByRole("group", { name: "Subagents" });
+      } else {
+        const opened = screen.getByRole("complementary", { name: "Right Utility Dock" });
+        expect(await within(opened).findByRole("region", { name: "Subagent" })).toBeVisible();
+      }
       for (let request = 0; request < 2; request += 1) {
         await user.click(
           within(tray).getByRole("button", { name: "View all 2 subagents in Agents" }),
         );
+        const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
         expect(await within(dock).findByRole("region", { name: "Subagents" })).toBeVisible();
         expect(within(dock).queryByRole("region", { name: "Subagent" })).not.toBeInTheDocument();
         expect(within(dock).getByRole("button", { name: /Earlier review/ })).toBeVisible();
@@ -4531,6 +4541,7 @@ describe("App", () => {
       await user.click(
         within(tray).getByRole("button", { name: "View all 2 subagents in Agents" }),
       );
+      const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
       await user.click(await within(dock).findByRole("button", { name: /Earlier review/ }));
       expect(await within(dock).findByText("Retained completed reply")).toBeVisible();
       expect(within(dock).queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();

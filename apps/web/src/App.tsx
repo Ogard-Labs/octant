@@ -6373,6 +6373,7 @@ function LaunchedShell(
       openSidebarList,
       openSkillsSettings,
       openSubagent,
+      openSubagentInAgents: openSubagentInDock,
       reviewSubagentChanges,
       openSubagentRequest,
       openSurface: controller.openSurface,

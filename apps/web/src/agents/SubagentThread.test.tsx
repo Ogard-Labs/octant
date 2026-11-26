@@ -159,6 +159,43 @@ describe("SubagentThread", () => {
     await waitFor(() => expect(runs.conversation).toHaveBeenCalledTimes(2));
   });
 
+  it("reads the conversation again when a queued subagent starts running", async () => {
+    let status = "queued";
+    const runs = client("queued");
+    const summary = runs.parentSummary as ReturnType<typeof vi.fn>;
+    const first = await (
+      summary.getMockImplementation() as () => Promise<{
+        readonly entries: ReadonlyArray<Record<string, unknown>>;
+      }>
+    )();
+    summary.mockImplementation(async () => ({
+      ...first,
+      parentThreadId,
+      entries: first.entries.map((entry) => ({ ...entry, lifecycleStatus: status })),
+    }));
+    view(runs);
+    await waitFor(() => expect(runs.conversation).toHaveBeenCalledTimes(1));
+    status = "running";
+    // The tab rereads its run every two seconds while it is active.
+    await waitFor(() => expect(runs.conversation).toHaveBeenCalledTimes(2), { timeout: 4_000 });
+  });
+
+  it("continues a waiting subagent instead of steering its parked session", async () => {
+    const runs = client("waiting");
+    view(runs);
+    const field = await screen.findByRole("textbox", { name: "Message to continue it" });
+    await userEvent.type(field, "Go on{Enter}");
+    await waitFor(() =>
+      expect(runs.resume).toHaveBeenCalledWith(expect.objectContaining({ message: "Go on" })),
+    );
+    expect(runs.steer).not.toHaveBeenCalled();
+  });
+
+  it("offers Retry for an interrupted subagent, as the Agents page does", async () => {
+    view(client("interrupted"));
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+  });
+
   it("opens a subagent the provider runs read-only, with no composer", async () => {
     view(client("running", { executionKind: "provider-native" }));
     expect(

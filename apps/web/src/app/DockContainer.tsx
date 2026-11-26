@@ -114,6 +114,7 @@ export interface DockContainerProps {
     | "openProjectPullRequestChat"
     | "openSettings"
     | "openSubagent"
+    | "openSubagentInAgents"
     | "persistBottomPanelPresentation"
     | "selectChatThread"
     | "selectCodeThread"
@@ -385,7 +386,8 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
           ? {
               requestedAgentReview: requestedAgentReview.request,
               onAgentReviewBack: () => {
-                actions.openSubagent(String(requestedAgentReview.request.packet.runId));
+                // A saved review is opened from the Agents page and returns there.
+                actions.openSubagentInAgents(String(requestedAgentReview.request.packet.runId));
                 actions.setRequestedAgentReview(undefined);
               },
             }

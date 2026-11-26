@@ -1,5 +1,5 @@
-import type { ChatThreadId } from "@octant/contracts/chat";
-import type { CodeThreadId } from "@octant/contracts/code";
+import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
+import { decodeCodeThreadId, type CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
 import type {
   PaneId,
@@ -51,6 +51,11 @@ export function activeChatThreadTabId(
   activePaneId: PaneId,
 ): ChatThreadId | undefined {
   const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  if (surface?.kind === "agent-run" && surface.mode === "chat") {
+    // A subagent's pane belongs to the thread that started it, so the dock
+    // and its tools stay on that thread while the subagent is in front.
+    return decodeChatThreadId(String(surface.parentThreadId));
+  }
   return surface?.kind === "chat-thread" ? surface.threadId : undefined;
 }
 
@@ -74,7 +79,7 @@ export function activeDraftTabKey(
 
 /**
  * The local Code thread the active pane is showing. When the active pane shows
- * a utility surface (Browser, Files, Side Chat, a subagent, Preview) instead, the Code
+ * a utility surface (Browser, Files, Side Chat, Preview) instead, the Code
  * thread visible in a sibling pane stays active so its transcript is not
  * unloaded just because the user clicked into the other pane.
  */
@@ -85,11 +90,14 @@ export function activeCodeThreadTabId(
   const surface = findWorkspacePane(layout, activePaneId)?.surface;
   const focused = localCodeThreadTabId(surface);
   if (focused !== undefined) return focused;
+  if (surface?.kind === "agent-run" && surface.mode === "code") {
+    // The subagent's own parent, not whichever Code thread is first in view.
+    return decodeCodeThreadId(String(surface.parentThreadId));
+  }
   switch (surface?.kind) {
     case "browser":
     case "files":
     case "side-chat":
-    case "agent-run":
     case "preview":
       return visibleLocalCodeThreadTabId(layout);
     default:
@@ -162,6 +170,9 @@ export function activeWorkThreadTabId(
   activePaneId: PaneId,
 ): string | undefined {
   const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  if (surface?.kind === "agent-run" && surface.mode === "work") {
+    return String(surface.parentThreadId);
+  }
   return surface?.kind === "work-thread" && surface.hostId === undefined
     ? String(surface.threadId)
     : undefined;

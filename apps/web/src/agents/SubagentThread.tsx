@@ -112,14 +112,17 @@ export function SubagentThread(props: {
     () => (row === undefined ? undefined : decodeAgentRunId(row.runId)),
     [row?.runId],
   );
-  // A resumed, continued or retried run works again under the same id; each
-  // time it does, its conversation is read again so the new attempt shows.
+  // The conversation stream ends with an attempt, and a run that has not
+  // started yet answers with a closed snapshot. Each time the run starts
+  // running (out of the queue, or again after a Resume, follow-up or Retry
+  // under the same id) its conversation is read again so that attempt shows.
+  const running = row?.lifecycleStatus === "running";
   const [attempt, setAttempt] = useState(0);
-  const wasActive = useRef(active);
+  const wasRunning = useRef(running);
   useEffect(() => {
-    if (active && !wasActive.current) setAttempt((current) => current + 1);
-    wasActive.current = active;
-  }, [active]);
+    if (running && !wasRunning.current) setAttempt((current) => current + 1);
+    wasRunning.current = running;
+  }, [running]);
   const conversation = useAgentRunConversation(props.client, conversationRunId, String(attempt));
   const items = useMemo(
     () => subagentTranscript(conversation.conversation?.entries ?? []),
@@ -169,13 +172,19 @@ export function SubagentThread(props: {
 
   const lifecycle = row.lifecycleStatus;
   const managed = row.executionKind === "octant-managed";
-  const canSteer = managed && (lifecycle === "running" || lifecycle === "waiting");
+  // Only a running session takes a steering note. A waiting run has parked
+  // its session (a provider wait or a usage limit ends the turn), so a message
+  // resumes it instead, under the host's own eligibility check.
+  const canSteer = managed && lifecycle === "running";
   const canResume =
     managed &&
     (lifecycle === "completed" ||
+      lifecycle === "waiting" ||
       (lifecycle === "interrupted" &&
         row.recoveryReason !== "restart-without-resumable-execution"));
-  const canRetry = managed && (lifecycle === "failed" || lifecycle === "interrupted") && !canResume;
+  // Retry stays for any run that stopped, as on the Agents page: an
+  // interruption before a provider session was saved has nothing to resume.
+  const canRetry = managed && (lifecycle === "failed" || lifecycle === "interrupted");
   const command = { runId: row.runId, version: row.version };
   const message = draft.trim();
   const facts = [subagentRoleWord(row.role), row.model, relativeTimeLabel(row.updatedAt)].filter(
@@ -344,7 +353,11 @@ export function SubagentThread(props: {
           <>
             {canRetry ? (
               <div className="subagent-thread__retry">
-                <span>It stopped and cannot pick up where it left off.</span>
+                <span>
+                  {canResume
+                    ? "It stopped. Send a message to continue it, or start it again."
+                    : "It stopped and cannot pick up where it left off."}
+                </span>
                 <OctantButton
                   onClick={() => {
                     void controls.retry(command).then((refusal) => {

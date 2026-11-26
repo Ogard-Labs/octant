@@ -58,4 +58,22 @@ describe("subagentTranscript", () => {
       { kind: "status", text: "Working-time limit: 30 minutes for this attempt." },
     ]);
   });
+
+  it("keeps a completed step's command, and shows a failed step's reason", () => {
+    const items = subagentTranscript([
+      entry({
+        kind: "tool",
+        text: "bun run lint",
+        tool: { toolCallId: "c", toolName: "Bash", state: "started", summary: "bun run lint" },
+      }),
+      entry({
+        kind: "tool",
+        text: "exit 0",
+        tool: { toolCallId: "c", toolName: "Bash", state: "completed", summary: "exit 0" },
+      }),
+    ]);
+    expect(items[0]).toMatchObject({
+      rows: [{ id: "c", state: "completed", summary: "bun run lint" }],
+    });
+  });
 });

@@ -719,12 +719,12 @@ says so.
 The normal composer sits under the transcript and uses only the run's existing
 commands and authority:
 
-- while the subagent works, a message steers it, and Stop beside Send stops
-  it;
-- once it finished, or stopped where it can pick up again, a message continues
-  it (Resume with the message);
-- a run that stopped for good offers Retry above a composer that says it
-  cannot take a message.
+- while the subagent runs, a message steers it, and Stop beside Send stops it;
+- once it finished, or waits with its session parked (a provider wait or a
+  usage limit), or stopped where it can pick up again, a message continues it
+  (Resume with the message);
+- a run that failed or was interrupted also offers Retry above the composer,
+  as the Agents page does.
 
 A subagent the provider runs itself is read only: a line, "Runs inside the
 provider. Octant can read it but not steer it.", stands where the composer

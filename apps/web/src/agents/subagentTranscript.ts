@@ -62,7 +62,9 @@ export function subagentTranscript(
       if (group !== undefined) {
         replaceItem(items, group, {
           ...group,
-          rows: group.rows.map((candidate) => (candidate.id === row.id ? row : candidate)),
+          rows: group.rows.map((candidate) =>
+            candidate.id === row.id ? finishedRow(candidate, row) : candidate,
+          ),
         });
         continue;
       }
@@ -102,6 +104,16 @@ export function subagentTranscript(
     items.push({ kind: "status", key, text: entry.text });
   }
   return items;
+}
+
+/**
+ * A finished step keeps the line its start gave (the command it ran, the file
+ * it read) unless it failed, when what went wrong is the line worth reading.
+ */
+function finishedRow(start: TurnActivityRow, finish: TurnActivityRow): TurnActivityRow {
+  if (start.kind !== "tool" || finish.kind !== "tool") return finish;
+  if (finish.state === "failed" || start.summary === undefined) return finish;
+  return { ...finish, summary: start.summary };
 }
 
 function replaceItem(
