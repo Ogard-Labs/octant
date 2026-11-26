@@ -309,6 +309,51 @@ describe("CodeComposerAdapter", () => {
     expect(prompt).toHaveValue("Next task");
   });
 
+  it("leaves a new thread's draft alone when a start from the composer it replaced is refused", async () => {
+    const user = userEvent.setup();
+    let refuse: () => void = () => undefined;
+    const onCreateThread = vi.fn(
+      (input: CodeComposerSubmitInput) =>
+        new Promise<boolean>((resolve) => {
+          refuse = () => {
+            input.stay?.report({ status: "refused", reason: "The provider is not signed in." });
+            resolve(false);
+          };
+        }),
+    );
+    const issue = {
+      kind: "github" as const,
+      request: { owner: "octo", name: "repo", number: 7 },
+      label: "octo/repo#7",
+    };
+    function Harness() {
+      const [source, setSource] = useState<NewTaskCreateFromSelection | undefined>(issue);
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <output aria-label="Create from">{source?.label ?? "none"}</output>
+          <button onClick={() => setRevision((current) => current + 1)} type="button">
+            New thread
+          </button>
+          <CodeComposerAdapter
+            key={revision}
+            {...defaultProps}
+            onCreateThread={onCreateThread}
+            stashSource={{ current: source, change: setSource }}
+            startsInBackground
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix issue 7");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "New thread" }));
+    await act(async () => refuse());
+    expect(screen.getByRole("status", { name: "Create from" })).toHaveTextContent("none");
+  });
+
   it("offers neither ⌘↩ start-and-stay nor several models where the create path cannot carry them", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn((_input: CodeComposerSubmitInput) => true);
@@ -353,11 +398,8 @@ describe("CodeComposerAdapter", () => {
       "aria-multiselectable",
       "true",
     );
-    fireEvent.keyDown(screen.getByRole("option", { name: "Model Two" }), {
-      key: "Enter",
-      shiftKey: true,
-    });
-    await user.keyboard("{Escape}");
+    screen.getByRole("option", { name: "Model Two" }).focus();
+    await user.keyboard("{Shift>}{Enter}{/Shift}{Escape}");
     expect(await screen.findByText(/Starts 2 threads/)).toBeInTheDocument();
     expect(onSelectProvider).not.toHaveBeenCalled();
   });

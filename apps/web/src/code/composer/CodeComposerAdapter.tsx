@@ -387,6 +387,15 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   latestDraftPrompt.current = draftPrompt;
   const latestStashSource = useRef(props.stashSource);
   latestStashSource.current = props.stashSource;
+  // New thread remounts this composer on the same draft scope; a start from
+  // the composer that was replaced must not write its source into the new one.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const typedScope = useNewTaskTypedScope();
   const prompt = props.fixedPrompt ?? draftPrompt;
   const drafts = useContext(NewTaskDraftsContext);
@@ -1228,7 +1237,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           setPrompt((current) => (current === "" ? sentPrompt : current));
           if (staged.length > 0) images.restore(staged);
           if (sentReceipts.length > 0) extensionDraft.restore(sentReceipts);
-          if (sentSource !== undefined && !nextDraftStarted) {
+          if (sentSource !== undefined && mounted.current && !nextDraftStarted) {
             latestStashSource.current?.change(sentSource);
           }
         }
