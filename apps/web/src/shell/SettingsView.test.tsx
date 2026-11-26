@@ -2435,9 +2435,12 @@ describe("SettingsView", () => {
     });
     expect(fullAccess).toHaveValue(0);
     expect(screen.getByText(/0 means no limit/)).toBeVisible();
-    // The event stop follows the limit, and is said where the limit is set.
-    expect(screen.getByText(/stops after 64 runtime events for each step kept/)).toBeVisible();
-    expect(screen.getByText(/no event count stops the turn/)).toBeVisible();
+    // The event stop follows the limit, and is said where the limit is set,
+    // behind the row's More.
+    expect(
+      screen.getByText(/stops after 64 runtime events for each step kept/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/no event count stops the turn/)).toBeInTheDocument();
     const user = userEvent.setup();
     const belowFull = screen.getByRole("spinbutton", { name: "Tool steps kept per turn" });
     await user.clear(belowFull);

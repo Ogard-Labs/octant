@@ -136,7 +136,9 @@ sentence stays on the row and the rest moves behind More.
 
 **Octant's own limits** sit on Settings › Limits after Tool steps, as
 host settings in five sections of number steppers (1 to the stated top) and
-switches, each row naming its default in its description
+switches, each stepper naming its default beside it once the value differs, and
+a Strict-only limit saying "Under Strict" in its sentence, with what holds
+outside Strict behind its More
 ([Octant's own limits become settings](../architecture.md#security-and-authority)):
 **Wake-ups and messages** (Wake-ups waiting per thread, 8, up to 64; Message
 wakes per hour, 30; Rounds of replies that wake, 10; Thread messages per turn,

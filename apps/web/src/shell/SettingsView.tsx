@@ -1824,7 +1824,12 @@ function ActiveSectionContent({
           <SettingsSection title="Browser captures">
             <div className="setgroup">
               <SettingRow
-                description={`How many screenshots and recordings each thread keeps, newest first. Default ${DEFAULT_BROWSER_CAPTURES_PER_THREAD}. A smaller number drops a thread's older captures, and a larger one never brings them back.`}
+                atDefault={
+                  props.settings.browserCapturesPerThread === DEFAULT_BROWSER_CAPTURES_PER_THREAD
+                }
+                defaultValue={String(DEFAULT_BROWSER_CAPTURES_PER_THREAD)}
+                description="How many screenshots and recordings each thread keeps, newest first."
+                more="A smaller number drops a thread's older captures, and a larger one never brings them back."
                 focused={focusedSetting === settingId("browser-captures-per-thread")}
                 label="Captures kept per thread"
                 scope="host"
@@ -1886,7 +1891,10 @@ function ActiveSectionContent({
           <SettingsSection title="Tool steps">
             <div className="setgroup">
               <SettingRow
-                description={`How many tool calls a Chat, Work or Code turn shows, and keeps records for, below Full access. Default ${DEFAULT_THREAD_TOOL_STEPS_PER_TURN}. A turn that calls more still runs; its later calls have no row. A turn stops after ${RUNTIME_EVENTS_PER_TOOL_STEP} runtime events for each step kept.`}
+                atDefault={props.settings.toolStepsPerTurn === DEFAULT_THREAD_TOOL_STEPS_PER_TURN}
+                defaultValue={String(DEFAULT_THREAD_TOOL_STEPS_PER_TURN)}
+                description="How many tool calls a Chat, Work or Code turn below Full access shows and keeps records for."
+                more={`A turn that calls more still runs; its later calls have no row. A turn stops after ${RUNTIME_EVENTS_PER_TOOL_STEP} runtime events for each step kept.`}
                 focused={focusedSetting === settingId("tool-steps-per-turn")}
                 label="Tool steps kept per turn"
                 scope="host"
@@ -1902,7 +1910,10 @@ function ActiveSectionContent({
                 />
               </SettingRow>
               <SettingRow
-                description="The same limit for a Work or Code turn that runs at Full access. 0 means no limit: every call is kept, no event count stops the turn, and the spend ceiling is what bounds it."
+                atDefault={props.settings.fullAccessToolStepsPerTurn === 0}
+                defaultValue="0, no limit"
+                description="The same limit for a Work or Code turn that runs at Full access; 0 means no limit."
+                more="With no limit every call is kept, no event count stops the turn, and the spend ceiling is what bounds it."
                 focused={focusedSetting === settingId("tool-steps-per-turn-full-access")}
                 label="Tool steps kept per turn at Full access"
                 scope="host"
@@ -1920,7 +1931,10 @@ function ActiveSectionContent({
                 />
               </SettingRow>
               <SettingRow
-                description={`How many turns a runtime may start by itself inside one of your turns below Full access, when a background command ends or a watch reports. Default ${DEFAULT_RUNTIME_TURNS_PER_TURN}. Past it your turn completes and its session stops. Full access has no such count, and a message you send meanwhile goes into the turn.`}
+                atDefault={props.settings.runtimeTurnsPerTurn === DEFAULT_RUNTIME_TURNS_PER_TURN}
+                defaultValue={String(DEFAULT_RUNTIME_TURNS_PER_TURN)}
+                description="How many turns a runtime may start by itself inside one of your turns below Full access."
+                more="A runtime starts one when a background command ends or a watch reports. Past the limit your turn completes and its session stops. Full access has no such count, and a message you send meanwhile goes into the turn."
                 focused={focusedSetting === settingId("runtime-turns-per-turn")}
                 label="Turns a runtime starts by itself"
                 scope="host"
