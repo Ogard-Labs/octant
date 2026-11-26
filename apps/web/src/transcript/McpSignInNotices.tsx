@@ -72,9 +72,8 @@ export function McpSignInNotices(
       [...listed.current].flatMap(([key, references]) => (now.has(key) ? [] : references)),
     );
     listed.current = now;
-    for (const receipt of latest.current.refused)
-      if (names.has(receipt.reference.slice(0, 256)))
-        void latest.current.onResolveReference(receipt.reference);
+    for (const { reference } of latest.current.refused)
+      if (names.has(reference.slice(0, 256))) void latest.current.onResolveReference(reference);
   }, [servers]);
   const refresh = useCallback(
     async (signal: AbortSignal) => {
