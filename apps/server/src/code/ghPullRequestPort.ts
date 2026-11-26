@@ -25,11 +25,19 @@ export interface GhCommandResult {
   readonly stdout: string;
   readonly stderr?: string;
   readonly timedOut?: boolean;
+  /** stdout lost its start to `stdoutTailBytes`. */
+  readonly stdoutCut?: true;
 }
 
 export interface GhCommandOptions {
   readonly environment: NodeJS.ProcessEnv;
   readonly stdin: string | undefined;
+  /**
+   * Keep only this many bytes from the end of stdout instead of failing past
+   * the output limit. A failed CI job's log is read for its end, and the
+   * biggest logs are the failures an agent most needs to read.
+   */
+  readonly stdoutTailBytes?: number;
 }
 
 export interface GhCommandPort {
@@ -2007,6 +2015,8 @@ async function runGh(
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const chunks: Buffer[] = [];
     let length = 0;
+    let cut = false;
+    const tailBytes = options.stdoutTailBytes;
     const errorChunks: Buffer[] = [];
     let errorLength = 0;
     const finish = (exitCode: number) => {
@@ -2014,11 +2024,20 @@ async function runGh(
       settled = true;
       signal.removeEventListener("abort", onAbort);
       if (timeout !== undefined) clearTimeout(timeout);
+      const stdout = Buffer.concat(chunks, length);
       resolve({
         exitCode: overflow ? 1 : exitCode,
-        stdout: overflow ? "" : Buffer.concat(chunks, length).toString("utf8"),
+        stdout: overflow
+          ? ""
+          : (tailBytes !== undefined && stdout.length > tailBytes
+              ? stdout.subarray(stdout.length - tailBytes)
+              : stdout
+            ).toString("utf8"),
         stderr: Buffer.concat(errorChunks, errorLength).toString("utf8"),
         timedOut,
+        ...(cut || (tailBytes !== undefined && stdout.length > tailBytes)
+          ? { stdoutCut: true as const }
+          : {}),
       });
     };
     const terminate = () => {
@@ -2042,6 +2061,17 @@ async function runGh(
     }, timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => {
       if (overflow) return;
+      if (tailBytes !== undefined) {
+        // A rolling tail: drop whole chunks from the front once the rest
+        // still holds the tail, so memory stays near the tail's size.
+        chunks.push(Buffer.from(chunk));
+        length += chunk.length;
+        while (chunks.length > 1 && length - (chunks[0]?.length ?? 0) >= tailBytes) {
+          length -= chunks.shift()?.length ?? 0;
+          cut = true;
+        }
+        return;
+      }
       if (length + chunk.length > outputLimitBytes) {
         overflow = true;
         terminate();

@@ -1235,6 +1235,8 @@ function missingCiLogReason(reason: GhCiMissingLogReason): string {
       return "GitHub returned no log for this job.";
     case "not-read":
       return "Not read: one read fetches at most 4 logs. Name this check to read its log.";
+    case "other-commit":
+      return "This check links a run of another commit, not the pull request's current head, so its log is not read.";
   }
 }
 
@@ -1252,6 +1254,10 @@ function pullRequestCiRefusal(
       return "This Project does not connect that pull request's repository on this window.";
     case "not-open":
       return "That pull request is not open.";
+    case "thread-unavailable":
+      return "This thread is archived or completed, so it no longer acts on its pull request.";
+    case "pull-request-replaced":
+      return "The pull request at that number is no longer the one linked to this thread, so nothing was read or rerun.";
     case "no-such-check":
       return "The current head has no check with that exact name. Call ci-logs without check to see the failing ones.";
     case "superseded-head":

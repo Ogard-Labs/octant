@@ -650,6 +650,9 @@ export class CodeProjectPullRequestSwitchService
       forgeRequest(own.target),
       {
         ...(input.check === undefined ? {} : { check: input.check }),
+        ...(own.pullRequestNodeId === undefined
+          ? {}
+          : { expectedPullRequestNodeId: own.pullRequestNodeId }),
         tailLines: input.tailLines,
         maxBytes: MAX_CI_LOG_BYTES,
       },
@@ -682,6 +685,9 @@ export class CodeProjectPullRequestSwitchService
       {
         ...(input.check === undefined ? {} : { check: input.check }),
         ...(input.headSha === undefined ? {} : { headSha: input.headSha }),
+        ...(own.pullRequestNodeId === undefined
+          ? {}
+          : { expectedPullRequestNodeId: own.pullRequestNodeId }),
         maxReruns: MAX_PULL_REQUEST_CI_RERUNS,
       },
       input.signal,
@@ -720,10 +726,18 @@ export class CodeProjectPullRequestSwitchService
     windowId: WindowId,
     threadId: CodeThreadId,
   ): Promise<
-    | { readonly status: "resolved"; readonly target: CodeProjectPullRequestSwitchTarget }
+    | {
+        readonly status: "resolved";
+        readonly target: CodeProjectPullRequestSwitchTarget;
+        readonly pullRequestNodeId?: string;
+      }
     | {
         readonly status: "refused";
-        readonly reason: "no-pull-request" | "ambiguous-pull-request" | "not-authorized";
+        readonly reason:
+          | "no-pull-request"
+          | "ambiguous-pull-request"
+          | "not-authorized"
+          | "thread-unavailable";
       }
     | { readonly status: "unavailable"; readonly reason: "disconnected" }
   > {
@@ -740,9 +754,15 @@ export class CodeProjectPullRequestSwitchService
     if (!authority.linkedThreadIds.includes(String(threadId))) {
       return { status: "refused", reason: "no-pull-request" };
     }
+    if (this.#threads.inspect(threadId).status !== "available") {
+      return { status: "refused", reason: "thread-unavailable" };
+    }
+    const resolved = this.#resolveIdentity(authority.canonicalTarget ?? target);
+    const pullRequestNodeId = resolved.pullRequestNodeId ?? authority.pullRequestNodeId;
     return {
       status: "resolved",
-      target: this.#resolveIdentity(authority.canonicalTarget ?? target).target,
+      target: resolved.target,
+      ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
     };
   }
 

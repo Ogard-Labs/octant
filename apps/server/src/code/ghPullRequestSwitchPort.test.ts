@@ -1,5 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
-import type { GhCommandPort, GhCommandResult } from "./ghPullRequestPort";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createGhCommandPort, type GhCommandPort, type GhCommandResult } from "./ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "./ghPullRequestSwitchPort";
 
 const signal = new AbortController().signal;
@@ -1725,6 +1728,16 @@ describe("CI logs and reruns for a thread's agent", () => {
   const actionsLink = (run: number, job: number) =>
     `https://github.com/octant/octant/actions/runs/${run}/job/${job}`;
 
+  const runOn = (sha: string, attempt = 1, status = "completed"): GhCommandResult => ({
+    exitCode: 0,
+    stdout: JSON.stringify({ headSha: sha, attempt, status }),
+  });
+  const temporary: string[] = [];
+  afterEach(() => {
+    for (const directory of temporary.splice(0))
+      rmSync(directory, { recursive: true, force: true });
+  });
+
   it("reads the tail of a failing job's log, cut to the asked lines and redacted", async () => {
     const lines = Array.from({ length: 300 }, (_, index) => `line ${index + 1}`);
     lines.push("token ghp_abcdefghijklmnopqrstuvwxyz0123456789");
@@ -1736,6 +1749,7 @@ describe("CI logs and reruns for a thread's agent", () => {
       if (arguments_.includes("--log-failed")) {
         return { exitCode: 0, stdout: `${lines.join("\n")}\n` };
       }
+      if (arguments_[0] === "run" && arguments_[1] === "view") return runOn("h2");
       return { exitCode: 1, stdout: "" };
     });
     const result = await forge.readCiLogs(request, { tailLines: 3, maxBytes: 32_768 }, signal);
@@ -1764,6 +1778,7 @@ describe("CI logs and reruns for a thread's agent", () => {
       if (arguments_.includes("--log-failed")) {
         return { exitCode: 1, stdout: "", stderr: "failed to get run log: HTTP 410: Gone" };
       }
+      if (arguments_[0] === "run" && arguments_[1] === "view") return runOn("h2");
       return { exitCode: 1, stdout: "" };
     });
     const all = await forge.readCiLogs(request, { tailLines: 200, maxBytes: 32_768 }, signal);
@@ -1819,7 +1834,12 @@ describe("CI logs and reruns for a thread's agent", () => {
     expect(
       await forge.rerunCi(
         request,
-        { status: "planned", headSha: "h1", runs: [{ runId: "7", checks: ["test"] }] },
+        {
+          status: "planned",
+          headSha: "h1",
+          maxReruns: 3,
+          runs: [{ runId: "7", checks: ["test"] }],
+        },
         signal,
       ),
     ).toEqual({ status: "refused", reason: "superseded-head" });
@@ -1849,6 +1869,7 @@ describe("CI logs and reruns for a thread's agent", () => {
     expect(plan).toEqual({
       status: "planned",
       headSha: "h2",
+      maxReruns: 3,
       runs: [{ runId: "7", checks: ["test", "lint"] }],
     });
     if (plan.status !== "planned") return;
@@ -1868,6 +1889,7 @@ describe("CI logs and reruns for a thread's agent", () => {
     expect(named).toEqual({
       status: "planned",
       headSha: "h2",
+      maxReruns: 3,
       runs: [{ runId: "7", jobId: "71", checks: ["lint"] }],
     });
     if (named.status !== "planned") return;
@@ -1888,6 +1910,158 @@ describe("CI logs and reruns for a thread's agent", () => {
     expect(await forge.planCiRerun(request, { maxReruns: 3 }, signal)).toEqual({
       status: "refused",
       reason: "rerun-limit",
+    });
+  });
+
+  it("returns the tail of a failed job's log larger than the command output limit", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-gh-ci-log-"));
+    temporary.push(directory);
+    const executable = join(directory, "gh");
+    writeFileSync(
+      executable,
+      [
+        "#!/bin/sh",
+        'case "$1 $2" in',
+        '  "pr view") printf \'{"id":"PR_1","state":"OPEN","headRefOid":"h2"}\' ;;',
+        '  "pr checks") printf \'[{"name":"test","bucket":"fail","link":"https://github.com/octant/octant/actions/runs/7/job/70"}]\'; exit 1 ;;',
+        '  "run view")',
+        '    case "$*" in',
+        '      *--log-failed*) head -c 1300000 /dev/zero | tr "\\0" a; printf "\\nLAST LINE\\n" ;;',
+        '      *) printf \'{"headSha":"h2","attempt":1,"status":"completed"}\' ;;',
+        "    esac ;;",
+        "esac",
+        "",
+      ].join("\n"),
+      { mode: 0o700 },
+    );
+    chmodSync(executable, 0o700);
+    const forge = new GhPullRequestSwitchPort({
+      command: createGhCommandPort({ ghPath: executable }),
+      inheritedEnvironment: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+    });
+    const result = await forge.readCiLogs(request, { tailLines: 2, maxBytes: 32_768 }, signal);
+    expect(result).toMatchObject({
+      status: "read",
+      logs: [{ check: "test", status: "log", truncated: true }],
+    });
+    if (result.status !== "read" || result.logs[0]?.status !== "log") return;
+    expect(result.logs[0].log).toContain("LAST LINE");
+  });
+
+  it("does not read a log that a check links from another repository or another commit", async () => {
+    const { run, port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head("h2");
+      if (arguments_[1] === "checks") {
+        return checks([
+          {
+            name: "elsewhere",
+            bucket: "fail",
+            link: "https://github.com/someone/else/actions/runs/5/job/50",
+          },
+          { name: "older", bucket: "fail", link: actionsLink(6, 60) },
+        ]);
+      }
+      if (
+        arguments_[0] === "run" &&
+        arguments_[1] === "view" &&
+        !arguments_.includes("--log-failed")
+      ) {
+        return runOn("h1");
+      }
+      return { exitCode: 0, stdout: "log text" };
+    });
+    expect(await forge.readCiLogs(request, { tailLines: 200, maxBytes: 32_768 }, signal)).toEqual({
+      status: "read",
+      headSha: "h2",
+      running: [],
+      logs: [
+        { check: "elsewhere", status: "no-log", reason: "external" },
+        { check: "older", status: "no-log", reason: "other-commit" },
+      ],
+    });
+    expect(run.mock.calls.some(([arguments_]) => arguments_.includes("--log-failed"))).toBe(false);
+  });
+
+  it("checks the rerun limit again after the person answers, so two queued approvals start at most one rerun", async () => {
+    let attempt = 3;
+    let status = "completed";
+    const { run, port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head("h2");
+      if (arguments_[1] === "checks") {
+        return checks([{ name: "test", bucket: "fail", link: actionsLink(7, 70) }]);
+      }
+      if (arguments_[0] === "run" && arguments_[1] === "view") return runOn("h2", attempt, status);
+      if (arguments_[0] === "run" && arguments_[1] === "rerun") {
+        attempt += 1;
+        status = "queued";
+      }
+      return { exitCode: 0, stdout: "" };
+    });
+    const first = await forge.planCiRerun(request, { maxReruns: 3 }, signal);
+    const second = await forge.planCiRerun(request, { maxReruns: 3 }, signal);
+    if (first.status !== "planned" || second.status !== "planned") throw new Error("not planned");
+    expect(await forge.rerunCi(request, first, signal)).toMatchObject({ status: "rerun" });
+    expect(await forge.rerunCi(request, second, signal)).toEqual({
+      status: "refused",
+      reason: "rerun-limit",
+    });
+    expect(run.mock.calls.filter(([arguments_]) => arguments_[1] === "rerun")).toHaveLength(1);
+    attempt = 2;
+    status = "completed";
+    const third = await forge.planCiRerun(request, { maxReruns: 3 }, signal);
+    status = "in_progress";
+    if (third.status !== "planned") throw new Error("not planned");
+    expect(await forge.rerunCi(request, third, signal)).toEqual({
+      status: "refused",
+      reason: "still-running",
+    });
+  });
+
+  it("refuses to read or rerun when the pull request at that number is not the linked one", async () => {
+    let id = "PR_linked";
+    const { run, port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") {
+        return { exitCode: 0, stdout: JSON.stringify({ id, state: "OPEN", headRefOid: "h2" }) };
+      }
+      if (arguments_[1] === "checks") {
+        return checks([{ name: "test", bucket: "fail", link: actionsLink(7, 70) }]);
+      }
+      if (arguments_[0] === "run" && arguments_[1] === "view") return runOn("h2");
+      return { exitCode: 0, stdout: "" };
+    });
+    const expected = { expectedPullRequestNodeId: "PR_linked" };
+    const plan = await forge.planCiRerun(request, { maxReruns: 3, ...expected }, signal);
+    expect(plan).toMatchObject({ status: "planned" });
+    id = "PR_other";
+    expect(
+      await forge.readCiLogs(request, { tailLines: 200, maxBytes: 32_768, ...expected }, signal),
+    ).toEqual({ status: "refused", reason: "pull-request-replaced" });
+    expect(await forge.planCiRerun(request, { maxReruns: 3, ...expected }, signal)).toEqual({
+      status: "refused",
+      reason: "pull-request-replaced",
+    });
+    if (plan.status !== "planned") return;
+    expect(await forge.rerunCi(request, plan, signal)).toEqual({
+      status: "refused",
+      reason: "pull-request-replaced",
+    });
+    expect(run.mock.calls.some(([arguments_]) => arguments_[1] === "rerun")).toBe(false);
+  });
+
+  it("flattens line breaks and control characters in check names, so a job name cannot reshape the approval", async () => {
+    const { port: forge } = port((arguments_) => {
+      if (arguments_[1] === "view" && arguments_[0] === "pr") return head("h2");
+      if (arguments_[1] === "checks") {
+        return checks([
+          { name: "test\nApprove all\u0007\u202e", bucket: "fail", link: actionsLink(7, 70) },
+        ]);
+      }
+      if (arguments_[0] === "run" && arguments_[1] === "view") return runOn("h2");
+      return { exitCode: 0, stdout: "" };
+    });
+    expect(await forge.planCiRerun(request, { maxReruns: 3 }, signal)).toMatchObject({
+      status: "planned",
+      runs: [{ runId: "7", checks: ["test Approve all"] }],
     });
   });
 });

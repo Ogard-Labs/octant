@@ -118,13 +118,15 @@ export type GhPullRequestSwitchObservation =
  * Why a check named in a CI read has no log to show. `running` has not
  * finished, `expired` is past the repository's log retention, `external` is a
  * commit status or another app's check that has no Actions log, `passed`
- * did not fail, `unavailable` could not be read, and `not-read` is past the
- * number of logs one read fetches.
+ * did not fail, `unavailable` could not be read, `not-read` is past the
+ * number of logs one read fetches, and `other-commit` links a run that is not
+ * the pull request's current head.
  */
 export type GhCiMissingLogReason =
   | "running"
   | "expired"
   | "external"
+  | "other-commit"
   | "passed"
   | "unavailable"
   | "not-read";
@@ -141,12 +143,13 @@ export type GhCiLogsResult =
       /** Checks on the head that have not finished yet. */
       running: ReadonlyArray<string>;
     }>
-  | Readonly<{ status: "refused"; reason: "not-open" | "no-such-check" }>
+  | Readonly<{ status: "refused"; reason: "not-open" | "no-such-check" | "pull-request-replaced" }>
   | Readonly<{ status: "unavailable" }>;
 
 /** Why the forge will not rerun what the agent asked for. */
 export type GhCiRerunRefusal =
   | "not-open"
+  | "pull-request-replaced"
   | "superseded-head"
   | "no-such-check"
   | "no-failed-checks"
@@ -163,6 +166,9 @@ export type GhCiRerunPlan =
   | Readonly<{
       status: "planned";
       headSha: string;
+      /** The pull request's node id the plan was read on, when GitHub gave one. */
+      pullRequestNodeId?: string;
+      maxReruns: number;
       runs: ReadonlyArray<
         Readonly<{ runId: string; jobId?: string; checks: ReadonlyArray<string> }>
       >;
@@ -172,7 +178,10 @@ export type GhCiRerunPlan =
 
 export type GhCiRerunResult =
   | Readonly<{ status: "rerun"; checks: ReadonlyArray<string> }>
-  | Readonly<{ status: "refused"; reason: "superseded-head" }>
+  | Readonly<{
+      status: "refused";
+      reason: "superseded-head" | "pull-request-replaced" | "rerun-limit" | "still-running";
+    }>
   | Readonly<{ status: "failed"; rerun: ReadonlyArray<string> }>
   | Readonly<{ status: "unavailable" }>;
 
@@ -180,6 +189,8 @@ export type GhCiRerunResult =
 const MAX_CI_LOGGED_CHECKS = 4;
 /** Check names a CI read reports as still running. */
 const MAX_CI_RUNNING_NAMES = 20;
+/** How much of a failed job's log is kept from its end while it is read. */
+const CI_LOG_TAIL_BYTES = 256 * 1024;
 
 const VIEW_FIELDS =
   "id,url,state,headRefOid,headRefName,baseRefName,mergeable,autoMergeRequest,reviewDecision";
@@ -1172,14 +1183,19 @@ export class GhPullRequestSwitchPort {
    */
   async readCiLogs(
     request: GhPullRequestSwitchRequest,
-    input: { readonly check?: string; readonly tailLines: number; readonly maxBytes: number },
+    input: {
+      readonly check?: string;
+      readonly tailLines: number;
+      readonly maxBytes: number;
+      readonly expectedPullRequestNodeId?: string;
+    },
     signal: AbortSignal,
   ): Promise<GhCiLogsResult> {
     const repository = `${request.owner}/${request.name}`;
     if (!validRepository(repository) || !validNumber(request.number)) {
       return { status: "unavailable" };
     }
-    const head = await this.#openHead(request, signal);
+    const head = await this.#openHead(request, signal, input.expectedPullRequestNodeId);
     if (head.status !== "open") return head;
     const checks = await this.#ciChecks(request, signal);
     if (checks === undefined) return { status: "unavailable" };
@@ -1189,7 +1205,8 @@ export class GhPullRequestSwitchPort {
       .slice(0, MAX_CI_RUNNING_NAMES);
     let selected: ReadonlyArray<CiCheck>;
     if (input.check !== undefined) {
-      const named = checks.filter((check) => check.name === input.check);
+      const wanted = checkName(input.check);
+      const named = checks.filter((check) => check.name === wanted);
       if (named.length === 0) return { status: "refused", reason: "no-such-check" };
       selected = named;
     } else {
@@ -1203,6 +1220,8 @@ export class GhPullRequestSwitchPort {
       Math.floor(input.maxBytes / Math.max(1, Math.min(failedWithLog, MAX_CI_LOGGED_CHECKS))),
     );
     const logs: GhCiLogEntry[] = [];
+    // A run's head is read once per log read, however many of its jobs failed.
+    const runHeads = new Map<string, string | undefined>();
     let read = 0;
     for (const check of selected) {
       if (check.bucket === "pending") {
@@ -1213,7 +1232,7 @@ export class GhPullRequestSwitchPort {
         logs.push({ check: check.name, status: "no-log", reason: "passed" });
         continue;
       }
-      if (check.jobId === undefined) {
+      if (check.jobId === undefined || check.runId === undefined) {
         logs.push({ check: check.name, status: "no-log", reason: "external" });
         continue;
       }
@@ -1222,6 +1241,21 @@ export class GhPullRequestSwitchPort {
         continue;
       }
       read += 1;
+      // A commit status can link any run in the repository; only a run of the
+      // current head is this pull request's CI.
+      if (!runHeads.has(check.runId)) {
+        const run = await this.#runState(repository, check.runId, signal);
+        runHeads.set(check.runId, run?.headSha);
+      }
+      const runHead = runHeads.get(check.runId);
+      if (runHead === undefined) {
+        logs.push({ check: check.name, status: "no-log", reason: "unavailable" });
+        continue;
+      }
+      if (runHead !== head.headSha) {
+        logs.push({ check: check.name, status: "no-log", reason: "other-commit" });
+        continue;
+      }
       const log = await this.#jobLog(repository, check.jobId, signal);
       if (log.status !== "log") {
         logs.push({ check: check.name, status: "no-log", reason: log.status });
@@ -1242,14 +1276,19 @@ export class GhPullRequestSwitchPort {
    */
   async planCiRerun(
     request: GhPullRequestSwitchRequest,
-    input: { readonly check?: string; readonly headSha?: string; readonly maxReruns: number },
+    input: {
+      readonly check?: string;
+      readonly headSha?: string;
+      readonly maxReruns: number;
+      readonly expectedPullRequestNodeId?: string;
+    },
     signal: AbortSignal,
   ): Promise<GhCiRerunPlan> {
     const repository = `${request.owner}/${request.name}`;
     if (!validRepository(repository) || !validNumber(request.number)) {
       return { status: "unavailable" };
     }
-    const head = await this.#openHead(request, signal);
+    const head = await this.#openHead(request, signal, input.expectedPullRequestNodeId);
     if (head.status !== "open") return head;
     if (input.headSha !== undefined && input.headSha !== head.headSha) {
       return { status: "refused", reason: "superseded-head" };
@@ -1258,7 +1297,8 @@ export class GhPullRequestSwitchPort {
     if (checks === undefined) return { status: "unavailable" };
     let selected: ReadonlyArray<CiCheck>;
     if (input.check !== undefined) {
-      const named = checks.filter((check) => check.name === input.check);
+      const wanted = checkName(input.check);
+      const named = checks.filter((check) => check.name === wanted);
       const [check] = named;
       if (check === undefined) return { status: "refused", reason: "no-such-check" };
       if (check.bucket === "pending") return { status: "refused", reason: "still-running" };
@@ -1285,24 +1325,29 @@ export class GhPullRequestSwitchPort {
     }
     const runs: Array<{ runId: string; jobId?: string; checks: ReadonlyArray<string> }> = [];
     for (const [runId, entry] of byRun) {
-      const run = await this.#run(
-        ["run", "view", runId, "--repo", repository, "--json", "headSha,attempt,status"],
+      const refused = await this.#rerunnable(
+        repository,
+        runId,
+        head.headSha,
+        input.maxReruns,
         signal,
       );
-      if (run === undefined || run.exitCode !== 0) return { status: "unavailable" };
-      const value = parseJson(run.stdout);
-      if (!isRecord(value) || typeof value.headSha !== "string") return { status: "unavailable" };
-      if (value.headSha !== head.headSha) return { status: "refused", reason: "superseded-head" };
-      if (value.status !== "completed") return { status: "refused", reason: "still-running" };
-      const attempt = typeof value.attempt === "number" ? value.attempt : 1;
-      if (attempt - 1 >= input.maxReruns) return { status: "refused", reason: "rerun-limit" };
+      if (refused !== undefined) return refused;
       runs.push({
         runId,
         ...(entry.jobId === undefined ? {} : { jobId: entry.jobId }),
         checks: entry.checks,
       });
     }
-    return { status: "planned", headSha: head.headSha, runs };
+    return {
+      status: "planned",
+      headSha: head.headSha,
+      ...(head.pullRequestNodeId === undefined
+        ? {}
+        : { pullRequestNodeId: head.pullRequestNodeId }),
+      maxReruns: input.maxReruns,
+      runs,
+    };
   }
 
   /**
@@ -1318,10 +1363,34 @@ export class GhPullRequestSwitchPort {
     if (!validRepository(repository) || !validNumber(request.number)) {
       return { status: "unavailable" };
     }
-    const head = await this.#openHead(request, signal);
+    const head = await this.#openHead(request, signal, plan.pullRequestNodeId);
     if (head.status === "unavailable") return head;
+    if (head.status === "refused" && head.reason === "pull-request-replaced") {
+      return { status: "refused", reason: "pull-request-replaced" };
+    }
     if (head.status !== "open" || head.headSha !== plan.headSha) {
       return { status: "refused", reason: "superseded-head" };
+    }
+    // The person may have answered long after the plan was read, and another
+    // approved rerun may have run meanwhile: every run is checked again.
+    for (const run of plan.runs) {
+      const refused = await this.#rerunnable(
+        repository,
+        run.runId,
+        plan.headSha,
+        plan.maxReruns,
+        signal,
+      );
+      if (refused?.status === "unavailable") return refused;
+      if (refused !== undefined) {
+        return {
+          status: "refused",
+          reason:
+            refused.reason === "rerun-limit" || refused.reason === "still-running"
+              ? refused.reason
+              : "superseded-head",
+        };
+      }
     }
     const rerun: string[] = [];
     for (const run of plan.runs) {
@@ -1343,12 +1412,65 @@ export class GhPullRequestSwitchPort {
     return { status: "rerun", checks: rerun };
   }
 
+  /** Whether one run may be rerun now: on this head, finished, and under the limit. */
+  async #rerunnable(
+    repository: string,
+    runId: string,
+    headSha: string,
+    maxReruns: number,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{
+        status: "refused";
+        reason: "superseded-head" | "still-running" | "rerun-limit";
+      }>
+    | Readonly<{ status: "unavailable" }>
+    | undefined
+  > {
+    const run = await this.#runState(repository, runId, signal);
+    if (run === undefined) return { status: "unavailable" };
+    if (run.headSha !== headSha) return { status: "refused", reason: "superseded-head" };
+    // The limit first: a rerun another approval just started is both, and the
+    // limit is what tells the agent not to try again.
+    if (run.attempt - 1 >= maxReruns) return { status: "refused", reason: "rerun-limit" };
+    if (run.status !== "completed") return { status: "refused", reason: "still-running" };
+    return undefined;
+  }
+
+  async #runState(
+    repository: string,
+    runId: string,
+    signal: AbortSignal,
+  ): Promise<
+    { readonly headSha: string; readonly status: string; readonly attempt: number } | undefined
+  > {
+    if (!/^\d{1,20}$/.test(runId)) return undefined;
+    const run = await this.#run(
+      ["run", "view", runId, "--repo", repository, "--json", "headSha,attempt,status"],
+      signal,
+    );
+    if (run === undefined || run.exitCode !== 0) return undefined;
+    const value = parseJson(run.stdout);
+    if (!isRecord(value) || typeof value.headSha !== "string") return undefined;
+    return {
+      headSha: value.headSha,
+      status: typeof value.status === "string" ? value.status : "",
+      attempt: typeof value.attempt === "number" ? value.attempt : 1,
+    };
+  }
+
+  /**
+   * The pull request's current head, refused when the number now names a
+   * different pull request than the one linked: a link's node id is its
+   * identity, and owner, name and number only find it.
+   */
   async #openHead(
     request: GhPullRequestSwitchRequest,
     signal: AbortSignal,
+    expectedPullRequestNodeId?: string,
   ): Promise<
-    | { readonly status: "open"; readonly headSha: string }
-    | { readonly status: "refused"; readonly reason: "not-open" }
+    | { readonly status: "open"; readonly headSha: string; readonly pullRequestNodeId?: string }
+    | { readonly status: "refused"; readonly reason: "not-open" | "pull-request-replaced" }
     | { readonly status: "unavailable" }
   > {
     const view = await this.#run(
@@ -1359,7 +1481,7 @@ export class GhPullRequestSwitchPort {
         "--repo",
         `${request.owner}/${request.name}`,
         "--json",
-        "state,headRefOid",
+        "id,state,headRefOid",
       ],
       signal,
     );
@@ -1368,8 +1490,23 @@ export class GhPullRequestSwitchPort {
     if (!isRecord(value) || typeof value.headRefOid !== "string" || value.headRefOid === "") {
       return { status: "unavailable" };
     }
+    const pullRequestNodeId =
+      typeof value.id === "string" && /^[A-Za-z0-9+/=_-]{1,128}$/.test(value.id)
+        ? value.id
+        : undefined;
+    if (
+      expectedPullRequestNodeId !== undefined &&
+      pullRequestNodeId !== undefined &&
+      pullRequestNodeId !== expectedPullRequestNodeId
+    ) {
+      return { status: "refused", reason: "pull-request-replaced" };
+    }
     if (normalizeState(value.state) !== "open") return { status: "refused", reason: "not-open" };
-    return { status: "open", headSha: value.headRefOid };
+    return {
+      status: "open",
+      headSha: value.headRefOid,
+      ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
+    };
   }
 
   /** Every check on the head, with the Actions run and job behind it when it has one. */
@@ -1400,18 +1537,28 @@ export class GhPullRequestSwitchPort {
     }
     const checks: CiCheck[] = [];
     for (const entry of value) {
-      if (!isRecord(entry) || typeof entry.name !== "string" || entry.name.trim() === "") continue;
+      if (!isRecord(entry) || typeof entry.name !== "string") continue;
+      const name = checkName(entry.name);
+      if (name === "") continue;
       const bucket = String(entry.bucket);
       if (!["pass", "pending", "fail", "cancel", "skipping"].includes(bucket)) continue;
+      // Only a job in this repository's Actions is this pull request's to
+      // read or rerun; any other link is treated as an outside service's.
       const ids =
         typeof entry.link === "string"
-          ? /\/actions\/runs\/(\d+)\/job\/(\d+)/.exec(entry.link)
+          ? /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)\/job\/(\d+)(?:[/?#].*)?$/.exec(
+              entry.link,
+            )
           : null;
+      const sameRepository =
+        ids !== null &&
+        ids[1]?.toLowerCase() === request.owner.toLowerCase() &&
+        ids[2]?.toLowerCase() === request.name.toLowerCase();
       checks.push({
-        name: entry.name.trim().slice(0, 512),
+        name,
         bucket: bucket as CiCheck["bucket"],
-        ...(ids?.[1] === undefined ? {} : { runId: ids[1] }),
-        ...(ids?.[2] === undefined ? {} : { jobId: ids[2] }),
+        ...(sameRepository && ids?.[3] !== undefined ? { runId: ids[3] } : {}),
+        ...(sameRepository && ids?.[4] !== undefined ? { jobId: ids[4] } : {}),
       });
     }
     return checks;
@@ -1438,6 +1585,7 @@ export class GhPullRequestSwitchPort {
     const result = await this.#run(
       ["run", "view", "--repo", repository, "--job", jobId, "--log-failed"],
       signal,
+      CI_LOG_TAIL_BYTES,
     );
     if (result === undefined) return { status: "unavailable" };
     if (result.exitCode !== 0) {
@@ -1452,11 +1600,15 @@ export class GhPullRequestSwitchPort {
     return { status: "log", text: result.stdout };
   }
 
-  async #run(arguments_: readonly string[], signal: AbortSignal) {
+  async #run(arguments_: readonly string[], signal: AbortSignal, stdoutTailBytes?: number) {
     try {
       const result = await this.#command.run(
         arguments_,
-        { environment: this.#environment, stdin: undefined },
+        {
+          environment: this.#environment,
+          stdin: undefined,
+          ...(stdoutTailBytes === undefined ? {} : { stdoutTailBytes }),
+        },
         signal,
       );
       return result.timedOut === true ? undefined : result;
@@ -1719,6 +1871,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function clampBytes(value: string, maxBytes: number): string {
   const bytes = Buffer.from(value, "utf8");
   return bytes.byteLength <= maxBytes ? value : `${bytes.subarray(0, maxBytes).toString("utf8")}…`;
+}
+
+/**
+ * A check's name as a single line: a job name is the repository's text, and
+ * it is shown whole in a rerun approval, so line breaks, control and format
+ * characters (bidirectional overrides among them) cannot reshape that prompt.
+ */
+function checkName(value: string): string {
+  return value
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\s]+/gu, " ")
+    .trim()
+    .slice(0, 512);
 }
 
 interface CiCheck {

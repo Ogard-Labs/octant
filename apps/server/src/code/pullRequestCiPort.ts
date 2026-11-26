@@ -49,7 +49,9 @@ type ThreadPullRequestRefusal =
   | "no-pull-request"
   | "ambiguous-pull-request"
   | "not-authorized"
-  | "not-open";
+  | "not-open"
+  | "thread-unavailable"
+  | "pull-request-replaced";
 
 export type PullRequestCiLogsOutcome =
   | {
