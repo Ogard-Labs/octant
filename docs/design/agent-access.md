@@ -291,10 +291,11 @@ lists only rows on threads in scope. `list_threads` lists only threads in scope.
 - Settings › Remote access › Agent access lists each grant: name, scope,
   connection kinds, enrolled key fingerprints, last use with where it came
   from (this computer, the LAN, or Tailscale),
-  threads started, and turns today. Change and Revoke are there; a paired
-  device sees the list and can revoke (`GET /api/agent-grants`,
+  threads started, and turns today. Change and Revoke are there; any paired
+  device, a Read only one included, sees the list and can revoke, since
+  revoking only reduces authority (`GET /api/agent-grants`,
   `POST /api/agent-grants/revoke`, action `agent-access.revoke`, journaled as
-  that device). An outside agent reaches neither route.
+  that device; maintainer decision, 2026-11-26). An outside agent reaches neither route.
 - A thread an outside agent started shows "Started by <agent name>" in its
   pane header and on its sidebar row, read from `GET /api/agent-grants/threads`,
   which names each such thread with its grant's current name.

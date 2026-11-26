@@ -544,6 +544,11 @@ address (such as a missing trailing slash) shows nothing. Until a check runs,
 a keyed endpoint whose host credential store holds no key reads Needs key with
 Add key on its row, in the same state a refused or missing key uses.
 
+A model's limits and capabilities come from the first source that names them:
+observed behaviour, runtime metadata, reviewed catalog metadata, user-supplied
+metadata, then unknown. User-supplied metadata can make a model selectable but
+never authorizes a side effect.
+
 ## Verification
 
 - Provider catalog: `apps/web/src/providers/catalog/ProviderCatalogView.test.tsx`.

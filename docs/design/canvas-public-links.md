@@ -55,9 +55,12 @@ moved into this repository for one-command deploys (see
   refused (`resolvePersonCanvasContext` in `apps/server/src/canvasRoutes.ts`).
   Paired Chat, Work and Code threads use the same Canvas reader and link list
   as the host. Opening a Canvas exposes its existing public links and Copy link
-  through the authenticated device session and current Canvas read grant. Its
-  client omits creation, editing, export and owner-management methods; their
-  controls are absent. Changing thread, mode or host client closes the reader.
+  through the authenticated device session and current Canvas read grant. A
+  browser the host's own person paired also gets the person's Canvas controls
+  (`PERSON_CANVAS_CONTROLS` in `apps/web/src/remote/remoteProductClients.ts`):
+  export offers, prepare and approve, link revoke, Public links settings, the
+  network switch, comments and the design-system switch. Any other session's
+  client omits them. Changing thread, mode or host client closes the reader.
 - A paired device's Canvas read grant is **thread read authority**: the host
   serves a thread's Canvas cards, and a Canvas's content, history, design
   images, HTML file, running-design page and public-link list, when the
@@ -70,8 +73,14 @@ moved into this repository for one-command deploys (see
   exist, so a device learns nothing about Canvases it cannot read. A window on
   this host keeps its active-Project rule. A paired device makes every Canvas
   write, share, export, public-link change and Settings change as a local window
-  does (maintainer decision, 2026-11-12). Not built yet: today each keeps the
-  window rule and stays refused to a paired device.
+  does (maintainer decision, 2026-11-12): each of those routes resolves a
+  device the host's own person paired through `resolvePersonCanvasContext` in
+  `apps/server/src/canvasRoutes.ts`, and a hub-introduced or restricted device
+  is refused. Not built yet: a plain create from a paired device, because the
+  `create` route still resolves only a window's active Project
+  (`resolveCreateContext`; Import HTML names its Project and is admitted);
+  and editing a Canvas in the paired browser and any of these controls on the
+  phone, which the server admits and the screens do not yet offer.
   _Rationale:_ a paired device's window has no active Project, and the shell
   route that sets one is local-only, so the window rule left every paired
   thread with no Canvas cards (seen on a real pairing in November 2026).

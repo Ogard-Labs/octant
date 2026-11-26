@@ -39,6 +39,9 @@ sidebar coverage and types, checks formatting, and builds with:
 - `OCTANT_DOCS_BASE=/docs/`
 - `OCTANT_DOCS_URL=https://octant.sh/docs/`
 
+Missing pages use the supported VitePress layout slot, and every link keeps the
+`/docs/` base.
+
 Each successful run uploads `docs/dist/` as `octant-docs-<commit SHA>`, retained
 seven days. Use a successful site `main` build for publication; PR artifacts
 are review builds. The root marketing site remains independent of this build.

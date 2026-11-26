@@ -677,7 +677,9 @@ the person or a turn that was running at snooze time ends). The sidebar files
 both in collapsed shelves below the Project groups and derives snooze
 visibility from the clock; no host timer wakes a snooze. The Work and Code
 boards leave out completed threads until they are reopened. A person sending a
-thread a turn reopens or wakes it on the server.
+thread a turn reopens or wakes it on the server. A running thread may be
+snoozed; one waiting on the person may not, and the wake time must be ahead.
+Settling drops the pin and any snooze.
 
 **A thread is not settled before its side tasks and child work are done**
 (maintainer decision, 2026-11-25). The host decides this for every way of
@@ -861,6 +863,13 @@ presentation references share the endpoint/window/context boundary, retain at
 most 64 entries and 128 KiB, and write no document text, native process identity,
 approval or authority. They never take focus or perform a host operation during
 restore. Composer drafts retain their existing durable storage. Editor drafts use the local recovery store described under [File editing](#file-editing); approval requests keep their explicit controls.
+
+The layout persists per window, mode and Project context across a restart; a
+mode's preset layout applies only when none is saved or when the person
+restores it. File and artifact previews are host-authorized and read-only: the
+renderer never receives a host path, every open is authorized again, scripts,
+remote resources, macros and formulas are off, and a missing source restores as
+a placeholder, never as another file.
 
 A window keeps in memory what the eight Code threads that left its panes last
 showed, so coming back to one draws its conversation in the first frame, never
@@ -1069,7 +1078,10 @@ selection-to-agent review. Language capabilities and launch authority remain
 owned by [Language services](language-services.md).
 
 In a Code thread a file opens inside the **Files tool**, in the dock beside the
-thread, and a plain click never replaces the thread with a Code file tab. The
+thread, and a plain click never replaces the thread with a Code file tab. It
+lists the whole bound folder, and a file opens through a host-minted target id
+and opaque reference, never a path; a forgotten or cross-Project token resolves
+to nothing. The
 tool is a file viewer: the open files (name and ×) are the tabs of its pane bar,
 where Refresh and the tree toggle are the bar's actions; under the bar a
 breadcrumb path in muted ink with the checkout's name at its end,
@@ -1417,7 +1429,9 @@ The shell loads each tool through `dockModuleRegistry`; modules under
 failures. Review owns local Working tree and Git History views. History reads
 through `GitHistoryReader` and the authenticated Code checkout-read boundary;
 its Git subprocesses are network-denied and its data is an ephemeral read,
-not a second journal. Pages anchor to immutable Git tips, and commit details
+not a second journal. Git History stays read-only at every level, Plan
+included: browsing or refreshing it never fetches, checks out, stages, reverts
+or resets. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
 Review also owns Local commits: the commits on the thread's branch that its
 upstream does not have, or that its base branch does not have when it has no
@@ -1697,7 +1711,7 @@ after five seconds, and on a failed read drops its figures and history instead
 of showing old ones as current. A window without authority to read the host is
 told so. For a thread in a server Project the tool shows the
 load on that server, read over the Project's SSH connection by
-`GET /api/server-projects/resources` (a local window only; Linux servers only,
+`GET /api/server-projects/resources` (a local window, or a device the host's own person paired, whose own view of it is not built yet; Linux servers only,
 and it says so for any other, and stops asking). The tool reads no
 host until the server Project catalog has answered, so it never shows this
 computer's load under a server thread's name, and a new target starts a new
@@ -1757,7 +1771,9 @@ rather than given an assumed scope. Hand off
 own provider for a six-section hand-off document in one tool-free request,
 keeps it as a Canvas of the thread, and opens that Canvas in the dock; a
 running turn, an unready provider, or a thread outside a Project is refused as
-an ordinary answer. The dock follows the active
+an ordinary answer. Hand off is authorized exactly as export is: an unreadable
+thread is refused identically, and a paired device may hand off only threads
+it may read. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
@@ -2315,7 +2331,8 @@ some computers, it reads, lists and names only those (maintainer decision,
 
 Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
-Chat has no board. The boards are the bundled Board plugin. Switching it off
+Chat has no board. A Code card may show one plan-progress count computed at
+read time, absent with no live plan and never on Work cards. The boards are the bundled Board plugin. Switching it off
 is a presentation switch only: the Work and Code board views, the sidebar
 Board row, and every other way to open them (the Running tile and cards on the
 start screen, back and forward, keyboard and
@@ -3413,7 +3430,10 @@ real plan artifact), Delivery (only for a configured target), Agents (when
 children exist or explicitly invoked), Tasks (opened by the person; see
 [Thread view: Plans and task lists](thread-view.md#plans-and-task-lists)),
 Artifacts (a Work or Code thread in a Project on this host), Simulator, and
-Side chat. A Markdown or
+Side chat. The Artifacts tool lists the thread's Project's artifacts, scoped by
+the host as the Artifacts page is, and opens a Canvas by `canvasId` in the
+dock; Chat has no Project to list, and a server Project's thread is not offered
+it (maintainer request, 2026-11-13). A Markdown or
 text file a Code turn creates or rewrites, and a Canvas a Work or Code turn
 authors, open in the dock beside the transcript once, the first time they appear: the
 offer never moves focus from the composer, a rewrite never reopens a tab, and a
@@ -3624,12 +3644,15 @@ becomes unavailable, loses its tile and comes back as a tab, not as a tile.
 ### Minimised tools
 
 **Minimised tools.** A thread's Browser and Terminal can stand as small live
-cards at the foot of the dock, so a page or a shell can be watched while another
+cards in the dock, so a page or a shell can be watched while another
 tool, or only the overview, is in front. A floating preview drawn over the thread
 covered the thread's own text and could not show a shell at all, so it is gone;
-the cards replace it. The shelf is a group named **Minimised tools** at the foot
-of the dock body, under the overview when no tool is shown and under the tiles
-when tools are shown (the tiles measure what is left and keep their floors). It
+the cards replace it. The shelf is a group named **Minimised tools**. Where the
+dock draws the Environment section, the shelf flows inside it after its last
+list section, rather than standing pinned to the foot. Where the dock draws no
+Environment section, the shelf stands at the foot of the dock body, under the
+overview when no tool is shown and under the tiles when tools are shown (the
+tiles measure what is left and keep their floors). It
 takes its natural height and holds at most two cards (Browser, then Terminal),
 side by side at half the width each (8px gap) once each can have 160px, a dock
 about 352px wide or wider, and stacked below that; one card takes the whole width.
@@ -4326,7 +4349,10 @@ is skipped and the others still show in order; beyond five, the first five
 valid ones show. Pictures are read only for entries that will be shown, and all
 of them cross to the renderer together as data URLs (at most about 3.5 MB, once
 per launch, only when the notes are due), because a second round trip would
-make the Next button wait on disk. The rule is in
+make the Next button wait on disk. Settings › General › Updates links the
+running build's notes at any time. First-run setup never shows the notes,
+opening them is never counted or reported, and nothing here contacts a
+network. The rule is in
 [Decisions and requirements](decisions.md#whats-new-after-an-update).
 
 When a verified app update finishes downloading, its notice offers a direct
@@ -4381,7 +4407,8 @@ create is up, a What's new announcement is showing, Zen is active, or the Inbox
 counts anything that needs attention, and it closes if a dialog opens over it.
 A person who finished setup before the tour existed has no record and is never
 offered it. Showing the tour, however it was opened, records it as seen in the
-same renderer-local storage the host notices use for their dismissals; where the
+same renderer-local storage the host notices use for their dismissals (no host
+setting, network call or count); where the
 storage cannot be read the offer may come back, which is harmless. The account
 menu's "Take the tour" opens it again at any time, in any window with the
 sidebar showing, and records nothing else.

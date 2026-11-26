@@ -375,7 +375,10 @@ the CLI. The hub depends on that:
     actual portable resources layout, claims the selected native profile before
     server/persistence imports, and composes its journal, usage cache, private
     authority stores, closed credential namespaces, logs and discovery ports.
-    It serves loopback Chat and keeps Work/Code and executable extensions refused.
+    It starts the ordinary server on loopback (`apps/server/src/windowsForeground.ts`);
+    which Work and Code turns it admits is the
+    [Windows below Full access](../architecture.md#current-release-boundary) rule,
+    and executable extensions stay unavailable until they have native private admission.
     CLI-backed provider construction is unavailable before catalog or session
     work; only existing in-process API providers are composed. This also keeps
     catalog/version discovery from launching a third-party executable at boot.
