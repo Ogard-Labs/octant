@@ -38,6 +38,7 @@ import {
   decodeWorkThreadId,
   decodeWorkTurnId,
   decodeWorkTurnUpdated,
+  THREAD_RETENTION_EVENT_NAMES,
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
   personalSignInRefusals,
@@ -160,6 +161,16 @@ import { attachedImageSources, workspaceImageSources } from "../image/threadImag
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
 import { lookToolForThread } from "../image/lookTool";
+import { prepareProjectTerminalProtections } from "../code/projectTerminalProtections";
+import { terminalShellFor } from "../code/terminalShell";
+import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
+import {
+  createWorkTerminalTools,
+  watchWorkTerminalsLeftBehind,
+  workAgentTerminalId,
+  type WorkTerminalCeiling,
+  type WorkTerminalStart,
+} from "../work/workAgentTerminal";
 import { providerTakesFileNatively, supportsConversationInput } from "./conversationInputs";
 import { modelLabelOf } from "./imageDescriber";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
@@ -193,6 +204,8 @@ import type { WorkRequestStateWiring } from "./workRequestState";
 import { workTurnToolLevel } from "../work/workTurnToolLevel";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
+  /** The network a chosen sandbox policy routes a terminal through. */
+  readonly providerRuntimeNetwork?: ProviderRuntimeNetworkPort;
   /** The member's Act item, which holds a hub-introduced device's queued Code turns. */
   readonly hubActScopeSlot: HubActScopeSlot;
   /** Sees images; absent on a host started without one. */
@@ -302,7 +315,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "resolveFeedbackThread"
     | "windowHoldsProject"
   > &
-  Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
+  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService" | "routeCodeService"> &
   Pick<
     HarnessWiring,
     | "runtimeForgeChanges"
@@ -333,6 +346,9 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   };
 
 export function wireWork(deps: WorkDependencies) {
+  // Where each Work thread's agent shell was started, so a later turn in
+  // another folder ends it instead of reusing it.
+  const workTerminalFolders = new Map<string, WorkTerminalStart>();
   const imageDescriber = deps.imageDescriber;
   const {
     threadSecretFacts,
@@ -503,8 +519,66 @@ export function wireWork(deps: WorkDependencies) {
           );
       }
     });
+    // The ceiling a Work thread holds now: its Strict value, and the level its
+    // running turn holds, or its own between turns.
+    const workThreadCeilingNow = (threadId: string): WorkTerminalCeiling | undefined => {
+      try {
+        const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        if (thread === undefined) return undefined;
+        return {
+          strict: resolveThreadStrict(threadId),
+          executionPolicy: workThreadAccessOf(
+            runningWorkTurns.get(threadId)?.access ?? thread.access,
+          ).executionPolicy,
+        };
+      } catch {
+        return undefined;
+      }
+    };
+    // The folder a Work thread works in now: undefined once it is archived,
+    // deleted, or its Project no longer binds it as it did.
+    const workThreadFolderNow = async (threadId: WorkThreadId) => {
+      const thread = workThreadProjection.read(threadId);
+      if (thread?.lifecycle !== "active") return undefined;
+      const project = persistence.readProject(thread.projectId);
+      if (
+        project?.type !== "work" ||
+        project.lifecycle !== "active" ||
+        project.bindingHistory.at(-1)?.revisionId !== thread.bindingRevisionId
+      )
+        return undefined;
+      const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
+      if (selected === undefined) return undefined;
+      return resolveThreadWorkingDirectory(
+        selected,
+        thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+      ).catch(() => undefined);
+    };
+    // A Work thread's agent shell ends as the change that leaves it behind is
+    // committed (an archive, a deletion, a move to another folder, the
+    // Project's relink or archive, or a narrower level or Strict), not at the
+    // agent's next terminal call.
+    const unsubscribeWorkTerminalFolders = watchWorkTerminalsLeftBehind({
+      subscribeCommitted: (listener) => persistence.journal.subscribeCommitted(listener),
+      started: workTerminalFolders,
+      ceilingNow: (threadId) => workThreadCeilingNow(threadId),
+      folderNow: async (threadId) => {
+        try {
+          return await workThreadFolderNow(decodeWorkThreadId(threadId));
+        } catch {
+          return undefined;
+        }
+      },
+      terminate: async (threadId) => {
+        await deps.codeOperationRuntime?.terminals
+          ?.terminate(workAgentTerminalId(threadId))
+          .catch(() => undefined);
+      },
+      onError: (error) => console.error("[work terminal] A shell left behind did not stop.", error),
+    });
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
+        unsubscribeWorkTerminalFolders();
         unsubscribeKeptWorkSessionTerms();
         await outlivingWorkSessions.close();
       }),
@@ -984,21 +1058,7 @@ export function wireWork(deps: WorkDependencies) {
             ? threadWorkingDirectoryCurrent(input.projectRoot, input.projectRoot)
             : undefined;
         const currentRoot = async () => {
-          const thread = workThreadProjection.read(input.thread.id);
-          if (thread?.lifecycle !== "active") return undefined;
-          const project = persistence.readProject(thread.projectId);
-          if (
-            project?.type !== "work" ||
-            project.lifecycle !== "active" ||
-            project.bindingHistory.at(-1)?.revisionId !== thread.bindingRevisionId
-          )
-            return undefined;
-          const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
-          if (selected === undefined) return undefined;
-          const root = await resolveThreadWorkingDirectory(
-            selected,
-            thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
-          ).catch(() => undefined);
+          const root = await workThreadFolderNow(input.thread.id);
           return root === input.projectRoot && pinnedRoot?.() === true ? root : undefined;
         };
         const speechTurnAllowed = () => {
@@ -1278,6 +1338,89 @@ export function wireWork(deps: WorkDependencies) {
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
+        // The thread's own shell, at its level and confinement. A routine's run
+        // has nobody to ask, so it is offered none.
+        const workTerminals = deps.codeOperationRuntime?.terminals;
+        const terminalTools =
+          !browserSupported ||
+          workTerminals === undefined ||
+          folder === undefined ||
+          input.routineRun !== undefined ||
+          isRoutineHostScope(input.windowId)
+            ? undefined
+            : createWorkTerminalTools({
+                threadId: String(input.thread.id),
+                projectId: String(input.thread.projectId),
+                terminals: workTerminals,
+                folder: currentRoot,
+                // The running turn's level, as the other families read it: a
+                // call that arrives with no turn running asks, rather than
+                // taking the level the thread was composed at.
+                posture: () => runningLevel().posture,
+                current: () => workThreadProjection.read(input.thread.id)?.lifecycle === "active",
+                // Between calls a thread that cannot be read holds nothing.
+                ceiling: () =>
+                  workThreadCeilingNow(String(input.thread.id)) ?? {
+                    strict: true,
+                    executionPolicy: "plan",
+                  },
+                ask: async (summary, command, signal) => {
+                  const outcome = await nativeHarnessApprovals.ask({
+                    threadId: String(input.thread.id),
+                    mode: "work",
+                    projectId: input.thread.projectId,
+                    lead: {
+                      hostId: LOCAL_HOST_ID,
+                      providerInstanceId: input.thread.providerInstanceId,
+                      modelId: input.thread.modelId,
+                    },
+                    toolName: "provider-action",
+                    summary,
+                    // The card shows the command whole, not the summary's first 240
+                    // characters, and the 8,192-character bound is the command's own.
+                    detail: command,
+                    approvalClass: "terminal",
+                    // Each command is its own answer, as in a Code thread's terminal.
+                    singleUse: true,
+                    signal,
+                  });
+                  return outcome === "approved" || outcome === "cancelled" ? outcome : "denied";
+                },
+                protections: async (root, executionPolicy) => {
+                  const prepared = await prepareProjectTerminalProtections(
+                    {
+                      terminalId: workAgentTerminalId(String(input.thread.id)),
+                      projectId: String(input.thread.projectId),
+                      root,
+                      mode: "work",
+                      executionPolicy,
+                      workThreadId: String(input.thread.id),
+                      outlivesParentTurn: true,
+                    },
+                    deps.providerRuntimeNetwork,
+                  );
+                  return prepared.status === "refused"
+                    ? { refused: prepared.message }
+                    : { launch: prepared.launch, end: prepared.end, current: prepared.current };
+                },
+                platform: process.platform,
+                strict: () => resolveThreadStrict(String(input.thread.id)),
+                shell: () =>
+                  terminalShellFor({
+                    platform: process.platform,
+                    windowsShell: persistence.readCodeSettings()?.settings.windowsTerminalShell,
+                  }),
+                recordExternalContentIngestion: (mark) =>
+                  externalContentIngestionStore.record(mark),
+                uuid: randomUUID,
+                startedIn: {
+                  get: () => workTerminalFolders.get(String(input.thread.id)),
+                  set: (started) => {
+                    if (started === undefined) workTerminalFolders.delete(String(input.thread.id));
+                    else workTerminalFolders.set(String(input.thread.id), started);
+                  },
+                },
+              });
         const secretTools = !browserSupported
           ? undefined
           : createCredentialTool({
@@ -1300,6 +1443,7 @@ export function wireWork(deps: WorkDependencies) {
           projectMemoryTools === undefined &&
           reportFinishedTools === undefined &&
           secretTools === undefined &&
+          terminalTools === undefined &&
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
@@ -1333,6 +1477,7 @@ export function wireWork(deps: WorkDependencies) {
           projectMemoryTools,
           reportFinishedTools,
           secretTools,
+          terminalTools,
         );
       },
       nativeHarness: nativeHarnessHooks,

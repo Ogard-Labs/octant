@@ -1278,8 +1278,8 @@ owns its file, quota and per-operation rules.
 
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
-`octant_browser`, `octant_computer`, `octant_threads` in Work and Code, in
-Code `octant_terminal`, `octant_apple`, `octant_android`, `octant_pull_request`,
+`octant_browser`, `octant_computer`, `octant_threads` and `octant_terminal` in
+Work and Code, in Code `octant_apple`, `octant_android`, `octant_pull_request`,
 and `octant_github`, and for Zen's assistant `octant_zen` — with its actions in
 an `operation` enum. The always-visible tool prefix stays small and
 cache-stable, so a family's description says only what an agent must know
@@ -1872,7 +1872,35 @@ Full access runs it, and below Full access each command the agent types into
 it (`run` or `write`) asks the person in the thread with the command shown
 first; an approval for a command that starts the terminal also mints the
 host's one-use approval for that start. Reading and stopping it ask nothing.
-A host that cannot ask refuses it below Full access.
+A host that cannot ask refuses it below Full access. The ask shows the whole
+command; one too long to show whole (over 8,192 characters) is refused. `run`
+waits up to 30 seconds for its command to finish; one still running then,
+such as a dev server started in the foreground, is left running, and `run`
+returns its output so far with `commandCompleted: false`, in Code, Work and a
+helper's terminal alike (maintainer decision, 2026-11-26). While that command
+still owns the terminal, a new `run` is refused as busy rather than typed into
+it, and `read`, `write` and `stop` still work; the next `read` after it ends
+reports its exit code. It stops holding the terminal only when it ends, when
+it is stopped, or when the agent has sent it Ctrl-C through `write` and its
+shell is back in the foreground with no completion; then `read` says it ended
+with its exit code unknown. A shell in the foreground alone frees nothing,
+since it may be in its own `read` rather than at its prompt, and Windows
+cannot report the foreground at all. The completion is typed in the same
+input the shell parses with the command, so a program reading its input
+cannot take it, and it follows the shell the terminal started in, which the
+terminal keeps, with that command, across turns. In Work it is one shell per
+thread in the thread's folder, at the thread's level and confined as its own
+commands are; on macOS and Linux it is confined at that level below Full
+access even outside Strict, and runs natively only at Full access outside
+Strict. Windows has no Octant sandbox, so there it runs unconfined outside
+Strict at every level, and below Full access every command and every input
+typed into a running program asks, with no answer remembered (maintainer
+decision, 2026-11-26); under Strict it is refused. A routine's run is offered
+none. It outlives the turn that started
+it, under Strict too, and ends when the agent stops it or as soon as the
+thread is archived or deleted, its Project unbound, its folder changed, or
+its ceiling narrowed: Plan, a narrower level, Strict turned on, or its
+sandbox scope or chosen policy no longer current.
 
 ## Modes: Chat, Work, and Code
 
@@ -16708,6 +16736,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
 
     Personal Project terminals own an admitted policy and broker lifetime;
     Work terminals also inherit their thread's current protection ceiling.
+    A person's own Work-task terminal ends with the turn running when it
+    started. A Work thread's agent terminal takes that ceiling at start,
+    outlives the turn, and ends once the thread's ceiling narrows instead.
     Configured folder grants and network policy reach the actual PTY launcher,
     including at Full access under Strict. Their proxy grants no inference
     endpoints, and closing the terminal revokes it and verifies the native

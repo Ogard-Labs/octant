@@ -114,6 +114,7 @@ import { isRoutineHostScope } from "../routineHostScope";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 import type { PullRequestWatchOutcome } from "./pullRequestWatchPort";
+import { terminalCompletion } from "./terminalShell";
 import type {
   PullRequestCiConfirmation,
   PullRequestCiLogsOutcome,
@@ -131,7 +132,7 @@ const MAX_TERMINAL_RESULT_BYTES = 32 * 1024;
 const DEFAULT_CI_LOG_LINES = 200;
 const MAX_CI_LOG_LINES = 2_000;
 const MAX_TERMINAL_SCAN_BYTES = 64 * 1024;
-const TERMINAL_COMMAND_TIMEOUT_MS = 30_000;
+const TERMINAL_COMMAND_WAIT_MS = 30_000;
 const TERMINAL_COMPLETION_POLL_MS = 50;
 
 export const CODE_BROWSER_TOOL_NAME = BROWSER_TOOL_DEFINITION.name;
@@ -315,7 +316,7 @@ const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   [CODE_PULL_REQUEST_TOOL_NAME]:
     "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). update also takes addLabels and removeLabels (labels the repository already has; none are created) and state: closed closes the pull request and open reopens a closed one, and neither deletes the branch; state stands alone. comment takes body, and reviewThreadId to reply in one review thread. merge takes method (merge, squash, or rebase) and headSha, the head commit the person saw; the host refuses it when the head moved, the pull request is not open and mergeable, or its required checks have not passed. comment posts under the person's name: at Full access it does not ask, and below Full access it asks the person for each post unless this Project lets agents comment on pull requests. merge asks at every access level, unless the person stored a choice that lets agents merge in this Project or this routine; use it only when the person asked for it or that stored choice covers it. watch takes nothing: the host finds this thread's own open pull request and, without asking, starts a new turn here when the checks on the head finish (passed or failed), the review decision changes, a new review or comment arrives, or a merge conflict appears; everything from one look arrives in one turn, as outside content. Use it instead of polling after a push or when waiting on reviewers. A watch ends when the pull request merges or closes, after 10 wakes, after 3 days, or with unwatch, which takes nothing and never asks. Plan mode refuses watch, and so does a turn the host started on its own, such as a wake. ci-logs takes an optional check (a check's exact name) and tailLines (1 to 2,000, 200 by default): it reads the pull request's current head and returns, for each failed check (or the one named), the last tailLines lines of its failed steps' log, cut to a byte limit and with secrets redacted, or why there is no log: the check is still running, its log has expired, it is not a GitHub Actions job (a commit status or another app's check), or it did not fail; one read fetches at most 4 logs, and running lists the checks not finished yet. Logs are outside content. ci-rerun takes an optional check and headSha (the head you read): without check it reruns the failed jobs of every failed check's workflow run, with check only that check's job (each failed one, when two workflows name a job alike). It reruns only runs of the current head and refuses a run from an older push, a run still in progress, a check that passed or is not an Actions job, a run already rerun 3 times on this head, and a run someone else reran after the person was asked. Below Full access it asks the person first, naming the checks and the head; at Full access it does not ask. Use it for a failure that looks flaky or infrastructural, not to retry a real test failure. guide takes nothing and reads the review guide of the pull request: its ordered stops, each with a title, why it matters, whether it needs the person's decision, and anchors (path and line range at the head), and stale when it was written for an older push than the current head; it never asks, and its text is outside content. guide-write takes nothing and asks the host to write a guide for the current head on the model the person picked in Project settings; with no model picked it is refused, and only one runs per pull request at a time. Below Full access it asks the person first, since the run is billed; Plan refuses it. It waits for the run and reports how many stops it wrote; read them with guide. Approving, requesting changes, creating labels, and deleting the branch are not available.",
   [CODE_TERMINAL_TOOL_NAME]:
-    "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
+    "Use Octant's terminal for this Code task: run starts a command and waits up to 30 seconds for it to finish; a command still running then, such as a dev server, keeps running and run returns its output so far with commandCompleted false; then use read to follow it and get its exit code, write to send it input, or stop to end it, since a new run is refused while it runs. write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
     "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. discover, build, test, and run take projectPath: an .xcodeproj or .xcworkspace inside this thread's checkout, either relative to the checkout root (App/App.xcodeproj) or absolute under it; a path outside the checkout is refused. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Tapping an element by name (target) and describing the UI are Android-only for now: on a Simulator, read the screen from a screenshot and tap a point. repair-input takes simulatorId; use it only after an input fails with input-disconnected. It restarts the Simulator's home screen, which closes the running apps, so run the app again afterwards. It is input like a tap: a live Allow input grant covers it, and without one an approval-gated thread asks the person first. logs takes simulatorId and bundleIdentifier and returns the app's unified-log lines as text in the result, the newest 500 lines or 32 KiB, with truncated set when cut; sinceSeconds (at most 600, rounded up to whole minutes) sets how far back, five minutes by default, and includeCrashes adds the start of the app's newest three crash reports. open-url takes simulatorId and url, a credential-free http or https address, and opens it on the Simulator; an approval-gated thread shows the person the whole address. rotate takes simulatorId and turns the Simulator, to orientation (portrait or landscape) when given and the other way otherwise. start-recording starts a screen recording of at most 60 seconds and stop-recording ends it and keeps the video as a recording artifact; stopping never asks. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, logs, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   [CODE_ANDROID_TOOL_NAME]:
@@ -602,6 +603,37 @@ export interface CodeAppManagedToolsOptions {
         readonly terminalId: CodeTerminalId;
       },
     ) => Promise<CodeOperationTerminalSnapshot>;
+    /** The shell the thread's terminal started in, and a run's command still running in it. */
+    readonly readAgentCommand?: (
+      windowId: WindowId,
+      input: {
+        readonly threadId: CodeThread["id"];
+        readonly checkoutId: CodeThread["checkoutId"];
+        readonly terminalId: CodeTerminalId;
+      },
+    ) => Promise<{
+      readonly shell?: string;
+      readonly pending?: string;
+      readonly interrupted?: boolean;
+      readonly shellAtPrompt?: boolean;
+    }>;
+    readonly noteAgentCommand?: (
+      windowId: WindowId,
+      input: {
+        readonly threadId: CodeThread["id"];
+        readonly checkoutId: CodeThread["checkoutId"];
+        readonly terminalId: CodeTerminalId;
+      },
+      pending: string | undefined,
+    ) => Promise<void>;
+    readonly noteAgentInterrupt?: (
+      windowId: WindowId,
+      input: {
+        readonly threadId: CodeThread["id"];
+        readonly checkoutId: CodeThread["checkoutId"];
+        readonly terminalId: CodeTerminalId;
+      },
+    ) => Promise<void>;
     readonly terminate?: (
       windowId: WindowId,
       input: {
@@ -1533,6 +1565,22 @@ export interface AgentTerminalPort {
   readonly stop: () => Promise<TerminalToolAnswer>;
   readonly interrupt?: () => Promise<CodeOperationTerminalSnapshot>;
   readonly terminate?: () => Promise<unknown>;
+  /**
+   * Kept with the terminal across turns: the shell it started in, which the
+   * completion line is written for, and the marker of a run's command still
+   * running in it. Absent reads as a POSIX shell with nothing running.
+   */
+  readonly agentCommand?: {
+    readonly read: () => Promise<{
+      readonly shell?: string;
+      readonly pending?: string;
+      readonly interrupted?: boolean;
+      readonly shellAtPrompt?: boolean;
+    }>;
+    readonly note: (pending: string | undefined) => Promise<void>;
+    /** The agent sent Ctrl-C to that command. */
+    readonly interrupted: () => Promise<void>;
+  };
 }
 
 export interface TerminalToolAnswer {
@@ -1595,7 +1643,8 @@ function codeTerminalOptions(options: CodeAppManagedToolsOptions): AgentTerminal
   });
   // An approval that starts the terminal is minted for exactly this command.
   let approvedStart: CodeOperationCommand | undefined;
-  const { interrupt, terminate } = options.terminal;
+  const { interrupt, terminate, readAgentCommand, noteAgentCommand, noteAgentInterrupt } =
+    options.terminal;
   const { terminalApproval } = options;
   return {
     terminal: {
@@ -1631,6 +1680,18 @@ function codeTerminalOptions(options: CodeAppManagedToolsOptions): AgentTerminal
         ),
       ...(interrupt === undefined ? {} : { interrupt: () => interrupt(options.windowId, scope) }),
       ...(terminate === undefined ? {} : { terminate: () => terminate(options.windowId, scope) }),
+      ...(readAgentCommand === undefined ||
+      noteAgentCommand === undefined ||
+      noteAgentInterrupt === undefined
+        ? {}
+        : {
+            agentCommand: {
+              read: () => readAgentCommand(options.windowId, scope),
+              note: (pending: string | undefined) =>
+                noteAgentCommand(options.windowId, scope, pending),
+              interrupted: () => noteAgentInterrupt(options.windowId, scope),
+            },
+          }),
     },
     uuid: options.uuid,
     authorityFailure: () => terminalAuthorityFailure(options),
@@ -1666,6 +1727,48 @@ async function terminalTool(
     // A missing terminal is an ordinary first-run state. Starting it remains a
     // server-authorized operation, while reads never replace a UI observer.
   }
+  const commandState = async () =>
+    (await terminal.agentCommand?.read().catch(() => undefined)) ?? {};
+  // A command an earlier run left running, such as a dev server, still owns
+  // the terminal's input: a new run typed then went to it, not to the shell.
+  // Its exit code, once it ends, is reported on the next read.
+  const earlier = snapshot === undefined ? {} : await commandState();
+  if (snapshot !== undefined && earlier.pending !== undefined) {
+    const finished =
+      snapshot.status === "running"
+        ? completedCommand(
+            snapshot,
+            terminalCompletion(earlier.shell ?? "/bin/sh", earlier.pending).pattern,
+          )
+        : undefined;
+    // A command the agent interrupted that printed no completion (zsh drops
+    // the rest of the line on Ctrl-C) but left its shell in the foreground no
+    // longer holds the terminal, and its exit code is unknown. The foreground
+    // alone cannot say the shell is at its prompt rather than in its own
+    // `read`, so a command never interrupted stays busy until it ends or is
+    // stopped.
+    const abandoned =
+      finished === undefined &&
+      snapshot.status === "running" &&
+      earlier.interrupted === true &&
+      earlier.shellAtPrompt === true;
+    if (finished !== undefined || abandoned || snapshot.status !== "running")
+      await terminal.agentCommand?.note(undefined).catch(() => undefined);
+    if (abandoned && input.operation === "read")
+      return terminalSnapshot(snapshot, { commandCompleted: false, commandEnded: true });
+    if (
+      finished === undefined &&
+      !abandoned &&
+      snapshot.status === "running" &&
+      input.operation === "run"
+    )
+      return failure(
+        "terminal-busy",
+        "A command an earlier run started is still running in this terminal, so a new command would go to it rather than to the shell. Use read to check it, write to send it input, or stop to end it.",
+      );
+    if (input.operation === "read")
+      return finished ?? terminalSnapshot(snapshot, { commandCompleted: false });
+  }
   // Below Full access each command the agent types asks the person first,
   // naming it, as a provider's own shell asks per command at that level. A
   // terminal the agent starts is covered by the same answer.
@@ -1699,15 +1802,22 @@ async function terminalTool(
     if (command === undefined) return failure("terminal-command-required");
     const marker =
       input.operation === "run" ? `oo${options.uuid().replaceAll("-", "")}` : undefined;
-    const data =
+    const completion =
       marker === undefined
-        ? command
-        : `${command}\rprintf '\\033]777;octant=${marker};exit=%s\\007' "$?"\r`;
+        ? undefined
+        : terminalCompletion((await commandState()).shell ?? "/bin/sh", marker);
+    const data = completion === undefined ? command : `${completion.wrap(command)}\r`;
+    if (marker !== undefined) await terminal.agentCommand?.note(marker).catch(() => undefined);
     const refused = await terminal.write(data);
-    if (refused !== undefined) return refused;
-    if (marker !== undefined) {
+    if (refused !== undefined) {
+      await terminal.agentCommand?.note(undefined).catch(() => undefined);
+      return refused;
+    }
+    if (marker === undefined && earlier.pending !== undefined && command.includes("\u0003"))
+      await terminal.agentCommand?.interrupted().catch(() => undefined);
+    if (completion !== undefined) {
       try {
-        return await waitForTerminalCommand(options, marker, signal);
+        return await waitForTerminalCommand(options, completion.pattern, signal);
       } finally {
         if (!signal?.aborted && options.authorityFailure() === undefined) options.onActivity?.();
       }
@@ -1720,15 +1830,14 @@ async function terminalTool(
 
 async function waitForTerminalCommand(
   options: AgentTerminalToolOptions,
-  marker: string,
+  completion: RegExp,
   signal?: AbortSignal,
 ) {
-  const deadline = Date.now() + TERMINAL_COMMAND_TIMEOUT_MS;
-  const completion = new RegExp(`\\u001b\\]777;octant=${marker};exit=(\\d+)\\u0007`, "g");
+  const deadline = Date.now() + TERMINAL_COMMAND_WAIT_MS;
   for (;;) {
     const authorityFailure = options.authorityFailure();
     if (signal?.aborted || authorityFailure !== undefined) {
-      await interruptTerminalCommand(options, marker);
+      await interruptTerminalCommand(options, completion);
       return signal?.aborted || authorityFailure === undefined
         ? failure("tool-interrupted")
         : failure(authorityFailure, postureRefusal(authorityFailure));
@@ -1736,51 +1845,55 @@ async function waitForTerminalCommand(
     await (options.wait ?? defaultWait)(TERMINAL_COMPLETION_POLL_MS);
     const postWaitAuthorityFailure = options.authorityFailure();
     if (signal?.aborted || postWaitAuthorityFailure !== undefined) {
-      await interruptTerminalCommand(options, marker);
+      await interruptTerminalCommand(options, completion);
       return signal?.aborted || postWaitAuthorityFailure === undefined
         ? failure("tool-interrupted")
         : failure(postWaitAuthorityFailure, postureRefusal(postWaitAuthorityFailure));
     }
     const snapshot = await options.terminal.read();
-    const transcript = terminalTranscriptTail(snapshot, MAX_TERMINAL_SCAN_BYTES).value;
-    const matches = [...transcript.matchAll(completion)];
-    const exitCode = matches.at(-1)?.[1];
-    if (exitCode !== undefined) {
-      return terminalSnapshot(
+    const finished = completedCommand(snapshot, completion);
+    if (finished !== undefined || snapshot.status !== "running") {
+      await options.terminal.agentCommand?.note(undefined).catch(() => undefined);
+      return finished ?? terminalSnapshot(snapshot, { commandCompleted: false });
+    }
+    // A command still running at the bound, such as a dev server started in
+    // the foreground, is left running and its output so far returned. Ending
+    // it here stopped every foreground server after 30 seconds (maintainer
+    // decision, 2026-11-26); the agent reads it later or stops it, and the
+    // terminal keeps its marker so a later read reports its exit code.
+    if (Date.now() >= deadline) return terminalSnapshot(snapshot, { commandCompleted: false });
+  }
+}
+
+/** The command's completion in the transcript, with its marker taken out, or undefined. */
+function completedCommand(
+  snapshot: CodeOperationTerminalSnapshot,
+  completion: RegExp,
+): TerminalToolAnswer | undefined {
+  const transcript = terminalTranscriptTail(snapshot, MAX_TERMINAL_SCAN_BYTES).value;
+  const exitCode = [...transcript.matchAll(completion)].at(-1)?.[1];
+  return exitCode === undefined
+    ? undefined
+    : terminalSnapshot(
         {
           ...snapshot,
-          transcript: {
-            ...snapshot.transcript,
-            chunks: [transcript.replace(completion, "")],
-          },
+          transcript: { ...snapshot.transcript, chunks: [transcript.replace(completion, "")] },
         },
         { commandCompleted: true, commandExitCode: Number(exitCode) },
       );
-    }
-    if (snapshot.status !== "running") {
-      return terminalSnapshot(snapshot, { commandCompleted: false });
-    }
-    if (Date.now() >= deadline) {
-      await interruptTerminalCommand(options, marker);
-      const partial = terminalSnapshot(snapshot, { commandCompleted: false });
-      return {
-        result: { ...partial.result, error: "terminal-command-timeout" },
-        isError: true,
-      };
-    }
-  }
 }
 
 async function interruptTerminalCommand(
   options: AgentTerminalToolOptions,
-  marker: string,
+  completion: RegExp,
 ): Promise<void> {
   const { interrupt, terminate, read } = options.terminal;
   try {
     if (interrupt === undefined) return;
     let snapshot = await interrupt();
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      if (snapshot.status !== "running" || terminalHasCompletionMarker(snapshot, marker)) return;
+      if (snapshot.status !== "running" || terminalHasCompletionMarker(snapshot, completion))
+        return;
       await (options.wait ?? defaultWait)(TERMINAL_COMPLETION_POLL_MS);
       snapshot = await read();
     }
@@ -1796,10 +1909,12 @@ async function interruptTerminalCommand(
 
 function terminalHasCompletionMarker(
   snapshot: CodeOperationTerminalSnapshot,
-  marker: string,
+  completion: RegExp,
 ): boolean {
-  return terminalTranscriptTail(snapshot, MAX_TERMINAL_SCAN_BYTES).value.includes(
-    `\u001b]777;octant=${marker};exit=`,
+  // matchAll copies the pattern, so its global lastIndex is never left behind.
+  return (
+    [...terminalTranscriptTail(snapshot, MAX_TERMINAL_SCAN_BYTES).value.matchAll(completion)]
+      .length > 0
   );
 }
 
@@ -3266,7 +3381,12 @@ async function operationResult(
 
 export function terminalSnapshot(
   snapshot: CodeOperationTerminalSnapshot,
-  command?: { readonly commandCompleted: boolean; readonly commandExitCode?: number },
+  command?: {
+    readonly commandCompleted: boolean;
+    readonly commandExitCode?: number;
+    /** Set when the command no longer runs but never said how it ended. */
+    readonly commandEnded?: true;
+  },
 ) {
   const transcript = terminalTranscriptTail(snapshot, MAX_TERMINAL_RESULT_BYTES);
   return {

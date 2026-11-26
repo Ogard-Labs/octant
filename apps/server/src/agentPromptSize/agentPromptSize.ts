@@ -316,6 +316,7 @@ function octantTools(context: AgentPromptContext): ReadonlyArray<ProviderToolDef
         routineProposalDefinition,
         routinesDefinition,
         REPORT_FINISHED_TOOL_DEFINITION,
+        terminalDefinition,
       ];
     case "code":
       return [

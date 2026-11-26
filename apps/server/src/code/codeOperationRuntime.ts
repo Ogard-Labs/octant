@@ -6739,6 +6739,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           terminal: {
             read: (windowId, input) => service.readTerminal(windowId, input),
             interrupt: (windowId, input) => service.interruptTerminal(windowId, input),
+            readAgentCommand: (windowId, input) => service.readAgentCommand(windowId, input),
+            noteAgentCommand: (windowId, input, pending) =>
+              service.noteAgentCommand(windowId, input, pending),
+            noteAgentInterrupt: (windowId, input) => service.noteAgentInterrupt(windowId, input),
             terminate: (windowId, input) => service.terminateTerminal(windowId, input),
           },
           ...(this.#options.browserAutomation === undefined

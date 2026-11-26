@@ -78,6 +78,13 @@ export interface NativeHarnessApprovalAsk {
   readonly toolName: NativeHarnessApproval["toolName"];
   readonly source?: NativeHarnessInteractionSource;
   readonly summary: string;
+  /**
+   * The whole of what the person approves, shown beside the summary, which a
+   * card cuts at 240 characters. An ask with a detail too long to show whole
+   * is denied: an agent's terminal command once ran in full after the person
+   * approved only its first 240 characters.
+   */
+  readonly detail?: string;
   readonly approvalClass: string;
   readonly singleUse?: boolean;
   readonly signal?: AbortSignal | undefined;
@@ -235,6 +242,8 @@ export class NativeHarnessApprovalStore {
     const settled = (outcome: NativeHarnessApprovalOutcome) => Promise.resolve({ outcome });
     if (input.signal?.aborted) return settled("cancelled");
     if (input.source !== undefined && input.summary.length > 8_192) return settled("denied");
+    const detail = input.detail?.trim();
+    if (detail !== undefined && detail.length > 8_192) return settled("denied");
     if (
       input.source === undefined &&
       !singleUse &&
@@ -258,14 +267,19 @@ export class NativeHarnessApprovalStore {
     });
     const approvalId = decodeNativeHarnessApprovalId(this.#options.uuid());
     const askedAt = decodeUtcTimestamp(this.#options.clock());
+    const summary = input.summary.length > 240 ? input.summary.slice(0, 240) : input.summary;
+    const whole =
+      detail ??
+      (input.source !== undefined && input.summary.length > 240 ? input.summary : undefined);
     const approval = decodeNativeHarnessApproval({
       id: approvalId,
       toolName: input.toolName,
       ...(input.source === undefined ? {} : { source: input.source }),
-      summary: input.summary.length > 240 ? input.summary.slice(0, 240) : input.summary,
-      ...(input.source !== undefined && input.summary.length > 240
-        ? { detail: input.summary }
-        : {}),
+      summary,
+      // Only where the card's summary does not already show all of it.
+      ...(whole === undefined || whole.length === 0 || summary.includes(whole)
+        ? {}
+        : { detail: whole }),
       approvalClass: input.approvalClass,
       ...(singleUse ? { singleUse: true } : {}),
       ...this.#outsideContentFor(input.threadId, singleUse && input.source === undefined),

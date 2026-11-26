@@ -6,6 +6,7 @@ import {
   sandboxToolPolicy,
   withSandboxToolPolicy,
   authorizeSandboxHostRequest,
+  beginSandboxTurn,
 } from "./sandboxRuntimePolicy";
 const selection = decodeSandboxPolicySelection({
   policy: {
@@ -107,5 +108,64 @@ describe("sandbox host-tool lifetime", () => {
       expect(() => sandboxToolPolicy()).toThrow(/expired/);
     });
     expect(f.cleanups.size).toBe(0);
+  });
+});
+describe("a terminal admitted under a running turn", () => {
+  it("lets only a terminal marked to outlive its turn do so, while a person's terminal and a helper end with it", async () => {
+    const parentCleanups = new Map<string, Set<() => Promise<void>>>();
+    const ended: string[] = [];
+    configureSandboxRestrictionsAuthority({
+      validateSelection: () => true,
+      active: (threadId) => (threadId === "work-thread" ? selection : undefined),
+      beginTurn: (request) => ({
+        status: "admitted",
+        turn: {
+          summary: "",
+          current: () => true,
+          end: () => {
+            ended.push(request.threadId);
+          },
+        },
+      }),
+      storageDirectory: () => undefined,
+      deny: () => undefined,
+      registerCleanup: (sessionId, cleanup) => {
+        const held = parentCleanups.get(sessionId) ?? new Set();
+        held.add(cleanup);
+        parentCleanups.set(sessionId, held);
+        return () => {
+          held.delete(cleanup);
+        };
+      },
+    });
+    const request = {
+      projectId: "20000000-0000-4000-8000-000000000001",
+      mode: "work" as const,
+      root: "/project",
+      parentThreadId: "work-thread",
+    };
+    const terminal = beginSandboxTurn({
+      ...request,
+      threadId: "terminal",
+      provider: "terminal",
+      executionRoute: "terminal",
+      outlivesParentTurn: true,
+    });
+    // A person's own Work-task terminal says nothing, and ends with the turn as before.
+    const personal = beginSandboxTurn({
+      ...request,
+      threadId: "personal",
+      provider: "terminal",
+      executionRoute: "terminal",
+    });
+    const helper = beginSandboxTurn({ ...request, threadId: "helper", provider: "codex" });
+    expect(terminal.status).toBe("admitted");
+    expect(personal.status).toBe("admitted");
+    expect(helper.status).toBe("admitted");
+    // The parent turn finishes: its cleanups run.
+    for (const cleanup of parentCleanups.get("session") ?? []) await cleanup();
+    expect(ended.sort()).toEqual(["helper", "personal"]);
+    if (terminal.status === "admitted") await terminal.turn.end();
+    expect(ended).toContain("terminal");
   });
 });

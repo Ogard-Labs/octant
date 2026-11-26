@@ -110,7 +110,7 @@ describe("Code app-managed tools", () => {
       expect.objectContaining({
         kind: "write-terminal",
         terminalId: threadId,
-        data: expect.stringMatching(/^pwd\rprintf .*octant=.*exit=/),
+        data: expect.stringMatching(/^\{\rpwd\r\}; printf .*octant=.*exit=/),
       }),
     );
     expect(result).toEqual({
@@ -379,7 +379,199 @@ describe("Code app-managed tools", () => {
     expect(executeOperation).toHaveBeenCalledOnce();
   });
 
-  it("interrupts a command before returning a terminal timeout", async () => {
+  describe("a command still running past run's wait", () => {
+    // One terminal across turns: its transcript, and what the host keeps with it.
+    function sharedTerminal(shell?: string) {
+      const kept: {
+        shell?: string;
+        pending?: string;
+        interrupted?: boolean;
+        shellAtPrompt?: boolean;
+      } = shell === undefined ? {} : { shell };
+      let output = "$ ";
+      const written: string[] = [];
+      let now = 0;
+      const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+      const tools = () =>
+        createCodeAppManagedTools({
+          windowId,
+          thread: thread(),
+          readThread: () => thread(),
+          uuid: uuidFactory(),
+          executeOperation: vi.fn(async (_windowId, command) => {
+            if (command.kind === "write-terminal") written.push(command.data);
+            return {
+              kind: "terminal-state",
+              operationId: command.operationId,
+              terminalId: threadId,
+              state: "running",
+            } as never;
+          }),
+          terminal: {
+            read: async () => ({
+              terminalId: threadId,
+              status: "running",
+              transcript: { chunks: [output], truncated: false, characters: output.length },
+            }),
+            interrupt: vi.fn(),
+            terminate: vi.fn(),
+            readAgentCommand: async () => ({ ...kept }),
+            noteAgentCommand: async (_window: unknown, _scope: unknown, pending?: string) => {
+              delete kept.interrupted;
+              if (pending === undefined) delete kept.pending;
+              else kept.pending = pending;
+            },
+            noteAgentInterrupt: async () => {
+              if (kept.pending !== undefined) kept.interrupted = true;
+            },
+          } as never,
+          wait: async () => {
+            now += 30_001;
+          },
+        });
+      const run = (command: string) =>
+        tools().execute({
+          name: CODE_TERMINAL_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "run", command }),
+        });
+      const read = () =>
+        tools().execute({
+          name: CODE_TERMINAL_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "read" }),
+        });
+      const write = (text: string) =>
+        tools().execute({
+          name: CODE_TERMINAL_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "write", command: text }),
+        });
+      return {
+        kept,
+        written,
+        run,
+        read,
+        write,
+        print: (text: string) => {
+          output += text;
+        },
+        restore: () => nowSpy.mockRestore(),
+      };
+    }
+
+    it("refuses a new run while it still owns the terminal, and types nothing into it", async () => {
+      const terminal = sharedTerminal();
+      try {
+        await terminal.run("npm run dev");
+        terminal.print("Local: http://localhost:5173\n");
+        expect(await terminal.run("npm test")).toMatchObject({
+          isError: true,
+          result: { error: "terminal-busy" },
+        });
+        expect(terminal.written).toHaveLength(1);
+        expect(JSON.stringify(await terminal.run("npm test"))).toMatch(/read.*write.*stop/);
+      } finally {
+        terminal.restore();
+      }
+    });
+
+    it("stays busy while the shell holds the foreground but was never interrupted, as in its own read", async () => {
+      const terminal = sharedTerminal();
+      try {
+        await terminal.run("read answer");
+        terminal.kept.shellAtPrompt = true;
+        expect(await terminal.read()).toMatchObject({ result: { commandCompleted: false } });
+        expect(terminal.kept.pending).toBeDefined();
+        expect(await terminal.run("pwd")).toMatchObject({ result: { error: "terminal-busy" } });
+      } finally {
+        terminal.restore();
+      }
+    });
+
+    it("is let go, exit code unknown, once the agent interrupted it and the shell is back without its completion", async () => {
+      const terminal = sharedTerminal();
+      try {
+        await terminal.run("sleep 60");
+        // Ctrl-C sent by the agent: the shell returns to its prompt, and zsh prints no completion.
+        await terminal.write("\u0003");
+        terminal.print("^C\n$ ");
+        terminal.kept.shellAtPrompt = true;
+        expect(await terminal.read()).toMatchObject({
+          isError: false,
+          result: { commandCompleted: false, commandEnded: true },
+        });
+        expect(terminal.kept.pending).toBeUndefined();
+        expect(await terminal.run("pwd")).not.toMatchObject({ result: { error: "terminal-busy" } });
+        expect(terminal.written).toHaveLength(3);
+      } finally {
+        terminal.restore();
+      }
+    });
+
+    it("reports its exit code on a later read once it ends, and then takes a new run", async () => {
+      const terminal = sharedTerminal();
+      try {
+        await terminal.run("npm test");
+        expect(await terminal.read()).toMatchObject({ result: { commandCompleted: false } });
+        terminal.print(`1 failed\n\u001b]777;octant=${terminal.kept.pending};exit=1\u0007$ `);
+        expect(await terminal.read()).toMatchObject({
+          isError: false,
+          result: { commandCompleted: true, commandExitCode: 1 },
+        });
+        expect(terminal.kept.pending).toBeUndefined();
+        await terminal.run("ls");
+        expect(terminal.written).toHaveLength(2);
+      } finally {
+        terminal.restore();
+      }
+    });
+  });
+
+  it("types a Code terminal's completion line for the Windows shell it started in", async () => {
+    const written: string[] = [];
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(async (_windowId, command) => {
+        if (command.kind === "write-terminal") written.push(command.data);
+        return {
+          kind: "terminal-state",
+          operationId: command.operationId,
+          terminalId: threadId,
+          state: "running",
+        } as never;
+      }),
+      terminal: {
+        read: async () => ({
+          terminalId: threadId,
+          status: "running",
+          transcript: {
+            chunks: [
+              written.length === 0
+                ? ""
+                : `octant=${/octant=([^;]+);/.exec(written[0] ?? "")?.[1]};exit=0\r\n`,
+            ],
+            truncated: false,
+            characters: 0,
+          },
+        }),
+        terminate: vi.fn(),
+        readAgentCommand: async () => ({ shell: "C:\\Windows\\System32\\cmd.exe" }),
+        noteAgentCommand: async () => undefined,
+        noteAgentInterrupt: async () => undefined,
+      } as never,
+      wait: async () => undefined,
+    });
+    const result = await tools.execute({
+      name: CODE_TERMINAL_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "run", command: "cd" }),
+    });
+    expect(written[0]).toContain("%^ERRORLEVEL%");
+    expect(written[0]).not.toContain("printf");
+    expect(result).toMatchObject({ result: { commandCompleted: true, commandExitCode: 0 } });
+  });
+
+  it("leaves a command still running at the wait bound running, and returns its output so far", async () => {
     const checkoutActivity = vi.fn();
     let now = 0;
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -431,10 +623,13 @@ describe("Code app-managed tools", () => {
       });
       expect(checkoutActivity).toHaveBeenCalledTimes(1);
       expect(result).toMatchObject({
-        result: { error: "terminal-command-timeout", commandCompleted: false },
-        isError: true,
+        result: { status: "running", commandCompleted: false },
+        isError: false,
       });
-      expect(interrupt).toHaveBeenCalledOnce();
+      expect(JSON.stringify(result.result)).toContain("still running");
+      expect(JSON.stringify(result.result)).not.toContain("terminal-command-timeout");
+      // A dev server started in the foreground keeps running.
+      expect(interrupt).not.toHaveBeenCalled();
     } finally {
       nowSpy.mockRestore();
     }

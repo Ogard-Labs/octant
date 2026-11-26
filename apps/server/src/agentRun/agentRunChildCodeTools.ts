@@ -142,7 +142,16 @@ export function childDebugTools(
 /** `octant_terminal` for an attended Code child outside Plan: a shell in its own worktree. */
 export function childTerminalTools(
   input: ChildCodeToolInput & {
-    readonly terminals: Pick<TerminalService, "launch" | "attach" | "write" | "terminate">;
+    readonly terminals: Pick<
+      TerminalService,
+      | "launch"
+      | "attach"
+      | "write"
+      | "terminate"
+      | "agentCommand"
+      | "noteAgentCommand"
+      | "noteAgentInterrupt"
+    >;
     /** The shell and confinement a Code thread's own terminal gets at this level. */
     readonly launchFor: (child: {
       readonly thread: CodeThread;

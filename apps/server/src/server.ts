@@ -122,6 +122,7 @@ import {
 import { wireHarness } from "./wiring/harness";
 import { wireChat } from "./wiring/chat";
 import { wireWork } from "./wiring/work";
+import { workAgentTerminalId } from "./work/workAgentTerminal";
 import { wireContinuation } from "./wiring/continuation";
 import { wireZen } from "./wiring/zen";
 import { wireContext } from "./wiring/context";
@@ -1440,6 +1441,8 @@ export function startOctantServer(
     } = yield* wireWork({
       threadUnfinishedWork,
       threadUnfinishedWorkHost,
+      codeOperationRuntime,
+      providerRuntimeNetwork,
       threadSecretFacts,
       narrationForTurn,
       hubActScopeSlot,
@@ -1549,6 +1552,12 @@ export function startOctantServer(
       serverConnection,
       serverProjectStore,
       shieldServerStore,
+    });
+    // A Work thread's agent shell ends with the thread.
+    onThreadArchived((threadId) => {
+      void codeOperationRuntime?.terminals
+        ?.terminate(workAgentTerminalId(threadId))
+        .catch(() => undefined);
     });
     const { restartRecovery } = yield* wireContinuation({
       personSentTurns,

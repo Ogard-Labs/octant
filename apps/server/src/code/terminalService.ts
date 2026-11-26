@@ -1,4 +1,4 @@
-import { delimiter } from "node:path";
+import { delimiter, win32 } from "node:path";
 import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
 import type { TerminalLaunchInput, TerminalProcessHandle } from "./terminalProcessPort";
 import { startServerTerminal, type ServerTerminalLogin } from "../serverProjects/serverTerminal";
@@ -155,6 +155,16 @@ interface TerminalServiceOptions {
 interface TerminalRecord {
   protectionCleanup?: () => Promise<void>;
   readonly terminalId: string;
+  /** The shell it was launched with; a restored record has none. */
+  readonly shell?: string;
+  /**
+   * The completion marker of an agent's command still running in it: one a
+   * run's wait gave up on, such as a dev server. Kept with the terminal so a
+   * later turn's run refuses rather than typing into that command, and a
+   * later read reports its exit code. `interrupted` says the agent has since
+   * sent it Ctrl-C.
+   */
+  agentCommand?: { readonly marker: string; interrupted: boolean };
   readonly transcript: TranscriptBuffer;
   readonly process?: TerminalProcessHandle;
   readonly secrets: readonly string[];
@@ -300,6 +310,7 @@ export class TerminalService {
     const record: TerminalRecord = {
       ...(request.onClosed === undefined ? {} : { protectionCleanup: request.onClosed }),
       terminalId: request.terminalId,
+      ...(request.server === undefined ? { shell: request.shell } : {}),
       transcript: new TranscriptBuffer(),
       process,
       secrets,
@@ -346,6 +357,45 @@ export class TerminalService {
     record.baseline.status = record.status;
     record.baseline.exitCode = record.exitCode;
     return snapshot;
+  }
+
+  /**
+   * The shell a terminal started in, an agent's command still running in it,
+   * and whether the shell itself is in the foreground: at its prompt, with no
+   * program of the command left running.
+   */
+  agentCommand(terminalId: string): {
+    readonly shell?: string;
+    readonly pending?: string;
+    readonly interrupted?: boolean;
+    readonly shellAtPrompt?: boolean;
+  } {
+    const record = this.#require(terminalId);
+    const foreground = record.status === "running" ? record.process?.foreground?.() : undefined;
+    return {
+      ...(record.shell === undefined ? {} : { shell: record.shell }),
+      ...(record.agentCommand === undefined
+        ? {}
+        : {
+            pending: record.agentCommand.marker,
+            ...(record.agentCommand.interrupted ? { interrupted: true } : {}),
+          }),
+      ...(foreground === undefined || record.shell === undefined
+        ? {}
+        : { shellAtPrompt: foreground === win32.basename(record.shell) }),
+    };
+  }
+
+  noteAgentCommand(terminalId: string, pending: string | undefined): void {
+    const record = this.#require(terminalId);
+    if (pending === undefined) delete record.agentCommand;
+    else record.agentCommand = { marker: pending, interrupted: false };
+  }
+
+  /** The agent sent Ctrl-C to the command still running in the terminal. */
+  noteAgentInterrupt(terminalId: string): void {
+    const command = this.#require(terminalId).agentCommand;
+    if (command !== undefined) command.interrupted = true;
   }
 
   attach(terminalId: string): TerminalSnapshot {

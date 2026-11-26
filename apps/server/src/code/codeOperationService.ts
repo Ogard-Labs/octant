@@ -487,6 +487,15 @@ export interface CodeOperationTerminalPort {
     readonly environment?: Readonly<Record<string, string>>;
   }) => Promise<CodeOperationTerminalSnapshot>;
   readonly attach: (terminalId: string) => CodeOperationTerminalSnapshot;
+  /** The shell a terminal started in, and an agent's command still running in it. */
+  readonly agentCommand?: (terminalId: string) => {
+    readonly shell?: string;
+    readonly pending?: string;
+    readonly interrupted?: boolean;
+    readonly shellAtPrompt?: boolean;
+  };
+  readonly noteAgentCommand?: (terminalId: string, pending: string | undefined) => void;
+  readonly noteAgentInterrupt?: (terminalId: string) => void;
   readonly observe?: (
     terminalId: string,
     listener: (emission: TerminalOutputEmission) => void,
@@ -2807,6 +2816,49 @@ export class CodeOperationService {
   ): Promise<CodeOperationTerminalSnapshot> {
     await this.#requireOwnedTerminal(windowId, input, true);
     return this.#options.terminals.attach(input.terminalId);
+  }
+
+  /** The shell the thread's terminal started in, and an agent's command still running in it. */
+  async readAgentCommand(
+    windowId: WindowId,
+    input: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutIdentity["id"];
+      readonly terminalId: CodeTerminalId;
+    },
+  ): Promise<{
+    readonly shell?: string;
+    readonly pending?: string;
+    readonly interrupted?: boolean;
+    readonly shellAtPrompt?: boolean;
+  }> {
+    await this.#requireOwnedTerminal(windowId, input, true);
+    return this.#options.terminals.agentCommand?.(input.terminalId) ?? {};
+  }
+
+  async noteAgentCommand(
+    windowId: WindowId,
+    input: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutIdentity["id"];
+      readonly terminalId: CodeTerminalId;
+    },
+    pending: string | undefined,
+  ): Promise<void> {
+    await this.#requireOwnedTerminal(windowId, input, true);
+    this.#options.terminals.noteAgentCommand?.(input.terminalId, pending);
+  }
+
+  async noteAgentInterrupt(
+    windowId: WindowId,
+    input: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutIdentity["id"];
+      readonly terminalId: CodeTerminalId;
+    },
+  ): Promise<void> {
+    await this.#requireOwnedTerminal(windowId, input, true);
+    this.#options.terminals.noteAgentInterrupt?.(input.terminalId);
   }
 
   async interruptTerminal(

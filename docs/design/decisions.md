@@ -921,7 +921,7 @@ Input rides the workbench control channel with actor attribution. Agent device t
 - Allow input is a short host-memory grant for one window, thread and destination, and never covers boot, shutdown, Open URL or Rotate, which are confirmed on their own.
 - An input of unknown delivery is reported interrupted, and an off-screen point is refused, never clamped.
 - Only an explicit screenshot sends a screen image to the model.
-- `octant_terminal` follows the level: Plan refuses it, Full access runs it, below that each command asks.
+- `octant_terminal` follows the level: Plan refuses it, Full access runs it, below that each command asks, showing the whole command; one too long to show whole is refused. Work gets it too, as one shell per thread in its folder at the thread's level, never offered to a routine's run; on macOS and Linux it is confined at that level below Full access even outside Strict, and on Windows, which has no Octant sandbox, it runs unconfined outside Strict with every command and input asking below Full access and no answer remembered (maintainer decision, 2026-11-26). The shell outlives the turn that started it, under Strict too, and ends when the agent stops it, or as soon as the thread is archived, its folder changes or its ceiling narrows (Plan, a narrower level, Strict, or a scope or policy no longer current). `run` waits up to 30 seconds; a command still running then is left running and `run` returns its output so far with `commandCompleted: false`, in every terminal the tool drives; while it runs a new `run` is refused as busy, until it ends, is stopped, or, after the agent sent it Ctrl-C through `write`, its shell is back in the foreground with no completion; the next `read` after it ends reports its exit code, and after such an interrupt says it ended with the code unknown (maintainer decisions, 2026-11-17 and 2026-11-26). Code intelligence and GitHub reads stay Code-only, because both are bound to a Code checkout and its delivery repository, and no Work Project repository link will be built (maintainer decision, 2026-11-26).
 - Checks on a real emulator and a real Mac are maintainer checks still owed.
 
 Not built yet:
@@ -1696,6 +1696,7 @@ Status: Built. Since: 2026-11-21. Detail: [Provider runtimes: Probe before a pro
 
 Octant's tools reach OpenCode and ACP agents on Linux as on macOS, and outside provider drivers run on Linux (maintainer decision, 2026-11-16).
 
+- OpenCode and ACP agents get Octant's tools on Windows too, under [Windows below Full access](#windows-below-full-access): a launch there has no Octant sandbox and reaches the loopback bridge directly. A live check on a real Windows machine is owed.
 - An outside driver on Linux takes the same install, trust and enablement steps and runs unconfined, labelled so, until Linux extension-process confinement exists. Windows stays `host-prohibited`.
 - Strict keeps an outside driver `host-prohibited` on Linux, read at each listing, admission and use ([Windows below Full access](#windows-below-full-access)).
 
