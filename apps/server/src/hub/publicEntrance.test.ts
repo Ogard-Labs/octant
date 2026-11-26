@@ -291,3 +291,54 @@ describe("what a request carries", () => {
     expect((await fetch(`${base}/healthz`)).status).toBe(404);
   });
 });
+
+describe("streaming answers", () => {
+  const LINK = "AAAAAAAAAAAAAAAAAAAAAA";
+
+  function streamingHandlers() {
+    const seen: { aborted: boolean; cancelled: boolean } = { aborted: false, cancelled: false };
+    const handlers: PublicEntranceHandlers = {
+      visitorStream: async (request) => {
+        request.signal.addEventListener("abort", () => {
+          seen.aborted = true;
+        });
+        return {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+          body: new ReadableStream<Uint8Array>({
+            start: (controller) => controller.enqueue(new TextEncoder().encode("data: 1\n\n")),
+            cancel: () => {
+              seen.cancelled = true;
+            },
+          }),
+        };
+      },
+    };
+    return { seen, handlers };
+  }
+
+  it("a streaming answer ends when the visitor disconnects, not before", async () => {
+    const { seen, handlers } = streamingHandlers();
+    const { base } = await boot({ handlers });
+    const leave = new AbortController();
+    const response = await fetch(`${base}/v/${LINK}/stream`, { signal: leave.signal });
+    const reader = response.body?.getReader();
+    await reader?.read();
+    expect(seen.aborted).toBe(false);
+    leave.abort();
+    await expect.poll(() => seen.aborted).toBe(true);
+  });
+
+  it("a stream request forwarded by a member is refused and its stream cancelled", async () => {
+    const { seen, handlers } = streamingHandlers();
+    const { entrance } = await boot({ handlers });
+    const reply = await entrance.dispatchForwarded({
+      method: "GET",
+      path: `/v/${LINK}/stream`,
+      headers: {},
+      body: "",
+    });
+    expect(reply.status).toBe(501);
+    expect(seen.cancelled).toBe(true);
+  });
+});

@@ -21,6 +21,7 @@ function setup(
     readonly role?: "hub" | "member" | "none";
     readonly privateListenerPort?: number;
     readonly failFunnel?: boolean;
+    readonly failFunnelOff?: () => boolean;
   } = {},
 ) {
   const folder = mkdtempSync(join(tmpdir(), "octant-public-entrance-"));
@@ -31,6 +32,9 @@ function setup(
     calls.push([...args]);
     if (args[0] === "funnel" && args[1] === "status") {
       return { exitCode: 0, stdout: "{}", stderr: "" };
+    }
+    if (args.at(-1) === "off" && options.failFunnelOff?.() === true) {
+      return { exitCode: 1, stdout: "", stderr: "tailscaled is not running" };
     }
     return options.failFunnel === true
       ? { exitCode: 1, stdout: "", stderr: 'Funnel not available; "funnel" node attribute not set' }
@@ -172,6 +176,19 @@ describe("the Funnel front", () => {
       kind: "funnel-not-allowed",
     });
     expect(service.status().funnel).toEqual({ enabled: false });
+  });
+
+  it("keeps the entrance on and says so when Tailscale refuses to turn Funnel off", async () => {
+    let failOff = false;
+    const { service } = setup({ failFunnelOff: () => failOff });
+    await service.setEnabled(true, WINDOW);
+    await service.setFunnel({ enabled: true }, WINDOW);
+    failOff = true;
+    expect(await service.setEnabled(false, WINDOW)).toEqual({
+      status: "refused",
+      kind: "funnel-off-failed",
+    });
+    expect(service.status()).toMatchObject({ enabled: true, funnel: { enabled: true } });
   });
 
   it("turns Funnel off with the same port it turned on", async () => {

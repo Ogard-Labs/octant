@@ -67,7 +67,7 @@ export function HubPublicEntranceSection(props: {
             onCheckedChange={props.onEntrance}
           />
         </SettingRow>
-        {!view.enabled ? null : (
+        {!view.enabled && !view.funnel.enabled ? null : (
           <SettingRow
             description="Let Tailscale carry the entrance on port 443 of this computer's tailnet name. TLS ends on this computer, so Tailscale's relays cannot read the traffic. Needs HTTPS, MagicDNS, and the funnel node attribute in your tailnet policy. Or point your own tunnel or proxy at the address below instead."
             label="Tailscale Funnel"

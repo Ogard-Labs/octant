@@ -42,7 +42,10 @@ export interface PublicEntranceServiceOptions {
 
 export type PublicEntranceSwitchOutcome =
   | { readonly status: "changed"; readonly enabled: boolean }
-  | { readonly status: "refused"; readonly kind: "not-in-a-hub" | "listener-failed" };
+  | {
+      readonly status: "refused";
+      readonly kind: "not-in-a-hub" | "listener-failed" | "funnel-off-failed";
+    };
 
 export type PublicFunnelOutcome =
   | { readonly status: "changed"; readonly enabled: boolean; readonly port?: PublicFunnelPort }
@@ -70,12 +73,15 @@ export interface PublicEntranceStatus {
 
 const DEFAULT_FUNNEL_PORT: PublicFunnelPort = 443;
 
+const FUNNEL_OFF_RETRY_MS = 60_000;
+
 export class PublicEntranceService {
   readonly #options: PublicEntranceServiceOptions;
   readonly #funnel: TailscaleFunnel;
   #entrance: PublicEntrance | undefined;
   /** One change at a time, so a pause and a switch cannot open and close the listener out of order. */
   #queue: Promise<unknown> = Promise.resolve();
+  #funnelOffRetryAt = 0;
 
   constructor(options: PublicEntranceServiceOptions) {
     this.#options = options;
@@ -110,8 +116,11 @@ export class PublicEntranceService {
       if (!enabled && saved?.funnel !== undefined) {
         // Turning the entrance off turns its front off first; a front left
         // pointing at a closed port would only answer 502.
+        // A front left on while Settings shows the entrance off would be
+        // invisible to the person, so the entrance stays on until it goes.
         const off = await this.#funnel.off(saved.funnel.port);
-        if (off.status === "done") this.#save({ ...saved, funnel: undefined });
+        if (off.status !== "done") return { status: "refused", kind: "funnel-off-failed" } as const;
+        this.#save({ ...saved, funnel: undefined });
       }
       const current = this.#saved();
       this.#save({
@@ -198,11 +207,23 @@ export class PublicEntranceService {
     const paused = this.#options.remoteAccessPaused();
     const role = this.#options.role();
     const open = saved?.enabled === true && !paused && role !== "none";
-    if (!open && saved?.funnel !== undefined && (paused || role === "none")) {
+    if (
+      !open &&
+      saved?.funnel !== undefined &&
+      (paused || role === "none") &&
+      Date.now() >= this.#funnelOffRetryAt
+    ) {
       // The pause or the end of the hub role is the journaled act; the front
-      // goes with it, and only the person turns it back on.
+      // goes with it, and only the person turns it back on. A refused off is
+      // retried once a minute, not on every five-second look, and Settings
+      // keeps showing Funnel as on until it goes.
       const off = await this.#funnel.off(saved.funnel.port);
-      if (off.status === "done") this.#save({ ...saved, funnel: undefined });
+      if (off.status === "done") {
+        this.#save({ ...saved, funnel: undefined });
+        this.#funnelOffRetryAt = 0;
+      } else {
+        this.#funnelOffRetryAt = Date.now() + FUNNEL_OFF_RETRY_MS;
+      }
     }
     if (!open) {
       const entrance = this.#entrance;

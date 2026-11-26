@@ -180,6 +180,10 @@ const PAGE_POLICY =
 
 const HEADER_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+// Room for every visitor stream and relay tunnel the caps allow, plus ordinary
+// requests; a socket that never sends headers counts until its timeout.
+const MAX_CONNECTIONS = 256;
+const MAX_FORWARDS_IN_FLIGHT = 32;
 const MINUTE_MS = 60_000;
 
 /** Request headers a handler may read: the hop-by-hop, cookie, credential and forwarding ones never pass. */
@@ -333,6 +337,7 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
   const now = options.now ?? Date.now;
   const cap = new MinuteCap(options.requestsPerMinute ?? PUBLIC_ENTRANCE_REQUESTS_PER_MINUTE, now);
   const closing = new AbortController();
+  let forwarding = 0;
   const handlers = () =>
     typeof options.handlers === "function" ? options.handlers() : options.handlers;
 
@@ -350,22 +355,36 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
     if (match.status === "method-not-allowed") {
       return { status: 405, headers: { allow: match.allow }, body: "" };
     }
-    if (!cap.take()) return { status: 429, headers: { "retry-after": "60" }, body: "" };
     const role = options.role();
     if (role === "closed") return notFound;
+    if (!cap.take()) return { status: 429, headers: { "retry-after": "60" }, body: "" };
     if (role === "forward" && !input.forwarded) {
-      const body = await input.readBody(PUBLIC_FORWARD_MAX_BODY_BYTES);
-      if (body.status === "too-large") return { status: 413, body: "" };
-      if (body.status === "aborted") return { status: 400, body: "" };
-      const reply = await options.forward?.({
-        method: input.method as PublicForwardEnvelope["method"],
-        path: input.path,
-        headers: Object.fromEntries(input.headers),
-        body: body.bytes.toString("base64"),
-      });
-      return reply === undefined
-        ? { status: 503, body: "" }
-        : { status: reply.status, headers: reply.headers, body: Buffer.from(reply.body, "base64") };
+      // Each forward holds its body in memory twice (raw and base64), so the
+      // number in flight is bounded, not just the number a minute.
+      if (forwarding >= MAX_FORWARDS_IN_FLIGHT) {
+        return { status: 503, headers: { "retry-after": "5" }, body: "" };
+      }
+      forwarding += 1;
+      try {
+        const body = await input.readBody(PUBLIC_FORWARD_MAX_BODY_BYTES);
+        if (body.status === "too-large") return { status: 413, body: "" };
+        if (body.status === "aborted") return { status: 400, body: "" };
+        const reply = await options.forward?.({
+          method: input.method as PublicForwardEnvelope["method"],
+          path: input.path,
+          headers: Object.fromEntries(input.headers),
+          body: body.bytes.toString("base64"),
+        });
+        return reply === undefined
+          ? { status: 503, body: "" }
+          : {
+              status: reply.status,
+              headers: reply.headers,
+              body: Buffer.from(reply.body, "base64"),
+            };
+      } finally {
+        forwarding -= 1;
+      }
     }
     if (match.name === "health") return json(200, { ok: true });
     const handler = handlerFor(handlers(), match.name);
@@ -388,7 +407,11 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
       const path = (incoming.url ?? "/").split("?")[0] ?? "/";
       const request = new AbortController();
       const abort = () => request.abort();
-      incoming.on("close", abort);
+      // The request's own "close" fires once its body is read, so a stream
+      // would end early; the visitor leaving is the response closing unfinished.
+      response.on("close", () => {
+        if (!response.writableFinished) abort();
+      });
       closing.signal.addEventListener("abort", abort, { once: true });
       void answer({
         method: incoming.method ?? "GET",
@@ -405,6 +428,7 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
         .finally(() => closing.signal.removeEventListener("abort", abort));
     },
   );
+  server.maxConnections = MAX_CONNECTIONS;
   server.headersTimeout = HEADER_TIMEOUT_MS;
   server.requestTimeout = REQUEST_TIMEOUT_MS;
   server.on("upgrade", (incoming: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -452,9 +476,14 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
         forwarded: true,
       });
       const body = reply.body;
-      // A stream does not cross members in this form; the answer says so.
+      // A stream does not cross members in this form; the answer says so, and
+      // cancelling it frees whatever the handler holds for it.
       if (body !== undefined && !(typeof body === "string" || body instanceof Uint8Array)) {
+        await body.cancel().catch(() => undefined);
         return { status: 501, headers: {}, body: "" };
+      }
+      if (Buffer.byteLength(body ?? "") > PUBLIC_FORWARD_MAX_BODY_BYTES) {
+        return { status: 502, headers: {}, body: "" };
       }
       return {
         status: reply.status,

@@ -197,7 +197,7 @@ export const HubPublicFunnelRequest = Schema.Struct({
 }).annotations(strict);
 export const decodeHubPublicFunnelRequest = Schema.decodeUnknownSync(HubPublicFunnelRequest);
 
-/** The most a forwarded request or its answer carries, base64 included. */
+/** The most raw bytes a forwarded request or its answer carries, before base64. */
 export const PUBLIC_FORWARD_MAX_BODY_BYTES = 512 * 1024;
 
 /**
@@ -216,7 +216,8 @@ export const decodePublicForwardEnvelope = Schema.decodeUnknownSync(PublicForwar
 
 /** The acting hub's answer to a forwarded request, carried back unchanged. */
 export const PublicForwardAnswer = Schema.Struct({
-  status: Schema.Int.pipe(Schema.between(100, 599)),
+  // An interim 1xx answer has no place in a forwarded reply.
+  status: Schema.Int.pipe(Schema.between(200, 599)),
   headers: Schema.Record({ key: Schema.String, value: Schema.String }),
   body: Schema.String,
 }).annotations(strict);
