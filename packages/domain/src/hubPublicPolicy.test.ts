@@ -80,6 +80,13 @@ describe("deciding a delivery", () => {
     ).toEqual({ status: "refused", kind: "stale-timestamp" });
   });
 
+  it("accepts a delivery exactly five minutes old and refuses one a millisecond older", () => {
+    const at = (timestampMs: number) =>
+      decideWebhookDelivery({ ...signed, timestampMs, nowMs: NOW, dedupeKeys: ["id:msg_1"] });
+    expect(at(NOW - 5 * 60_000)).toEqual({ status: "accept", claimKeys: ["id:msg_1"] });
+    expect(at(NOW - 5 * 60_000 - 1)).toEqual({ status: "refused", kind: "stale-timestamp" });
+  });
+
   it("refuses a delivery dated more than five minutes ahead", () => {
     expect(
       decideWebhookDelivery({
@@ -201,6 +208,13 @@ describe("visitor links", () => {
 
   it("a link whose secret does not match its hash is refused", () => {
     expect(decideVisitorLink({ ...valid, secretMatches: false })).toEqual({
+      status: "refused",
+      kind: "secret-mismatch",
+    });
+  });
+
+  it("answers a wrong secret the same way whether or not the link has expired", () => {
+    expect(decideVisitorLink({ ...valid, secretMatches: false, nowMs: grant.expiresAt })).toEqual({
       status: "refused",
       kind: "secret-mismatch",
     });

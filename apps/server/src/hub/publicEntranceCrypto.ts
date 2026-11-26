@@ -148,6 +148,8 @@ function sealingKey(shared: Buffer, endpointId: string, recipientMemberId: strin
   );
 }
 
+const GCM_TAG_BYTES = 16;
+
 /** Seals a secret to one recipient: ephemeral ECDH, HKDF-SHA256, AES-256-GCM. */
 export function sealWebhookSecret(input: {
   readonly secret: string;
@@ -186,14 +188,18 @@ export function openWebhookSecret(input: {
     const shared = ecdh.computeSecret(Buffer.from(input.sealed.ephemeralPublicKey, "base64url"));
     const key = sealingKey(shared, input.endpointId, input.sealed.recipientMemberId);
     const bytes = Buffer.from(input.sealed.ciphertext, "base64url");
+    // Node accepts a GCM tag as short as 4 bytes unless told its length, so a
+    // seal shorter than a full tag would be checked against 32 bits, not 128.
+    if (bytes.length <= GCM_TAG_BYTES) return undefined;
     const decipher = createDecipheriv(
       "aes-256-gcm",
       key,
       Buffer.from(input.sealed.nonce, "base64url"),
+      { authTagLength: GCM_TAG_BYTES },
     );
-    decipher.setAuthTag(bytes.subarray(bytes.length - 16));
+    decipher.setAuthTag(bytes.subarray(bytes.length - GCM_TAG_BYTES));
     return Buffer.concat([
-      decipher.update(bytes.subarray(0, bytes.length - 16)),
+      decipher.update(bytes.subarray(0, bytes.length - GCM_TAG_BYTES)),
       decipher.final(),
     ]).toString("utf8");
   } catch {

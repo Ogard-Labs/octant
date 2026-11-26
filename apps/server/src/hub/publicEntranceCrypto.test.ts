@@ -133,6 +133,22 @@ describe("webhook signatures", () => {
         body: Buffer.from('{"action":"closed"}'),
       }),
     ).toBe(false);
+    expect(
+      verifyWebhookSignature({
+        scheme: "standard-webhooks",
+        secret,
+        reading: { ...reading, deliveryId: "msg_2" },
+        body,
+      }),
+    ).toBe(false);
+    expect(
+      verifyWebhookSignature({
+        scheme: "standard-webhooks",
+        secret,
+        reading: { ...reading, timestampMs: 1_800_000_001_000 },
+        body,
+      }),
+    ).toBe(false);
   });
 
   it("verifies GitHub's sha256 signature over the body alone", () => {
@@ -176,6 +192,28 @@ describe("sealed webhook secrets", () => {
       openWebhookSecret({
         sealed,
         endpointId: "CCCCCCCCCCCCCCCCCCCCCC",
+        privateKey: recipient.privateKey,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("refuses a sealed secret whose tag was cut short", () => {
+    const recipient = makeSealingKeyPair();
+    const sealed = sealWebhookSecret({
+      secret: "abcdefgh",
+      endpointId: "BBBBBBBBBBBBBBBBBBBBBB",
+      recipientMemberId: HUB,
+      recipientPublicKey: recipient.publicKey,
+    });
+    const bytes = Buffer.from(sealed.ciphertext, "base64url");
+    // Eight bytes of ciphertext and the first four bytes of its real tag: a
+    // GCM tag truncated to 32 bits, which still authenticates if its length is
+    // not pinned.
+    const truncated = Buffer.concat([bytes.subarray(0, 8), bytes.subarray(8, 12)]);
+    expect(
+      openWebhookSecret({
+        sealed: { ...sealed, ciphertext: truncated.toString("base64url") },
+        endpointId: "BBBBBBBBBBBBBBBBBBBBBB",
         privateKey: recipient.privateKey,
       }),
     ).toBeUndefined();

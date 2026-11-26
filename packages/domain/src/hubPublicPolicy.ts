@@ -159,7 +159,9 @@ export function decideVisitorLink(input: {
   if (input.grant.expiresAt - input.grant.issuedAt > VISITOR_LINK_MAX_LIFETIME_MS) {
     return { status: "refused", kind: "lifetime-too-long" };
   }
-  if (input.nowMs >= input.grant.expiresAt) return { status: "refused", kind: "expired" };
+  // The secret is checked before expiry so that someone holding only a link id
+  // cannot tell an expired link from a live one.
   if (!input.secretMatches) return { status: "refused", kind: "secret-mismatch" };
+  if (input.nowMs >= input.grant.expiresAt) return { status: "refused", kind: "expired" };
   return { status: "valid" };
 }

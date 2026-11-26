@@ -112,7 +112,8 @@ export const SealedWebhookSecret = Schema.Struct({
   recipientMemberId: HubMemberId,
   ephemeralPublicKey: base64Url(80, 256),
   nonce: base64Url(16, 16),
-  ciphertext: base64Url(16, 512),
+  // A full 16-byte GCM tag plus at least one byte of secret.
+  ciphertext: base64Url(23, 512),
 }).annotations(strict);
 export type SealedWebhookSecret = typeof SealedWebhookSecret.Type;
 
@@ -146,8 +147,17 @@ export const WebhookDeliveryEnvelope = Schema.Struct({
   endpointId: WebhookEndpointId,
   deliveryId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
   receivedAt: millis,
-  headers: Schema.Record({ key: Schema.String, value: Schema.String }),
-  body: Schema.String,
+  headers: Schema.Record({
+    key: Schema.String.pipe(
+      Schema.filter((name) => (WEBHOOK_FORWARDED_HEADERS as ReadonlyArray<string>).includes(name)),
+    ),
+    value: Schema.String.pipe(Schema.maxLength(4096)),
+  }),
+  /** The original body as base64; a 256 KiB body is at most this long. */
+  body: Schema.String.pipe(
+    Schema.pattern(/^[A-Za-z0-9+/]*={0,2}$/),
+    Schema.maxLength(Math.ceil(WEBHOOK_BODY_MAX_BYTES / 3) * 4),
+  ),
 }).annotations(strict);
 export type WebhookDeliveryEnvelope = typeof WebhookDeliveryEnvelope.Type;
 export const decodeWebhookDeliveryEnvelope = Schema.decodeUnknownSync(WebhookDeliveryEnvelope);

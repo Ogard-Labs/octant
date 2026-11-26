@@ -83,6 +83,18 @@ const IGNORED_DIRECTORIES = new Set([
  */
 export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   [
+    "packages/contracts/src/hubPublic.ts",
+    "The public entrance's contracts land one stack layer before the entrance listener and services that import them. Remove when the hub's public entrance imports them.",
+  ],
+  [
+    "packages/domain/src/hubPublicPolicy.ts",
+    "The public entrance's pure checks land with its contracts, one stack layer before the hub services that call them. Remove when the hub's webhook and visitor services import it.",
+  ],
+  [
+    "apps/server/src/hub/publicEntranceCrypto.ts",
+    "The public entrance's crypto lands with its contracts and pure checks, one stack layer before the entrance listener and services that import it. Remove when the hub's public entrance imports it.",
+  ],
+  [
     "apps/desktop/src/browserDownloadSource.native-smoke.ts",
     "Isolated Electron main entry bundled by scripts/smoke-browser-download-source.ts for the CI-only native HTTPS redirect proof. Remove when the smoke is retired or this entry is imported by product code.",
   ],
