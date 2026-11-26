@@ -1200,9 +1200,10 @@ export const CodeCommand = Schema.Union(
   }).annotations(strict),
   /**
    * Move a thread off a checkout it shares onto a managed worktree of its own,
-   * copying its uncommitted changes there. The source checkout is never
-   * written; the person is offered the reviewed Discard for it afterwards.
-   * Without `branchName` the host names the branch as it does for a fork.
+   * copying its uncommitted changes there. The move writes none of the source
+   * checkout's files, so the source keeps those changes; discarding them there
+   * is the person's own later step. Without `branchName` the host names the
+   * branch as it does for a fork.
    */
   Schema.Struct({
     kind: Schema.Literal("move-code-thread-to-worktree"),
@@ -1717,6 +1718,7 @@ export const CodeThreadWorktreeMoveRefusal = Schema.Literal(
   "turn-running",
   "checkout-in-use",
   "capture-failed",
+  "nested-changes",
   "apply-failed",
   "unavailable",
 );
@@ -1734,6 +1736,11 @@ export const CodeThreadWorktreeMoveOutcome = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeThreadWorktreeMoveRefusal,
+    /**
+     * With `nested-changes`: the submodules and nested repositories whose own
+     * changes a copy would leave behind, so nothing is claimed as copied.
+     */
+    paths: Schema.optional(Schema.Array(Schema.String).pipe(Schema.maxItems(50))),
   }).annotations(strict),
 );
 export type CodeThreadWorktreeMoveOutcome = typeof CodeThreadWorktreeMoveOutcome.Type;

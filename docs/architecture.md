@@ -2747,16 +2747,29 @@ with its Project can move onto a managed worktree of its own
 starts it from the Branch row's "Move to a new worktree…", from a window or a
 device the host's own person paired; an agent asks through `octant_threads`'
 `move-to-worktree`, which asks the person at every level, Full access
-included, is refused in Plan and offered to no turn the host started on its
-own, and runs only after the agent's turn ends. The host captures the source
+included, is refused in Plan, and is offered only to a turn a local window
+or a device the host's own person paired started (never one the host started
+on its own or a device the hub introduced, which could otherwise allow its
+own ask); only such a window may allow the ask. The move runs only after the
+agent's turn completed (a stopped, interrupted or failed turn moves nothing),
+and the thread is then marked for the person's follow-up with what happened:
+"Moved to worktree <branch>", or the refusal and its reason. The host captures the source
 checkout as Git trees (objects only, as a fork's fresh capture does), makes a
 managed worktree at the captured head on a new branch (the one the person
 named, otherwise one derived as for a fork), and lays the trees over it, so
-staged, unstaged and untracked work all arrive; the source checkout is never
-written and keeps every change, and the dialog tells the person so and that
-they may discard them there. It refuses a thread that already owns a
+staged, unstaged and untracked work all arrive; the move writes none of the
+source checkout's files, so it keeps every change, and the dialog says so
+(Octant does not remove them there; a one-click reviewed Discard of them is
+not built). It refuses an archived or completed thread, a thread that already owns a
 worktree, a plain folder, a server Project's checkout, Plan, a running turn,
-and another thread's running turn on the same checkout. Only after the
+and another thread's running turn on the same checkout, and reads the last
+two again inside the journal unit that records the move, so a turn started
+during the copy refuses it. It refuses too, naming the paths, when a
+submodule has changes of its own or an untracked folder is a repository of
+its own: a capture records either only as a commit pointer, so a copy would
+leave that work behind. A rolled-back creation deletes the branch it made
+while that branch still points at its start and no worktree holds it, so a
+retry under the same name is not refused as a collision. Only after the
 worktree holds the changes does it journal, in one unit, the new checkout's
 `code.checkout-observed@1` and, on the thread's aggregate,
 `code.thread-moved-to-worktree@1` (the checkout it left, the new one, the

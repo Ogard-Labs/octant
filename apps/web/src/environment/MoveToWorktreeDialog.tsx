@@ -85,7 +85,7 @@ export function MoveToWorktreeDialog(props: MoveToWorktreeDialogProps) {
       ) : (
         <p id={descriptionId} role="status">
           Moved to worktree {moved.branch}. Your changes were copied; {props.sourceLabel} still has
-          them. Discard them there from its Changes once you no longer need them.
+          them, and Octant does not remove them there.
         </p>
       )}
       <div className="project-dialog__actions">

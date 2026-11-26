@@ -1032,6 +1032,61 @@ export class GitMutationPort {
   }
 
   /**
+   * The paths whose changes a working-tree capture cannot carry: a submodule
+   * with uncommitted or untracked changes of its own, and an untracked folder
+   * that is a repository of its own. `add -A` records each only as a commit
+   * pointer, so laying a capture down elsewhere would silently leave that
+   * work behind. Sorted; undefined when the checkout could not be read.
+   */
+  async uncopyableNestedChanges(
+    input: { readonly checkoutRoot: string },
+    signal?: AbortSignal,
+  ): Promise<ReadonlyArray<string> | undefined> {
+    const status = await this.#run(
+      [
+        "-C",
+        input.checkoutRoot,
+        "status",
+        "--porcelain=v2",
+        "-z",
+        "--untracked-files=normal",
+        "--ignore-submodules=none",
+      ],
+      signal,
+      undefined,
+      "approval-gated",
+    );
+    if (status.exitCode !== 0) return undefined;
+    const found = new Set<string>();
+    const records = status.stdout.split("\0");
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index] ?? "";
+      if (record.startsWith("1 ") || record.startsWith("2 ")) {
+        const fields = record.split(" ");
+        const submodule = fields[2] ?? "";
+        // `S<c><m><u>`: m and u are the submodule's own tracked and untracked changes.
+        const path = fields.slice(record.startsWith("1 ") ? 8 : 9).join(" ");
+        if (submodule.startsWith("S") && (submodule[2] === "M" || submodule[3] === "U")) {
+          found.add(path);
+        }
+        // A rename's original path follows as its own record.
+        if (record.startsWith("2 ")) index += 1;
+        continue;
+      }
+      if (record.startsWith("? ") && record.endsWith("/")) {
+        const path = record.slice(2, -1);
+        try {
+          await access(join(input.checkoutRoot, path, ".git"));
+          found.add(path);
+        } catch {
+          // An ordinary untracked folder: a capture carries its files.
+        }
+      }
+    }
+    return [...found].sort();
+  }
+
+  /**
    * Put the checkout's files back the way a snapshot recorded them.
    *
    * Both trees are proven to exist before anything is written, and the real

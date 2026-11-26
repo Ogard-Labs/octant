@@ -170,6 +170,7 @@ function harness(
     /** Threads whose latest turn is still running. */
     readonly runningThreads?: ReadonlyArray<string>;
     readonly sessionAuthority?: CodeSessionAuthorityStore;
+    readonly captureOverride?: NonNullable<CodeServiceOptions["forkPoints"]>["capture"];
   } = {},
 ) {
   // Observations: prepare repo-id lookup, prepare resolve fresh-state, commit plan fresh-state,
@@ -202,6 +203,7 @@ function harness(
     isDirty: vi.fn(async () => ({ status: "observed" as const, dirty: false })),
     removeWorktree: vi.fn(async () => ({ status: "removed" as const })),
     removeCheckpointRefs: vi.fn(async () => {}),
+    deleteBranch: vi.fn(async () => ({ status: "deleted" as const })),
   };
   const authority: ManagedWorktreeAuthorityPort = {
     observeCleanupEligibility: vi.fn(async () => ({
@@ -297,7 +299,8 @@ function harness(
       : {
           forkPoints: {
             resolve: vi.fn(async () => options.forkPoint as CodeForkPoint),
-            capture: vi.fn(async () => options.forkPoint as CodeForkPoint),
+            capture:
+              options.captureOverride ?? vi.fn(async () => options.forkPoint as CodeForkPoint),
           },
         }),
     ...(options.sessionAuthority === undefined
@@ -1323,14 +1326,28 @@ describe("moving a thread into its own worktree", () => {
       status: "resolved",
       oid: recordedRevision,
     });
-    const calls: ReturnType<typeof observation>[] = [
-      observation(false),
-      observation(false),
-      observation(false),
-      observation(false),
-    ];
+    // Git as the move sees it: the worktree exists between its creation and
+    // its removal, and the branch from its creation until it is deleted.
+    let present = false;
+    let branchCreated = false;
+    (fixture.git.addWorktree as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      present = true;
+      branchCreated = true;
+      return { status: "created" as const };
+    });
+    (fixture.git.removeWorktree as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      present = false;
+      return { status: "removed" as const };
+    });
+    (fixture.git.branchExists as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => branchCreated,
+    );
+    (fixture.git.deleteBranch as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      branchCreated = false;
+      return { status: "deleted" as const };
+    });
     const moveBranch = () =>
-      (fixture.git.addWorktree as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+      (fixture.git.addWorktree as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]
         ?.branchIntent as string;
     // The moving thread keeps its id, so its worktree sits at that id's path.
     const movedPath = `/workspace/.octant-worktrees/${repositoryId}/${sourceThreadId}`;
@@ -1343,10 +1360,10 @@ describe("moving a thread into its own worktree", () => {
         worktrees: [checkout, { ...managed, reportedPath: movedPath, canonicalPath: movedPath }],
       };
     };
-    (fixture.repository.observe as ReturnType<typeof vi.fn>).mockImplementation(
-      async () => calls.shift() ?? withMovedWorktree(),
+    (fixture.repository.observe as ReturnType<typeof vi.fn>).mockImplementation(async () =>
+      present ? withMovedWorktree() : observation(false),
     );
-    return { ...fixture, applySourceFiles };
+    return { ...fixture, applySourceFiles, branchExists: () => branchCreated };
   }
 
   const move = {
@@ -1392,7 +1409,7 @@ describe("moving a thread into its own worktree", () => {
       sourceHead: recordedRevision,
       capturedTrees: files,
     });
-    // The source checkout is never written: no append touches it.
+    // Nothing the move journals is about the checkout it left.
     expect(
       appended.some(
         (request) =>
@@ -1469,5 +1486,74 @@ describe("moving a thread into its own worktree", () => {
     expect(sessionAuthority.effectiveThread(windowId, gated).executionPolicy).toBe(
       "approval-gated",
     );
+  });
+
+  it("refuses and removes its worktree when a turn starts on the source during the move", async () => {
+    const running: string[] = [];
+    const fixture = moving({
+      runningThreads: running,
+      applySourceFiles: vi.fn(async () => {
+        // A phone, a wake or a routine starts a turn on the source mid-move.
+        running.push(String(sourceThreadId));
+        return "applied" as const;
+      }),
+    });
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "turn-running" },
+    });
+    expect(fixture.git.removeWorktree).toHaveBeenCalled();
+    expect(fixture.branchExists()).toBe(false);
+    expect(
+      fixture.journal.append.mock.calls.some(
+        ([request]) => request.aggregate.aggregateType === "code-thread",
+      ),
+    ).toBe(false);
+  });
+
+  it("a failed move leaves no branch, and a retry succeeds", async () => {
+    let fail = true;
+    const fixture = moving({
+      applySourceFiles: vi.fn(async () => (fail ? ("failed" as const) : ("applied" as const))),
+    });
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "apply-failed" },
+    });
+    expect(fixture.branchExists()).toBe(false);
+    expect(fixture.git.deleteBranch).toHaveBeenCalledTimes(1);
+    fail = false;
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "moved" },
+    });
+  });
+
+  it("reports a dirty submodule instead of claiming its changes were copied", async () => {
+    const fixture = moving();
+    const capture = vi.fn(async () => ({
+      status: "refused" as const,
+      reason: "nested-changes" as const,
+      paths: ["vendor/lib"],
+    }));
+    const withNested = harness({
+      threads: [sourceThread()],
+      checkouts: [sharedCheckout],
+      forkPoint: { status: "resolved", head: recordedRevision, files },
+      captureOverride: capture,
+    });
+    expect(await withNested.codeService.execute(windowId, move)).toEqual({
+      kind: "thread-moved-to-worktree",
+      threadId: sourceThreadId,
+      outcome: { status: "refused", reason: "nested-changes", paths: ["vendor/lib"] },
+    });
+    expect(withNested.git.addWorktree).not.toHaveBeenCalled();
+    expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+  });
+
+  it("refuses to move an archived thread", async () => {
+    const archived = decodeCodeThread({ ...sourceThread(), lifecycle: "archived" });
+    const fixture = moving({ threads: [archived] });
+    expect(await fixture.codeService.execute(windowId, move)).toMatchObject({
+      outcome: { status: "refused", reason: "unavailable" },
+    });
+    expect(fixture.git.addWorktree).not.toHaveBeenCalled();
   });
 });

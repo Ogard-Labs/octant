@@ -639,8 +639,20 @@ export interface CodeForkPointPort {
     throughOperationId: string,
   ) => Promise<CodeForkPoint>;
   /** The thread's checkout as it stands now, for a move into a worktree. */
-  readonly capture: (windowId: WindowId, source: CodeThread) => Promise<CodeForkPoint>;
+  readonly capture: (windowId: WindowId, source: CodeThread) => Promise<CodeCheckoutCapture>;
 }
+
+/**
+ * A capture for a move: a fork point, or a refusal naming the submodules and
+ * nested repositories whose own changes laying it down elsewhere would lose.
+ */
+export type CodeCheckoutCapture =
+  | CodeForkPoint
+  | {
+      readonly status: "refused";
+      readonly reason: "nested-changes";
+      readonly paths: ReadonlyArray<string>;
+    };
 
 /**
  * The resolved source context for a managed creation, produced before any
@@ -5249,13 +5261,23 @@ export class CodeService {
     command: Extract<CodeCommand, { readonly kind: "move-code-thread-to-worktree" }>,
     actor: EventActor | undefined,
   ): Promise<CodeCommandResult> {
-    const refused = (reason: CodeThreadWorktreeMoveRefusal): CodeCommandResult => ({
+    const refused = (
+      reason: CodeThreadWorktreeMoveRefusal,
+      paths?: ReadonlyArray<string>,
+    ): CodeCommandResult => ({
       kind: "thread-moved-to-worktree",
       threadId: current.id,
-      outcome: { status: "refused", reason },
+      outcome: {
+        status: "refused",
+        reason,
+        ...(paths === undefined ? {} : { paths: paths.slice(0, 50) }),
+      },
     });
     if (command.expectedVersion !== current.version) {
       throw this.#failure("conflict", "Code thread version is stale.");
+    }
+    if (current.lifecycle !== "active" || current.completedAt !== undefined) {
+      return refused("unavailable");
     }
     const checkout = this.#persistence.readCodeCheckout(current.checkoutId);
     if (checkout === undefined || checkout.availability !== "available") {
@@ -5267,20 +5289,31 @@ export class CodeService {
     if (current.executionPolicy === "plan") return refused("plan");
     const executing = (threadId: CodeThreadId) =>
       boardRuntimeActivityFromWorks(this.#persistence.readCodeRuntimeWorks(threadId)).executing;
-    if (executing(current.id)) return refused("turn-running");
-    const sharing = this.#persistence
-      .readCodeThreads()
-      .some(
-        (thread) =>
-          String(thread.id) !== String(current.id) &&
-          thread.lifecycle === "active" &&
-          String(thread.checkoutId) === String(current.checkoutId) &&
-          executing(thread.id),
-      );
-    if (sharing) return refused("checkout-in-use");
+    // Read before the move starts and again just before it is journaled: a
+    // turn a phone, a wake or a routine starts in between keeps writing to
+    // the source, so its work would not be in the copy.
+    const busy = (): "turn-running" | "checkout-in-use" | undefined => {
+      if (executing(current.id)) return "turn-running";
+      return this.#persistence
+        .readCodeThreads()
+        .some(
+          (thread) =>
+            String(thread.id) !== String(current.id) &&
+            thread.lifecycle === "active" &&
+            String(thread.checkoutId) === String(current.checkoutId) &&
+            executing(thread.id),
+        )
+        ? "checkout-in-use"
+        : undefined;
+    };
+    const busyBefore = busy();
+    if (busyBefore !== undefined) return refused(busyBefore);
     const creation = this.#managedThreadCreation;
     if (this.#forkPoints === undefined || creation === undefined) return refused("unavailable");
     const point = await this.#forkPoints.capture(windowId, current);
+    if (point.status === "refused" && point.reason === "nested-changes") {
+      return refused("nested-changes", point.paths);
+    }
     if (point.status !== "resolved") return refused("capture-failed");
     const branch =
       command.branchName ??
@@ -5335,8 +5368,11 @@ export class CodeService {
       version: command.expectedVersion + 2,
       updatedAt: observedAt,
     });
+    let busyAtCommit: "turn-running" | "checkout-in-use" | undefined;
     try {
       this.#inUnit(() => {
+        busyAtCommit = busy();
+        if (busyAtCommit !== undefined) return;
         this.#append(
           "code-checkout",
           moved.id,
@@ -5370,6 +5406,10 @@ export class CodeService {
     } catch (error) {
       await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
       throw error;
+    }
+    if (busyAtCommit !== undefined) {
+      await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
+      return refused(busyAtCommit);
     }
     // As for a rebind: every capability minted under the checkout the thread
     // left is discarded, in every window that holds one.

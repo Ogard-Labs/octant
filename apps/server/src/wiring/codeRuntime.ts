@@ -102,6 +102,7 @@ import {
   CodeThreadBoardService,
 } from "../code/codeThreadBoardService";
 import { CodeFollowUpService } from "../code/codeFollowUpService";
+import { runAllowedWorktreeMove } from "../code/agentWorktreeMove";
 import { FailingChecksFollowUps } from "../code/failingChecksFollowUps";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "../code/terminalProcessPort";
@@ -1623,16 +1624,33 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         },
         // The agent's ask to plan, or to leave Plan, changes the level the way
         // the person's own level menu does, for the window that approved it.
-        moveThreadToWorktree: async ({ windowId, threadId, branchName }) => {
-          const thread = persistence.readCodeThread(threadId);
-          if (thread === undefined) return;
-          await codeService.execute(windowId, {
-            kind: "move-code-thread-to-worktree",
-            threadId,
-            expectedVersion: thread.version,
-            ...(branchName === undefined ? {} : { branchName }),
-          });
-        },
+        // The person allowed an agent's move during its turn; it runs after
+        // the turn, and the thread says what happened either way.
+        moveThreadToWorktree: (input) =>
+          runAllowedWorktreeMove(input, {
+            readThread: (threadId) => persistence.readCodeThread(threadId),
+            execute: async (windowId, command) => await codeService.execute(windowId, command),
+            notify: async (threadId, text) => {
+              const view = codeFollowUpService.read(threadId);
+              await codeFollowUpService.observeTrigger({
+                threadId,
+                sourceEventId: randomUUID(),
+                sourceSequence:
+                  Math.max(
+                    view.followUp?.triggerSequence ?? 0,
+                    view.followUp?.acknowledgedThroughSequence ?? 0,
+                  ) + 1,
+                reason: text,
+                origin: "automatic",
+                triggeredAt: new Date().toISOString(),
+              });
+            },
+          }),
+        actsAsPerson: (windowId) =>
+          !isRoutineHostScope(windowId) &&
+          !deps.isRestrictedDeviceScope(windowId) &&
+          (deps.isPairedDeviceScope(windowId) ||
+            deps.windowAuthorityStore.listWindowIds().includes(windowId)),
         changeThreadLevel: async ({ windowId, threadId, executionPolicy, planReturnPolicy }) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return false;

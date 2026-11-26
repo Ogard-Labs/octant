@@ -1187,6 +1187,24 @@ describe("CodeThreadEnvironment branch and move actions", () => {
     expect(dialog).toHaveTextContent("still has them");
   });
 
+  it("shows a refused move's reason, naming what could not be copied, and claims nothing was copied", async () => {
+    const onMoveToWorktree = vi.fn(async () => ({
+      status: "refused" as const,
+      message:
+        "Changes inside vendor/lib cannot be copied into a worktree. Commit them there first; nothing was moved.",
+    }));
+    const { user } = await openBranchMenuClicked({
+      checkoutKind: "existing-worktree",
+      onMoveToWorktree,
+    });
+    await user.click(await screen.findByRole("menuitem", { name: "Move to a new worktree…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Move to a new worktree" });
+    await user.click(within(dialog).getByRole("button", { name: "Move" }));
+    expect(await within(dialog).findByText(/vendor\/lib/)).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent("Moved to worktree");
+    expect(dialog).not.toHaveTextContent("still has them");
+  });
+
   it("offers no move for a thread that already owns a worktree, and greys it while a turn runs or in Plan", async () => {
     const onMoveToWorktree = vi.fn();
     const owned = await openBranchMenuClicked({

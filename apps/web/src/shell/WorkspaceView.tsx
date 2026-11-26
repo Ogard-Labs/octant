@@ -1992,7 +1992,10 @@ function renderCodeTab(
                         ? { status: "moved", branch: result.outcome.branch }
                         : {
                             status: "refused",
-                            message: worktreeMoveRefusalMessage(result.outcome.reason),
+                            message: worktreeMoveRefusalMessage(
+                              result.outcome.reason,
+                              result.outcome.paths,
+                            ),
                           };
                     },
                   })}
@@ -3978,7 +3981,10 @@ function draftAutoReview(props: WorkspaceViewProps): {
 }
 
 /** Why the host did not move a thread into its own worktree, in the person's words. */
-function worktreeMoveRefusalMessage(reason: CodeThreadWorktreeMoveRefusal): string {
+function worktreeMoveRefusalMessage(
+  reason: CodeThreadWorktreeMoveRefusal,
+  paths: ReadonlyArray<string> | undefined,
+): string {
   switch (reason) {
     case "already-own-worktree":
       return "This task already works in a worktree of its own.";
@@ -3994,6 +4000,8 @@ function worktreeMoveRefusalMessage(reason: CodeThreadWorktreeMoveRefusal): stri
       return "Another task is working in this checkout right now. Try again when it finishes.";
     case "capture-failed":
       return "This checkout's changes could not be read, so nothing was moved.";
+    case "nested-changes":
+      return `Changes inside ${(paths ?? []).join(", ") || "a submodule or nested repository"} cannot be copied into a worktree. Commit them there first; nothing was moved.`;
     case "apply-failed":
       return "The changes could not be copied into the new worktree, so nothing was moved.";
     case "unavailable":

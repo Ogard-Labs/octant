@@ -700,6 +700,7 @@ export class ManagedWorktreeService {
       if (removed.status !== "removed") return { status: "waiting" };
       await this.#releaseCheckpoints(observation.repositoryRoot, receipt.checkoutId, signal);
     }
+    await this.#deleteCreatedBranch(receipt, observation, signal);
     try {
       await this.#receipts.transition(receiptId, "removed");
     } catch {
@@ -1060,6 +1061,46 @@ export class ManagedWorktreeService {
    * Deletes the discard branch when this repository still has it and no
    * worktree holds it. Undefined means it is gone or was deleted.
    */
+  /**
+   * Deletes the branch a rolled-back creation made, so a retry under the same
+   * derived name is not refused as a collision for good. Only while the branch
+   * still points at the commit the creation started it on (nothing was
+   * committed there) and no other worktree holds it; best effort, since a
+   * branch left behind costs a name, not work.
+   */
+  async #deleteCreatedBranch(
+    receipt: ManagedWorktreeReceipt,
+    observation: Extract<RepositoryIdentityObservation, { status: "available" }>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const branch = receipt.branchIntent;
+    if (
+      observation.worktrees.some(
+        (worktree) =>
+          worktree.status === "present" &&
+          worktree.canonicalPath !== receipt.canonicalWorktreePath &&
+          worktree.branch === branchRef(branch),
+      )
+    ) {
+      return;
+    }
+    try {
+      if (!(await this.#git.branchExists(receipt.canonicalRepositoryPath, branch, signal))) return;
+      const tip = await this.#git.resolveRef(
+        receipt.canonicalRepositoryPath,
+        branchRef(branch),
+        signal,
+      );
+      if (tip.status !== "resolved" || tip.oid !== receipt.expectedHead) return;
+      await this.#git.deleteBranch?.(
+        { repositoryRoot: receipt.canonicalRepositoryPath, branch },
+        signal,
+      );
+    } catch {
+      // The branch stays; the next creation under its name is refused, not lost.
+    }
+  }
+
   async #deleteDiscardBranch(
     receipt: ManagedWorktreeReceipt,
     observation: RepositoryIdentityObservation,

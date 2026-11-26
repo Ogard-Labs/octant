@@ -645,6 +645,40 @@ describe("GitMutationPort", () => {
     expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("staged then edited\n");
   });
 
+  it("names a dirty submodule and an untracked nested repository that a capture cannot copy", async () => {
+    const root = temporaryDirectory();
+    const library = createRepository(temporaryDirectory());
+    const repository = createRepository(root);
+    execFileSync(
+      "git",
+      [
+        "-C",
+        repository,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        library,
+        "vendor/lib",
+      ],
+      { stdio: "ignore" },
+    );
+    git(repository, "commit", "-m", "add submodule");
+    const port = new GitMutationPort(undefined, confinedOptions());
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([]);
+
+    writeFileSync(join(repository, "vendor/lib/README.md"), "changed inside\n");
+    const nested = join(repository, "scratch");
+    mkdirSync(nested);
+    git(nested, "init", "--initial-branch=main");
+    writeFileSync(join(nested, "notes.txt"), "nested\n");
+
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([
+      "scratch",
+      "vendor/lib",
+    ]);
+  });
+
   it("checkpoints the working tree and puts every kind of change back on restore", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, "doomed.txt"), "doomed\n");

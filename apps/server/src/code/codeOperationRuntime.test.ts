@@ -14244,6 +14244,7 @@ function runtimeFixture(options: {
   /** Whether the thread's provider can carry app-managed tools (default true). */
   supportsAppManagedTools?: boolean;
   moveThreadToWorktree?: Parameters<typeof createCodeOperationRuntime>[0]["moveThreadToWorktree"];
+  actsAsPerson?: Parameters<typeof createCodeOperationRuntime>[0]["actsAsPerson"];
   /** Whether the provider natively serves ACP client capabilities. */
   supportsAcpClientCapabilities?: boolean;
   /** The checkout root a turn resolves (default a path that does not exist). */
@@ -14698,6 +14699,7 @@ function runtimeFixture(options: {
     ...(options.moveThreadToWorktree === undefined
       ? {}
       : { moveThreadToWorktree: options.moveThreadToWorktree }),
+    ...(options.actsAsPerson === undefined ? {} : { actsAsPerson: options.actsAsPerson }),
     ...(options.serverCodeTurn === undefined ? {} : { serverCodeTurn: options.serverCodeTurn }),
     ...(options.holdsServerThread === undefined
       ? {}
@@ -15981,10 +15983,12 @@ describe("the threads tool on Code turns", () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const moveThreadToWorktree = vi.fn(async () => undefined);
+    const hubWindow = "10000000-0000-4000-8000-0000000000aa" as WindowId;
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
       supportsAppManagedTools: true,
       moveThreadToWorktree,
+      actsAsPerson: (candidate) => String(candidate) !== String(hubWindow),
       threads: ({ windowId: turnWindowId, thread: caller, readPosture, worktreeMove }) =>
         createThreadsTools({
           mode: "code",
@@ -16035,6 +16039,20 @@ describe("the threads tool on Code turns", () => {
       );
       if (approval === undefined) throw new Error("expected an approval");
       expect(approval.event.summary).toContain("new worktree");
+      // A device the hub introduced cannot allow it in the person's place.
+      expect(
+        JSON.stringify(
+          await fixture.runtime.execute(hubWindow, {
+            kind: "answer-provider-approval",
+            operationId: operationId(1303),
+            threadId,
+            checkoutId,
+            approvalId: approval.event.approvalId,
+            decision: "approved",
+          }),
+        ),
+      ).toContain("Only you");
+      expect(connection.answerTool).not.toHaveBeenCalled();
       await fixture.runtime.execute(windowId, {
         kind: "answer-provider-approval",
         operationId: operationId(1302),
@@ -16047,8 +16065,54 @@ describe("the threads tool on Code turns", () => {
       expect(moveThreadToWorktree).not.toHaveBeenCalled();
       await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
       await vi.waitFor(() =>
-        expect(moveThreadToWorktree).toHaveBeenCalledWith({ windowId, threadId }),
+        expect(moveThreadToWorktree).toHaveBeenCalledWith({
+          windowId,
+          threadId,
+          turnCompleted: true,
+        }),
       );
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("a hub-introduced device's turn cannot move the thread", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const starts: Array<ProviderSessionStart> = [];
+    const offered = vi.fn();
+    const fixture = runtimeFixture({
+      provider: providerDriver(providerConnection(queue, starts)),
+      supportsAppManagedTools: true,
+      moveThreadToWorktree: vi.fn(async () => undefined),
+      actsAsPerson: () => false,
+      threads: ({ windowId: turnWindowId, thread: caller, readPosture, worktreeMove }) => {
+        offered(worktreeMove !== undefined);
+        return createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
+          service: { answer: async () => waited() },
+          source: quietSource,
+          callerThreadId: String(caller.id),
+          toolConstraints: [],
+          profileDisplayName: "Reviewer",
+          readPosture,
+          ...(worktreeMove === undefined ? {} : { worktreeMove }),
+        });
+      },
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1311),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(offered).toHaveBeenCalled());
+      expect(offered).toHaveBeenCalledWith(false);
+      expect(threadsOperations(starts[0]?.tools)).not.toContain("move-to-worktree");
     } finally {
       await fixture.runtime.close();
       fixture.close();
