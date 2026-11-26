@@ -3,12 +3,20 @@ import type {
   ImageGenerationProfileView,
   ServiceOffer,
   ServiceOfferDecision,
-  ServiceOffersResponse,
+  ServiceOfferEnvelope,
+  ServiceOfferEnvelopes,
 } from "@octant/contracts";
-import { useCallback, useEffect, useState, type ComponentType } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ComponentType,
+  type LazyExoticComponent,
+} from "react";
 import "../followUps/follow-up-suggestions.css";
-import { ImageGenerateOfferCard, ImageSaveOfferCard } from "../image/imageOfferCards";
-import { VideoGenerateOfferCard, VideoSaveOfferCard } from "../video/videoOfferCards";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
   useThreadActivityRevision,
@@ -16,28 +24,60 @@ import {
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { OctantAlert } from "../ui/base/OctantAlert";
-import { NarrationOfferCard } from "./NarrationOfferCard";
-import { TranscriptionOfferCard } from "./TranscriptionOfferCard";
+import type { ListedOfferCardProps } from "./strictOfferCard";
 
 const ACTIVE_OFFER_POLL_MS = 500;
 const IDLE_OFFER_POLL_MS = 5_000;
 
-interface OfferCardProps {
-  readonly offer: ServiceOffer;
-  readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
-  readonly keptIn: "project" | "thread";
-  readonly busy: boolean;
-  readonly decide: (answer: ServiceOfferDecision) => void;
+type ListedOfferCard = LazyExoticComponent<ComponentType<ListedOfferCardProps>>;
+
+/**
+ * Each kind's card brings its payload schema with it, when the first such
+ * offer shows. A card that cannot load is set aside as an offer this build
+ * cannot read is, rather than taking the thread's pane down with it; the
+ * offer stays listed and waiting, and the thread's next offer is asked. The
+ * next offer of that kind tries the card again, in this thread or another:
+ * `lazy` alone would hold one failed load for the life of the window.
+ */
+function offerCard(load: () => Promise<ComponentType<ListedOfferCardProps>>) {
+  const attempt = (): ListedOfferCard =>
+    lazy(() =>
+      load().then(
+        (Card) => ({ default: Card }),
+        () => {
+          current = attempt();
+          return { default: UnloadedCard };
+        },
+      ),
+    );
+  let current = attempt();
+  return () => current;
 }
 
-const CARD_RENDERERS: Record<ServiceOffer["kind"], ComponentType<OfferCardProps>> = {
-  generate: ImageGenerateOfferCard,
-  save: ImageSaveOfferCard,
-  transcribe: TranscriptionOfferCard,
-  narrate: NarrationOfferCard,
-  "video-generate": VideoGenerateOfferCard,
-  "video-save": VideoSaveOfferCard,
+/** Set aside like a refused offer, so the thread's next offer is asked. */
+function UnloadedCard({ offer, refuse }: ListedOfferCardProps) {
+  useLayoutEffect(() => refuse(offer.offerId), [offer.offerId, refuse]);
+  return null;
+}
+
+const CARDS: Record<ServiceOffer["kind"], () => ListedOfferCard> = {
+  generate: offerCard(
+    async () => (await import("../image/imageOfferCards")).ImageGenerateOfferCard,
+  ),
+  save: offerCard(async () => (await import("../image/imageOfferCards")).ImageSaveOfferCard),
+  transcribe: offerCard(
+    async () => (await import("./TranscriptionOfferCard")).TranscriptionOfferCard,
+  ),
+  narrate: offerCard(async () => (await import("./NarrationOfferCard")).NarrationOfferCard),
+  "video-generate": offerCard(
+    async () => (await import("../video/videoOfferCards")).VideoGenerateOfferCard,
+  ),
+  "video-save": offerCard(
+    async () => (await import("../video/videoOfferCards")).VideoSaveOfferCard,
+  ),
 };
+
+const CARD_KINDS: ReadonlyMap<string, () => ListedOfferCard> = new Map(Object.entries(CARDS));
 
 export function ServiceOfferPrompt(props: {
   readonly client: ServiceOfferClient | undefined;
@@ -49,17 +89,25 @@ export function ServiceOfferPrompt(props: {
   readonly className?: string;
 }) {
   const { client, scopeId, threadKind, turnActive } = props;
-  const [listed, setListed] = useState<ServiceOffersResponse>();
+  const [listed, setListed] = useState<ServiceOfferEnvelopes>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<{
     readonly offerId: ServiceOffer["offerId"];
     readonly message: string;
   }>();
+  const [refused, setRefused] = useState<ReadonlySet<string>>(new Set());
   const revision = useThreadActivityRevision("toolApprovals");
 
   useEffect(() => {
     setListed(undefined);
+    setRefused(new Set());
   }, [client, scopeId, threadKind]);
+
+  const refuse = useCallback(
+    (offerId: ServiceOfferEnvelope["offerId"]) =>
+      setRefused((current) => new Set([...current, String(offerId)])),
+    [],
+  );
 
   const refresh = useCallback(
     async (signal: AbortSignal) => {
@@ -86,15 +134,20 @@ export function ServiceOfferPrompt(props: {
         : THREAD_ACTIVITY_RECOVERY_MS,
   );
 
-  const pending = listed?.offers[0];
+  // An offer this build cannot show waits for a build that can; the thread's
+  // other offers are asked meanwhile.
+  const pending = listed?.offers.find(
+    (offer) => CARD_KINDS.has(offer.kind) && !refused.has(String(offer.offerId)),
+  );
+  const Card = pending === undefined ? undefined : CARD_KINDS.get(pending.kind)?.();
   if (
     pending === undefined ||
+    Card === undefined ||
     client === undefined ||
     pending.threadKind !== threadKind ||
     String(pending.scopeId) !== String(scopeId)
   )
     return null;
-  const Card = CARD_RENDERERS[pending.kind];
   const message = failure?.offerId === pending.offerId ? failure.message : undefined;
 
   async function decide(answer: ServiceOfferDecision) {
@@ -126,20 +179,26 @@ export function ServiceOfferPrompt(props: {
   }
 
   return (
-    <section aria-label="Asked by the agent" className={`follow-up-cards ${props.className ?? ""}`}>
-      <Card
-        key={pending.offerId}
-        offer={pending}
-        profiles={listed?.imageProfiles ?? props.profiles}
-        keptIn={props.keptIn}
-        busy={busy}
-        decide={(answer) => void decide(answer)}
-      />
-      {message === undefined ? null : (
-        <OctantAlert className="follow-up-cards__error" tone="danger">
-          {message}
-        </OctantAlert>
-      )}
-    </section>
+    <Suspense fallback={null}>
+      <section
+        aria-label="Asked by the agent"
+        className={`follow-up-cards ${props.className ?? ""}`}
+      >
+        <Card
+          key={pending.offerId}
+          offer={pending}
+          profiles={listed?.imageProfiles ?? props.profiles}
+          keptIn={props.keptIn}
+          busy={busy}
+          decide={(answer) => void decide(answer)}
+          refuse={refuse}
+        />
+        {message === undefined ? null : (
+          <OctantAlert className="follow-up-cards__error" tone="danger">
+            {message}
+          </OctantAlert>
+        )}
+      </section>
+    </Suspense>
   );
 }

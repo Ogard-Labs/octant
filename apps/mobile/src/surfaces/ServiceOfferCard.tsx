@@ -2,17 +2,21 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import {
-  createMobileServiceOfferClient,
   describeVideoOffer,
   imageOfferModelChoices,
   videoOfferChoices,
+} from "@octant/client-runtime/service-offer-choices";
+import {
+  createMobileServiceOfferClient,
   type ServiceOfferClient,
 } from "@octant/client-runtime/service-offer-client";
 import {
   decodeImageGenerationScopeId,
+  decodeServiceOffer,
   type ServiceOffer,
   type ServiceOfferDecision,
-  type ServiceOffersResponse,
+  type ServiceOfferEnvelope,
+  type ServiceOfferEnvelopes,
   type VideoClipOptions,
 } from "@octant/contracts";
 import { useTheme } from "../../design-system";
@@ -38,7 +42,8 @@ export function ServiceOfferCard(props: {
     [client, threadKind, threadId],
   );
   const resource = usePolledResource(load, { intervalMs: 2_000 });
-  const offer = resource.value?.offers[0];
+  const listed = resource.value?.offers;
+  const offer = useMemo(() => firstShownOffer(listed ?? []), [listed]);
   if (offer === undefined) return null;
   return (
     <OfferCard
@@ -54,12 +59,28 @@ export function ServiceOfferCard(props: {
   );
 }
 
+/**
+ * The first waiting offer this build can show whole. The list carries only
+ * envelopes, so each offer meets its kind's strict decode here, before anything
+ * of it is shown: an unknown kind or payload field leaves that offer waiting.
+ */
+function firstShownOffer(listed: ReadonlyArray<ServiceOfferEnvelope>): ServiceOffer | undefined {
+  for (const envelope of listed) {
+    try {
+      return decodeServiceOffer(envelope);
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
 function OfferCard(props: {
   readonly authenticator?: BiometricAuthenticator | undefined;
   readonly client: ServiceOfferClient;
   readonly inProject: boolean;
   readonly offer: ServiceOffer;
-  readonly profiles: ServiceOffersResponse["imageProfiles"];
+  readonly profiles: ServiceOfferEnvelopes["imageProfiles"];
   readonly reload: () => Promise<void>;
   readonly stale: boolean;
 }) {

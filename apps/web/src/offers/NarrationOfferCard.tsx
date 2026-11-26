@@ -1,20 +1,14 @@
 import { useId, useState } from "react";
-import type { ServiceOffer, ServiceOfferDecision } from "@octant/contracts";
+import { decodeNarrationOffer, type NarrationOffer } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { strictOfferCard, type OfferCardProps } from "./strictOfferCard";
 
-export function NarrationOfferCard({
-  offer,
-  busy,
-  decide,
-}: {
-  readonly offer: ServiceOffer;
-  readonly busy: boolean;
-  readonly decide: (answer: ServiceOfferDecision) => void;
-}) {
+export const NarrationOfferCard = strictOfferCard(decodeNarrationOffer, NarrationCard);
+
+function NarrationCard({ offer, busy, decide }: OfferCardProps<NarrationOffer>) {
   const [remember, setRemember] = useState(false);
   const id = useId();
-  if (offer.kind !== "narrate") return null;
   const truncated = offer.characters > offer.excerpt.length;
   const canRemember = offer.canRemember !== false;
   return (

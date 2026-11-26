@@ -1,20 +1,14 @@
 import { useId, useState } from "react";
-import type { ServiceOffer, ServiceOfferDecision } from "@octant/contracts";
+import { decodeTranscriptionOffer, type TranscriptionOffer } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { strictOfferCard, type OfferCardProps } from "./strictOfferCard";
 
-export function TranscriptionOfferCard({
-  offer,
-  busy,
-  decide,
-}: {
-  readonly offer: ServiceOffer;
-  readonly busy: boolean;
-  readonly decide: (answer: ServiceOfferDecision) => void;
-}) {
+export const TranscriptionOfferCard = strictOfferCard(decodeTranscriptionOffer, TranscriptionCard);
+
+function TranscriptionCard({ offer, busy, decide }: OfferCardProps<TranscriptionOffer>) {
   const [remember, setRemember] = useState(false);
   const id = useId();
-  if (offer.kind !== "transcribe") return null;
   return (
     <article aria-label="Transcription request" className="follow-up-card">
       <p className="follow-up-card__title">Transcribe this recording?</p>

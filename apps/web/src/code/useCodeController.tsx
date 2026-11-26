@@ -427,6 +427,24 @@ function threadListActivity(
 }
 
 /**
+ * The transcript a thread's controller held when its thread left the window,
+ * with what a later read needs to join its newest turns onto it. Text and
+ * figures only: no turn status, pending request, draft, stream or poll.
+ */
+export interface CodeKeptThread {
+  readonly client: CodeClient;
+  readonly view: CodeThreadView;
+  readonly conversation: ReadonlyArray<CodeConversationMessage>;
+  readonly inheritedConversation: ReadonlyArray<CodeConversationMessage>;
+  readonly earlierConversation: CodeEarlierConversation;
+  readonly forkedFrom: CodeThread["forkedFrom"];
+  readonly turnActivity: ReadonlyMap<string, TurnActivity>;
+  readonly threadUsage: CodeThreadUsage;
+  readonly usageByOperation: ReadonlyMap<string, CodeTurnUsage>;
+  readonly earlierUsage: CodeConversationUsageTotals | undefined;
+}
+
+/**
  * Add up what each turn reported.
  *
  * The thread's figure is the sum over turns, never the sum over reports: a
@@ -437,6 +455,12 @@ function threadListActivity(
  */
 export interface CodeControllerOptions {
   readonly activeThreadId?: CodeThreadId;
+  /**
+   * What this thread showed when the window last left it, read once on mount.
+   * It is drawn until the journal answers the read every open starts; nothing
+   * treats it as the thread's current state before that.
+   */
+  readonly kept?: CodeKeptThread | undefined;
   /** Window-owned metadata; a thread slot waits for it instead of bootstrapping. */
   readonly navigation?: { readonly bootstrap: CodeBootstrap | undefined };
   readonly client?: CodeClient;
@@ -496,11 +520,20 @@ export function useCodeController(options: CodeControllerOptions) {
       }),
     [options.client, options.serverUrl, options.windowCapability],
   );
+  const [kept] = useState(() =>
+    options.kept !== undefined &&
+    options.kept.client === client &&
+    String(options.kept.view.thread.id) === String(options.activeThreadId)
+      ? options.kept
+      : undefined,
+  );
+  // True while the transcript held is the kept one, or one read onto it.
+  const keptTranscript = useRef(kept !== undefined);
   const [status, setStatus] = useState<CodeControllerStatus>("loading");
   const [bootstrap, setBootstrap] = useState<CodeBootstrap>();
   const bootstrapRef = useRef(bootstrap);
   bootstrapRef.current = bootstrap;
-  const [activeView, setActiveView] = useState<CodeThreadView>();
+  const [activeView, setActiveView] = useState<CodeThreadView | undefined>(kept?.view);
   const activeViewRef = useRef(activeView);
   activeViewRef.current = activeView;
   const lastStandingRead = useRef(0);
@@ -529,12 +562,16 @@ export function useCodeController(options: CodeControllerOptions) {
     },
     [ownsNavigation],
   );
-  const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
+  const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>(
+    kept?.conversation ?? [],
+  );
   // The transcript as last set, and whose it is, for the window reads that
   // join a page onto it. A render keeps it level with live updates.
   const conversationRef = useRef(conversation);
   conversationRef.current = conversation;
-  const conversationThreadKey = useRef<string | undefined>(undefined);
+  const conversationThreadKey = useRef<string | undefined>(
+    kept === undefined ? undefined : String(kept.view.thread.id),
+  );
   // The turn this window's own send streams, which no other path may stream
   // and no read of the conversation may replace.
   const sentTurnStreaming = useRef<string | undefined>(undefined);
@@ -548,14 +585,17 @@ export function useCodeController(options: CodeControllerOptions) {
     [],
   );
   // The whole-history fallback's inherited turns, read before the thread's own.
-  const inheritedConversation = useRef<ReadonlyArray<CodeConversationMessage>>([]);
+  const inheritedConversation = useRef<ReadonlyArray<CodeConversationMessage>>(
+    kept?.inheritedConversation ?? [],
+  );
   /*
    * What the open thread holds beyond its newest page: whether its own turns
    * go on, and where a fork's inherited history continues. Mirrored in a ref
    * for the page reads, which run outside render.
    */
-  const [earlierConversation, setEarlierConversationState] =
-    useState<CodeEarlierConversation>(NO_EARLIER_CONVERSATION);
+  const [earlierConversation, setEarlierConversationState] = useState<CodeEarlierConversation>(
+    kept?.earlierConversation ?? NO_EARLIER_CONVERSATION,
+  );
   const earlierConversationRef = useRef(earlierConversation);
   const setEarlierConversation = useCallback(
     (update: (current: CodeEarlierConversation) => CodeEarlierConversation) => {
@@ -565,7 +605,7 @@ export function useCodeController(options: CodeControllerOptions) {
     },
     [],
   );
-  const forkedFrom = useRef<CodeThread["forkedFrom"]>(undefined);
+  const forkedFrom = useRef<CodeThread["forkedFrom"]>(kept?.forkedFrom);
   const earlierAbort = useRef<AbortController | undefined>(undefined);
   /*
    * Whether an empty transcript is still loading, authoritatively empty, or
@@ -720,7 +760,7 @@ export function useCodeController(options: CodeControllerOptions) {
     [],
   );
   const [turnActivity, setTurnActivity] = useState<ReadonlyMap<string, TurnActivity>>(
-    () => new Map(),
+    () => kept?.turnActivity ?? new Map(),
   );
   /** A read's tool and reasoning rows, leaving those the own send streams as they are. */
   const takeReadActivity = useCallback((read: ReadonlyMap<string, TurnActivity>) => {
@@ -739,7 +779,9 @@ export function useCodeController(options: CodeControllerOptions) {
   // What this thread has consumed and how much of the provider's usage windows
   // is left. Both are the provider's own figures; nothing here is derived from
   // a price list or a limit Octant assumed.
-  const [threadUsage, setThreadUsage] = useState<CodeThreadUsage>(EMPTY_THREAD_USAGE);
+  const [threadUsage, setThreadUsage] = useState<CodeThreadUsage>(
+    kept?.threadUsage ?? EMPTY_THREAD_USAGE,
+  );
   const [accessNotice, setAccessNotice] = useState<string>();
   // The way back from this thread's last restore, as the host recorded it. It
   // lives here rather than in the surface that ran the restore because that
@@ -754,9 +796,10 @@ export function useCodeController(options: CodeControllerOptions) {
   const noteRestoreUndo = useCallback((checkpoint: CodeCheckpoint | undefined) => {
     setRestoreUndo(checkpoint);
   }, []);
-  const usageByOperation = useRef(new Map<string, CodeTurnUsage>());
+  const [keptUsage] = useState(() => new Map<string, CodeTurnUsage>(kept?.usageByOperation));
+  const usageByOperation = useRef(keptUsage);
   // The host's fold of every own turn older than the oldest loaded one.
-  const earlierUsage = useRef<CodeConversationUsageTotals | undefined>(undefined);
+  const earlierUsage = useRef<CodeConversationUsageTotals | undefined>(kept?.earlierUsage);
   const noteUsage = useCallback((operationId: CodeOperationId, event: CodeOperationEvent) => {
     if (event.kind === "usage") {
       const {
@@ -1363,19 +1406,25 @@ export function useCodeController(options: CodeControllerOptions) {
       );
       setRestoreUndo(window.restoreUndo);
       showConversation(threadId, joined.messages);
-      if (projected.activity.size > 0) {
-        takeReadActivity(projected.activity);
-      }
+      // A turn the journal no longer holds (another window rewound it away)
+      // takes its tool activity with it, so nothing keeps watching its tools.
+      // The turn this window's own send streams keeps its rows, as its
+      // transcript rows are kept above.
+      const held = new Set(joined.messages.map((message) => String(message.operationId)));
+      const streamed = sentTurnStreaming.current;
+      setTurnActivity((current) => {
+        const kept = [...current].filter(
+          ([operation]) => held.has(operation) || operation === streamed,
+        );
+        const read = [...projected.activity].filter(
+          ([operation]) => operation !== streamed || !current.has(operation),
+        );
+        if (kept.length === current.size && read.length === 0) return current;
+        return new Map([...kept, ...read]);
+      });
       return settleLatestTurn(threadId, window.turns.at(-1));
     },
-    [
-      client,
-      hydrateWholeConversation,
-      setEarlierConversation,
-      settleLatestTurn,
-      showConversation,
-      takeReadActivity,
-    ],
+    [client, hydrateWholeConversation, setEarlierConversation, settleLatestTurn, showConversation],
   );
 
   /**
@@ -1635,6 +1684,9 @@ export function useCodeController(options: CodeControllerOptions) {
           if (!isActive(request, threadGeneration, mounted)) return;
           openingReadFailed = true;
           setConversation([]);
+          // A transcript kept from an earlier visit goes, and with it the
+          // tool activity of turns no longer shown.
+          setTurnActivity(new Map());
           setConversationHistory("unavailable");
           setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
         }
@@ -2321,14 +2373,24 @@ export function useCodeController(options: CodeControllerOptions) {
     turnAbort.current?.abort();
     turnAbort.current = undefined;
     earlierAbort.current?.abort();
-    conversationThreadKey.current = undefined;
-    conversationRef.current = [];
-    setConversation([]);
+    // A thread the window comes back to keeps the transcript it starts from;
+    // the read below joins the journal's newest turns onto it or replaces it.
+    const keepsTranscript =
+      keptTranscript.current &&
+      readsConversationWindow(client) &&
+      kept?.client === client &&
+      conversationThreadKey.current === String(options.activeThreadId);
+    if (!keepsTranscript) {
+      keptTranscript.current = false;
+      conversationThreadKey.current = undefined;
+      conversationRef.current = [];
+      setConversation([]);
+      setTurnActivity(new Map());
+    }
     setSteeredMessages(new Map());
     setConversationHistory("loading");
     setProviderRequests([]);
     setRefusedAnswer(undefined);
-    setTurnActivity(new Map());
     setTurnStatus(
       options.activeThreadId === undefined
         ? "idle"
@@ -2352,7 +2414,47 @@ export function useCodeController(options: CodeControllerOptions) {
       return;
     }
     void activateThread(options.activeThreadId);
-  }, [activateThread, options.activeThreadId]);
+  }, [activateThread, client, kept, options.activeThreadId]);
+
+  const shownFacts = useRef({ activeView, conversationHistory, threadUsage, turnActivity });
+  shownFacts.current = { activeView, conversationHistory, threadUsage, turnActivity };
+  /**
+   * What this thread shows now, for the window to start from when it comes
+   * back, or nothing when no read of it has landed or the last one failed.
+   */
+  const keepThread = useCallback((): CodeKeptThread | undefined => {
+    const threadKey = String(activeThreadId.current);
+    const shown = shownFacts.current;
+    const view = shown.activeView;
+    const held =
+      shown.conversationHistory === "loaded" ||
+      (shown.conversationHistory === "loading" && keptTranscript.current);
+    // A host without the window read is read again from its first page, which
+    // would replace the kept newest turns with the oldest ones while it loads.
+    if (
+      !held ||
+      !readsConversationWindow(client) ||
+      view === undefined ||
+      String(view.thread.id) !== threadKey ||
+      conversationThreadKey.current !== threadKey ||
+      conversationRef.current.length === 0
+    ) {
+      return undefined;
+    }
+    const earlier = earlierConversationRef.current;
+    return {
+      client,
+      view,
+      conversation: conversationRef.current,
+      inheritedConversation: inheritedConversation.current,
+      earlierConversation: earlier.loading === "idle" ? earlier : { ...earlier, loading: "idle" },
+      forkedFrom: forkedFrom.current,
+      turnActivity: shown.turnActivity,
+      threadUsage: shown.threadUsage,
+      usageByOperation: usageByOperation.current,
+      earlierUsage: earlierUsage.current,
+    };
+  }, [client]);
 
   // The current thread list, read inside callbacks that must not re-create
   // themselves every time a thread's version changes.
@@ -4140,6 +4242,7 @@ export function useCodeController(options: CodeControllerOptions) {
     // re-activates a tab that is already open.
     retry,
     conversationHistory,
+    keepThread,
     sendFollowUp,
     sendPullRequestLineNotes,
     setPendingDraft,
@@ -4161,7 +4264,9 @@ export function useCodeController(options: CodeControllerOptions) {
 }
 
 type CodeControllerResult = ReturnType<typeof useCodeController>;
-export type CodeController = Omit<CodeControllerResult, "writePendingDraftFor"> & {
+export type CodeController = Omit<CodeControllerResult, "keepThread" | "writePendingDraftFor"> & {
+  /** Optional for injected fixtures, which have no transcript to come back to. */
+  readonly keepThread?: CodeControllerResult["keepThread"];
   /** Optional for injected fixtures and hosts that do not persist drafts by thread. */
   readonly writePendingDraftFor?: (threadId: string, value: string) => void;
 };

@@ -9,7 +9,12 @@ import { randomBytes, randomUUID } from "node:crypto";
 export interface SmokeWindowAuthority {
   readonly windowId: string;
   readonly headers: Readonly<Record<string, string>>;
-  readonly send: (path: string, body: unknown, step: string) => Promise<unknown>;
+  readonly send: (
+    path: string,
+    body: unknown,
+    step: string,
+    signal?: AbortSignal,
+  ) => Promise<unknown>;
 }
 
 export interface SeededCodeProject {
@@ -50,11 +55,12 @@ export async function registerWindowAuthority(
   return {
     windowId,
     headers,
-    send: async (path, body, step) => {
+    send: async (path, body, step, signal) => {
       const response = await fetch(`${serverUrl}${path}`, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        ...(signal === undefined ? {} : { signal }),
       });
       if (!response.ok) {
         throw new Error(`Packaged smoke could not ${step} (${response.status}).`);
