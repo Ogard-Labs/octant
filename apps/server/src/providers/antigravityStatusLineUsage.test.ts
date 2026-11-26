@@ -94,7 +94,7 @@ describe("antigravity status-line usage", () => {
       reading!,
       "2026-11-26T11:05:00.000Z" as UtcTimestamp,
     );
-    expect(limits?.scope).toBe("account");
+    expect(limits?.scope).toBe("model");
     expect(limits?.quota).toBe("unknown");
     expect(limits?.rateLimitWindows?.map((w) => w.window)).toEqual([
       "gemini:five_hour",

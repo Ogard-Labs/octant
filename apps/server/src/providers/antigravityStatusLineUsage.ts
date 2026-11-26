@@ -366,12 +366,13 @@ export function antigravityStatusLineLimits(
 
   if (windows.length === 0) return undefined;
   // Antigravity exposes independent quota buckets per model family (for
-  // example Gemini vs Claude & GPT). Exhausting one bucket must not mark the
-  // entire account exhausted and block turns for unrelated model families;
-  // leave hard refusal to `agy acp` while displaying every bucket honestly.
+  // example Gemini vs Claude & GPT). Emit model-scoped limits with aggregate
+  // `quota: "unknown"` so exhausting one model family never blocks turns or
+  // worker selection for unrelated models; leave model-specific refusal to
+  // `agy acp` while displaying every bucket honestly.
   return decodeProviderServiceLimits({
     providerInstanceId: instanceId,
-    scope: "account",
+    scope: "model",
     requests: { status: "unavailable" },
     tokens: { status: "unavailable" },
     concurrency: { status: "unavailable" },

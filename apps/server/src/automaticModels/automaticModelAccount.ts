@@ -48,10 +48,11 @@ function atLimit(
   const future = (resetsAt: string | undefined) =>
     resetsAt === undefined || Date.parse(resetsAt) > nowMs;
   const windows = limits.rateLimitWindows ?? [];
+  const accountWindows = limits.scope === "model" ? [] : windows;
   // A window's reset time decides when its exhaustion ends; the aggregate
-  // quota flag has none, so it counts only when no window explains it.
+  // quota flag has none, so it counts only when no account-wide window explains it.
   if (
-    windows.some(
+    accountWindows.some(
       (window) =>
         window.status === "exhausted" &&
         future(window.resetsAt) &&
@@ -60,7 +61,7 @@ function atLimit(
   ) {
     return true;
   }
-  if (windows.length === 0 && limits.quota === "exhausted") return true;
+  if (accountWindows.length === 0 && limits.quota === "exhausted") return true;
   // HTTP providers report absolute buckets in rate-limit headers.
   return [limits.requests, limits.tokens].some(
     (bucket) => bucket.status === "available" && bucket.remaining === 0 && future(bucket.resetsAt),

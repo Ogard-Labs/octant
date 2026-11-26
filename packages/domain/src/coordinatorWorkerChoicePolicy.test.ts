@@ -786,4 +786,54 @@ describe("usageLimitFromReading", () => {
     ).toBeUndefined();
     expect(usageLimitFromReading(undefined, now)).toBeUndefined();
   });
+
+  it("does not turn one exhausted family window in a model-scoped reading into an account-wide limit", () => {
+    const modelScoped = {
+      status: "available",
+      providerInstanceId: "p",
+      observedAt: "2026-11-15T12:00:00.000Z",
+      limits: {
+        scope: "model",
+        quota: "unknown",
+        requests: { status: "unavailable" },
+        tokens: { status: "unavailable" },
+        rateLimitWindows: [
+          {
+            window: "gemini:five_hour",
+            status: "allowed",
+            utilization: 0.2,
+            resetsAt: "2026-11-15T14:00:00.000Z",
+          },
+          {
+            window: "claude_gpt:five_hour",
+            status: "exhausted",
+            utilization: 1,
+            resetsAt: "2026-11-15T14:00:00.000Z",
+          },
+        ],
+      },
+    } as never;
+    expect(usageLimitFromReading(modelScoped, now)).toBeUndefined();
+
+    const modelScopedExplicitExhausted = {
+      status: "available",
+      providerInstanceId: "p",
+      observedAt: "2026-11-15T12:00:00.000Z",
+      limits: {
+        scope: "model",
+        quota: "exhausted",
+        requests: { status: "unavailable" },
+        tokens: { status: "unavailable" },
+        rateLimitWindows: [
+          {
+            window: "claude_gpt:five_hour",
+            status: "exhausted",
+            utilization: 1,
+            resetsAt: "2026-11-15T14:00:00.000Z",
+          },
+        ],
+      },
+    } as never;
+    expect(usageLimitFromReading(modelScopedExplicitExhausted, now)).toEqual({});
+  });
 });
