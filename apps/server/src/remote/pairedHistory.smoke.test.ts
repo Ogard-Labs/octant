@@ -66,6 +66,18 @@ const threadId = decodeChatThreadId("83000000-0000-4000-8000-000000000001");
 const actor = decodeEventActor({ kind: "system", actorId: randomUUID() });
 const aggregate = { aggregateType: "chat-thread", aggregateId: threadId };
 
+function chatPrompt(sequence: number) {
+  return `Investigation step ${sequence}. ${"Compare the recorded result with the expected state and list the outstanding questions. ".repeat(12).trim()}`;
+}
+
+function projectPrompt(sequence: number) {
+  return `Investigation step ${sequence}. ${"Describe expected behavior and compare it with the recorded observations. ".repeat(12).trim()}`;
+}
+
+function projectReply(sequence: number) {
+  return `Step ${sequence}. ${"The recorded observations match the expected behavior. ".repeat(15).trim()}`;
+}
+
 function seedChat(persistence: PersistenceService) {
   const now = new Date().toISOString();
   const providerInstanceId = decodeProviderInstanceId(randomUUID());
@@ -105,7 +117,7 @@ function seedChat(persistence: PersistenceService) {
     const committedSequences = [];
     for (let index = 0; index < count; index++) {
       sequence++;
-      const body = `Investigation step ${sequence}. ${"Compare the recorded result with the expected state and list the outstanding questions. ".repeat(12).trim()}`;
+      const body = chatPrompt(sequence);
       const contentId = randomUUID();
       const digest = createHash("sha256").update(body).digest("hex");
       const content = { contentId, digest, byteLength: Buffer.byteLength(body) };
@@ -246,8 +258,8 @@ function seedProjectHistory(persistence: PersistenceService, total: number) {
   });
   const codeOperations = [];
   for (const sequence of sequences(1, total)) {
-    const prompt = `Investigation step ${sequence}. ${"Describe expected behavior and compare it with the recorded observations. ".repeat(12).trim()}`;
-    const response = "The recorded observations match the expected behavior. ".repeat(15).trim();
+    const prompt = projectPrompt(sequence);
+    const response = projectReply(sequence);
     const requestId = randomUUID();
     const turnId = randomUUID();
     append("work-turn", requestId, 0, "work.turn-accepted@1", {
@@ -347,6 +359,8 @@ it.each([
   { total: 1200, transport: "pinned TLS" },
 ])(
   "bounds paired conversation history with $total turns over $transport",
+  // The transfer budgets measure bytes and rows. Allow for building the large journal on shared CI runners.
+  { timeout: 120_000 },
   async ({ total, transport }) => {
     const directory = mkdtempSync(join(tmpdir(), "octant-paired-history-"));
     try {
@@ -359,7 +373,9 @@ it.each([
             }).ensure(address);
             if (certificate.status !== "ready") throw new Error(certificate.code);
 
-            const projectThreads = seedProjectHistory(persistence, total);
+            const projectThreads = persistence.connection.transaction(() =>
+              seedProjectHistory(persistence, total),
+            )();
             let localFetch: ServeOptions["fetch"] | undefined;
             let remoteFetch: ServeOptions["fetch"] | undefined;
             let peer = 0;
@@ -449,7 +465,7 @@ it.each([
                   }),
                 );
               const addTurns = seedChat(persistence);
-              addTurns(total);
+              persistence.connection.transaction(() => addTurns(total))();
               const ticketResponse = await admin("pairing-tickets", { sourceClass: "tailscale" });
               expect(ticketResponse.status).toBe(201);
               const { ticket } = await ticketResponse.json();
@@ -593,19 +609,14 @@ it.each([
                   bytes = 0;
                 };
                 const newest = await chat.threadWindow(threadId, { limit: pageSize });
+                expect(newest).toMatchObject({ hasEarlier: true, hasLater: false });
                 const verifyChatContents = (view: typeof newest.view, first: number) => {
                   const bodies = new Map(
                     view.contents.map((content) => [String(content.contentId), content.body]),
                   );
                   expect(
-                    view.turns.map((turn) =>
-                      Number(
-                        /^Investigation step (\d+)\./.exec(
-                          bodies.get(String(turn.userMessageRef.contentId)) ?? "",
-                        )?.[1],
-                      ),
-                    ),
-                  ).toEqual(sequences(first, pageSize));
+                    view.turns.map((turn) => bodies.get(String(turn.userMessageRef.contentId))),
+                  ).toEqual(sequences(first, pageSize).map(chatPrompt));
                 };
                 expect(newest.view.turns.map((turn) => turn.sequence)).toEqual(
                   sequences(total - pageSize + 1, pageSize),
@@ -615,6 +626,7 @@ it.each([
                 const before = newest.view.turns[0]?.id;
                 if (before === undefined) throw new Error("Missing previous-page anchor");
                 const older = await chat.threadWindow(threadId, { limit: pageSize, before });
+                expect(older).toMatchObject({ hasEarlier: true, hasLater: true });
                 expect(older.view.turns.map((turn) => turn.sequence)).toEqual(
                   sequences(total - 2 * pageSize + 1, pageSize),
                 );
@@ -623,11 +635,20 @@ it.each([
                 const newestWork = await work.transcriptWindow(projectThreads.work, {
                   limit: pageSize,
                 });
-                const workPrompts = (rows: typeof newestWork.turns) =>
-                  rows.map((turn) => Number(/^Investigation step (\d+)\./.exec(turn.prompt)?.[1]));
-                expect(workPrompts(newestWork.turns)).toEqual(
-                  sequences(total - pageSize + 1, pageSize),
-                );
+                expect(newestWork).toMatchObject({ hasEarlier: true, hasLater: false });
+                const verifyWorkContents = (
+                  rows: typeof newestWork.turns,
+                  first: number,
+                  count: number,
+                ) => {
+                  expect(rows.map(({ prompt, response }) => [prompt, response])).toEqual(
+                    sequences(first, count).map((sequence) => [
+                      projectPrompt(sequence),
+                      projectReply(sequence),
+                    ]),
+                  );
+                };
+                verifyWorkContents(newestWork.turns, total - pageSize + 1, pageSize);
                 record("Work cold open", newestWork.turns.length, workWindowBytes);
                 const liveWork = workHeads.mock.contexts.at(-1);
                 if (!(liveWork instanceof WorkTurnLiveStore))
@@ -640,9 +661,8 @@ it.each([
                   limit: pageSize,
                   before: beforeWork,
                 });
-                expect(workPrompts(olderWork.turns)).toEqual(
-                  sequences(total - 2 * pageSize + 1, pageSize),
-                );
+                expect(olderWork).toMatchObject({ hasEarlier: true, hasLater: true });
+                verifyWorkContents(olderWork.turns, total - 2 * pageSize + 1, pageSize);
                 record("Work previous page", olderWork.turns.length, workWindowBytes);
 
                 const codePageSize = 20;
@@ -650,6 +670,7 @@ it.each([
                   limit: codePageSize,
                 });
                 if (newestCode === undefined) throw new Error("Missing Code window");
+                expect(newestCode).toMatchObject({ hasEarlier: true, hasLater: false });
                 expect(newestCode.turns.map((turn) => turn.operationId)).toEqual(
                   projectThreads.codeOperations.slice(-codePageSize),
                 );
@@ -678,15 +699,16 @@ it.each([
                     }
                   }
                   expect(contents.size).toBe(turns.length * 2);
-                  expect(
-                    turns.map((turn) =>
-                      Number(
-                        /^Investigation step (\d+)\./.exec(
-                          contents.get(`${turn.operationId}:${turn.prompt.contentId}`) ?? "",
-                        )?.[1],
+                  for (const [index, turn] of turns.entries()) {
+                    expect(contents.get(`${turn.operationId}:${turn.prompt.contentId}`)).toBe(
+                      projectPrompt(first + index),
+                    );
+                    expect(
+                      turn.assistant.map((ref) =>
+                        contents.get(`${turn.operationId}:${ref.contentId}`),
                       ),
-                    ),
-                  ).toEqual(sequences(first, turns.length));
+                    ).toEqual([projectReply(first + index)]);
+                  }
                 };
                 await verifyCodeContent(newestCode.turns, total - codePageSize + 1);
                 const readCodeReplay = async (afterCursor: number) => {
@@ -704,7 +726,7 @@ it.each([
                 // client follows by replaying that operation from its start.
                 const openingFrames = await readCodeReplay(0);
                 expect(openingFrames.map((frame) => frame.cursor)).toEqual([1, 2]);
-                expect(openingFrames[1]?.displayText).toContain("recorded observations");
+                expect(openingFrames[1]?.displayText).toBe(projectReply(total));
                 record(
                   "Code cold open",
                   newestCode.turns.length,
@@ -719,6 +741,7 @@ it.each([
                   before: beforeCode,
                 });
                 if (olderCode === undefined) throw new Error("Missing Code window");
+                expect(olderCode).toMatchObject({ hasEarlier: true, hasLater: true });
                 expect(olderCode.turns.map((turn) => turn.operationId)).toEqual(
                   projectThreads.codeOperations.slice(-2 * codePageSize, -codePageSize),
                 );
@@ -766,8 +789,10 @@ it.each([
 
                 if (listener !== undefined) {
                   const mobileWork = await loadMobileWorkTranscript(mobile, projectThreads.work);
-                  expect(workPrompts(mobileWork.turns)).toEqual(
-                    sequences(total - MAX_WORK_TRANSCRIPT_TURNS + 1, MAX_WORK_TRANSCRIPT_TURNS),
+                  verifyWorkContents(
+                    mobileWork.turns,
+                    total - MAX_WORK_TRANSCRIPT_TURNS + 1,
+                    MAX_WORK_TRANSCRIPT_TURNS,
                   );
                   measurements.push({
                     scenario: "Mobile Work transcript (64-row cap)",
@@ -779,14 +804,18 @@ it.each([
                   bytes = 0;
 
                   const mobileCode = await loadMobileCodeConversation(mobile, projectThreads.code);
+                  expect(mobileCode).toMatchObject({ hasEarlier: true, hasLater: false });
                   expect(mobileCode.turns.map((turn) => turn.operationId)).toEqual(
                     projectThreads.codeOperations.slice(-codePageSize),
                   );
                   expect(
-                    mobileCode.turns.every(
-                      (turn) => turn.prompt.length > 0 && turn.assistant.length > 0,
-                    ),
-                  ).toBe(true);
+                    mobileCode.turns.map(({ prompt, assistant }) => [prompt, assistant]),
+                  ).toEqual(
+                    sequences(total - codePageSize + 1, codePageSize).map((sequence) => [
+                      projectPrompt(sequence),
+                      [projectReply(sequence)],
+                    ]),
+                  );
                   record("Mobile Code cold open", mobileCode.turns.length, codeWindowBytes, 2);
                   const through = projectThreads.codeOperations.at(-codePageSize - 1);
                   if (through === undefined) throw new Error("Missing Mobile Code page anchor");
@@ -795,14 +824,18 @@ it.each([
                     projectThreads.code,
                     { through },
                   );
+                  expect(olderMobileCode).toMatchObject({ hasEarlier: true, hasLater: true });
                   expect(olderMobileCode.turns.map((turn) => turn.operationId)).toEqual(
                     projectThreads.codeOperations.slice(-2 * codePageSize, -codePageSize),
                   );
                   expect(
-                    olderMobileCode.turns.every(
-                      (turn) => turn.prompt.length > 0 && turn.assistant.length > 0,
-                    ),
-                  ).toBe(true);
+                    olderMobileCode.turns.map(({ prompt, assistant }) => [prompt, assistant]),
+                  ).toEqual(
+                    sequences(total - 2 * codePageSize + 1, codePageSize).map((sequence) => [
+                      projectPrompt(sequence),
+                      [projectReply(sequence)],
+                    ]),
+                  );
                   record(
                     "Mobile Code anchored page",
                     olderMobileCode.turns.length,
