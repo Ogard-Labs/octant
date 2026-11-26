@@ -143,6 +143,11 @@ beforeEach(async () => {
       freshness: "2026-08-10T09:30:00.000Z",
     },
   ];
+  await mount();
+});
+
+/** Opens the app on the Pull requests place; the sample computers keep their state. */
+async function mount(): Promise<void> {
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -162,7 +167,7 @@ beforeEach(async () => {
   );
   await settle();
   await press("mobile-tab-prs");
-});
+}
 afterEach(() => {
   act(() => root.unmount());
   document.body.replaceChildren();
@@ -210,6 +215,12 @@ describe("the phone's pull requests", () => {
     expect(seen("mobile-pr-merge-when-ready-off")).toBeUndefined();
     await press("mobile-pr-merge-when-ready-open");
     await press("mobile-pr-merge-confirm");
+    expect(seen("mobile-pr-merge-when-ready-off")).toBeDefined();
+    // Opened again, from a list that does not know of the switch yet.
+    act(() => root.unmount());
+    document.body.replaceChildren();
+    await mount();
+    await press("mobile-pr-row-44");
     expect(seen("mobile-pr-merge-when-ready-off")).toBeDefined();
     await press("mobile-pr-merge-when-ready-off");
     expect(seen("mobile-pr-merge-when-ready-off")).toBeUndefined();

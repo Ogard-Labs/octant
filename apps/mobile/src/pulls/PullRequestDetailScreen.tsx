@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   listMobilePullRequests,
-  readMobilePullRequestBabysit,
+  readMobilePullRequestSwitches,
   setMobilePullRequestBabysit,
   type MobileInboxRow,
 } from "@octant/client-runtime";
@@ -30,6 +30,11 @@ import {
   pullRequestStateChip,
   type MobilePullRequest,
 } from "./pullRequestPresentation";
+
+function withoutAutoMerge(row: CodeProjectPullRequestRow): CodeProjectPullRequestRow {
+  const { merging: _merging, ...rest } = row;
+  return rest;
+}
 
 /** A pull request the computer just merged: no Merge, nothing on its way. */
 export function mergedRow(row: CodeProjectPullRequestRow): CodeProjectPullRequestRow {
@@ -84,23 +89,35 @@ export function PullRequestDetailScreen(props: {
   const [babysitBusy, setBabysitBusy] = useState(false);
   const [babysitNotice, setBabysitNotice] = useState<string>();
   const { projectId, repositoryOwner, repositoryName, number } = row;
+  const [mergeWhenReadyConfirmed, setMergeWhenReadyOn] = useState<boolean>();
   useEffect(() => {
     if (transport === undefined || !open) return;
     let live = true;
-    void readMobilePullRequestBabysit(transport, {
+    void readMobilePullRequestSwitches(transport, {
       projectId: String(projectId),
       repositoryOwner,
       repositoryName,
       number,
     }).then((state) => {
-      if (live) setAutoFix(state);
+      if (!live || state === undefined) return;
+      setAutoFix(state.autoFix);
+      setMergeWhenReadyOn(state.mergeWhenReadyOn);
     });
     return () => {
       live = false;
     };
   }, [transport, open, projectId, repositoryOwner, repositoryName, number]);
-  const [mergeWhenReadyConfirmed, setMergeWhenReadyOn] = useState<boolean>();
   const mergeWhenReadyOn = mergeWhenReadyConfirmed ?? row.merging === "auto-merge";
+  // What the page says of the pull request follows the switch the computer
+  // confirmed; the row's queue place stays its own.
+  const shownRow: CodeProjectPullRequestRow =
+    mergeWhenReadyOn === (row.merging === "auto-merge")
+      ? row
+      : mergeWhenReadyOn
+        ? row.merging === "queued"
+          ? row
+          : { ...row, merging: "auto-merge" }
+        : withoutAutoMerge(row);
   const merge = usePullRequestMerge({
     transport,
     target,
@@ -132,7 +149,7 @@ export function PullRequestDetailScreen(props: {
   const checks = pullRequestChecks(row);
   const review = pullRequestReview(row);
   const mergeability = pullRequestMergeability(row);
-  const badges = pullRequestBadges(row);
+  const badges = pullRequestBadges(shownRow);
   const failing = row.failingChecks ?? [];
   const threads = row.linkedThreads.map((linked) => ({
     linked,

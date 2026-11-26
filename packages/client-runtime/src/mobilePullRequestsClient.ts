@@ -187,19 +187,30 @@ export async function setMobilePullRequestBabysit(
 }
 
 /** Whether Babysit runs for the pull request now, and for which thread; undefined when unreadable. */
-export async function readMobilePullRequestBabysit(
+/**
+ * Babysit and Merge when ready as the computer holds them now. The overview's
+ * row may predate either, so a pull request's page reads them when it opens.
+ */
+export async function readMobilePullRequestSwitches(
   transport: MobileRemoteTransport,
   target: MobilePullRequestSwitchTarget,
-): Promise<CodeProjectPullRequestAutoFixState | undefined> {
+): Promise<
+  | {
+      readonly autoFix: CodeProjectPullRequestAutoFixState;
+      readonly mergeWhenReadyOn: boolean;
+    }
+  | undefined
+> {
   try {
-    return decodeHostAnswer(CodeProjectPullRequestSwitchesView)(
+    const view = decodeHostAnswer(CodeProjectPullRequestSwitchesView)(
       await postSwitch(transport, "switches", {
         projectId: target.projectId,
         repositoryOwner: target.repositoryOwner,
         repositoryName: target.repositoryName,
         number: target.number,
       }),
-    ).autoFix;
+    );
+    return { autoFix: view.autoFix, mergeWhenReadyOn: view.mergeWhenReady.status === "on" };
   } catch {
     return undefined;
   }
