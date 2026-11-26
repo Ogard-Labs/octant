@@ -1696,6 +1696,7 @@ Status: Built. Since: 2026-11-21. Detail: [Provider runtimes: Probe before a pro
 
 Octant's tools reach OpenCode and ACP agents on Linux as on macOS, and outside provider drivers run on Linux (maintainer decision, 2026-11-16).
 
+- OpenCode and ACP agents get Octant's tools on Windows too, under [Windows below Full access](#windows-below-full-access): a launch there has no Octant sandbox and reaches the loopback bridge directly. A live check on a real Windows machine is owed.
 - An outside driver on Linux takes the same install, trust and enablement steps and runs unconfined, labelled so, until Linux extension-process confinement exists. Windows stays `host-prohibited`.
 - Strict keeps an outside driver `host-prohibited` on Linux, read at each listing, admission and use ([Windows below Full access](#windows-below-full-access)).
 
