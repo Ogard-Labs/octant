@@ -224,7 +224,7 @@ an image driver, each rule taking the fail-closed option:
   for one that declares `removal: delete`; a declared expiry is left to it),
   each naming the remote id the start returned. Results mirror
   `VideoAdapterStart`, `VideoAdapterPoll` and `VideoAdapterForget` with no free
-  text. Images are capped at 2.5 MiB combined, as for an outside image job, and
+  text, and a running answer carries no usage. Images are capped at 2.5 MiB combined, as for an outside image job, and
   a request past that is refused before its card.
 - **Brokered calls.** Every `http/request` names the call it serves; one that
   names none stops the driver, so nothing billable travels outside a call the

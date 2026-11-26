@@ -20,7 +20,7 @@ export type VideoCostEstimate =
   | { readonly kind: "estimate"; readonly usdMicros: number }
   /** The model publishes no price, so an active money ceiling must refuse it. */
   | { readonly kind: "unknown" }
-  /** A flat-priced model has no rate for this combination; the call is refused. */
+  /** A priced model has no rate for this combination; the call is refused. */
   | { readonly kind: "no-rate" };
 
 export interface VideoUsage {
@@ -101,6 +101,23 @@ function perSecondRate(
   return matching.find((rate) => rate.audio === undefined)?.usdMicrosPerSecond;
 }
 
+/** Whether a published price covers this combination; an unpublished price covers every one. */
+function hasRate(
+  price: VideoPrice,
+  options: Pick<VideoClipOptions, "durationSeconds" | "resolution" | "audio">,
+): boolean {
+  switch (price.kind) {
+    case "unpublished":
+      return true;
+    case "per-clip":
+      return perClipRate(price, options) !== undefined;
+    case "per-second":
+      return perSecondRate(price, options) !== undefined;
+    case "per-token":
+      return price.outputTokensPerSecond.some((entry) => entry.resolution === options.resolution);
+  }
+}
+
 function nearest(values: ReadonlyArray<number>, target: number): number | undefined {
   let best: number | undefined;
   for (const value of values) {
@@ -116,7 +133,7 @@ function nearest(values: ReadonlyArray<number>, target: number): number | undefi
 }
 
 /**
- * The options a clip starts with. For a flat-priced model the default is a
+ * The options a clip starts with. For a priced model the default is a
  * whole combination that has a rate, never each field chosen on its own:
  * resolution first (the declared default, else the lowest), then audio (the
  * declared default, else off), then the length nearest the declared default
@@ -149,14 +166,9 @@ export function defaultVideoClipOptions(
 
   for (const resolution of resolutionOrder) {
     for (const audio of audioOrder) {
-      const price = capabilities.price;
-      const allowedDurations =
-        price.kind === "per-clip"
-          ? durations.filter(
-              (durationSeconds) =>
-                perClipRate(price, { durationSeconds, resolution, audio }) !== undefined,
-            )
-          : durations;
+      const allowedDurations = durations.filter((durationSeconds) =>
+        hasRate(capabilities.price, { durationSeconds, resolution, audio }),
+      );
       const durationSeconds = nearest(allowedDurations, targetDuration);
       if (durationSeconds !== undefined) {
         return { durationSeconds, resolution, aspectRatio, audio };
@@ -219,10 +231,7 @@ export function checkVideoClipOptions(
         : `${capabilities.displayName} takes at most ${capabilities.inputs.maxReferenceImages} reference images.`,
     );
   }
-  if (
-    capabilities.price.kind === "per-clip" &&
-    perClipRate(capabilities.price, options) === undefined
-  ) {
+  if (!hasRate(capabilities.price, options)) {
     return refused(
       `${capabilities.displayName} has no price for ${options.durationSeconds} s at ${options.resolution}${options.audio ? " with audio" : ""}.`,
     );
@@ -253,7 +262,7 @@ export function estimateVideoCost(
     }
     case "per-second": {
       const rate = perSecondRate(price, options);
-      if (rate === undefined) return { kind: "unknown" };
+      if (rate === undefined) return { kind: "no-rate" };
       return {
         kind: "estimate",
         usdMicros: perSecondCostUsdMicros(price, rate, options.durationSeconds, input.imageCount),
@@ -263,7 +272,7 @@ export function estimateVideoCost(
       const perSecond = price.outputTokensPerSecond.find(
         (entry) => entry.resolution === options.resolution,
       );
-      if (perSecond === undefined) return { kind: "unknown" };
+      if (perSecond === undefined) return { kind: "no-rate" };
       const outputTokens =
         perSecond.tokens * options.durationSeconds + (price.reservedOutputTokenAllowance ?? 0);
       const inputTokens = input.promptTokens + (price.inputTokensPerImage ?? 0) * input.imageCount;

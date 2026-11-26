@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { type ImageGenerationScopeId } from "@octant/contracts";
 import { MAX_VIDEO_CLIP_BYTES, type VideoClipId } from "@octant/contracts/video-generation";
 
+const CLIP_EXTENSION = ".mp4";
+
 /** `"video/mp4"` when the bytes start with an MP4 `ftyp` box, else `undefined`. */
 export function sniffVideoClipMediaType(bytes: Uint8Array): "video/mp4" | undefined {
   return bytes.length >= 12 &&
@@ -43,6 +45,8 @@ export class VideoClipStore {
    * rather than recreating a directory the delete already removed.
    */
   readonly #purgedScopes = new Set<string>();
+  /** Paths of finished clips no job recorded, until they are removed. */
+  readonly #strays = new Set<string>();
   readonly #openWrites = new Map<string, number>();
   readonly #writeWaiters = new Map<string, Array<() => void>>();
 
@@ -55,7 +59,7 @@ export class VideoClipStore {
   }
 
   #clipPath(scopeId: ImageGenerationScopeId, clipId: VideoClipId): string {
-    return join(this.#scopeDirectory(scopeId), `${String(clipId)}.mp4`);
+    return join(this.#scopeDirectory(scopeId), `${String(clipId)}${CLIP_EXTENSION}`);
   }
 
   async write(
@@ -198,8 +202,13 @@ export class VideoClipStore {
     await rm(this.#scopeDirectory(scopeId), { recursive: true, force: true });
   }
 
-  /** Removes temporary files a crash left behind. */
-  async recover(): Promise<void> {
+  /**
+   * Removes temporary files a crash left behind and, in the threads `recorded`
+   * names, finds finished clips the journal does not record for
+   * `reclaimStrays`. Other threads keep every clip. Called before any job can
+   * write one.
+   */
+  async recover(recorded: ReadonlyMap<string, ReadonlySet<string>>): Promise<void> {
     let scopes: ReadonlyArray<string>;
     try {
       scopes = await readdir(this.#root);
@@ -214,11 +223,34 @@ export class VideoClipStore {
       } catch {
         continue;
       }
+      const known = recorded.get(scope);
       for (const name of names) {
         if (name.endsWith(".partial")) {
           await rm(join(directory, name), { force: true }).catch(() => undefined);
+        } else if (
+          known !== undefined &&
+          name.endsWith(CLIP_EXTENSION) &&
+          !known.has(name.slice(0, -CLIP_EXTENSION.length))
+        ) {
+          this.#strays.add(join(directory, name));
         }
       }
     }
+  }
+
+  /** Removes the clips `recover` found; one that cannot go yet is kept for the next call. */
+  async reclaimStrays(): Promise<
+    { readonly status: "reclaimed" } | { readonly status: "failed"; readonly error: unknown }
+  > {
+    let failure: { readonly status: "failed"; readonly error: unknown } | undefined;
+    for (const path of this.#strays) {
+      try {
+        await rm(path, { force: true });
+        this.#strays.delete(path);
+      } catch (error) {
+        failure = { status: "failed", error };
+      }
+    }
+    return failure ?? { status: "reclaimed" };
   }
 }

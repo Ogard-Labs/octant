@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   type ProviderModelId,
 } from "@octant/contracts";
 import {
+  decodeVideoClipId,
   decodeVideoJobId,
   decodeVideoJobQueued,
   decodeVideoJobStatusChanged,
@@ -29,6 +30,7 @@ import {
 import { CONFORMANCE_MP4_BYTES } from "@octant/provider-sdk/video-generation-conformance";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
+import { DISK_FULL_MESSAGE, JournalWriteFailed } from "../persistence/journalErrors";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -746,6 +748,84 @@ describe("video jobs", () => {
     expect(cancelSignal?.aborted).toBe(true);
   });
 
+  it("starts a waiting clip as soon as an expired one settles, before the provider confirms its stop", async () => {
+    const { service, calls, advance } = harness({
+      poll: async () =>
+        calls.start < 3
+          ? { status: "running" }
+          : {
+              status: "completed",
+              video: { bytes: CONFORMANCE_MP4_BYTES, mediaType: "video/mp4" },
+            },
+      cancel: () => new Promise(() => undefined),
+    });
+    const expiring = [await enqueue(service), await enqueue(service)];
+    const waiting = await enqueue(service);
+    await vi.waitFor(() =>
+      expect(expiring.map((job) => service.getById(job.id)?.remoteId)).toEqual([
+        "remote-1",
+        "remote-1",
+      ]),
+    );
+    advance(VIDEO_JOB_TIMEOUT_MS + 1_000);
+    expect(await service.whenTerminal(waiting.id, 1_000)).toMatchObject({ status: "completed" });
+    // Shutdown ends the stops still pending, so the removals they hold back stay owed.
+    expect(expiring.map((job) => service.getById(job.id)?.providerCopy)).toEqual(["held", "held"]);
+    service.close();
+  });
+
+  it.each(["answers", "rejects"])(
+    "keeps the provider's copy until the stop of an expired clip %s",
+    async (outcome) => {
+      const stop = Promise.withResolvers<VideoAdapterPoll>();
+      const { service, calls, advance } = harness({
+        poll: async () => ({ status: "running" }),
+        cancel: () => stop.promise,
+      });
+      const queued = await enqueue(service);
+      await vi.waitFor(() => expect(service.getById(queued.id)?.remoteId).toBe("remote-1"));
+      advance(VIDEO_JOB_TIMEOUT_MS + 1_000);
+      await service.whenTerminal(queued.id);
+      await vi.waitFor(() => expect(calls.cancel).toBe(1));
+      const sweep = service.retryOwedRemovals();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(calls.forget).toBe(0);
+
+      if (outcome === "answers") stop.resolve({ status: "cancelled" });
+      else stop.reject(new Error("The provider could not be reached."));
+      await sweep;
+      await vi.waitFor(() => expect(service.getById(queued.id)?.providerCopy).toBe("removed"));
+      expect(calls.forget).toBe(1);
+      service.close();
+    },
+  );
+
+  it("removes the provider's copy once an unanswered stop reaches its bound", async () => {
+    const bound = new AbortController();
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeouts = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation((ms) => (ms === 15_000 ? bound.signal : timeout(ms)));
+    const { service, calls, advance } = harness({
+      poll: async () => ({ status: "running" }),
+      // A driver that never notices the signal it was given.
+      cancel: () => new Promise(() => undefined),
+    });
+    try {
+      const queued = await enqueue(service);
+      await vi.waitFor(() => expect(service.getById(queued.id)?.remoteId).toBe("remote-1"));
+      advance(VIDEO_JOB_TIMEOUT_MS + 1_000);
+      await service.whenTerminal(queued.id);
+      await vi.waitFor(() => expect(calls.cancel).toBe(1));
+      expect(calls.forget).toBe(0);
+      bound.abort();
+      await vi.waitFor(() => expect(service.getById(queued.id)?.providerCopy).toBe("removed"));
+    } finally {
+      timeouts.mockRestore();
+      service.close();
+    }
+  });
+
   it("leaves a job running for the next host when shutdown interrupts its cancel", async () => {
     const { service, calls } = harness({
       polls: Array.from({ length: 1000 }, () => ({ status: "running" as const })),
@@ -848,6 +928,77 @@ describe("video jobs", () => {
     } finally {
       restarted.service.close();
       restarted.connection.close();
+    }
+  });
+
+  it("reclaims a clip the journal never recorded when removing it at shutdown failed", async () => {
+    const first = harness({});
+    const kept = await first.service.whenTerminal((await enqueue(first.service)).id);
+    const entered = Promise.withResolvers<string>();
+    const resume = Promise.withResolvers<void>();
+    const write = first.clips.write.bind(first.clips);
+    vi.spyOn(first.clips, "write").mockImplementation(async (scope, clipId, bytes) => {
+      entered.resolve(String(clipId));
+      await resume.promise;
+      return write(scope, clipId, bytes);
+    });
+    vi.spyOn(first.clips, "remove").mockRejectedValue(new Error("The volume is busy."));
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const running = await enqueue(first.service);
+    const strayId = await entered.promise;
+    first.service.close();
+    first.connection.close();
+    resume.resolve();
+    await vi.waitFor(() =>
+      expect(report).toHaveBeenCalledWith(expect.any(String), "The volume is busy."),
+    );
+    report.mockRestore();
+    const clipFile = (scope: string, clipId: string) =>
+      join(first.root, "generated-video", scope, `${clipId}.mp4`);
+    const stray = clipFile(String(scopeId), strayId);
+    expect(existsSync(stray)).toBe(true);
+    // A thread with no unfinished job is not searched: nothing there can be owed a cleanup.
+    const otherScope = decodeImageGenerationScopeId("b4000000-0000-4000-8000-000000000009");
+    const otherClip = decodeVideoClipId("b4000000-0000-4000-8000-00000000000a");
+    await first.clips.write(otherScope, otherClip, CONFORMANCE_MP4_BYTES);
+
+    const restarted = harness({ poll: async () => ({ status: "running" }) }, first.root);
+    try {
+      await restarted.service.recover();
+      expect(existsSync(stray)).toBe(false);
+      expect(existsSync(clipFile(String(scopeId), String(kept?.clip?.clipId)))).toBe(true);
+      expect(existsSync(clipFile(String(otherScope), String(otherClip)))).toBe(true);
+      expect(restarted.service.getById(running.id)?.status).toBe("running");
+    } finally {
+      restarted.service.close();
+    }
+  });
+
+  it("reports a stray clip it cannot reclaim and tries again with the owed removals", async () => {
+    const first = harness({ poll: () => new Promise(() => undefined) });
+    const queued = await enqueue(first.service);
+    await vi.waitFor(() => expect(first.service.getById(queued.id)?.remoteId).toBe("remote-1"));
+    first.service.close();
+    // A folder under a clip's name cannot be removed as a file.
+    const directory = join(first.root, "generated-video", String(scopeId));
+    const stray = join(directory, "b4000000-0000-4000-8000-00000000000b.mp4");
+    mkdirSync(stray, { recursive: true });
+
+    const second = harness({ poll: () => new Promise(() => undefined) }, first.root);
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await second.service.recover();
+      expect(report).toHaveBeenCalledWith(
+        "Could not remove an unrecorded video clip. The host will retry.",
+        expect.any(String),
+      );
+      rmSync(stray, { recursive: true });
+      writeFileSync(stray, CONFORMANCE_MP4_BYTES);
+      await second.service.retryOwedRemovals();
+      expect(existsSync(stray)).toBe(false);
+    } finally {
+      report.mockRestore();
+      second.service.close();
     }
   });
 
@@ -1310,6 +1461,28 @@ describe("video jobs", () => {
     }
   });
 
+  it("says the disk is full when a removal cannot be recorded, and keeps the copy owed", async () => {
+    const release = Promise.withResolvers<"removed">();
+    const { service, journal } = harness({ forget: () => release.promise });
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const job = await enqueue(service);
+    await service.whenTerminal(job.id);
+    const append = vi.spyOn(journal, "append").mockImplementationOnce(() => {
+      throw new JournalWriteFailed({ operation: "append", reason: "disk-full" });
+    });
+    release.resolve("removed");
+    try {
+      await vi.waitFor(() =>
+        expect(report).toHaveBeenCalledWith(expect.any(String), DISK_FULL_MESSAGE),
+      );
+      expect(service.getById(job.id)?.providerCopy).toBe("held");
+    } finally {
+      append.mockRestore();
+      report.mockRestore();
+      service.close();
+    }
+  });
+
   it("recovers after a restart: unsent jobs bill nothing, sent ones resume or settle at the estimate", async () => {
     const first = harness({ start: () => new Promise(() => undefined) });
     const sending = await enqueue(first.service);
@@ -1369,6 +1542,38 @@ describe("video jobs", () => {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
   });
+
+  it.each([0, 1, 2, 3, 4, 5, 6, 7, 8])(
+    "records nothing for a waiting clip when shutdown lands %i steps after the clip before it ends",
+    async (steps) => {
+      const poll = Promise.withResolvers<VideoAdapterPoll>();
+      const { service, calls, journal, instance } = harness({
+        poll: () => (calls.start === 1 ? poll.promise : new Promise(() => undefined)),
+      });
+      const first = await enqueue(service);
+      await vi.waitFor(() => expect(calls.poll).toBe(1));
+      await enqueue(service);
+      const waiting = await enqueue(service);
+      await vi.waitFor(() => expect(calls.poll).toBe(2));
+      // A waiting clip whose profile is gone fails the moment it is admitted,
+      // so admitting it after shutdown would write to a closed journal.
+      instance.current = undefined;
+      poll.resolve({
+        status: "refused",
+        safetyRefusal: "Blocked by the provider's filters.",
+      });
+      await service.whenTerminal(first.id);
+      // The slot is handed over a few microtasks after the first clip ends.
+      for (let step = 0; step < steps; step += 1) await Promise.resolve();
+      service.close();
+      const atClose = { version: service.getById(waiting.id)?.version, starts: calls.start };
+      const append = vi.spyOn(journal, "append");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(append).not.toHaveBeenCalled();
+      expect(service.getById(waiting.id)?.version).toBe(atClose.version);
+      expect(calls.start).toBe(atClose.starts);
+    },
+  );
 
   it("resumes a running job with a provider id after a restart and keeps its clip", async () => {
     const first = harness({
@@ -1566,6 +1771,21 @@ describe("video jobs", () => {
         "fal-ai/restored",
       ),
     );
+  });
+
+  it("offers a profile whose catalog read was rejected once the cooldown has passed", async () => {
+    const { service, calls, advance } = harness({ modelsFail: "once" });
+    expect(service.readyProfilesNow()).toEqual([]);
+    await vi.waitFor(() => expect(calls.models).toBe(1));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Inside the cooldown the provider is not asked again.
+    advance(59_000);
+    expect(service.readyProfilesNow()).toEqual([]);
+    expect(calls.models).toBe(1);
+    advance(2_000);
+    await vi.waitFor(() => expect(service.readyProfilesNow()).toHaveLength(1));
+    expect(calls.models).toBe(2);
+    service.close();
   });
 
   it("ends a sent job as interrupted when discovery cannot describe it after a restart", async () => {
@@ -1916,6 +2136,39 @@ describe("video jobs", () => {
     expect(calls.poll).toBe(2);
     expect(spend.abandon).not.toHaveBeenCalled();
     expect(spend.settle).toHaveBeenCalledOnce();
+  });
+
+  it("settles a finished clip that never downloaded at the usage the provider last reported", async () => {
+    const { service, calls, journal, advance } = harness({
+      poll: async () => {
+        if (calls.poll === 3) advance(VIDEO_JOB_TIMEOUT_MS);
+        // The last status check says nothing about usage; the one before it did.
+        return calls.poll === 2
+          ? { status: "running", usage: { outputTokens: 28_960 } }
+          : { status: "running" };
+      },
+    });
+    const append = vi.spyOn(journal, "append");
+    const queued = await enqueue(service);
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({ status: "failed", settledCostUsdMicros: 347_520 });
+    expect(queued.estimatedCostUsdMicros).toBe(695_040);
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: expect.arrayContaining([
+          expect.objectContaining({
+            eventName: "context.usage-reconciled@1",
+            payload: {
+              reconciliation: expect.objectContaining({
+                actualOutputTokens: 28_960,
+                cost: { kind: "api-estimate", usdMicros: 347_520 },
+              }),
+            },
+          }),
+        ]),
+      }),
+    );
+    service.close();
   });
 
   it("ends a job on the provider's own failure answer, billed nothing", async () => {

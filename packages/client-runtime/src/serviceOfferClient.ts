@@ -155,7 +155,7 @@ export function videoOfferChoices(offer: VideoGenerateOffer) {
  * The card's price line and its Stop and retention notes for the chosen
  * options, from the same policy the host reserves with, so the card and the
  * reservation agree. `approvable` is false when the options fall outside what
- * the model declares or a flat-priced model has no rate for them: the host
+ * the model declares or a priced model has no rate for them: the host
  * would refuse either.
  */
 export function describeVideoOffer(offer: VideoGenerateOffer, options: VideoClipOptions) {
