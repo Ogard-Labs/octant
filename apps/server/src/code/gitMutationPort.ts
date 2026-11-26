@@ -192,41 +192,47 @@ type GitMutationPolicy = {
   readonly executionPolicy?: ProviderExecutionPolicy;
 };
 
-/** Entries one move may look through below untracked folders before it gives up. */
+/** Entries one move may look through below its untracked folders before it gives up. */
 const MAX_UNTRACKED_ENTRIES_WALKED = 100_000;
 
 /**
  * The repositories of their own at or below an untracked folder, which Git
- * status lists as that folder alone. A walk too large to finish answers
- * undefined, so the move is refused rather than claiming a full copy.
+ * status lists as that folder alone. Folders Git ignores are skipped, as a
+ * capture skips them; `ignored` answers which of a level's folders those are.
+ * The budget is shared by every folder of one move, and a walk past it
+ * answers undefined, so the move is refused rather than claiming a full copy.
  */
 async function nestedRepositoriesBelow(
   checkoutRoot: string,
   folder: string,
+  ignored: (paths: ReadonlyArray<string>) => Promise<ReadonlySet<string> | undefined>,
+  budget: { walked: number },
 ): Promise<ReadonlyArray<string> | undefined> {
   const found: string[] = [];
-  const pending = [folder];
-  let walked = 0;
-  while (pending.length > 0) {
-    const relative = pending.pop();
-    if (relative === undefined) break;
-    let entries;
-    try {
-      entries = await readdir(join(checkoutRoot, relative), { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    if (entries.some((entry) => entry.name === ".git")) {
-      found.push(relative);
-      continue;
-    }
-    for (const entry of entries) {
-      walked += 1;
-      if (walked > MAX_UNTRACKED_ENTRIES_WALKED) return undefined;
-      if (entry.isDirectory() && !entry.isSymbolicLink()) {
-        pending.push(`${relative}/${entry.name}`);
+  let level = [folder];
+  while (level.length > 0) {
+    const next: string[] = [];
+    for (const relative of level) {
+      let entries;
+      try {
+        entries = await readdir(join(checkoutRoot, relative), { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      if (entries.some((entry) => entry.name === ".git")) {
+        found.push(relative);
+        continue;
+      }
+      for (const entry of entries) {
+        budget.walked += 1;
+        if (budget.walked > MAX_UNTRACKED_ENTRIES_WALKED) return undefined;
+        if (entry.isDirectory() && !entry.isSymbolicLink()) next.push(`${relative}/${entry.name}`);
       }
     }
+    if (next.length === 0) break;
+    const skipped = await ignored(next);
+    if (skipped === undefined) return undefined;
+    level = next.filter((path) => !skipped.has(path));
   }
   return found;
 }
@@ -1099,6 +1105,7 @@ export class GitMutationPort {
     );
     if (status.exitCode !== 0) return undefined;
     const found = new Set<string>();
+    const budget = { walked: 0 };
     const records = status.stdout.split("\0");
     for (let index = 0; index < records.length; index += 1) {
       const record = records[index] ?? "";
@@ -1115,12 +1122,35 @@ export class GitMutationPort {
         continue;
       }
       if (record.startsWith("? ") && record.endsWith("/")) {
-        const nested = await nestedRepositoriesBelow(input.checkoutRoot, record.slice(2, -1));
+        const nested = await nestedRepositoriesBelow(
+          input.checkoutRoot,
+          record.slice(2, -1),
+          (paths) => this.#ignoredPaths(input.checkoutRoot, paths, signal),
+          budget,
+        );
         if (nested === undefined) return undefined;
         for (const path of nested) found.add(path);
       }
     }
     return [...found].sort();
+  }
+
+  /** Which of these checkout-relative paths Git ignores; undefined when Git could not say. */
+  async #ignoredPaths(
+    checkoutRoot: string,
+    paths: ReadonlyArray<string>,
+    signal?: AbortSignal,
+  ): Promise<ReadonlySet<string> | undefined> {
+    const result = await this.#run(
+      ["-C", checkoutRoot, "check-ignore", "--stdin", "-z"],
+      signal,
+      undefined,
+      "approval-gated",
+      paths.map((path) => `${path}\0`).join(""),
+    );
+    // Exit 1 is Git's "none of them is ignored".
+    if (result.exitCode !== 0 && result.exitCode !== 1) return undefined;
+    return new Set(result.stdout.split("\0").filter((path) => path !== ""));
   }
 
   /**

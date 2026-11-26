@@ -679,6 +679,20 @@ describe("GitMutationPort", () => {
     ]);
   });
 
+  it("skips ignored folders inside an untracked folder, as a capture does", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, ".gitignore"), "build/\n");
+    git(repository, "add", ".gitignore");
+    git(repository, "commit", "-m", "ignore build");
+    const ignoredRepository = join(repository, "vendor", "build", "cache");
+    mkdirSync(ignoredRepository, { recursive: true });
+    git(ignoredRepository, "init", "--initial-branch=main");
+    writeFileSync(join(repository, "vendor", "README.md"), "untracked parent\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([]);
+  });
+
   it("names a nested repository below a folder that is untracked as a whole", async () => {
     const repository = createRepository(temporaryDirectory());
     const nested = join(repository, "vendor", "lib");
