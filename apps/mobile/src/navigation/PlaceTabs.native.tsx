@@ -20,8 +20,11 @@ type AndroidIcons = Readonly<
   Partial<Record<MobilePlaceId, readonly [ImageSourcePropType, ImageSourcePropType]>>
 >;
 
-/** Material bars take an image; the glyphs come from the icon font the app ships. */
-function useAndroidIcons(): AndroidIcons {
+/**
+ * Material bars take an image; the glyphs come from the icon font the app
+ * ships. The bar tints each one, so `glyph` gives only its shape a colour.
+ */
+function useAndroidIcons(glyph: string): AndroidIcons {
   const [icons, setIcons] = useState<AndroidIcons>({});
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -29,8 +32,8 @@ function useAndroidIcons(): AndroidIcons {
     void Promise.all(
       shippedMobilePlaces().map(async (place) => {
         const [plain, selected] = await Promise.all([
-          Ionicons.getImageSource(place.icon, 24, "#000000"),
-          Ionicons.getImageSource(place.selectedIcon, 24, "#000000"),
+          Ionicons.getImageSource(place.icon, 24, glyph),
+          Ionicons.getImageSource(place.selectedIcon, 24, glyph),
         ]);
         return plain === null || selected === null
           ? undefined
@@ -43,14 +46,14 @@ function useAndroidIcons(): AndroidIcons {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [glyph]);
   return icons;
 }
 
 /** The system's own tab bar: icons only, each with a spoken label. */
 export function PlaceTabs(props: PlaceTabsProps) {
   const { colors, scheme } = useTheme();
-  const androidIcons = useAndroidIcons();
+  const androidIcons = useAndroidIcons(colors.ink);
   // The native bar holds the selection; a request names the state it was
   // derived from, so a late one cannot undo a tap.
   const provenance = useRef(0);

@@ -26,7 +26,7 @@ export function NewButton(props: { readonly disabled: boolean; readonly onPress:
           justifyContent: "center",
           backgroundColor: colors.accent,
           elevation: 6,
-          shadowColor: "#000000",
+          shadowColor: colors.shadow,
           shadowOpacity: 0.22,
           shadowRadius: 10,
           shadowOffset: { width: 0, height: 4 },
