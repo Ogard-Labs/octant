@@ -1369,7 +1369,7 @@ describe("CodeOperationRuntime", () => {
     },
   );
 
-  it("refuses a restore point from the checkout a thread moved off and offers no Undo restore there", async () => {
+  it("refuses to put back files from the checkout a thread moved off, by restore or rewind, and offers no Undo restore there", async () => {
     const movedCheckoutId = decodeCodeCheckoutId("90000000-0000-4000-8000-000000000097");
     const fixture = runtimeFixture({
       movedCheckout: decodeCodeCheckoutIdentity({
@@ -1398,6 +1398,12 @@ describe("CodeOperationRuntime", () => {
           checkoutId,
           checkpoint: beforeTurn,
         }),
+      });
+      fixture.appendOperationEvent({
+        threadId,
+        operationId: operationId(40),
+        expectedCursor: 1,
+        event: decodeCodeOperationEvent({ kind: "operation-state", state: "completed" }),
       });
       recordRestorePoint(fixture, threadId, checkoutId, replaced, 41);
       const before = await fixture.runtime.conversation(windowId, threadId, 0, 50);
@@ -1428,7 +1434,42 @@ describe("CodeOperationRuntime", () => {
           },
         });
       }
+
+      // Rewinding to the turn from before the move would put back the same
+      // point, so its files part is refused the same way.
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "preview-code-rewind",
+          operationId: operationId(60),
+          threadId,
+          checkoutId: movedCheckoutId,
+          fromOperationId: operationId(40),
+        }),
+      ).resolves.toMatchObject({
+        kind: "rewind-preview",
+        files: { kind: "unavailable", reason: "other-checkout" },
+      });
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "rewind-code-thread",
+          operationId: operationId(61),
+          threadId,
+          checkoutId: movedCheckoutId,
+          fromOperationId: operationId(40),
+          scope: "files",
+          filesOperationId: operationId(62),
+          gitOperationId: operationId(63),
+        }),
+      ).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "unavailable",
+          message:
+            "This point was recorded in another checkout, so its files cannot be put back here. Rewind the conversation only.",
+        },
+      });
       expect(fixture.restoredTrees()).toBe(0);
+      expect(fixture.conversation().turns).toHaveLength(1);
     } finally {
       await fixture.runtime.close();
       fixture.close();

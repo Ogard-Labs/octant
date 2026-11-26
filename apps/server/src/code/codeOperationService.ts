@@ -250,6 +250,8 @@ const REWIND_FILES_UNAVAILABLE: Readonly<Record<CodeRewindFilesUnavailableReason
   unrecorded:
     "A turn after this point changed files without a recorded checkpoint, so the files cannot be put back. Rewind the conversation only.",
   unreadable: "The checkout could not be read, so the files cannot be put back. Try again.",
+  "other-checkout":
+    "This point was recorded in another checkout, so its files cannot be put back here. Rewind the conversation only.",
 };
 /**
  * Pull request operations, which a server thread runs with this host's `gh`
@@ -6305,6 +6307,17 @@ export class CodeOperationService {
     if (thread.executionPolicy === "plan") return { kind: "unavailable", reason: "plan" };
     const point = chooseCodeRewindFilePoint(all, String(fromOperationId));
     if (point.kind === "refused") return { kind: "unavailable", reason: "unrecorded" };
+    if (point.kind !== "checkpoint") return point;
+    // The files part is an in-place restore, so it writes back only a point
+    // recorded on this checkout, by the same rule as Restore files.
+    const recorded =
+      this.#options.restorePointRecorded?.({
+        threadId: thread.id,
+        checkoutId: checkout.id,
+        checkpoint: point.checkpoint,
+      }) ?? "unreadable";
+    if (recorded === "unrecorded") return { kind: "unavailable", reason: "other-checkout" };
+    if (recorded === "unreadable") return { kind: "unavailable", reason: "unreadable" };
     return point;
   }
 

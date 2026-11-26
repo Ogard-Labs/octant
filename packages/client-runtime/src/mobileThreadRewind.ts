@@ -52,6 +52,8 @@ export const MOBILE_REWIND_FILES_UNAVAILABLE: Readonly<
   unrecorded:
     "A turn after this point changed files without a recorded checkpoint, so the files cannot be put back. Rewind the conversation only.",
   unreadable: "The files could not be compared with this point.",
+  "other-checkout":
+    "This point was saved in another checkout, so only the conversation can go back.",
 };
 
 /** Said when a phone cannot put files back; the conversation can still go back. */

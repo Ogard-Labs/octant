@@ -2198,6 +2198,46 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
+  it("says a rewind's files cannot come back when the point was recorded in another checkout", async () => {
+    const user = userEvent.setup();
+    const executeOperation = vi.fn(async () => ({
+      kind: "rewind-preview" as const,
+      operationId: "30000000-0000-4000-8000-000000000001",
+      fromOperationId: "20000000-0000-4000-8000-000000000001",
+      removedTurns: 1,
+      files: { kind: "unavailable" as const, reason: "other-checkout" as const },
+      rollback: "handoff" as const,
+    }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:user",
+              role: "user" as const,
+              text: "before the move",
+              operationId: "20000000-0000-4000-8000-000000000001",
+            },
+          ],
+          refreshConversation: vi.fn(() => true),
+        } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    await chooseTurnAction(user, "Rewind to here…", "before the move");
+    const dialog = await screen.findByRole("dialog", { name: "Rewind to here" });
+    expect(
+      await within(dialog).findByText(
+        "This point was recorded in another checkout, so only the conversation can be rewound.",
+      ),
+    ).toBeVisible();
+    expect(within(dialog).queryByRole("button", { name: "Files only" })).not.toBeInTheDocument();
+  });
+
   it("rewinds only the conversation without asking for an approval", async () => {
     const user = userEvent.setup();
     const executeOperation = vi.fn(async (command: { readonly kind: string }) =>

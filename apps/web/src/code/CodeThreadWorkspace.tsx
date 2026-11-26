@@ -3877,7 +3877,7 @@ function nextOwnUserMessage(
 
 /** Why a rewind's files cannot come back, as the dialog says it. */
 const REWIND_FILES_UNAVAILABLE: Readonly<
-  Record<"server-project" | "plan" | "unrecorded" | "unreadable", string>
+  Record<"server-project" | "plan" | "unrecorded" | "unreadable" | "other-checkout", string>
 > = {
   "server-project":
     "A thread in a Project on a server takes no checkpoints, so only the conversation can be rewound. Git on the server is the way back for files.",
@@ -3885,6 +3885,8 @@ const REWIND_FILES_UNAVAILABLE: Readonly<
   unrecorded:
     "A turn after this point changed files without a recorded checkpoint, so only the conversation can be rewound.",
   unreadable: "The checkout could not be read, so only the conversation can be rewound.",
+  "other-checkout":
+    "This point was recorded in another checkout, so only the conversation can be rewound.",
 };
 
 function previousAssistantMessage(

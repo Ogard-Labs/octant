@@ -1795,13 +1795,15 @@ const RunReviewResult = Schema.Struct({
 /**
  * Why a rewind's files cannot be put back: a thread on a registered server
  * takes no checkpoints, a Plan thread writes nothing, a turn wrote files the
- * host never recorded, or the checkout could not be read.
+ * host never recorded, the checkout could not be read, or the point was
+ * recorded in another checkout than the one the thread is on now.
  */
 export const CodeRewindFilesUnavailableReason = Schema.Literal(
   "server-project",
   "plan",
   "unrecorded",
   "unreadable",
+  "other-checkout",
 );
 export type CodeRewindFilesUnavailableReason = typeof CodeRewindFilesUnavailableReason.Type;
 /**
