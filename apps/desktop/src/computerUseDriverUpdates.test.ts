@@ -54,25 +54,28 @@ describe("Computer use driver updates", () => {
     expect(f.updates.state()).toMatchObject({ status: "current", currentVersion: "0.25.0" });
   });
 
-  it("does not check for driver updates until the person turns updates on", async () => {
+  it("checks for driver updates unless the person turned them off", async () => {
     const f = fixture();
     f.idle();
-    // A new install and a store saved before the switch existed both decode to off:
-    // the driver is an upstream binary that runs under Octant's macOS permissions.
-    for (const settings of [
-      defaultShellSettings().computerUse,
-      decodeComputerUseSettings({}),
-      decodeComputerUseSettings({ enabled: true }),
-    ]) {
-      expect(settings.automaticUpdates).toBe(false);
-      f.updates.configure({
-        enabled: settings.enabled,
-        automaticUpdates: settings.automaticUpdates,
-      });
-    }
+    // The person's recorded choice is the only thing that keeps updates off:
+    // a new install and a store saved while updates were off by default both
+    // decode to on.
+    const off = decodeComputerUseSettings({
+      enabled: true,
+      automaticUpdates: false,
+      automaticUpdatesChosen: true,
+    });
+    expect(off.automaticUpdates).toBe(false);
+    f.updates.configure({ enabled: off.enabled, automaticUpdates: off.automaticUpdates });
     expect(f.scheduled).toHaveLength(0);
     expect(f.check).not.toHaveBeenCalled();
 
+    for (const settings of [
+      defaultShellSettings().computerUse,
+      decodeComputerUseSettings({}),
+      decodeComputerUseSettings({ enabled: true, automaticUpdates: false }),
+    ])
+      expect(settings.automaticUpdates).toBe(true);
     f.updates.configure({ enabled: true, automaticUpdates: true });
     expect(f.scheduled).toHaveLength(1);
     f.scheduled[0]?.();

@@ -11,7 +11,9 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { BUNDLED_CUA_DRIVER } from "../apps/desktop/src/computerUseDriverRelease";
 import {
+  PINNED_DRIVER_ASSET,
   archiveResponse,
   releaseMetadata,
   removeOwnedBrowserDriverCache,
@@ -20,19 +22,18 @@ import {
 } from "./packaged-browser-owner-driver-cache";
 
 const release = () => ({
-  tag_name: "cua-driver-rs-v0.38.0",
+  tag_name: `cua-driver-rs-v${BUNDLED_CUA_DRIVER.version}`,
   draft: false,
   prerelease: true,
   assets: [
     {
-      id: 661454894,
-      name: "cua-driver-rs-0.38.0-darwin-universal-binary.tar.gz",
+      id: PINNED_DRIVER_ASSET.id,
+      name: `cua-driver-rs-${BUNDLED_CUA_DRIVER.version}-darwin-universal-binary.tar.gz`,
       state: "uploaded",
-      size: 53208248,
-      digest: "sha256:2bb8dc4a7e69185ffd04c4a9c0eab590bd2c54b72c2c1be13ab675be4f487732",
-      browser_download_url:
-        "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.38.0/cua-driver-rs-0.38.0-darwin-universal-binary.tar.gz",
-      url: "https://api.github.com/repos/trycua/cua/releases/assets/661454894",
+      size: PINNED_DRIVER_ASSET.bytes,
+      digest: `sha256:${BUNDLED_CUA_DRIVER.sha256}`,
+      browser_download_url: BUNDLED_CUA_DRIVER.url,
+      url: `https://api.github.com/repos/trycua/cua/releases/assets/${PINNED_DRIVER_ASSET.id}`,
     },
   ],
 });
@@ -54,7 +55,7 @@ describe("the owned native Browser driver cache", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
     for (const [url, options] of fetcher.mock.calls) {
       expect(url).toBe(
-        "https://api.github.com/repos/trycua/cua/releases/tags/cua-driver-rs-v0.38.0",
+        `https://api.github.com/repos/trycua/cua/releases/tags/cua-driver-rs-v${BUNDLED_CUA_DRIVER.version}`,
       );
       expect(options).toMatchObject({
         redirect: "manual",

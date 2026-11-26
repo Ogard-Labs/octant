@@ -88,6 +88,6 @@
   },
   "packageManager": "bun@1.4.4",
   "patchedDependencies": {
-    "@trycua/cua-driver@0.38.0": "patches/cua-driver-0.38.0.patch"
+    "@trycua/cua-driver@0.62.1": "patches/cua-driver-0.62.1.patch"
   }
 }

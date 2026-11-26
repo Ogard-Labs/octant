@@ -9,12 +9,13 @@ import type {
 import { createComputerUseControlHost } from "./computerUseControlHost";
 import {
   createComputerUseDriverUpdates,
+  isNewerComputerDriver,
   type StagedComputerDriver,
 } from "./computerUseDriverUpdates";
 import {
   BUNDLED_CUA_DRIVER,
   commitComputerDriver,
-  latestComputerDriverRelease,
+  latestCompatibleComputerDriverRelease,
   readInstalledComputerDriver,
   stageComputerDriver,
   verifyComputerDriverBinary,
@@ -54,6 +55,8 @@ export function createComputerUseDesktopService(options: {
   let testing: AbortController | undefined;
   let testCompletion: Promise<unknown> | undefined;
   let replacing = false;
+  /** The newest upstream driver, when it speaks a contract only a newer Octant does. */
+  let needsNewerOctant: string | undefined;
   let closed = false;
   let closing: Promise<void> | undefined;
   const shutdown = new AbortController();
@@ -61,7 +64,11 @@ export function createComputerUseDesktopService(options: {
   async function initialize() {
     initializing ??= (async () => {
       if (!supported) return;
-      active = (await readInstalledComputerDriver(versions)) ?? active;
+      // A driver an earlier Octant downloaded can be older than the one this
+      // build bundles, and speak a contract this build's SDK no longer does.
+      const installed = await readInstalledComputerDriver(versions);
+      if (installed !== undefined && isNewerComputerDriver(installed.version, active.version))
+        active = installed;
       updates.restoreVerifiedVersion(active.version);
       try {
         await verifyComputerDriverBinary(active.path, active.version);
@@ -138,7 +145,11 @@ export function createComputerUseDesktopService(options: {
   const removeDisplayListeners = options.onDisplayLock?.(display.close);
   const updates = createComputerUseDriverUpdates({
     currentVersion: active.version,
-    check: latestComputerDriverRelease,
+    check: async (signal) => {
+      const found = await latestCompatibleComputerDriverRelease(active.version, signal);
+      needsNewerOctant = found.needsNewerOctant;
+      return found.release;
+    },
     stage: (release, signal) => stageComputerDriver(release, versions, signal),
     isBusy: () => controls.activeSessions() > 0 || replacing || testing !== undefined,
     activate: async (candidate) => {
@@ -218,7 +229,9 @@ export function createComputerUseDesktopService(options: {
     const update = updates.state();
     return {
       supported,
-      ...settings,
+      enabled: settings.enabled,
+      automaticUpdates: settings.automaticUpdates,
+      ...(settings.setupPending === undefined ? {} : { setupPending: settings.setupPending }),
       verification,
       ...(verificationMessage === undefined ? {} : { verificationMessage }),
       permissions,
@@ -251,9 +264,13 @@ export function createComputerUseDesktopService(options: {
                       message:
                         "Allow Octant in macOS Accessibility and Screen Recording, then recheck. Some permission changes require relaunching Octant.",
                     }
-                  : update.message === undefined
-                    ? {}
-                    : { message: update.message }),
+                  : update.message !== undefined
+                    ? { message: update.message }
+                    : update.status === "current" && needsNewerOctant !== undefined
+                      ? {
+                          message: `CuaDriver ${needsNewerOctant} needs a newer Octant. Update Octant to use it.`,
+                        }
+                      : {}),
     };
   }
   async function reserve(owner: ComputerUseOwner): Promise<boolean> {

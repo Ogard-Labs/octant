@@ -33,8 +33,9 @@ describe("Computer use Settings", () => {
     await waitFor(() => expect(requestComputerUsePermissions).toHaveBeenCalledOnce());
     expect(await screen.findAllByText("Allowed")).toHaveLength(2);
     fireEvent.click(screen.getByRole("switch", { name: "Automatically update Computer use" }));
+    // The recorded choice is what keeps updates off after the default turned on.
     expect(onSettingsChange).toHaveBeenCalledWith({
-      computerUse: { enabled: true, automaticUpdates: false },
+      computerUse: { enabled: true, automaticUpdates: false, automaticUpdatesChosen: true },
     });
   });
 

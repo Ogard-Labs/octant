@@ -222,7 +222,7 @@ export function defaultShellSettings(): ShellSettings {
     // Off by default: an unrecorded preference decodes to no update traffic.
     automaticUpdateChecks: false,
     quitShortcutNeedsSecondPress: true,
-    computerUse: { enabled: true, automaticUpdates: false },
+    computerUse: { enabled: true, automaticUpdates: true },
     marketplaceFetchesEnabled: true,
     completedThreadArchiveAfterDays: DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
     putAwayThreadsWhenDone: true,

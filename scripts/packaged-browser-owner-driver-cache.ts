@@ -20,11 +20,13 @@ import {
   writeVerifiedElectronFile as writeVerifiedDriverArchive,
 } from "./packaged-browser-owner-electron-cache";
 
-const version = "0.38.0";
-const assetId = 661454894;
-const assetName = "cua-driver-rs-0.38.0-darwin-universal-binary.tar.gz";
-const assetBytes = 53208248;
-const sha256 = "2bb8dc4a7e69185ffd04c4a9c0eab590bd2c54b72c2c1be13ab675be4f487732";
+const { version, sha256 } = BUNDLED_CUA_DRIVER;
+// The upstream asset record of the bundled driver; scripts/computer-use-driver-pin.ts
+// rewrites both when it moves the pin.
+export const PINNED_DRIVER_ASSET = { id: 789313065, bytes: 44306659 } as const;
+const assetId = PINNED_DRIVER_ASSET.id;
+const assetName = `cua-driver-rs-${version}-darwin-universal-binary.tar.gz`;
+const assetBytes = PINNED_DRIVER_ASSET.bytes;
 const browserUrl = `https://github.com/trycua/cua/releases/download/cua-driver-rs-v${version}/${assetName}`;
 const assetUrl = `https://api.github.com/repos/trycua/cua/releases/assets/${assetId}`;
 const repositoryRoot = resolve(import.meta.dirname, "..");
