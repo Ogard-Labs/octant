@@ -295,6 +295,7 @@ const MAX_CODE_RECONNECT_DELAY_MS = 10_000;
  * so a retried thread does not keep wearing a stale history banner.
  */
 const HISTORY_UNAVAILABLE_MESSAGE = "Conversation history could not be loaded.";
+const HISTORY_UNREFRESHED_MESSAGE = "Conversation history could not be refreshed.";
 const INHERITED_HISTORY_UNAVAILABLE_MESSAGE = "Inherited conversation history could not be loaded.";
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
@@ -614,6 +615,9 @@ export function useCodeController(options: CodeControllerOptions) {
   const [conversationHistory, setConversationHistory] = useState<
     "loading" | "loaded" | "unavailable"
   >("loading");
+  // Read by an activation, which sets the state to loading before it reads.
+  const conversationHistoryNow = useRef(conversationHistory);
+  conversationHistoryNow.current = conversationHistory;
   const [followUps, setFollowUps] = useState<ReadonlyMap<string, CodeThreadFollowUpView>>(
     () => new Map(),
   );
@@ -1650,6 +1654,11 @@ export function useCodeController(options: CodeControllerOptions) {
       // reason: hydration may fail, and offering one thread's way back on
       // another thread's checkout would overwrite files nobody asked about.
       setRestoreUndo(undefined);
+      // A thread read again in place (a rename, a retry) shows the transcript
+      // this activation's earlier read loaded, not one kept from a visit.
+      const reloadsShown =
+        conversationThreadKey.current === String(threadId) &&
+        conversationHistoryNow.current === "loaded";
       setConversationHistory("loading");
       // The first read covers the thread as the list described it now.
       const activityAtOpen = threadListActivity(bootstrapRef.current, threadId)?.sequence ?? -1;
@@ -1676,6 +1685,7 @@ export function useCodeController(options: CodeControllerOptions) {
           // before activation still belongs to the user's bounced prompt.
           setTurnError((current) =>
             current === HISTORY_UNAVAILABLE_MESSAGE ||
+            current === HISTORY_UNREFRESHED_MESSAGE ||
             current === INHERITED_HISTORY_UNAVAILABLE_MESSAGE
               ? undefined
               : current,
@@ -1683,12 +1693,19 @@ export function useCodeController(options: CodeControllerOptions) {
         } catch {
           if (!isActive(request, threadGeneration, mounted)) return;
           openingReadFailed = true;
-          setConversation([]);
-          // A transcript kept from an earlier visit goes, and with it the
-          // tool activity of turns no longer shown.
-          setTurnActivity(new Map());
-          setConversationHistory("unavailable");
-          setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
+          if (reloadsShown) {
+            // What a read loaded stays, as when a refresh fails: emptying it
+            // would also take the row a reply this window sends streams into.
+            setConversationHistory("loaded");
+            setTurnError(HISTORY_UNREFRESHED_MESSAGE);
+          } else {
+            setConversation([]);
+            // A transcript kept from an earlier visit goes, and with it the
+            // tool activity of turns no longer shown.
+            setTurnActivity(new Map());
+            setConversationHistory("unavailable");
+            setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
+          }
         }
         if (initial.thread.forkedFrom !== undefined && !readsConversationWindow(client)) {
           try {
@@ -2031,16 +2048,14 @@ export function useCodeController(options: CodeControllerOptions) {
                   // otherwise report it may not run until the user has left.
                   void recordSeenActivity(threadId);
                   setTurnError((current) =>
-                    current === "Conversation history could not be refreshed."
-                      ? undefined
-                      : current,
+                    current === HISTORY_UNREFRESHED_MESSAGE ? undefined : current,
                   );
                   return;
                 }
                 conversationCursor = hydrated.nextCursor ?? conversationCursor;
               } catch {
                 if (!isActive(request, threadGeneration, mounted)) return;
-                setTurnError("Conversation history could not be refreshed.");
+                setTurnError(HISTORY_UNREFRESHED_MESSAGE);
               }
             }
           })().finally(() => {
@@ -2079,7 +2094,9 @@ export function useCodeController(options: CodeControllerOptions) {
           unread = false;
           setConversationHistory("loaded");
           setTurnError((current) =>
-            current === HISTORY_UNAVAILABLE_MESSAGE ? undefined : current,
+            current === HISTORY_UNAVAILABLE_MESSAGE || current === HISTORY_UNREFRESHED_MESSAGE
+              ? undefined
+              : current,
           );
           if (hydrated.incomplete) startConversationPoll();
           if (hydrated.activeOperationId !== undefined) {
@@ -2246,7 +2263,7 @@ export function useCodeController(options: CodeControllerOptions) {
                 const settled = await conversationRead;
                 if (settled.status === "rejected") {
                   if (!isActive(request, threadGeneration, mounted)) return;
-                  setTurnError("Conversation history could not be refreshed.");
+                  setTurnError(HISTORY_UNREFRESHED_MESSAGE);
                 } else {
                   const hydrated = settled.value;
                   conversationIncomplete = hydrated?.incomplete === true;

@@ -3673,6 +3673,59 @@ describe("useCodeController", () => {
       unmount();
     });
 
+    it("keeps the transcript and the reply of a turn this window sent streaming when a reload of the thread fails", async () => {
+      const { client, host, say } = runningThread();
+      const stored = host.threads[String(ids.thread)]?.turns;
+      stored?.splice(0, 1, { ...stored[0], status: "completed" } as never);
+      const sentTurns: string[] = [];
+      const sent = fakeClient({
+        ...client,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => {
+          sentTurns.push(String(command.operationId));
+          return {
+            kind: "provider-turn-state",
+            operationId: command.operationId,
+            state: "running",
+          };
+        }) as never,
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client: sent,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      act(() => say(1, "part-1"));
+      await waitFor(() =>
+        expect(result.current.conversation.at(-1)).toMatchObject({ text: "First half" }),
+      );
+      const shown = result.current.conversation.length;
+
+      vi.mocked(host.client.conversationWindow).mockRejectedValueOnce(new Error("offline"));
+      act(() => {
+        result.current.refreshConversation();
+      });
+      await waitFor(() => expect(result.current.turnError).toBeDefined());
+      expect(result.current.conversation).toHaveLength(shown);
+      expect(result.current.conversation[0]).toMatchObject({ operationId });
+      expect(result.current.conversationHistory).toBe("loaded");
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed.");
+
+      act(() => say(2, "part-2"));
+      await waitFor(() =>
+        expect(result.current.conversation.at(-1)).toMatchObject({
+          operationId: sentTurns[0],
+          text: "First half, second half",
+        }),
+      );
+      unmount();
+    });
+
     it("shows in a turn this window sent, which no conversation read follows", async () => {
       const { client, hold, host, say } = runningThread();
       host.threads[String(ids.thread)]?.turns.splice(0, 1);
