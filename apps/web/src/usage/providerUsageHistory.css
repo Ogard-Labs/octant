@@ -74,9 +74,10 @@
 }
 .provider-history__providers li {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--oct-space-3);
+  gap: var(--oct-space-1) var(--oct-space-3);
   font-size: var(--oct-text-base);
   font-variant-numeric: tabular-nums;
 }
@@ -98,22 +99,26 @@
   background: var(--usage-series-color);
 }
 .provider-history [data-series="0"] {
-  --usage-series-color: var(--oct-fg);
+  --usage-series-color: var(--usage-provider-color, var(--oct-fg));
 }
 .provider-history [data-series="1"] {
-  --usage-series-color: var(--octant-palette-orange);
+  --usage-series-color: var(--usage-provider-color, var(--octant-palette-orange));
 }
 .provider-history [data-series="2"] {
-  --usage-series-color: var(--octant-palette-blue);
+  --usage-series-color: var(--usage-provider-color, var(--octant-palette-blue));
 }
 .provider-history [data-series="3"] {
-  --usage-series-color: var(--octant-palette-purple);
+  --usage-series-color: var(--usage-provider-color, var(--octant-palette-purple));
 }
 .provider-history [data-series="4"] {
-  --usage-series-color: var(--octant-palette-green);
+  --usage-series-color: var(--usage-provider-color, var(--octant-palette-green));
 }
 .provider-history [data-series="5"] {
-  --usage-series-color: var(--octant-palette-red);
+  --usage-series-color: var(--usage-provider-color, var(--octant-palette-red));
+}
+/* The Mono style draws every provider in ink; the dashes still tell them apart. */
+:root[data-octant-style="mono"] .provider-history [data-series] {
+  --usage-series-color: var(--oct-fg);
 }
 .provider-history__chart {
   margin: 0;
@@ -138,17 +143,37 @@
   stroke: var(--oct-border);
   stroke-width: 1;
 }
-.provider-history__series path {
+.provider-history__area {
+  fill: var(--usage-series-color);
+  fill-opacity: 0.18;
+}
+.provider-history__line {
+  fill: none;
   stroke: var(--usage-series-color);
+  stroke-width: 1.5;
 }
 .provider-history__series circle {
   fill: var(--usage-series-color);
 }
-.provider-history__series[data-series="2"] path {
+.provider-history__series[data-series="2"] .provider-history__line {
   stroke-dasharray: 5 3;
 }
-.provider-history__series[data-series="3"] path {
+.provider-history__series[data-series="3"] .provider-history__line {
   stroke-dasharray: 2 3;
+}
+.provider-history__guide {
+  stroke: var(--oct-muted);
+  stroke-width: 1;
+}
+.provider-history__day {
+  fill: transparent;
+}
+.provider-history__readout {
+  min-height: 1lh;
+  margin: var(--oct-space-1) 0 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  font-variant-numeric: tabular-nums;
 }
 .provider-history__chart-empty {
   display: grid;
@@ -159,20 +184,20 @@
 }
 .provider-history__totals {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--oct-space-4);
 }
 /* Keep wrapped labels from lowering their values relative to neighboring totals.
    A total carries up to four rows (label, value, detail, partial coverage);
    at three, Cache savings stacked its coverage line on top of its detail. */
-.provider-history__totals > div {
+.provider-history__totals > div:not(.provider-history__tokens) {
   display: grid;
   grid-row: span 4;
   grid-template-rows: subgrid;
   align-content: start;
   gap: var(--oct-space-1);
 }
-.provider-history__totals > div > span:first-child {
+.provider-history__totals > div:not(.provider-history__tokens) > span:first-child {
   align-self: end;
 }
 .provider-history__totals span,
@@ -184,6 +209,85 @@
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-medium);
   font-variant-numeric: tabular-nums;
+}
+.provider-history__tokens {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--oct-space-3);
+}
+.provider-history__token-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--oct-radius-pill);
+}
+/* A sliver still shows; the legend beside it carries the figure. */
+.provider-history__token-bar > span {
+  flex-basis: 0;
+  min-width: 2px;
+}
+.provider-history__tokens ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2) var(--oct-space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.provider-history__tokens li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+.provider-history__token-swatch {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--oct-radius-pill);
+  border: 1px dashed var(--oct-border);
+}
+.provider-history__tokens [data-token="input"] {
+  background: var(--octant-palette-blue);
+  border: 0;
+}
+.provider-history__tokens [data-token="cache-read"] {
+  background: var(--octant-palette-teal);
+  border: 0;
+}
+.provider-history__tokens [data-token="cache-write"].provider-history__token-swatch,
+.provider-history__tokens [data-token="cache-write"] {
+  background: var(--octant-palette-purple);
+  border: 0;
+}
+.provider-history__tokens [data-token="other-input"] {
+  background: var(--oct-border);
+  border: 0;
+}
+.provider-history__tokens [data-token="output"] {
+  background: var(--octant-palette-orange);
+  border: 0;
+}
+.provider-history__rank {
+  min-width: 2ch;
+  color: var(--oct-muted);
+  font-variant-numeric: tabular-nums;
+}
+.provider-history__share {
+  display: block;
+  width: 72px;
+  height: 4px;
+  margin-top: var(--oct-space-1);
+  margin-left: auto;
+  overflow: hidden;
+  background: var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+}
+.provider-history__share-fill {
+  display: block;
+  height: 100%;
+  background: var(--oct-accent);
 }
 .provider-history__section-heading {
   display: flex;
@@ -290,7 +394,12 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.provider-history__providers li > span:last-child {
+.provider-history__provider-share {
+  flex-basis: 100%;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+}
+.provider-history__providers li > span:nth-child(2) {
   flex-shrink: 0;
   white-space: nowrap;
 }

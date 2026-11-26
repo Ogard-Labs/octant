@@ -174,7 +174,7 @@ describe("ProviderUsageLimitsPanel", () => {
         instances={[provider]}
       />,
     );
-    expect(await screen.findByText("Limit reached")).toBeVisible();
+    expect(await screen.findByText("Limit reached", { selector: "span" })).toBeVisible();
     expect(
       screen.queryByRole("meter", { name: "5-hour window remaining" }),
     ).not.toBeInTheDocument();
@@ -207,7 +207,7 @@ describe("ProviderUsageLimitsPanel", () => {
     const { unmount } = render(<ProviderUsageLimitsPanel client={client} instances={[provider]} />);
     const meter = await screen.findByRole("meter", { name: "5-hour window remaining" });
     expect(meter).toHaveAttribute("value", "25");
-    expect(screen.getAllByText("25% left")).toHaveLength(2);
+    expect(screen.getAllByText("25% left", { selector: "span" })).toHaveLength(2);
     expect(screen.getAllByText(/Resets in 1h/)).toHaveLength(2);
     unmount();
     vi.mocked(Date.now).mockReturnValue(Date.parse("2026-08-23T13:01:00.000Z"));
@@ -482,7 +482,7 @@ describe("ProviderUsageLimitsPanel", () => {
         "value",
         "88",
       );
-      expect(screen.getByText("88% left")).toBeVisible();
+      expect(screen.getByText("88% left", { selector: "span" })).toBeVisible();
       expect(screen.getByText("Pay as you go on")).toBeVisible();
       expect(screen.getByText(/Resets in /)).toBeVisible();
       expect(screen.queryByText(/0% left/)).not.toBeInTheDocument();
@@ -755,9 +755,17 @@ describe("ProviderUsageLimitsPanel", () => {
           />,
         );
       });
-      expect(screen.getByText("Gemini · 5-hour window")).toBeVisible();
-      expect(screen.getByText("Claude & GPT · 7-day window")).toBeVisible();
-      expect(screen.getByText("96% left")).toBeVisible();
+      expect(
+        screen.getByText("Gemini · 5-hour window", {
+          selector: ".provider-limits__window-heading > span",
+        }),
+      ).toBeVisible();
+      expect(
+        screen.getByText("Claude & GPT · 7-day window", {
+          selector: ".provider-limits__window-heading > span",
+        }),
+      ).toBeVisible();
+      expect(screen.getByText("96% left", { selector: "span" })).toBeVisible();
       expect(screen.getByText(/Google AI Ultra/)).toBeVisible();
 
       await act(async () => {
@@ -769,13 +777,13 @@ describe("ProviderUsageLimitsPanel", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2_100);
       });
-      expect(screen.getByText("93% left")).toBeVisible();
+      expect(screen.getByText("93% left", { selector: "span" })).toBeVisible();
       expect(screen.getByText(/Waiting for fresh limits/)).toBeVisible();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2_100);
       });
-      expect(screen.getByText("90% left")).toBeVisible();
+      expect(screen.getByText("90% left", { selector: "span" })).toBeVisible();
       expect(screen.getByText("Updated limits received.")).toBeVisible();
 
       await act(async () => {
@@ -1076,5 +1084,186 @@ describe("ProviderUsageLimitsPanel", () => {
     expect(await screen.findByText("Account limit reached")).toBeVisible();
     expect(screen.queryByText("Each account")).not.toBeInTheDocument();
     expect(screen.getByText("Not reporting limits")).toBeVisible();
+  });
+});
+
+describe("Provider limits pace and forecast", () => {
+  const NOW = "2026-08-23T12:00:00.000Z";
+  function windows(
+    rateLimitWindows: ReadonlyArray<Record<string, unknown>>,
+    status: "available" | "failed" = "available",
+  ) {
+    const limits = {
+      providerInstanceId,
+      scope: "account",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      concurrency: { status: "unavailable" },
+      retry: { status: "inactive" },
+      quota: "available",
+      source: "observed-evidence",
+      confidence: "high",
+      updatedAt: NOW,
+      rateLimitWindows: rateLimitWindows.map((window) => ({
+        status: "allowed",
+        observedAt: NOW,
+        ...window,
+      })),
+    };
+    const data = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: NOW,
+      entries: [
+        status === "available"
+          ? {
+              providerInstanceId,
+              status,
+              source: "provider-runtime",
+              observedAt: NOW,
+              limits,
+            }
+          : {
+              providerInstanceId,
+              status,
+              source: "provider-runtime",
+              observedAt: NOW,
+              failure: { category: "rate-limited", message: "Refresh failed." },
+              staleLimits: limits,
+              lastSuccessfulAt: NOW,
+            },
+      ],
+    });
+    return { list: async () => data, refresh: async () => data };
+  }
+  async function renderAt(client: ReturnType<typeof windows>) {
+    vi.useFakeTimers({ now: new Date(NOW), shouldAdvanceTime: true });
+    const view = render(<ProviderUsageLimitsPanel client={client} instances={[provider]} />);
+    await screen.findByRole("meter", { name: "5-hour window remaining" });
+    return view;
+  }
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("the pace marker sits at the share of the window already elapsed", async () => {
+    // 1h 15m of five hours has passed: a quarter of the window.
+    await renderAt(
+      windows([{ window: "five_hour", utilization: 0.1, resetsAt: "2026-08-23T15:45:00.000Z" }]),
+    );
+    const marker = screen.getByRole("img", {
+      name: "Even spending would leave 75% by now: 25% of the window has passed",
+    });
+    // The bar is what is left, so the elapsed share is measured from its full end.
+    expect(marker.style.insetInlineStart).toBe("75%");
+    expect(screen.getByText("90% left", { selector: "strong" })).toBeVisible();
+    expect(screen.getByText("+10% back in 3h 45m")).toBeVisible();
+    expect(screen.getByText("Lasts until the reset")).toBeVisible();
+    expect(screen.getByText("Spending slower than an even pace")).toBeInTheDocument();
+  });
+
+  it("says when a window spent faster than evenly runs out before its reset", async () => {
+    // Half the window gone, 80% used: the last 20% lasts about 38 minutes.
+    await renderAt(
+      windows([{ window: "five_hour", utilization: 0.8, resetsAt: "2026-08-23T14:30:00.000Z" }]),
+    );
+    expect(screen.getByText("Runs out in about 38m, before the reset")).toBeVisible();
+    expect(screen.getByText("Spending faster than an even pace")).toBeInTheDocument();
+    expect(screen.getByText("+80% back in 2h 30m")).toBeVisible();
+  });
+
+  it("a window with no reset time shows no pace marker or forecast", async () => {
+    await renderAt(windows([{ window: "five_hour", utilization: 0.4 }]));
+    expect(screen.getByText("60% left", { selector: "strong" })).toBeVisible();
+    expect(screen.queryByRole("img", { name: /Even spending/ })).toBeNull();
+    expect(screen.queryByText(/ back in |Runs out|Lasts until|an even pace/)).toBeNull();
+  });
+
+  it("forecasts no run-out for a window whose length the provider does not name", async () => {
+    vi.useFakeTimers({ now: new Date(NOW), shouldAdvanceTime: true });
+    render(
+      <ProviderUsageLimitsPanel
+        client={windows([
+          { window: "monthly", utilization: 0.9, resetsAt: "2026-09-01T00:00:00.000Z" },
+        ])}
+        instances={[provider]}
+      />,
+    );
+    await screen.findByRole("meter", { name: "Monthly window remaining" });
+    expect(screen.getByText(/\+90% back in /)).toBeVisible();
+    expect(screen.queryByRole("img", { name: /Even spending/ })).toBeNull();
+    expect(screen.queryByText(/Runs out|Lasts until/)).toBeNull();
+  });
+
+  it("forecasts nothing from a reading kept after a failed refresh", async () => {
+    await renderAt(
+      windows(
+        [{ window: "five_hour", utilization: 0.8, resetsAt: "2026-08-23T14:30:00.000Z" }],
+        "failed",
+      ),
+    );
+    expect(screen.queryByText(/ back in |Runs out|Lasts until|an even pace/)).toBeNull();
+    expect(screen.getByText("5-hour window · last reading, refresh failed")).toBeVisible();
+  });
+
+  it("keeps the provider limits explanation behind an info mark", async () => {
+    await renderAt(windows([{ window: "five_hour", utilization: 0.4 }]));
+    expect(screen.queryByText(/can include usage from other apps/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "About provider limits" }));
+    expect(await screen.findByText(/can include usage from other apps/)).toBeVisible();
+  });
+});
+
+describe("Pooled provider limits headline", () => {
+  it("leads with the account closest to running out and names it, never an average", async () => {
+    const second = {
+      ...provider,
+      id: "22222222-2222-4222-8222-222222222222" as ProviderInstanceId,
+      displayName: "Second account",
+    } as ProviderInstance;
+    const resetsAt = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
+    const observedAt = new Date().toISOString();
+    const data = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: observedAt,
+      entries: [
+        [provider, 0.2],
+        [second, 0.7],
+      ].map(([account, utilization]) => {
+        const id = (account as ProviderInstance).id;
+        return {
+          providerInstanceId: id,
+          status: "available",
+          source: "provider-runtime",
+          observedAt,
+          limits: {
+            providerInstanceId: id,
+            scope: "account",
+            requests: { status: "unavailable" },
+            tokens: { status: "unavailable" },
+            concurrency: { status: "unavailable" },
+            retry: { status: "inactive" },
+            quota: "available",
+            source: "observed-evidence",
+            confidence: "high",
+            updatedAt: observedAt,
+            rateLimitWindows: [
+              { window: "five_hour", status: "allowed", utilization, resetsAt, observedAt },
+            ],
+          },
+        };
+      }),
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[provider, second]}
+      />,
+    );
+    expect(await screen.findByText("30% left", { selector: "strong" })).toBeVisible();
+    expect(screen.getByText("Second account · 5-hour window")).toBeVisible();
+    // Each account keeps its own marker and forecast on its own segment.
+    expect(screen.getAllByRole("img", { name: /: Even spending would leave/ })).toHaveLength(2);
+    // Once on its pooled segment and once in its own reading under Each account.
+    expect(screen.getAllByText(/\+70% back in /)).toHaveLength(2);
   });
 });

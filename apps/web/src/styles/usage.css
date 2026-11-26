@@ -444,23 +444,80 @@ html[data-octant-increased-contrast="true"] .usage-dashboard__error {
   flex: 1 1 0;
   min-width: 0;
 }
+/* A bar and the marker laid over it. */
+.provider-limits__track {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+.provider-limits__pace {
+  position: absolute;
+  inset-block: -2px;
+  width: 2px;
+  margin-inline-start: -1px;
+  background: var(--oct-fg);
+  border-radius: var(--oct-radius-pill);
+}
+.provider-limits__forecast {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 var(--oct-space-3);
+  font-variant-numeric: tabular-nums;
+}
+.provider-limits__forecast > [data-outlook="runs-out"] {
+  color: var(--oct-warn-fg);
+}
+.provider-limits__headline {
+  display: grid;
+  gap: 2px;
+  margin-top: var(--oct-space-2);
+}
+.provider-limits__headline > div {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+.provider-limits__headline strong {
+  font-size: var(--oct-text-3xl);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+}
+.provider-limits__headline > span {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+}
+.provider-limits__trend {
+  display: inline-flex;
+  color: var(--oct-muted);
+}
+.provider-limits__trend[data-trend="faster"] {
+  color: var(--oct-warn-fg);
+}
+
 .provider-limits__segment-empty {
+  align-self: center;
   height: 6px;
   border: 1px dashed var(--oct-border);
   border-radius: var(--oct-radius-pill);
 }
 .provider-limits__segment-legend {
   display: grid;
-  gap: 2px;
+  gap: var(--oct-space-2);
   margin: 0;
   padding: 0;
   list-style: none;
   font-variant-numeric: tabular-nums;
 }
+.provider-limits__segment-legend > li > .provider-limits__forecast {
+  flex-basis: 100%;
+}
 .provider-limits__segment-legend > li {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: var(--oct-space-3);
+  gap: 0 var(--oct-space-3);
 }
 .provider-limits__accounts > summary {
   cursor: pointer;

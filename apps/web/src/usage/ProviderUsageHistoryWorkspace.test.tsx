@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { decodeLocalUsageHistoryResponse, type LocalUsageHistoryResponse } from "@octant/contracts";
@@ -221,20 +221,158 @@ describe("Local provider usage history", () => {
     expect(await screen.findByText(/sessions so far/)).toBeVisible();
   });
 
-  it("marks every point of a multi-day series instead of drawing a bare line", async () => {
+  it("draws a smooth filled area for each provider over round tick values", async () => {
+    const base = history();
+    const days = base.days.flatMap((row) => [
+      { ...row, day: "2026-09-07" },
+      { ...row, day: "2026-09-09" },
+    ]);
+    const { container } = render(
+      <ProviderUsageHistoryWorkspace client={{ load: async () => ({ ...base, days }) }} />,
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector(".provider-history__area")).toHaveAttribute(
+        "d",
+        expect.stringContaining("C"),
+      ),
+    );
+    const ticks = [...container.querySelectorAll(".provider-history__tick")].map(
+      (tick) => tick.textContent,
+    );
+    expect(ticks).toEqual(["$0", "$0.50", "$1", "$1.50"]);
+  });
+
+  it("leaves a gap rather than a zero where a day's cost is unknown", async () => {
+    const base = history();
+    const row = base.days[0];
+    if (row === undefined) throw new Error("Expected a fixture day");
+    const days = [
+      { ...row, day: "2026-09-08", cost: { pricedRecordCount: 0, unpricedRecordCount: 1 } },
+      { ...row, day: "2026-09-09" },
+    ];
+    render(<ProviderUsageHistoryWorkspace client={{ load: async () => ({ ...base, days }) }} />);
+
+    expect(await screen.findByRole("img", { name: /Sep 8.*Codex Unavailable/ })).toBeVisible();
+    expect(screen.getByRole("img", { name: /Sep 9.*Codex \$1\.25/ })).toBeVisible();
+  });
+
+  it("the chart's per-day readout is reachable by keyboard", async () => {
     const base = history();
     const days = base.days.flatMap((row) => [
       { ...row, day: "2026-09-08" },
       { ...row, day: "2026-09-09" },
     ]);
-    const data = { ...base, days };
     const { container } = render(
-      <ProviderUsageHistoryWorkspace client={{ load: async () => data }} />,
+      <ProviderUsageHistoryWorkspace client={{ load: async () => ({ ...base, days }) }} />,
     );
+    const latest = await screen.findByRole("img", { name: /Sep 9.*Codex \$1\.25/ });
+    const earlier = screen.getByRole("img", { name: /Sep 8.*Codex \$1\.25/ });
+    // One tab stop for the whole plot; the arrow keys walk the days.
+    expect(latest).toHaveAttribute("tabindex", "0");
+    expect(earlier).toHaveAttribute("tabindex", "-1");
 
-    await waitFor(() =>
-      expect(container.querySelectorAll(".provider-history__series circle")).toHaveLength(2),
+    act(() => latest.focus());
+    const readout = () => container.querySelector(".provider-history__readout");
+    expect(readout()).toHaveTextContent("Sep 9");
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(earlier).toHaveFocus();
+    expect(readout()).toHaveTextContent("Sep 8");
+    expect(readout()).toHaveTextContent("Codex $1.25");
+    await userEvent.keyboard("{End}");
+    expect(latest).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(readout()).not.toHaveTextContent("Sep 9");
+  });
+
+  it("a provider row reads its share of cost and its tokens", async () => {
+    const base = history();
+    const provider = base.providers[0];
+    if (provider === undefined) throw new Error("Expected a fixture provider");
+    const providers = [
+      { ...provider, cost: { ...provider.cost, apiEstimateUsd: 0.7875 } },
+      {
+        ...provider,
+        key: "claude-code",
+        label: "claude-code",
+        providerKey: "claude-code",
+        cost: { pricedRecordCount: 0, unpricedRecordCount: 2 },
+      },
+    ];
+    render(
+      <ProviderUsageHistoryWorkspace client={{ load: async () => ({ ...base, providers }) }} />,
     );
+    const list = await screen.findByRole("list", { name: "Usage by provider" });
+    const rows = within(list).getAllByRole("listitem");
+    await waitFor(() => expect(rows[0]).toHaveTextContent("63% of cost · 1.2K tokens"));
+    expect(rows[1]).toHaveTextContent("Share unavailable · 1.2K tokens");
+    await userEvent.click(screen.getByRole("button", { name: "Tokens" }));
+    expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent("100% of tokens · $0.79");
+  });
+
+  it("splits tokens into one bar and names what no source broke down", async () => {
+    render(<ProviderUsageHistoryWorkspace client={{ load: async () => history() }} />);
+    const bar = await screen.findByRole("img", {
+      name: "Tokens by type: Input 400, Cache read 600, Output 200",
+    });
+    expect(bar.children).toHaveLength(3);
+    // The fixture measures no cache write, which is unknown and never zero.
+    expect(screen.getByRole("list", { name: "Token types" })).toHaveTextContent(
+      "Cache writeUnavailable",
+    );
+  });
+
+  it("counts input a source did not break down as its own part of the bar", async () => {
+    const base = history();
+    const totals = {
+      ...base.totals,
+      componentCoverage: {
+        ...base.totals.componentCoverage,
+        cacheRead: { measured: 1, total: 2 },
+      },
+      cacheReadInputTokens: 200,
+    };
+    render(<ProviderUsageHistoryWorkspace client={{ load: async () => ({ ...base, totals }) }} />);
+    expect(
+      await screen.findByRole("img", {
+        name: "Tokens by type: Input 400, Cache read 200, Input not broken down 400, Output 200",
+      }),
+    ).toBeVisible();
+    expect(screen.getByRole("list", { name: "Token types" })).toHaveTextContent(
+      "1 of 2 requests measured",
+    );
+  });
+
+  it("ranks each model with a bar for its share", async () => {
+    const base = history();
+    const model = base.models[0];
+    if (model === undefined) throw new Error("Expected a fixture model");
+    const models = [
+      { ...model, key: "small", label: "small", cost: { ...model.cost, apiEstimateUsd: 0.25 } },
+      { ...model, key: "large", label: "large", cost: { ...model.cost, apiEstimateUsd: 1 } },
+    ];
+    const { container } = render(
+      <ProviderUsageHistoryWorkspace client={{ load: async () => ({ ...base, models }) }} />,
+    );
+    const table = await screen.findByRole("table", { name: "Usage by model" });
+    await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(3));
+    const rows = within(table).getAllByRole("row");
+    expect(rows[1]).toHaveTextContent(/^1.*large.*80\.0%/);
+    expect(rows[2]).toHaveTextContent(/^2.*small.*20\.0%/);
+    const bars = container.querySelectorAll<HTMLElement>(".provider-history__share-fill");
+    expect(bars[0]?.style.width).toBe("80%");
+  });
+
+  it("keeps the explanatory sentences behind an info mark", async () => {
+    render(<ProviderUsageHistoryWorkspace client={{ load: async () => history() }} />);
+    await screen.findByRole("heading", { name: "$1.25" });
+    expect(screen.queryByText(/not a subscription invoice/)).toBeNull();
+    expect(screen.queryByText(/Local provider history · this computer/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "About these costs" }));
+    expect(await screen.findByText(/not a subscription invoice/)).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "About this history" }));
+    expect(await screen.findByText(/Local provider history · this computer/)).toBeVisible();
   });
 
   it("opens at the host's last reading and keeps it until the fresh read completes", async () => {

@@ -1,5 +1,5 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { ArrowLeft, RefreshCw } from "../ui/icons";
 import {
   decodeLocalUsageHistoryRequest,
@@ -11,12 +11,15 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ProviderUsageHistoryChart } from "./ProviderUsageHistoryChart";
+import { UsageInfoMark } from "./UsageInfoMark";
+import { UsageTokenBar } from "./UsageTokenBar";
 import { SettingsSection } from "../settings/primitives";
 import "./providerUsageHistory.css";
 
 type Range = "24h" | "7d" | "30d" | "90d";
 import {
   compactTokens,
+  historyProviderColor,
   historyProviderName,
   dollars,
   formatDay,
@@ -215,6 +218,9 @@ export function ProviderUsageHistoryWorkspace(props: {
           >
             <RefreshCw size={16} />
           </OctantButton>
+          <UsageInfoMark label="About this history">
+            {`Local provider history · this computer. Activity recorded by provider tools on this computer can include Octant sessions. It is not added to Octant’s own ledger.`}
+          </UsageInfoMark>
         </div>
         <div className="provider-history__controls">
           <OctantToggleGroup<HistoryMetric>
@@ -262,7 +268,7 @@ export function ProviderUsageHistoryWorkspace(props: {
                   ? "No supported local history source is enabled. Check Providers & Models."
                   : data?.coverage.some((source) => source.status !== "ready")
                     ? "Some sources are incomplete or unavailable. See source coverage."
-                    : "Local provider history · this computer"}
+                    : ""}
         </p>
         <HistoryBlock
           ariaLabel="Usage overview"
@@ -294,20 +300,33 @@ export function ProviderUsageHistoryWorkspace(props: {
               {metric === "cost"
                 ? ` · ${costBasis === "apiEstimateUsd" ? "API-equivalent estimate" : "Provider-recorded cost"}`
                 : " · processed tokens"}
+              {metric === "cost" && data !== undefined ? (
+                <UsageInfoMark label="About these costs">
+                  {`${
+                    selectedPricedCount === undefined
+                      ? ""
+                      : `${selectedPricedCount.toLocaleString("en")} of ${data.totals.requestCount.toLocaleString("en")} requests priced in this view. `
+                  }Costs are in USD and reflect the selected source, not a subscription invoice.`}
+                </UsageInfoMark>
+              ) : null}
             </p>
-            <ul className="provider-history__providers">
+            <ul className="provider-history__providers" aria-label="Usage by provider">
               {data?.providers.map((provider, index) => (
                 <li key={provider.key}>
                   <span className="provider-history__provider-label">
                     <span
                       className="provider-history__swatch"
                       data-series={index % 6}
+                      style={swatchStyle(provider.key)}
                       aria-hidden="true"
                     />
                     {historyProviderName(provider.key, provider.label)}
                     <small>{provider.totals.sessionCount.toLocaleString("en")} sessions</small>
                   </span>
                   <span>{displayValue(metricValue(provider, metric, costBasis), metric)}</span>
+                  <small className="provider-history__provider-share">
+                    {providerShare(provider, metric, costBasis, primary)}
+                  </small>
                 </li>
               ))}
             </ul>
@@ -331,15 +350,11 @@ export function ProviderUsageHistoryWorkspace(props: {
                     </OctantToggleGroupItem>
                   </OctantToggleGroup>
                 ) : null}
-                <p>
-                  {data.cost.unpricedRecordCount > 0
-                    ? `${data.cost.unpricedRecordCount.toLocaleString("en")} ${data.cost.unpricedRecordCount === 1 ? "request without pricing" : "requests without pricing"}. `
-                    : ""}
-                  {selectedPricedCount === undefined
-                    ? ""
-                    : `${selectedPricedCount.toLocaleString("en")} of ${data.totals.requestCount.toLocaleString("en")} requests priced in this view. `}
-                  Costs are in USD and reflect the selected source, not a subscription invoice.
-                </p>
+                {data.cost.unpricedRecordCount > 0 ? (
+                  <p>
+                    {`${data.cost.unpricedRecordCount.toLocaleString("en")} ${data.cost.unpricedRecordCount === 1 ? "request without pricing" : "requests without pricing"}.`}
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -357,22 +372,10 @@ export function ProviderUsageHistoryWorkspace(props: {
             loading={busy && data === undefined}
           />
           <Metric
-            label="Cached input"
-            value={hasHistorySource ? data?.totals.cacheReadInputTokens : undefined}
-            coverage={data?.totals.componentCoverage.cacheRead}
-            loading={busy && data === undefined}
-          />
-          <Metric
             label="Input cache hit rate"
             value={hasHistorySource ? inputCacheHitRate : undefined}
             format="percent"
             detail="Cache reads / total input"
-            loading={busy && data === undefined}
-          />
-          <Metric
-            label="Uncached input"
-            value={hasHistorySource ? data?.totals.uncachedInputTokens : undefined}
-            coverage={data?.totals.componentCoverage.uncachedInput}
             loading={busy && data === undefined}
           />
           <Metric
@@ -390,11 +393,7 @@ export function ProviderUsageHistoryWorkspace(props: {
             }
             loading={busy && data === undefined}
           />
-          <Metric
-            label="Output"
-            value={hasHistorySource ? data?.totals.outputTokens : undefined}
-            loading={busy && data === undefined}
-          />
+          {data === undefined || !hasHistorySource ? null : <UsageTokenBar totals={data.totals} />}
         </HistoryBlock>
         {props.limits}
         <HistoryBlock
@@ -427,9 +426,10 @@ export function ProviderUsageHistoryWorkspace(props: {
               </thead>
               <tbody>
                 {breakdown === "model"
-                  ? modelRows.map((row) => (
+                  ? modelRows.map((row, index) => (
                       <HistoryRow
                         key={row.key}
+                        rank={index + 1}
                         label={row.label}
                         providerKey={row.providerKey}
                         tokens={row.totals.totalTokens}
@@ -489,10 +489,7 @@ export function ProviderUsageHistoryWorkspace(props: {
               API estimates use the recorded standard rates. Cache savings compare priced input with
               the same input uncached; negative savings mean cache-write overhead.
             </p>
-            <p>
-              Activity recorded by provider tools on this computer can include Octant sessions. It
-              is not added to Octant’s own ledger. Read {new Date(data.queryAt).toLocaleString()}.
-            </p>
+            <p>Read {new Date(data.queryAt).toLocaleString()}.</p>
           </OctantCollapsible>
         )}
       </div>
@@ -538,17 +535,22 @@ function Metric(props: {
 }
 function HistoryRow(props: {
   readonly label: string;
+  /** A model's place by the selected measure; days keep their own order. */
+  readonly rank?: number;
   readonly providerKey?: string;
   readonly tokens: number;
   readonly cost: number | undefined;
   readonly metric: HistoryMetric;
   readonly total: number | undefined;
 }) {
-  const value = props.metric === "tokens" ? props.tokens : props.cost;
+  const share = shareOf(props.metric === "tokens" ? props.tokens : props.cost, props.total);
   return (
     <tr>
       <th scope="row">
         <span className="provider-history__model-label">
+          {props.rank === undefined ? null : (
+            <span className="provider-history__rank">{props.rank}</span>
+          )}
           {props.providerKey === undefined ? null : (
             <span title={props.providerKey}>
               <ProviderGlyph
@@ -564,17 +566,53 @@ function HistoryRow(props: {
       </th>
       <td>{props.cost === undefined ? "—" : dollars(props.cost)}</td>
       <td>
-        {value === undefined || props.total === undefined || props.total === 0
+        {share === undefined
           ? "—"
           : new Intl.NumberFormat("en", {
               style: "percent",
               maximumFractionDigits: 1,
               minimumFractionDigits: 1,
-            }).format(value / props.total)}
+            }).format(share)}
+        {props.rank === undefined || share === undefined ? null : (
+          <span className="provider-history__share" aria-hidden="true">
+            <span
+              className="provider-history__share-fill"
+              style={{ width: `${Math.min(100, share * 100)}%` }}
+            />
+          </span>
+        )}
       </td>
       <td>{compactTokens(props.tokens)}</td>
     </tr>
   );
+}
+function shareOf(value: number | undefined, total: number | undefined): number | undefined {
+  return value === undefined || total === undefined || total === 0 ? undefined : value / total;
+}
+/** "63% of cost · 5.17B tokens": the row's share, then the measure it does not lead with. */
+function providerShare(
+  row: LocalUsageHistoryGroup,
+  metric: HistoryMetric,
+  basis: HistoryCostBasis,
+  total: number | undefined,
+): string {
+  const share = shareOf(metricValue(row, metric, basis), total);
+  const lead =
+    share === undefined
+      ? "Share unavailable"
+      : `${Math.round(share * 100)}% of ${metric === "cost" ? "cost" : "tokens"}`;
+  const cost = row.cost[basis];
+  const other =
+    metric === "cost"
+      ? `${compactTokens(row.totals.totalTokens)} tokens`
+      : cost === undefined
+        ? "cost unavailable"
+        : dollars(cost);
+  return `${lead} · ${other}`;
+}
+function swatchStyle(providerKey: string): CSSProperties | undefined {
+  const color = historyProviderColor(providerKey);
+  return color === undefined ? undefined : ({ "--usage-provider-color": color } as CSSProperties);
 }
 function metricValue(
   row: LocalUsageHistoryGroup,

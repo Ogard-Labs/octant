@@ -409,7 +409,20 @@ capacity independently of ledger loading. Each provider window leads with its
 remaining percentage and an accessible meter, followed by its reset countdown.
 Account, model, and provider-instance scopes remain distinct. An elapsed reset
 shows Awaiting updated limits until a fresh reading arrives; it never implies
-refilled capacity. A provider with more than one account on this computer
+refilled capacity. On Usage each provider leads with a large share left, taken
+from its reading closest to running out and naming that window (and the account,
+where accounts pool; never an average), with an arrow when spending is ahead of
+or behind an even pace over the window. Each bar carries a pace marker where
+even spending would be now (on a bar of what is left, the elapsed share measured
+from the full end), and a forecast: what comes back and when ("+30% back in
+1d 1h"), and whether the share left lasts until the reset or runs out about
+when, at the pace up to the reading. The forecast uses only the used share, the
+window's length as its name states it, its reset time and when it was read. A
+window with no reset shows neither; a window whose length is not named (monthly,
+overage, request and token buckets) gets only what comes back; a spent window
+and the first twentieth of a window get no pace; and a reading kept after a
+failed refresh gets only the marker. No plan size, vendor usage endpoint or
+credential is involved. A provider with more than one account on this computer
 reads as one row (maintainer decision, 2026-11-26): each limit window is one
 bar with one segment per account, side by side and ordered by which refills
 first, and the bar names the soonest reset. There is no averaged share, since
@@ -771,13 +784,38 @@ render a late result under the new period. A refresh keeps the previous reading
 visible. Resumable imports continue in bounded batches; read errors and hard
 limits remain visibly partial.
 
-History leads with the total and provider list beside a daily chart, followed
-by processed, cached, uncached, output, and estimated cache-savings totals.
+The page reads like a calm dashboard (maintainer decision, 2026-11-26).
+History leads with the total and provider list beside a daily chart. Each
+provider row adds a second line with its share of the selected measure and the
+other measure ("63% of cost · 5.17B tokens"); an unknown share reads Share
+unavailable. The chart draws one smooth filled area per provider in that
+provider's colour (ink under Mono), over round tick values from zero. The curve
+never leaves the range between two neighbouring days. A day with no record is
+zero; a record with no price is unknown and leaves a gap, and a provider with no
+priced record is not drawn under Cost. Pointing at a day shows its readings in
+a line above the plot; the plot is one tab stop, the arrow keys, Home and End
+move between days, Escape closes the readout, and each day's mark is named with
+its readings.
+
+Token totals follow: processed tokens, input cache hit rate and estimated cache
+savings above one stacked bar of input, cache read, cache write and output, with
+a legend of each. Input already includes cache reads and writes, so input no
+request measured by type is its own part (Input not broken down); a type nobody
+measured reads Unavailable, and a partly measured one says how many requests
+measured it. The bar carries no cost split: the history has one cost per
+request, not one per token type.
+
 Cost and Tokens share the same geometry. Model and Day breakdowns are compact
-read-only tables. Individual chart readings also have a disclosed table.
-Unknown prices and missing quota measurements are unavailable, never zero.
-API estimates, provider-recorded costs, pricing revisions, and measured-record
-coverage remain distinguishable.
+read-only tables; a model row leads with its rank by the selected measure and
+draws a bar for its share. Individual chart readings also have a disclosed
+table. Unknown prices and missing quota measurements are unavailable, never
+zero. API estimates, provider-recorded costs, pricing revisions, and
+measured-record coverage remain distinguishable.
+
+Explanations wait behind an info mark that opens on hover or a press: where the
+history comes from, that costs are in USD and are not a subscription invoice,
+and what provider limits include. A state of the read itself (reading, failed,
+incomplete, no source) and the count of unpriced requests stay on the page.
 
 Diagnostics is the third source in the same toggle group, offered when the host
 answers turn diagnostics. It reads how turns went across every provider and mode

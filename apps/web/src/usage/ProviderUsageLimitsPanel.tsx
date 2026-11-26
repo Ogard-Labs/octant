@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw } from "../ui/icons";
+import { ArrowDownRight, ArrowUpRight, RefreshCw } from "../ui/icons";
 import type {
   ProviderLimitsCaptureStatus,
   ProviderUsageLimitsClient,
@@ -18,6 +18,14 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { driverLabel } from "../providers/providerSettingsPresentation";
 import { poolProviderLimits, type PooledProvider, type PooledWindow } from "./pooledProviderLimits";
+import {
+  limitForecast,
+  outlookPhrase,
+  paceDuration,
+  type LimitForecast,
+  type LimitWindowReading,
+} from "./limitPace";
+import { UsageInfoMark } from "./UsageInfoMark";
 import "../styles/usage.css";
 
 const CAPTURE_POLL_INTERVAL_MS = 2_000;
@@ -332,6 +340,7 @@ export function ProviderUsageLimitsPanel(props: {
         <ul className="surface-list provider-limits__list">
           {pooled.map((provider) => (
             <PooledProviderRow
+              compact={props.compact === true}
               entries={visible}
               key={provider.driverKind}
               now={now}
@@ -368,6 +377,9 @@ export function ProviderUsageLimitsPanel(props: {
                       ? capture.summary
                       : scopeDetail}
                   </span>
+                  {props.compact === true ? null : (
+                    <LimitHeadline now={now} readings={entryReadings(entry, now)} />
+                  )}
                 </div>
                 <div className="surface-row__control">
                   <div className="provider-limits__details">
@@ -481,21 +493,27 @@ export function ProviderUsageLimitsPanel(props: {
   return (
     <SurfaceSection
       actions={
-        <OctantButton
-          aria-label="Refresh provider limits"
-          disabled={busy}
-          onClick={() => void load(true)}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <RefreshCw aria-hidden="true" size={14} />
-          Refresh
-        </OctantButton>
+        <>
+          <UsageInfoMark label="About provider limits">
+            Provider-reported limits can include usage from other apps. An unreported window stays
+            unknown; a reset requires a fresh reading. The marker on a bar is where spending evenly
+            over the window would be now, and a forecast assumes the pace so far.
+          </UsageInfoMark>
+          <OctantButton
+            aria-label="Refresh provider limits"
+            disabled={busy}
+            onClick={() => void load(true)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <RefreshCw aria-hidden="true" size={14} />
+            Refresh
+          </OctantButton>
+        </>
       }
       className="provider-limits"
       label="Provider limits"
-      note="Provider-reported limits can include usage from other apps. An unreported window stays unknown; a reset requires a fresh reading."
     >
       {body}
     </SurfaceSection>
@@ -509,6 +527,7 @@ export function ProviderUsageLimitsPanel(props: {
  * account's full reading stays one disclosure away.
  */
 function PooledProviderRow(props: {
+  readonly compact: boolean;
   readonly provider: PooledProvider;
   readonly entries: ReadonlyArray<ProviderUsageLimitsEntry>;
   readonly now: number;
@@ -527,6 +546,9 @@ function PooledProviderRow(props: {
         <span className="oct-row-detail">
           {props.provider.accounts.length} accounts · each account counted on its own
         </span>
+        {props.compact ? null : (
+          <LimitHeadline now={props.now} readings={pooledReadings(props.provider)} />
+        )}
       </div>
       <div className="surface-row__control">
         <div className="provider-limits__details">
@@ -579,14 +601,19 @@ function PooledWindowBar(props: { readonly window: PooledWindow; readonly now: n
           // screen reader can reach the meter on its own.
           segment.kind === "reading" &&
           (segment.remainingPercent !== undefined || segment.exhausted) ? (
-            <meter
-              aria-label={`${segment.account}, ${label} remaining${segment.exhausted ? ", limit reached" : ""}`}
-              data-state={segment.exhausted ? "exhausted" : "reading"}
-              key={segment.providerInstanceId}
-              max={100}
-              min={0}
-              value={segment.remainingPercent ?? 0}
-            />
+            <span className="provider-limits__track" key={segment.providerInstanceId}>
+              <meter
+                aria-label={`${segment.account}, ${label} remaining${segment.exhausted ? ", limit reached" : ""}`}
+                data-state={segment.exhausted ? "exhausted" : "reading"}
+                max={100}
+                min={0}
+                value={segment.remainingPercent ?? 0}
+              />
+              <PaceMarker
+                account={segment.account}
+                forecast={limitForecast({ ...segment, window: props.window.window }, props.now)}
+              />
+            </span>
           ) : (
             <span
               aria-hidden="true"
@@ -608,6 +635,11 @@ function PooledWindowBar(props: { readonly window: PooledWindow; readonly now: n
           <li data-segment={segment.kind} key={segment.providerInstanceId}>
             <span>{segment.account}</span>
             <span>{segmentReading(segment, timestampFormat)}</span>
+            {segment.kind === "missing" ? null : (
+              <ForecastLine
+                forecast={limitForecast({ ...segment, window: props.window.window }, props.now)}
+              />
+            )}
           </li>
         ))}
       </ul>
@@ -751,7 +783,11 @@ function EntryDetails({
           )}
         </div>
       ) : null}
-      {limits === undefined ? <p>Unavailable</p> : <LimitBuckets limits={limits} now={now} />}
+      {limits === undefined ? (
+        <p>Unavailable</p>
+      ) : (
+        <LimitBuckets limits={limits} now={now} stale={entry.status === "failed"} />
+      )}
       <p className="provider-limits__updated">
         Last updated {formatTime(limits?.updatedAt ?? entry.observedAt, timestampFormat)}
       </p>
@@ -762,9 +798,11 @@ function EntryDetails({
 function LimitBuckets({
   limits,
   now,
+  stale,
 }: {
   readonly limits: ProviderServiceLimits;
   readonly now: number;
+  readonly stale: boolean;
 }) {
   const timestampFormat = useTimestampFormat();
   const buckets = [
@@ -784,13 +822,26 @@ function LimitBuckets({
         <p>No quota windows reported</p>
       ) : null}
       {buckets.map(([label, bucket]) => (
-        <LimitBucket bucket={bucket} key={label} label={label} now={now} />
+        <LimitBucket
+          bucket={bucket}
+          key={label}
+          label={label}
+          now={now}
+          observedAt={limits.updatedAt}
+          stale={stale}
+        />
       ))}
       {limits.rateLimitWindows?.map((window) => (
         <QuotaWindow
           key={window.window}
           label={windowLabel(window.window)}
           now={now}
+          pace={{
+            window: window.window,
+            observedAt: window.observedAt,
+            exhausted: window.status === "exhausted",
+            stale,
+          }}
           status={capitalize(window.status)}
           {...(window.utilization === undefined
             ? {}
@@ -812,12 +863,20 @@ function LimitBucket(props: {
   readonly bucket: ServiceLimitBucket;
   readonly label: string;
   readonly now: number;
+  readonly observedAt: string;
+  readonly stale: boolean;
 }) {
   if (props.bucket.status === "unavailable") return null;
   return (
     <QuotaWindow
       label={capitalize(props.label)}
       now={props.now}
+      pace={{
+        window: props.label,
+        observedAt: props.observedAt,
+        exhausted: props.bucket.remaining <= 0,
+        stale: props.stale,
+      }}
       remainingPercent={Math.floor((props.bucket.remaining / props.bucket.limit) * 100)}
       detail={`${props.bucket.remaining.toLocaleString("en")} remaining of ${props.bucket.limit.toLocaleString("en")} ${props.label}`}
       {...(props.bucket.resetsAt === undefined ? {} : { resetsAt: props.bucket.resetsAt })}
@@ -828,6 +887,7 @@ function LimitBucket(props: {
 function QuotaWindow(props: {
   readonly label: string;
   readonly now: number;
+  readonly pace: Pick<LimitWindowReading, "window" | "observedAt" | "exhausted" | "stale">;
   readonly status?: string;
   readonly remainingPercent?: number;
   readonly resetsAt?: string;
@@ -837,6 +897,14 @@ function QuotaWindow(props: {
   const timestampFormat = useTimestampFormat();
   const expired = props.resetsAt !== undefined && Date.parse(props.resetsAt) <= props.now;
   const remaining = expired ? undefined : props.remainingPercent;
+  const forecast = limitForecast(
+    {
+      ...props.pace,
+      ...(remaining === undefined ? {} : { remainingPercent: remaining }),
+      ...(props.resetsAt === undefined ? {} : { resetsAt: props.resetsAt }),
+    },
+    props.now,
+  );
   return (
     <div className="provider-limits__window">
       <div className="provider-limits__window-heading">
@@ -844,7 +912,10 @@ function QuotaWindow(props: {
         {expired || props.status === undefined ? null : <span>{props.status}</span>}
       </div>
       {remaining === undefined ? null : (
-        <meter aria-label={`${props.label} remaining`} min={0} max={100} value={remaining} />
+        <span className="provider-limits__track">
+          <meter aria-label={`${props.label} remaining`} min={0} max={100} value={remaining} />
+          <PaceMarker forecast={forecast} />
+        </span>
       )}
       <div className="provider-limits__window-reading">
         <span>
@@ -863,8 +934,146 @@ function QuotaWindow(props: {
           </time>
         )}
       </div>
+      <ForecastLine forecast={forecast} />
       {props.overage === undefined || expired ? null : <p>{props.overage}</p>}
       {props.detail === undefined || expired ? null : <p>{props.detail}</p>}
+    </div>
+  );
+}
+
+/** Where spending evenly over the window would be now, drawn on the bar of what is left. */
+function PaceMarker(props: { readonly forecast: LimitForecast; readonly account?: string }) {
+  const elapsed = props.forecast.elapsedPercent;
+  if (elapsed === undefined) return null;
+  const account = props.account === undefined ? "" : `${props.account}: `;
+  return (
+    <span
+      aria-label={`${account}Even spending would leave ${100 - elapsed}% by now: ${elapsed}% of the window has passed`}
+      className="provider-limits__pace"
+      role="img"
+      style={{ insetInlineStart: `${100 - elapsed}%` }}
+      title={`Even spending would leave ${100 - elapsed}% by now`}
+    />
+  );
+}
+
+function ForecastLine(props: { readonly forecast: LimitForecast }) {
+  const { back, outlook } = props.forecast;
+  if (back === undefined && outlook === undefined) return null;
+  return (
+    <p className="provider-limits__forecast">
+      {outlook === undefined ? null : (
+        <span data-outlook={outlook.kind}>{outlookPhrase(outlook)}</span>
+      )}
+      {back === undefined ? null : (
+        <span>{`+${back.percent}% back in ${paceDuration(back.inMs)}`}</span>
+      )}
+    </p>
+  );
+}
+
+/** A reading a provider's headline can lead with. */
+interface HeadlineReading extends LimitWindowReading {
+  readonly account?: string;
+}
+
+function entryReadings(
+  entry: ProviderUsageLimitsEntry,
+  now: number,
+): ReadonlyArray<HeadlineReading> {
+  const limits =
+    entry.status === "available"
+      ? entry.limits
+      : entry.status === "failed"
+        ? entry.staleLimits
+        : undefined;
+  if (limits === undefined) return [];
+  const stale = entry.status === "failed";
+  const windows = (limits.rateLimitWindows ?? []).map(
+    (window): HeadlineReading => ({
+      window: window.window,
+      observedAt: window.observedAt,
+      exhausted: window.status === "exhausted",
+      stale,
+      ...(window.utilization === undefined
+        ? {}
+        : { remainingPercent: Math.floor((1 - window.utilization) * 100 + 1e-9) }),
+      ...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt }),
+    }),
+  );
+  const buckets = (
+    [
+      ["requests", limits.requests],
+      ["tokens", limits.tokens],
+      ["concurrent", limits.concurrency],
+    ] as const
+  ).flatMap(
+    ([window, bucket]): ReadonlyArray<HeadlineReading> =>
+      bucket.status === "unavailable"
+        ? []
+        : [
+            {
+              window,
+              observedAt: limits.updatedAt,
+              exhausted: bucket.remaining <= 0,
+              stale,
+              remainingPercent: Math.floor((bucket.remaining / bucket.limit) * 100),
+              ...(bucket.resetsAt === undefined ? {} : { resetsAt: bucket.resetsAt }),
+            },
+          ],
+  );
+  return [...windows, ...buckets].filter(
+    (reading) => reading.resetsAt === undefined || Date.parse(reading.resetsAt) > now,
+  );
+}
+
+function pooledReadings(provider: PooledProvider): ReadonlyArray<HeadlineReading> {
+  return provider.windows.flatMap((window) =>
+    window.segments.flatMap((segment) =>
+      segment.kind === "missing" || segment.awaitingUpdate
+        ? []
+        : [{ ...segment, window: window.window }],
+    ),
+  );
+}
+
+/**
+ * The reading closest to running out, large: the share left, whether spending is
+ * ahead of or behind an even pace, and whose window it is. Pooled accounts are
+ * never averaged, so the headline is one account's own figure and names it.
+ */
+function LimitHeadline(props: {
+  readonly readings: ReadonlyArray<HeadlineReading>;
+  readonly now: number;
+}) {
+  const rank = (reading: HeadlineReading) =>
+    reading.exhausted ? -1 : (reading.remainingPercent ?? Number.POSITIVE_INFINITY);
+  const lead = [...props.readings]
+    .filter((reading) => reading.exhausted || reading.remainingPercent !== undefined)
+    .sort((a, b) => rank(a) - rank(b))[0];
+  if (lead === undefined) return null;
+  const forecast = limitForecast(lead, props.now);
+  const detail = [
+    ...(lead.account === undefined ? [] : [lead.account]),
+    windowLabel(lead.window),
+    ...(lead.stale ? ["last reading, refresh failed"] : []),
+  ].join(" · ");
+  return (
+    <div className="provider-limits__headline">
+      <div>
+        <strong>{lead.exhausted ? "Limit reached" : `${lead.remainingPercent}% left`}</strong>
+        {forecast.trend === undefined || forecast.trend === "even" ? null : (
+          <span className="provider-limits__trend" data-trend={forecast.trend}>
+            {forecast.trend === "faster" ? (
+              <ArrowDownRight aria-hidden="true" size={20} />
+            ) : (
+              <ArrowUpRight aria-hidden="true" size={20} />
+            )}
+            <span className="sr-only">Spending {forecast.trend} than an even pace</span>
+          </span>
+        )}
+      </div>
+      <span>{detail}</span>
     </div>
   );
 }

@@ -18,6 +18,8 @@ export type PooledSegment =
       readonly remainingPercent?: number;
       readonly exhausted: boolean;
       readonly resetsAt?: string;
+      /** When the provider reported this share; a forecast is measured from it. */
+      readonly observedAt: string;
       /**
        * The reading's reset has passed, so it says nothing about what is left
        * now until a fresh reading arrives; never an assumed refill.
@@ -52,6 +54,7 @@ interface WindowReading {
   readonly remainingPercent?: number;
   readonly exhausted: boolean;
   readonly resetsAt?: string;
+  readonly observedAt: string;
 }
 
 /** The windows an account's limits name, in the order the account reported them. */
@@ -69,6 +72,7 @@ function windowReadings(limits: ProviderServiceLimits): ReadonlyArray<WindowRead
         window,
         remainingPercent: Math.floor((bucket.remaining / bucket.limit) * 100),
         exhausted: bucket.remaining <= 0,
+        observedAt: limits.updatedAt,
         ...(bucket.resetsAt === undefined ? {} : { resetsAt: bucket.resetsAt }),
       },
     ];
@@ -80,6 +84,7 @@ function windowReadings(limits: ProviderServiceLimits): ReadonlyArray<WindowRead
         ? {}
         : { remainingPercent: Math.floor((1 - window.utilization) * 100 + 1e-9) }),
       exhausted: window.status === "exhausted",
+      observedAt: window.observedAt,
       ...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt }),
     }),
   );
@@ -182,6 +187,7 @@ export function poolProviderLimits(input: {
             ? {}
             : { remainingPercent: match.remainingPercent }),
           exhausted: match.exhausted && !expired,
+          observedAt: match.observedAt,
           ...(match.resetsAt === undefined || expired ? {} : { resetsAt: match.resetsAt }),
           awaitingUpdate: expired,
           stale: reading.stale,
