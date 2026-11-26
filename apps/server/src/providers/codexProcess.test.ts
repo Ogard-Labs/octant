@@ -378,7 +378,7 @@ describe("sanitizeCodexEnvironment", () => {
     ).toMatchObject({ PATH: "C:\\bin", GH_TOKEN: "host-gh" });
   });
 
-  it("gives a lease outside Strict the host's environment, the person's own tool credentials included, less Octant's own and other providers' keys, and under Strict the fixed list", () => {
+  it("gives a lease outside Strict the host's environment, the person's own tool credentials and another model provider's key included, less Octant's own, and under Strict the fixed list", () => {
     const hostEnvironment = {
       PATH: "/usr/bin",
       GH_TOKEN: "host-gh",
@@ -408,9 +408,9 @@ describe("sanitizeCodexEnvironment", () => {
       SOME_SERVICE_API_KEY: "service-key",
       NODE_EXTRA_CA_CERTS: "/etc/ssl/corporate.pem",
       OPENAI_API_KEY: "codex-own",
+      ANTHROPIC_API_KEY: "another-provider",
       CODEX_HOME: "/Users/test/.codex",
     });
-    expect(open.ANTHROPIC_API_KEY).toBeUndefined();
     expect(open.OCTANT_DESKTOP_BRIDGE_SECRET).toBeUndefined();
 
     // Strict keeps the fixed list.

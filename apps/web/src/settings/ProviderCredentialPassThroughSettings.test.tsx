@@ -79,7 +79,7 @@ describe("ProviderCredentialPassThroughSettings", () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(
       screen.getByText(
-        "This is a model provider's key. A provider already gets its own and never gets another provider's.",
+        "This is a model provider's key. Under Strict a provider gets its own and no other provider's.",
       ),
     ).toBeVisible();
     expect(field).toHaveValue("OPENAI_API_KEY");

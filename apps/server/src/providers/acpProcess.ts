@@ -226,8 +226,9 @@ export interface AcpProcessStartInput {
   readonly sandboxPolicy?: SandboxPolicySelection;
   /**
    * Whether the launch is Strict; absent is Strict. Off, the agent gets the
-   * host's environment less Octant's variables and other providers' keys, and
-   * its telemetry and self-update guards follow {@link ownChannels}.
+   * host's environment less Octant's variables and the key of its own Octant
+   * account, and its telemetry and self-update guards follow
+   * {@link ownChannels}.
    */
   readonly strict?: boolean;
   /**
@@ -1183,6 +1184,28 @@ export function versionAtLeast(
   return patch >= minimumPatch;
 }
 
+/**
+ * The variables an agent's Octant account signs it in with: the names its
+ * profile sets when the account holds a key. Read off the profile's own
+ * `environment`, so the list cannot drift from what a launch sets. A launch
+ * outside Strict never takes these from the host: the account chosen in
+ * Octant decides which account a turn runs as and is billed to, so a browser
+ * sign-in is not replaced by a key the host happens to export. A profile
+ * whose agent keeps its own sign-in and holds no key in Octant names none.
+ */
+function acpAccountCredentials(
+  profile: AcpProviderProfile,
+  launch: { readonly managedHome: string; readonly executionPolicy: ProviderExecutionPolicy },
+): ReadonlySet<string> {
+  const without = profile.process.environment(launch);
+  const withKey = profile.process.environment({ ...launch, apiKey: "account" });
+  return new Set(
+    Object.keys(withKey)
+      .filter((name) => withKey[name] !== without[name])
+      .map((name) => name.toUpperCase()),
+  );
+}
+
 /** Whether an agent's `initialize` answer is the ACP version and agent the profile names. */
 export function acpNegotiationAccepted(
   profile: AcpProviderProfile,
@@ -1528,10 +1551,10 @@ export function sanitizeAcpEnvironment(
   );
   const passthrough = new Set(profile.process.passthroughVariables);
   // Outside Strict the agent gets the host's environment as in the person's
-  // own shell, less Octant's variables and other providers' keys; a standard
-  // host variable the profile deliberately leaves out (Kimi's HOME) stays
-  // out unless the launch runs on the person's own home. The agent's own key
-  // comes from its account below, never from the host.
+  // own shell, less Octant's variables; a standard host variable the profile
+  // deliberately leaves out (Kimi's HOME) stays out unless the launch runs
+  // on the person's own home. The key of the agent's Octant account comes
+  // from that account below, never from the host.
   const withheld = new Set(
     HOST_PASSTHROUGH_VARIABLES.filter(
       (name) => !passthrough.has(name) && !(ownHome && name === "HOME"),
@@ -1550,7 +1573,15 @@ export function sanitizeAcpEnvironment(
         ),
       )
     : Object.fromEntries(
-        Object.entries(providerHostEnvironment(inherited)).filter(([key]) => !withheld.has(key)),
+        Object.entries(
+          providerHostEnvironment(
+            inherited,
+            acpAccountCredentials(profile, {
+              managedHome: input.managedHome,
+              executionPolicy: input.executionPolicy ?? "approval-gated",
+            }),
+          ),
+        ).filter(([key]) => !withheld.has(key)),
       );
   const profileEnvironment = profile.process.environment({
     managedHome: input.managedHome,

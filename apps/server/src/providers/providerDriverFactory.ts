@@ -27,7 +27,6 @@ import {
   hostCodexHomeOverlayIsRelative,
 } from "./providerService";
 import { codexAccountProcessEnvironment } from "./codexProcess";
-import { codexConfiguresBedrock } from "./codexProviderCredential";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
 import { readClaudeGitIdentity } from "./claudeGitIdentity";
@@ -504,10 +503,7 @@ export function makeProviderDriver(
 
 /**
  * A Codex account's launch environment outside Strict, for its turns and its
- * provider terminal alike. Whether the account signs in to Amazon Bedrock is
- * read from its `config.toml` at each call, so an account moved onto Bedrock
- * gets the host's Bedrock API key from its next process and one moved off it
- * loses it.
+ * provider terminal alike.
  */
 export function openCodexAccountEnvironment(input: {
   readonly binaryPath: string;
@@ -518,10 +514,6 @@ export function openCodexAccountEnvironment(input: {
   return codexAccountProcessEnvironment({
     ...input,
     strict: false,
-    signsInToBedrock: codexConfiguresBedrock({
-      ...input.hostEnvironment,
-      CODEX_HOME: input.codexHome,
-    }),
   });
 }
 

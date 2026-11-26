@@ -153,8 +153,8 @@ export interface PiProcessPort {
     readonly sandboxPolicy?: SandboxPolicySelection;
     /**
      * Whether the launch is Strict; absent is Strict. Off, the process gets the
-     * host's environment less Octant's variables and other providers' keys,
-     * and Pi's telemetry and release check follow {@link ownChannels}.
+     * host's environment less Octant's variables, and Pi's telemetry and
+     * release check follow {@link ownChannels}.
      */
     readonly strict?: boolean;
     /**
@@ -508,12 +508,13 @@ export function sanitizePiEnvironment(
     modelProvider === undefined ? [] : (PROVIDER_CREDENTIALS.get(modelProvider) ?? []),
   );
   if (!strict) {
-    // The thread's own provider's variables are its own. On the person's own
-    // home (`piRunsOnOwnHome`) `HOME` and `PI_CODING_AGENT_DIR` stay as the
-    // host has them; otherwise both name Octant's managed home.
+    // Pi signs in to a model provider from the host's variables, as in the
+    // person's shell, so it names no account credential to keep out. On the
+    // person's own home (`piRunsOnOwnHome`) `HOME` and `PI_CODING_AGENT_DIR`
+    // stay as the host has them; otherwise both name Octant's managed home.
     const chosen = launchOwnChannels(false, ownChannels);
     return {
-      ...providerHostEnvironment(host, credentials),
+      ...providerHostEnvironment(host),
       ...(ownHome ? {} : { HOME: piHome, PI_CODING_AGENT_DIR: piHome }),
       ...guardsForOwnChannels(PI_GUARDS, PI_CHANNEL_GUARD_NAMES, chosen),
       OCTANT_PI_APPROVALS: approvals,

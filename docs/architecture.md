@@ -16526,21 +16526,34 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     person's own tools sign in with, such as `GH_TOKEN`, `GITHUB_TOKEN`,
     `GITLAB_TOKEN`, `NPM_TOKEN`, `NODE_AUTH_TOKEN`, AWS keys and their own
     services' `*_API_KEY`, so `gh`,
-    `npm publish` and `aws` work inside an agent's commands. Two kinds of
-    variable never cross (`providerHostEnvironment`): Octant's own
-    (`OCTANT_*`, which name the host's bridges, ports and switches), and
-    another model provider's named key
-    (`MODEL_PROVIDER_CREDENTIAL_VARIABLES`), since one provider never
-    receives another's credentials. A provider's own key stays: Codex keeps
-    its keys, Pi the keys of the thread's model provider, and an account's
-    own key is applied by Octant after the filter. OpenCode keeps every model
-    provider's key, because it signs in to any provider itself. The Bedrock
-    bearer token (`AWS_BEARER_TOKEN_BEDROCK`) is a model provider's key: it
-    reaches Claude Code only while the host routes it through Bedrock
-    (`CLAUDE_CODE_USE_BEDROCK`), Codex only while its account's configuration
-    selects Amazon Bedrock, and OpenCode; Pi does not receive it (not built
-    yet: Pi has no Bedrock entry to tie it to). The ordinary AWS key variables
-    are the person's general credentials and cross for every provider. Under Strict Claude Code,
+    `npm publish` and `aws` work inside an agent's commands. Another model
+    provider's key crosses too (`OPENAI_API_KEY` to Claude Code,
+    `GEMINI_API_KEY` to Codex, the Bedrock bearer token
+    `AWS_BEARER_TOKEN_BEDROCK` to all of them; maintainer decision,
+    2026-11-26, replacing the 2026-11-25 rule that kept other providers'
+    named keys out): a script or a test the agent runs calls those services
+    as it does from the person's shell. Two kinds of variable never cross
+    (`providerHostEnvironment`). Octant's own (`OCTANT_*`) name the host's
+    bridges, ports and switches. And where the person chose an account for
+    the provider in Octant, the variables that would sign the provider
+    itself in as a different account stay out; this protects the hard line
+    that a provider's credentials reach it through the account chosen in
+    Octant, so the host decides which account a turn spends from. For Claude
+    Code these are `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+    `ANTHROPIC_OAUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`
+    (`CLAUDE_ACCOUNT_CREDENTIALS`): a host `ANTHROPIC_API_KEY` would
+    otherwise move a subscription thread to metered API billing without a
+    word in the thread. For an ACP agent it is the variable its Octant
+    account's key is passed in (`MISTRAL_API_KEY` for Mistral Vibe,
+    `GEMINI_API_KEY` for Gemini CLI, `acpAccountCredentials`); other names
+    the agent may also read for its own sign-in cross as in the person's
+    shell. An extra Codex account does not get `OPENAI_API_KEY`,
+    `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN` or the Bedrock bearer token from
+    the host; the first Codex account, Pi and OpenCode take their sign-in
+    from the host's variables as they do on their own, so nothing is kept
+    from them. An account's own key is applied by Octant after the filter.
+    A consequence: a command Claude Code runs cannot read the host's
+    `ANTHROPIC_API_KEY`. Under Strict Claude Code,
     Codex, Pi and the ACP agents each keep a fixed list. Settings › Providers & Models › Let through under
     Strict keeps a per-provider list of names (such as `GH_TOKEN` for an
     agent that runs `gh`), at most 64 per provider, names only and never
@@ -16823,7 +16836,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   subagent of one, with its answer kept out of the record, maintainer
   decisions, 2026-11-21; Strict refuses it),
   an account with Run as itself off keeps its own web tools
-  off, and one provider never receives another's credentials.
+  off, and a provider signs in as the account chosen for it in Octant, never
+  with a key the host's environment happens to hold for it.
 
   Rationale: people choose Octant for what it adds beside the provider, not
   to lose what the provider already does. Protection stays available to
@@ -17856,13 +17870,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
     known why its launch sets `GROK_SANDBOX=off`; until then each keeps
     Octant's profile. A provider's own sandbox replaces Octant's profile
     only where it can keep other providers' sign-ins unreadable, since one
-    provider never reads another's credentials, Strict or not. Checked, and
+    provider never reads another's stored sign-in, Strict or not. Checked, and
     kept on Octant's profile below Full access for that reason or the ones
     [Provider runtimes](design/provider-runtimes.md#own-sandboxes-checked-and-not-switched)
     records: Gemini CLI, Qwen Code, Copilot CLI, Cursor and Grok Build.
   - **Unchanged.** Server-side approval authority and journaling; Plan's
     read-only enforcement and no shell in Chat; the paired-device and
-    routine rules; never handing one provider another's credentials;
+    routine rules; signing a provider in as the account chosen for it in
+    Octant, never with a key the host's environment holds for it;
     marking and showing outside content; and Full access, which keeps no
     sandbox unless the thread keeps one. The rest of what Octant adds
     moves into Strict under

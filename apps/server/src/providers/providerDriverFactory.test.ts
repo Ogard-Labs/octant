@@ -8,9 +8,6 @@ import { DISCOVERY_DESCRIPTORS } from "@octant/provider-sdk/discovery";
 import { isAcpHostProfileDriver } from "@octant/provider-sdk/driver-plugins";
 import { providerKeepsConversation } from "@octant/domain";
 import { Effect } from "effect";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
@@ -885,54 +882,35 @@ describe("Codex's open launch environment", () => {
     PATH: "/usr/bin",
     AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
     AWS_SECRET_ACCESS_KEY: "aws-secret",
+    AWS_BEARER_TOKEN_BEDROCK: "bedrock-token",
     OPENAI_API_KEY: "codex-own",
+    GEMINI_API_KEY: "other-provider-key",
+    OCTANT_HOST_PORT: "4100",
   };
 
-  it.each([
-    ['model_provider = "amazon-bedrock"\n', true],
-    ['model_provider = "openai"\n', false],
-    [undefined, false],
-  ] as const)(
-    "hands the host's Bedrock API key to a Codex account outside Strict only when its config.toml selects Amazon Bedrock (config %j)",
-    (config, crosses) => {
-      const codexHome = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
-      try {
-        if (config !== undefined) writeFileSync(join(codexHome, "config.toml"), config);
-        const environment = openCodexAccountEnvironment({
-          binaryPath: "/opt/homebrew/bin/codex",
-          hostEnvironment: { ...hostEnvironment, AWS_BEARER_TOKEN_BEDROCK: "bedrock-token" },
-          codexHome,
-          inheritHostAuth: true,
-        });
-        expect(environment.AWS_BEARER_TOKEN_BEDROCK).toBe(crosses ? "bedrock-token" : undefined);
-        expect(environment.AWS_ACCESS_KEY_ID).toBe("AKIAEXAMPLE");
-      } finally {
-        rmSync(codexHome, { recursive: true, force: true });
-      }
-    },
-  );
+  it("keeps the person's AWS keys, Bedrock key and another model provider's key outside Strict for the account on the host profile, and none of Octant's variables", () => {
+    const { OCTANT_HOST_PORT: _octant, ...kept } = hostEnvironment;
+    const environment = openCodexAccountEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/provider-user/.codex",
+      inheritHostAuth: true,
+    });
+    expect(environment).toMatchObject({ ...kept, PATH: "/opt/homebrew/bin:/usr/bin" });
+    expect(environment).not.toHaveProperty("OCTANT_HOST_PORT");
+  });
 
-  it.each([['model_provider = "amazon-bedrock"\n'], ['model_provider = "openai"\n'], [undefined]])(
-    "keeps the person's exported AWS keys outside Strict whichever provider the account's config.toml selects (config %j)",
-    (config) => {
-      const codexHome = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
-      try {
-        if (config !== undefined) writeFileSync(join(codexHome, "config.toml"), config);
-        expect(
-          openCodexAccountEnvironment({
-            binaryPath: "/opt/homebrew/bin/codex",
-            hostEnvironment,
-            codexHome,
-            inheritHostAuth: true,
-          }),
-        ).toMatchObject({
-          AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
-          AWS_SECRET_ACCESS_KEY: "aws-secret",
-          OPENAI_API_KEY: "codex-own",
-        });
-      } finally {
-        rmSync(codexHome, { recursive: true, force: true });
-      }
-    },
-  );
+  it("keeps the host's Codex sign-in variables from an extra account outside Strict, and still hands it another model provider's key", () => {
+    const environment = openCodexAccountEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/provider-user/.codex-work",
+    });
+    expect(environment).not.toHaveProperty("OPENAI_API_KEY");
+    expect(environment).not.toHaveProperty("AWS_BEARER_TOKEN_BEDROCK");
+    expect(environment).toMatchObject({
+      AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+      GEMINI_API_KEY: "other-provider-key",
+    });
+  });
 });

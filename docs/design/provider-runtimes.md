@@ -1695,9 +1695,10 @@ run every command unasked (below).
   fails the turn.
 - The lease key carries Strict, so a Strict and a non-Strict session never
   share a process, and the launch takes the account's open environment: the
-  host's less Octant's variables and other providers' keys (its own keys
-  stay, and `GH_TOKEN`, AWS keys and the person's other credentials cross as
-  their shell has them; maintainer decision, 2026-11-25). A Strict lease
+  host's less Octant's variables (its own keys stay for the first account,
+  and `GH_TOKEN`, AWS keys, other model providers' keys and the person's
+  other credentials cross as their shell has them; maintainer decisions,
+  2026-11-25 and 2026-11-26). A Strict lease
   keeps the fixed list plus the names the person let through for Codex, and
   its key carries that list, so a changed list starts a new Strict process
   ([Architecture: Security and authority](../architecture.md#security-and-authority),
@@ -3566,7 +3567,7 @@ can be loosened or tightened in one line without rewriting enforcement sites:
 - **No sandbox in Work and Code outside Strict.** There the CLI starts as the
   person's own terminal would start it, at every level: no Octant sandbox, no
   network allowlist, the person's environment less Octant's own variables
-  and other model providers' keys
+  and the key of the agent's own Octant account
   ([Architecture: Security and authority](../architecture.md#security-and-authority),
   the Environment rule), and its own sign-in read as it reads it. Every ACP agent now runs this way
   (`providerHoldsLevelWithoutSandbox`, maintainer decision, 2026-11-21), the

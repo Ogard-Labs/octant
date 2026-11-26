@@ -1,18 +1,20 @@
 import { MAX_PROVIDER_PASS_THROUGH } from "@octant/contracts";
 
 /**
- * Model-provider credentials Octant knows by name. A provider launched outside
- * Strict receives only the ones it names as its own; every other one is
- * dropped, since one provider never receives another's credentials. Every
- * other host variable, the person's `GH_TOKEN`, npm token, AWS keys and their
- * own services' keys among them, reaches a launch outside Strict as their
- * shell has it (maintainer decision, 2026-11-25): stripping them left `gh`,
- * `npm publish` and `aws` without a sign-in inside an agent's commands. Only
- * Strict keeps a fixed list.
+ * Model-provider credentials Octant knows by name. They matter only under
+ * Strict: a Strict launch keeps a fixed list, on which a provider's own key
+ * already sits, and the person cannot add a model provider's key to it
+ * (`hostCredentialPassThroughRefusal`). Outside Strict a launch gets the
+ * person's environment as their shell has it, these keys among them
+ * (maintainer decisions, 2026-11-25 and 2026-11-26): stripping credentials
+ * left `gh`, `npm publish`, `aws` and a script that calls another model
+ * provider without a sign-in inside an agent's commands. The one thing a
+ * launch outside Strict still keeps out is the key that would replace the
+ * sign-in of the account chosen for that provider in Octant, which each
+ * driver names itself.
  *
  * `AWS_BEARER_TOKEN_BEDROCK` is on the list although it is an AWS variable:
- * it is a Bedrock API key, which buys model calls and signs no other tool in,
- * so it reaches only a provider that itself signs in to Amazon Bedrock.
+ * it is a Bedrock API key, which buys model calls and signs no other tool in.
  */
 export const MODEL_PROVIDER_CREDENTIAL_VARIABLES: ReadonlySet<string> = new Set([
   "AIROUTER_API_KEY",
@@ -49,9 +51,9 @@ const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
  * Why a name cannot join a provider's pass-through list (`current`, the names
  * already on it), or undefined when it can. A name the launch would still keep
  * out is refused rather than kept as a grant that never applies: Octant's own
- * variables name the host's internal bridges, and a model provider's key is
- * either the provider's own, which it already gets, or another's, which it
- * never gets.
+ * variables name the host's internal bridges, and under Strict a model
+ * provider's key is either the provider's own, which it already gets, or
+ * another's, which it does not get.
  */
 export function hostCredentialPassThroughRefusal(
   name: string,
@@ -65,7 +67,7 @@ export function hostCredentialPassThroughRefusal(
     return "Octant's own variables never reach a provider.";
   }
   if (MODEL_PROVIDER_CREDENTIAL_VARIABLES.has(upper)) {
-    return "This is a model provider's key. A provider already gets its own and never gets another provider's.";
+    return "This is a model provider's key. Under Strict a provider gets its own and no other provider's.";
   }
   if (!current.includes(name) && current.length >= MAX_PROVIDER_PASS_THROUGH) {
     return `A provider can let at most ${MAX_PROVIDER_PASS_THROUGH} credentials through. Remove one first.`;

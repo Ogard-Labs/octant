@@ -104,9 +104,9 @@ export function sanitizeClaudeEnvironment(
 
   if (overrides.strict === false && authentication === "subscription") {
     // The host's own Claude sign-in, outside Strict: the host's environment
-    // less Octant's variables and other providers' keys, which keeps the
-    // host's Claude account directories, with the telemetry and self-update
-    // guards the person's provider switches keep.
+    // less Octant's variables and the variables Claude Code signs itself in
+    // with, which keeps the host's Claude account directories, with the
+    // telemetry and self-update guards the person's provider switches keep.
     return {
       ...openClaudeHostEnvironment(hostEnvironment),
       ...packagedSmokeObserverEnvironment(hostEnvironment),

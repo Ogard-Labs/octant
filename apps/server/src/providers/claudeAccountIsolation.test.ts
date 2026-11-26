@@ -64,7 +64,7 @@ describe("isolatedClaudeAccountEnvironment", () => {
     );
   });
 
-  it("outside Strict passes the host's environment, the person's own tool credentials included, less Octant's variables, other providers' keys and host Claude credentials, and keeps provider telemetry off until the person turns it on", () => {
+  it("outside Strict passes the host's environment, the person's own tool credentials included, another model provider's key included, less Octant's variables and host Claude credentials, and keeps provider telemetry off until the person turns it on", () => {
     const environment = isolatedClaudeAccountEnvironment({
       hostEnvironment: {
         ...hostileHostEnvironment,
@@ -96,6 +96,7 @@ describe("isolatedClaudeAccountEnvironment", () => {
       GH_TOKEN: "gh-token-sentinel",
       NPM_TOKEN: "npm-token-sentinel",
       SOME_SERVICE_API_KEY: "service-key-sentinel",
+      OPENAI_API_KEY: "other-provider-key-sentinel",
       UNRELATED_TEST_SECRET: "unrelated-secret-sentinel",
       // The person chose nothing, so Octant's telemetry guards win over the
       // host's own value, as they did before the switch existed.
@@ -106,35 +107,32 @@ describe("isolatedClaudeAccountEnvironment", () => {
     });
     expect(environment).not.toHaveProperty("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL");
     expect(JSON.stringify(environment)).not.toMatch(
-      /ambient-|other-account|other-secure|other-provider-key|octant-secret/,
+      /ambient-|other-account|other-secure|octant-secret/,
     );
   });
 
-  it("a Claude launch outside Strict receives the host's Bedrock API key only while the host routes Claude through Bedrock", () => {
-    const launch = (routing: NodeJS.ProcessEnv) =>
-      isolatedClaudeAccountEnvironment({
-        hostEnvironment: {
-          PATH: "/usr/bin",
-          AWS_BEARER_TOKEN_BEDROCK: "bedrock-token-sentinel",
-          AWS_ACCESS_KEY_ID: "aws-key-sentinel",
-          ...routing,
-        },
-        configDirectory: "/Users/provider-user/.claude-accounts/work",
-        authentication: "subscription",
-        strict: false,
-      });
-    expect(launch({ CLAUDE_CODE_USE_BEDROCK: "1" })).toMatchObject({
-      AWS_BEARER_TOKEN_BEDROCK: "bedrock-token-sentinel",
-      AWS_ACCESS_KEY_ID: "aws-key-sentinel",
-    });
+  it("a Claude launch outside Strict receives the host's Bedrock API key whether or not the host routes Claude through Bedrock", () => {
     for (const routing of [
+      { CLAUDE_CODE_USE_BEDROCK: "1" },
       {},
       { CLAUDE_CODE_USE_BEDROCK: "0" },
-      { CLAUDE_CODE_USE_BEDROCK: "false" },
     ]) {
-      const environment = launch(routing);
-      expect(environment).not.toHaveProperty("AWS_BEARER_TOKEN_BEDROCK");
-      expect(environment).toMatchObject({ AWS_ACCESS_KEY_ID: "aws-key-sentinel" });
+      expect(
+        isolatedClaudeAccountEnvironment({
+          hostEnvironment: {
+            PATH: "/usr/bin",
+            AWS_BEARER_TOKEN_BEDROCK: "bedrock-token-sentinel",
+            AWS_ACCESS_KEY_ID: "aws-key-sentinel",
+            ...routing,
+          },
+          configDirectory: "/Users/provider-user/.claude-accounts/work",
+          authentication: "subscription",
+          strict: false,
+        }),
+      ).toMatchObject({
+        AWS_BEARER_TOKEN_BEDROCK: "bedrock-token-sentinel",
+        AWS_ACCESS_KEY_ID: "aws-key-sentinel",
+      });
     }
   });
 
@@ -389,7 +387,7 @@ describe("isolatedClaudeAccountEnvironment", () => {
     expect(environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
-  it("gives a gateway account only its own address and token, in its own directory, with every ambient credential stripped", () => {
+  it("gives a gateway account only its own address and token, in its own directory, with every ambient Claude credential stripped", () => {
     for (const strict of [true, false]) {
       const environment = isolatedClaudeAccountEnvironment({
         hostEnvironment: { ...hostileHostEnvironment, OPENAI_API_KEY: "other-provider-key" },
@@ -409,8 +407,11 @@ describe("isolatedClaudeAccountEnvironment", () => {
       expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
       expect(environment).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
       expect(JSON.stringify(environment)).not.toMatch(
-        /ambient-|other-account|other-secure|routing\.invalid|other-provider-key/,
+        /ambient-|other-account|other-secure|routing\.invalid/,
       );
+      // Another model provider's key is the person's own outside Strict;
+      // under Strict it stays out with the rest of the environment.
+      expect(environment.OPENAI_API_KEY).toBe(strict ? undefined : "other-provider-key");
     }
   });
 

@@ -75,11 +75,7 @@ import {
   type CodexRpcClient,
   type CodexRpcStderrCapture,
 } from "./codexRpcClient";
-import {
-  awsProfileReadPaths,
-  BEDROCK_MODEL_CREDENTIALS,
-  providerHostEnvironment,
-} from "./providerHostEnvironment";
+import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
 import { strictLetThroughNames } from "./providerOwnChannels";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
@@ -618,31 +614,14 @@ export function sanitizeCodexEnvironment(
   );
 }
 
-/**
- * The model-provider keys Codex reads as its own. Outside Strict these cross
- * from the host with the rest of its environment, the AWS keys a Bedrock
- * sign-in takes among them; every other provider's key is dropped. The
- * Bedrock API key is Codex's own only for an account whose `config.toml`
- * selects Amazon Bedrock (`codexConfiguresBedrock`): an OpenAI-backed account
- * has no use for it.
- */
-const CODEX_OWN_MODEL_CREDENTIALS: ReadonlySet<string> = new Set([
-  "CODEX_ACCESS_TOKEN",
-  "CODEX_API_KEY",
-  "OPENAI_API_KEY",
-]);
-
 function openCodexEnvironment(
   environment: NodeJS.ProcessEnv,
-  signsInToBedrock: boolean,
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
-  const open = providerHostEnvironment(
-    environment,
-    signsInToBedrock
-      ? new Set([...CODEX_OWN_MODEL_CREDENTIALS, ...BEDROCK_MODEL_CREDENTIALS])
-      : CODEX_OWN_MODEL_CREDENTIALS,
-  );
+  // Codex takes its sign-in from its own home and from the host's
+  // variables, as in the person's shell, so it names no account credential
+  // to keep out.
+  const open = providerHostEnvironment(environment);
   // Windows spells its names in any case (`Path`); upper-cased as the Strict
   // list is, so the launch's own `PATH` below replaces the host's.
   return platform === "win32"
@@ -654,23 +633,22 @@ function openCodexEnvironment(
  * The app-server's environment. Under Strict, the fixed list above plus the
  * names the person let through to Codex (Settings › Providers & Models), so a
  * person who runs Strict can still hand an agent their `GH_TOKEN`. Outside
- * Strict, the host's environment less Octant's own variables and other
- * providers' keys, as Codex receives it from the person's own shell
- * (Architecture: "Octant adds no restrictions of its own unless Strict is
- * on"): proxies, certificate authorities, the AWS profile or exported
- * credentials a Bedrock sign-in uses, and the credentials the person's other
- * tools sign in with.
+ * Strict, the host's environment less Octant's own variables, as Codex
+ * receives it from the person's own shell (Architecture: "Octant adds no
+ * restrictions of its own unless Strict is on"): proxies, certificate
+ * authorities, the AWS profile or exported credentials a Bedrock sign-in
+ * uses, and the credentials the person's other tools and other model
+ * providers sign in with.
  */
 export function codexProcessEnvironment(
   binaryPath: string,
   environment: NodeJS.ProcessEnv,
   strict = true,
   letThrough: ReadonlyArray<string> = [],
-  signsInToBedrock = false,
 ): NodeJS.ProcessEnv {
   const sanitized = strict
     ? sanitizeCodexEnvironment(environment, process.platform, letThrough)
-    : openCodexEnvironment(environment, signsInToBedrock);
+    : openCodexEnvironment(environment);
   const binaryDirectory = dirname(binaryPath);
   const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
   return {
@@ -710,18 +688,12 @@ export function codexAccountProcessEnvironment(input: {
   readonly strict?: false;
   /** The host variables the person let through to Codex; read only under Strict. */
   readonly credentialPassThrough?: ReadonlyArray<string>;
-  /**
-   * The account's `config.toml` selects Amazon Bedrock, so the host's Bedrock
-   * API key is its own. Read only outside Strict.
-   */
-  readonly signsInToBedrock?: boolean;
 }): NodeJS.ProcessEnv {
   const environment = codexProcessEnvironment(
     input.binaryPath,
     input.hostEnvironment,
     input.strict !== false,
     input.credentialPassThrough,
-    input.signsInToBedrock === true,
   );
   if (input.inheritHostAuth !== true) {
     for (const name of ACCOUNT_AUTH_VARIABLES) {

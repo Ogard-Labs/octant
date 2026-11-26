@@ -249,7 +249,7 @@ afterAll(() => {
 });
 
 describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
-  it("outside Strict passes the host's environment, the person's own tool credentials included, less Octant's variables, other providers' keys and the host names the profile withholds, and lifts only channel guards once the person turns provider telemetry on", () => {
+  it("outside Strict passes the host's environment, the person's own tool credentials and another model provider's key included, less Octant's variables and the host names the profile withholds, and lifts only channel guards once the person turns provider telemetry on", () => {
     const host = {
       PATH: "/usr/bin",
       HOME: "/Users/test",
@@ -258,8 +258,7 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
       NPM_TOKEN: "npm-token",
       AWS_SECRET_ACCESS_KEY: "aws-secret",
       SOME_SERVICE_API_KEY: "service-key",
-      MISTRAL_API_KEY: "must-not-cross",
-      ANTHROPIC_API_KEY: "must-not-cross",
+      ANTHROPIC_API_KEY: "another-provider-key",
       OCTANT_SECRET: "must-not-cross",
     };
     // Provider telemetry is off by default, so a launch whose person chose
@@ -283,6 +282,7 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
       NPM_TOKEN: "npm-token",
       AWS_SECRET_ACCESS_KEY: "aws-secret",
       SOME_SERVICE_API_KEY: "service-key",
+      ANTHROPIC_API_KEY: "another-provider-key",
       ...Object.fromEntries(
         Object.entries(profile.process.guards).filter(([name]) => !channels.has(name)),
       ),
@@ -565,6 +565,28 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     expect(spawn?.environment).not.toHaveProperty("NODE_OPTIONS");
     expect(spawn?.environment).not.toHaveProperty("HTTPS_PROXY");
     expect(spawn?.environment).not.toHaveProperty("HTTP_PROXY");
+  });
+});
+
+describe("an ACP agent's own account key outside Strict", () => {
+  const launch = (profile: AcpProviderProfile, apiKey?: string) =>
+    sanitizeAcpEnvironment(
+      profile,
+      { PATH: "/usr/bin", MISTRAL_API_KEY: "host-key" },
+      {
+        managedHome: "/private/tmp/octant-acp-home",
+        strict: false,
+        ...(apiKey === undefined ? {} : { apiKey }),
+      },
+    );
+
+  it("never takes the key of the agent's own account from the host, so the account chosen in Octant decides who a turn is billed to", () => {
+    expect(launch(vibe)).not.toHaveProperty("MISTRAL_API_KEY");
+    expect(launch(vibe, "account-key").MISTRAL_API_KEY).toBe("account-key");
+  });
+
+  it("hands the same host key to an agent whose account does not sign in with it", () => {
+    expect(launch(gemini).MISTRAL_API_KEY).toBe("host-key");
   });
 });
 

@@ -754,8 +754,7 @@ export interface CodexDriverOptions {
   readonly strictEnvironment?: (credentialPassThrough: ReadonlyArray<string>) => NodeJS.ProcessEnv;
   /**
    * The account's launch environment outside Strict: the host's, less
-   * Octant's variables and other providers' keys. Absent, a lease outside
-   * Strict takes `environment`.
+   * Octant's variables. Absent, a lease outside Strict takes `environment`.
    */
   readonly openEnvironment?: () => NodeJS.ProcessEnv;
   readonly credentialResolver?: ProviderCredentialResolver;

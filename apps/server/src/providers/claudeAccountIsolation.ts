@@ -6,7 +6,7 @@ import type { ClaudeAuthentication } from "@octant/contracts";
 
 import type { ProviderOwnChannels } from "@octant/provider-sdk";
 
-import { BEDROCK_MODEL_CREDENTIALS, providerHostEnvironment } from "./providerHostEnvironment";
+import { CLAUDE_ACCOUNT_CREDENTIALS, providerHostEnvironment } from "./providerHostEnvironment";
 import {
   DEFAULT_PROVIDER_OWN_CHANNELS,
   guardsForOwnChannels,
@@ -249,8 +249,8 @@ export interface IsolatedClaudeAccountEnvironmentInput {
   /**
    * Whether the launch is Strict. Absent is Strict: the fixed passthrough list
    * plus the names the person let through, and every channel guard. Off, the
-   * launch gets the host's environment less Octant's own variables and other
-   * providers' keys.
+   * launch gets the host's environment less Octant's own variables and the
+   * variables Claude Code signs itself in with.
    */
   readonly strict?: boolean;
   /**
@@ -329,21 +329,14 @@ export function isolatedClaudeAccountEnvironment(
 
 /**
  * The host environment a Claude launch outside Strict starts from: the
- * person's own, credentials for their other tools included, less Octant's
- * variables and every model provider's key. Claude names no Anthropic key as
- * its own here, since the Octant account's sign-in decides which account a
- * turn runs as. The Bedrock API key is Claude's own only while the host
- * routes Claude through Amazon Bedrock (`CLAUDE_CODE_USE_BEDROCK`), which is
- * when Claude Code itself reads it.
+ * person's own, with the credentials for their other tools and for other
+ * model providers, less Octant's variables and the variables Claude Code
+ * signs itself in with. The Bedrock API key stays: Claude Code reads it only
+ * when the host routes it through Amazon Bedrock, which is the person's own
+ * routing.
  */
 export function openClaudeHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const bedrock = hostEnvironment.CLAUDE_CODE_USE_BEDROCK?.trim().toLowerCase();
-  const routesThroughBedrock =
-    bedrock !== undefined && bedrock !== "" && bedrock !== "0" && bedrock !== "false";
-  return providerHostEnvironment(
-    hostEnvironment,
-    new Set(routesThroughBedrock ? BEDROCK_MODEL_CREDENTIALS : []),
-  );
+  return providerHostEnvironment(hostEnvironment, CLAUDE_ACCOUNT_CREDENTIALS);
 }
 
 /**
@@ -352,8 +345,8 @@ export function openClaudeHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): N
  * directory and an API-key or gateway account's own credential applied and only
  * {@link openClaudeLaunchGuards} set. An Octant account's own sign-in
  * decides which account a turn runs as, so no host Anthropic key or token
- * crosses (`providerHostEnvironment` names none of them as Claude's own) and
- * the host's account directories are replaced by the account's.
+ * crosses (`CLAUDE_ACCOUNT_CREDENTIALS`) and the host's account directories
+ * are replaced by the account's.
  */
 function openClaudeAccountEnvironment(
   input: IsolatedClaudeAccountEnvironmentInput,

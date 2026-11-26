@@ -1927,12 +1927,12 @@ function acquireOpenCodeServer(
       // Outside Strict the launch takes the host environment less every
       // variable of Octant's own, not only the broker variables: the rest
       // name the host's ports and switches, which no provider should read.
-      // OpenCode signs in to any model provider itself, so every model
-      // provider's key is its own and stays.
+      // OpenCode signs in to any model provider itself from the host's
+      // variables, so it names no account credential to keep out.
       const inherited = options.inheritedEnvironment ?? process.env;
       const hostEnvironment = launchIsStrict(input)
         ? openCodeGuardedEnvironment(inherited, input)
-        : providerHostEnvironment(inherited, MODEL_PROVIDER_CREDENTIAL_VARIABLES);
+        : providerHostEnvironment(inherited);
       const selfUpdate = launchOwnChannels(launchIsStrict(input), input.ownChannels).selfUpdate;
       let profile: PrivateOpenCodeProfile;
       let ownConfiguration = false;

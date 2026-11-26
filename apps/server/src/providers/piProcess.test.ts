@@ -161,7 +161,7 @@ describe("Pi process boundary", () => {
     expect(launch(false, [])).toMatchObject({ GH_TOKEN: "gh-token", NPM_TOKEN: "npm-token" });
   });
 
-  it("outside Strict gives a Pi process the host's environment, the person's own tool credentials included, less Octant's variables and other providers' keys, with telemetry off until the person turns it on", () => {
+  it("outside Strict gives a Pi process the host's environment, the person's own tool credentials and every model provider's key included, less Octant's variables, with telemetry off until the person turns it on", () => {
     const host = {
       PATH: "/usr/bin",
       HOME: "/Users/test",
@@ -176,9 +176,6 @@ describe("Pi process boundary", () => {
       OCTANT_PI_TOOL_BRIDGE_TOKEN: "octant-secret",
     };
     const open = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false);
-    // A Bedrock API key is a model provider's key, and this thread's model
-    // does not run on Bedrock.
-    expect(open).not.toHaveProperty("AWS_BEARER_TOKEN_BEDROCK");
     expect(open).toMatchObject({
       PATH: "/usr/bin",
       HOME: "/managed",
@@ -187,16 +184,25 @@ describe("Pi process boundary", () => {
       GH_TOKEN: "gh-token",
       NPM_TOKEN: "npm-token",
       AWS_ACCESS_KEY_ID: "aws-key",
+      AWS_BEARER_TOKEN_BEDROCK: "bedrock-token",
       SOME_SERVICE_API_KEY: "service-key",
       OPENAI_API_KEY: "openai-key",
+      ANTHROPIC_API_KEY: "anthropic-key",
       PI_SKIP_VERSION_CHECK: "1",
       PI_TELEMETRY: "0",
     });
-    expect(open).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(open).not.toHaveProperty("OCTANT_PI_TOOL_BRIDGE_TOKEN");
     const strict = sanitizePiEnvironment(host, "/managed", "enabled", "openai");
     expect(strict).toMatchObject({ PI_TELEMETRY: "0", OPENAI_API_KEY: "openai-key" });
-    for (const name of ["GH_TOKEN", "NPM_TOKEN", "AWS_ACCESS_KEY_ID", "SOME_SERVICE_API_KEY"]) {
+    // Under Strict only the key of the thread's own model provider crosses.
+    for (const name of [
+      "GH_TOKEN",
+      "NPM_TOKEN",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_BEARER_TOKEN_BEDROCK",
+      "SOME_SERVICE_API_KEY",
+      "ANTHROPIC_API_KEY",
+    ]) {
       expect(strict, name).not.toHaveProperty(name);
     }
   });
