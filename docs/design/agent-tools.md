@@ -81,8 +81,12 @@ its asks appear on the parent's thread.
 - **Same approvals.** Plan, the access level, per-act approval, the profile's
   tool constraints and outside-content marks apply as for the lead, at the
   child's own level. A child's ask is single-use on the parent's thread: no
-  remembered answer of the parent's settles it and none is kept. A child's own
-  marks and its parent's both count where the lead's would.
+  answer remembered for the parent thread settles it and none is kept. A
+  standing choice the Project keeps for every thread in it (an image model's
+  "Don't ask again", agents writing Project memory without asking, a
+  remembered Computer app) covers the child as it covers the lead, since the
+  lead is not asked there either. A child's own marks and its parent's both
+  count where the lead's would.
 - **Someone must be able to answer.** A tool that may ask is withheld from a
   child of a routine's run or another host-started turn, from a child whose
   window is gone, and from a child in Plan. Chat children run read-only, so

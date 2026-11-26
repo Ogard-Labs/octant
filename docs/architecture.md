@@ -19908,7 +19908,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
   worktree the run was admitted with; a child's worktree is never a journaled
   thread checkout, so none is required. A provider transport that cannot carry
   app-managed tools fails the start with a typed reason rather than dropping
-  the tool. For the key providers the rule is that their native
+  the tool. A managed child also inherits its parent's other Octant tools,
+  each built again from the child's own run, workspace and level and checked
+  on every call against the parent's live grant, tool constraints and Project,
+  so a child never gets a tool its parent was not offered, never acts under
+  the parent's identity, window or grants, keeps every approval the lead
+  would need, and is offered no tool that asks where nobody can answer.
+  Whatever it starts (a terminal, a debug session, a device, a desktop
+  action) is stopped when its run ends or loses its grant; the tools that act
+  for the thread itself are never inherited
+  ([detail](design/agent-tools.md#child-runs)). For the key providers the rule is that their native
   subagents are on ([Key providers run as themselves](#providers)): Octant
   journals and shows each native child run the provider reports, its tool
   calls reach the same approval path as the parent's at the parent's level,
