@@ -62,7 +62,7 @@ import {
 } from "../code/codeAppManagedTools";
 import { REPORT_FINISHED_TOOL_DEFINITION } from "../finishedReceipts/finishedReceiptTools";
 import { followUpSuggestionInstructionsFor } from "../followUps/followUpSuggestionInstructions";
-import { githubUpdateDefinition } from "../github/githubReadToolService";
+import { githubReadDefinition, githubUpdateDefinition } from "../github/githubReadToolService";
 import {
   harnessTodayInstruction,
   nativeHarnessInstructions,
@@ -369,6 +369,7 @@ function octantTools(context: AgentPromptContext): ReadonlyArray<ProviderToolDef
         MAC_TOOL,
         projectMemoryDefinition,
         ...mediaTools("code", CHILD_MEDIA),
+        // A helper reads its lead's repository but never updates issues.
         githubReadDefinition,
         CODE_LANGUAGE_TOOL_DEFINITION,
         terminalDefinition,
