@@ -1699,10 +1699,15 @@ export function useCodeController(options: CodeControllerOptions) {
             setConversationHistory("loaded");
             setTurnError(HISTORY_UNREFRESHED_MESSAGE);
           } else {
-            setConversation([]);
             // A transcript kept from an earlier visit goes, and with it the
-            // tool activity of turns no longer shown.
+            // tool activity of turns no longer shown and where Load earlier
+            // went on: the next read starts the thread again from its newest
+            // turns, as a first open does.
+            conversationThreadKey.current = undefined;
+            conversationRef.current = [];
+            setConversation([]);
             setTurnActivity(new Map());
+            setEarlierConversation(() => NO_EARLIER_CONVERSATION);
             setConversationHistory("unavailable");
             setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
           }
@@ -1722,22 +1727,30 @@ export function useCodeController(options: CodeControllerOptions) {
             if (!isActive(request, threadGeneration, mounted)) return;
             setTurnError((current) => current ?? INHERITED_HISTORY_UNAVAILABLE_MESSAGE);
           }
-        } else if (
-          initial.thread.forkedFrom !== undefined &&
-          conversationThreadKey.current === String(threadId) &&
-          !earlierConversationRef.current.ownHasEarlier &&
-          earlierConversationRef.current.inherited === undefined &&
-          conversationRef.current.filter((message) => message.role === "user").length <
-            CODE_CONVERSATION_PAGE_TURNS
-        ) {
-          // A new fork has few turns of its own, so its first inherited page
-          // is read at open rather than leaving the fork nearly empty.
+        }
+        /**
+         * A new fork has few turns of its own, so its first inherited page is
+         * read with the first read of the fork that succeeds, rather than
+         * leaving the fork nearly empty.
+         */
+        const readFirstInheritedPage = async () => {
+          if (
+            initial.thread.forkedFrom === undefined ||
+            !readsConversationWindow(client) ||
+            conversationThreadKey.current !== String(threadId) ||
+            earlierConversationRef.current.ownHasEarlier ||
+            earlierConversationRef.current.inherited !== undefined ||
+            conversationRef.current.filter((message) => message.role === "user").length >=
+              CODE_CONVERSATION_PAGE_TURNS
+          )
+            return;
           const loaded = await readEarlierPage(threadId);
           if (!isActive(request, threadGeneration, mounted)) return;
           if (!loaded && earlierConversationRef.current.loading === "failed") {
             setTurnError((current) => current ?? INHERITED_HISTORY_UNAVAILABLE_MESSAGE);
           }
-        }
+        };
+        await readFirstInheritedPage();
         if (!isActive(request, threadGeneration, mounted)) return;
         // The thread is open in front of the user now: its recorded turns when
         // history loaded, its explicit error state when it did not. Either way
@@ -2091,6 +2104,7 @@ export function useCodeController(options: CodeControllerOptions) {
             return true;
           conversationCursor = hydrated.nextCursor ?? conversationCursor;
           // It may be the first read of the thread to succeed.
+          if (unread) void readFirstInheritedPage();
           unread = false;
           setConversationHistory("loaded");
           setTurnError((current) =>

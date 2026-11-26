@@ -25,7 +25,11 @@ import {
   noteTypedComposerText,
   threadDraftScope,
 } from "@octant/client-runtime/typed-composer-text";
-import { createCodeReadCursorStore, useCodeController } from "./useCodeController";
+import {
+  createCodeReadCursorStore,
+  useCodeController,
+  type CodeKeptThread,
+} from "./useCodeController";
 import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { sendLineNotesAsFollowUp } from "../dockModules/ReviewModule";
 
@@ -5008,6 +5012,64 @@ describe("useCodeController conversation window", () => {
     );
     unmount();
   });
+
+  it.each(["a new fork", "a fork the window comes back to"])(
+    "shows the inherited turns of %s once it reads again after its first read failed",
+    async (opening) => {
+      const sourceId = "10000000-0000-4000-8000-000000000077" as CodeThreadId;
+      const source = turnsOf("source", 50);
+      const forkPoint = source[29];
+      if (forkPoint === undefined) throw new Error("fixture");
+      const host = windowedHost({
+        [ids.thread]: {
+          turns: turnsOf("fork", 3),
+          forkedFrom: { threadId: sourceId, throughOperationId: forkPoint.operationId },
+        },
+        [sourceId]: { turns: source },
+      });
+      const client = fakeClient(host.client);
+      let kept: CodeKeptThread | undefined;
+      if (opening === "a fork the window comes back to") {
+        const first = renderHook(() =>
+          useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+        );
+        await waitFor(() => expect(first.result.current.conversation).toHaveLength(46));
+        act(() => first.result.current.loadEarlierConversation());
+        await waitFor(() => expect(first.result.current.earlierConversation).toBe("none-left"));
+        kept = first.result.current.keepThread();
+        first.unmount();
+        expect(kept).toBeDefined();
+      }
+      vi.mocked(host.client.conversationWindow).mockRejectedValueOnce(new Error("offline"));
+
+      const { result, rerender, unmount } = renderHook(
+        ({ navigationBootstrap }) =>
+          useCodeController({
+            activeThreadId: ids.thread,
+            client,
+            ...(kept === undefined ? {} : { kept }),
+            navigation: { bootstrap: navigationBootstrap },
+            reconnectDelayMs: 60_000,
+          }),
+        { initialProps: { navigationBootstrap: bootstrap(1) } },
+      );
+      await waitFor(() => expect(result.current.conversationHistory).toBe("unavailable"));
+      // The list's activity for the fork moves, and the fork is read again.
+      rerender({ navigationBootstrap: bootstrap(1, 4) });
+
+      // The fork's own three turns, and the source's page that ends at the fork point.
+      await waitFor(() => expect(result.current.conversation).toHaveLength(46));
+      expect(result.current.conversationHistory).toBe("loaded");
+      expect(result.current.conversation[0]).toMatchObject({
+        text: "source prompt 10",
+        sourceThreadId: sourceId,
+      });
+      act(() => result.current.loadEarlierConversation());
+      await waitFor(() => expect(result.current.conversation).toHaveLength(66));
+      expect(result.current.conversation[0]).toMatchObject({ text: "source prompt 0" });
+      unmount();
+    },
+  );
 
   it("falls back to the whole forward read when the host has no window route", async () => {
     const conversationWindow = vi.fn(async () => {
