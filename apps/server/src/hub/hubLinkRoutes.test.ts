@@ -2,7 +2,7 @@
 // on either. Host A is the hub, host B a spoke that joined it; A's identity key
 // signs the requests, as A's own server would.
 
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -483,6 +483,11 @@ describe("the hub-link routes the private listener serves", () => {
       ],
       [REMOTE_HUB_LINK_ROUTE_IDS.publicVisitorGrants, "POST", HUB_LINK_ROUTES.publicVisitorGrants],
       [REMOTE_HUB_LINK_ROUTE_IDS.publicVisitorFetch, "POST", HUB_LINK_ROUTES.publicVisitorFetch],
+      [
+        REMOTE_HUB_LINK_ROUTE_IDS.publicWebhookHandback,
+        "POST",
+        HUB_LINK_ROUTES.publicWebhookHandback,
+      ],
       [REMOTE_HUB_LINK_ROUTE_IDS.provisionOffer, "POST", HUB_LINK_ROUTES.provisionOffer],
       [REMOTE_HUB_LINK_ROUTE_IDS.provisionMirror, "POST", HUB_LINK_ROUTES.provisionMirror],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegate, "POST", PEER_DELEGATION_ROUTES.create],
@@ -621,44 +626,71 @@ describe("a public request forwarded to the acting hub", () => {
   });
 });
 
-describe("a visitor fetch from a named standby", () => {
-  const FAILOVER_AFTER_MS = 60;
+const FAILOVER_AFTER_MS = 60;
 
+/** A hub, a standby named first in its order, and a spoke that ticked Standby and Public. */
+async function standbyFamily() {
+  const network = new HubTestNetwork();
+  const start = (name: string, last: number) =>
+    startHubTestHost({
+      name,
+      address: `100.101.102.${last}`,
+      network,
+      cleanups,
+      failoverAfterMs: FAILOVER_AFTER_MS,
+    });
+  const hub = await start("Mac mini", 103);
+  const standby = await start("Standby", 104);
+  const spoke = await start("Laptop", 105);
+  hub.hub.enable(window);
+  for (const member of [standby, spoke]) {
+    const minted = hub.hub.mintJoinCode({ owner: false });
+    if (minted.status !== "minted") throw new Error(minted.status);
+    await member.spoke.startJoin({ code: minted.code });
+    const pending = hub.administration.listPendingPairings().at(-1);
+    if (pending === undefined) throw new Error("No pairing to approve.");
+    hub.administration.approvePairing({ ticketId: pending.ticketId });
+    const joined = await member.spoke.finishJoin(window);
+    if (joined.status !== "joined") throw new Error(JSON.stringify(joined));
+  }
+  standby.spoke.setGrant(
+    { items: ["roster", "introduce", "owners", "standby"], actProjects: [] },
+    window,
+  );
+  spoke.spoke.setGrant(
+    { items: ["roster", "introduce", "owners", "standby", "public"], actProjects: [] },
+    window,
+  );
+  const ordered = await hub.hub.setStandbyOrder([decodeHubMemberId(standby.hostId)], window);
+  if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+  /** A route on the spoke, signed by `signer` with its host key presented. */
+  const sendAs = (signer: HubTestHost, path: string, body: string) =>
+    spoke.hubLink(
+      new Request(`${spoke.origin}${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          [HUB_PEER_KEY_HEADER]: signer.hostPublicKey,
+          [HUB_LINK_HEADER]: signHubLinkRequest({
+            signHostPayload: signer.signHostPayload,
+            senderMemberId: signer.hostId,
+            recipientMemberId: spoke.hostId,
+            method: "POST",
+            path,
+            body,
+            now: Date.now(),
+          }),
+        },
+        body,
+      }),
+    );
+  return { network, hub, standby, spoke, sendAs };
+}
+
+describe("a visitor fetch from a named standby", () => {
   async function family() {
-    const network = new HubTestNetwork();
-    const start = (name: string, last: number) =>
-      startHubTestHost({
-        name,
-        address: `100.101.102.${last}`,
-        network,
-        cleanups,
-        failoverAfterMs: FAILOVER_AFTER_MS,
-      });
-    const hub = await start("Mac mini", 103);
-    const standby = await start("Standby", 104);
-    const spoke = await start("Laptop", 105);
-    hub.hub.enable(window);
-    for (const member of [standby, spoke]) {
-      const minted = hub.hub.mintJoinCode({ owner: false });
-      if (minted.status !== "minted") throw new Error(minted.status);
-      await member.spoke.startJoin({ code: minted.code });
-      const pending = hub.administration.listPendingPairings().at(-1);
-      if (pending === undefined) throw new Error("No pairing to approve.");
-      hub.administration.approvePairing({ ticketId: pending.ticketId });
-      const joined = await member.spoke.finishJoin(window);
-      if (joined.status !== "joined") throw new Error(JSON.stringify(joined));
-    }
-    standby.spoke.setGrant(
-      { items: ["roster", "introduce", "owners", "standby"], actProjects: [] },
-      window,
-    );
-    spoke.spoke.setGrant(
-      { items: ["roster", "introduce", "owners", "standby", "public"], actProjects: [] },
-      window,
-    );
-    const ordered = await hub.hub.setStandbyOrder([decodeHubMemberId(standby.hostId)], window);
-    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
-    const shared = await spoke.spokeVisitors.share({
+    const { sendAs, ...hosts } = await standbyFamily();
+    const shared = await hosts.spoke.spokeVisitors.share({
       mode: "code",
       threadId: "t-1",
       scope: "read",
@@ -674,26 +706,8 @@ describe("a visitor fetch from a named standby", () => {
       secret,
     });
     const fetchAs = (signer: HubTestHost) =>
-      spoke.hubLink(
-        new Request(`${spoke.origin}${HUB_LINK_ROUTES.publicVisitorFetch}`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            [HUB_PEER_KEY_HEADER]: signer.hostPublicKey,
-            [HUB_LINK_HEADER]: signHubLinkRequest({
-              signHostPayload: signer.signHostPayload,
-              senderMemberId: signer.hostId,
-              recipientMemberId: spoke.hostId,
-              method: "POST",
-              path: HUB_LINK_ROUTES.publicVisitorFetch,
-              body: open,
-              now: Date.now(),
-            }),
-          },
-          body: open,
-        }),
-      );
-    return { network, hub, standby, spoke, fetchAs };
+      sendAs(signer, HUB_LINK_ROUTES.publicVisitorFetch, open);
+    return { ...hosts, fetchAs };
   }
 
   it("is refused while the hub is still reachable, and answered once the standby stands in", async () => {
@@ -729,5 +743,58 @@ describe("a visitor fetch from a named standby", () => {
     const refused = await fetchAs(standby);
     expect(refused?.status).toBe(403);
     expect(await refused?.json()).toEqual({ status: "refused", kind: "item-not-granted" });
+  });
+});
+
+describe("a webhook delivery from a named standby", () => {
+  async function family() {
+    const { sendAs, ...hosts } = await standbyFamily();
+    const created = await hosts.spoke.spokeWebhooks.create({
+      scheme: "github",
+      label: "Repository pushes",
+    });
+    if (created.status !== "created") throw new Error(created.status);
+    const deliverAs = (signer: HubTestHost, guid: string) => {
+      const payload = `{"ref":"refs/heads/main","n":"${guid}"}`;
+      const envelope = JSON.stringify({
+        endpointId: created.endpointId,
+        deliveryId: guid,
+        receivedAt: Date.now(),
+        headers: {
+          "x-hub-signature-256": `sha256=${createHmac("sha256", created.secret).update(payload).digest("hex")}`,
+          "x-github-delivery": guid,
+          "x-github-event": "push",
+        },
+        body: Buffer.from(payload).toString("base64"),
+      });
+      return sendAs(signer, HUB_LINK_ROUTES.publicWebhookDelivery, envelope);
+    };
+    return { ...hosts, deliverAs };
+  }
+
+  it("is refused while the hub is still reachable, and accepted once the standby stands in", async () => {
+    const { network, hub, standby, spoke, deliverAs } = await family();
+    await standby.failover.tick();
+    await spoke.failover.tick();
+
+    const early = await deliverAs(standby, "guid-early");
+    expect(early?.status).toBe(403);
+    expect(await early?.json()).toEqual({ status: "refused", kind: "hub-reachable" });
+
+    network.stop(hub.address);
+    await new Promise((resolve) => setTimeout(resolve, FAILOVER_AFTER_MS + 40));
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+
+    const standingIn = await deliverAs(standby, "guid-standing-in");
+    expect(standingIn?.status).toBe(200);
+    expect(await standingIn?.json()).toEqual({ status: "accepted" });
+  });
+
+  it("is still taken from the hub itself while the hub is reachable", async () => {
+    const { hub, deliverAs } = await family();
+    const fromHub = await deliverAs(hub, "guid-hub");
+    expect(fromHub?.status).toBe(200);
+    expect(await fromHub?.json()).toEqual({ status: "accepted" });
   });
 });

@@ -51,8 +51,15 @@ import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { HubWebhookService } from "./hubWebhookService";
 import { SpokeWebhookService } from "./spokeWebhookService";
 import { sendWebhookDelivery, spokeWebhookHubPort } from "./webhookLinks";
+import { HubVisitorService } from "./hubVisitorService";
 import { SpokeVisitorService, type VisitorThreadSource } from "./spokeVisitorService";
-import { spokeVisitorHubPort } from "./visitorLinks";
+import { askVisitorSpoke, spokeVisitorHubPort } from "./visitorLinks";
+import {
+  handBackPublicQueue,
+  servesOwnPublicEndpoints,
+  servesPublicEntrance,
+  servingRosterMembers,
+} from "./publicStandIn";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
 import { TestCredentialBroker, TestPostureHost, TestThreadWakeHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
@@ -156,6 +163,29 @@ export class HubTestNetwork {
     this.#stopped.delete(address);
   }
 
+  readonly #split = new Set<string>();
+
+  /** Makes two hosts unreachable to each other only, as a split network does; others reach both. */
+  split(a: string, b: string): void {
+    this.#split.add(`${a}|${b}`).add(`${b}|${a}`);
+  }
+
+  heal(a: string, b: string): void {
+    this.#split.delete(`${a}|${b}`);
+    this.#split.delete(`${b}|${a}`);
+  }
+
+  /** The network as the host at `from` sees it, so a split between two hosts holds. */
+  networkFor(from: string): HubNetwork {
+    return {
+      resolve: this.network.resolve,
+      dial: (address, port) =>
+        this.#split.has(`${from}|${address}`)
+          ? Promise.reject(new Error(`${address} is split from ${from}.`))
+          : this.network.dial(address, port),
+    };
+  }
+
   readonly network: HubNetwork = {
     resolve: async (hostname) => [hostname],
     dial: (address) =>
@@ -225,6 +255,8 @@ export interface HubTestHost {
   readonly webhooks: HubWebhookService;
   /** This host's own webhook endpoints, as a spoke. */
   readonly spokeWebhooks: SpokeWebhookService;
+  /** The acting hub's visitor links: each spoke's signed grants, and the visitor routes. */
+  readonly visitors: HubVisitorService;
   /** This host's own visitor links, as a spoke; its one thread is a fixed Code thread. */
   readonly spokeVisitors: SpokeVisitorService;
   /** The owner unlock a paired client's merge may need here, over the same challenges the owner route issues. */
@@ -410,7 +442,7 @@ export async function startHubTestHost(input: {
 
   const state = createHubStateStore(directory);
   const records: HubMembershipChangedPayload[] = [];
-  const transport = createPinnedHubTransport(input.network.network);
+  const transport = createPinnedHubTransport(input.network.networkFor(input.address));
   let gateway: RemoteGateway | undefined;
   const hubPairing = (): HubPairingPort | undefined => {
     const administration = gateway?.localDeviceAdministration();
@@ -510,6 +542,8 @@ export async function startHubTestHost(input: {
     ...(input.failoverAfterMs === undefined
       ? {}
       : { failoverAfterMs: () => input.failoverAfterMs }),
+    handBackPublic: (link) =>
+      handBackPublicQueue({ webhooks, link, identity, transport, now: Date.now }),
   });
   const wakeNow = input.wakeClock ?? Date.now;
   const magicPackets: Uint8Array[] = [];
@@ -721,12 +755,22 @@ export async function startHubTestHost(input: {
     record: (change) => records.push(change),
     now: wakeNow,
   });
-  const webhookLinks = { state, identity: () => identity, transport, now: wakeNow };
+  const standbyGranted = () => spoke.hubMayUse("standby").status === "allowed";
+  const webhookLinks = {
+    state,
+    identity: () => identity,
+    transport,
+    now: wakeNow,
+    standbyGranted,
+    own: () => ({ webhooks, visitors, spokeWebhooks, spokeVisitors }),
+  };
+  const servesPublicNow = () =>
+    servesPublicEntrance({ hubEnabled: hub.status().enabled, state: state.load() });
   const webhooks = new HubWebhookService({
     state,
     identity: () => identity,
     hubMemberId: () => hub.hubMemberId(),
-    serving: () => hub.status().enabled,
+    serving: servesPublicNow,
     send: (spokeMemberId, envelope) =>
       sendWebhookDelivery(
         { ...webhookLinks, selfMemberId: () => hub.hubMemberId() },
@@ -734,6 +778,7 @@ export async function startHubTestHost(input: {
         envelope,
       ),
     wake: async (spokeMemberId) => void (await wake.wakeForDelivery(spokeMemberId)),
+    servesOwnEndpoints: () => servesOwnPublicEndpoints(state.load()),
     record: (change) => records.push(change),
     now: wakeNow,
   });
@@ -769,6 +814,23 @@ export async function startHubTestHost(input: {
     record: (change) => records.push(change),
     now: Date.now,
   });
+  const visitors = new HubVisitorService({
+    state,
+    serving: servesPublicNow,
+    standingIn: () => !hub.status().enabled && servesPublicNow(),
+    hubMemberId: () => hub.hubMemberId(),
+    rosterFingerprintFor: (memberId) =>
+      servingRosterMembers(state.load()).find((member) => String(member.memberId) === memberId)
+        ?.identityKeyFingerprint,
+    ask: (spokeMemberId, request) =>
+      askVisitorSpoke(
+        { ...webhookLinks, selfMemberId: () => hub.hubMemberId() },
+        spokeMemberId,
+        request,
+      ),
+    record: (change) => records.push(change),
+    now: Date.now,
+  });
   const hubLinkRoutes = createHubLinkRouteHandler({
     hub,
     spoke,
@@ -797,7 +859,9 @@ export async function startHubTestHost(input: {
       }),
     webhooks,
     spokeWebhooks,
+    visitors,
     spokeVisitors,
+    publicState: () => state.load(),
     ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
   });
   const credentials = new TestCredentialBroker();
@@ -1062,6 +1126,7 @@ export async function startHubTestHost(input: {
     spokeSignIn,
     webhooks,
     spokeWebhooks,
+    visitors,
     spokeVisitors,
     pairedMergeUnlock,
     ownerApprovalAnswerUnlock,

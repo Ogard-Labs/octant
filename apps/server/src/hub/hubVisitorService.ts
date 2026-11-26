@@ -50,6 +50,11 @@ export interface HubVisitorServiceOptions {
   readonly state: HubStatePort;
   /** Whether this host serves the entrance now: it is the acting hub. */
   readonly serving: () => boolean;
+  /**
+   * Whether this host is a standby standing in whose own person chose to serve
+   * the entrance; that choice covers visitor links, whatever its own switch says.
+   */
+  readonly standingIn?: () => boolean;
   readonly hubMemberId: () => string;
   /** The identity-key fingerprint the signed roster lists for a member. */
   readonly rosterFingerprintFor: (memberId: string) => string | undefined;
@@ -125,6 +130,17 @@ export class HubVisitorService {
   }
 
   /** The grants this hub holds now; failover copies them to a standby. */
+  #enabled(): boolean {
+    return this.#load().enabled || this.#options.standingIn?.() === true;
+  }
+
+  /** Forgets every grant this host holds as a copy; for a host that is no longer a hub or a named standby. */
+  forgetCopies(): void {
+    const held = this.#load();
+    if (held.grants.length === 0) return;
+    this.#save({ ...held, grants: [] });
+  }
+
   heldGrants(): ReadonlyArray<SignedVisitorLinkGrant> {
     return this.#load().grants;
   }
@@ -171,7 +187,7 @@ export class HubVisitorService {
 
   /** The entrance's visitor routes; none while the switch is off. */
   handlers(): PublicEntranceHandlers {
-    if (!this.#load().enabled || !this.#options.serving()) return {};
+    if (!this.#enabled() || !this.#options.serving()) return {};
     const viewer = this.#options.viewer;
     return {
       ...(viewer === undefined
@@ -277,7 +293,7 @@ export class HubVisitorService {
             if (!open || request.signal.aborted) break;
             // The switch going off, or this host no longer acting as hub, ends
             // a stream already open, not only the next one.
-            if (!this.#options.serving() || !this.#load().enabled) {
+            if (!this.#options.serving() || !this.#enabled()) {
               controller.enqueue(
                 encoder.encode(`event: end\ndata: ${JSON.stringify({ reason: "closed" })}\n\n`),
               );
@@ -324,7 +340,7 @@ export class HubVisitorService {
 
   /** The switch, the route's own grant, the per-link cap, and the browser's proof. */
   #admit(request: PublicRequest): Admission {
-    if (!this.#options.serving() || !this.#load().enabled) {
+    if (!this.#options.serving() || !this.#enabled()) {
       return { status: "refused", answer: NOT_FOUND };
     }
     const linkId = request.params.id ?? "";

@@ -11,6 +11,7 @@ import {
   WEBHOOK_BODY_MAX_BYTES,
   WEBHOOK_FORWARDED_HEADERS,
   WEBHOOK_HOLD_MS,
+  WEBHOOK_TIMESTAMP_WINDOW_MS,
   WEBHOOK_QUEUE_MAX_BYTES,
   WEBHOOK_QUEUE_MAX_DELIVERIES,
   WEBHOOK_REQUESTS_PER_MINUTE,
@@ -18,6 +19,7 @@ import {
   type HubSealingKey,
   type HubWebhookEndpoint,
   type HubWebhookEndpointsUpdate,
+  type HubWebhookHandback,
   type WebhookDeliveryAnswer,
   type WebhookDeliveryEnvelope,
 } from "@octant/contracts";
@@ -59,6 +61,13 @@ export interface HubWebhookServiceOptions {
   readonly wake?: (spokeMemberId: string) => Promise<void>;
   /** The member ids the roster this host serves lists; absent while it holds none. */
   readonly members?: () => ReadonlyArray<string> | undefined;
+  /**
+   * Whether this host may take deliveries for endpoints it owns as a spoke:
+   * only while its own hub's Public grant stands. A standby promoted to hub is
+   * no one's spoke, so its own endpoints could never reach a routine; they
+   * answer 404 rather than acknowledge a delivery nothing will run.
+   */
+  readonly servesOwnEndpoints?: () => boolean;
   readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now: () => number;
 }
@@ -153,6 +162,138 @@ export class HubWebhookService {
     return { status: "recorded", count: own.length };
   }
 
+  /**
+   * A delivery a standby queued while it stood in and hands back now. The hub
+   * checks it as it checks one from the internet: the signature on the
+   * original bytes with its own copy of the secret, the timestamp at the time
+   * the standby received it, and dedupe keys it works out itself, so a standby
+   * can neither slip in a forged delivery nor name keys that would make a
+   * genuine one look like a duplicate. It is queued once, and one for an
+   * endpoint this hub does not hold for that spoke is dropped. Whether it runs
+   * is still the spoke's claim to decide.
+   */
+  takeHandback(
+    standbyMemberId: string,
+    queued: HubWebhookHandback,
+  ): {
+    readonly status: "queued" | "duplicate" | "unknown-endpoint" | "queue-full" | "refused";
+  } {
+    this.sealingKey();
+    const state = this.#options.state.load();
+    const hub = state.webhookHub;
+    if (hub === undefined) return { status: "unknown-endpoint" };
+    const endpointId = String(queued.envelope.endpointId);
+    const endpoint = hub.endpoints.find(
+      (entry) =>
+        String(entry.endpointId) === endpointId &&
+        String(entry.spokeMemberId) === String(queued.spokeMemberId),
+    );
+    if (endpoint === undefined) return { status: "unknown-endpoint" };
+    const secret = this.#secretFor(endpoint, hub.sealingKey.privateKey);
+    if (secret === undefined) return { status: "unknown-endpoint" };
+    const body = Buffer.from(queued.envelope.body, "base64");
+    const reading = readWebhookHeaders(endpoint.scheme, queued.envelope.headers);
+    const receivedAt = queued.envelope.receivedAt;
+    const now = this.#options.now();
+    if (
+      reading.status === "refused" ||
+      reading.deliveryId !== queued.envelope.deliveryId ||
+      receivedAt > now + WEBHOOK_TIMESTAMP_WINDOW_MS ||
+      now - receivedAt > WEBHOOK_HOLD_MS
+    ) {
+      return { status: "refused" };
+    }
+    const keys =
+      endpoint.scheme === "github"
+        ? webhookDedupeKeys({
+            scheme: "github",
+            deliveryId: reading.deliveryId,
+            bodyDigest: webhookBodyDigest(body),
+          })
+        : webhookDedupeKeys({ scheme: "standard-webhooks", deliveryId: reading.deliveryId });
+    const forEndpoint = hub.queue.filter(
+      (entry) => String(entry.envelope.endpointId) === endpointId,
+    );
+    const held = new Set(forEndpoint.flatMap((entry) => entry.keys));
+    const decision = decideWebhookDelivery({
+      endpointEnabled: true,
+      signatureMatches: verifyWebhookSignature({ scheme: endpoint.scheme, secret, reading, body }),
+      ...(reading.timestampMs === undefined ? {} : { timestampMs: reading.timestampMs }),
+      nowMs: receivedAt,
+      dedupeKeys: keys,
+      claimed: (key) => held.has(key),
+    });
+    if (decision.status === "refused") return { status: "refused" };
+    if (decision.status === "duplicate") return { status: "duplicate" };
+    const heldBytes = forEndpoint.reduce((total, entry) => total + entry.bytes, 0);
+    // Counted from the body itself, not from what the standby says it weighs.
+    const bytes = body.length;
+    if (
+      forEndpoint.length >= WEBHOOK_QUEUE_MAX_DELIVERIES ||
+      heldBytes + bytes > WEBHOOK_QUEUE_MAX_BYTES
+    ) {
+      return { status: "queue-full" };
+    }
+    this.#options.state.save({
+      ...state,
+      webhookHub: { ...hub, queue: [...hub.queue, { ...queued, bytes, keys: [...keys] }] },
+    });
+    this.#options.record({
+      change: "webhook-deliveries-handed-back",
+      actingPrincipal: { kind: "peer", memberId: decodeMemberId(standbyMemberId) },
+      memberId: decodeMemberId(standbyMemberId),
+      webhookCount: 1,
+    });
+    return { status: "queued" };
+  }
+
+  /**
+   * Forgets every endpoint copy and queued delivery this host holds; for a host
+   * that is no longer a hub or a named standby, so it keeps no sealed secret
+   * the spokes meant only for the members that may stand in.
+   */
+  forgetCopies(): void {
+    const state = this.#options.state.load();
+    const hub = state.webhookHub;
+    if (hub === undefined || (hub.endpoints.length === 0 && hub.queue.length === 0)) return;
+    this.#options.state.save({ ...state, webhookHub: { ...hub, endpoints: [], queue: [] } });
+    if (hub.queue.length > 0) {
+      this.#options.record({
+        change: "webhook-deliveries-dropped",
+        actingPrincipal: { kind: "hub", memberId: decodeMemberId(this.#options.hubMemberId()) },
+        webhookCount: hub.queue.length,
+      });
+    }
+  }
+
+  /** What this host still queues, for a standby to hand back when the hub returns. */
+  handbackQueue(): ReadonlyArray<HubWebhookHandback> {
+    return (this.#options.state.load().webhookHub?.queue ?? []).map((queued) => ({
+      spokeMemberId: queued.spokeMemberId,
+      keys: [...queued.keys],
+      bytes: queued.bytes,
+      envelope: queued.envelope,
+    }));
+  }
+
+  /** Drops what the hub took back; it is the hub's to deliver now. */
+  handedBack(taken: ReadonlyArray<HubWebhookHandback>): void {
+    // One write for the whole hand-back: a write per delivery rewrote the
+    // queue, up to 32 MiB, once for each of up to 500 deliveries.
+    this.#removeAll(taken);
+  }
+
+  /** Drops deliveries the returning hub can never take, and journals how many. */
+  dropHandback(dropped: ReadonlyArray<HubWebhookHandback>): void {
+    if (dropped.length === 0) return;
+    this.#removeAll(dropped);
+    this.#options.record({
+      change: "webhook-deliveries-dropped",
+      actingPrincipal: { kind: "hub", memberId: decodeMemberId(this.#options.hubMemberId()) },
+      webhookCount: dropped.length,
+    });
+  }
+
   status(): HubWebhookStatus {
     const hub = this.#options.state.load().webhookHub;
     const counts = hub?.counts ?? emptyCounts();
@@ -182,11 +323,21 @@ export class HubWebhookService {
     if (body.status === "too-large") return answer(413, { error: "too-large" });
     if (body.status === "aborted") return answer(400, { error: "invalid" });
     // The body read awaited; the endpoint, its queue and this host's role are
-    // judged as they are now, and nothing below awaits before the save.
-    if (!this.#options.serving()) return NOT_FOUND;
+    // judged as they are now, and nothing below awaits before the save. A
+    // standby that began handing back meanwhile has already taken its queue's
+    // snapshot, so it answers 503 and the sender retries at the hub.
+    if (!this.#options.serving()) {
+      return answer(503, { error: "unavailable" }, { "retry-after": "60" });
+    }
     const hub = this.#options.state.load().webhookHub;
     const endpoint = hub?.endpoints.find((entry) => String(entry.endpointId) === endpointId);
     if (hub === undefined || endpoint === undefined) return NOT_FOUND;
+    if (
+      String(endpoint.spokeMemberId) === this.#options.hubMemberId() &&
+      this.#options.servesOwnEndpoints?.() === false
+    ) {
+      return NOT_FOUND;
+    }
     const headers = Object.fromEntries(
       WEBHOOK_FORWARDED_HEADERS.flatMap((name) => {
         const value = request.headers.get(name);
@@ -361,7 +512,21 @@ export class HubWebhookService {
     });
   }
 
-  #remove(target: HubWebhookQueued): void {
+  #removeAll(targets: ReadonlyArray<Pick<HubWebhookQueued, "envelope">>): void {
+    if (targets.length === 0) return;
+    const state = this.#options.state.load();
+    const hub = state.webhookHub;
+    if (hub === undefined) return;
+    const key = (queued: Pick<HubWebhookQueued, "envelope">) =>
+      `${String(queued.envelope.endpointId)}|${queued.envelope.deliveryId}`;
+    const gone = new Set(targets.map(key));
+    this.#options.state.save({
+      ...state,
+      webhookHub: { ...hub, queue: hub.queue.filter((queued) => !gone.has(key(queued))) },
+    });
+  }
+
+  #remove(target: Pick<HubWebhookQueued, "envelope">): void {
     const state = this.#options.state.load();
     const hub = state.webhookHub;
     if (hub === undefined) return;

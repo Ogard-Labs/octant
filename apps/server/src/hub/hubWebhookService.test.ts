@@ -40,6 +40,7 @@ function setup(
     /** The endpoints whose spoke answers busy, when the rest are accepted. */
     readonly busyEndpoints?: ReadonlySet<string>;
     readonly members?: () => ReadonlyArray<string> | undefined;
+    readonly servesOwnEndpoints?: boolean;
   } = {},
 ) {
   const clock = { now: NOW };
@@ -62,6 +63,9 @@ function setup(
       return { status: "accepted" };
     },
     ...(options.members === undefined ? {} : { members: options.members }),
+    ...(options.servesOwnEndpoints === undefined
+      ? {}
+      : { servesOwnEndpoints: () => options.servesOwnEndpoints === true }),
     wake: async (memberId) => void woken.push(memberId),
     record: () => undefined,
     now: () => clock.now,
@@ -292,5 +296,75 @@ describe("webhook receipt on the hub", () => {
     expect((await service.handle(delivery({ secret, id: "msg_1", timestampMs: NOW }))).status).toBe(
       202,
     );
+  });
+
+  it("a promoted hub answers 404 for an endpoint it owned as a spoke, rather than take a delivery no routine will run", async () => {
+    const OWN = "DDDDDDDDDDDDDDDDDDDDDD" as WebhookEndpointId;
+    const { service, handEndpoints } = setup({ forward: "accepted", servesOwnEndpoints: false });
+    const own = mintWebhookSecret();
+    handEndpoints(HUB as HubMemberId, [[OWN, own]]);
+    expect(
+      (await service.handle(delivery({ secret: own, id: "m", timestampMs: NOW, endpointId: OWN })))
+        .status,
+    ).toBe(404);
+  });
+
+  describe("a standby's hand-back", () => {
+    const STANDBY = "44444444-4444-4444-8444-444444444444";
+    const handback = (input: {
+      readonly secret: string;
+      readonly id: string;
+      readonly keys: ReadonlyArray<string>;
+      readonly signature?: string;
+    }) => {
+      const body = Buffer.from('{"ref":"refs/heads/main"}');
+      const seconds = Math.floor(NOW / 1000);
+      const signature =
+        input.signature ??
+        createHmac("sha256", Buffer.from(input.secret.slice("whsec_".length), "base64"))
+          .update(`${input.id}.${seconds}.`)
+          .update(body)
+          .digest("base64");
+      return {
+        spokeMemberId: SPOKE,
+        keys: [...input.keys],
+        bytes: body.length,
+        envelope: {
+          endpointId: ENDPOINT,
+          deliveryId: input.id,
+          receivedAt: NOW,
+          headers: {
+            "webhook-id": input.id,
+            "webhook-timestamp": String(seconds),
+            "webhook-signature": `v1,${signature}`,
+          },
+          body: body.toString("base64"),
+        },
+      };
+    };
+
+    it("refuses a delivery its own copy of the secret does not verify", () => {
+      const { service } = setup();
+      expect(
+        service.takeHandback(
+          STANDBY,
+          handback({ secret: mintWebhookSecret(), id: "forged", keys: ["id:forged"] }),
+        ),
+      ).toEqual({ status: "refused" });
+      expect(service.status().queued).toBe(0);
+    });
+
+    it("a standby cannot make a genuine delivery look like a duplicate by naming its keys", async () => {
+      const { service, secret } = setup({ forward: "unreachable" });
+      // A genuine delivery the standby really queued, handed back with the key
+      // of another delivery that has not arrived yet.
+      expect(
+        service.takeHandback(STANDBY, handback({ secret, id: "msg_1", keys: ["id:msg_2"] })),
+      ).toEqual({ status: "queued" });
+      expect(
+        (await service.handle(delivery({ secret, id: "msg_2", timestampMs: NOW }))).status,
+      ).toBe(202);
+      expect(service.status().queued).toBe(2);
+    });
   });
 });

@@ -239,6 +239,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   publicWebhookDelivery: "hub-link-public-webhook-delivery",
   publicVisitorGrants: "hub-link-public-visitor-grants",
   publicVisitorFetch: "hub-link-public-visitor-fetch",
+  publicWebhookHandback: "hub-link-public-webhook-handback",
   owner: "hub-link-owner",
   delegate: "hub-link-delegate",
   delegationStatus: "hub-link-delegation-status",
@@ -602,6 +603,18 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
   {
     id: REMOTE_HUB_LINK_ROUTE_IDS.publicWebhookDelivery,
     match: { kind: "exact", path: "/api/hub/public/webhook-delivery" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 786_432,
+    maxResponseBytes: 4_096,
+  },
+  // A standby that stood in hands the hub back one webhook delivery it still queues.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.publicWebhookHandback,
+    match: { kind: "exact", path: "/api/hub/public/webhook-handback" },
     surface: "pre-auth",
     methods: ["POST"],
     allowQuery: false,

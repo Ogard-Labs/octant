@@ -8,9 +8,10 @@ import {
 import { hubSealingKeyPayload } from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
-import { SpokeWebhookService, type SpokeWebhookHubPort } from "./spokeWebhookService";
 import { publicKeyFingerprint } from "./hubCrypto";
+import { HubWebhookService } from "./hubWebhookService";
 import { makeSealingKeyPair } from "./publicEntranceCrypto";
+import { SpokeWebhookService, type SpokeWebhookHubPort } from "./spokeWebhookService";
 
 const NOW = 1_800_000_000_000;
 const SPOKE = "11111111-1111-4111-8111-111111111111";
@@ -361,13 +362,13 @@ describe("webhook deliveries on the spoke", () => {
     let releaseFirst: (() => void) | undefined;
     let calls = 0;
     const hub: SpokeWebhookHubPort = {
-      target: () => ({ memberId: HUB_ID, fingerprint: publicKeyFingerprint(SIGNER.publicKey) }),
+      targets: () => [{ memberId: HUB_ID, fingerprint: publicKeyFingerprint(SIGNER.publicKey) }],
       sealingKey: async () => {
         calls += 1;
         if (calls === 1) await new Promise<void>((resolve) => (releaseFirst = resolve));
         return SIGNER.sealingKey(key.publicKey);
       },
-      sendEndpoints: async (update) => {
+      sendEndpoints: async (_memberId, update) => {
         sent.push(update.endpoints.length);
         return true;
       },
@@ -381,5 +382,118 @@ describe("webhook deliveries on the spoke", () => {
     await Promise.all([first, second]);
     expect(sent.at(-1)).toBe(2);
     expect(service.view().published).toBe(true);
+  });
+});
+
+describe("copies on a standby", () => {
+  const SPOKE = "33333333-3333-4333-8333-333333333333";
+  const HUB = "11111111-1111-4111-8111-111111111111";
+  const STANDBY = "22222222-2222-4222-8222-222222222222";
+
+  function holder(memberId: string) {
+    const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const spki = publicKey.export({ format: "der", type: "spki" }).toString("base64url");
+    const service = new HubWebhookService({
+      state: memoryState(),
+      identity: () =>
+        ({
+          signing: {
+            hostPublicKey: spki,
+            signHostPayload: (payload: string) =>
+              sign("sha256", Buffer.from(payload), {
+                key: privateKey,
+                dsaEncoding: "ieee-p1363",
+              }).toString("base64url"),
+          },
+        }) as never,
+      hubMemberId: () => memberId,
+      serving: () => false,
+      send: async () => undefined,
+      record: () => undefined,
+      now: () => NOW,
+    });
+    return { memberId, service, fingerprint: publicKeyFingerprint(spki) };
+  }
+
+  it("a spoke that unticks Standby withdraws its endpoints from the standby", async () => {
+    const hub = holder(HUB);
+    const standby = holder(STANDBY);
+    let standbyTicked = true;
+    const state = memoryState();
+    state.save({ link: { selfMemberId: SPOKE } as never });
+    const service = new SpokeWebhookService({
+      state,
+      publicGranted: () => true,
+      remoteAccessPaused: () => false,
+      hub: {
+        targets: () =>
+          (standbyTicked ? [hub, standby] : [hub]).map(({ memberId, fingerprint }) => ({
+            memberId,
+            fingerprint,
+          })),
+        named: () => [HUB, STANDBY],
+        sealingKey: async (memberId) => (memberId === HUB ? hub : standby).service.sealingKey(),
+        sendEndpoints: async (memberId, update) => {
+          (memberId === HUB ? hub : standby).service.receiveEndpoints(SPOKE, update);
+          return true;
+        },
+      },
+      record: () => undefined,
+      now: () => NOW,
+    });
+    await service.create({ scheme: "github", label: "Pushes" });
+    expect(standby.service.status().endpoints).toBe(1);
+
+    standbyTicked = false;
+    await service.look();
+    expect(standby.service.status().endpoints).toBe(0);
+    expect(hub.service.status().endpoints).toBe(1);
+  });
+
+  it("sends its endpoints again under a new roster, so a standby put back in the order gets its copies", async () => {
+    const key = makeSealingKeyPair();
+    let epoch = "1";
+    let sends = 0;
+    const hub: SpokeWebhookHubPort = {
+      targets: () => [{ memberId: HUB_ID, fingerprint: publicKeyFingerprint(SIGNER.publicKey) }],
+      copyEpoch: () => epoch,
+      sealingKey: async () => SIGNER.sealingKey(key.publicKey),
+      sendEndpoints: async () => {
+        sends += 1;
+        return true;
+      },
+    };
+    const { service } = setup(true, { hub });
+    await service.create({ scheme: "github", label: "Pushes" });
+    await service.look();
+    const before = sends;
+    epoch = "2";
+    await service.look();
+    expect(sends).toBe(before + 1);
+  });
+
+  it("sends its endpoints again when the roster changes while a list is out, even if the recipients end up the same", async () => {
+    const key = makeSealingKeyPair();
+    let epoch = "10";
+    let sends = 0;
+    const hub: SpokeWebhookHubPort = {
+      targets: () => [{ memberId: HUB_ID, fingerprint: publicKeyFingerprint(SIGNER.publicKey) }],
+      copyEpoch: () => epoch,
+      sealingKey: async () => SIGNER.sealingKey(key.publicKey),
+      sendEndpoints: async () => {
+        sends += 1;
+        // A standby taken out of the order and put back while the first list is out.
+        if (sends === 1) epoch = "12";
+        return true;
+      },
+    };
+    const { service } = setup(true, { hub });
+    await service.create({ scheme: "github", label: "Pushes" });
+    expect(sends).toBe(1);
+    await service.look();
+    expect(sends).toBe(2);
+    // Taken under the roster it was sent under, the list now counts as published.
+    await service.look();
+    expect(sends).toBe(2);
   });
 });

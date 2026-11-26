@@ -16,6 +16,13 @@ import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
+import {
+  copyEpoch,
+  isSelf,
+  publicCopyTargets,
+  servingRosterMembers,
+  type OwnPublicServices,
+} from "./publicStandIn";
 import type { HubTransport } from "./pinnedHubTransport";
 import { grantConfirmTimeoutMs } from "./pushService";
 import type { SpokeVisitorHubPort } from "./spokeVisitorService";
@@ -25,10 +32,18 @@ interface LinkDependencies {
   readonly identity: () => HubHostIdentity;
   readonly transport: HubTransport;
   readonly now: () => number;
+  /** This host's own services, for the copies and fetches that name it. */
+  readonly own?: () => OwnPublicServices;
 }
 
-/** What a spoke reaches its hub through for visitor links; nothing when it has no hub. */
-export function spokeVisitorHubPort(deps: LinkDependencies): SpokeVisitorHubPort {
+/**
+ * What a spoke reaches its hub through for visitor links, and each named
+ * standby when its person ticked Standby; nothing when it has no hub. Grants
+ * carry no secret, so every recipient gets the same update.
+ */
+export function spokeVisitorHubPort(
+  deps: LinkDependencies & { readonly standbyGranted: () => boolean },
+): SpokeVisitorHubPort {
   return {
     target: () => {
       const link = deps.state.load().link;
@@ -36,23 +51,49 @@ export function spokeVisitorHubPort(deps: LinkDependencies): SpokeVisitorHubPort
         ? undefined
         : { memberId: String(link.hubMemberId) };
     },
+    // The roster's sequence too: a standby put back in the order after it
+    // forgot its copies has the same member id and needs the list again.
+    recipients: () =>
+      `${publicCopyTargets(deps.state.load().link, deps.standbyGranted())
+        .map((target) => target.memberId)
+        .join(",")}@${copyEpoch(deps.state.load().link)}`,
     sendGrants: async (update: HubVisitorGrantsUpdate) => {
       const link = deps.state.load().link;
-      if (link === undefined || link.removed === true) return false;
+      const targets = publicCopyTargets(link, deps.standbyGranted());
+      if (link === undefined || targets.length === 0) return false;
       const identity = deps.identity();
-      const answer = await sendHubLinkRequest({
-        transport: deps.transport,
-        target: { origin: link.hubOrigin, pin: listenerPinFromDigest(link.hubListenerPin) },
-        signHostPayload: identity.signing.signHostPayload,
-        senderMemberId: String(link.selfMemberId),
-        recipientMemberId: String(link.hubMemberId),
-        method: "POST",
-        path: HUB_LINK_ROUTES.publicVisitorGrants,
-        body: JSON.stringify(update),
-        headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
-        now: deps.now(),
-      });
-      return answer.status === "answered" && answer.response.ok;
+      let complete = true;
+      // A standby that no longer takes copies (Standby unticked, or out of the
+      // order) gets an empty list, so it holds nothing the person withdrew.
+      const current = new Set(targets.map((target) => target.memberId));
+      const withdrawn = publicCopyTargets(link, true).filter(
+        (target) => !current.has(target.memberId),
+      );
+      const sends = [
+        ...targets.map((target) => ({ target, body: update })),
+        ...withdrawn.map((target) => ({ target, body: { grants: [] } })),
+      ];
+      for (const { target, body } of sends) {
+        const own = deps.own?.();
+        if (own !== undefined && isSelf(deps.state.load(), target.memberId)) {
+          own.visitors.receiveGrants(target.memberId, body);
+          continue;
+        }
+        const answer = await sendHubLinkRequest({
+          transport: deps.transport,
+          target: { origin: target.origin, pin: listenerPinFromDigest(target.pin) },
+          signHostPayload: identity.signing.signHostPayload,
+          senderMemberId: String(link.selfMemberId),
+          recipientMemberId: target.memberId,
+          method: "POST",
+          path: HUB_LINK_ROUTES.publicVisitorGrants,
+          body: JSON.stringify(body),
+          headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
+          now: deps.now(),
+        });
+        if (answer.status !== "answered" || !answer.response.ok) complete = false;
+      }
+      return complete;
     },
   };
 }
@@ -64,7 +105,12 @@ export async function askVisitorSpoke(
   request: VisitorFetchRequest,
 ): Promise<VisitorFetchAnswer | undefined> {
   const state = deps.state.load();
-  const member = state.hub?.roster?.roster.members.find(
+  const own = deps.own?.();
+  if (own !== undefined && isSelf(state, spokeMemberId)) {
+    return own.spokeVisitors.fetch(request, spokeMemberId);
+  }
+  // A standing-in standby reads the roster it holds as a member.
+  const member = servingRosterMembers(state).find(
     (entry) => String(entry.memberId) === spokeMemberId,
   );
   if (member === undefined) return undefined;

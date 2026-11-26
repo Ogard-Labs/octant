@@ -423,7 +423,7 @@ describe("visitor links on the hub", () => {
 describe("the viewer page", () => {
   it("is the same for every link, names only its own assets, and writes thread text as text", () => {
     const viewer = visitorViewer();
-    expect(viewer.page).not.toMatch(/<script>[^<]/);
+    expect(viewer.page).not.toMatch(/<script>[^<]/i);
     for (const name of viewer.assets.keys()) {
       expect(name).toMatch(/^[0-9a-f]{16}\.(js|css)$/);
       expect(viewer.page).toContain(`/v/_/${name}`);
@@ -466,6 +466,6 @@ describe("the viewer page", () => {
     const page = await handlers.visitorPage?.(
       request("visitor-page", "AAAAAAAAAAAAAAAAAAAAAA", new Map()),
     );
-    expect(String(page?.body)).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/);
+    expect(String(page?.body)).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i);
   });
 });

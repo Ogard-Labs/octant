@@ -66,6 +66,11 @@ export interface VisitorThreadSource {
 
 export interface SpokeVisitorHubPort {
   readonly target: () => { readonly memberId: string } | undefined;
+  /**
+   * The members that hold this spoke's grants now (the hub, and each standby
+   * when its person ticked Standby), so a change to them is sent again.
+   */
+  readonly recipients?: () => string;
   readonly sendGrants: (update: HubVisitorGrantsUpdate) => Promise<boolean>;
 }
 
@@ -144,6 +149,7 @@ export class SpokeVisitorService {
   #revision = 0;
   /** The hub that took the last list; a promoted hub holds none of it yet. */
   #publishedTo: string | undefined;
+  #publishedRecipients: string | undefined;
 
   constructor(options: SpokeVisitorServiceOptions) {
     this.#options = options;
@@ -352,25 +358,28 @@ export class SpokeVisitorService {
           .filter((link) => link.stoppedAt === undefined && link.signed.grant.expiresAt > now)
           .map((link) => link.signed)
       : [];
+    const recipients = hub.recipients?.();
     const sent = await hub.sendGrants({ grants });
     // A link shared or stopped while this list was out is not in it; the flag
     // stays, and the next look sends the newer list.
     if (sent && revision === this.#revision) {
       this.#publishedGranted = granted;
       this.#publishedTo = target.memberId;
+      this.#publishedRecipients = recipients;
       const { unpublished: _unpublished, ...rest } = this.#prune(this.#load(), now);
       this.#save(rest);
     }
     return sent;
   }
 
-  /** Sends the list again when the hub has not taken it, or when the Public item or the hub changed since. */
+  /** Sends the list again when the hub has not taken it, or when the Public item, the hub, or its recipients changed since. */
   async look(): Promise<void> {
     const granted = this.#options.publicGranted();
     if (
       this.#load().unpublished !== true &&
       granted === this.#publishedGranted &&
-      this.#options.hub?.target()?.memberId === this.#publishedTo
+      this.#options.hub?.target()?.memberId === this.#publishedTo &&
+      this.#options.hub?.recipients?.() === this.#publishedRecipients
     ) {
       return;
     }

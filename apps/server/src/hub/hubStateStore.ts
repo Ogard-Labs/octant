@@ -429,6 +429,8 @@ export const PublicEntranceState = Schema.Struct({
   enabled: Schema.Boolean,
   port: Schema.optional(Schema.Int.pipe(Schema.between(1, 65_535))),
   funnel: Schema.optional(Schema.Struct({ port: PublicFunnelPort }).annotations(strict)),
+  /** A standby's own choice to serve the entrance while it stands in for the hub. */
+  serveWhileStandingIn: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type PublicEntranceState = typeof PublicEntranceState.Type;
 
