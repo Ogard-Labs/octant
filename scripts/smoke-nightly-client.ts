@@ -246,8 +246,7 @@ class EventLog {
     createInterface({ input: stream }).on("line", (line) => {
       if (!line.startsWith("HARNESS ")) {
         if (process.env.OCTANT_NIGHTLY_SMOKE_VERBOSE === "1") console.error(`${echo}: ${line}`);
-        this.#output.push(`+${Date.now() - this.#started}ms ${line.slice(0, 400)}`);
-        if (this.#output.length > 40) this.#output.shift();
+        this.output(line);
         return;
       }
       try {
@@ -256,6 +255,11 @@ class EventLog {
         return;
       }
     });
+  }
+
+  output(line: string): void {
+    this.#output.push(`+${Date.now() - this.#started}ms ${line.slice(0, 400)}`);
+    if (this.#output.length > 40) this.#output.shift();
   }
 
   note(event: HarnessEvent): void {
@@ -392,23 +396,32 @@ async function launchNightly(input: {
   const inherited: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env))
     if (value !== undefined && !name.startsWith("OCTANT_")) inherited[name] = value;
-  const app = await _electron.launch({
-    executablePath: input.binary,
-    args: [input.main],
-    env: {
-      ...inherited,
-      OCTANT_HARNESS_SOCKET: input.stable.socket,
-      OCTANT_HARNESS_WORK: input.work,
-      OCTANT_HARNESS_PICK_FOLDER: input.pickFolder,
-      OCTANT_HARNESS_MENU_PICK: "Third",
-      OCTANT_HARNESS_OWNER_PID: String(process.pid),
-    },
-    timeout: 60_000,
-  });
-  const pid = app.process().pid;
-  track(pid, "Nightly harness (Electron)");
+  // Registered before launch: a Nightly that fails to start leaves only the
+  // launch error, whose process output the summary row would cut short.
   const events = new EventLog();
   logs.push({ name: `nightly for ${input.stable.socket}`, log: events });
+  let app: ElectronApplication;
+  try {
+    app = await _electron.launch({
+      executablePath: input.binary,
+      args: [input.main],
+      env: {
+        ...inherited,
+        OCTANT_HARNESS_SOCKET: input.stable.socket,
+        OCTANT_HARNESS_WORK: input.work,
+        OCTANT_HARNESS_PICK_FOLDER: input.pickFolder,
+        OCTANT_HARNESS_MENU_PICK: "Third",
+        OCTANT_HARNESS_OWNER_PID: String(process.pid),
+      },
+      timeout: 60_000,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    for (const line of message.split("\n")) events.output(line);
+    throw error;
+  }
+  const pid = app.process().pid;
+  track(pid, "Nightly harness (Electron)");
   // Whether Nightly quit (recovery gave up or never began) or kept running
   // while its windows were refused is the first question about a failure.
   app.process().once("exit", (code, signal) => events.note({ event: "exited", code, signal }));
