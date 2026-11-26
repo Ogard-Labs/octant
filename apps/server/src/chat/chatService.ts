@@ -2022,7 +2022,7 @@ export class ChatService {
           );
         case "snooze-chat-thread-at-usage-reset":
           return await this.#withThreadAdmission(command.threadId, () =>
-            this.#snoozeAtUsageReset(command),
+            this.#snoozeAtUsageReset(command, executionContext?.actor),
           );
         case "schedule-chat-usage-resume":
           return await this.#withThreadAdmission(command.threadId, () =>
@@ -4792,6 +4792,9 @@ export class ChatService {
       ReturnType<typeof decodeChatCommand>,
       { kind: "snooze-chat-thread-at-usage-reset" }
     >,
+    // The host's default snooze journals as the system, and a paired device's
+    // as that device, as Work and Code record theirs.
+    actor: EventActor | undefined,
   ): Promise<ChatCommandResult> {
     const thread = this.#requireActiveThread(command.threadId);
     this.#assertExpectedThreadVersion(thread, command.expectedVersion);
@@ -4845,7 +4848,11 @@ export class ChatService {
       aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
       expectedVersion: command.expectedVersion,
       events: [
-        this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
+        this.#pending(
+          "chat.thread-updated@1",
+          { kind: "thread-updated", thread: updatedThread },
+          actor === undefined ? undefined : { actor },
+        ),
       ],
     });
     return { kind: "thread-updated", thread: updatedThread };

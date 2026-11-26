@@ -1052,10 +1052,13 @@ until the thread carries a snooze of its own. Resume at reset and Snooze
 appear only while the reset is known and still ahead. A billing stop names
 the problem and offers nothing, since no clock clears it. A scheduled resume
 that did not run says why on the line and offers Resume at reset again. The
-strip goes once the turn leaves the limit; it never shows plan meters. The
-transcript keeps one quiet line per stop, the provider's sentence and its
-reset as a clock time, and no actions; Code shows that line once, not
-again beside its waiting row. The rules are in
+strip goes once the turn leaves the limit, or once a move to another account
+releases the stop, since Resume now would send the stopped prompt on the new
+account; it never shows plan meters. The transcript keeps one quiet line per
+stop in Chat and Work, the provider's sentence and its reset as a clock time,
+and no actions. Code keeps that line for its latest provider turn only, once,
+not again beside its waiting row: an earlier stop's line goes when a later
+turn starts. The rules are in
 [Architecture: usage limits](../architecture.md#modes-chat-work-and-code).
 
 ## Live tasks

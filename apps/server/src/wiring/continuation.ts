@@ -79,7 +79,7 @@ import {
   createWorkSideTaskReportDeliveryPort,
   noteRunningParent,
 } from "../sideTasks/sideTaskReportDeliveryPorts";
-import { defaultShellSettings, enabledModes } from "@octant/domain";
+import { defaultShellSettings, enabledModes, stopLeftToUsageLimitHandoff } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -304,6 +304,18 @@ export function wireContinuation(deps: ContinuationDependencies) {
               ? workThreadProjection.read(decodeWorkThreadId(threadId))?.providerInstanceId
               : persistence.readCodeThread(decodeCodeThreadId(threadId))?.providerInstanceId;
         return providerInstanceId === undefined ? undefined : String(providerInstanceId);
+      },
+      // The stop id is the one the handoff records: the Chat attempt, the
+      // Work turn, the Code provider-turn operation.
+      leftToAccountHandoff: (stop) => {
+        const stopId = stop.attemptId ?? stop.turnId;
+        const current =
+          stop.mode === "chat"
+            ? persistence.readChatThread(decodeChatThreadId(stop.threadId))
+            : stop.mode === "work"
+              ? workThreadProjection.read(decodeWorkThreadId(stop.threadId))
+              : persistence.readCodeThread(decodeCodeThreadId(stop.threadId));
+        return current !== undefined && stopLeftToUsageLimitHandoff(current, stopId);
       },
       refusesHostContinuations: (providerInstanceId) =>
         personalSignInRefusals(

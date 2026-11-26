@@ -7925,6 +7925,7 @@ describe("scheduling a Code thread's usage-limit resume", () => {
       personSent: () => true,
       providerInstanceOf: () => "provider",
       refusesHostContinuations: () => false,
+      leftToAccountHandoff: () => false,
       clock: () => new Date(Date.parse(resetsAt) - 60 * 60_000),
       ...usageLimitDefaultCommands({
         hostScope: ROUTINE_HOST_SCOPE_ID,

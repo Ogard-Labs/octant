@@ -17,7 +17,11 @@
  *   covered, and neither is one whose sender the host no longer knows after a
  *   restart;
  * - is on a provider account that does not refuse the host's continuations
- *   (the resume only; a snooze starts nothing).
+ *   (the resume only; a snooze starts nothing);
+ * - is not the thread's account handoff's to act on
+ *   (`stopLeftToUsageLimitHandoff`): a default written while the handoff's
+ *   provider change waits on validation would win the version race and keep
+ *   the thread on the limited account.
  *
  * Each stopped turn (Chat: attempt) is armed at most once, whatever reset it
  * is journaled with later, so a default the person cancels stays cancelled.
@@ -86,6 +90,8 @@ export interface UsageLimitDefaultsOptions {
   ) => string | undefined;
   /** Whether the account's sign-in refuses turns the host starts by itself. */
   readonly refusesHostContinuations: (providerInstanceId: string) => boolean;
+  /** Whether the thread's usage-limit account handoff owns this stop. */
+  readonly leftToAccountHandoff: (stop: UsageLimitStop) => boolean;
   readonly clock: () => Date;
   /** The mode's ordinary commands, run as the host. Each throws when the mode refuses. */
   readonly scheduleResume: (stop: UsageLimitStop) => Promise<void>;
@@ -243,7 +249,8 @@ export class UsageLimitDefaults {
     const limit = stop.usageLimit;
     if (limit.kind === "billing" || limit.resetsAt === undefined) return false;
     if (Date.parse(limit.resetsAt) <= this.#options.clock().getTime()) return false;
-    return this.#options.personSent(stop.mode, personSentKey(stop));
+    if (!this.#options.personSent(stop.mode, personSentKey(stop))) return false;
+    return !this.#options.leftToAccountHandoff(stop);
   }
 
   #mayResume(stop: UsageLimitStop): boolean {

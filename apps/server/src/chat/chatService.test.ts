@@ -6769,6 +6769,7 @@ describe("ChatService", () => {
       providerInstanceOf: (_mode, threadId) =>
         String(persistence.readChatThread(threadId as never)?.providerInstanceId),
       refusesHostContinuations: () => false,
+      leftToAccountHandoff: () => false,
       clock: () => new Date(),
       scheduleResume: async (stop) => {
         armed.push(String(stop.attemptId));
@@ -6995,6 +6996,44 @@ describe("ChatService", () => {
     // Hiding the row is the whole action — nothing asked the provider for
     // another turn.
     expect(fakeDriver.sentTurns).toHaveLength(1);
+  });
+
+  it("journals a snooze the person's default armed as the host, not as the person", async () => {
+    const { service, persistence } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "limited",
+      usageLimitResetsAt: "2099-01-02T09:00:00.000Z",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const actors: string[] = [];
+    const unsubscribe = persistence.journal.subscribeCommitted((append) => {
+      for (const event of append.events) actors.push(event.actor.kind);
+    });
+    await service.execute(
+      {
+        kind: "snooze-chat-thread-at-usage-reset",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+      },
+      { actor: Schema.decodeUnknownSync(EventActor)({ kind: "system", actorId: ids.actor }) },
+    );
+    unsubscribe();
+    expect(actors).toEqual(["system"]);
   });
 
   it("keeps an armed resume when the thread hides until the reset, and keeps the snooze when the resume is withdrawn", async () => {

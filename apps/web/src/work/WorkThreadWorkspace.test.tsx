@@ -3356,7 +3356,7 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
-  it("stops treating a turn parked on a usage limit as running once a hand-off released it", async () => {
+  it("stops treating a turn parked on a usage limit as running, and drops its strip, once a hand-off released it", async () => {
     const parked = workTurn({
       status: "waiting",
       failure: {
@@ -3387,6 +3387,7 @@ describe("WorkThreadWorkspace", () => {
 
     const waiting = render(renderThread(workThread()));
     expect(await screen.findByRole("button", { name: "Stop turn" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Resume now" })).toBeVisible();
     waiting.unmount();
 
     render(
@@ -3406,6 +3407,8 @@ describe("WorkThreadWorkspace", () => {
     );
     expect(await screen.findByText("Summarize the brief")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Stop turn" })).not.toBeInTheDocument();
+    // Recovery would resend the stopped prompt on the account it moved to.
+    expect(screen.queryByRole("button", { name: "Resume now" })).not.toBeInTheDocument();
   });
 
   it("does not duplicate a turn that settles before the start response arrives", async () => {

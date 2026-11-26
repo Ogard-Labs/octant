@@ -1561,7 +1561,12 @@ describe("CodeThreadWorkspace", () => {
       <CodeThreadWorkspace
         controller={controller({
           turnStatus: "waiting",
-          turnUsageLimit: { kind: "temporary" },
+          // A reset ahead gives the strip actions to wait for, so the absence
+          // below is read after the lazily loaded buttons have rendered.
+          turnUsageLimit: {
+            kind: "temporary",
+            resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+          },
           latestProviderTurnOperationId: "op-1",
           conversation: [
             {
@@ -1577,7 +1582,7 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    await screen.findByText(/· Rate limit ·/);
+    expect(await screen.findByRole("button", { name: "Resume at reset" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Resume now" })).toBeNull();
   });
 
@@ -1760,7 +1765,7 @@ describe("CodeThreadWorkspace", () => {
     ).toBeTruthy();
   });
 
-  it("sends the next message on the new account once a usage-limit hand-off released the parked turn", async () => {
+  it("sends the next message on the new account, with no usage-limit strip, once a hand-off released the parked turn", async () => {
     const user = userEvent.setup();
     const stopId = "30000000-0000-4000-8000-0000000000e1";
     const base = controller();
@@ -1769,11 +1774,16 @@ describe("CodeThreadWorkspace", () => {
       turnStatus: "waiting" as const,
       turnError: "The provider's usage window is spent.",
       turnErrorCategory: "failed",
+      turnUsageLimit: {
+        kind: "exhausted" as const,
+        resetsAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      },
       latestProviderTurnOperationId: stopId,
     };
     const { rerender } = render(
       <CodeThreadWorkspace controller={parked as never} threadId={threadId} />,
     );
+    expect(await screen.findByRole("button", { name: "Snooze until reset" })).toBeVisible();
     await user.type(screen.getByLabelText("Follow-up message"), "Carry on");
     expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
 
@@ -1804,6 +1814,8 @@ describe("CodeThreadWorkspace", () => {
     );
     expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    // Recovery would resend the stopped prompt on the account it moved to.
+    expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
   });
 
   it("leaves the model picker enabled on a turn parked by a refused resume", () => {

@@ -1279,12 +1279,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
 
   // The strip above the composer while the conversation's tail is parked on a
   // provider's usage limit. Every action rides the ordinary serialized command
-  // path, so the line changes only from what the host journaled.
+  // path, so the line changes only from what the host journaled. A move to
+  // another account releases the stop, and its Resume now would resend the
+  // attempt on the new account, so the strip goes with the release.
   const stoppedAttempt = activeChatTurns(view.turns).at(-1)?.attempts.at(-1);
   const usageLimitNotice =
     stoppedAttempt === undefined ||
     stoppedAttempt.outcome !== "waiting" ||
-    stoppedAttempt.usageLimit === undefined
+    stoppedAttempt.usageLimit === undefined ||
+    parkedStopReleased(view.thread, String(stoppedAttempt.id))
       ? undefined
       : usageLimitStripNotice({
           limit: stoppedAttempt.usageLimit,

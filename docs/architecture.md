@@ -5630,7 +5630,11 @@ never covered. A Chat retry continues the same turn, so Chat records the
 attempt the person's send or retry admitted: the scheduler's own retry is not
 one, and a default resume that stops again never arms another. The
 resume is never armed on a provider account whose sign-in refuses the host's
-continuations. Nothing else changes: the resume fires through the same
+continuations. Neither default arms on a stop the thread's usage-limit account
+handoff owns: its opt-in names another account, or a move already released the
+stop. The handoff's provider change waits on the new account's validation, and
+a default written meanwhile took the thread's version, so the change was
+refused and the thread stayed on the limited account. Nothing else changes: the resume fires through the same
 scheduler, inspection and ordinary turn admission as a person's opt-in.
 
 **Wake-ups a thread's agent schedules.** A provider runtime that can wake

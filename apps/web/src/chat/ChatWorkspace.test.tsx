@@ -623,6 +623,26 @@ describe("Chat usage-limit strip", () => {
     );
     expect(document.querySelector(".usage-limit-strip")).toBeNull();
   });
+
+  it("draws no strip once a move to another account released the waiting attempt", async () => {
+    const resetsAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const workspace = (thread: Record<string, unknown>) => (
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ activeView: limited(resetsAt, thread) })}
+      />
+    );
+    const parked = render(workspace({}));
+    expect(await screen.findByRole("button", { name: "Resume now" })).toBeVisible();
+    parked.unmount();
+
+    render(workspace({ releasedStopId: attemptId }));
+    // Resume now would resend the stopped attempt on the account it moved to.
+    expect(await screen.findByLabelText("Message")).toBeVisible();
+    expect(document.querySelector(".usage-limit-strip")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume now" })).toBeNull();
+  });
 });
 
 describe("Chat questions", () => {

@@ -5,6 +5,7 @@ import {
   decideProviderAccountMove,
   decideUsageLimitHandoff,
   decideUsageLimitHandoffSetting,
+  stopLeftToUsageLimitHandoff,
 } from "./providerAccountMovePolicy";
 
 const work = {
@@ -172,5 +173,48 @@ describe("handing a thread off when its account hits its usage limit", () => {
         to: "off",
       }),
     ).toMatchObject({ kind: "refused", reason: "unattended" });
+  });
+});
+
+describe("a usage-limit stop left to the thread's account handoff", () => {
+  const onA = { providerInstanceId: "account-a" };
+  it("is left to a handoff that would move the thread to another account", () => {
+    expect(
+      stopLeftToUsageLimitHandoff(
+        { ...onA, usageLimitHandoff: { providerInstanceId: "account-b" } },
+        "stop-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("is left alone once a move released it, whoever made the move", () => {
+    expect(
+      stopLeftToUsageLimitHandoff(
+        { providerInstanceId: "account-b", providerHandoff: { releasedStopId: "stop-1" } },
+        "stop-1",
+      ),
+    ).toBe(true);
+    expect(
+      stopLeftToUsageLimitHandoff(
+        { providerInstanceId: "account-b", releasedStopId: "stop-1" },
+        "stop-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("is not the handoff's when the opt-in is off or names the account the thread is already on", () => {
+    expect(stopLeftToUsageLimitHandoff(onA, "stop-1")).toBe(false);
+    expect(
+      stopLeftToUsageLimitHandoff(
+        { ...onA, usageLimitHandoff: { providerInstanceId: "account-a" } },
+        "stop-1",
+      ),
+    ).toBe(false);
+    expect(
+      stopLeftToUsageLimitHandoff(
+        { ...onA, providerHandoff: { releasedStopId: "an-earlier-stop" } },
+        "stop-1",
+      ),
+    ).toBe(false);
   });
 });

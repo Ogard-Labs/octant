@@ -34,6 +34,7 @@ function defaults(
     personSent: (mode, key) => people.sent(mode, key),
     providerInstanceOf: () => "provider-1",
     refusesHostContinuations: () => false,
+    leftToAccountHandoff: () => false,
     clock: () => NOW,
     scheduleResume,
     snoozeAtReset,
@@ -93,6 +94,18 @@ describe("usage-limit defaults", () => {
     expect(armed).toEqual({ resumed: false, snoozed: true });
     expect(scheduleResume).not.toHaveBeenCalled();
     expect(snoozeAtReset).toHaveBeenCalledTimes(1);
+  });
+
+  it("leave a stop to the thread's account handoff, arming neither the resume nor the snooze", async () => {
+    const { service, scheduleResume, snoozeAtReset } = defaults({
+      leftToAccountHandoff: (candidate) => candidate.turnId === TURN,
+    });
+    expect(await service.arm(stop({ kind: "exhausted", resetsAt: AHEAD }))).toEqual({
+      resumed: false,
+      snoozed: false,
+    });
+    expect(scheduleResume).not.toHaveBeenCalled();
+    expect(snoozeAtReset).not.toHaveBeenCalled();
   });
 
   it("a cancelled default stays cancelled: the same stop is armed once", async () => {
@@ -163,6 +176,7 @@ describe("usage-limit defaults", () => {
       personSent: (mode, key) => people.sent(mode, key),
       providerInstanceOf: () => "provider-1",
       refusesHostContinuations: () => false,
+      leftToAccountHandoff: () => false,
       clock: () => NOW,
       scheduleResume,
       snoozeAtReset: async () => undefined,

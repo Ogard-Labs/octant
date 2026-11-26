@@ -1158,8 +1158,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.controller.conversation,
     providerTurnOperationId === undefined ? undefined : String(providerTurnOperationId),
   );
+  // A move to another account releases the stop, and its Resume now would
+  // resend the prompt on the new account, so the strip goes with the release.
   const usageLimitNotice =
-    props.controller.turnStatus !== "waiting" || props.controller.turnUsageLimit === undefined
+    props.controller.turnStatus !== "waiting" ||
+    props.controller.turnUsageLimit === undefined ||
+    releasedStop
       ? undefined
       : usageLimitStripNotice({
           limit: props.controller.turnUsageLimit,

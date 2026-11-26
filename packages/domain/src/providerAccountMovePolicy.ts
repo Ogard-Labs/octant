@@ -240,3 +240,28 @@ export function parkedStopReleased(
   const released = thread.providerHandoff?.releasedStopId ?? thread.releasedStopId;
   return stopId !== undefined && released !== undefined && released === stopId;
 }
+
+/**
+ * Whether a usage-limit stop belongs to the thread's account handoff, so the
+ * person's "Resume at reset" and "Snooze until reset" defaults leave it alone:
+ * the opt-in names an account other than the one the thread is on, or a move
+ * has already released the stop. Both act on the same stopped turn, and the
+ * handoff's provider change waits on the new account's validation, so a
+ * default written meanwhile won the version race and left the thread on the
+ * limited account. A resume armed after the move would also send the stopped
+ * turn on the account it moved to.
+ */
+export function stopLeftToUsageLimitHandoff(
+  thread: Parameters<typeof parkedStopReleased>[0] & {
+    readonly providerInstanceId: string;
+    readonly usageLimitHandoff?: { readonly providerInstanceId: string } | undefined;
+  },
+  stopId: string,
+): boolean {
+  if (parkedStopReleased(thread, stopId)) return true;
+  const handoff = thread.usageLimitHandoff;
+  return (
+    handoff !== undefined &&
+    String(handoff.providerInstanceId) !== String(thread.providerInstanceId)
+  );
+}

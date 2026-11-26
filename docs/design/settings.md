@@ -730,8 +730,9 @@ Below it, two host switches, both off by default, set what happens when a
 provider's usage limit stops a turn the person sent and names its reset:
 **Resume at reset by default** schedules the resume at that reset, and
 **Snooze until reset by default** hides the thread until then. Neither applies
-to a billing stop, a turn a routine or an agent started, or (for the resume) a
-provider that refuses Octant's own continuations; the strip above the composer
+to a billing stop, a turn a routine or an agent started, a thread set to hand
+off to another account on a limit, or (for the resume) a provider that refuses
+Octant's own continuations; the strip above the composer
 says "(default)" with Cancel ([Thread view: usage-limit strip](thread-view.md#usage-limit-strip);
 maintainer decision, 2026-11-26).
 

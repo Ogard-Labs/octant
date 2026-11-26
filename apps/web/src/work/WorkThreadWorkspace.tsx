@@ -2952,12 +2952,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   }
 
   // The strip above the composer while the thread's latest turn is parked on a
-  // provider's usage limit; the transcript keeps only a one-line record.
+  // provider's usage limit; the transcript keeps only a one-line record. A move
+  // to another account releases the stop, and its Resume now would resend the
+  // prompt on the new account, so the strip goes with the release.
   const stoppedTurn = turns.at(-1);
   const usageLimitNotice =
     stoppedTurn === undefined ||
     stoppedTurn.status !== "waiting" ||
-    stoppedTurn.failure?.usageLimit === undefined
+    stoppedTurn.failure?.usageLimit === undefined ||
+    latestStopReleased
       ? undefined
       : usageLimitStripNotice({
           limit: stoppedTurn.failure.usageLimit,
