@@ -1,3 +1,4 @@
+import { projectConversationId } from "../code/projectConversationBinding";
 import { cleanedUpWorktreeOf } from "../code/cleanedUpWorktrees";
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { ownPullRequestsFromHistory } from "../code/codeThreadMetadataService";
@@ -2189,8 +2190,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         // The facts come from the host's own records on every call. The
         // Code runtime, the decision reader, and the mention directory are
         // declared later in this startup; a turn runs only after they exist.
-        threads: ({ windowId, thread, readPosture, planner, worktreeMove }) =>
+        threads: ({ windowId, thread, operationId, readPosture, planner, worktreeMove }) =>
           createThreadsTools({
+            operationId,
             ...(worktreeMove === undefined ? {} : { worktreeMove }),
             mode: "code",
             windowId,
@@ -2823,6 +2825,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       clock: () => new Date().toISOString(),
     });
     const coordinatorService = new CoordinatorService({
+      isProjectConversation: (thread) =>
+        projectConversationId(persistence.journal, thread.projectId) === thread.id,
       messageWakeDefaults: () => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
         return { wakesPerHour: settings.messageWakesPerHour, rounds: settings.messageWakeRounds };
@@ -2982,11 +2986,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                   : "The turn was not admitted.",
             };
       },
-      propose: (coordinatorThreadId, draft, workerOptions) => {
+      readAssignmentProposal: (id) => codePlannerService.assignmentProposal(id),
+      propose: (coordinatorThreadId, draft, workerOptions, assignmentId) => {
         const outcome = codePlannerService.proposeForCoordinator(
           coordinatorThreadId,
           draft,
           workerOptions,
+          assignmentId,
         );
         return outcome.status === "proposed"
           ? { status: "proposed", proposalId: String(outcome.proposal.id) }
@@ -3195,7 +3201,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     });
     const codeBoardOf = (windowId: WindowId, boardThreads: ReadonlyArray<CodeBoardThread>) =>
       new CodeThreadBoardService({
-        threads: { list: () => boardThreads },
+        threads: {
+          list: () =>
+            boardThreads.filter(
+              ({ thread }) =>
+                thread.coordinator !== true ||
+                projectConversationId(persistence.journal, thread.projectId) !== thread.id,
+            ),
+        },
         metadata: codeThreadMetadataService,
         runtime: {
           observe: (threadId) => {

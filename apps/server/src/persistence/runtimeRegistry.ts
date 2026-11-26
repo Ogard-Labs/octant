@@ -148,6 +148,7 @@ import {
   CodeOperationEventFrame,
   CodeSettingsUpdated,
   CodeThreadCreated,
+  CodeProjectConversationBound,
   CodeThreadUpdated,
   PersistedCodeThreadCreated,
   PersistedCodeThreadUpdated,
@@ -767,6 +768,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("chat.deletion-requested@1", 1, ChatDeletionRequested)
     .register("chat.deleted@1", 1, ChatDeleted)
     .register("code.settings-updated@1", 1, CodeSettingsUpdated)
+    .register("code.project-conversation-bound@1", 1, CodeProjectConversationBound)
     .register("code.thread-created@1", 1, CodeThreadCreated, {
       persistedSchema: PersistedCodeThreadCreated,
     })

@@ -1,3 +1,4 @@
+import { deterministicUuid } from "../deterministicUuid";
 import {
   AggregateVersion,
   DEFAULT_SIBLING_THREAD_WAIT_MS,
@@ -563,6 +564,7 @@ const PLAN_REFUSAL_MOVE = "Plan mode is read-only; this thread cannot move into 
 export interface CoordinatorToolPort {
   levelOf(threadId: string): ProviderExecutionPolicy | undefined;
   start(input: {
+    readonly assignmentId?: string;
     readonly callerThreadId: string;
     readonly windowId: WindowId;
     readonly fields: Readonly<Record<string, unknown>>;
@@ -587,6 +589,7 @@ export interface CoordinatorToolPort {
  * spends the same budget as reading them.
  */
 export function createThreadsTools(input: {
+  readonly operationId?: string;
   readonly mode: "work" | "code";
   readonly windowId: WindowId;
   readonly service: Pick<SiblingThreadsService, "answer">;
@@ -722,7 +725,7 @@ export function createThreadsTools(input: {
   const tools: AppManagedToolSet = {
     // A tool this turn could only be refused is omitted, not advertised.
     definitions: operations.length === 0 ? [] : [threadsToolDefinition(operations)],
-    execute: async ({ name, inputJson, signal }) => {
+    execute: async ({ name, inputJson, signal, toolCallId }) => {
       if (signal?.aborted === true) return policy(CANCELLED);
       let raw: unknown;
       try {
@@ -758,6 +761,18 @@ export function createThreadsTools(input: {
           return policy(NOT_COORDINATOR);
         }
         return await input.coordinator.start({
+          ...(input.operationId === undefined
+            ? {}
+            : {
+                assignmentId: deterministicUuid(
+                  JSON.stringify([
+                    "coordinator-start",
+                    callerThreadId,
+                    input.operationId,
+                    toolCallId ?? inputJson,
+                  ]),
+                ),
+              }),
           callerThreadId: String(callerThreadId),
           windowId: input.windowId,
           fields,

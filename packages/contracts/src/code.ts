@@ -979,7 +979,24 @@ export const MergeCodeForkContextCommand = Schema.Struct({
 }).annotations(strict);
 export type MergeCodeForkContextCommand = typeof MergeCodeForkContextCommand.Type;
 
+export const CodeProjectConversationBound = Schema.Struct({
+  projectId: ProjectId,
+  threadId: CodeThreadId,
+}).annotations(strict);
+export const decodeCodeProjectConversationBound = Schema.decodeUnknownSync(
+  CodeProjectConversationBound,
+);
+
 export const CodeCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("read-code-project-reports"),
+    projectId: ProjectId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("open-code-project-conversation"),
+    projectId: ProjectId,
+    model: Schema.optional(CodeDefaultModel),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("prepare-code-project-checkout"),
     projectId: ProjectId,
@@ -1870,7 +1887,27 @@ export const CodeForkContextMerged = Schema.Struct({
 }).annotations(strict);
 export type CodeForkContextMerged = typeof CodeForkContextMerged.Type;
 
+export const CodeProjectReport = Schema.Struct({
+  workerId: CodeThreadId,
+  operationId: CodeRuntimeWorkId,
+  sequence: GlobalSequence,
+  title: Schema.String,
+  state: Schema.Literal("completed", "interrupted", "failed", "ambiguous", "waiting"),
+  summary: Schema.String,
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+export type CodeProjectReport = typeof CodeProjectReport.Type;
+export const decodeCodeProjectReport = Schema.decodeUnknownSync(CodeProjectReport);
+
 export const CodeCommandResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("project-reports"),
+    reports: Schema.Array(CodeProjectReport),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-conversation-opened"),
+    thread: CodeThread,
+  }).annotations(strict),
   CodePublicEvent,
   CodeCheckoutPrepared,
   CodeWorktreeSourcePreviewed,
@@ -1918,6 +1955,7 @@ export type CodeThreadView = typeof CodeThreadView.Type;
  * is the one a read cursor can be compared against.
  */
 export const CodeThreadActivity = Schema.Struct({
+  projectReportSequence: Schema.optional(GlobalSequence),
   threadId: CodeThreadId,
   lastSequence: GlobalSequence,
 }).annotations(strict);
@@ -2009,6 +2047,7 @@ export const CodeBootstrap = Schema.Struct({
    */
   runtime: Schema.optionalWith(Schema.Array(CodeNavigationRuntime), { default: () => [] }),
   plannerThreadIds: CodePlannerThreadIds,
+  projectConversationIds: Schema.optional(Schema.Array(CodeThreadId)),
 }).annotations(strict);
 export type CodeBootstrap = typeof CodeBootstrap.Type;
 
@@ -2024,6 +2063,7 @@ export const CodeNavigation = Schema.Struct({
   activity: Schema.optionalWith(Schema.Array(CodeThreadActivity), { default: () => [] }),
   runtime: Schema.optionalWith(Schema.Array(CodeNavigationRuntime), { default: () => [] }),
   plannerThreadIds: CodePlannerThreadIds,
+  projectConversationIds: Schema.optional(Schema.Array(CodeThreadId)),
 }).annotations(strict);
 export type CodeNavigation = typeof CodeNavigation.Type;
 

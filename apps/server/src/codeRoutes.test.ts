@@ -501,6 +501,8 @@ describe("Code routes", () => {
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
     const commands = [
+      { kind: "open-code-project-conversation", projectId },
+      { kind: "read-code-project-reports", projectId },
       { kind: "set-code-thread-coordinator", threadId, expectedVersion: 1, coordinator: true },
       {
         kind: "set-code-thread-coordinator",

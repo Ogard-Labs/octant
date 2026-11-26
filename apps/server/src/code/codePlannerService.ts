@@ -1,3 +1,4 @@
+import { projectConversationId } from "./projectConversationBinding";
 import {
   ActorId,
   AggregateVersion,
@@ -215,6 +216,14 @@ export class CodePlannerService {
 
     const timestamp = decodeTimestamp(this.#clock());
     if (command.kind === "designate-code-planner-thread") {
+      const conversation = projectConversationId(this.#persistence.journal, command.projectId);
+      if (command.threadId === conversation)
+        throw new CodePlannerServiceError(
+          decodeCodeFailure({
+            category: "invalid",
+            message: "The Project conversation cannot become a designated planner.",
+          }),
+        );
       const candidate = this.#persistence.readCodeThread(command.threadId);
       const decision = decideCodePlannerDesignation({
         project,
@@ -234,6 +243,7 @@ export class CodePlannerService {
                     (thread) =>
                       String(thread.projectId) === String(command.projectId) &&
                       String(thread.id) !== String(command.threadId) &&
+                      thread.id !== conversation &&
                       thread.coordinator === true &&
                       thread.lifecycle !== "archived",
                   ).length,
@@ -366,6 +376,11 @@ export class CodePlannerService {
    * planner, which reads as a coordinator whose starts always need approval.
    * The pending cap is the planner's.
    */
+  assignmentProposal(id: string): CodePlannerWorkProposal | undefined {
+    return readCodePlannerProposal(this.#persistence.connection, decodeCodePlannerProposalId(id))
+      ?.proposal;
+  }
+
   proposeForCoordinator(
     coordinatorThreadId: CodeThreadId,
     draftInput: { readonly title: string; readonly intent: string },
@@ -378,6 +393,7 @@ export class CodePlannerService {
       readonly needsImages?: true;
       readonly reviewedProviderKind?: string;
     },
+    assignmentId?: string,
   ):
     | { readonly status: "proposed"; readonly proposal: CodePlannerWorkProposal }
     | { readonly status: "refused"; readonly message: string } {
@@ -409,7 +425,7 @@ export class CodePlannerService {
       };
     }
     const proposal: CodePlannerWorkProposal = {
-      id: decodeCodePlannerProposalId(this.#uuid()),
+      id: decodeCodePlannerProposalId(assignmentId ?? this.#uuid()),
       projectId: thread.projectId,
       plannerThreadId: coordinatorThreadId,
       title: draft.title,

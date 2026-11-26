@@ -989,7 +989,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           if (
             command !== undefined &&
             (callerAuthority !== "local-window" || agentGrantSession) &&
-            (command.kind === "set-code-thread-coordinator" ||
+            (command.kind === "read-code-project-reports" ||
+              command.kind === "open-code-project-conversation" ||
+              command.kind === "set-code-thread-coordinator" ||
               command.kind === "set-code-thread-coordinator-bounds" ||
               command.kind === "set-code-thread-coordinator-done-when" ||
               command.kind === "set-code-thread-message-wake" ||

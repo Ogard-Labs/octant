@@ -1,3 +1,4 @@
+import { projectConversationId } from "./projectConversationBinding";
 import { type CleanedUpWorktreeStanding } from "@octant/domain/code-worktree-cleanup-policy";
 import {
   decodeThreadWorkingDirectory,
@@ -39,6 +40,8 @@ import {
 } from "@octant/domain";
 import {
   defaultFullAccessSandboxFor,
+  defaultPermissionModeFor,
+  threadAccessOf,
   fullAccessSandboxSupported,
   guardrailLowered,
   permissionModeOf,
@@ -77,6 +80,7 @@ import {
   EventId,
   UtcTimestamp,
   decodeCodeCommand,
+  decodeCodeThreadActivity,
   decodeCodeCheckoutHead,
   decodeCodeCheckoutIdentity,
   decodeCodeWorktreeSourceProvenance,
@@ -846,6 +850,12 @@ export interface CodeServiceOptions {
    */
   readonly turnAwaiting?: (threadId: string) => "approval" | "user-input" | undefined;
   /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
+  readonly projectReports?: (
+    projectId: ProjectId,
+  ) => ReadonlyArray<import("@octant/contracts").CodeProjectReport>;
+  readonly projectReportSequence?: (
+    projectId: ProjectId,
+  ) => CodeThreadActivity["lastSequence"] | undefined;
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
   /** The person's Settings choice to put a thread away once it is done; absent is off. */
   readonly putAwayWhenDone?: () => boolean;
@@ -1311,6 +1321,8 @@ export class CodeService {
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
   readonly #touchedIssues: CodeNavigationTouchedIssueSource | undefined;
   readonly #linkedIssues: CodeLinkedIssuesPort | undefined;
+  readonly #projectReports: CodeServiceOptions["projectReports"];
+  readonly #projectReportSequence: CodeServiceOptions["projectReportSequence"];
   readonly #readLatestFinishedReceipt:
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
@@ -1390,6 +1402,8 @@ export class CodeService {
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#turnAwaiting = options.turnAwaiting;
+    this.#projectReports = options.projectReports;
+    this.#projectReportSequence = options.projectReportSequence;
     this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
     this.#putAwayWhenDone = options.putAwayWhenDone ?? (() => false);
     this.#unfinishedWork = options.unfinishedWork;
@@ -1415,6 +1429,7 @@ export class CodeService {
       activity: this.#visibleActivity(threads),
       runtime: this.#visibleRuntime(threads, pullRequests),
       ...this.#visiblePlanners(threads),
+      ...this.#visibleConversations(threads),
     };
   }
 
@@ -1634,6 +1649,7 @@ export class CodeService {
       activity: this.#visibleActivity(threads),
       runtime: this.#visibleRuntime(threads, pullRequests),
       ...this.#visiblePlanners(threads),
+      ...this.#visibleConversations(threads),
     };
   }
 
@@ -1660,9 +1676,31 @@ export class CodeService {
     // window that cannot see a thread must not learn that it is running from
     // its activity sequence either.
     const threadIds = new Set(threads.map((thread) => String(thread.id)));
-    return this.#persistence
-      .readCodeThreadActivity()
-      .filter((entry) => threadIds.has(String(entry.threadId)));
+    const activity = new Map(
+      this.#persistence
+        .readCodeThreadActivity()
+        .filter((row) => threadIds.has(String(row.threadId)))
+        .map((row) => [row.threadId, row]),
+    );
+    for (const thread of threads) {
+      if (
+        thread.coordinator !== true ||
+        projectConversationId(this.#persistence.journal, thread.projectId) !== thread.id
+      )
+        continue;
+      const sequence = this.#projectReportSequence?.(thread.projectId);
+      if (sequence !== undefined) {
+        activity.set(
+          thread.id,
+          decodeCodeThreadActivity({
+            threadId: thread.id,
+            lastSequence: activity.get(thread.id)?.lastSequence ?? 0,
+            projectReportSequence: sequence,
+          }),
+        );
+      }
+    }
+    return [...activity.values()];
   }
 
   /**
@@ -1689,6 +1727,26 @@ export class CodeService {
       })
       .map((thread) => thread.id);
     return { plannerThreadIds };
+  }
+
+  #boundConversation(projectId: ProjectId): CodeThread | undefined {
+    const id = projectConversationId(this.#persistence.journal, projectId);
+    if (id === undefined) return undefined;
+    const thread = this.#persistence.readCodeThread(id);
+    if (thread?.projectId !== projectId)
+      throw this.#failure("unavailable", "The Project conversation could not be recovered.");
+    return thread;
+  }
+
+  #visibleConversations(threads: ReadonlyArray<CodeThread>) {
+    const ids = threads
+      .filter(
+        (thread) =>
+          thread.coordinator === true &&
+          projectConversationId(this.#persistence.journal, thread.projectId) === thread.id,
+      )
+      .map((thread) => thread.id);
+    return ids.length === 0 ? {} : { projectConversationIds: ids };
   }
 
   /** Whether a thread is its Project's designated planner, which reads as a coordinator. */
@@ -2075,7 +2133,7 @@ export class CodeService {
   ): Promise<CodeCommandResult> {
     const actor = executionContext?.actor;
     try {
-      let command;
+      let command: CodeCommand;
       try {
         command = decodeCodeCommand(input);
       } catch {
@@ -2137,6 +2195,83 @@ export class CodeService {
           signal ?? new AbortController().signal,
         );
         return { kind: "worktree-source-previewed", preview };
+      }
+      if (command.kind === "read-code-project-reports") {
+        if (!(await this.#access.canAccessProject(authenticatedWindowId, command.projectId)))
+          throw this.#failure("unauthorized", "This window cannot read the Project conversation.");
+        const project = this.#persistence.readProject?.(command.projectId);
+        if (
+          project?.type !== "code" ||
+          project.lifecycle !== "active" ||
+          this.#projectReports === undefined
+        )
+          throw this.#failure("unavailable", "Project reports are unavailable.");
+        return { kind: "project-reports", reports: this.#projectReports(command.projectId) };
+      }
+      const openingConversation = command.kind === "open-code-project-conversation";
+      if (command.kind === "open-code-project-conversation") {
+        const { projectId } = command;
+        if (
+          isRoutineHostScope(authenticatedWindowId) ||
+          !(await this.#access.canAccessProject(authenticatedWindowId, projectId))
+        ) {
+          throw this.#failure("unauthorized", "This window cannot open the Project conversation.");
+        }
+        const project = this.#persistence.readProject?.(projectId);
+        if (project?.type !== "code" || project.lifecycle !== "active") {
+          throw this.#failure("unavailable", "The Code Project is unavailable.");
+        }
+        const existing = this.#boundConversation(projectId);
+        if (existing !== undefined)
+          return {
+            kind: "project-conversation-opened",
+            thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, existing),
+          };
+        const settings = this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings();
+        const model = command.model ?? settings.defaultModel;
+        if (model === undefined)
+          throw this.#failure(
+            "unavailable",
+            "Choose a Code provider and model to start the Project conversation.",
+          );
+        const prepared = await this.execute(authenticatedWindowId, {
+          kind: "prepare-code-project-checkout",
+          projectId,
+        });
+        if (prepared.kind !== "checkout-prepared")
+          throw this.#failure("unavailable", "The Project checkout is unavailable.");
+        const head = prepared.checkout.head;
+        const base =
+          head.kind === "branch" ? head.name : head.kind === "detached" ? head.oid : "HEAD";
+        const timestamp = this.#clock();
+        const posture = threadAccessOf(defaultPermissionModeFor({ project, settings }));
+        command = {
+          kind: "create-code-thread",
+          thread: decodeCodeThread({
+            id: this.#uuid(),
+            projectId,
+            title: project.name,
+            ...model,
+            bindingRevisionId: prepared.bindingRevisionId,
+            repositoryId: prepared.checkout.repositoryId,
+            checkoutId: prepared.checkout.id,
+            lifecycle: "active",
+            executionPolicy: posture.executionPolicy,
+            ...(posture.autoApprove ? { autoApprove: true } : {}),
+            permissionPersistence: settings.defaultPermissionPersistence,
+            deliveryTarget: {
+              branchIntent: base,
+              proposedBaseBranch: base,
+              remoteName: "origin",
+              proposedBaseRepository: `local/${project.name}`,
+              outcomeKind: "local-implementation",
+              confirmedAt: timestamp,
+            },
+            version: 1,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }),
+        };
       }
       if (command.kind === "create-managed-code-thread") {
         if (this.#managedThreadCreation === undefined) {
@@ -2867,6 +3002,44 @@ export class CodeService {
             );
         }
         executionContext?.onCreationBoundary?.();
+        if (openingConversation) {
+          const { projectId } = thread;
+          const project = this.#persistence.readProject?.(projectId);
+          if (project?.lifecycle !== "active")
+            throw this.#failure("unavailable", "The Code Project is unavailable.");
+          const journal = this.#persistence.journal;
+          if (journal.transaction === undefined)
+            throw this.#failure(
+              "unavailable",
+              "The Project conversation needs transactional storage.",
+            );
+          const conversation = journal.transaction(() => {
+            const winner = this.#boundConversation(projectId);
+            if (winner !== undefined) return winner;
+            const owned = decodeCodeThread({ ...thread, coordinator: true });
+            this.#append(
+              "code-project-conversation",
+              projectId,
+              0,
+              "code.project-conversation-bound@1",
+              { projectId, threadId: owned.id },
+              "system",
+            );
+            this.#append(
+              "code-thread",
+              owned.id,
+              0,
+              "code.thread-created@1",
+              { kind: "thread-created", thread: owned },
+              actor,
+            );
+            return owned;
+          });
+          return {
+            kind: "project-conversation-opened",
+            thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, conversation),
+          };
+        }
         this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
           this.#append(
             "code-thread",
@@ -2930,6 +3103,25 @@ export class CodeService {
       const current = this.#persistence.readCodeThread(command.threadId);
       if (current === undefined) throw this.#failure("invalid", "Code thread was not found.");
       await this.#authorizeThread(authenticatedWindowId, current);
+      if (
+        current.coordinator === true &&
+        projectConversationId(this.#persistence.journal, current.projectId) === current.id &&
+        [
+          "mark-code-thread-done",
+          "change-code-thread-lifecycle",
+          "complete-code-thread",
+          "set-code-thread-coordinator",
+          "set-code-thread-coordinator-done-when",
+          "move-code-thread",
+          "move-code-thread-to-worktree",
+          "rename-code-thread",
+          "snooze-code-thread",
+          "snooze-code-thread-at-usage-reset",
+          "pin-code-thread",
+        ].includes(command.kind)
+      ) {
+        throw this.#failure("invalid", "The Project owns this conversation and its lifecycle.");
+      }
       if (current.version !== command.expectedVersion) {
         throw this.#failure("stale", "Code state changed; reload and retry.");
       }
@@ -5341,6 +5533,7 @@ export class CodeService {
       (thread) =>
         String(thread.projectId) === String(current.projectId) &&
         String(thread.id) !== String(current.id) &&
+        projectConversationId(this.#persistence.journal, current.projectId) !== thread.id &&
         readsAsCoordinator({
           lifecycle: thread.lifecycle,
           coordinator: thread.coordinator === true,

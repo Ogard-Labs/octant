@@ -6,6 +6,7 @@ import {
   decodeCoordinatorStartInput,
   type CodeCommand,
   type CodeCommandResult,
+  type CodePlannerWorkProposal,
   type CodeSettings,
   type CodeThread,
   type CodeThreadId,
@@ -69,8 +70,18 @@ const FIRST_TURN_WATCH_MS = 15 * 60_000;
 const MAX_REMEMBERED_STOPS = 512;
 const HOUR_MS = 60 * 60_000;
 
+interface CoordinatorStartCall {
+  readonly assignmentId?: string;
+  readonly callerThreadId: string;
+  readonly windowId: WindowId;
+  readonly fields: Readonly<Record<string, unknown>>;
+  readonly profileAllowsStart: boolean;
+}
+
 /** What the coordinator service reads and does through the host. */
 export interface CoordinatorServicePorts {
+  readonly readAssignmentProposal?: (id: string) => CodePlannerWorkProposal | undefined;
+  readonly isProjectConversation?: (thread: CodeThread) => boolean;
   readonly readThread: (threadId: string) => CodeThread | undefined;
   readonly readThreads: () => ReadonlyArray<CodeThread>;
   readonly readProject: (projectId: ProjectId) => Project | undefined;
@@ -157,6 +168,7 @@ export interface CoordinatorServicePorts {
       readonly choice?: CoordinatorWorkerChoice;
       readonly modelName?: string;
     },
+    assignmentId?: string,
   ) =>
     | { readonly status: "proposed"; readonly proposalId: string }
     | { readonly status: "refused"; readonly message: string };
@@ -344,13 +356,24 @@ export class CoordinatorService {
     };
   }
 
-  /** One `start` call from a coordinator's turn. */
-  async start(input: {
-    readonly callerThreadId: string;
-    readonly windowId: WindowId;
-    readonly fields: Readonly<Record<string, unknown>>;
-    readonly profileAllowsStart: boolean;
-  }): Promise<ToolAnswer> {
+  // Count and create together for this coordinator. A simultaneous second start
+  // sees the first worker, including when both calls replay one assignment.
+  readonly #startsInFlight = new Map<string, Promise<ToolAnswer>>();
+
+  async start(input: CoordinatorStartCall): Promise<ToolAnswer> {
+    const owner = input.callerThreadId;
+    const previous = this.#startsInFlight.get(owner);
+    const start = () => this.#start(input);
+    const starting = previous === undefined ? start() : previous.then(start, start);
+    this.#startsInFlight.set(owner, starting);
+    try {
+      return await starting;
+    } finally {
+      if (this.#startsInFlight.get(owner) === starting) this.#startsInFlight.delete(owner);
+    }
+  }
+
+  async #start(input: CoordinatorStartCall): Promise<ToolAnswer> {
     let call: CoordinatorStartInput;
     try {
       call = decodeCoordinatorStartInput(input.fields);
@@ -358,6 +381,44 @@ export class CoordinatorService {
       return refusedAnswer("policy", "The start input is invalid or over its bounds.");
     }
     const caller = this.#ports.readThread(input.callerThreadId);
+    if (
+      input.assignmentId !== undefined &&
+      caller !== undefined &&
+      this.#readsAsCoordinator(caller) &&
+      input.profileAllowsStart &&
+      this.#ports.readProject(caller.projectId)?.lifecycle === "active"
+    ) {
+      const existing = this.#ports.readThread(input.assignmentId);
+      if (existing?.coordinatorThreadId === caller.id && existing.projectId === caller.projectId) {
+        return {
+          result: {
+            status: "started",
+            title: existing.title,
+            reference: `${existing.id}@${caller.projectId}`,
+            firstTurn:
+              this.#ports.latestTurnId(input.assignmentId) === undefined
+                ? "not-started"
+                : "started",
+          },
+          isError: false,
+        };
+      }
+      const proposal = this.#ports.readAssignmentProposal?.(input.assignmentId);
+      if (proposal?.plannerThreadId === caller.id && proposal.projectId === caller.projectId) {
+        return proposal.status === "confirmed"
+          ? {
+              result: {
+                status: "started",
+                title: proposal.title,
+                reference: `${proposal.createdThreadId}@${caller.projectId}`,
+              },
+              isError: false,
+            }
+          : proposal.status === "declined"
+            ? refusedAnswer("policy", "This assignment was declined.")
+            : { result: { status: "proposed", proposalId: proposal.id }, isError: false };
+      }
+    }
     const settings = this.#ports.readSettings();
     const now = this.#ports.now();
     const workers = caller === undefined ? [] : this.#openWorkers(caller);
@@ -449,6 +510,7 @@ export class CoordinatorService {
             ? {}
             : { reviewedProviderKind: request.reviewedProviderKind }),
         },
+        input.assignmentId,
       );
       return proposed.status === "proposed"
         ? {
@@ -471,6 +533,7 @@ export class CoordinatorService {
       decision.level,
       resolved,
       request,
+      input.assignmentId,
     );
   }
 
@@ -793,6 +856,12 @@ export class CoordinatorService {
     return [
       "Coordinator roster, written by Octant from its own records (no agent wrote this).",
       "This turn is read-only: start workers with octant_threads start and message them with send.",
+      ...(this.#ports.isProjectConversation?.(coordinator) === true
+        ? [
+            "This is the lasting Project conversation. Answer questions inline. Start one worker for each distinct executable task. For revisions, read your existing workers and send the change to its worker. Give each confirmed worker’s title and reference. If approval is pending, say so.",
+            "For outcomes, blockers or decisions, combine related results in a concise report and cite each worker reference or evidenced pull request. Identify outstanding decisions and the coordinator responsible. Keep the Project open.",
+          ]
+        : []),
       ...(this.#isPlanner(coordinator)
         ? ["You are this Project's planner: every start becomes a proposal a person approves."]
         : []),
@@ -1127,6 +1196,7 @@ export class CoordinatorService {
     level: Exclude<ProviderExecutionPolicy, "plan">,
     resolved: ResolvedWorkerModel,
     request: WorkerChoiceRequest | undefined,
+    assignmentId?: string,
   ): Promise<ToolAnswer> {
     const hop = this.#hopFrom(String(caller.id));
     let workerId: CodeThreadId;
@@ -1139,7 +1209,7 @@ export class CoordinatorService {
       if (prepared.kind !== "checkout-prepared") {
         return refusedAnswer("unavailable", "The Project's checkout could not be prepared.");
       }
-      const threadId = this.#ports.uuid();
+      const threadId = assignmentId ?? this.#ports.uuid();
       const prefix = this.#ports.readSettings()?.worktrees?.branchPrefix;
       // A branch or tag named like the person's prefix blocks every name below
       // it, so a chosen prefix is checked against the names that exist.

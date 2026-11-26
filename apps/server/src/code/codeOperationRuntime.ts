@@ -776,6 +776,7 @@ export interface CodeOperationRuntimeOptions {
    * asked, so a turn in Plan is neither offered messaging nor able to send.
    */
   readonly threads?: (input: {
+    readonly operationId: string;
     readonly windowId: WindowId;
     readonly thread: CodeThread;
     readonly readPosture: () => CodeThread["executionPolicy"];
@@ -6761,6 +6762,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.githubReadTools?.(this.#trackerToolInput(active)),
         this.#options.linearReadTools?.(this.#trackerToolInput(active)),
         this.#options.threads?.({
+          operationId: String(active.operationId),
           windowId: active.windowId,
           thread: active.thread,
           readPosture: () =>

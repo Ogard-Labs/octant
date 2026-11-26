@@ -48,7 +48,13 @@ import { Schema } from "effect";
 import { DeviceId, StableHostId, RemoteSessionId } from "@octant/contracts/remote-access";
 import { CodeProjectAccess } from "../codeProjectAccess";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
+import { readCodeThread, readCodeThreads } from "../persistence/codeProjection";
+import { projectReportsReader } from "./projectReports";
 import { lstat } from "node:fs/promises";
 import {
   mkdirSync,
@@ -1189,6 +1195,191 @@ describe("CodeService reads", () => {
 });
 
 describe("CodeService commands", () => {
+  it("binds a Project conversation as a coordinator without starting a turn", async () => {
+    const fixture = serviceFixture({ project: rememberedFullAccessProject });
+    const result = await fixture.service.execute(ids.window, {
+      kind: "open-code-project-conversation",
+      projectId: ids.project,
+      model: { providerInstanceId: ids.provider, modelId: "model-a" },
+    });
+    expect(result).toMatchObject({
+      kind: "project-conversation-opened",
+      thread: {
+        projectId: ids.project,
+        coordinator: true,
+        lifecycle: "active",
+      },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: { aggregateType: "code-project-conversation", aggregateId: ids.project },
+        expectedVersion: 0,
+        events: [expect.objectContaining({ eventName: "code.project-conversation-bound@1" })],
+      }),
+    );
+  });
+
+  it("recovers a single Project conversation across simultaneous windows and a host restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-project-conversation-"));
+    const path = join(directory, "journal.sqlite3");
+    const project = approvalGatedProject as Project;
+    const otherProject = decodeProjectId(randomUUID());
+    const model = { providerInstanceId: ids.provider, modelId: "model-a" };
+    const openHost = () => {
+      const connection = openSqlite(path);
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      const fixture = serviceFixture({
+        project,
+        uuid: randomUUID,
+        threads: [],
+        reports: projectReportsReader(connection),
+      });
+      Object.assign(fixture.persistence, {
+        journal,
+        readCodeThread: (id: CodeThreadId) => readCodeThread(connection, id),
+        readCodeThreads: () => readCodeThreads(connection),
+        readProject: (id: ProjectId) => ({ ...project, id }),
+      });
+      return { ...fixture, connection, journal };
+    };
+    let host = openHost();
+    try {
+      await host.service.execute(ids.window, { kind: "create-code-thread", thread: thread() });
+      await host.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        coordinator: true,
+      });
+      const open = (windowId: typeof ids.window, projectId: ProjectId) =>
+        host.service.execute(windowId, {
+          kind: "open-code-project-conversation",
+          projectId,
+          model,
+        });
+      const [first, second] = await Promise.all([
+        open(ids.window, ids.project),
+        open(decodeWindowId(randomUUID()), ids.project),
+      ]);
+      expect(first).toEqual(second);
+      if (first.kind !== "project-conversation-opened") throw new Error("missing conversation");
+      expect(first.thread.id).not.toEqual(ids.thread);
+      expect(first.thread.messageWake).toBeUndefined();
+      expect(readCodeThreads(host.connection)).toHaveLength(2);
+      expect(projectReportsReader(host.connection).projectReports(ids.project)).toEqual([]);
+      const worker = thread({
+        id: decodeCodeThreadId(randomUUID()),
+        coordinatorThreadId: ids.thread,
+        title: "Fix updater retries",
+      });
+      const operationId = randomUUID();
+      const append = (
+        aggregateType: string,
+        aggregateId: string,
+        expectedVersion: number,
+        eventName: string,
+        payload: unknown,
+      ) =>
+        host.journal.append({
+          aggregate: { aggregateType, aggregateId },
+          expectedVersion,
+          events: [
+            {
+              eventId: randomUUID(),
+              eventName,
+              eventVersion: 1,
+              correlationId: randomUUID(),
+              actor: { kind: "system", actorId: ids.window },
+              occurredAt: now,
+              payload,
+            },
+          ],
+        });
+      append("code-thread", worker.id, 0, "code.thread-created@1", {
+        kind: "thread-created",
+        thread: worker,
+      });
+      const observe = (version: number, state: string) =>
+        append("code-runtime", operationId, version, "code.runtime-work-updated@1", {
+          kind: "runtime-work-updated",
+          work: {
+            id: operationId,
+            threadId: worker.id,
+            kind: "provider-turn",
+            state,
+            updatedAt: now,
+          },
+        });
+      const report = () =>
+        host.service.execute(ids.window, {
+          kind: "read-code-project-reports",
+          projectId: ids.project,
+        });
+      observe(0, "running");
+      expect(await report()).toEqual({ kind: "project-reports", reports: [] });
+      observe(1, "waiting");
+      const waiting = await report();
+      expect(waiting).toMatchObject({
+        kind: "project-reports",
+        reports: [{ workerId: worker.id, operationId, state: "waiting" }],
+      });
+      expect((await host.service.navigation(ids.window)).activity).toContainEqual(
+        expect.objectContaining({
+          threadId: first.thread.id,
+          projectReportSequence: expect.any(Number),
+        }),
+      );
+      await expect(
+        host.service.execute(ids.window, {
+          kind: "read-code-project-reports",
+          projectId: otherProject,
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+      await expect(open(ids.window, otherProject)).rejects.toMatchObject({
+        failure: { category: "unauthorized" },
+      });
+      host.access.canAccessProject.mockReturnValue(true);
+      const other = await open(ids.window, otherProject);
+      expect(other).toMatchObject({
+        kind: "project-conversation-opened",
+        thread: { id: expect.not.stringMatching(first.thread.id) },
+      });
+      host.connection.close();
+      host = openHost();
+      expect(
+        await host.service.execute(ids.window, {
+          kind: "open-code-project-conversation",
+          projectId: ids.project,
+        }),
+      ).toEqual(first);
+      expect(await report()).toEqual(waiting);
+      expect(readCodeThread(host.connection, ids.thread)?.coordinator).toBe(true);
+      for (const command of [
+        { kind: "mark-code-thread-done" },
+        { kind: "change-code-thread-lifecycle", lifecycle: "archived" },
+        { kind: "set-code-thread-coordinator", coordinator: false },
+      ]) {
+        await expect(
+          host.service.execute(ids.window, {
+            ...command,
+            threadId: first.thread.id,
+            expectedVersion: 1,
+          }),
+        ).rejects.toMatchObject({ failure: { category: "invalid" } });
+      }
+    } finally {
+      host.connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("prepares a paired device checkout and lists its thread without granting desktop workspace authority", async () => {
     const fixture = serviceFixture();
     const access = new CodeProjectAccess({
@@ -6949,6 +7140,7 @@ type ProviderInstanceReader = NonNullable<CodePersistencePort["readProviderInsta
 
 function serviceFixture(
   options: {
+    readonly uuid?: () => string;
     readonly workingFolderAllowed?: boolean;
     readonly moveHold?: (threadId: string) => boolean;
     readonly threads?: ReturnType<typeof thread>[];
@@ -6963,6 +7155,7 @@ function serviceFixture(
     readonly activity?: ReturnType<CodePersistencePort["readCodeThreadActivity"]>;
     readonly approve?: boolean;
     readonly project?: Project;
+    readonly reports?: ReturnType<typeof projectReportsReader>;
     readonly profiles?: ReadonlyArray<AgentProfile>;
     readonly profileScope?: AgentProfileScope;
     readonly sessionAuthority?: CodeSessionAuthorityStore;
@@ -7092,6 +7285,7 @@ function serviceFixture(
       : { readLatestFinishedReceipt: options.readLatestFinishedReceipt }),
     ...(options.putAwayWhenDone === undefined ? {} : { putAwayWhenDone: options.putAwayWhenDone }),
     ...(options.unfinishedWork === undefined ? {} : { unfinishedWork: options.unfinishedWork }),
+    ...options.reports,
     persistence: persistence as unknown as CodePersistencePort,
     access,
     checkouts,
@@ -7099,7 +7293,7 @@ function serviceFixture(
     files,
     tests,
     content,
-    uuid: () => "00000000-0000-4000-8000-000000001099",
+    uuid: options.uuid ?? (() => "00000000-0000-4000-8000-000000001099"),
     clock: options.clock ?? (() => now),
     workingDirectories,
     onWorkingDirectoryChanged,

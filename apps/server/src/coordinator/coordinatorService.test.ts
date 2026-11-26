@@ -300,6 +300,43 @@ describe("starting workers", () => {
     expect(h.hostTurns).toEqual([{ threadId: NEW_WORKER, prompt: "Find and fix it." }]);
   });
 
+  it("links distinct assignments to distinct workers and reuses the first after restart", async () => {
+    const h = harness();
+    const retries = {
+      ...startCall({ title: "Fix updater retries" }),
+      assignmentId: "50000000-0000-4000-8000-000000000081",
+    };
+    const notes = {
+      ...startCall({ title: "Draft release notes" }),
+      assignmentId: "50000000-0000-4000-8000-000000000082",
+    };
+    const [first, repeat, second] = await Promise.all([
+      h.service.start(retries),
+      h.service.start(retries),
+      h.service.start(notes),
+    ]);
+    expect(first.result).toMatchObject({
+      status: "started",
+      reference: expect.stringContaining(retries.assignmentId),
+    });
+    expect(repeat.result).toMatchObject({
+      status: "started",
+      reference: expect.stringContaining(retries.assignmentId),
+    });
+    expect(second.result).toMatchObject({
+      status: "started",
+      reference: expect.stringContaining(notes.assignmentId),
+    });
+    expect((await h.restart().start(retries)).result).toMatchObject({
+      status: "started",
+      reference: expect.stringContaining(retries.assignmentId),
+    });
+    expect(h.hostTurns.map((turn) => turn.threadId)).toEqual([
+      retries.assignmentId,
+      notes.assignmentId,
+    ]);
+  });
+
   it("starts a marked coordinator's worker marked and at the coordinator's Full access outside Strict", async () => {
     const h = harness();
     h.threads.set(
