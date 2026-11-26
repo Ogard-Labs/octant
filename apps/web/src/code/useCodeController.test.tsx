@@ -2870,6 +2870,46 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("takes the refresh warning down when a later change to the thread reads its history", async () => {
+    const first = deferred<void>();
+    const second = deferred<void>();
+    async function* changes(signal: AbortSignal) {
+      await first.promise;
+      yield {
+        threadId: ids.thread,
+        sequence: 2,
+        event: { kind: "thread-updated", thread: thread(2) },
+      } as never;
+      await second.promise;
+      yield {
+        threadId: ids.thread,
+        sequence: 3,
+        event: { kind: "thread-updated", thread: thread(3) },
+      } as never;
+      yield* idleStream(signal);
+    }
+    const client = fakeClient({
+      subscribe: vi.fn((_id, _cursor, signal) => changes(signal)),
+      thread: vi.fn(async () => view(1)),
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+
+    vi.mocked(client.thread).mockImplementation(async () => view(2));
+    vi.mocked(client.conversation).mockRejectedValueOnce(new Error("offline"));
+    first.resolve();
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+    );
+    vi.mocked(client.thread).mockImplementation(async () => view(3));
+    second.resolve();
+    await waitFor(() => expect(client.conversation).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(result.current.turnError).toBeUndefined());
+    unmount();
+  });
+
   it("keeps a fork's whole transcript when a later page of reading it again fails on a host read whole", async () => {
     const operationId = "70000000-0000-4000-8000-000000000010";
     const parentId = "10000000-0000-4000-8000-000000000099" as CodeThreadId;

@@ -2013,6 +2013,13 @@ export function useCodeController(options: CodeControllerOptions) {
         if (conversationOperationId !== undefined) {
           startConversationOperationStream(conversationOperationId);
         }
+        // A read of the thread that succeeds takes down the warning of one that failed.
+        const historyRead = () =>
+          setTurnError((current) =>
+            current === HISTORY_UNAVAILABLE_MESSAGE || current === HISTORY_UNREFRESHED_MESSAGE
+              ? undefined
+              : current,
+          );
         let conversationPoll: Promise<void> | undefined;
         const startConversationPoll = () => {
           if (conversationPoll !== undefined) return;
@@ -2070,9 +2077,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   // turn is on screen now, and the timed refresh that would
                   // otherwise report it may not run until the user has left.
                   void recordSeenActivity(threadId);
-                  setTurnError((current) =>
-                    current === HISTORY_UNREFRESHED_MESSAGE ? undefined : current,
-                  );
+                  historyRead();
                   return;
                 }
                 conversationCursor = hydrated.nextCursor ?? conversationCursor;
@@ -2117,11 +2122,7 @@ export function useCodeController(options: CodeControllerOptions) {
           if (unread) void readFirstInheritedPage();
           unread = false;
           setConversationHistory("loaded");
-          setTurnError((current) =>
-            current === HISTORY_UNAVAILABLE_MESSAGE || current === HISTORY_UNREFRESHED_MESSAGE
-              ? undefined
-              : current,
-          );
+          historyRead();
           if (hydrated.incomplete) startConversationPoll();
           if (hydrated.activeOperationId !== undefined) {
             startConversationOperationStream(hydrated.activeOperationId);
@@ -2293,6 +2294,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   conversationIncomplete = hydrated?.incomplete === true;
                   conversationOperationId = hydrated?.activeOperationId;
                   conversationCursor = hydrated?.nextCursor ?? conversationCursor;
+                  if (hydrated !== undefined) historyRead();
                   // The thread's state and its recorded turns were both
                   // re-read into the transcript, so the activity the host had
                   // reported by now has been read.
