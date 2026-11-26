@@ -183,10 +183,7 @@ import {
   refreshReviewedModelManifest,
   ReviewedModelManifest,
 } from "../providers/reviewedModelManifest";
-import {
-  AntigravityStatusLineBridge,
-  openAntigravityInteractiveTerminal,
-} from "../providers/antigravityStatusLineUsage";
+import { AntigravityStatusLineBridge } from "../providers/antigravityStatusLineUsage";
 import { ProviderUsageLimitsService } from "../providers/providerUsageLimitsService";
 import { unavailableLimitsReason } from "../providers/providerLimitsReporting";
 import { createProviderUsageLimitsRouteHandler } from "../providers/providerUsageLimitsRoutes";
@@ -2762,27 +2759,37 @@ export function wireProviders(deps: ProvidersDependencies) {
     void providerUsageLimitsService.refresh().catch(() => undefined);
     const providerUsageLimitsRoutes = createProviderUsageLimitsRouteHandler({
       service: providerUsageLimitsService,
-      antigravityStatusLine: {
-        status: () => antigravityStatusLineBridge.status(),
-        connect: async () => {
-          const status = antigravityStatusLineBridge.connect();
-          await providerUsageLimitsService.refresh({ onDemand: true }).catch(() => undefined);
-          return status;
+      limitsCapture: {
+        list: () => {
+          const captures: Record<
+            string,
+            ReturnType<
+              NonNullable<NonNullable<ProviderDriver["contextFacts"]>["limitsCapture"]>["status"]
+            >
+          > = {};
+          for (const instance of persistence.readProviderInstances()) {
+            if (!instance.enabled) continue;
+            try {
+              const driver = makeConfiguredProviderDriver(instance, configuredDriverOptions);
+              const capture = driver.contextFacts?.limitsCapture;
+              if (capture !== undefined) {
+                captures[String(instance.id)] = capture.status();
+              }
+            } catch {
+              continue;
+            }
+          }
+          return captures;
         },
-        disconnect: async () => {
-          const result = antigravityStatusLineBridge.disconnect();
-          await providerUsageLimitsService.refresh({ onDemand: true }).catch(() => undefined);
-          return result;
-        },
-        openTerminal: () => {
-          const antigravity = persistence
-            .readProviderInstances()
-            .find((candidate) => candidate.enabled && candidate.driverKind === "antigravity");
-          const binaryPath =
-            antigravity !== undefined && antigravity.driverKind === "antigravity"
-              ? antigravity.configuration.binaryPath
-              : "agy";
-          return openAntigravityInteractiveTerminal(binaryPath);
+        resolve: (instanceId) => {
+          const instance = persistence.readProviderInstance(instanceId);
+          if (instance === undefined || !instance.enabled) return undefined;
+          try {
+            return makeConfiguredProviderDriver(instance, configuredDriverOptions).contextFacts
+              ?.limitsCapture;
+          } catch {
+            return undefined;
+          }
         },
       },
       windowAuthorityStore,

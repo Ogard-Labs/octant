@@ -21,7 +21,12 @@ import type {
   UtcTimestamp,
 } from "@octant/contracts";
 import { planUsageWindowStatus } from "@octant/domain";
-import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
+import type {
+  ProviderContextFactsSource,
+  ProviderLimitsCaptureCapability,
+  ProviderLimitsCaptureRefreshResult,
+  ProviderLimitsCaptureStatus,
+} from "@octant/provider-sdk/context-facts";
 import { Effect } from "effect";
 import { accountUsageFailure, accountWindowLimits, isRecord } from "./accountUsageEndpoint";
 
@@ -365,7 +370,7 @@ export function antigravityStatusLineLimits(
  * Self-contained ESM helper executed by Antigravity CLI's documented
  * `statusLine` hook. Sanitizes stdin to only `quota` + `plan_tier`, writes the
  * local reading atomically (0600), and forwards stdin/stdout to any previously
- * configured `statusLine.command` (such as OpenQuota's bridge) within 4.5s.
+ * configured `statusLine.command` within 4.5s.
  */
 function buildBridgeScriptSource(readingPath: string, metadataPath: string): string {
   return `#!/usr/bin/env node
@@ -530,10 +535,13 @@ export class AntigravityStatusLineBridge {
   }
 
   #installedCommand(): string {
+    // Packaged desktop builds run the server through the Electron executable
+    // with ELECTRON_RUN_AS_NODE=1; preserve Node mode explicitly so interactive
+    // `agy` executes the helper script instead of launching the desktop app.
     if (process.platform === "win32") {
-      return `"${this.#nodeExecutable}" "${this.scriptPath}"`;
+      return `set ELECTRON_RUN_AS_NODE=1&& "${this.#nodeExecutable}" "${this.scriptPath}"`;
     }
-    return `${shellQuotePosix(this.#nodeExecutable)} ${shellQuotePosix(this.scriptPath)}`;
+    return `env ELECTRON_RUN_AS_NODE=1 ${shellQuotePosix(this.#nodeExecutable)} ${shellQuotePosix(this.scriptPath)}`;
   }
 
   #readMetadata(): BridgeMetadata | undefined {
@@ -601,7 +609,7 @@ export class AntigravityStatusLineBridge {
   /**
    * Reversibly installs Octant's status-line capture command in Antigravity
    * CLI's `settings.json`, chaining any active prior `statusLine.command`
-   * (such as OpenQuota or a custom script) and preserving all unrelated keys.
+   * and preserving all unrelated keys.
    */
   connect(): AntigravityStatusLineStatus {
     mkdirSync(this.#configDirectory, { recursive: true, mode: 0o700 });
@@ -776,13 +784,47 @@ export class AntigravityStatusLineBridge {
   }
 }
 
+function toCaptureStatus(status: AntigravityStatusLineStatus): ProviderLimitsCaptureStatus {
+  return {
+    connected: status.connected,
+    ...(status.recordedAt === undefined ? {} : { recordedAt: status.recordedAt }),
+    ...(status.planTier === undefined ? {} : { planTier: status.planTier }),
+    summary: "Antigravity CLI status line · shared Google AI quota",
+    disconnectedHint:
+      "Connect Antigravity CLI's official statusLine hook to read remaining quota when interactive agy runs.",
+    connectedHint: "Connected · open interactive agy in a terminal to capture remaining quota.",
+    connectLabel: "Connect status line",
+    refreshActionLabel: "Open agy in terminal",
+  };
+}
+
 export function makeAntigravityStatusLineUsageFacts(options: {
   readonly instanceId: ProviderInstanceId;
   readonly authentication?: AcpAgentAuthentication;
+  readonly binaryPath?: string;
   readonly bridge: AntigravityStatusLineBridge;
   readonly clock?: () => string;
 }): ProviderContextFactsSource {
   const clock = options.clock ?? (() => options.bridge.now());
+  const isPersonalSignIn =
+    options.authentication !== "api-key" && options.authentication !== "agent-platform";
+  const limitsCapture: ProviderLimitsCaptureCapability | undefined = isPersonalSignIn
+    ? {
+        status: () => toCaptureStatus(options.bridge.status()),
+        connect: async () => toCaptureStatus(options.bridge.connect()),
+        disconnect: async () => {
+          const result = options.bridge.disconnect();
+          return { restored: result.restored, status: toCaptureStatus(result.status) };
+        },
+        triggerRefresh: async (): Promise<ProviderLimitsCaptureRefreshResult> => {
+          const launched = openAntigravityInteractiveTerminal(options.binaryPath ?? "agy");
+          return {
+            launched: launched.opened,
+            ...(launched.message === undefined ? {} : { message: launched.message }),
+          };
+        },
+      }
+    : undefined;
   return {
     observeModelLimits: () => Effect.succeed([]),
     observeServiceLimits: ({ instanceId }) => {
@@ -791,7 +833,7 @@ export function makeAntigravityStatusLineUsageFacts(options: {
           accountUsageFailure("invalid-configuration", "Provider instance does not match."),
         );
       }
-      if (options.authentication === "api-key" || options.authentication === "agent-platform") {
+      if (!isPersonalSignIn) {
         return Effect.fail(
           accountUsageFailure(
             "unsupported",
@@ -820,6 +862,7 @@ export function makeAntigravityStatusLineUsageFacts(options: {
       }
       return Effect.succeed(limits);
     },
+    ...(limitsCapture === undefined ? {} : { limitsCapture }),
   };
 }
 

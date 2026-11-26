@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "../ui/icons";
 import type {
-  AntigravityStatusLineStatus,
+  ProviderLimitsCaptureStatus,
   ProviderUsageLimitsClient,
 } from "@octant/client-runtime/provider-usage-limits-client";
 import type {
@@ -19,6 +19,16 @@ import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { driverLabel } from "../providers/providerSettingsPresentation";
 import "../styles/usage.css";
 
+const CAPTURE_POLL_INTERVAL_MS = 2_000;
+const CAPTURE_POLL_DURATION_MS = 60_000;
+
+function entryReadingMarker(entry: ProviderUsageLimitsEntry | undefined): string | undefined {
+  if (entry === undefined) return undefined;
+  if (entry.status === "available") return `available:${entry.limits.updatedAt}`;
+  if (entry.status === "failed") return `failed:${entry.lastSuccessfulAt ?? entry.observedAt}`;
+  return undefined;
+}
+
 export function ProviderUsageLimitsPanel(props: {
   readonly client: ProviderUsageLimitsClient;
   readonly instances: ReadonlyArray<ProviderInstance>;
@@ -31,38 +41,36 @@ export function ProviderUsageLimitsPanel(props: {
     readonly busy: boolean;
   }>();
   const sequence = useRef(0);
+  const pollTimer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const current = reading?.client === props.client ? reading : undefined;
   const snapshot = current?.snapshot;
   const message = current?.message;
   const busy = current?.busy ?? true;
   const [now, setNow] = useState(Date.now);
-  const [agyStatus, setAgyStatus] = useState<AntigravityStatusLineStatus>();
-  const [agyBusy, setAgyBusy] = useState(false);
-  const [agyNotice, setAgyNotice] = useState<string>();
+  const [captures, setCaptures] = useState<Readonly<Record<string, ProviderLimitsCaptureStatus>>>(
+    {},
+  );
+  const [captureBusyId, setCaptureBusyId] = useState<string>();
+  const [captureNotices, setCaptureNotices] = useState<Readonly<Record<string, string>>>({});
   const names = useMemo(
     () => new Map(props.instances.map((instance) => [String(instance.id), instance])),
     [props.instances],
   );
-  const hasAntigravityPersonal = useMemo(
-    () =>
-      props.instances.some(
-        (instance) =>
-          instance.enabled &&
-          instance.driverKind === "antigravity" &&
-          instance.configuration.authentication !== "api-key" &&
-          instance.configuration.authentication !== "agent-platform",
-      ),
-    [props.instances],
-  );
-  const loadAgyStatus = useCallback(async () => {
-    if (!hasAntigravityPersonal || props.client.antigravityStatusLineStatus === undefined) return;
+  const stopCapturePoll = useCallback(() => {
+    if (pollTimer.current !== undefined) {
+      clearInterval(pollTimer.current);
+      pollTimer.current = undefined;
+    }
+  }, []);
+  const loadCaptures = useCallback(async () => {
+    if (props.client.listLimitsCaptures === undefined) return;
     try {
-      const next = await props.client.antigravityStatusLineStatus();
-      setAgyStatus(next);
+      const next = await props.client.listLimitsCaptures();
+      setCaptures(next);
     } catch {
       // Optional capability; ignore if unavailable.
     }
-  }, [hasAntigravityPersonal, props.client]);
+  }, [props.client]);
   const load = useCallback(
     async (refresh: boolean): Promise<void> => {
       const request = ++sequence.current;
@@ -78,7 +86,7 @@ export function ProviderUsageLimitsPanel(props: {
         if (request !== sequence.current) return;
         setNow(Date.now());
         setReading({ client: props.client, snapshot: next, busy: false });
-        void loadAgyStatus();
+        void loadCaptures();
       } catch {
         if (request !== sequence.current) return;
         setReading((previous) => ({
@@ -93,72 +101,141 @@ export function ProviderUsageLimitsPanel(props: {
         }));
       }
     },
-    [loadAgyStatus, props.client],
+    [loadCaptures, props.client],
   );
-  const handleConnectAntigravity = useCallback(async () => {
-    if (props.client.connectAntigravityStatusLine === undefined) return;
-    setAgyBusy(true);
-    setAgyNotice(undefined);
-    try {
-      const status = await props.client.connectAntigravityStatusLine();
-      setAgyStatus(status);
-      setAgyNotice(
-        "Status line connected. Open interactive agy in a terminal to capture a fresh reading.",
-      );
-      await load(true);
-    } catch (error) {
-      setAgyNotice(
-        error instanceof Error ? error.message : "Could not connect Antigravity status line.",
-      );
-    } finally {
-      setAgyBusy(false);
-    }
-  }, [load, props.client]);
-  const handleDisconnectAntigravity = useCallback(async () => {
-    if (props.client.disconnectAntigravityStatusLine === undefined) return;
-    setAgyBusy(true);
-    setAgyNotice(undefined);
-    try {
-      const result = await props.client.disconnectAntigravityStatusLine();
-      setAgyStatus(result.status);
-      setAgyNotice(
-        result.restored
-          ? "Antigravity status line disconnected and previous settings restored."
-          : "Antigravity status line disconnected.",
-      );
-      await load(true);
-    } catch (error) {
-      setAgyNotice(
-        error instanceof Error ? error.message : "Could not disconnect Antigravity status line.",
-      );
-    } finally {
-      setAgyBusy(false);
-    }
-  }, [load, props.client]);
-  const handleOpenAntigravityTerminal = useCallback(async () => {
-    if (props.client.openAntigravityTerminal === undefined) return;
-    setAgyBusy(true);
-    setAgyNotice(undefined);
-    try {
-      const result = await props.client.openAntigravityTerminal();
-      setAgyNotice(
-        result.opened
-          ? "Opened interactive agy in Terminal. Limits update automatically within seconds."
-          : (result.message ??
-              "Run interactive agy in a terminal to capture a fresh status-line reading."),
-      );
-    } catch (error) {
-      setAgyNotice(error instanceof Error ? error.message : "Could not open Antigravity terminal.");
-    } finally {
-      setAgyBusy(false);
-    }
-  }, [props.client]);
+  const startCapturePoll = useCallback(
+    (instanceId: string, baselineMarker: string | undefined) => {
+      stopCapturePoll();
+      const deadline = Date.now() + CAPTURE_POLL_DURATION_MS;
+      pollTimer.current = setInterval(() => {
+        if (Date.now() >= deadline) {
+          stopCapturePoll();
+          return;
+        }
+        const request = ++sequence.current;
+        void props.client
+          .list()
+          .then((next) => {
+            if (request !== sequence.current) return;
+            setNow(Date.now());
+            setReading({ client: props.client, snapshot: next, busy: false });
+            void loadCaptures();
+            const updatedEntry = next.entries.find(
+              (entry) => String(entry.providerInstanceId) === instanceId,
+            );
+            const nextMarker = entryReadingMarker(updatedEntry);
+            if (nextMarker !== undefined && nextMarker !== baselineMarker) {
+              stopCapturePoll();
+              setCaptureNotices((prev) => ({
+                ...prev,
+                [instanceId]: "Updated limits received.",
+              }));
+            }
+          })
+          .catch(() => undefined);
+      }, CAPTURE_POLL_INTERVAL_MS);
+    },
+    [loadCaptures, props.client, stopCapturePoll],
+  );
+  const handleConnectCapture = useCallback(
+    async (instanceId: string) => {
+      if (props.client.connectLimitsCapture === undefined) return;
+      stopCapturePoll();
+      setCaptureBusyId(instanceId);
+      setCaptureNotices((prev) => {
+        const { [instanceId]: _removed, ...rest } = prev;
+        return rest;
+      });
+      try {
+        const status = await props.client.connectLimitsCapture(instanceId);
+        setCaptures((prev) => ({ ...prev, [instanceId]: status }));
+        setCaptureNotices((prev) => ({ ...prev, [instanceId]: status.connectedHint }));
+        await load(true);
+      } catch (error) {
+        setCaptureNotices((prev) => ({
+          ...prev,
+          [instanceId]:
+            error instanceof Error ? error.message : "Could not connect local limits capture.",
+        }));
+      } finally {
+        setCaptureBusyId(undefined);
+      }
+    },
+    [load, props.client, stopCapturePoll],
+  );
+  const handleDisconnectCapture = useCallback(
+    async (instanceId: string) => {
+      if (props.client.disconnectLimitsCapture === undefined) return;
+      stopCapturePoll();
+      setCaptureBusyId(instanceId);
+      setCaptureNotices((prev) => {
+        const { [instanceId]: _removed, ...rest } = prev;
+        return rest;
+      });
+      try {
+        const result = await props.client.disconnectLimitsCapture(instanceId);
+        setCaptures((prev) => ({ ...prev, [instanceId]: result.status }));
+        setCaptureNotices((prev) => ({
+          ...prev,
+          [instanceId]: result.restored
+            ? "Status line disconnected and previous settings restored."
+            : "Status line disconnected.",
+        }));
+        await load(true);
+      } catch (error) {
+        setCaptureNotices((prev) => ({
+          ...prev,
+          [instanceId]:
+            error instanceof Error ? error.message : "Could not disconnect local limits capture.",
+        }));
+      } finally {
+        setCaptureBusyId(undefined);
+      }
+    },
+    [load, props.client, stopCapturePoll],
+  );
+  const handleTriggerCaptureRefresh = useCallback(
+    async (instanceId: string, entry: ProviderUsageLimitsEntry) => {
+      if (props.client.triggerLimitsCaptureRefresh === undefined) return;
+      setCaptureBusyId(instanceId);
+      setCaptureNotices((prev) => {
+        const { [instanceId]: _removed, ...rest } = prev;
+        return rest;
+      });
+      try {
+        const result = await props.client.triggerLimitsCaptureRefresh(instanceId);
+        if (result.launched) {
+          setCaptureNotices((prev) => ({
+            ...prev,
+            [instanceId]: "Opened interactive terminal. Waiting for fresh limits…",
+          }));
+          startCapturePoll(instanceId, entryReadingMarker(entry));
+        } else {
+          setCaptureNotices((prev) => ({
+            ...prev,
+            [instanceId]:
+              result.message ?? "Run the provider CLI interactively in a terminal to refresh.",
+          }));
+        }
+      } catch (error) {
+        setCaptureNotices((prev) => ({
+          ...prev,
+          [instanceId]:
+            error instanceof Error ? error.message : "Could not launch interactive refresh.",
+        }));
+      } finally {
+        setCaptureBusyId(undefined);
+      }
+    },
+    [props.client, startCapturePoll],
+  );
   useEffect(() => {
     void load(false);
     return () => {
       sequence.current += 1;
+      stopCapturePoll();
     };
-  }, [load]);
+  }, [load, stopCapturePoll]);
   useEffect(() => {
     const resets =
       snapshot?.entries
@@ -188,23 +265,14 @@ export function ProviderUsageLimitsPanel(props: {
   }, [snapshot, now]);
 
   const visible = snapshot?.entries.filter((entry) => names.has(String(entry.providerInstanceId)));
-  const isAntigravityInteractiveRow = (entry: ProviderUsageLimitsEntry): boolean => {
-    if (props.client.connectAntigravityStatusLine === undefined) return false;
-    const instance = names.get(String(entry.providerInstanceId));
-    return (
-      instance !== undefined &&
-      instance.enabled &&
-      instance.driverKind === "antigravity" &&
-      instance.configuration.authentication !== "api-key" &&
-      instance.configuration.authentication !== "agent-platform"
-    );
-  };
+  const captureFor = (entry: ProviderUsageLimitsEntry): ProviderLimitsCaptureStatus | undefined =>
+    captures[String(entry.providerInstanceId)];
   // Providers that cannot report limits collapse into one closing row instead
   // of a wall of identical cards; the runtime's reason still names each.
   const unavailable =
     visible?.filter(
       (entry): entry is Extract<ProviderUsageLimitsEntry, { status: "unavailable" }> =>
-        entry.status === "unavailable" && !isAntigravityInteractiveRow(entry),
+        entry.status === "unavailable" && captureFor(entry) === undefined,
     ) ?? [];
   const body = (
     <>
@@ -226,18 +294,18 @@ export function ProviderUsageLimitsPanel(props: {
       {visible === undefined || visible.length === 0 ? null : (
         <ul className="surface-list provider-limits__list">
           {visible.map((entry) => {
-            const antigravityRow = isAntigravityInteractiveRow(entry);
-            if (entry.status === "unavailable" && !antigravityRow) return null;
-            const instance = names.get(String(entry.providerInstanceId));
+            const instanceId = String(entry.providerInstanceId);
+            const capture = captureFor(entry);
+            if (entry.status === "unavailable" && capture === undefined) return null;
+            const instance = names.get(instanceId);
             const scopeDetail =
-              antigravityRow && agyStatus?.planTier !== undefined
-                ? `${agyStatus.planTier} · ${limitScope(entry)}`
+              capture?.planTier !== undefined
+                ? `${capture.planTier} · ${limitScope(entry)}`
                 : limitScope(entry);
+            const captureBusy = captureBusyId === instanceId;
+            const captureNotice = captureNotices[instanceId];
             return (
-              <li
-                className="surface-row provider-limits__row"
-                key={String(entry.providerInstanceId)}
-              >
+              <li className="surface-row provider-limits__row" key={instanceId}>
                 <div className="surface-row__copy">
                   <span className="provider-limits__identity">
                     {instance === undefined ? null : (
@@ -250,18 +318,16 @@ export function ProviderUsageLimitsPanel(props: {
                     <span className="oct-row-label">{instance?.displayName ?? "Provider"}</span>
                   </span>
                   <span className="oct-row-detail">
-                    {entry.status === "unavailable" && antigravityRow
-                      ? "Antigravity CLI status line · shared Google AI quota"
+                    {entry.status === "unavailable" && capture !== undefined
+                      ? capture.summary
                       : scopeDetail}
                   </span>
                 </div>
                 <div className="surface-row__control">
                   <div className="provider-limits__details">
-                    {entry.status === "unavailable" && antigravityRow ? (
+                    {entry.status === "unavailable" && capture !== undefined ? (
                       <p className="provider-limits__state">
-                        {agyStatus?.connected === true
-                          ? "Connected · open interactive agy in a terminal to capture remaining quota."
-                          : "Connect Antigravity CLI's official statusLine hook to read remaining quota when interactive agy runs."}
+                        {capture.connected ? capture.connectedHint : capture.disconnectedHint}
                       </p>
                     ) : (
                       <EntryDetails
@@ -272,45 +338,50 @@ export function ProviderUsageLimitsPanel(props: {
                         }
                       />
                     )}
-                    {!antigravityRow ? null : (
+                    {capture === undefined ? null : (
                       <div className="provider-limits__actions">
-                        {agyStatus?.connected === true ? (
+                        {capture.connected ? (
                           <>
-                            <OctantButton
-                              disabled={agyBusy}
-                              onClick={() => void handleOpenAntigravityTerminal()}
-                              size="sm"
-                              type="button"
-                              variant="ghost"
-                            >
-                              Open agy in terminal
-                            </OctantButton>
-                            <OctantButton
-                              disabled={agyBusy}
-                              onClick={() => void handleDisconnectAntigravity()}
-                              size="sm"
-                              type="button"
-                              variant="ghost"
-                            >
-                              Disconnect
-                            </OctantButton>
+                            {capture.refreshActionLabel === undefined ||
+                            props.client.triggerLimitsCaptureRefresh === undefined ? null : (
+                              <OctantButton
+                                disabled={captureBusy}
+                                onClick={() => void handleTriggerCaptureRefresh(instanceId, entry)}
+                                size="sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                {capture.refreshActionLabel}
+                              </OctantButton>
+                            )}
+                            {props.client.disconnectLimitsCapture === undefined ? null : (
+                              <OctantButton
+                                disabled={captureBusy}
+                                onClick={() => void handleDisconnectCapture(instanceId)}
+                                size="sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                Disconnect
+                              </OctantButton>
+                            )}
                           </>
-                        ) : (
+                        ) : props.client.connectLimitsCapture === undefined ? null : (
                           <OctantButton
-                            disabled={agyBusy}
-                            onClick={() => void handleConnectAntigravity()}
+                            disabled={captureBusy}
+                            onClick={() => void handleConnectCapture(instanceId)}
                             size="sm"
                             type="button"
                             variant="ghost"
                           >
-                            Connect status line
+                            {capture.connectLabel}
                           </OctantButton>
                         )}
                       </div>
                     )}
-                    {!antigravityRow || agyNotice === undefined ? null : (
+                    {captureNotice === undefined ? null : (
                       <p className="provider-limits__updated" role="status">
-                        {agyNotice}
+                        {captureNotice}
                       </p>
                     )}
                   </div>

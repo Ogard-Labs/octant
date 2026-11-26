@@ -197,6 +197,7 @@ export function makeProviderDriver(
         ...driver,
         contextFacts: makeAntigravityStatusLineUsageFacts({
           instanceId: instance.id,
+          binaryPath: configuration.binaryPath,
           ...(configuration.authentication === undefined
             ? {}
             : { authentication: configuration.authentication }),

@@ -88,6 +88,38 @@ export interface ProviderLocalUsageHistorySource {
   >;
 }
 
+export interface ProviderLimitsCaptureStatus {
+  readonly connected: boolean;
+  readonly recordedAt?: UtcTimestamp;
+  readonly planTier?: string;
+  readonly summary: string;
+  readonly disconnectedHint: string;
+  readonly connectedHint: string;
+  readonly connectLabel: string;
+  readonly refreshActionLabel?: string;
+}
+
+export interface ProviderLimitsCaptureRefreshResult {
+  readonly launched: boolean;
+  readonly message?: string;
+}
+
+/**
+ * Optional provider-owned opt-in local capture capability (for example, a
+ * CLI's documented status-line hook). Any built-in or plugin driver may
+ * implement it; the host exposes connect, disconnect, and manual refresh
+ * generically by provider instance id with no vendor-specific routing.
+ */
+export interface ProviderLimitsCaptureCapability {
+  readonly status: () => ProviderLimitsCaptureStatus;
+  readonly connect: () => Promise<ProviderLimitsCaptureStatus>;
+  readonly disconnect: () => Promise<{
+    readonly restored: boolean;
+    readonly status: ProviderLimitsCaptureStatus;
+  }>;
+  readonly triggerRefresh?: () => Promise<ProviderLimitsCaptureRefreshResult>;
+}
+
 export interface ProviderContextFactsSource {
   readonly observeModelLimits: (
     input: ProviderContextFactsInput,
@@ -95,6 +127,7 @@ export interface ProviderContextFactsSource {
   readonly observeServiceLimits: (
     input: ProviderContextFactsInput,
   ) => Effect.Effect<ProviderServiceLimits, ProviderFailure, Scope.Scope>;
+  readonly limitsCapture?: ProviderLimitsCaptureCapability;
 }
 
 export class ProviderContextFactsRejected extends Error {

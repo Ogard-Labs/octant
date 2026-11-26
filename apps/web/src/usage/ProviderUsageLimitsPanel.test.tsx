@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -658,83 +658,117 @@ describe("ProviderUsageLimitsPanel", () => {
     expect(screen.getAllByText(/Resets in /).length).toBeGreaterThanOrEqual(2);
   });
 
-  it("renders Antigravity status-line windows with Gemini and Claude & GPT labels and connect/terminal controls", async () => {
-    const agyId = "33333333-3333-4333-8333-333333333333" as ProviderInstanceId;
-    const agyInstance = {
-      id: agyId,
-      displayName: "Google Antigravity",
-      driverKind: "antigravity",
-      enabled: true,
-      environmentPolicy: "inherit-host",
-      configuration: { kind: "antigravity-acp", binaryPath: "/usr/local/bin/agy" },
-      version: 1,
-      createdAt: "2026-08-23T12:00:00.000Z",
-      updatedAt: "2026-08-23T12:00:00.000Z",
-    } as ProviderInstance;
-    const data = decodeProviderUsageLimitsSnapshot({
-      version: 1,
-      refreshedAt: "2026-08-23T12:00:00.000Z",
-      entries: [
-        {
-          providerInstanceId: agyId,
-          status: "available",
-          source: "provider-runtime",
-          observedAt: "2026-08-23T12:00:00.000Z",
-          limits: {
-            providerInstanceId: agyId,
-            scope: "account",
-            requests: { status: "unavailable" },
-            tokens: { status: "unavailable" },
-            concurrency: { status: "unavailable" },
-            retry: { status: "inactive" },
-            quota: "available",
-            source: "runtime-reported",
-            confidence: "high",
-            updatedAt: "2026-08-23T12:00:00.000Z",
-            rateLimitWindows: [
-              {
-                window: "gemini:five_hour",
-                status: "allowed",
-                utilization: 0.04,
-                resetsAt: "2026-08-23T14:00:00.000Z",
-                observedAt: "2026-08-23T12:00:00.000Z",
+  it("renders provider-neutral capture controls, Gemini and Claude & GPT labels, and reloads automatically after launching interactive refresh", async () => {
+    vi.useFakeTimers({ now: new Date("2026-08-23T12:00:00.000Z") });
+    try {
+      const agyId = "33333333-3333-4333-8333-333333333333" as ProviderInstanceId;
+      const agyInstance = {
+        id: agyId,
+        displayName: "Google Antigravity",
+        driverKind: "antigravity",
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        configuration: { kind: "antigravity-acp", binaryPath: "/usr/local/bin/agy" },
+        version: 1,
+        createdAt: "2026-08-23T12:00:00.000Z",
+        updatedAt: "2026-08-23T12:00:00.000Z",
+      } as ProviderInstance;
+      const makeSnapshot = (updatedAt: string, utilization: number) =>
+        decodeProviderUsageLimitsSnapshot({
+          version: 1,
+          refreshedAt: updatedAt,
+          entries: [
+            {
+              providerInstanceId: agyId,
+              status: "available",
+              source: "provider-runtime",
+              observedAt: updatedAt,
+              limits: {
+                providerInstanceId: agyId,
+                scope: "account",
+                requests: { status: "unavailable" },
+                tokens: { status: "unavailable" },
+                concurrency: { status: "unavailable" },
+                retry: { status: "inactive" },
+                quota: "available",
+                source: "runtime-reported",
+                confidence: "high",
+                updatedAt,
+                rateLimitWindows: [
+                  {
+                    window: "gemini:five_hour",
+                    status: "allowed",
+                    utilization,
+                    resetsAt: "2026-08-23T14:00:00.000Z",
+                    observedAt: updatedAt,
+                  },
+                  {
+                    window: "claude_gpt:seven_day",
+                    status: "allowed",
+                    utilization: 0,
+                    observedAt: updatedAt,
+                  },
+                ],
               },
-              {
-                window: "claude_gpt:seven_day",
-                status: "allowed",
-                utilization: 0,
-                observedAt: "2026-08-23T12:00:00.000Z",
-              },
-            ],
-          },
-        },
-      ],
-    });
-    const openTerminal = vi.fn(async () => ({ opened: true }));
-    const disconnect = vi.fn(async () => ({ restored: true, status: { connected: false } }));
-    render(
-      <ProviderUsageLimitsPanel
-        client={{
-          list: async () => data,
-          refresh: async () => data,
-          antigravityStatusLineStatus: async () => ({
-            connected: true,
-            planTier: "Google AI Ultra",
-          }),
-          connectAntigravityStatusLine: async () => ({ connected: true }),
-          disconnectAntigravityStatusLine: disconnect,
-          openAntigravityTerminal: openTerminal,
-        }}
-        instances={[agyInstance]}
-      />,
-    );
-    expect(await screen.findByText("Gemini · 5-hour window")).toBeVisible();
-    expect(screen.getByText("Claude & GPT · 7-day window")).toBeVisible();
-    expect(screen.getByText(/Google AI Ultra/)).toBeVisible();
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Open agy in terminal" }));
-    expect(openTerminal).toHaveBeenCalledOnce();
-    await user.click(screen.getByRole("button", { name: "Disconnect" }));
-    expect(disconnect).toHaveBeenCalledOnce();
+            },
+          ],
+        });
+      const initial = makeSnapshot("2026-08-23T12:00:00.000Z", 0.04);
+      const updated = makeSnapshot("2026-08-23T12:00:03.000Z", 0.1);
+      let listCalls = 0;
+      const list = vi.fn(async () => (++listCalls >= 2 ? updated : initial));
+      const triggerRefresh = vi.fn(async () => ({ launched: true }));
+      const captureStatus = {
+        connected: true,
+        planTier: "Google AI Ultra",
+        summary: "Antigravity CLI status line · shared Google AI quota",
+        disconnectedHint: "Connect hook.",
+        connectedHint: "Connected.",
+        connectLabel: "Connect status line",
+        refreshActionLabel: "Open agy in terminal",
+      };
+      const disconnect = vi.fn(async () => ({
+        restored: true,
+        status: { ...captureStatus, connected: false },
+      }));
+      await act(async () => {
+        render(
+          <ProviderUsageLimitsPanel
+            client={{
+              list,
+              refresh: async () => updated,
+              listLimitsCaptures: async () => ({ [String(agyId)]: captureStatus }),
+              connectLimitsCapture: async () => captureStatus,
+              disconnectLimitsCapture: disconnect,
+              triggerLimitsCaptureRefresh: triggerRefresh,
+            }}
+            instances={[agyInstance]}
+          />,
+        );
+      });
+      expect(screen.getByText("Gemini · 5-hour window")).toBeVisible();
+      expect(screen.getByText("Claude & GPT · 7-day window")).toBeVisible();
+      expect(screen.getByText("96% left")).toBeVisible();
+      expect(screen.getByText(/Google AI Ultra/)).toBeVisible();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Open agy in terminal" }));
+      });
+      expect(triggerRefresh).toHaveBeenCalledExactlyOnceWith(String(agyId));
+
+      // Advance past the 2s poll interval so the panel automatically picks up the fresh snapshot.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_100);
+      });
+      expect(screen.getByText("90% left")).toBeVisible();
+      expect(screen.getByText("Updated limits received.")).toBeVisible();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+      });
+      expect(disconnect).toHaveBeenCalledExactlyOnceWith(String(agyId));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -2,27 +2,36 @@ import { ProviderUsageLimitsSnapshot } from "@octant/contracts/provider-usage-li
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
-export interface AntigravityStatusLineStatus {
+export interface ProviderLimitsCaptureStatus {
   readonly connected: boolean;
   readonly recordedAt?: string;
   readonly planTier?: string;
+  readonly summary: string;
+  readonly disconnectedHint: string;
+  readonly connectedHint: string;
+  readonly connectLabel: string;
+  readonly refreshActionLabel?: string;
 }
 
-export interface AntigravityTerminalLaunchResult {
-  readonly opened: boolean;
+export interface ProviderLimitsCaptureRefreshResult {
+  readonly launched: boolean;
   readonly message?: string;
 }
 
 export interface ProviderUsageLimitsClient {
   readonly list: () => Promise<ProviderUsageLimitsSnapshot>;
   readonly refresh: () => Promise<ProviderUsageLimitsSnapshot>;
-  readonly antigravityStatusLineStatus?: () => Promise<AntigravityStatusLineStatus>;
-  readonly connectAntigravityStatusLine?: () => Promise<AntigravityStatusLineStatus>;
-  readonly disconnectAntigravityStatusLine?: () => Promise<{
+  readonly listLimitsCaptures?: () => Promise<
+    Readonly<Record<string, ProviderLimitsCaptureStatus>>
+  >;
+  readonly connectLimitsCapture?: (instanceId: string) => Promise<ProviderLimitsCaptureStatus>;
+  readonly disconnectLimitsCapture?: (instanceId: string) => Promise<{
     readonly restored: boolean;
-    readonly status: AntigravityStatusLineStatus;
+    readonly status: ProviderLimitsCaptureStatus;
   }>;
-  readonly openAntigravityTerminal?: () => Promise<AntigravityTerminalLaunchResult>;
+  readonly triggerLimitsCaptureRefresh?: (
+    instanceId: string,
+  ) => Promise<ProviderLimitsCaptureRefreshResult>;
 }
 
 export class ProviderUsageLimitsClientFailure extends Error {
@@ -93,28 +102,29 @@ export function createProviderUsageLimitsClient(options: {
   return {
     list: () => request("/api/provider-usage-limits", "GET"),
     refresh: () => request("/api/provider-usage-limits/refresh", "POST"),
-    antigravityStatusLineStatus: () =>
+    listLimitsCaptures: async () => {
+      const body = (await requestJson("/api/provider-usage-limits/capture", "GET")) as {
+        readonly captures?: Readonly<Record<string, ProviderLimitsCaptureStatus>>;
+      };
+      return body.captures ?? {};
+    },
+    connectLimitsCapture: (instanceId) =>
       requestJson(
-        "/api/provider-usage-limits/antigravity-statusline",
-        "GET",
-      ) as Promise<AntigravityStatusLineStatus>,
-    connectAntigravityStatusLine: () =>
-      requestJson(
-        "/api/provider-usage-limits/antigravity-statusline/connect",
+        `/api/provider-usage-limits/capture/${encodeURIComponent(instanceId)}/connect`,
         "POST",
-      ) as Promise<AntigravityStatusLineStatus>,
-    disconnectAntigravityStatusLine: () =>
+      ) as Promise<ProviderLimitsCaptureStatus>,
+    disconnectLimitsCapture: (instanceId) =>
       requestJson(
-        "/api/provider-usage-limits/antigravity-statusline/disconnect",
+        `/api/provider-usage-limits/capture/${encodeURIComponent(instanceId)}/disconnect`,
         "POST",
       ) as Promise<{
         readonly restored: boolean;
-        readonly status: AntigravityStatusLineStatus;
+        readonly status: ProviderLimitsCaptureStatus;
       }>,
-    openAntigravityTerminal: () =>
+    triggerLimitsCaptureRefresh: (instanceId) =>
       requestJson(
-        "/api/provider-usage-limits/antigravity-statusline/open-terminal",
+        `/api/provider-usage-limits/capture/${encodeURIComponent(instanceId)}/trigger-refresh`,
         "POST",
-      ) as Promise<AntigravityTerminalLaunchResult>,
+      ) as Promise<ProviderLimitsCaptureRefreshResult>,
   };
 }

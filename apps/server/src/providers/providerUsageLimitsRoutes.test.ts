@@ -109,61 +109,84 @@ describe("provider usage limit routes", () => {
     expect(refresh).toHaveBeenCalledOnce();
   });
 
-  it("authenticates Antigravity status-line status, connect, disconnect, and open-terminal actions", async () => {
-    const agy = {
-      status: vi.fn(() => ({ connected: false })),
-      connect: vi.fn(async () => ({ connected: true })),
-      disconnect: vi.fn(async () => ({ restored: true, status: { connected: false } })),
-      openTerminal: vi.fn(() => ({ opened: true })),
+  it("authenticates provider-neutral limits capture list, connect, disconnect, and trigger-refresh actions", async () => {
+    const instanceId = "11111111-1111-4111-8111-111111111111";
+    const baseStatus = {
+      connected: false,
+      summary: "CLI status line",
+      disconnectedHint: "Connect to capture.",
+      connectedHint: "Connected.",
+      connectLabel: "Connect status line",
+      refreshActionLabel: "Open terminal",
+    };
+    const capabilityPort = {
+      status: vi.fn(() => baseStatus),
+      connect: vi.fn(async () => ({ ...baseStatus, connected: true })),
+      disconnect: vi.fn(async () => ({ restored: true, status: baseStatus })),
+      triggerRefresh: vi.fn(async () => ({ launched: true })),
     };
     const store = new WindowAuthorityStore();
     store.register({ windowId, capability, now: 0 });
+    const refresh = vi.fn(async () => snapshot);
     const route = createProviderUsageLimitsRouteHandler({
-      service: { snapshot: vi.fn(() => snapshot), refresh: vi.fn(async () => snapshot) },
-      antigravityStatusLine: agy,
+      service: { snapshot: vi.fn(() => snapshot), refresh },
+      limitsCapture: {
+        list: () => ({ [instanceId]: baseStatus }),
+        resolve: (id) => (String(id) === instanceId ? capabilityPort : undefined),
+      },
       windowAuthorityStore: store,
       now: () => 1,
     });
     const headers = { "x-octant-window-capability": capability };
 
-    const statusResp = await route(
-      new Request("http://127.0.0.1/api/provider-usage-limits/antigravity-statusline", { headers }),
+    const listResp = await route(
+      new Request("http://127.0.0.1/api/provider-usage-limits/capture", { headers }),
     );
-    expect(statusResp?.status).toBe(200);
-    expect(await statusResp?.json()).toEqual({ connected: false });
+    expect(listResp?.status).toBe(200);
+    expect(await listResp?.json()).toEqual({ captures: { [instanceId]: baseStatus } });
 
     const connectResp = await route(
-      new Request("http://127.0.0.1/api/provider-usage-limits/antigravity-statusline/connect", {
+      new Request(`http://127.0.0.1/api/provider-usage-limits/capture/${instanceId}/connect`, {
         method: "POST",
         headers,
       }),
     );
     expect(connectResp?.status).toBe(200);
-    expect(await connectResp?.json()).toEqual({ connected: true });
+    expect(await connectResp?.json()).toEqual({ ...baseStatus, connected: true });
 
-    const terminalResp = await route(
+    const triggerResp = await route(
       new Request(
-        "http://127.0.0.1/api/provider-usage-limits/antigravity-statusline/open-terminal",
+        `http://127.0.0.1/api/provider-usage-limits/capture/${instanceId}/trigger-refresh`,
         { method: "POST", headers },
       ),
     );
-    expect(terminalResp?.status).toBe(200);
-    expect(await terminalResp?.json()).toEqual({ opened: true });
+    expect(triggerResp?.status).toBe(200);
+    expect(await triggerResp?.json()).toEqual({ launched: true });
 
     const disconnectResp = await route(
-      new Request("http://127.0.0.1/api/provider-usage-limits/antigravity-statusline/disconnect", {
+      new Request(`http://127.0.0.1/api/provider-usage-limits/capture/${instanceId}/disconnect`, {
         method: "POST",
         headers,
       }),
     );
     expect(disconnectResp?.status).toBe(200);
-    expect(await disconnectResp?.json()).toEqual({ restored: true, status: { connected: false } });
+    expect(await disconnectResp?.json()).toEqual({ restored: true, status: baseStatus });
 
-    // Wrong method and missing auth fail closed.
+    // Unknown instance, wrong method, and missing auth fail closed.
     expect(
       (
         await route(
-          new Request("http://127.0.0.1/api/provider-usage-limits/antigravity-statusline/connect", {
+          new Request(
+            "http://127.0.0.1/api/provider-usage-limits/capture/22222222-2222-4222-8222-222222222222/connect",
+            { method: "POST", headers },
+          ),
+        )
+      )?.status,
+    ).toBe(404);
+    expect(
+      (
+        await route(
+          new Request(`http://127.0.0.1/api/provider-usage-limits/capture/${instanceId}/connect`, {
             method: "GET",
             headers,
           }),
@@ -173,7 +196,7 @@ describe("provider usage limit routes", () => {
     expect(
       (
         await route(
-          new Request("http://127.0.0.1/api/provider-usage-limits/antigravity-statusline/connect", {
+          new Request(`http://127.0.0.1/api/provider-usage-limits/capture/${instanceId}/connect`, {
             method: "POST",
           }),
         )

@@ -139,7 +139,7 @@ describe("antigravity status-line usage", () => {
       nodeExecutable: process.execPath,
     });
 
-    // Seed an existing active statusLine (e.g., OpenQuota or custom script) and unrelated settings.
+    // Seed an existing active statusLine (e.g., a user-configured script) and unrelated settings.
     writeFileSync(join(root, "chained.sh"), "#!/bin/sh\ncat >/dev/null\nprintf 'CHAINED_OK'\n", {
       mode: 0o755,
     });
@@ -165,6 +165,7 @@ describe("antigravity status-line usage", () => {
     };
     expect(edited.theme).toBe("dark");
     expect(edited.statusLine.enabled).toBe(true);
+    expect(edited.statusLine.command).toContain("ELECTRON_RUN_AS_NODE=1");
     expect(edited.statusLine.command).toContain("antigravity-statusline-bridge.mjs");
 
     // Execute the installed bridge script directly, simulating `agy` piping statusLine JSON.
@@ -273,6 +274,7 @@ describe("antigravity status-line usage", () => {
       authentication: "api-key",
       bridge,
     });
+    expect(apiKeyFacts.limitsCapture).toBeUndefined();
     const apiKeyResult = await Effect.runPromise(
       Effect.scoped(Effect.either(apiKeyFacts.observeServiceLimits({ instanceId }))),
     );
@@ -284,6 +286,7 @@ describe("antigravity status-line usage", () => {
       authentication: "provider-owned",
       bridge,
     });
+    expect(personalFacts.limitsCapture?.status().connected).toBe(false);
     const beforeReading = await Effect.runPromise(
       Effect.scoped(Effect.either(personalFacts.observeServiceLimits({ instanceId }))),
     );
