@@ -232,6 +232,7 @@ import { HubVisitorService } from "../hub/hubVisitorService";
 import { SpokeVisitorService } from "../hub/spokeVisitorService";
 import { askVisitorSpoke, spokeVisitorHubPort } from "../hub/visitorLinks";
 import { visitorThreadSource } from "../hub/visitorThreadSources";
+import { visitorViewer } from "../hub/visitorViewer";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { SpokeWakeService } from "../hub/spokeWakeService";
 import { createUdpWakeOnLanPort } from "../hub/wakeOnLan";
@@ -1426,6 +1427,7 @@ export function wireRemote(deps: RemoteDependencies) {
         spokeMemberId,
         request,
       ),
+    viewer: visitorViewer(),
     record: recordHubMembership,
     now: Date.now,
   });

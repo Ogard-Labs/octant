@@ -12,6 +12,7 @@ import { publicKeyFingerprint } from "./hubCrypto";
 import { HubVisitorService } from "./hubVisitorService";
 import type { PublicAnswer, PublicRequest, PublicRouteName } from "./publicEntrance";
 import { SpokeVisitorService } from "./spokeVisitorService";
+import { visitorViewer } from "./visitorViewer";
 
 const SPOKE = "11111111-1111-4111-8111-111111111111" as HubMemberId;
 const HUB = "22222222-2222-4222-8222-222222222222";
@@ -416,5 +417,55 @@ describe("visitor links on the hub", () => {
     const latest = await reader.read();
     expect(decoder.decode(latest.value)).toContain("Edit 10");
     await reader.cancel();
+  });
+});
+
+describe("the viewer page", () => {
+  it("is the same for every link, names only its own assets, and writes thread text as text", () => {
+    const viewer = visitorViewer();
+    expect(viewer.page).not.toMatch(/<script>[^<]/);
+    for (const name of viewer.assets.keys()) {
+      expect(name).toMatch(/^[0-9a-f]{16}\.(js|css)$/);
+      expect(viewer.page).toContain(`/v/_/${name}`);
+    }
+    const script = [...viewer.assets.values()].find((asset) =>
+      asset.type.startsWith("text/javascript"),
+    );
+    expect(script?.body).toContain("textContent");
+    expect(script?.body).not.toContain("innerHTML");
+    expect(script?.body).toContain('generateKey({ name: "ECDSA", namedCurve: "P-256" }, false');
+    // The comment form is hidden by default; a display rule on it must not
+    // override that, or a read-only link would show a comment box.
+    const style = [...viewer.assets.values()].find((asset) => asset.type.startsWith("text/css"));
+    expect(style?.body).toContain("[hidden] { display: none !important; }");
+    expect(viewer.page).toMatch(/<form id="comment"[^>]*hidden/);
+  });
+
+  it("serves only the viewer's own assets, with no inline script on the page", async () => {
+    const context = world();
+    const viewer = visitorViewer();
+    const hub = new HubVisitorService({
+      state: memoryState({ visitorHub: { enabled: true, grants: [] } }),
+      serving: () => true,
+      hubMemberId: () => HUB,
+      rosterFingerprintFor: () => undefined,
+      ask: async (_spoke, fetched) => context.spoke.fetch(fetched, HUB),
+      record: () => undefined,
+      now: () => NOW,
+      viewer,
+    });
+    const handlers = hub.handlers();
+    const asset = (name: string) =>
+      handlers.visitorAsset?.({
+        ...request("visitor-page", "AAAAAAAAAAAAAAAAAAAAAA", new Map()),
+        params: { asset: name },
+      });
+    const [known] = viewer.assets.keys();
+    expect((await asset(known ?? ""))?.status).toBe(200);
+    expect((await asset("0123456789abcdef.js"))?.status).toBe(404);
+    const page = await handlers.visitorPage?.(
+      request("visitor-page", "AAAAAAAAAAAAAAAAAAAAAA", new Map()),
+    );
+    expect(String(page?.body)).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/);
   });
 });

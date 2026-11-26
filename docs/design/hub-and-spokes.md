@@ -3020,7 +3020,12 @@ person's work without any service Octant runs (maintainer decision,
 - **Every member forwards to the acting hub.** A member whose own entrance is
   on and that is not the acting hub forwards each request unchanged to the
   acting hub over the pinned private transport; only the acting hub serves
-  (decision H30). A front with connectors on the hub and the standby (a
+  (decision H30). A visitor's open, stream, and comments are the exception:
+  a member's entrance answers them 501 itself rather than forward them
+  ([Visitor links](#visitor-links)), so a front that sends a visitor to a
+  member's connector shows the viewer's "ask for the hub's address" page
+  instead of the thread, and a front for visitor links points at the acting
+  hub's entrance alone. A front with connectors on the hub and the standby (a
   Cloudflare Tunnel, or Caddy with both as upstreams) therefore keeps one
   stable address across failover. With Funnel alone, a URL names one machine
   ([The public entrance during failover](#the-public-entrance-during-failover)).
@@ -3037,6 +3042,10 @@ person's work without any service Octant runs (maintainer decision,
 
 #### Visitor links
 
+Built for a hub and its spokes, for Code and Chat threads, from `octant hub
+visitor` (slice 25); a Work thread, the window's Share menu and Request
+card, and the standby's copy (slice 26) are not built yet.
+
 - **Sharing.** In a thread's Share menu on the spoke that owns it, **Share
   with visitor** makes a read-only or comment-only link with an expiry, and
   **Stop sharing** revokes it. The spoke signs the link's grant with its host
@@ -3044,7 +3053,22 @@ person's work without any service Octant runs (maintainer decision,
   against the roster's key for that spoke, and the spoke checks revocation
   and expiry on every fetch, so a revoked link stops at once on the hub and
   every standby. The link's secret travels only in the URL fragment, which a
-  browser never sends, so neither the front nor the hub's logs see it.
+  browser never sends, so neither the front nor the hub's logs see it. The
+  hub keeps a grant only when its signer is the roster's key for the spoke
+  it names, and holds no thread id. The viewer makes a P-256 key the browser
+  cannot export, keeps it in that origin's storage, and signs every request
+  with it (`octant-visitor-proof`: time, nonce, signature over method and
+  path, 60 seconds of skew, each nonce once); the spoke binds the link to the
+  first key that opens it with the secret and refuses every other key. A
+  first open that meets a busy hub, a rate limit, or no answer within 30
+  seconds tries again on its own, waiting 3 seconds and doubling to a minute
+  as the stream does. The 30 seconds include the body only where the viewer
+  reads it: a 200's scope and a 403's reason; a 401, 404, 410, or 501 ends
+  on its status alone.
+  The secret leaves the address bar only once the link opens, has ended, or
+  is open in another browser; after a 401 (a skewed clock) or a 404 (a grant
+  that has not reached the hub yet) it stays, so a reload can still open
+  the link.
 - **What a visitor sees.** A projection the spoke builds and redacts: the
   messages and the titles and states of steps, live. Never tool inputs or
   outputs, diffs, files, attachments, Canvases, paths, or approval contents;
@@ -3053,22 +3077,34 @@ person's work without any service Octant runs (maintainer decision,
   messages that fit in 384 KiB are shown, so the answer crosses the private
   link whole. The page is a small
   viewer the hub serves, separate from the web app, that runs no script from
-  the thread.
+  the thread: it writes every message as text. Built: the thread's title,
+  its state (working, idle, or the owner deciding), and its messages (Code's
+  prompts and replies, Chat's messages and replies) with paths and
+  secret-shaped values replaced; the stream asks the spoke again every two
+  seconds and ends when the spoke refuses. Not built yet: step titles and
+  states.
 - **Comments.** On a comment-only link, a visitor's message lands on the
   spoke as a **Request** in the thread with **Send** and **Dismiss**. Only
   the person's Send delivers it, framed as outside content from the visitor.
+  Built: Send journals the thread's outside-content taint first and then
+  hands the person the framed comment to send as their next message there;
+  posting it into the thread from the server is not built yet. At most 20
+  comments wait per link, 4,000 characters each, 10 a minute.
   A visitor never answers an approval, changes the model or mode, or acts on
-  the thread. Until the thread's Request is built in the window,
-  `octant hub visitor send` marks the thread as carrying outside content and
-  prints the framed comment for the person to send there themselves; the
-  CLI shows a visitor's text with its control characters replaced.
+  the thread. The CLI shows a visitor's text with its control characters
+  replaced.
 - **Ends.** A link ends when it expires, is revoked, or its thread is
   archived or moves to another member. A spoke refuses to share a thread it
   cannot find or one already archived, and while its person pauses remote
   access it answers no visitor.
-- **Streams through the hub's own entrance.** A member's entrance forwards a
-  visitor's open and comments, but not the live stream, which answers 501
-  there; a front for visitor links points at the hub's entrance.
+- **Streams through the hub's own entrance.** A member's entrance answers a
+  visitor's open, stream, and comments 501 without forwarding them: the live
+  stream does not cross members yet, and an open there would bind the link
+  to a key only that origin keeps. The viewer then says to ask for the hub's
+  address and leaves the secret in the address bar; a front for visitor
+  links points at the hub's entrance. Two tabs opening one link at once
+  settle on one stored key, and a key the browser could not store is never
+  used.
 
 #### Webhook triggers
 
@@ -3425,10 +3461,10 @@ choice to the design, the design's recommendation was taken.
 | H29 | What carries internet traffic to the hub's public entrance?                 | A built-in Tailscale Funnel switch on the hub (TLS ends on the hub, no port forwarding at home), and, documented, a front the person runs themselves (their own Cloudflare Tunnel, or Caddy on a VPS in the tailnet) pointed at the entrance. Rejected: a router port forward, which exposes the home address, and making `apps/share` a live relay (2026-11-26; the Funnel switch is built, a front on another machine designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | H30 | How does the public address survive failover?                               | Every member's entrance forwards to the acting hub over the pinned private transport, and only the acting hub serves, so a front with connectors on the hub and the standby keeps one address. With Funnel alone, the standby turns on its own Funnel while it stands in and Settings shows that URL (2026-11-26; a member's forwarding is built, a standing-in standby designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | H31 | What are the outside person and the link called?                            | A **visitor** and a **visitor link**; "guest" stays the person's own phone or browser (2026-11-26)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| H32 | Who signs a visitor link?                                                   | The spoke that owns the thread, with its host identity key. The hub and standbys verify it against the roster's key, and the spoke checks revocation on every fetch (2026-11-26; built on the hub and the spoke; a standby's copy designed, not built; the viewer page a visitor opens is not built yet)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| H32 | Who signs a visitor link?                                                   | The spoke that owns the thread, with its host identity key. The hub and standbys verify it against the roster's key, and the spoke checks revocation on every fetch (2026-11-26; built for the hub; a standby's copy designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | H33 | Who holds a webhook secret?                                                 | The spoke that owns the routine mints and keeps it and seals it to the hub and each standby. The acting hub drops a forged request before queueing, and the spoke verifies the original bytes again. GitHub, which signs no timestamp, is deduped by delivery id and body digest for seven days. Residual risk: a compromised hub can forge a delivery, only into a routine the person defined and only as outside content (2026-11-26; built for the hub; a standby's sealed copy designed, not built)                                                                                                                                                                                                                                                                                                                                                                    |
 | H34 | How much may a run a webhook starts do?                                     | Never Full access: Code runs approval-gated at most, and Work at its default level (2026-11-26; built)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| H35 | What are the public entrance's limits?                                      | A webhook endpoint takes 60 requests a minute and a 256 KiB body, and holds at most 500 deliveries or 32 MiB for at most 24 hours while its spoke is away. A visitor link expires after 24 hours by default, 7 days at most, and is bound to the first browser that opens it with its secret, which the spoke checks before it binds; each browser key on a link takes 120 requests and 10 comments a minute and holds at most 4 of the entrance's 64 streams (2026-11-26; partly built: the webhook limits, and the visitor link limits on the hub, which no viewer page reaches yet)                                                                                                                                                                                                                                                                                     |
+| H35 | What are the public entrance's limits?                                      | A webhook endpoint takes 60 requests a minute and a 256 KiB body, and holds at most 500 deliveries or 32 MiB for at most 24 hours while its spoke is away. A visitor link expires after 24 hours by default, 7 days at most, and is bound to the first browser that opens it with its secret, which the spoke checks before it binds; each browser key on a link takes 120 requests and 10 comments a minute and holds at most 4 of the entrance's 64 streams (2026-11-26; built)                                                                                                                                                                                                                                                                                                                                                                                          |
 | H36 | Can the person's own devices reach their hosts without the tailnet?         | Yes, through the hub's public entrance as an end-to-end encrypted channel pinned to the host key and certificate from pairing, so the hub and the front see only ciphertext; pairing still happens on the private network or by QR; off by default. The hub is the person's own relay and Octant runs none. Phone push for the store build still goes through the minimal Octant push gateway (2026-11-26; designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | H14 | Does a host fetch its own Tailscale certificate for the web app?            | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | H15 | How does a browser guest reach a spoke?                                     | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -4583,8 +4619,15 @@ limits, and the device relay's channel design.
     browser binding on the hub, reusing the token and rate-limit patterns of
     `apps/share` and leaving it unchanged. Acceptance: a revoked link stops
     on the next fetch on the hub and the standby; a comment-only visitor
-    cannot answer an approval. **Linux container: yes**, with a rendered
-    check; a phone outside the tailnet is a maintainer gate.
+    cannot answer an approval. Built for Code and Chat threads from the
+    CLI and loopback administration, with server tests and a headless
+    Chromium check of the viewer at 1280 and 390 pixels in light and dark
+    (no horizontal scroll) and of two tabs opening one link at once (one
+    key); not built: Work
+    threads, the window's Share menu and Request card (the renderer has no
+    room left for them outside a lazy chunk), step titles in the projection,
+    and Send posting into the thread itself. **Linux container: yes**, with
+    a rendered check; a phone outside the tailnet is a maintainer gate.
 26. **Failover of the public entrance.** Sealed copies on standbys, the
     standby's own Serve the public entrance choice, the queue in the
     hand-back, and spoke-side dedupe in a split network. Acceptance: a

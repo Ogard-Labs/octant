@@ -171,7 +171,7 @@ export class HubVisitorService {
 
   /** The entrance's visitor routes; none while the switch is off. */
   handlers(): PublicEntranceHandlers {
-    if (!this.#load().enabled) return {};
+    if (!this.#load().enabled || !this.#options.serving()) return {};
     const viewer = this.#options.viewer;
     return {
       ...(viewer === undefined

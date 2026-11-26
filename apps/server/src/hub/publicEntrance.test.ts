@@ -205,6 +205,26 @@ describe("health", () => {
       },
     ]);
   });
+
+  it("a member's entrance binds no visitor link, since the live thread cannot follow it there", async () => {
+    const forwarded: string[] = [];
+    const { base } = await boot({
+      role: () => "forward",
+      forward: async (envelope) => {
+        forwarded.push(envelope.path);
+        return { status: 200, headers: {}, body: "" };
+      },
+    });
+    const link = "AAAAAAAAAAAAAAAAAAAAAA";
+    for (const [method, path] of [
+      ["POST", `/v/${link}/open`],
+      ["GET", `/v/${link}/stream`],
+      ["POST", `/v/${link}/comments`],
+    ] as const) {
+      expect((await fetch(`${base}${path}`, { method })).status).toBe(501);
+    }
+    expect(forwarded).toEqual([]);
+  });
 });
 
 describe("what a request carries", () => {

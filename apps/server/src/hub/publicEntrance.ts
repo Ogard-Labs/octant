@@ -358,6 +358,18 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
     const role = options.role();
     if (role === "closed") return notFound;
     if (!cap.take()) return { status: 429, headers: { "retry-after": "60" }, body: "" };
+    if (
+      role === "forward" &&
+      !input.forwarded &&
+      (match.name === "visitor-open" ||
+        match.name === "visitor-stream" ||
+        match.name === "visitor-comments")
+    ) {
+      // A live stream does not cross members yet, and an open forwarded from
+      // here would bind the link to a key this origin keeps, which the hub's
+      // own address could never use again.
+      return { status: 501, headers: {}, body: "" };
+    }
     if (role === "forward" && !input.forwarded) {
       // Each forward holds its body in memory twice (raw and base64), so the
       // number in flight is bounded, not just the number a minute.
