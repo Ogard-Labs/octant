@@ -1146,11 +1146,16 @@ export class GitMutationPort {
       signal,
       undefined,
       "approval-gated",
-      paths.map((path) => `${path}\0`).join(""),
+      paths.map((path) => `${asPlainPath(path)}\0`).join(""),
     );
     // Exit 1 is Git's "none of them is ignored".
     if (result.exitCode !== 0 && result.exitCode !== 1) return undefined;
-    return new Set(result.stdout.split("\0").filter((path) => path !== ""));
+    return new Set(
+      result.stdout
+        .split("\0")
+        .filter((path) => path !== "")
+        .map((path) => (path.startsWith("./:") ? path.slice(2) : path)),
+    );
   }
 
   /**
@@ -1291,7 +1296,7 @@ export class GitMutationPort {
       // pathname at a time, which is affordable here: the candidates are only
       // the snapshot's untracked files, not the whole tree.
       const checked = await this.#run(
-        ["-C", checkoutRoot, "check-ignore", "-q", "--", path],
+        ["-C", checkoutRoot, "check-ignore", "-q", "--", asPlainPath(path)],
         signal,
         undefined,
         executionPolicy,
@@ -1833,4 +1838,14 @@ function validBranchRef(ref: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A path Git would otherwise read as pathspec magic. An untracked folder named
+ * `:build` was checked as `build`, so a nested repository inside it was taken
+ * for ignored and missed. `./` keeps the name literal; `check-ignore` echoes
+ * the path it was given, so callers strip the prefix again.
+ */
+function asPlainPath(path: string): string {
+  return path.startsWith(":") ? `./${path}` : path;
 }

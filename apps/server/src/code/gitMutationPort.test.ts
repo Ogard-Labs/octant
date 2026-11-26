@@ -693,6 +693,23 @@ describe("GitMutationPort", () => {
     expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([]);
   });
 
+  it("checks a folder named like a Git pathspec as itself, not as the path it spells", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, ".gitignore"), "build/\n");
+    git(repository, "add", ".gitignore");
+    git(repository, "commit", "-m", "ignore build");
+    const nested = join(repository, ":build", "lib");
+    mkdirSync(nested, { recursive: true });
+    git(nested, "init", "--initial-branch=main");
+    writeFileSync(join(nested, "notes.txt"), "nested\n");
+    writeFileSync(join(repository, ":build", "README.md"), "untracked parent\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([
+      ":build/lib",
+    ]);
+  });
+
   it("names a nested repository below a folder that is untracked as a whole", async () => {
     const repository = createRepository(temporaryDirectory());
     const nested = join(repository, "vendor", "lib");
