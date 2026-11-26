@@ -1493,7 +1493,19 @@ export class GhPullRequestSwitchPort {
   ): Promise<CiRunState | undefined> {
     if (!/^\d{1,20}$/.test(runId)) return undefined;
     const run = await this.#run(
-      ["run", "view", runId, "--repo", repository, "--json", "headSha,attempt,status,jobs"],
+      // Only the job ids: a large matrix's full job listing, every step
+      // included, can pass the command's output limit.
+      [
+        "run",
+        "view",
+        runId,
+        "--repo",
+        repository,
+        "--json",
+        "headSha,attempt,status,jobs",
+        "--jq",
+        "{headSha, attempt, status, jobs: [.jobs[] | {databaseId}]}",
+      ],
       signal,
     );
     if (run === undefined || run.exitCode !== 0) return undefined;
