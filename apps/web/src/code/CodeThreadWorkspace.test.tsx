@@ -1,4 +1,5 @@
 import { cleanedUpWorktreeSentence } from "@octant/domain";
+import { writeTurnSendPreference } from "../messageQueue/turnSendPreference";
 import { threadImageOfferKey, threadImageOffers } from "../composer/threadImageOffers";
 import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
@@ -376,7 +377,7 @@ describe("Code host queue", () => {
         await user.click(await screen.findByRole("option", { name: /Release plan/ }));
       }
       await user.type(composer, "First");
-      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
       if (pendingStep === "mention resolution") expect(mentions.resolve).toHaveBeenCalledOnce();
       else await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
 
@@ -406,7 +407,7 @@ describe("Code host queue", () => {
         }
       });
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled(),
+        expect(screen.getByRole("button", { name: "Send into the running turn" })).toBeEnabled(),
       );
       expect(screen.getByRole("button", { name: "Remove second.png" })).toBeEnabled();
       expect(composer).toHaveValue("Second");
@@ -416,9 +417,9 @@ describe("Code host queue", () => {
 
       const nextResponse = Promise.withResolvers<ThreadMessageQueueResult>();
       host.execute.mockImplementationOnce(() => nextResponse.promise);
-      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
       await waitFor(() => expect(host.execute).toHaveBeenCalledTimes(earlierSubmissions + 1));
-      expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Send into the running turn" })).toBeDisabled();
       expect(screen.getByRole("button", { name: "Remove second.png" })).toBeDisabled();
       await user.click(composer);
       await user.keyboard("{Enter}");
@@ -434,7 +435,7 @@ describe("Code host queue", () => {
       await waitFor(() => expect(composer).toHaveValue(""));
       expect(screen.queryByAltText("second.png")).not.toBeInTheDocument();
       await user.type(composer, "Third");
-      expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Send into the running turn" })).toBeEnabled();
     },
   );
 
@@ -451,11 +452,11 @@ describe("Code host queue", () => {
     );
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "First");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
     await waitFor(() => expect(composer).toHaveValue(""));
     await user.type(composer, "Second");
     expect(host.execute).toHaveBeenCalledOnce();
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
     expect(await screen.findByRole("button", { name: "2 queued" })).toBeVisible();
     rerender(
       <CodeThreadWorkspace
@@ -472,6 +473,32 @@ describe("Code host queue", () => {
         payload: expect.objectContaining({ mode: "code", prompt: "First" }),
       }),
     );
+  });
+
+  it("⌘↩ steers when the default is Queue, and the send button says it queues", async () => {
+    writeTurnSendPreference("queue");
+    try {
+      const host = queueTestHost();
+      const user = userEvent.setup();
+      render(
+        <CodeThreadWorkspace
+          messageQueueClient={host}
+          controller={controller({ turnStatus: "running" })}
+          threadId={threadId}
+        />,
+      );
+      const composer = screen.getByLabelText("Follow-up message");
+      await user.type(composer, "Wait for the next turn");
+      await user.click(screen.getByRole("button", { name: "Queue for the next turn" }));
+      await waitFor(() => expect(composer).toHaveValue(""));
+      await user.type(composer, "Steer this one");
+      await user.keyboard("{Meta>}{Enter}{/Meta}");
+      await waitFor(() => expect(host.execute).toHaveBeenCalledTimes(2));
+      expect(host.execute.mock.calls[0]?.[0]).toMatchObject({ timing: "next-turn" });
+      expect(host.execute.mock.calls[1]?.[0]).not.toHaveProperty("timing");
+    } finally {
+      writeTurnSendPreference("steer");
+    }
   });
 
   it("keeps newer draft attachments across a delayed queue acknowledgment", async () => {
@@ -502,7 +529,7 @@ describe("Code host queue", () => {
     await user.type(composer, "First");
     pasteImage(composer, "first.png");
     await screen.findByAltText("first.png");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
     await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
     expect(composer).toHaveValue("First");
     await user.clear(composer);
@@ -552,7 +579,7 @@ describe("Code host queue", () => {
       await user.type(composer, "First");
       pasteImage(composer, "first.png");
       await screen.findByAltText("first.png");
-      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
       await screen.findByText(/host has not confirmed/);
       pasteImage(composer, "later.png");
       await screen.findByAltText("later.png");
@@ -586,7 +613,7 @@ describe("Code host queue", () => {
     );
     await user.type(screen.getByLabelText("Follow-up message"), "Keep this");
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send into the running turn" })).toBeDisabled();
     expect(sendFollowUp).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Follow-up message")).toHaveValue("Keep this");
   });
@@ -1684,7 +1711,9 @@ describe("CodeThreadWorkspace", () => {
 
     await user.type(screen.getByLabelText("Follow-up message"), "Try a different approach");
     expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Send into the running turn" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps a waiting turn busy when its failure is not a refused resume", async () => {
@@ -1705,7 +1734,7 @@ describe("CodeThreadWorkspace", () => {
     ).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("Follow-up message"), "Queue this instead");
     // A busy wait offers to queue the follow-up, where a parked one sends it.
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send into the running turn" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send follow-up" })).not.toBeInTheDocument();
   });
 
@@ -1785,7 +1814,7 @@ describe("CodeThreadWorkspace", () => {
     );
     expect(await screen.findByRole("button", { name: "Snooze until reset" })).toBeVisible();
     await user.type(screen.getByLabelText("Follow-up message"), "Carry on");
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send into the running turn" })).toBeInTheDocument();
 
     rerender(
       <CodeThreadWorkspace
@@ -1813,7 +1842,9 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Send into the running turn" }),
+    ).not.toBeInTheDocument();
     // Recovery would resend the stopped prompt on the account it moved to.
     expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
   });

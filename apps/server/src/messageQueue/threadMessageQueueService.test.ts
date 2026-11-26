@@ -972,6 +972,83 @@ describe("durable ordinary thread queue", () => {
     expect(f.p.admit).toHaveBeenCalledTimes(1);
     expect(f.p.admit.mock.calls[0]?.[0].messageId).toBe(message.messageId);
   });
+  it("with Queue chosen, a message sent during a turn waits for the next turn", async () => {
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(async () => "steered");
+    const f = fixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const waiting = { ...enqueue(), timing: "next-turn" as const };
+    expect((await f.service.execute(windowId, waiting)).status).toBe("applied");
+    await f.service.tick();
+    await f.service.tick();
+    expect(steer).not.toHaveBeenCalled();
+    expect((await snapshot(f.service)).items).toEqual([
+      expect.objectContaining({ messageId: waiting.messageId, waitsForNextTurn: true }),
+    ]);
+    f.p.setInspection({
+      status: "ready",
+      binding: "authorized-target",
+      tail: { id: "running", status: "completed" },
+    });
+    await f.service.tick();
+    expect(f.p.admit).toHaveBeenCalledOnce();
+    expect(f.p.admit.mock.calls[0]?.[0].messageId).toBe(waiting.messageId);
+  });
+  it("Send now steers the oldest queued message into the running turn", async () => {
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(async () => "steered");
+    const f = fixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const first = { ...enqueue(0), timing: "next-turn" as const };
+    const second = { ...enqueue(1), timing: "next-turn" as const };
+    await f.service.execute(windowId, first);
+    await f.service.execute(windowId, second);
+    await f.service.tick();
+    expect(steer).not.toHaveBeenCalled();
+    const sent = await f.service.execute(
+      windowId,
+      command("send-now", 2, { messageId: second.messageId }),
+    );
+    expect(sent.status).toBe("applied");
+    if (sent.status !== "applied") return;
+    expect(sent.snapshot.items.map((item) => [item.messageId, item.waitsForNextTurn])).toEqual([
+      [second.messageId, undefined],
+      [first.messageId, true],
+    ]);
+    await f.service.tick();
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledOnce());
+    expect(steer.mock.calls[0]?.[0].messageId).toBe(second.messageId);
+    await vi.waitFor(async () =>
+      expect((await snapshot(f.service)).items.map((item) => item.messageId)).toEqual([
+        first.messageId,
+      ]),
+    );
+  });
+  it("Send now on a paused queue is refused and steers nothing", async () => {
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(async () => "steered");
+    const f = fixture({ ...port(), steer });
+    const waiting = enqueue();
+    await f.service.execute(windowId, waiting);
+    await f.service.execute(windowId, command("pause", 1));
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const sent = await f.service.execute(
+      windowId,
+      command("send-now", 2, { messageId: waiting.messageId }),
+    );
+    expect(sent).toMatchObject({ status: "refused", reason: "paused" });
+    await f.service.tick();
+    expect(steer).not.toHaveBeenCalled();
+  });
   it("steers a message into a running turn this queue started itself", async () => {
     const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(async () => "steered");
     const f = fixture({ ...port(), steer });
@@ -1834,6 +1911,8 @@ describe("a paired device at the queue", () => {
       command("pause", version),
       command("resume", version),
       command("reorder", version, { messageIds: [local.messageId] }),
+      // A restricted paired device cannot send another client's message now.
+      command("send-now", version, { messageId: local.messageId }),
     ])
       expect(await f.service.execute(deviceId, attempt)).toMatchObject(refused);
     expect(await snapshot(f.service)).toMatchObject({ version, paused: false });

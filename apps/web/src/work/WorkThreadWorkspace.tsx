@@ -205,6 +205,7 @@ import {
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
 import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import { messageTiming, useTurnSendPreference } from "../messageQueue/turnSendPreference";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
@@ -1379,6 +1380,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       });
     }
   }
+  const turnSendPreference = useTurnSendPreference();
   const queueFollowUp =
     turnRunning ||
     (messageQueue.snapshot?.items.length ?? 0) > 0 ||
@@ -2334,7 +2336,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   );
 
   const sendWorkTurn = useCallback(
-    async (enqueue = false, toolCatalogHandoff = false): Promise<boolean> => {
+    async (enqueue = false, toolCatalogHandoff = false, timing?: "next-turn"): Promise<boolean> => {
       if (
         thread !== undefined &&
         thread.bindingRevisionId === undefined &&
@@ -2431,6 +2433,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             },
             discardUploadedAttachments,
             { text: promptText, revision: draftRevision },
+            timing,
           );
           return result === "accepted";
         }
@@ -2519,65 +2522,71 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       messageQueue,
     ],
   );
-  const submit = useCallback(async () => {
-    if (!canSubmit || preparingQueue.current) return;
-    if (queueFollowUp) {
-      preparingQueue.current = true;
-      try {
-        await sendWorkTurn(true);
-      } finally {
-        preparingQueue.current = false;
-      }
-      return;
-    }
-    if (!canSubmit || projectId === undefined) {
-      return;
-    }
-    if (props.turnClient !== undefined) {
-      await sendWorkTurn();
-      return;
-    }
-    if (props.mutationClient === undefined) return;
-    const retireStashRecovery = stashSubmission.current?.();
-    setCreating(true);
-    setErrorMessage(undefined);
-    setToolCatalogHandoffRequired(false);
-    setStatus(undefined);
-    try {
-      const reply = await props.mutationClient.mutate({
-        kind: "create-artifact",
-        requestId: decodeWorkMutationRequestId(globalThis.crypto.randomUUID()),
-        projectId,
-        format: "markdown",
-        displayName: artifactNameFromPrompt(trimmed),
-        content: trimmed,
-        threadId: props.threadId,
-      });
-      if (reply.outcome.kind !== "created") {
-        setErrorMessage("The artifact could not be created.");
+  // ⌘↩ (Ctrl+↩) sends this one message the opposite way to this client's
+  // choice for messages sent while a turn runs.
+  const submit = useCallback(
+    async (opposite = false) => {
+      if (!canSubmit || preparingQueue.current) return;
+      if (queueFollowUp) {
+        preparingQueue.current = true;
+        try {
+          await sendWorkTurn(true, false, messageTiming(turnSendPreference, opposite));
+        } finally {
+          preparingQueue.current = false;
+        }
         return;
       }
-      retireStashRecovery?.();
-      composerDraft.clear();
-      setStatus(`Created ${reply.outcome.artifact.displayName} in the bound folder.`);
-      textareaRef.current?.focus();
-    } catch {
-      setErrorMessage("Could not create the artifact. Check the Project status.");
-    } finally {
-      setCreating(false);
-    }
-  }, [
-    extensionDraft,
-    canSubmit,
-    composerDraft,
-    projectId,
-    props.mutationClient,
-    props.turnClient,
-    sendWorkTurn,
-    queueFollowUp,
-    trimmed,
-    turnRunning,
-  ]);
+      if (!canSubmit || projectId === undefined) {
+        return;
+      }
+      if (props.turnClient !== undefined) {
+        await sendWorkTurn();
+        return;
+      }
+      if (props.mutationClient === undefined) return;
+      const retireStashRecovery = stashSubmission.current?.();
+      setCreating(true);
+      setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
+      setStatus(undefined);
+      try {
+        const reply = await props.mutationClient.mutate({
+          kind: "create-artifact",
+          requestId: decodeWorkMutationRequestId(globalThis.crypto.randomUUID()),
+          projectId,
+          format: "markdown",
+          displayName: artifactNameFromPrompt(trimmed),
+          content: trimmed,
+          threadId: props.threadId,
+        });
+        if (reply.outcome.kind !== "created") {
+          setErrorMessage("The artifact could not be created.");
+          return;
+        }
+        retireStashRecovery?.();
+        composerDraft.clear();
+        setStatus(`Created ${reply.outcome.artifact.displayName} in the bound folder.`);
+        textareaRef.current?.focus();
+      } catch {
+        setErrorMessage("Could not create the artifact. Check the Project status.");
+      } finally {
+        setCreating(false);
+      }
+    },
+    [
+      extensionDraft,
+      canSubmit,
+      composerDraft,
+      projectId,
+      props.mutationClient,
+      props.turnClient,
+      sendWorkTurn,
+      queueFollowUp,
+      trimmed,
+      turnRunning,
+      turnSendPreference,
+    ],
+  );
 
   const confirmCompletion = useCallback(async () => {
     if (
@@ -2697,7 +2706,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (fileMentions.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void submit();
+      void submit(event.metaKey || event.ctrlKey);
     }
   }
 
@@ -3989,7 +3998,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               sending: turnRunning,
               send: {
                 ariaLabel: queueFollowUp
-                  ? "Queue message"
+                  ? turnSendPreference === "queue"
+                    ? "Queue for the next turn"
+                    : "Send into the running turn"
                   : props.turnClient === undefined && !turnRunning
                     ? "Create artifact"
                     : "Send follow-up",

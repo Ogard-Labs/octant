@@ -97,7 +97,9 @@ describe("Work host queue", () => {
     );
     const composer = await screen.findByLabelText("Work prompt");
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("button", { name: "Send into the running turn" }),
+      ).toBeInTheDocument(),
     );
     await user.type(composer, "First");
     fireEvent.paste(composer, {
@@ -107,7 +109,7 @@ describe("Work host queue", () => {
       },
     });
     await screen.findByAltText("first.png");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
     await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
     expect(clients.turnClient.putAttachment).toHaveBeenCalledOnce();
     const command = host.execute.mock.calls[0]?.[0];
@@ -135,7 +137,7 @@ describe("Work host queue", () => {
     expect(composer).toHaveValue("New draft");
     expect(screen.queryByAltText("first.png")).not.toBeInTheDocument();
     expect(screen.getByAltText("later.png")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
     expect(await screen.findByRole("button", { name: "2 queued" })).toBeVisible();
     unmount();
     expect(clients.turnClient.startFirstTurn).not.toHaveBeenCalled();
@@ -172,7 +174,7 @@ describe("Work host queue", () => {
         },
       });
       await screen.findByAltText("kept.png");
-      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
       if (retry) {
         await screen.findByText(/host has not confirmed/);
         fireEvent.paste(composer, {
@@ -206,7 +208,7 @@ describe("Work host queue", () => {
     const composer = await screen.findByLabelText("Work prompt");
     await user.type(composer, "Keep this");
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send into the running turn" })).toBeDisabled();
     expect(composer).toHaveValue("Keep this");
     expect(clients.turnClient.startFirstTurn).not.toHaveBeenCalled();
   });

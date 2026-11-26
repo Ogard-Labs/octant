@@ -44,7 +44,7 @@ type QueueChange =
       readonly typedByPerson?: true;
       readonly expectedVersion?: ThreadMessageQueueSnapshot["version"];
     }
-  | { readonly kind: "remove"; readonly messageId: string }
+  | { readonly kind: "remove" | "send-now"; readonly messageId: string }
   | { readonly kind: "reorder"; readonly messageIds: ReadonlyArray<string> }
   | { readonly kind: "pause" | "resume" };
 export type QueueAcknowledgment = "accepted" | "refused" | "unknown";
@@ -66,6 +66,8 @@ export interface ThreadMessageQueue {
     accepted?: () => void,
     onRefused?: () => void | Promise<void>,
     draft?: QueueDraft,
+    /** `next-turn`: the person chose Queue, so it never steers the running turn. */
+    timing?: "next-turn",
   ) => Promise<QueueAcknowledgment>;
   readonly change: (change: QueueChange) => Promise<QueueAcknowledgment>;
   readonly refresh: () => Promise<void>;
@@ -372,6 +374,7 @@ export function useThreadMessageQueue(options: {
       accepted?: () => void,
       onRefused?: () => void | Promise<void>,
       draft?: QueueDraft,
+      timing?: "next-turn",
     ): Promise<QueueAcknowledgment> => {
       if (
         !available ||
@@ -390,6 +393,7 @@ export function useThreadMessageQueue(options: {
         requestId: crypto.randomUUID(),
         messageId: crypto.randomUUID(),
         payload,
+        ...(timing === undefined ? {} : { timing }),
       });
       let settled = false;
       return execute(

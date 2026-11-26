@@ -246,7 +246,7 @@ export class ThreadMessageQueueService {
         if (command.kind === "pause" || command.kind === "resume" || command.kind === "reorder")
           return refused("unauthorized");
         if (
-          (command.kind === "edit" || command.kind === "remove") &&
+          (command.kind === "edit" || command.kind === "remove" || command.kind === "send-now") &&
           state.items.some(
             (item) =>
               String(item.messageId) === String(command.messageId) &&
@@ -298,6 +298,7 @@ export class ThreadMessageQueueService {
                 revision: decodeAggregateVersion(1),
                 createdAt: decodeTime(this.#clock()),
                 queuedBy: windowId,
+                ...(command.timing === "next-turn" ? { waitsForNextTurn: true as const } : {}),
               },
             ],
           },
@@ -381,6 +382,34 @@ export class ThreadMessageQueueService {
           this.#unsteerable.delete(item.messageId);
           if (content !== undefined) await this.#release(content, "removed", true);
         }
+        return outcome === "unavailable" ? refused("storage-unavailable") : result(outcome);
+      }
+      if (command.kind === "send-now") {
+        // The person's own press: the message goes to the front of what can
+        // still move and may steer the running turn, through the same checks
+        // as any message. A pause or a hold stays the person's to lift first.
+        if (state.paused) return refused("paused");
+        if (state.holdReason !== undefined) return refused(state.holdReason);
+        const item = state.items.find(
+          (value) => String(value.messageId) === String(command.messageId),
+        );
+        if (item === undefined) return refused("not-found");
+        if (item.status !== "queued" || this.#steering.has(item.messageId))
+          return refused("not-editable");
+        const { waitsForNextTurn: _waits, ...rest } = item;
+        const sent = { ...rest, revision: decodeAggregateVersion(item.revision + 1) };
+        const others = state.items.filter((value) => value !== item);
+        // Messages already on their way, or offered to the turn, keep their place.
+        const fixed = others.findIndex(
+          (value) => value.status === "queued" && !this.#steering.has(value.messageId),
+        );
+        const at = fixed < 0 ? others.length : fixed;
+        const outcome = this.#store.write(
+          { ...state, items: [...others.slice(0, at), sent, ...others.slice(at)] },
+          { command, ...actor },
+        );
+        // A runtime that would not take it before is asked again on this press.
+        if (outcome === "applied") this.#unsteerable.delete(item.messageId);
         return outcome === "unavailable" ? refused("storage-unavailable") : result(outcome);
       }
       if (command.kind === "reorder") {
@@ -705,7 +734,9 @@ export class ThreadMessageQueueService {
       if (head === undefined) return;
     }
     if (inspection.status === "busy") {
-      this.#steer(scope, head.messageId, content, auth.windowId);
+      // A message the person chose to queue waits for the next turn.
+      if (head.waitsForNextTurn !== true)
+        this.#steer(scope, head.messageId, content, auth.windowId);
       return;
     }
     this.#unsteerable.delete(head.messageId);
@@ -778,6 +809,7 @@ export class ThreadMessageQueueService {
       this.#port.steer === undefined ||
       next === undefined ||
       next.status !== "queued" ||
+      next.waitsForNextTurn === true ||
       state.paused ||
       state.holdReason !== undefined ||
       this.#disposed ||
