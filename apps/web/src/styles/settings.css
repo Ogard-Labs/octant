@@ -750,7 +750,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 /* The load readings are three lines once read; the room is held from the
    first frame so the rows under them do not step down when they arrive. */
 .host-resources__readings {
+  display: block;
   min-height: 3lh;
+}
+
+.host-resources__readings > span {
+  display: block;
 }
 
 .host-resources__keep-awake-status {

@@ -3212,14 +3212,13 @@ function AppearanceSection({
     return (
       <section aria-label="Background" className="settings-section-stack" id="settings-background">
         {/* A refused save answers here: the theme editor that showed it is on
-            Appearance and Text, not on this page. */}
-        <div aria-live="polite" className="settings-feedback-slot">
-          {theme?.error === undefined ? null : (
-            <OctantAlert className="settings-view__error" tone="danger">
-              {theme.error}
-            </OctantAlert>
-          )}
-        </div>
+            Appearance and Text, not on this page. Drawn only when there is
+            one, so no empty slot opens a gap above the page's one section. */}
+        {theme?.error === undefined ? null : (
+          <OctantAlert className="settings-view__error" tone="danger">
+            {theme.error}
+          </OctantAlert>
+        )}
         {theme === undefined || !isAvailable("app-background") ? (
           <SettingsSection title="Source and effect">
             <SettingsState kind="empty">
