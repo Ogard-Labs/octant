@@ -117,7 +117,14 @@ The design rests on a small set of invariants that every package obeys:
   endpoint the person configured and only while the Settings › Sync switch is
   on. Remote access is host-to-device over the user's
   own network; traffic among a person's own hub and spokes there is not a
-  third-party call ([Hub and spokes](design/hub-and-spokes.md), built). Four host-initiated
+  third-party call ([Hub and spokes](design/hub-and-spokes.md), built). A
+  person may also open their hub's narrow
+  [public entrance](design/hub-and-spokes.md#public-entrance) to the internet
+  through a front they control (the hub's Tailscale Funnel switch on their
+  own tailnet, or their own tunnel or proxy) for visitor links, webhook
+  triggers, and their own paired devices; it takes inbound requests only,
+  adds no outbound call, and Octant runs no part of it (maintainer decision,
+  2026-11-26; designed, not built). Four host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed (the
   same feed serves a host the headless build it installs on a server over SSH,
   only while the person has that sheet open and no suitable build is on the
@@ -20990,7 +20997,18 @@ approval-gated` command that undoes it. The terminal shows no one-time
   (a private network overlay, an SSH tunnel) in front of the listener; the
   user guide documents that setup, and nothing in the product changes for it:
   the listener's address rules, certificate pinning, and device-key proofs
-  apply unchanged through it.
+  apply unchanged through it. The person's own hub may also act as their
+  relay (maintainer decision, 2026-11-26; designed, not built): its
+  [public entrance](design/hub-and-spokes.md#public-entrance) is a separate
+  listener, bound to loopback or to the hub's Tailscale address for one named
+  front, with a closed route table (visitor page, stream and comments,
+  webhook receipt, device relay, health) that never reaches the private
+  listener, pairing, administration, or a member-to-member route. A device
+  relayed through it runs its ordinary pinned TLS to the host inside, so the
+  hub and the front see only ciphertext, and pairing stays on the private
+  network. Visitor text and webhook payloads are outside content, a run a
+  webhook starts never reaches Full access, and Pause remote access closes
+  the entrance.
 - **Provider keys on a host without the desktop app.** The desktop saves an
   endpoint's API key or bearer token over native IPC from its own renderer,
   so a browser client — local or paired — has no way to save one and names
@@ -23444,7 +23462,15 @@ documents its authority, privacy, and release boundaries):
   keeps running and authorizing its own work and the hub carries no session
   traffic (maintainer decision, 2026-11-19; designed, not built;
   [The hub coordinates](design/hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)). An
-  Octant-operated wake service is not in scope.
+  Octant-operated wake service is not in scope. The hub may open one narrow
+  [public entrance](design/hub-and-spokes.md#public-entrance) through the
+  person's own front for read-only or comment-only visitor links to one
+  thread, signed webhook triggers that start a defined routine on a spoke,
+  and an end-to-end encrypted channel for the person's own paired devices,
+  with failover to the standby (maintainer decision, 2026-11-26, replacing
+  the private-only rule for these routes; designed, not built). An
+  Octant-run relay or tunnel is not in scope; phone push for the store build
+  stays on the minimal push gateway.
 - Connectors (MCP servers added by hand, imported from other tools on this Mac,
   signed in to, or chosen from the bundled catalog): user-added packages
   through the published seams and the credential broker, never a hosted

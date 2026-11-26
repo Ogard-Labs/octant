@@ -5,8 +5,9 @@ person's own devices: one running Octant host turned into the hub, an optional
 standby hub that takes over when the hub is down, the person's other computers
 joining as spokes, and their phones joining as guests. It covers how a member
 joins and leaves, what the hub may do on a spoke, how spokes find and delegate
-to each other, failover, and the services the hub runs for its members (wake
-and push). Architecture owns the boundaries it extends: remote clients and the
+to each other, failover, the services the hub runs for its members (wake
+and push), and the hub's narrow public entrance (visitor links, webhook
+triggers, and the person's own devices away from the private network). Architecture owns the boundaries it extends: remote clients and the
 rule that hosts never trust each other
 ([Security and authority](../architecture.md#security-and-authority)),
 routines ([Modes](../architecture.md#modes-chat-work-and-code)), host-initiated
@@ -109,6 +110,11 @@ the web app to a phone or laptop over Tailscale. The maintainer settled the [dec
 the same day. A rule below is in force once its
 slice lands; until then each host is its own authority, paired computers
 federate reads as Architecture describes, and routines are host-local.
+On 2026-11-26 the maintainer added one narrow
+[public entrance](#public-entrance) on the hub, for visitor links, webhook
+triggers, and the person's own paired devices away from the private network,
+with failover and no Octant-run service, and settled
+[decisions H29 to H36](#decisions); slices 21 to 27 are designed, not built.
 
 ## Outcome
 
@@ -141,28 +147,53 @@ in a browser at its Tailscale name. After that:
    person starts a coding session on whichever member they choose, in a
    Project on that member, and follows, steers and manages it from there, and
    an agent on one member hands Code work to another as it hands Work today
-   ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
+   ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work));
+10. the person shares one thread with someone who has no Octant and no
+    tailnet through a visitor link that is read-only or comment-only,
+    expires, and can be revoked; the visitor follows the thread live in a
+    browser, and a visitor's comment waits until the person sends or
+    dismisses it ([Visitor links](#visitor-links));
+11. an outside service (GitHub, a script) POSTs a signed request to a URL on
+    the hub, which starts a routine on the spoke that owns it, waking that
+    spoke first when it sleeps ([Webhook triggers](#webhook-triggers));
+12. the person's own paired phone or computer reaches its hosts away from the
+    private network through the hub, end-to-end encrypted, so the hub is the
+    person's own relay ([Your own devices through the hub](#your-own-devices-through-the-hub));
+    and
+13. when the hub is down, the standby takes over the public entrance: no
+    webhook delivery runs twice and visitor links keep working
+    ([The public entrance during failover](#the-public-entrance-during-failover)).
+
+Items 10 to 13 are designed, not built (maintainer decision, 2026-11-26).
 
 **Not in scope:** members that are not the person's own devices (teams, shared
-machines, other people's computers), cloud machines Octant provisions, and
-any path over the public internet. A person who needs to reach the hub away
-from home turns on the mesh (such as Tailscale) on that device.
+machines, other people's computers), cloud machines Octant provisions, an
+Octant-run relay or tunnel, and any path over the public internet except the
+hub's [public entrance](#public-entrance), which the person turns on and
+which serves only its closed route table. Joining, pairing, and every
+member-to-member request stay on the private network.
 
 ## Terms
 
-| Term         | Meaning                                                                                                                                                                                                                                                 |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hub          | A running Octant host (desktop or headless) with the hub role turned on. It is also a host in its own right with its own threads                                                                                                                        |
-| Standby hub  | A spoke the person names to take over the hub's role while the hub is unreachable. It holds a copy of the roster and wake times                                                                                                                         |
-| Spoke        | A computer running Octant, joined to one hub. It runs agents and keeps its own journal, files, credentials, sandbox, and approval policy                                                                                                                |
-| Guest        | A phone app or a browser joined to the hub. It runs no agents, has no files or Projects of its own, and acts on spokes as a paired device. It is a member of the roster like a spoke                                                                    |
-| Member       | The hub, the standby hub, a spoke, or a guest                                                                                                                                                                                                           |
-| Roster       | The hub's signed list of members; its fields are listed once, under [Discovery](#spoke-to-spoke-discovery-and-delegation)                                                                                                                               |
-| Hub grant    | The closed set of things a spoke lets its hub do (and a standby, when the spoke ticked Standby), chosen on the spoke when it joins and changeable only there                                                                                            |
-| Peer grant   | The closed set of things a spoke lets another member do to it, chosen on the receiving spoke                                                                                                                                                            |
-| Owner device | A member the person marked as their own. With a fresh unlock it acts on a host that honors owners, and that it was never paired with, with the powers of a window there; a device paired with a host needs neither the mark nor the unlock on that host |
-| Unlock       | A signature from a key the device's platform uses only after the person proves presence (biometrics, device passcode, or a passkey with user verification)                                                                                              |
-| Introduction | The hub vouching, through the signed roster, that a name belongs to an identity key and listener pin, so a receiver can check who is knocking. What the member may then do is the receiver's peer grant                                                 |
+| Term             | Meaning                                                                                                                                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hub              | A running Octant host (desktop or headless) with the hub role turned on. It is also a host in its own right with its own threads                                                                                                                        |
+| Standby hub      | A spoke the person names to take over the hub's role while the hub is unreachable. It holds a copy of the roster and wake times                                                                                                                         |
+| Spoke            | A computer running Octant, joined to one hub. It runs agents and keeps its own journal, files, credentials, sandbox, and approval policy                                                                                                                |
+| Guest            | A phone app or a browser joined to the hub. It runs no agents, has no files or Projects of its own, and acts on spokes as a paired device. It is a member of the roster like a spoke                                                                    |
+| Member           | The hub, the standby hub, a spoke, or a guest                                                                                                                                                                                                           |
+| Roster           | The hub's signed list of members; its fields are listed once, under [Discovery](#spoke-to-spoke-discovery-and-delegation)                                                                                                                               |
+| Hub grant        | The closed set of things a spoke lets its hub do (and a standby, when the spoke ticked Standby), chosen on the spoke when it joins and changeable only there                                                                                            |
+| Peer grant       | The closed set of things a spoke lets another member do to it, chosen on the receiving spoke                                                                                                                                                            |
+| Owner device     | A member the person marked as their own. With a fresh unlock it acts on a host that honors owners, and that it was never paired with, with the powers of a window there; a device paired with a host needs neither the mark nor the unlock on that host |
+| Unlock           | A signature from a key the device's platform uses only after the person proves presence (biometrics, device passcode, or a passkey with user verification)                                                                                              |
+| Introduction     | The hub vouching, through the signed roster, that a name belongs to an identity key and listener pin, so a receiver can check who is knocking. What the member may then do is the receiver's peer grant                                                 |
+| Public entrance  | A separate listener on the hub with a closed route table (visitor page, visitor stream, visitor comments, webhook receipt, device relay, health), reached from the internet only through a front. Off by default ([Public entrance](#public-entrance))  |
+| Front            | What carries internet traffic to the public entrance: the hub's built-in Tailscale Funnel switch, or a tunnel or proxy the person runs themselves (decision H29)                                                                                        |
+| Visitor          | Someone outside the roster who opens a visitor link in a browser. Not a member and not a guest: a guest is the person's own phone or browser (decision H31)                                                                                             |
+| Visitor link     | A link the spoke that owns a thread signs, letting one browser read that thread (and, if it allows, comment) until it expires or is revoked                                                                                                             |
+| Webhook endpoint | A URL on the public entrance bound to one routine on one spoke, with a secret the spoke mints, that an outside service POSTs signed deliveries to                                                                                                       |
+| Device relay     | The public entrance's end-to-end encrypted channel that carries a person's own paired device to one of their hosts without the tailnet (decision H36)                                                                                                   |
 
 ## What exists today
 
@@ -1116,19 +1147,21 @@ spoke checks it on every hub request. A standby hub acting as hub uses the
 same grant, except Status and Usage (below), only on spokes that ticked
 Standby:
 
-| Hub grant item | Lets the hub                                                                                                                                                                                          |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Roster         | The hub's signed list of members; its fields are listed once, under [Discovery](#spoke-to-spoke-discovery-and-delegation)                                                                             |
-| Status         | Read host resources, running threads' titles and states, waiting approvals (count and kind), and update status, the same read a paired device has                                                     |
-| Introduce      | Introduce other members to this spoke; each becomes a full member here (decision H2). Ticked by default                                                                                               |
-| Wake           | Hold this spoke's routine wake times and wake it (see [Wake service](#wake-service))                                                                                                                  |
-| Owners         | Let the person's owner devices act on this spoke with a window's powers after a fresh unlock (see [Owner devices](#owner-devices)). Ticked by default                                                 |
-| Standby        | Let a standby hub the person named use this same grant, except Status and Usage, while it stands in for the hub (see [Failover](#failover))                                                           |
-| Push           | Receive this spoke's sealed phone notifications and send them through the hub's push sender                                                                                                           |
-| Provision      | Offer configuration (below). Every offer lands on the spoke as a proposal the person on the spoke applies, unless the person turned on auto-apply for that kind of offer ([decision H5](#decisions))  |
-| Sign-in        | Ask this spoke's person to sign in to a provider account on this spoke. Nothing starts until a person on the spoke accepts; the hub learns one outcome word (see [Shared sign-ins](#shared-sign-ins)) |
-| Act            | Act on the spoke as a paired device would, within the Projects the person names: create threads, send turns, answer questions. Approvals stay on the spoke (below)                                    |
-| Usage          | Read the spoke's provider plan-limit readings, the windows its own Limits view shows, through `GET /api/hub/usage` (maintainer decision C, 2026-11-26). Never a credential, thread, or cost           |
+| Hub grant item | Lets the hub                                                                                                                                                                                                                                                   |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Roster         | The hub's signed list of members; its fields are listed once, under [Discovery](#spoke-to-spoke-discovery-and-delegation)                                                                                                                                      |
+| Status         | Read host resources, running threads' titles and states, waiting approvals (count and kind), and update status, the same read a paired device has                                                                                                              |
+| Introduce      | Introduce other members to this spoke; each becomes a full member here (decision H2). Ticked by default                                                                                                                                                        |
+| Wake           | Hold this spoke's routine wake times and wake it (see [Wake service](#wake-service))                                                                                                                                                                           |
+| Owners         | Let the person's owner devices act on this spoke with a window's powers after a fresh unlock (see [Owner devices](#owner-devices)). Ticked by default                                                                                                          |
+| Standby        | Let a standby hub the person named use this same grant, except Status and Usage, while it stands in for the hub (see [Failover](#failover))                                                                                                                    |
+| Push           | Receive this spoke's sealed phone notifications and send them through the hub's push sender                                                                                                                                                                    |
+| Provision      | Offer configuration (below). Every offer lands on the spoke as a proposal the person on the spoke applies, unless the person turned on auto-apply for that kind of offer ([decision H5](#decisions))                                                           |
+| Sign-in        | Ask this spoke's person to sign in to a provider account on this spoke. Nothing starts until a person on the spoke accepts; the hub learns one outcome word (see [Shared sign-ins](#shared-sign-ins))                                                          |
+| Act            | Act on the spoke as a paired device would, within the Projects the person names: create threads, send turns, answer questions. Approvals stay on the spoke (below)                                                                                             |
+| Usage          | Read the spoke's provider plan-limit readings, the windows its own Limits view shows, through `GET /api/hub/usage` (maintainer decision C, 2026-11-26). Never a credential, thread, or cost                                                                    |
+| Public         | Hold this spoke's visitor-link grants and sealed webhook secrets, and carry visitor traffic and webhook deliveries between the [public entrance](#public-entrance) and this spoke. The spoke still checks every fetch and owns every run (designed, not built) |
+| Relay          | Carry this spoke's own paired devices to it through the public entrance as ciphertext the hub cannot read ([Your own devices through the hub](#your-own-devices-through-the-hub); designed, not built)                                                         |
 
 **Status and Usage stay with the hub itself.** A standby standing in uses
 the spoke's grant for what keeps the network running (the roster, wakes,
@@ -2906,17 +2939,176 @@ hub, and each other, directly under the existing address rule: a Tailscale
 private-network names and addresses, so members connect without the hub in
 the path.
 
-- **Private only.** The hub role, joining, and every member-to-member request
-  are served only on the private listener, which binds only LAN and mesh
-  addresses. A host refuses to turn the hub role on while its listener has a
-  public address, and refuses a join code or roster entry that names one.
-- **No relay, no port forwarding.** Hub-and-spoke traffic never goes through a
-  relay, and no member opens or asks for a port on the internet. A device away from home
-  joins the mesh to reach its members.
+- **Private for members.** The hub role, joining, pairing, administration,
+  and every member-to-member request are served only on the private listener,
+  which binds only LAN and mesh addresses. A host refuses to turn the hub role
+  on while its private listener has a public address, and refuses a join code
+  or roster entry that names one. The public entrance never changes this.
+- **One narrow public entrance.** The hub may open a second, separate
+  listener, the [public entrance](#public-entrance), that serves only a
+  closed route table to the internet through a front: the hub's built-in
+  Tailscale Funnel switch, or a tunnel or proxy the person runs themselves
+  (decision H29). It is off by default, and nothing on it reaches a private,
+  pairing, administration, or member-to-member route (designed, not built;
+  maintainer decision, 2026-11-26).
+- **No Octant relay, no port forwarding.** No traffic goes through a relay or
+  tunnel Octant runs, and no member opens or asks for a port on the person's
+  router. The person's own hub can carry their paired devices' encrypted
+  traffic ([Your own devices through the hub](#your-own-devices-through-the-hub));
+  without it, a device away from home joins the mesh.
 
 Rationale: the private network is the first lock. Only the person's own
-devices can reach a member at all, and pairing over that network is what
-proves a new member is theirs.
+devices can reach a member's private listener at all, and pairing over that
+network is what proves a new member is theirs. The public entrance adds a
+second, much smaller door with its own lock on every route (a signed link, a
+signed delivery, or a paired device key), so opening it does not weaken the
+first.
+
+### Public entrance
+
+The hub's public entrance lets things outside the private network reach the
+person's work without any service Octant runs (maintainer decision,
+2026-11-26; designed, not built). Its rules:
+
+- **A separate listener.** It is its own HTTP server in the Octant server
+  process, with its own route table, and shares no port, session, cookie,
+  principal, or handler with the private listener. It sets no cookie and
+  ignores any `Cookie`, `Forwarded`, or `X-Forwarded-*` header for authority.
+  A request that reaches it from loopback (as every Funnel request does) is
+  never loopback administration.
+- **Where it binds.** On `127.0.0.1` at a port the hub picks, plain HTTP,
+  for a front on the same machine (Funnel, or the person's own `cloudflared`).
+  For the person's own proxy on another machine in the tailnet (Caddy on a
+  VPS), it may instead bind the hub's Tailscale address with the hub's
+  Tailscale certificate and accept connections only from the front addresses
+  the person entered. It never binds a wildcard, LAN, or public address.
+- **A closed route table.** The visitor page and its assets, the visitor
+  stream, visitor comments, webhook receipt, the device relay, and health.
+  Every other path answers 404, and a known path with another method answers
+  405 without reading the body. HEAD and GET never start a run.
+- **Off at three levels.** The hub's own Public entrance switch; each
+  spoke's Public (and, for the device relay, Relay) hub-grant item; and each
+  link, endpoint, or device. Each feature on the entrance has its own switch
+  on the hub too. **Pause remote access** on the hub closes the entrance
+  and turns its front off; pause on a spoke refuses that spoke's links,
+  deliveries, and relayed devices.
+- **The spoke stays the authority.** The spoke that owns a thread or routine
+  creates and revokes its links and endpoints, checks every visitor fetch,
+  and owns runs, claims, and dedupe in its own journal. The hub holds only
+  ids, spoke-signed grants, sealed secrets, the delivery queue, and counts.
+- **Outside content.** Visitor text and webhook payloads taint the thread
+  they reach and are never instructions or grants.
+- **The front.** Settings › Remote access › Hub and `octant hub public`
+  turn the Funnel switch on, which runs
+  `tailscale funnel --bg --https=443 http://127.0.0.1:<port>` through the
+  local Tailscale daemon, and off, which runs
+  `tailscale funnel --https=443 off`; Octant runs no Tailscale or tunnel
+  command the person did not turn on. Funnel listens publicly only on 443,
+  8443, or 10000, needs MagicDNS, HTTPS certificates, and the `funnel` node
+  attribute in the tailnet policy, and ends TLS on the hub, so Tailscale's
+  relays do not decrypt it
+  ([Tailscale Funnel](https://tailscale.com/kb/1223/funnel),
+  [`tailscale funnel`](https://tailscale.com/kb/1311/tailscale-funnel)). The
+  hub uses 443 and refuses a port its private listener already serves on the
+  same Tailscale name. With the person's own front, Settings shows the
+  entrance's address and the person points the front at it.
+- **Every member forwards to the acting hub.** A member whose own entrance is
+  on and that is not the acting hub forwards each request unchanged to the
+  acting hub over the pinned private transport; only the acting hub serves
+  (decision H30). A front with connectors on the hub and the standby (a
+  Cloudflare Tunnel, or Caddy with both as upstreams) therefore keeps one
+  stable address across failover. With Funnel alone, a URL names one machine
+  ([The public entrance during failover](#the-public-entrance-during-failover)).
+- **Limits.** Each webhook endpoint takes 60 requests a minute and a body of
+  at most 256 KiB, and holds at most 500 queued deliveries or 32 MiB for at
+  most 24 hours while its spoke is away. A visitor link expires after 24
+  hours by default and 7 days at most, and is bound to the first browser that
+  opens it (decision H35).
+
+#### Visitor links
+
+- **Sharing.** In a thread's Share menu on the spoke that owns it, **Share
+  with visitor** makes a read-only or comment-only link with an expiry, and
+  **Stop sharing** revokes it. The spoke signs the link's grant with its host
+  identity key (decision H32); the hub and standbys check the signature
+  against the roster's key for that spoke, and the spoke checks revocation
+  and expiry on every fetch, so a revoked link stops at once on the hub and
+  every standby. The link's secret travels only in the URL fragment, which a
+  browser never sends, so neither the front nor the hub's logs see it.
+- **What a visitor sees.** A projection the spoke builds and redacts: the
+  messages and the titles and states of steps, live. Never tool inputs or
+  outputs, diffs, files, attachments, Canvases, paths, or approval contents;
+  an approval shows only that the owner is deciding. The page is a small
+  viewer the hub serves, separate from the web app, that runs no script from
+  the thread.
+- **Comments.** On a comment-only link, a visitor's message lands on the
+  spoke as a **Request** in the thread with **Send** and **Dismiss**. Only
+  the person's Send delivers it, framed as outside content from the visitor.
+  A visitor never answers an approval, changes the model or mode, or acts on
+  the thread.
+- **Ends.** A link ends when it expires, is revoked, or its thread is
+  archived or moves to another member.
+
+#### Webhook triggers
+
+- **An endpoint is a routine trigger.** A routine on a spoke may take a
+  `webhook` trigger. The spoke mints the endpoint and its secret, shows the
+  secret once, and seals it to the hub and to each standby (decision H33).
+  Rotating the secret or the URL ends the old one. The spoke keeps a log of
+  recent deliveries.
+- **Verify, queue, forward.** The acting hub verifies each delivery's
+  signature and timestamp on the raw bytes before it queues anything, and
+  drops a forged or stale one. It forwards the original bytes and headers to
+  the spoke, which verifies them again with its own copy of the secret and
+  starts the routine only if the delivery id has no claim in its journal. A
+  delivery whose spoke is asleep is held and sends a wake
+  ([Wake service](#wake-service)).
+- **GitHub deliveries carry no signed timestamp.** GitHub signs only the body,
+  and its delivery id is not covered by the signature, so the timestamp window
+  applies to Standard Webhooks alone. A GitHub delivery is claimed under both
+  its delivery id and the SHA-256 of its body, and the spoke keeps those
+  claims for seven days, so a captured body replayed under a fresh id inside
+  that time starts nothing. A replay of a captured body after seven days is
+  accepted residual risk: it is bounded like a leaked secret, to the defined
+  routine and outside content. Stripe signatures are deferred.
+- **A payload never changes authority.** The routine's own task, Project,
+  profile, and allowance apply, and the payload arrives as framed outside
+  content. A run a webhook starts never runs at Full access: Code is
+  approval-gated at most and Work runs at its default level (decision H34).
+
+#### Your own devices through the hub
+
+A paired phone or computer away from the private network can reach the hosts
+it paired with through the hub's public entrance, so the hub is the person's
+own relay and no Octant-run relay is needed (decision H36; designed, not
+built).
+
+- **Pinned end to end.** The device opens a WebSocket to the entrance's relay
+  route and names one host. The hub carries the bytes to that host over the
+  pinned private transport, and the device runs its ordinary TLS connection
+  to that host's private listener inside, checking the certificate pin and
+  the signed host hello it stored at pairing. The hub and the front see only
+  ciphertext, the host id, sizes, and timing. Every existing device-key
+  proof, session, and origin check applies unchanged inside.
+  This is the one place the hub carries session traffic, against
+  [decision H24](#decisions), and it carries only ciphertext for a device
+  that chose the relay.
+- **Only paired devices.** The hub opens a relay only for a device whose key
+  the target host listed for relay, after the device signs the hub's
+  challenge with that key. A host serves relayed connections only for the
+  routes a paired device already reaches, and refuses pairing and listener
+  administration on them: pairing still happens on the private network or by
+  QR.
+- **Off by default.** The hub's Device relay switch, each host's Relay
+  hub-grant item, and each device's own per-host choice. A browser cannot
+  check a pin, so the relay serves only the phone and desktop apps.
+- **Phone push is separate.** The relay carries a device's own connection,
+  not notifications. The store build of the phone app still gets push through
+  the minimal Octant push gateway
+  ([Mobile maturity: delivery path](mobile-maturity.md#delivery-path)),
+  because Apple and Google deliver only with the credential of the account
+  that signs the app; a phone app the person built uses the hub as its own
+  gateway ([decision H7](#decisions)).
 
 ### Failover
 
@@ -2971,6 +3163,27 @@ consensus protocol. Membership changes made during a stand-in merge back
 under one rule (removal wins), so a split network cannot keep a removed
 member in the roster.
 
+#### The public entrance during failover
+
+Designed, not built (maintainer decision, 2026-11-26):
+
+- **What a standby holds.** A standby holds sealed copies of the endpoints
+  and their secrets and the spoke-signed link grants of every spoke whose
+  Public item and Standby item are both ticked.
+- **When it serves.** A standby opens its own entrance only while it stands
+  in, and only if its own person ticked Serve the public entrance on it.
+  With Funnel it turns its own Funnel on while it stands in and off when it
+  steps down, and Settings on each spoke shows the standby's URL for senders
+  that accept a fallback address. With the person's own multi-connector
+  front, the address does not change.
+- **Hand-back.** Stepping down hands the hub the undelivered queue with its
+  delivery ids, under the `handing-back` freeze above.
+- **No delivery runs twice.** Dedupe is the spoke's: a delivery id the spoke
+  has already claimed starts nothing, so a split network in which both hubs
+  forward the same delivery still runs it once.
+- **Links keep working.** The spoke checks every visitor fetch, so a link the
+  spoke revoked is refused on the standby as on the hub.
+
 ### Wake service
 
 Routines today run only while their host is awake, and nothing wakes it
@@ -3005,6 +3218,11 @@ may run a self-hosted wake service for spokes whose hub grant includes Wake:
   and on does the same, and the generation never goes backwards. The hub's report answer
   and heartbeat carry it, and a spoke that sees it change forgets what it last
   sent and reports in full on its next look, without any routine changing.
+- **Held webhook deliveries.** A webhook delivery queued for a spoke that
+  is asleep sends the same nudge, when that spoke's Wake item is ticked; the
+  spoke runs it on return if it is still within the 24-hour hold. A nudge
+  never carries the payload, and the spoke fetches queued deliveries itself
+  (designed, not built).
 - **Hub-held schedules.** A routine the person wants to run "on whichever
   spoke is awake" is not in this design; a routine always belongs to one
   spoke's Project.
@@ -3049,6 +3267,11 @@ notifications from all of them after joining once:
 | A thread's Reachable tag                          | The host that owns the thread, set by a person                                                                            | Set by an agent, the hub, or a peer                                                                         |
 | Wake times (routine id, next time, hardware addr) | The hub and standbys, rebuilt from spoke reports                                                                          | Holds the routine's prompt, Project, or profile                                                             |
 | Push envelopes in transit                         | Not journaled on the hub; counts and failure category only                                                                | Readable by the hub                                                                                         |
+| Visitor links (grant, revocation, binding)        | The spoke that owns the thread; the hub and standbys hold the spoke-signed grant                                          | Created, widened, or revived by the hub                                                                     |
+| Visitor comment requests                          | The spoke, as a Request; Send or Dismiss by the person                                                                    | Delivered without the person's Send; treated as instructions                                                |
+| Webhook endpoints, secrets, claims, and runs      | The spoke that owns the routine; dedupe by delivery id in its journal                                                     | Run twice for one delivery id; given more authority by a payload                                            |
+| Webhook delivery queue                            | The acting hub, counts and failure category only; held up to 24 hours                                                     | Journaled with its payload on the hub                                                                       |
+| Device relay traffic                              | Not journaled on the hub; counts only. The host journals the device's requests as it does today                           | Readable by the hub or the front                                                                            |
 | Credentials                                       | The broker of each host that holds them                                                                                   | Copied except by an owner's unlocked act; journaled                                                         |
 
 Hub and spoke membership state (the hub's roster and members, and a spoke's
@@ -3064,18 +3287,24 @@ reads each spoke directly.
 
 ## Threat model
 
-| Party                                                             | Can                                                                                                                                                                                                                                                                                                                                         | Cannot, and why                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A compromised hub                                                 | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata; list a fake member window, which may act on the hub itself only within the hub's own Act list | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act                 |
-| A compromised standby                                             | While standing in, what a compromised hub can except read Status or Usage, limited to the spokes whose grant covers the standby                                                                                                                                                                                                             | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                                              |
-| A compromised spoke                                               | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; post text into the threads other members tagged Reachable, which arrives framed and tainting and can wake an idle tagged thread within the wake bounds, spending that spoke's provider usage; claim to be standing in as hub                         | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster; move a thread onto another member without an owner's fresh unlock |
-| A stolen owner device                                             | What an ordinary member can, until removed or revoked                                                                                                                                                                                                                                                                                       | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                                |
-| A stolen or compromised device a host's own person paired with it | Everything a local window on that host can, Full access included, until its session expires or the device is revoked, each action journaled with the device as its actor (maintainer decision, 2026-11-12)                                                                                                                                  | Read a stored credential back, act on a host it never paired with beyond the grant that host gave, or outlive session expiry and revocation                                                                                                             |
-| A lost or stolen phone                                            | What each spoke allows that guest, until revoked                                                                                                                                                                                                                                                                                            | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                                           |
-| A hub a spoke ticked Usage for                                    | Read that spoke's plan-limit readings: which provider accounts it has, their limit windows and resets                                                                                                                                                                                                                                       | Read a credential, a thread, a prompt or a cost; act on the spoke; read anything while Usage is unticked, which it is unless the person ticks it                                                                                                        |
-| A spoke's agent                                                   | Ask its own host to delegate within its thread's authority; from a tagged thread, message other members' tagged threads                                                                                                                                                                                                                     | Choose the peer grant, tag a thread, start more than the bounded wake turns on a tagged receiver, approve on the receiver, widen authority, carry a credential                                                                                          |
-| Someone on the private net                                        | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                                                                                                                         | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                                |
-| Someone who can push to a repository                              | Push a branch whose tip carries an `Octant-Handover` trailer, which a member lists under Handovers                                                                                                                                                                                                                                          | Make its note more than outside content, or start a turn: only a person continues a handover                                                                                                                                                            |
+| Party                                                                    | Can                                                                                                                                                                                                                                                                                                                                         | Cannot, and why                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A compromised hub                                                        | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata; list a fake member window, which may act on the hub itself only within the hub's own Act list | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act                 |
+| A compromised standby                                                    | While standing in, what a compromised hub can except read Status or Usage, limited to the spokes whose grant covers the standby                                                                                                                                                                                                             | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                                              |
+| A compromised spoke                                                      | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; post text into the threads other members tagged Reachable, which arrives framed and tainting and can wake an idle tagged thread within the wake bounds, spending that spoke's provider usage; claim to be standing in as hub                         | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster; move a thread onto another member without an owner's fresh unlock |
+| A stolen owner device                                                    | What an ordinary member can, until removed or revoked                                                                                                                                                                                                                                                                                       | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                                |
+| A stolen or compromised device a host's own person paired with it        | Everything a local window on that host can, Full access included, until its session expires or the device is revoked, each action journaled with the device as its actor (maintainer decision, 2026-11-12)                                                                                                                                  | Read a stored credential back, act on a host it never paired with beyond the grant that host gave, or outlive session expiry and revocation                                                                                                             |
+| A lost or stolen phone                                                   | What each spoke allows that guest, until revoked                                                                                                                                                                                                                                                                                            | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                                           |
+| A hub a spoke ticked Usage for                                           | Read that spoke's plan-limit readings: which provider accounts it has, their limit windows and resets                                                                                                                                                                                                                                       | Read a credential, a thread, a prompt or a cost; act on the spoke; read anything while Usage is unticked, which it is unless the person ticks it                                                                                                        |
+| A spoke's agent                                                          | Ask its own host to delegate within its thread's authority; from a tagged thread, message other members' tagged threads                                                                                                                                                                                                                     | Choose the peer grant, tag a thread, start more than the bounded wake turns on a tagged receiver, approve on the receiver, widen authority, carry a credential                                                                                          |
+| Someone on the private net                                               | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                                                                                                                         | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                                |
+| Someone who can push to a repository                                     | Push a branch whose tip carries an `Octant-Handover` trailer, which a member lists under Handovers                                                                                                                                                                                                                                          | Make its note more than outside content, or start a turn: only a person continues a handover                                                                                                                                                            |
+| Anyone on the internet, once the public entrance is on                   | Reach the entrance's closed routes, rate-limited; learn that an Octant hub answers there                                                                                                                                                                                                                                                    | Reach the private listener, pairing, administration, or a member-to-member route; start a run without a valid signature; read a thread without a link's secret; open a device relay without a key a host listed                                         |
+| A visitor link holder                                                    | Read the one thread's redacted projection live from one browser until the link expires or is revoked; on a comment-only link, send comments the person may Send or Dismiss                                                                                                                                                                  | Act on the thread, answer approvals, see diffs, files, tool output or paths, change the model, open the link in a second browser, or outlive revocation                                                                                                 |
+| Someone holding a leaked webhook secret                                  | Start the routine that endpoint names, with outside content, within that routine's allowance and the hold limits                                                                                                                                                                                                                            | Change the routine's task, Project or authority, reach Full access, skip an approval, or replay a delivery id the spoke has claimed                                                                                                                     |
+| The front operator (Tailscale with Funnel; the person's tunnel or proxy) | Funnel: see connection metadata (addresses, sizes, timing); TLS ends on the hub. The person's own tunnel or proxy: also see visitor-page and webhook plaintext, and the device relay's inner ciphertext                                                                                                                                     | Read a visitor link's secret (it stays in the fragment), forge a link or a delivery, or read device-relay traffic, which is pinned end to end to the host                                                                                               |
+| A compromised hub, with the public entrance on                           | Also: forge a webhook delivery into a routine the person defined, as outside content; read shared threads' visitor projections and webhook payloads in transit; drop, delay or replay relayed ciphertext; see which device reaches which host and when                                                                                      | Sign or revive a visitor link, widen a link's scope, start a run twice for one delivery id, raise a webhook run to Full access, or read or alter device-relay traffic                                                                                   |
+| A stolen device with the device relay on                                 | What it could already do on each host, now from anywhere, until the host revokes it                                                                                                                                                                                                                                                         | Pair a new device or administer a listener through the relay, or outlive revocation, which also removes its key from the relay list                                                                                                                     |
 
 The biggest risk is the hub as introducer: whoever controls the hub can tell a
 spoke that an attacker's key belongs to another member, and with full
@@ -3093,6 +3322,17 @@ on **Confirm new members**, which closes the gap at the cost of one unlock per
 new device. Owner powers move the main risk to
 the unlock key; it lives in each device's secure hardware and is used only
 after the person proves presence.
+
+The public entrance (designed, not built) adds internet reach to the hub,
+which the private-network argument above no longer covers for those routes.
+Its own locks are: a route table with no private, pairing or administration
+route on it; a spoke-signed grant and a fragment-only secret per visitor
+link; a signature over the raw bytes per webhook delivery, checked again on
+the spoke, with a five-minute timestamp window for Standard Webhooks and a
+seven-day id-and-body claim for GitHub, which signs no timestamp; a paired device key per relay;
+and three levels of switches that all start off. The residual risk the
+maintainer accepted on 2026-11-26 is a compromised hub forging a delivery,
+but only into a routine the person defined and only as outside content.
 
 ## Decisions
 
@@ -3118,6 +3358,14 @@ choice to the design, the design's recommendation was taken.
 | H26 | May a computer be added as a member over SSH without visiting it?           | Yes, as an option: the person's window, or a device the host's person paired directly, runs the signed headless installer over SSH after the person confirms, as a user service with no sudo, then the computer joins with a join code passed in the same session. The SSH login is the person on that machine, so only the spoke joins. The install dialog's confirmation also approves that one join in advance; the comparison code exists only once the installed computer's listener runs and the join opens, so the window then reads it from the computer over the pinned SSH connection and completes the join only if it matches the hub's, refusing it otherwise without asking again. The headless build carries its own runtime, Octant never runs sudo, and the install is journaled. Updates drain, swap and roll back after a failed handshake (2026-11-19) |
 | H27 | Who is told when a new device joins or pairs?                               | Every device connected to the hub or the host: the hub, spokes, guests and paired devices, each with the new device's name and private-network IP address, key fingerprint and role, Remove one tap away, and a push notification on phones (2026-11-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | H28 | How does a person bootstrap a local repository onto another computer?       | From one modal over the pinned direct paired session (never via the hub), limited to computers where the caller acts as that computer's own person: derive SSH and HTTPS clone URLs from `origin` (never `file://` or `ext::`), clone non-interactively into an empty/new folder (`~/<repo>` default) with hooks/templates suppressed and strict SSH host-key checking, bind the Code Project with a one-time receipt, and optionally copy only explicitly ticked plain gitignored files afterwards (0 selected by default; whole ignored directories, OS junk, symlinks, `.git/**`, and special permission bits excluded; secret-guard matches badged; partial copy keeps the clone and names failed paths) (2026-11-24)                                                                                                                                                  |
+| H29 | What carries internet traffic to the hub's public entrance?                 | A built-in Tailscale Funnel switch on the hub (TLS ends on the hub, no port forwarding at home), and, documented, a front the person runs themselves (their own Cloudflare Tunnel, or Caddy on a VPS in the tailnet) pointed at the entrance. Rejected: a router port forward, which exposes the home address, and making `apps/share` a live relay (2026-11-26; designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| H30 | How does the public address survive failover?                               | Every member's entrance forwards to the acting hub over the pinned private transport, and only the acting hub serves, so a front with connectors on the hub and the standby keeps one address. With Funnel alone, the standby turns on its own Funnel while it stands in and Settings shows that URL (2026-11-26; designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| H31 | What are the outside person and the link called?                            | A **visitor** and a **visitor link**; "guest" stays the person's own phone or browser (2026-11-26)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| H32 | Who signs a visitor link?                                                   | The spoke that owns the thread, with its host identity key. The hub and standbys verify it against the roster's key, and the spoke checks revocation on every fetch (2026-11-26; designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| H33 | Who holds a webhook secret?                                                 | The spoke that owns the routine mints and keeps it and seals it to the hub and each standby. The acting hub drops a forged request before queueing, and the spoke verifies the original bytes again. GitHub, which signs no timestamp, is deduped by delivery id and body digest for seven days. Residual risk: a compromised hub can forge a delivery, only into a routine the person defined and only as outside content (2026-11-26; designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                               |
+| H34 | How much may a run a webhook starts do?                                     | Never Full access: Code runs approval-gated at most, and Work at its default level (2026-11-26; designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| H35 | What are the public entrance's limits?                                      | A webhook endpoint takes 60 requests a minute and a 256 KiB body, and holds at most 500 deliveries or 32 MiB for at most 24 hours while its spoke is away. A visitor link expires after 24 hours by default, 7 days at most, and is bound to the first browser that opens it (2026-11-26; designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| H36 | Can the person's own devices reach their hosts without the tailnet?         | Yes, through the hub's public entrance as an end-to-end encrypted channel pinned to the host key and certificate from pairing, so the hub and the front see only ciphertext; pairing still happens on the private network or by QR; off by default. The hub is the person's own relay and Octant runs none. Phone push for the store build still goes through the minimal Octant push gateway (2026-11-26; designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | H14 | Does a host fetch its own Tailscale certificate for the web app?            | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | H15 | How does a browser guest reach a spoke?                                     | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | H16 | Do spokes honor owner devices by default?                                   | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -3160,6 +3408,17 @@ joins or pairs, with its name and IP address.
 A server without Octant stays reachable over SSH as a
 [server Project](server-projects.md), which the same day gained running a
 provider on the server.
+
+On 2026-11-26 the maintainer asked for public reach, visitor links, and
+webhook triggers through hub and spokes rather than an Octant-run service,
+with failover, which replaces the earlier "private only" and "no relay, no
+port forwarding" rules for the hub's [public entrance](#public-entrance)
+alone, and settled H29 to H35 as recommended. Asked whether hub and spokes
+could also carry connectivity and phone push without an Octant relay, the
+maintainer added H36 the same day: the hub carries the person's own paired
+devices end to end, while phone push for the store build stays on the push
+gateway, because Apple and Google deliver only with the signing account's
+credential.
 
 Earlier on 2026-10-28 the maintainer settled that a standby hub exists (was
 H1), and that no member acts as a relay or introducer except the hub and a
@@ -4201,6 +4460,62 @@ sheets; a real machine and a published listing are maintainer gates.
     still preparing; a retry of a start whose acceptance was lost gets its
     original answer. Not built yet: showing the level beside the roster.
 
+Slices 21 to 27 deliver the [public entrance](#public-entrance) (maintainer
+decision, 2026-11-26; designed, not built). They ship as one issue's branch
+in a native stack, and slices 22 to 27 start only after the maintainer
+approves the security proposal on the issue: the route table and bind, the
+Funnel command and port, the link token format, the signature schemes, the
+limits, and the device relay's channel design.
+
+21. **The public entrance's design and rule changes.** This section,
+    Connectivity, the Release Boundary, and the decisions. Docs only.
+    **Linux container: yes.**
+22. **Contracts and pure policy.** The Public and Relay hub-grant items; the
+    visitor-link grant (link id, spoke, scope, expiry, revision, secret hash)
+    and the browser-binding refusal; the webhook endpoint and delivery envelope; pure checks
+    for the signature schemes, the five-minute timestamp window, dedupe keys,
+    and link validity. Tests first: a delivery whose timestamp is older than
+    five minutes is refused; a redelivered webhook id starts no second run; a
+    link signed by a key the roster does not list is refused. Built: the
+    contracts, the pure checks, and the signing, signature and sealing
+    crypto on the server, with nothing yet calling them. **Linux container:
+    yes.**
+23. **The entrance on the hub.** The separate listener, its route table,
+    limits, and health served by the acting hub only; the Funnel switch in
+    Settings and `octant hub public`; Pause; forwarding to the acting hub.
+    Acceptance: the public listener answers 404 to every private route, and
+    pausing remote access closes it. **Linux container: yes**, with a fake
+    Tailscale daemon; a real Funnel URL from mobile data is a maintainer
+    gate.
+24. **Webhook triggers.** The `webhook` trigger kind, secret mint and
+    rotation, and the delivery log on the spoke; verify, queue, and forward
+    on the hub under the Public item; a wake for a sleeping spoke; claims in
+    the run-first claim ledger keyed by delivery id; the routine's allowance
+    and decision H34. Acceptance: a delivery to a sleeping spoke wakes it and
+    runs once on return; a payload never changes the routine's authority.
+    **Linux container: yes**; a real GitHub delivery is a maintainer gate.
+25. **Visitor links.** Share with visitor and Stop sharing, expiry, the
+    redacted live projection, and comment Requests with Send and Dismiss on
+    the spoke; the viewer page, a fetch from the spoke on each open, and the
+    browser binding on the hub, reusing the token and rate-limit patterns of
+    `apps/share` and leaving it unchanged. Acceptance: a revoked link stops
+    on the next fetch on the hub and the standby; a comment-only visitor
+    cannot answer an approval. **Linux container: yes**, with a rendered
+    check; a phone outside the tailnet is a maintainer gate.
+26. **Failover of the public entrance.** Sealed copies on standbys, the
+    standby's own Serve the public entrance choice, the queue in the
+    hand-back, and spoke-side dedupe in a split network. Acceptance: a
+    three-host loopback smoke stops the hub, the standby serves both
+    features, and no delivery is lost or runs twice. **Linux container:
+    yes**; failover on a real network is a maintainer gate.
+27. **Your own devices through the hub.** The relay route, the host's relay
+    key list, relayed connections into the private listener with pairing and
+    administration refused, and the per-device choice in the phone and
+    desktop apps. Acceptance: a paired device reaches its host through the
+    entrance with its pin checked, the hub sees only ciphertext, and an
+    unlisted key or a pairing route is refused. **Linux container: yes**
+    for the server; a phone on mobile data is a maintainer gate.
+
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
 
@@ -4215,3 +4530,17 @@ routine; results from another spoke are data; a moved thread takes turns on one 
 a time unless the person chooses otherwise, needs an owner's own fresh unlock,
 and leaves the source only after the destination commits; joining happens only
 over a private network; the hub runs and serves the web app with no desktop window; and every hub service is off until the person turns it on.
+
+The public entrance adds these: no private, pairing, administration, or
+member-to-member route answers on the public listener (a route-table test);
+nothing opens until the hub's switch, the spoke's Public or Relay item, and
+the link, endpoint, or device are all on, and Pause closes it (server
+tests); a signed delivery starts its routine once, and an unsigned, stale, or
+replayed one starts nothing; a webhook run never reaches Full access; a
+revoked or expired link stops on the next fetch on every hub; a comment-only
+visitor cannot answer an approval; a standing-in standby serves both
+features and the hand-back loses and repeats no delivery (a three-host
+loopback smoke); and a relayed device's pin is checked end to end. The live
+checks (a real Funnel URL from mobile data, a real GitHub delivery, a visitor
+link on a phone outside the tailnet, a relayed phone, and failover on a real
+network) are maintainer gates.
