@@ -2069,13 +2069,14 @@ describe("a paired device at the queue", () => {
       own.messageId,
     ]);
     answer("refused");
-    await vi.waitFor(async () =>
-      expect((await snapshot(f.service)).items.map((item) => item.messageId)).toEqual([
-        waiting.messageId,
-        offered.messageId,
-        own.messageId,
-      ]),
-    );
+    // The order is the same before and after the refusal settles, so polling
+    // for it would pass at once; let the settlement run first, then read.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect((await snapshot(f.service)).items.map((item) => item.messageId)).toEqual([
+      waiting.messageId,
+      offered.messageId,
+      own.messageId,
+    ]);
   });
 
   it("lets a device the host's own person paired pause, resume and reorder the queue and edit, remove or send now another's message, journaled as the device", async () => {
