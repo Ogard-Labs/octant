@@ -1283,6 +1283,9 @@ export function useCodeController(options: CodeControllerOptions) {
       let pageRestoreUndo: CodeCheckpoint | undefined;
       usageByOperation.current = new Map();
       earlierUsage.current = undefined;
+      // A transcript already shown is replaced only once every page is read: a
+      // later page that fails must not leave it cut short.
+      const shown = conversationThreadKey.current === String(threadId);
       for (;;) {
         const page = await client.conversation(threadId, cursor, 50, signal);
         if (!isActive(request, threadGeneration, mounted) || page.threadId !== threadId)
@@ -1314,7 +1317,8 @@ export function useCodeController(options: CodeControllerOptions) {
           }),
         );
         setRestoreUndo(pageRestoreUndo);
-        showConversation(threadId, [...inheritedConversation.current, ...messages]);
+        if (!shown || !page.hasMore)
+          showConversation(threadId, [...inheritedConversation.current, ...messages]);
         if (projected.activity.size > 0) {
           takeReadActivity(projected.activity);
         }

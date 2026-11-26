@@ -2870,6 +2870,70 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("keeps a fork's whole transcript when a later page of reading it again fails on a host read whole", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000010";
+    const parentId = "10000000-0000-4000-8000-000000000099" as CodeThreadId;
+    const ownPage = (cursor: number) => ({
+      version: 3 as const,
+      threadId: ids.thread,
+      turns: [
+        conversationTurn(
+          `70000000-0000-4000-8000-00000000002${String(cursor)}`,
+          `60000000-0000-4000-8000-00000000002${String(cursor)}`,
+        ),
+      ],
+      nextCursor: cursor + 1,
+      hasMore: cursor === 0,
+    });
+    const forkConversation = vi.fn(async (_threadId: unknown, cursor: number) => ownPage(cursor));
+    const client = fakeClient({
+      thread: vi.fn(async (threadId) =>
+        threadId === parentId
+          ? { ...view(1), thread: { ...view(1).thread, id: parentId } }
+          : {
+              ...view(1),
+              thread: {
+                ...view(1).thread,
+                forkedFrom: { threadId: parentId, throughOperationId: operationId },
+              },
+            },
+      ),
+      conversation: vi.fn(async (threadId, cursor) =>
+        threadId === parentId
+          ? {
+              version: 3,
+              threadId: parentId,
+              turns: [conversationTurn(operationId, "60000000-0000-4000-8000-000000000010")],
+              nextCursor: 1,
+              hasMore: false,
+            }
+          : forkConversation(threadId, cursor),
+      ) as never,
+      operationContents: vi.fn(async (request) => ({
+        threadId: request.threadId,
+        items: request.items.map((item: object) => ({ ...item, text: "text" })),
+      })) as never,
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.conversation).toHaveLength(6));
+    const shown = result.current.conversation.map((message) => message.id);
+
+    forkConversation
+      .mockImplementationOnce(async (_threadId, cursor) => ownPage(cursor))
+      .mockRejectedValueOnce(new Error("offline"));
+    act(() => {
+      result.current.refreshConversation();
+    });
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+    );
+    await act(async () => undefined);
+    expect(result.current.conversation.map((message) => message.id)).toEqual(shown);
+    unmount();
+  });
+
   it("keeps a fork readable when its source history is unavailable", async () => {
     const promptId = "60000000-0000-4000-8000-000000000010";
     const replyId = "60000000-0000-4000-8000-000000000011";
