@@ -83,6 +83,13 @@ export type VideoAdapterPoll =
       /** The provider billed generation even though no usable clip was returned. */
       readonly billed?: true;
       readonly usage?: VideoAdapterUsage;
+      /**
+       * The HTTP status of a status check the provider answered with an
+       * error, when that is what failed. The host reads it to tell a job the
+       * provider no longer holds from any other failure; leave it out for a
+       * failure that was not an HTTP error answer.
+       */
+      readonly httpStatus?: number;
     }
   | { readonly status: "cancelled"; readonly usage?: VideoAdapterUsage };
 
