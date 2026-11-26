@@ -1,24 +1,15 @@
-import {
-  CircleAlert,
-  CircleCheck,
-  CircleDashed,
-  CircleHelp,
-  CircleSlash,
-  KeyRound,
-  Loader,
-  ShieldAlert,
-  TriangleAlert,
-  Unplug,
-} from "../ui/icons";
+import { CircleAlert, CircleCheck, CircleDashed, Loader, Unplug } from "../ui/icons";
 import type { ProviderInstanceId } from "@octant/contracts";
-import { forwardRef, type ComponentType } from "react";
+import { forwardRef, useState } from "react";
+import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import type {
   FirstRunDiscoveryNotice,
-  FirstRunProviderState,
+  FirstRunProviderReadiness,
   FirstRunReadinessOverall,
   FirstRunReadinessSummary,
 } from "./firstRunReadinessModel";
@@ -37,18 +28,8 @@ export interface FirstRunProviderStepProps {
   readonly onSetProviderEnabled?: (instanceId: ProviderInstanceId, enabled: boolean) => void;
 }
 
-const PROVIDER_ICONS: Record<FirstRunProviderState, ComponentType<{ readonly size?: number }>> = {
-  ready: CircleCheck,
-  "no-models": CircleAlert,
-  "authentication-required": KeyRound,
-  "credential-unavailable": ShieldAlert,
-  unreachable: Unplug,
-  incompatible: TriangleAlert,
-  degraded: CircleAlert,
-  checking: Loader,
-  unverified: CircleHelp,
-  disabled: CircleSlash,
-};
+/** How many providers show before the rest wait behind "Show N more". */
+const PROVIDERS_SHOWN = 5;
 
 const SUMMARY_ICONS = {
   ready: CircleCheck,
@@ -74,10 +55,26 @@ const CAVEATS: Partial<Record<Exclude<FirstRunReadinessOverall, "ready">, string
 };
 
 /**
+ * Keeps rows in the order given. Rows the order does not name follow in the
+ * model's own order.
+ */
+function inHeldOrder(
+  providers: ReadonlyArray<FirstRunProviderReadiness>,
+  held: ReadonlyArray<string> | undefined,
+): ReadonlyArray<FirstRunProviderReadiness> {
+  if (held === undefined) return providers;
+  const place = (provider: FirstRunProviderReadiness) => {
+    const index = held.indexOf(String(provider.instanceId));
+    return index === -1 ? held.length : index;
+  };
+  return [...providers].sort((left, right) => place(left) - place(right));
+}
+
+/**
  * The one thing first run has to get right: whether any provider on this host
  * can answer a message, and what to do when none can.
  *
- * Every status carries an icon *and* a word, so the surface stays readable for
+ * Every status is a word, so the surface stays readable for
  * colour-blind users and under Increased Contrast. It claims nothing the host
  * has not reported: while readiness is still being checked, or while the
  * provider registry is unreachable, it names the unknown instead of saying
@@ -89,63 +86,86 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
     const computer = thisComputerName(useHostPlatform());
     const SummaryIcon = SUMMARY_ICONS[readiness.overall];
     const caveat = readiness.overall === "ready" ? undefined : CAVEATS[readiness.overall];
+    const [showAll, setShowAll] = useState(false);
+    // A switch changes its row's rank. Once the person has used one, rows stay
+    // put, so the row under the pointer does not jump or fold out of sight.
+    const [heldOrder, setHeldOrder] = useState<ReadonlyArray<string>>();
+    const ordered = inHeldOrder(readiness.providers, heldOrder);
+    const shown = showAll ? ordered : ordered.slice(0, PROVIDERS_SHOWN);
+    const folded = ordered.length - PROVIDERS_SHOWN;
 
     return (
       <div className="first-run__step">
-        <p className="first-run__intro">
-          Octant runs on {computer} and talks to the AI providers you choose. If Claude Code or
-          Codex is already installed, first run enables it so a thread can start without visiting
-          Settings; you can turn it off later. Other detected CLIs stay off until you enable them.
-        </p>
-
-        {/* The verdict is the section's own second line, not a row: it speaks
-            for the whole list rather than for one provider in it. */}
-        <section
-          aria-label="Provider readiness"
-          className="settings-card-section settings-card-section--open"
-        >
-          <h2>Provider readiness</h2>
-          <p
-            className="settings-section-note first-run__summary"
-            data-overall={readiness.overall}
-            role="status"
+        <div className="first-run__intro">
+          <p>Choose the AI providers Octant uses. You can change this later in Settings.</p>
+          <OctantCollapsible
+            chevronSize={12}
+            className="setrow-more"
+            summary="More"
+            summaryClassName="setrow-more__summary"
+            summaryProps={{ "aria-label": "More about providers" }}
           >
+            <p className="setrow-more__body">
+              Octant runs on {computer} and talks to the AI providers you choose. If Claude Code or
+              Codex is already installed, first run enables it so a thread can start without
+              visiting Settings; you can turn it off later. Other detected CLIs stay off until you
+              enable them.
+            </p>
+          </OctantCollapsible>
+        </div>
+
+        {/* The verdict speaks for the whole list rather than for one provider
+            in it, so it stands above the rows. */}
+        <section aria-label="Provider readiness" className="first-run__readiness">
+          <p className="first-run__summary" data-overall={readiness.overall} role="status">
             <SummaryIcon size={16} />
             <span className="first-run__summary-headline">{readiness.headline}</span>
             <span className="first-run__summary-detail">{readiness.detail}</span>
           </p>
 
-          {readiness.providers.length > 0 ? (
+          {ordered.length > 0 ? (
             <ul className="setgroup first-run__providers" role="list">
-              {readiness.providers.map((provider) => {
-                const Icon = PROVIDER_ICONS[provider.state];
-                return (
-                  <li
-                    className="setrow first-run__provider"
-                    data-state={provider.state}
-                    key={String(provider.instanceId)}
-                  >
-                    <span className="setrow-label">
-                      <Icon size={16} />
-                      {provider.displayName}
-                    </span>
-                    <p className="setrow-hint">{provider.detail}</p>
+              {shown.map((provider) => (
+                <li
+                  className="setrow first-run__provider"
+                  data-state={provider.state}
+                  key={String(provider.instanceId)}
+                >
+                  <span className="setrow-label">
+                    <ProviderGlyph
+                      displayName={provider.displayName}
+                      driverKind={provider.driverKind}
+                      size={16}
+                    />
+                    {provider.displayName}
+                  </span>
+                  <p className="setrow-hint">{provider.label}</p>
+                  {props.onSetProviderEnabled === undefined ? null : (
                     <div className="setrow-control">
-                      <span className="first-run__provider-state">{provider.label}</span>
-                      {props.onSetProviderEnabled === undefined ? null : (
-                        <OctantSwitch
-                          checked={provider.state !== "disabled"}
-                          label={`Enable ${provider.displayName}`}
-                          onCheckedChange={(enabled) =>
-                            props.onSetProviderEnabled?.(provider.instanceId, enabled)
-                          }
-                        />
-                      )}
+                      <OctantSwitch
+                        checked={provider.state !== "disabled"}
+                        label={`Enable ${provider.displayName}, ${provider.label}`}
+                        onCheckedChange={(enabled) => {
+                          setHeldOrder(ordered.map((row) => String(row.instanceId)));
+                          props.onSetProviderEnabled?.(provider.instanceId, enabled);
+                        }}
+                      />
                     </div>
-                  </li>
-                );
-              })}
+                  )}
+                </li>
+              ))}
             </ul>
+          ) : null}
+          {folded > 0 ? (
+            <OctantButton
+              aria-expanded={showAll}
+              className="first-run__fold"
+              onClick={() => setShowAll((current) => !current)}
+              type="button"
+              variant="ghost"
+            >
+              {showAll ? "Show fewer" : `Show ${String(folded)} more`}
+            </OctantButton>
           ) : null}
         </section>
 

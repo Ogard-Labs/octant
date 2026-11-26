@@ -11,7 +11,9 @@ describe("first-run steps", () => {
     });
 
     expect(steps.map((step) => step.id)).toEqual(["providers", "project", "model", "mode"]);
-    expect(steps.filter((step) => step.current).map((step) => step.id)).toEqual(["providers"]);
+    expect(steps.filter((step) => step.progress === "current").map((step) => step.id)).toEqual([
+      "providers",
+    ]);
     expect(steps.every((step) => !step.configured)).toBe(true);
     expect(nextFirstRunStep("model")).toBe("mode");
     expect(nextFirstRunStep("mode")).toBeUndefined();
@@ -47,5 +49,38 @@ describe("first-run steps", () => {
     });
 
     expect(steps[0]?.summary).toBe(host.summary);
+  });
+
+  it("a step the person has not reached shows its number, not a check", () => {
+    const steps = buildFirstRunSteps({
+      current: "providers",
+      providersReady: true,
+      projectReady: true,
+      modelChosen: true,
+    });
+
+    expect(steps.map((step) => step.progress)).toEqual([
+      "current",
+      "pending",
+      "pending",
+      "pending",
+    ]);
+  });
+
+  it("completes a step only when the person moved past it with an answer", () => {
+    const steps = buildFirstRunSteps({
+      current: "model",
+      passed: new Set(["providers", "project"]),
+      providersReady: false,
+      projectReady: true,
+      modelChosen: true,
+    });
+
+    expect(steps.map((step) => step.progress)).toEqual([
+      "pending",
+      "completed",
+      "current",
+      "pending",
+    ]);
   });
 });

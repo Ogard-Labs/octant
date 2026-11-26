@@ -30,11 +30,19 @@ export interface FirstRunStepDescriptor {
    * says so.
    */
   readonly configured: boolean;
-  readonly current: boolean;
+  /**
+   * What the rail's mark shows. A check means the person moved past the step
+   * and the host holds its answer: a Project that already existed is no check
+   * on a step nobody has reached.
+   */
+  readonly progress: "current" | "completed" | "pending";
 }
 
 export interface FirstRunStepInputs {
-  readonly current: FirstRunStepId;
+  /** Absent on the readiness view, where no counted step is current. */
+  readonly current: FirstRunStepId | undefined;
+  /** The steps the person has moved forward from. */
+  readonly passed?: ReadonlySet<FirstRunStepId>;
   readonly providersReady: boolean;
   readonly projectReady: boolean;
   readonly modelChosen: boolean;
@@ -75,7 +83,12 @@ export function buildFirstRunSteps(
     title: TITLES[id],
     summary: summary[id],
     configured: configured[id],
-    current: id === inputs.current,
+    progress:
+      id === inputs.current
+        ? "current"
+        : configured[id] && inputs.passed?.has(id) === true
+          ? "completed"
+          : "pending",
   }));
 }
 

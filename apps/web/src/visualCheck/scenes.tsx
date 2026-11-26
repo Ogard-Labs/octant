@@ -25,6 +25,7 @@ import { ShellFrame } from "../shell/ShellFrame";
 import { ShellSidebar } from "../shell/ShellSidebar";
 import { SidebarRail } from "../shell/SidebarRail";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
+import { FirstRunOnboarding } from "../onboarding/FirstRunOnboarding";
 import type { ThemeController } from "../theme/useThemeController";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { RailUsage } from "../usage/RailUsage";
@@ -36,6 +37,7 @@ import {
   automationClient,
   CODE_PROJECT,
   CODE_TAB,
+  FIRST_RUN_READINESS,
   codeProjectClient,
   localUsageHistoryFixture,
   planUsageClient,
@@ -284,6 +286,37 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
     render: () => ACCESS_LEVEL_RENDERERS.find((r) => r.id === "qa-paired-devices")?.render(),
   },
   { id: "home", render: () => <HomeScene /> },
+  {
+    // The first-run dialog on its Providers step, with more providers than
+    // show before the fold.
+    id: "first-run",
+    render: () => (
+      <FirstRunOnboarding
+        codeModelGroups={[]}
+        controller={{
+          pending: true,
+          visible: true,
+          submitting: undefined,
+          blockedMessage: undefined,
+          refused: false,
+          complete: noop,
+          skip: noop,
+          defer: noop,
+        }}
+        onCreateProject={noop}
+        onOpenProviderSettings={noop}
+        onRescan={noop}
+        onSelectModel={async () => true}
+        onSetProviderEnabled={async () => true}
+        onStartThread={noop}
+        projects={[]}
+        readiness={FIRST_RUN_READINESS}
+        scanning={false}
+        workEnabled
+        workModelGroups={[]}
+      />
+    ),
+  },
   {
     // The side panel is the dock's Environment tool. The panel renders in place
     // when no dock host exists, so it is drawn on its own in a dock-width pane.

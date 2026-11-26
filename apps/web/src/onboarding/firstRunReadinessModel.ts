@@ -7,7 +7,11 @@ import type {
 } from "@octant/contracts";
 import { providerCanServeAnyModel } from "@octant/domain";
 import { thisComputerName } from "../platform";
-import { providerWithheldReason } from "../providers/providerSettingsPresentation";
+import {
+  isAbsenceProven,
+  isDetectedLocally,
+  providerBinaryPath,
+} from "../providers/providerSettingsPresentation";
 
 /**
  * How one configured provider looks to a user completing first run.
@@ -30,13 +34,22 @@ export type FirstRunProviderState =
   | "unverified"
   | "disabled";
 
+/**
+ * Whether a turned-off provider's runtime is on the host. `unknown` covers a
+ * provider with nothing to install (an endpoint or a key) and a scan that did
+ * not look where the runtime was saved: neither supports "Not installed".
+ */
+export type FirstRunProviderInstallation = "installed" | "not-installed" | "unknown";
+
 export interface FirstRunProviderReadiness {
   readonly instanceId: ProviderInstanceId;
   readonly displayName: string;
+  readonly driverKind: ProviderInstance["driverKind"];
   readonly state: FirstRunProviderState;
-  /** Status word shown beside the icon so status never depends on colour. */
+  /** The row's one state line: words, so status never depends on colour. */
   readonly label: string;
-  readonly detail: string;
+  /** Enabled and able to answer a message now. */
+  readonly usable: boolean;
 }
 
 export type FirstRunReadinessOverall =
@@ -50,6 +63,7 @@ export interface FirstRunReadinessSummary {
   readonly overall: FirstRunReadinessOverall;
   readonly headline: string;
   readonly detail: string;
+  /** Usable providers first, then installed ones that are off, then the rest. */
   readonly providers: ReadonlyArray<FirstRunProviderReadiness>;
   readonly readyCount: number;
   /**
@@ -100,7 +114,7 @@ export function describeFirstRunDiscoveryProgress(
   return input.snapshot?.status === "completed" ? "searched" : "unsearched";
 }
 
-const LABELS: Record<FirstRunProviderState, string> = {
+const LABELS: Record<Exclude<FirstRunProviderState, "disabled">, string> = {
   ready: "Ready",
   "no-models": "No models",
   "authentication-required": "Sign-in required",
@@ -110,20 +124,12 @@ const LABELS: Record<FirstRunProviderState, string> = {
   degraded: "Degraded",
   checking: "Checking",
   unverified: "Not checked",
-  disabled: "Disabled",
 };
 
-const DETAILS: Record<FirstRunProviderState, string> = {
-  ready: "Verified by the host and reporting usable models.",
-  "no-models": "The host reached this provider, but it offered no usable models.",
-  "authentication-required": "This provider must be signed in before it can answer.",
-  "credential-unavailable": "Octant cannot read this provider's stored credential.",
-  unreachable: "The host could not reach this provider.",
-  incompatible: "The installed version of this provider is not supported.",
-  degraded: "This provider answered, but reported reduced capability.",
-  checking: "The host is still checking this provider.",
-  unverified: "The host has not checked this provider yet, so it is not reported as ready.",
-  disabled: "Turned off for this host.",
+const OFF_LABELS: Record<FirstRunProviderInstallation, string> = {
+  installed: "Installed · off",
+  "not-installed": "Not installed",
+  unknown: "Off",
 };
 
 /**
@@ -135,34 +141,42 @@ const DETAILS: Record<FirstRunProviderState, string> = {
  * plain sign-in prompt, because unlocking the keychain and re-authenticating
  * are different remedies.
  */
-export function describeProviderReadiness(
+function describeProviderReadiness(
   instance: ProviderInstance,
   observed: ProviderObservedState | undefined,
-  hostPlatform: HostPlatform | undefined,
+  installation: FirstRunProviderInstallation,
 ): FirstRunProviderReadiness {
   const state = resolveProviderState(instance, observed);
-  const hostMessage = providerWithheldReason(instance, observed) ?? observed?.message;
   return {
     instanceId: instance.id,
     displayName: instance.displayName,
+    driverKind: instance.driverKind,
     state,
-    label: LABELS[state],
-    detail:
-      state === "ready" || hostMessage === undefined
-        ? stateDetail(state, hostPlatform)
-        : hostMessage,
+    label: state === "disabled" ? OFF_LABELS[installation] : LABELS[state],
+    // Chat answers with a degraded provider whose models are still reported.
+    usable:
+      state === "ready" ||
+      (state === "degraded" && observed !== undefined && providerCanServeAnyModel(observed)),
   };
 }
 
-function stateDetail(state: FirstRunProviderState, hostPlatform: HostPlatform | undefined): string {
-  if (state !== "credential-unavailable") return DETAILS[state];
-  // The remedy is the host's own store: the login keychain on a Mac, the
-  // Secret Service collection elsewhere.
-  const unlock =
-    hostPlatform === "darwin"
-      ? "Unlock the login keychain or sign in again."
-      : `Unlock ${thisComputerName(hostPlatform)}'s credential store or sign in again.`;
-  return `${DETAILS[state]} ${unlock}`;
+function resolveInstallation(
+  instance: ProviderInstance,
+  snapshot: DiscoverySnapshot | undefined,
+): FirstRunProviderInstallation {
+  if (isDetectedLocally(instance, snapshot)) return "installed";
+  const binaryPath = providerBinaryPath(instance);
+  // A runtime the scan found under another path may be reached by the saved
+  // one too (a launcher of the person's own), so only a driver found nowhere
+  // is called missing.
+  const foundElsewhere = snapshot?.candidates.some(
+    (candidate) => candidate.driverKind === instance.driverKind,
+  );
+  return foundElsewhere !== true &&
+    binaryPath !== undefined &&
+    isAbsenceProven(binaryPath, instance.driverKind, snapshot)
+    ? "not-installed"
+    : "unknown";
 }
 
 function resolveProviderState(
@@ -188,6 +202,30 @@ function resolveProviderState(
   }
 }
 
+/** "Claude Code is ready", or the count and every name. */
+function readyHeadline(
+  usable: ReadonlyArray<FirstRunProviderReadiness>,
+  allReady: boolean,
+): string {
+  const names = new Intl.ListFormat("en-US").format(usable.map((provider) => provider.displayName));
+  if (usable.length === 1) return `${names} ${allReady ? "is ready" : "can answer"}`;
+  return `${String(usable.length)} providers ${allReady ? "are ready" : "can answer"}: ${names}`;
+}
+
+/**
+ * Where a provider sits in the list: the ones that work, then the ones one
+ * switch away, then everything else, with a provider the person turned on that
+ * needs attention ahead of those that are off or missing.
+ */
+function listRank(entry: {
+  readonly readiness: FirstRunProviderReadiness;
+  readonly installation: FirstRunProviderInstallation;
+}): number {
+  if (entry.readiness.usable) return 0;
+  if (entry.readiness.state !== "disabled") return 2;
+  return entry.installation === "installed" ? 1 : 3;
+}
+
 /**
  * Summarize provider readiness for the first-run surface.
  *
@@ -200,25 +238,25 @@ function resolveProviderState(
 export function summarizeFirstRunReadiness(
   input: FirstRunReadinessInput,
 ): FirstRunReadinessSummary {
-  const described = input.instances.map((instance) => {
-    const observed = input.observedByInstance.get(instance.id);
-    return {
-      readiness: describeProviderReadiness(instance, observed, input.hostPlatform),
-      observed,
-    };
-  });
-  const providers = described.map((entry) => entry.readiness);
+  // Observations are only as current as the registry they came from. While it
+  // is loading or unreachable, no row may claim what the summary says is unknown.
+  const registryRead = input.providerStatus === "ready";
+  const providers = input.instances
+    .map((instance) => {
+      const installation = resolveInstallation(instance, input.discovery.snapshot);
+      const observed = registryRead ? input.observedByInstance.get(instance.id) : undefined;
+      return {
+        readiness: describeProviderReadiness(instance, observed, installation),
+        installation,
+      };
+    })
+    .sort((left, right) => listRank(left) - listRank(right))
+    .map((entry) => entry.readiness);
   const readyCount = providers.filter((provider) => provider.state === "ready").length;
-  // Chat answers with a degraded provider whose models are still reported, so
-  // first run must not tell that user the app cannot work. The per-provider row
-  // keeps saying "Degraded", because reduced capability is still worth knowing.
-  const usableCount = described.filter(
-    (entry) =>
-      entry.readiness.state === "ready" ||
-      (entry.readiness.state === "degraded" &&
-        entry.observed !== undefined &&
-        providerCanServeAnyModel(entry.observed)),
-  ).length;
+  // A degraded provider that still answers counts, so first run never tells
+  // that user the app cannot work; its row keeps saying "Degraded".
+  const usable = providers.filter((provider) => provider.usable);
+  const usableCount = usable.length;
   // Discovery reports families Octant cannot configure yet, so compare as
   // plain strings rather than narrowing to the configurable driver union.
   const configuredDriverKinds = new Set<string>(
@@ -250,10 +288,7 @@ export function summarizeFirstRunReadiness(
     return {
       ...base,
       overall: "ready",
-      headline:
-        usableCount === readyCount
-          ? `${readyCount} provider${readyCount === 1 ? " is" : "s are"} ready`
-          : `${usableCount} provider${usableCount === 1 ? "" : "s"} can answer`,
+      headline: readyHeadline(usable, usableCount === readyCount),
       detail:
         usableCount === readyCount
           ? "You can start a Chat message now."
