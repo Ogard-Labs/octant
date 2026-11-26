@@ -631,6 +631,21 @@ export function ThreadScreen(props: ThreadScreenProps) {
   // A search hit lands on its turn once that turn has been read.
   const focusIndex = transcriptRows.findIndex((row) => row.focused);
   const landed = useRef<string | undefined>(undefined);
+  // The thread opened again from its row after a search hit, in the same
+  // screen (an iPad's column): once the newest page is in, the reader is
+  // taken to its end, as a freshly opened thread starts there.
+  const lastFocus = useRef(props.focusTurnId);
+  const toNewest = useRef(false);
+  useEffect(() => {
+    if (lastFocus.current !== undefined && props.focusTurnId === undefined) toNewest.current = true;
+    lastFocus.current = props.focusTurnId;
+  }, [props.focusTurnId]);
+  const shownPage = code.conversation;
+  useEffect(() => {
+    if (!toNewest.current || shownPage === undefined || shownPage.hasLater) return;
+    toNewest.current = false;
+    void listRef.current?.scrollToEnd({ animated: false });
+  }, [shownPage]);
   // A search hit opened in this screen is in the conversation, so a full
   // view (the Browser) gives way to it.
   useEffect(() => {
