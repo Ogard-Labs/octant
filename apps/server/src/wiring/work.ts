@@ -1362,6 +1362,8 @@ export function wireWork(deps: WorkDependencies) {
                     },
                     toolName: "provider-action",
                     summary,
+                    // The card shows the command whole, not the summary's first 240 characters.
+                    detail: summary,
                     approvalClass: "terminal",
                     // Each command is its own answer, as in a Code thread's terminal.
                     singleUse: true,
