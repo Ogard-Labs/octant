@@ -55,7 +55,7 @@ const githubReadDefinition = {
 
 const GITHUB_READ_HELP = [
   "Every operation reads this Code Project's delivery repository; none takes a repository, host, or endpoint.",
-  "issues and pull-requests take state (open when omitted, closed, or all), pageSize (1 to 30, 20 when omitted), and cursor; projects takes pageSize and cursor. Rows carry number, title, state, author, updatedAt, and url, never bodies.",
+  "issues and pull-requests take state (open when omitted, closed, or all), pageSize (1 to 30, 20 when omitted), and cursor; projects takes pageSize and cursor. Rows carry number, title, state, author, updatedAt, and url, never bodies. A closed issue also carries stateReason (completed, not-planned, or duplicate) when GitHub gives one.",
   "issue takes number and returns that issue or pull request (kind says which): title, state, author, labels, createdAt, updatedAt, url, body, and comments. body is cut to 8 KB and each comment to 2 KB, each marked truncated when cut; comments holds only the newest ten of the conversation, and commentsOmitted counts the older ones it leaves out. Pull request review comments and diffs are not included.",
   "search takes query (1 to 160 characters), state, pageSize, and cursor, and returns issue and pull-request rows whose title or body contain the words in query, newest activity first, each with kind. query may also hold author:login and #number; any other qualifier is dropped, so a search never leaves this repository.",
   "A page with hasNextPage true carries endCursor: pass it back as cursor, with the same operation and arguments, for the next page.",
