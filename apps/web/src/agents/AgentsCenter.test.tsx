@@ -57,6 +57,39 @@ function createClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
 }
 
 describe("AgentsCenter", () => {
+  it("opens on active work when the window has it, with the runs one choice away", async () => {
+    const user = userEvent.setup();
+    const activeWork = {
+      hosts: [
+        {
+          hostId: "studio",
+          name: "Studio",
+          reach: "ready" as const,
+          revision: 0,
+          client: {
+            read: async () => ({
+              status: "answered" as const,
+              work: { rows: [], truncated: false },
+            }),
+          },
+        },
+      ],
+      canOpen: () => true,
+      onOpen: () => undefined,
+    };
+    const { rerender } = render(<AgentsCenter activeWork={activeWork} client={createClient()} />);
+    expect(await screen.findByText("No active work")).toBeVisible();
+    expect(screen.queryByText("Summarize the design")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Runs" }));
+    expect(await screen.findByText("Summarize the design")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Graph" }));
+    expect(screen.queryByText("No active work")).toBeNull();
+    rerender(<AgentsCenter activeWork={activeWork} client={createClient()} narrow />);
+    expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Active work" }));
+    expect(screen.getByText("No active work")).toBeVisible();
+  });
+
   it("follows up a completed managed child with its existing identity and version", async () => {
     const user = userEvent.setup();
     const item = { ...summary, lifecycleStatus: "completed" as const };

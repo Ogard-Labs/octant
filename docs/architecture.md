@@ -3883,7 +3883,10 @@ waiting included) at 16 per parent and 32 per host as the runaway guard.
 
 Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
-Done); Chat has no board. Code lists active open and draft pull requests from
+Done); Chat has no board. The Agents page's Active work lists what is not Done
+across both and across computers in the boards' own states
+([Workspace: Active work](design/workspace.md#active-work)). Code lists active
+open and draft pull requests from
 connected Projects in a manually refreshed workspace and joins exact
 thread-owned PR status onto Code board cards. A Code thread is Done only when
 its user-confirmed delivery target is objectively satisfied; ambiguous state
@@ -17508,7 +17511,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   transitions and a Chat attempt's question are journaled, a Code request's ask,
   answer, and turn end are journaled stream events, and a Code tool ask that
   is withdrawn or abandoned — which journals nothing — publishes
-  `code-navigation` itself.
+  `code-navigation` itself. A subagent's or a routine run's request or state change, and a thread session's pause or resume (which holds or releases its subagents), publishes all three navigation topics, since each can move the work lists while its thread journals nothing.
 - **Fleet activity.** `GET /api/fleet-activity` returns the threads that need
   the calling window's person and the threads that are running, needs you
   first, at most 64 with a `truncated` flag, each naming its mode, title,
@@ -17522,6 +17525,29 @@ approval-gated` command that undoes it. The terminal shows no one-time
   The read takes a local window or a device the host's own person paired.
   Only local reads include the extra waits from persisted local windows.
   The [desktop menu bar](#desktop-menu-bar) is its reader.
+- **Active work read.** `GET /api/active-work` returns this host's work that is
+  not Done, at most 200 rows, waiting first, with a `truncated` flag. It adds no
+  authority, state, journal event, or forge read: each mode's threads are that
+  mode's own navigation read for the caller, and one row builder
+  (`activeWorkRow`) gives each the `ThreadBoardDerivation` its board card would
+  have, with the checkout, pull-request and issue facts its sidebar row already
+  carries. Projects are named as stored; their GitHub repository comes from a
+  Projects read at most once a minute, because that read observes every
+  Project's folder and remotes, and again at once when a Project is bound to
+  another folder, whose repository it never borrows from the old one. Linked pull requests and issues are identities only, because a title
+  on a forge is text an outsider may have written. A coordinator is derived
+  without delivery evidence; a Chat thread is a row only while it runs or waits;
+  a subagent is a row only under a thread already listed, In progress while queued, starting, running, or waiting on what the host ends by itself, as the orchestration service decides from its own holds, judging each run and reading each parent session once per read (room under the subagent limit, which the capacity queue fills whatever the parent session does; a free request slot or siblings on their way, unless the parent session or a restart holds the run); Waiting for a pool with no eligible model, a sibling a person must retry, and any other wait, and
+  its task is named only to a local window the
+  AgentRun authorization admits, the same one the Agents center applies. A Chat
+  thread's subagents are listed to such a window alone. The read takes a local
+  window and any paired device the overview read admits (one the person paired
+  at any level, one the hub introduced), and for a device only the hub
+  introduced it leaves out the Code Projects the Act item does not name, as that
+  device's Projects read does. An agent grant's session is refused. A host
+  answers only for itself: a client merges the answers of the hosts it reaches
+  ([Workspace: Active work](design/workspace.md#active-work)), and no host or
+  hub makes a row for another.
 - **Turn decisions.** A Work or Code turn that cannot continue without the
   person's choice ends its reply with one closing `octant-decision` block: an
   ask (one line, at most 110 characters) and one to four options (at most 60

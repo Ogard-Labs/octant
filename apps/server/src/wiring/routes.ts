@@ -157,6 +157,7 @@ export type RoutesDependencies = {
   Pick<BenchmarksWiring, "benchmarkRoutes"> &
   Pick<
     WorkRequestsWiring,
+    | "activeWorkRoutes"
     | "designSystemRoutes"
     | "fleetActivityRoutes"
     | "pendingRequestRoutes"
@@ -225,6 +226,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     extensionRoutes,
     providerToolingRoutes,
     fileMentionRoutes,
+    activeWorkRoutes,
     fleetActivityRoutes,
     folderBrowseRoutes,
     repositoryBootstrapRoutes,
@@ -402,6 +404,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await workRequestRoutes(request)) ??
     (await pendingRequestRoutes(request)) ??
     (await fleetActivityRoutes(request)) ??
+    (await activeWorkRoutes(request)) ??
     (await sidebarBackgroundRoutes(request)) ??
     (await zenBackgroundRoutes(request)) ??
     (await zenRoutes(request)) ??

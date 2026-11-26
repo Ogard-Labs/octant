@@ -106,6 +106,7 @@ const PRODUCT_PROBES = [
   { path: "/api/canvas/html-file", method: "POST" },
   { path: "/api/agent-profiles", method: "GET" },
   { path: "/api/replica-sync/status", method: "GET" },
+  { path: "/api/active-work", method: "GET" },
   {
     path: "/api/thread-message-queue?mode=chat&threadId=00000000-0000-4000-8000-000000000001",
     method: "GET",

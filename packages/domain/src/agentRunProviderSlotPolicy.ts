@@ -9,6 +9,9 @@ import { DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES, type AgentRun } from "@oc
  */
 export const AGENT_RUN_PROVIDER_SLOT_WAITING_REASON = "Waiting for a free request slot";
 
+/** The reason a run parks with while the host's or its thread's subagent limit is full. */
+export const AGENT_RUN_CAPACITY_WAITING_REASON = "provider-capacity-saturated";
+
 /**
  * How long a child waits for a provider slot, by default, before it ends
  * Interrupted with the capacity reason, as it did before it could wait. A

@@ -4,6 +4,7 @@ import {
   THREAD_SECRETS_PATH,
 } from "./threadSecrets/threadSecretRoutes";
 import { authorizePrincipalAction } from "@octant/domain";
+import { ACTIVE_WORK_PATH } from "./activeWork/activeWorkRoutes";
 import { removeImageMetadata } from "./attachments/imageMetadataRemoval";
 import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
 import {
@@ -206,6 +207,9 @@ export function classifyProductAction(request: Request): string | undefined {
   // Search across modes reads what each mode's own GETs already read under
   // the overview grant, and only among the threads each mode lists.
   if (path === "/api/search" && method === "GET") return "project.overview.read";
+  // Active work reads what each mode's own lists already read under the
+  // overview grant, narrowed to the caller by its route.
+  if (path === ACTIVE_WORK_PATH && method === "GET") return "project.overview.read";
   // Sync status is a read of this host with nothing to act on; setting up,
   // joining, and revoking stay on the host's own membership routes.
   if (path === "/api/replica-sync/status" && method === "GET") return "project.overview.read";

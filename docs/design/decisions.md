@@ -54,7 +54,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 5       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 20        | 15      | 5            | 0                   |
+| [Workspace](#workspace)                                                               | 21        | 16      | 5            | 0                   |
 | [Start screen](#start-screen)                                                         | 4         | 4       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **301**   | **183** | **114**      | **4**               |
+| **All areas**                                                                         | **302**   | **184** | **114**      | **4**               |
 
 ## Principles and hard lines
 
@@ -3320,6 +3320,18 @@ Work and Code have server-authoritative boards. Chat has none, and an agent cann
 - Line notes also work on a pull request's diff (Changes tab and dock review; maintainer decision, 2026-11-21): clicking a line number opens a window-local note, a small thread picker under **Send notes** chooses a linked Code thread (defaulting to the first linked thread; with none linked, **Send notes** is disabled and says to link a thread), and sending delivers one ordinary follow-up through `start-provider-turn` without posting anything to GitHub. Before starting the turn the host compares the observed pull request's author against the signed-in `gh` viewer login: when they differ or either cannot be read, it marks the thread as having read outside content through the same path Auto-fix uses; when they match, the notes travel as plain person text. Owner: [Workspace](workspace.md).
 
 Status: Partly built. Since: —. Detail: [Workspace: Boards and integrations](workspace.md#boards-and-integrations).
+
+### Active work across computers
+
+The Agents page opens on everything that is not Done on every computer the window already reaches, in the Board's own words (maintainer request, 2026-11-25). Bots are not part of it (maintainer decision, 2026-11-25).
+
+- One host read lists threads, coordinators, subagents and routine runs with their computer, Project, repository, branch or own worktree and linked pull requests and issues by identifier, each only when the host already holds it. One builder makes every row, and its state is the thread board's derivation.
+- A host answers only for itself, with threads the asking window or device already lists there; a device only the hub introduced is not told of Code Projects outside the Act item, and an agent grant's session is refused. A subagent's task is named only where the window may read that run.
+- A client merges the answers. A computer that does not answer is named as unreachable with when it was last connected, and has no rows; no host or hub makes a row for another. The list follows the sidebar's Environments filter: narrowed to some computers, it reads, lists and names only those (maintainer decision, 2026-11-26).
+- A row opens as its sidebar row does. A paired computer's Work and Chat threads are listed but not opened from another window.
+- Reads run in parallel over sessions already held, follow the existing change feed (where a subagent's or routine run's state change now publishes the navigation topics) and each start of the paired-computer refresh, and add no timer and no journal event. A paired browser lists its one host; the phone has no list.
+
+Status: Built. Since: —. Detail: [Workspace: Active work](workspace.md#active-work) and [Architecture: Security and authority](../architecture.md#security-and-authority).
 
 ### Threads from issues and repositories
 

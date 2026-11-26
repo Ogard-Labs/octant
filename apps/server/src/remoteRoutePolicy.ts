@@ -25,6 +25,7 @@ import {
 import { REPOSITORY_BOOTSTRAP_LAND_FILES_MAX_BODY_BYTES } from "@octant/contracts/repository-bootstrap";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER } from "./hub/hubLink";
+import { ACTIVE_WORK_PATH } from "./activeWork/activeWorkRoutes";
 import { PENDING_REQUESTS_PATH } from "./pendingRequestRoutes";
 import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
 import { PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS } from "./providers/providerCredentialRoutes";
@@ -1189,6 +1190,14 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   })),
+  // The work on this host a paired device may already open; the route narrows
+  // the answer to the device that asked.
+  {
+    kind: "exact" as const,
+    path: ACTIVE_WORK_PATH,
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
   // Every connected device is told when a new device joins, a hub guest
   // included: the read changes nothing, and Remove stays on its own routes.
   {

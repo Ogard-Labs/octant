@@ -311,6 +311,26 @@ function topicsForEvent(event: {
   if (aggregateType === "project") {
     return ["projects", "chat-navigation", "work-navigation", "code-navigation"];
   }
+  // A subagent or a routine run that starts, waits or ends moves the work
+  // lists even while its thread records nothing (a subagent finishing under an
+  // idle parent), so its own state change says so. Its other records do not.
+  if (
+    (aggregateType === "agent-run" &&
+      (event.eventName === "agent.run-requested@1" ||
+        event.eventName === "agent.run-status-changed@1")) ||
+    (aggregateType === "automation-run" &&
+      (event.eventName === "automation-run-created@1" ||
+        event.eventName === "automation-run-status-changed@1"))
+  )
+    return ["chat-navigation", "work-navigation", "code-navigation"];
+  // Pausing or resuming a thread's session holds or releases its subagents,
+  // which the work lists show, though the thread itself records nothing.
+  if (
+    aggregateType === NATIVE_HARNESS_SESSION_AGGREGATE_TYPE &&
+    (event.eventName === NATIVE_HARNESS_SESSION_EVENT_NAMES.paused ||
+      event.eventName === NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed)
+  )
+    return ["chat-navigation", "work-navigation", "code-navigation"];
   if (aggregateType === "pending-question-deferral" || aggregateType === "decision-review")
     return ["chat-navigation", "work-navigation", "code-navigation"];
   if (aggregateType.startsWith("chat-")) return ["chat-navigation"];

@@ -1421,7 +1421,8 @@ function desktopRecipeWithKey(
   return { ...keyless, credentialRef: mint() };
 }
 
-function toSummary(project: Project): ProjectSummary {
+/** A stored Project as a Projects read names it, without observing anything. */
+export function toSummary(project: Project): ProjectSummary {
   if (project.type === "chat") return project;
   const { bindingHistory, ...summary } = project;
   const bindingRevisionId = bindingHistory.at(-1)?.revisionId;

@@ -644,7 +644,7 @@ import {
   useHostFederationLifecycle,
 } from "./host/useHostFederationLifecycle";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
-import { usePairedComputerReads } from "./host/usePairedComputerReads";
+import { createRefreshTicks, usePairedComputerReads } from "./host/usePairedComputerReads";
 import {
   AddRepositoryToComputerContext,
   type OpenRepositoryBootstrap,
@@ -2714,9 +2714,13 @@ function LaunchedShell(
       : undefined;
   // Every paired computer's Code threads and asks, listed in this window and
   // each opened on its own computer through that computer's start screen.
+  // When each refresh of the paired computers starts; active work asks each
+  // computer then, on its own, and the shell does not render for it.
+  const pairedRefreshTicks = useMemo(createRefreshTicks, []);
   const pairedComputerReads = usePairedComputerReads({
     transports: hostFederationTransports,
     cache: federation?.cache,
+    onRefreshStarted: pairedRefreshTicks.tick,
   });
   const pairedComputerThreads = useMemo(
     () => pairedComputerReads.filter(isPairedComputerThread),
@@ -9556,6 +9560,13 @@ function LaunchedShell(
                           inboxOpen={inboxOpen}
                           {...(todosOpen ? { todosPage } : {})}
                           isNarrow={isNarrow}
+                          computerSnapshots={computerSnapshots}
+                          {...(hostFederationTransports === undefined
+                            ? {}
+                            : { hostFederationTransports })}
+                          onOpenPairedComputerThread={openPairedComputerThreadLatest}
+                          pairedRefreshTicks={pairedRefreshTicks}
+                          environmentSelection={environmentSelection}
                           linearClient={linearClient}
                           linearIssuesOpen={linearIssuesOpen}
                           linearIssuesRead={linearIssuesRead}

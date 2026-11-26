@@ -28,6 +28,7 @@ export * from "./workPromotion";
 export * from "./workRequests";
 export * from "./pendingRequests";
 export * from "./fleetActivity";
+export * from "./activeWork";
 export * from "./workResearch";
 export * from "./workThreads";
 export * from "./workTurns";

@@ -250,7 +250,7 @@ function readAgentRunLeadPersonMemoryScope(
   }
 }
 
-function authorizeAgentRunCancellation(input: {
+export function authorizeAgentRunCancellation(input: {
   readonly persistence: PersistenceService;
   readonly workThreadProjection: WorkThreadProjection;
   readonly run: AgentRun;

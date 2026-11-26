@@ -9,6 +9,9 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 const LazyRemoteChangeNotices = lazy(async () => ({
   default: (await import("./RemoteChangeNotices")).RemoteChangeNotices,
 }));
+const LazyRemoteActiveWork = lazy(async () => ({
+  default: (await import("./RemoteActiveWork")).RemoteActiveWork,
+}));
 import type { RemoteSessionBridge } from "@octant/client-runtime";
 import { createConnectionSupervisor, type ConnectionStatus } from "@octant/client-runtime";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
@@ -71,7 +74,21 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   const [activeMode, setActiveMode] = useState<OctantMode>(
     () => readContinuationLink(globalThis.location?.href ?? "")?.mode ?? "chat",
   );
+  const [activeWorkOpen, setActiveWorkOpen] = useState(false);
+  // A thread opened from active work. Its count asks the mounted workspace to
+  // open it, so opening it again after moving away opens it again, and opening
+  // the one already open keeps its composer and staged attachments.
+  const [openedThread, setOpenedThread] = useState<{
+    readonly thread: { readonly mode: OctantMode; readonly threadId: string };
+    readonly count: number;
+  }>();
   const connected = canExecuteRemoteProductMutation(state);
+  // When the session was last ready, so active work can say how long ago the
+  // host last answered once it stops.
+  const [lastReadyAt, setLastReadyAt] = useState<string>();
+  useEffect(() => {
+    if (state.kind === "ready") setLastReadyAt(new Date().toISOString());
+  }, [state.kind]);
   // The host can change device access without replacing the session.
   const connection = props.bridge.connection();
   const sessionId = state.kind === "ready" ? connection?.session()?.sessionId : undefined;
@@ -217,7 +234,35 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           onSelectMode={setActiveMode}
           presentation="buttons"
         />
+        <OctantButton
+          aria-expanded={activeWorkOpen}
+          onClick={() => setActiveWorkOpen((open) => !open)}
+          type="button"
+          variant="ghost"
+        >
+          Active work
+        </OctantButton>
       </header>
+
+      {activeWorkOpen ? (
+        <section aria-label="Active work">
+          <Suspense fallback={null}>
+            <LazyRemoteActiveWork
+              bridge={props.bridge}
+              connected={connected}
+              {...(lastReadyAt === undefined ? {} : { lastReadyAt })}
+              reach={activeWorkReach(state.kind)}
+              hostId={hosts[0]?.hostId ?? "paired-browser"}
+              hostName={hosts[0]?.displayName ?? "Paired host"}
+              onOpen={(thread) => {
+                setActiveWorkOpen(false);
+                setActiveMode(thread.mode);
+                setOpenedThread((previous) => ({ thread, count: (previous?.count ?? 0) + 1 }));
+              }}
+            />
+          </Suspense>
+        </section>
+      ) : null}
 
       {state.kind === "stale" ? (
         <OctantEmpty
@@ -253,6 +298,9 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           clients={clients}
           connected={connected}
           extensionClient={extensionClient}
+          {...(openedThread === undefined
+            ? {}
+            : { initialThread: openedThread.thread, initialThreadRequest: openedThread.count })}
           mode={activeMode}
           {...(personPort === undefined ? {} : { worktreePort: personPort })}
           readOnly={standing.accessLevel === "read-only"}
@@ -326,6 +374,22 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       </OctantButton>
     </section>
   );
+}
+
+/** The browser's session, in the words active work uses for a computer. */
+function activeWorkReach(kind: string): "ready" | "connecting" | "refused" | "unreachable" {
+  switch (kind) {
+    case "ready":
+      return "ready";
+    case "unauthorized":
+      return "refused";
+    case "stale":
+    case "incompatible":
+    case "unavailable":
+      return "unreachable";
+    default:
+      return "connecting";
+  }
 }
 
 function ConnectionStatusLine(props: { readonly status: ConnectionStatus }) {

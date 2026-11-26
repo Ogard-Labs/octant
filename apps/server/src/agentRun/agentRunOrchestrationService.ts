@@ -17,6 +17,7 @@ import {
   isAgentRunTerminalStatus,
   AGENT_RUN_DEPENDENCY_WAITING_REASON,
   AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS,
+  AGENT_RUN_CAPACITY_WAITING_REASON,
   AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
   agentRunProviderSlotWaitExpired,
   decideAgentRunDependencies,
@@ -664,6 +665,79 @@ export class AgentRunOrchestrationService {
     });
     if (result.kind === "run-updated") this.#providerSlotRefusals.delete(run.id);
     return result;
+  }
+
+  /**
+   * Whether the host will start this waiting run with no one doing anything,
+   * read from the same holds its start paths read:
+   * - room under the subagent limit: the capacity queue starts it whatever its
+   *   parent's session is doing;
+   * - a free request slot: retried until a slot frees, unless the parent's
+   *   session is held;
+   * - siblings: started once they all complete, unless held since the restart
+   *   or by the parent's session, and only while each sibling it still waits on
+   *   is itself on its way (queued, starting, running, or a wait like this).
+   * A pool that named no eligible model, a sibling a person must retry, a
+   * cycle, and every other wait need a person.
+   */
+  startsWithoutPerson(run: AgentRun): boolean {
+    return this.waitsOnItsOwn()(run);
+  }
+
+  /**
+   * The judgement above for one read of many runs. Siblings share
+   * prerequisites, so each run is judged once and each parent's hold is read
+   * once, whatever the number of paths that reach them: judged per path, a
+   * graph of sixteen runs read one parent session tens of thousands of times.
+   */
+  waitsOnItsOwn(): (run: AgentRun) => boolean {
+    const judged = new Map<string, boolean>();
+    const judging = new Set<string>();
+    const held = new Map<string, boolean>();
+    const parentHeld = (run: AgentRun): boolean => {
+      const key = String(run.parentThreadId);
+      const known = held.get(key);
+      if (known !== undefined) return known;
+      const read = this.#parentSessions?.isHeld(run.parentThreadId) === true;
+      held.set(key, read);
+      return read;
+    };
+    const judge = (run: AgentRun): boolean => {
+      const key = String(run.id);
+      const known = judged.get(key);
+      if (known !== undefined) return known;
+      // A run met again while it is being judged waits on itself.
+      if (judging.has(key)) return false;
+      judging.add(key);
+      const answer = decide(run);
+      judging.delete(key);
+      judged.set(key, answer);
+      return answer;
+    };
+    const decide = (run: AgentRun): boolean => {
+      if (run.lifecycleStatus !== "waiting") return false;
+      if (run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON) return true;
+      if (parentHeld(run)) return false;
+      if (run.recoveryReason !== AGENT_RUN_DEPENDENCY_WAITING_REASON) {
+        return this.waitsForProviderSlot(run);
+      }
+      if (this.#heldSinceRestart.has(run.id)) return false;
+      const decision = decideAgentRunDependencies(run, (id) => this.#persistence.getById(id));
+      if (decision.kind === "ready") return true;
+      if (decision.kind !== "wait") return false;
+      return decision.pending.every((siblingId) => {
+        const sibling = this.#persistence.getById(siblingId);
+        if (sibling === undefined) return false;
+        const { lifecycleStatus } = sibling;
+        return (
+          lifecycleStatus === "queued" ||
+          lifecycleStatus === "starting" ||
+          lifecycleStatus === "running" ||
+          judge(sibling)
+        );
+      });
+    };
+    return judge;
   }
 
   /** Whether this child waits for a provider slot, by the host's record and not its reason text. */
@@ -1437,7 +1511,7 @@ export class AgentRunOrchestrationService {
       // A run parked on dependencies that all completed is waiting only for a
       // slot now, exactly like a capacity waiter — unless it is held.
       const waitsForSlot =
-        run.recoveryReason === "provider-capacity-saturated" ||
+        run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON ||
         (decideAgentRunDependencies(run, (id) => this.#persistence.getById(id)).kind === "ready" &&
           !this.#dependencyStartHeld(run));
       if (
@@ -1621,7 +1695,7 @@ export function createInMemoryCapacityPort(
       if (scope !== undefined) {
         if (!queued.includes(String(runId))) queued.push(String(runId));
         onQueued?.();
-        return { status: "queued", reason: "provider-capacity-saturated", scope };
+        return { status: "queued", reason: AGENT_RUN_CAPACITY_WAITING_REASON, scope };
       }
       const reservationId = `res-${next++}`;
       reserved.set(reservationId, {

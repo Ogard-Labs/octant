@@ -473,6 +473,18 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("lets a paired device read active work as it reads the thread boards, and change nothing there", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    expect(classifyProductAction(new Request("https://octant.example/api/active-work"))).toBe(
+      "project.overview.read",
+    );
+    expect((await product(handoff("/api/active-work")))?.status).toBe(200);
+    expect((await product(handoff("/api/active-work", "POST")))?.status).toBe(403);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses a paired device a Computer approval for this Mac before the route sees it", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });

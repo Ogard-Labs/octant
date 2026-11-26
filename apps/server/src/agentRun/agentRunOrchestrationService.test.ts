@@ -29,6 +29,7 @@ import {
   decodeNativeHarnessSlotCandidate,
   type AgentRunAuthority,
   type AgentRunCommand,
+  type AgentRun,
   type AgentRunId,
   type AgentRunRoutingReceipt,
   type AgentRunWorkspaceReceipt,
@@ -507,7 +508,11 @@ describe("AgentRunOrchestrationService", () => {
       });
     }
     const reserve = vi.spyOn(capacity, "tryReserve");
-    const { orchestration, persistence } = createHarness(capacity);
+    // A paused parent does not hold a run waiting for room: the capacity queue
+    // starts it when a slot frees, so it needs no one.
+    const { orchestration, persistence } = createHarness(capacity, true, undefined, {
+      isHeld: () => true,
+    });
     const admitted = orchestration.admit({
       command: requestCommand(),
       parentAuthority: authority,
@@ -518,6 +523,7 @@ describe("AgentRunOrchestrationService", () => {
     if (admitted.kind !== "run-updated") return;
     expect(admitted.run.lifecycleStatus).toBe("waiting");
     expect(admitted.run.recoveryReason).toMatch(/capacity/i);
+    expect(orchestration.startsWithoutPerson(admitted.run)).toBe(true);
     expect(persistence.getById(admitted.run.id)).toMatchObject({
       lifecycleStatus: "waiting",
       recoveryReason: "provider-capacity-saturated",
@@ -885,6 +891,8 @@ describe("AgentRunOrchestrationService", () => {
     const persisted = persistence.getById(admitted.run.id);
     expect(persisted?.lifecycleStatus).toBe("waiting");
     expect(persisted?.routingReceipt.poolRoute?.decision.kind).toBe("waiting");
+    // It starts only when it is requested again.
+    if (persisted !== undefined) expect(orchestration.startsWithoutPerson(persisted)).toBe(false);
   });
 
   it("reserves capacity on the explicit pool fallback target, not the unavailable primary", () => {
@@ -1369,6 +1377,7 @@ describe("AgentRun dependency graphs", () => {
       lifecycleStatus: "waiting",
       recoveryReason: AGENT_RUN_DEPENDENCY_WAITING_REASON,
     });
+    expect(orchestration.startsWithoutPerson(joined)).toBe(true);
 
     orchestration.onSessionSettled({
       runId: first,
@@ -1385,6 +1394,48 @@ describe("AgentRun dependency graphs", () => {
     await settle();
     expect(persistence.getById(joined.id)?.lifecycleStatus).toBe("starting");
     expect(starts).toContain(String(joined.id));
+  });
+
+  it("judges a graph of shared prerequisites once per read: each run once and its parent's hold once", () => {
+    let holdReads = 0;
+    const harness = createHarness(createInMemoryCapacityPort(), true, undefined, {
+      isHeld: () => {
+        holdReads += 1;
+        return false;
+      },
+    });
+    const request = (n: number) =>
+      decodeAgentRunRequestId(`27272727-2727-4272-8272-${String(n).padStart(12, "0")}`);
+    const admit = (n: number, dependsOn: ReadonlyArray<AgentRunId>) => {
+      const admitted = harness.orchestration.admit({
+        command: {
+          ...requestCommand(request(n)),
+          ...(dependsOn.length === 0 ? {} : { dependsOn }),
+        },
+        parentAuthority: authority,
+        confirmed: true,
+        liveAuthority: authority,
+      });
+      if (admitted.kind === "run-command-failed") throw new Error(admitted.message);
+      return admitted.run;
+    };
+    const first = admit(0, []);
+    harness.orchestration.start(first.id, first.version, authority);
+    // Each run waits on every run before it, up to the eight a request may name.
+    const parked: AgentRun[] = [];
+    for (let n = 1; n <= 9; n += 1) {
+      parked.push(admit(n, [first.id, ...parked.slice(-7).map((run) => run.id)]));
+    }
+    const edges = parked.reduce((total, run) => total + (run.dependsOn?.length ?? 0), 0);
+    holdReads = 0;
+    const reads = vi.spyOn(harness.persistence, "getById");
+    const startsWithoutPerson = harness.orchestration.waitsOnItsOwn();
+    expect(parked.map((run) => startsWithoutPerson(run))).toEqual(parked.map(() => true));
+    expect(holdReads).toBe(1);
+    // Judged once each, a run reads each prerequisite at most twice: once to
+    // decide and once to look at what it still waits on. Judged again on
+    // every path, the reads grow with the paths, not the edges.
+    expect(reads.mock.calls.length).toBeLessThanOrEqual(2 * edges);
   });
 
   it("fails a waiting run without ever starting it when a dependency fails", async () => {
@@ -1416,11 +1467,16 @@ describe("AgentRun dependency graphs", () => {
   });
 
   it("keeps a run parked on its dependencies across a restart", () => {
-    const { persistence, admit, run } = graphHarness();
+    const { persistence, orchestration, admit, run } = graphHarness();
     const first = run(requestIds[0]);
     const dependent = admit(requestIds[1], [String(first)]);
+    expect(orchestration.startsWithoutPerson(dependent)).toBe(true);
 
     persistence.reconcileAfterRestart();
+    // Its sibling was interrupted and starts again only when a person retries it.
+    const parked = persistence.getById(dependent.id);
+    if (parked === undefined) throw new Error("The dependent is gone.");
+    expect(orchestration.startsWithoutPerson(parked)).toBe(false);
 
     // The running dependency is interrupted like any child a restart catches;
     // the parked run never held execution, so it keeps waiting for a retry.
@@ -1461,6 +1517,7 @@ describe("AgentRun dependency graphs", () => {
 
     const parked = persistence.getById(dependent.id);
     if (parked === undefined) throw new Error("The dependent is gone.");
+    expect(orchestration.startsWithoutPerson(parked)).toBe(false);
     await orchestration.resume(dependent.id, parked.version, authority);
     expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("starting");
     expect(starts).toContain(String(dependent.id));
@@ -1471,6 +1528,7 @@ describe("AgentRun dependency graphs", () => {
     const first = run(requestIds[0]);
     const dependent = admit(requestIds[1], [String(first)]);
     sessions.pause(String(ids.thread), "paused-by-user", "Checking the plan.");
+    expect(orchestration.startsWithoutPerson(dependent)).toBe(false);
 
     orchestration.onSessionSettled({
       runId: first,
@@ -1737,6 +1795,7 @@ describe("managed child waiting for a provider slot", () => {
       lifecycleStatus: "waiting",
       recoveryReason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
     });
+    expect(provider.orchestration.startsWithoutPerson(helper)).toBe(true);
     expect(provider.acquire).not.toHaveBeenCalled();
     expect(provider.supervisor.activeRunIds()).toEqual([]);
     // Asking again while the provider is still full journals nothing: each
@@ -2572,6 +2631,7 @@ describe("managed child waiting for a provider slot", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(provider.acquire).not.toHaveBeenCalled();
     expect(provider.status(helper.id)).toBe("waiting");
+    expect(provider.orchestration.startsWithoutPerson(helper)).toBe(false);
 
     held = false;
     provider.slots.retryNow();

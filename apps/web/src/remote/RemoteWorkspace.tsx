@@ -53,6 +53,11 @@ const RemoteDesktopPane = lazy(async () => ({
 
 export interface RemoteWorkspaceProps {
   readonly initialThread?: { readonly mode: OctantMode; readonly threadId: string };
+  /**
+   * Counts each time `initialThread` is asked for again. A new count opens it in
+   * the mounted surface, so opening the thread already open keeps its composer.
+   */
+  readonly initialThreadRequest?: number;
   readonly clients: RemoteProductClients;
   readonly mode: OctantMode;
   readonly stashScope?: ComposerStashScope;
@@ -235,6 +240,9 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
         <RemoteChatSurface
           clients={props.clients}
           initialThread={props.initialThread}
+          {...(props.initialThreadRequest === undefined
+            ? {}
+            : { initialThreadRequest: props.initialThreadRequest })}
           connected={props.connected}
           actsAsHostPerson={props.actsAsHostPerson === true}
           readOnly={props.readOnly === true}
@@ -253,6 +261,9 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
         <RemoteWorkSurface
           clients={props.clients}
           initialThread={props.initialThread}
+          {...(props.initialThreadRequest === undefined
+            ? {}
+            : { initialThreadRequest: props.initialThreadRequest })}
           connected={props.connected}
           actsAsHostPerson={props.actsAsHostPerson === true}
           readOnly={props.readOnly === true}
@@ -269,6 +280,9 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
           clients={props.clients}
           {...(props.worktreePort === undefined ? {} : { worktreePort: props.worktreePort })}
           initialThread={props.initialThread}
+          {...(props.initialThreadRequest === undefined
+            ? {}
+            : { initialThreadRequest: props.initialThreadRequest })}
           connected={props.connected}
           actsAsHostPerson={props.actsAsHostPerson === true}
           readOnly={props.readOnly === true}
@@ -333,6 +347,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
 
 interface RemoteSurfaceProps {
   readonly initialThread?: RemoteWorkspaceProps["initialThread"];
+  readonly initialThreadRequest?: number;
   readonly clients: RemoteProductClients;
   /** A browser the host's own person paired starts threads as a window does. */
   readonly actsAsHostPerson: boolean;
@@ -353,6 +368,11 @@ function RemoteChatSurface(
     const link = readContinuationLink(globalThis.location?.href ?? "");
     return link?.mode === "chat" ? decodeChatThreadId(link.threadId) : undefined;
   });
+  const requestedChat =
+    props.initialThread?.mode === "chat" ? props.initialThread.threadId : undefined;
+  useEffect(() => {
+    if (requestedChat !== undefined) setActiveThreadId(decodeChatThreadId(requestedChat));
+  }, [requestedChat, props.initialThreadRequest]);
   const [chatProjectId, setChatProjectId] = useState<ProjectId>();
   const [createError, setCreateError] = useState<string>();
   // The host takes an HTML import only from a device its own person paired,
@@ -462,6 +482,11 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
     const link = readContinuationLink(globalThis.location?.href ?? "");
     return link?.mode === "work" ? decodeWorkThreadId(link.threadId) : undefined;
   });
+  const requestedWork =
+    props.initialThread?.mode === "work" ? props.initialThread.threadId : undefined;
+  useEffect(() => {
+    if (requestedWork !== undefined) setActiveThreadId(decodeWorkThreadId(requestedWork));
+  }, [requestedWork, props.initialThreadRequest]);
   const workNavigation = useWorkThreadNavigation(props.clients.workThread, {
     navigationRefreshMs: 5_000,
   });
@@ -598,9 +623,12 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
     return link?.mode === "code" ? decodeCodeThreadId(link.threadId) : undefined;
   });
   const { initialThreadId, initialThreadRequest } = props;
+  const requestedCode =
+    props.initialThread?.mode === "code" ? props.initialThread.threadId : undefined;
   useEffect(() => {
-    if (initialThreadId !== undefined) setActiveThreadId(initialThreadId);
-  }, [initialThreadId, initialThreadRequest]);
+    if (requestedCode !== undefined) setActiveThreadId(decodeCodeThreadId(requestedCode));
+    else if (initialThreadId !== undefined) setActiveThreadId(initialThreadId);
+  }, [requestedCode, initialThreadId, initialThreadRequest]);
   const controller = useCodeController({
     client: props.clients.code,
     ...(activeThreadId === undefined ? {} : { activeThreadId }),

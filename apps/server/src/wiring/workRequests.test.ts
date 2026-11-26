@@ -9,6 +9,7 @@ import {
   decodeProjectId,
   decodeStableHostId,
   decodeWindowId,
+  decodeWorkThread,
   DeviceId,
   RemoteSessionId,
   ServiceOffer,
@@ -29,6 +30,7 @@ import { ServiceOfferService } from "../offers/serviceOfferService";
 import { makePersistenceLive, Persistence } from "../persistence/persistenceService";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { createActiveWorkProjects } from "../activeWork/activeWorkProjects";
 import { wireWorkRequests, type WorkRequestsDependencies } from "./workRequests";
 
 const tempDirs: string[] = [];
@@ -251,6 +253,7 @@ describe("wireWorkRequests service offers", () => {
               bootstrap: async () => ({ active: [], archived: [] }),
             },
             workProjectStatusReader: {},
+            codeActiveWorkForWindow: emptyAsync,
             baseRouteCodeService: {
               navigation: async () => ({ threads: [], runtime: [] }),
             },
@@ -381,6 +384,166 @@ describe("wireWorkRequests service offers", () => {
             serviceOffers.close();
             yield* Effect.promise(() => Promise.all([pairedWait, localWait, refusedWait]));
           }
+        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory }))),
+      ),
+    );
+  });
+});
+
+describe("wireWorkRequests active work", () => {
+  it("says each Work thread's board state, under the sidebar's own list, and none that is Done or put away", async () => {
+    const dataDirectory = mkdtempSync(join(tmpdir(), "octant-active-work-"));
+    tempDirs.push(dataDirectory);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          const now = new Date().toISOString();
+          const projectId = decodeProjectId(randomUUID());
+          const bindingRevisionId = randomUUID();
+          const thread = (title: string, extra: Record<string, unknown> = {}) =>
+            decodeWorkThread({
+              id: randomUUID(),
+              projectId,
+              bindingRevisionId,
+              title,
+              lifecycle: "active",
+              providerInstanceId: randomUUID(),
+              modelId: "fixture",
+              workingDirectory: ".",
+              version: 1,
+              createdAt: now,
+              updatedAt: now,
+              ...extra,
+            });
+          const threads = [
+            thread("Idle"),
+            thread("Running"),
+            thread("Asking"),
+            thread("Stopped"),
+            thread("Rebound", { bindingRevisionId: randomUUID() }),
+            thread("Done", { completionConfirmed: true }),
+            thread("Settled", { completedAt: now }),
+          ];
+          // A turn that moved after every thread record, as a running turn's
+          // progress does, dates its thread as the board dates its card.
+          const lastTurn = new Date(Date.parse(now) + 60_000).toISOString();
+          const lastGoal = new Date(Date.parse(now) + 120_000).toISOString();
+          const titleOf = (threadId: unknown) =>
+            threads.find((entry) => String(entry.id) === String(threadId))?.title;
+          const windowId = decodeWindowId(randomUUID());
+          const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+          const windowAuthorityStore = new WindowAuthorityStore();
+          windowAuthorityStore.register({ windowId, capability, now: Date.now() });
+          const emptyList = () => [];
+          const wired = wireWorkRequests({
+            hubActScopeSlot: createHubActScopeSlot(),
+            persistence,
+            windowAuthorityStore,
+            providerDataDirectory: dataDirectory,
+            agentRunPersistence: { listCenterCandidates: emptyList },
+            agentRunOrchestration: { waitsOnItsOwn: () => () => false },
+            decisionReviewModelPort: {},
+            workRequestService: { listForThread: emptyList },
+            goalService: {
+              read: (threadId: string) => ({
+                goal:
+                  titleOf(threadId) === "Asking"
+                    ? { status: "active", objective: "Ship it", updatedAt: lastGoal }
+                    : null,
+              }),
+            },
+            projectService: {
+              onWorkProjectArchived: () => () => undefined,
+              bootstrap: async () => ({
+                active: [{ id: projectId, type: "work", name: "Reports", bindingRevisionId }],
+              }),
+            },
+            workProjectStatusReader: { hasDueItems: async () => false },
+            codeActiveWorkForWindow: async () => [],
+            activeWorkProjects: createActiveWorkProjects({
+              readProjects: () => [
+                {
+                  id: projectId,
+                  type: "work",
+                  name: "Reports",
+                  lifecycle: "active",
+                  bindingRevisionId,
+                },
+              ],
+              bootstrap: async () => ({ active: [] }),
+            }),
+            codeTurnDecisions: {},
+            baseRouteCodeService: {},
+            routeCodeService: {},
+            chatService: { navigation: () => ({ threads: [] }) },
+            observeWorkThreadRuntime: (threadId: unknown) => ({
+              executing: titleOf(threadId) === "Running",
+              awaitingInput: titleOf(threadId) === "Asking",
+              interrupted: titleOf(threadId) === "Stopped",
+            }),
+            workflowService: {},
+            workThreadService: {},
+            workThreadServiceWithWorkflows: {
+              navigation: async () => ({ threads, runtime: [] }),
+              bootstrap: async () => ({ threads, runtime: [] }),
+            },
+            workResearchProjection: { snapshot: () => new Map() },
+            finishedReceipts: { boardMark: () => undefined },
+            workArtifactProjection: { snapshot: () => new Map() },
+            workThreadProjection: { read: () => undefined, list: emptyList },
+            workTurnProjection: {
+              listForThread: (threadId: unknown) =>
+                titleOf(threadId) === "Idle" ? [{ updatedAt: lastTurn }] : [],
+            },
+          } as unknown as WorkRequestsDependencies);
+          const headers = { "x-octant-window-capability": capability };
+          const answer = yield* Effect.promise(async () => {
+            const response = await wired.activeWorkRoutes(
+              new Request("http://127.0.0.1/api/active-work", { headers }),
+            );
+            expect(response?.status).toBe(200);
+            return (await response?.json()) as {
+              rows: ReadonlyArray<{
+                title: string;
+                projectName: string;
+                board: { status: string };
+                updatedAt: string;
+              }>;
+            };
+          });
+          const board = yield* Effect.promise(async () => {
+            const response = await wired.workThreadRoutes(
+              new Request("http://127.0.0.1/api/work/board", {
+                method: "POST",
+                headers: { ...headers, "content-type": "application/json" },
+                body: JSON.stringify({ version: 1 }),
+              }),
+            );
+            expect(response?.status).toBe(200);
+            return (await response?.json()) as {
+              cards: ReadonlyArray<{ title: string; status: string; statusReason: string }>;
+            };
+          });
+          expect(Object.fromEntries(answer.rows.map((row) => [row.title, row.board]))).toEqual(
+            Object.fromEntries(
+              board.cards
+                .filter((card) => card.status !== "done")
+                .map((card) => [card.title, { status: card.status, reason: card.statusReason }]),
+            ),
+          );
+          expect(answer.rows.map((row) => row.title).toSorted()).toEqual([
+            "Asking",
+            "Idle",
+            "Rebound",
+            "Running",
+            "Stopped",
+          ]);
+          expect(answer.rows[0]?.projectName).toBe("Reports");
+          const ready = answer.rows.filter((row) => row.board.status === "ready");
+          expect(ready.map((row) => row.title)).toEqual(["Idle"]);
+          expect(ready[0]?.updatedAt).toBe(lastTurn);
+          expect(answer.rows.find((row) => row.title === "Asking")?.updatedAt).toBe(lastGoal);
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory }))),
       ),
     );
