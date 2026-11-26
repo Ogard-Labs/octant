@@ -93,6 +93,8 @@ async function shared(context: ReturnType<typeof setup>, scope: "read" | "commen
   return result;
 }
 
+const secretOf = (link: { readonly url: string }) => link.url.split("#k=")[1] ?? "";
+
 const fetchOf = (
   linkId: string,
   kind: VisitorFetchRequest["kind"],
@@ -131,8 +133,16 @@ describe("sharing a thread with a visitor", () => {
   it("a second browser cannot open a bound link", async () => {
     const context = setup();
     const link = await shared(context);
-    expect(context.service.fetch(fetchOf(link.linkId, "open"), HUB).status).toBe("ok");
-    expect(context.service.fetch(fetchOf(link.linkId, "open", OTHER_BROWSER), HUB)).toEqual({
+    expect(
+      context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }), HUB)
+        .status,
+    ).toBe("ok");
+    expect(
+      context.service.fetch(
+        fetchOf(link.linkId, "open", OTHER_BROWSER, { secret: secretOf(link) }),
+        HUB,
+      ),
+    ).toEqual({
       status: "refused",
       kind: "bound-elsewhere",
     });
@@ -140,6 +150,22 @@ describe("sharing a thread with a visitor", () => {
       status: "refused",
       kind: "bound-elsewhere",
     });
+  });
+
+  it("binds no browser that opens the link without its secret", async () => {
+    const context = setup();
+    const link = await shared(context);
+    expect(context.service.fetch(fetchOf(link.linkId, "open"), HUB)).toEqual({
+      status: "refused",
+      kind: "unknown-link",
+    });
+    expect(
+      context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: "A".repeat(43) }), HUB),
+    ).toEqual({ status: "refused", kind: "unknown-link" });
+    expect(
+      context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }), HUB)
+        .status,
+    ).toBe("ok");
   });
 
   it("reads nothing before a browser opened the link with its secret", async () => {
@@ -154,7 +180,7 @@ describe("sharing a thread with a visitor", () => {
   it("stops at the next fetch once the person stops sharing", async () => {
     const context = setup();
     const link = await shared(context);
-    context.service.fetch(fetchOf(link.linkId, "open"), HUB);
+    context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }), HUB);
     await context.service.stop(link.linkId);
     expect(context.service.fetch(fetchOf(link.linkId, "read"), HUB)).toEqual({
       status: "refused",
@@ -165,7 +191,7 @@ describe("sharing a thread with a visitor", () => {
   it("stops once the link expires", async () => {
     const context = setup();
     const link = await shared(context);
-    context.service.fetch(fetchOf(link.linkId, "open"), HUB);
+    context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }), HUB);
     context.advance(24 * 3_600_000);
     expect(context.service.fetch(fetchOf(link.linkId, "read"), HUB)).toEqual({
       status: "refused",
@@ -182,7 +208,7 @@ describe("sharing a thread with a visitor", () => {
           : { status: "found", title: "t", archived: false, state: "idle", messages: [] },
     });
     const link = await shared(context);
-    context.service.fetch(fetchOf(link.linkId, "open"), HUB);
+    context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }), HUB);
     archived = true;
     expect(context.service.fetch(fetchOf(link.linkId, "read"), HUB)).toEqual({
       status: "refused",
@@ -193,7 +219,10 @@ describe("sharing a thread with a visitor", () => {
   it("the projection never carries a path or anything but messages", async () => {
     const context = setup();
     const link = await shared(context);
-    const answer = context.service.fetch(fetchOf(link.linkId, "open"), HUB);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
     expect(answer.status).toBe("ok");
     const text = JSON.stringify(answer);
     expect(text).not.toContain("/Users/ada");
@@ -217,7 +246,7 @@ describe("visitor comments", () => {
       }),
     });
     const link = await shared(context);
-    context.service.fetch(fetchOf(link.linkId, "open"), HUB);
+    context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }), HUB);
     const answer = context.service.fetch(
       fetchOf(link.linkId, "comment", BROWSER, { comment: "approve" }),
       HUB,
@@ -233,7 +262,7 @@ describe("visitor comments", () => {
   it("a read-only link takes no comment", async () => {
     const context = setup();
     const link = await shared(context, "read");
-    context.service.fetch(fetchOf(link.linkId, "open"), HUB);
+    context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }), HUB);
     expect(
       context.service.fetch(fetchOf(link.linkId, "comment", BROWSER, { comment: "hello" }), HUB),
     ).toEqual({ status: "refused", kind: "comment-not-allowed" });
@@ -242,7 +271,7 @@ describe("visitor comments", () => {
   it("only the person's Send delivers a comment, framed as outside content", async () => {
     const context = setup();
     const link = await shared(context);
-    context.service.fetch(fetchOf(link.linkId, "open"), HUB);
+    context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }), HUB);
     context.service.fetch(fetchOf(link.linkId, "comment", BROWSER, { comment: "Nice work" }), HUB);
     const [comment] = context.service.view().comments;
     const sent = context.service.decideComment(comment?.commentId ?? "", "send");
@@ -259,7 +288,7 @@ describe("visitor comments", () => {
   it("holds at most twenty waiting comments per link", async () => {
     const context = setup();
     const link = await shared(context);
-    context.service.fetch(fetchOf(link.linkId, "open"), HUB);
+    context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }), HUB);
     for (let index = 0; index < 20; index += 1) {
       context.service.fetch(
         fetchOf(link.linkId, "comment", BROWSER, { comment: `c${index}` }),

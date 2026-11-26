@@ -32,7 +32,12 @@ import type {
   SpokeVisitorLink,
   SpokeVisitorState,
 } from "./hubStateStore";
-import { mintPublicId, mintVisitorLinkSecret, visitorLinkSecretHash } from "./publicEntranceCrypto";
+import {
+  mintPublicId,
+  mintVisitorLinkSecret,
+  visitorLinkSecretHash,
+  visitorLinkSecretMatches,
+} from "./publicEntranceCrypto";
 
 const decodeLinkId = Schema.decodeUnknownSync(VisitorLinkId);
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
@@ -236,6 +241,14 @@ export class SpokeVisitorService {
     if (thread.status === "missing" || thread.archived) return { status: "refused", kind: "ended" };
     if (link.binding === undefined) {
       if (request.kind !== "open") return { status: "refused", kind: "not-bound" };
+      // The spoke binds the first browser that opens the link with its
+      // secret; it checks the secret itself rather than trusting the hub did.
+      if (
+        request.secret === undefined ||
+        !visitorLinkSecretMatches({ linkId, secret: request.secret, secretHash: grant.secretHash })
+      ) {
+        return { status: "refused", kind: "unknown-link" };
+      }
       this.#save({
         ...held,
         links: held.links.map((entry) =>

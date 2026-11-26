@@ -33,6 +33,9 @@ const MINUTE_MS = 60_000;
 const DEFAULT_POLL_MS = 2_000;
 const BODY_MAX_BYTES = 8 * 1024;
 const NONCES_MAX = 4_096;
+const STREAMS_PER_BROWSER = 4;
+// Windows are keyed per browser key, which anyone can mint, so idle ones go.
+const WINDOWS_MAX = 4_096;
 
 export interface HubVisitorViewer {
   /** The viewer page, the same for every link: it holds no content. */
@@ -107,6 +110,7 @@ export class HubVisitorService {
   readonly #commentRate = new Map<string, number[]>();
   readonly #nonces = new Map<string, number>();
   #streams = 0;
+  readonly #streamsByBinding = new Map<string, number>();
 
   constructor(options: HubVisitorServiceOptions) {
     this.#options = options;
@@ -205,7 +209,7 @@ export class HubVisitorService {
         ? GONE
         : NOT_FOUND;
     }
-    const answer = await this.#ask(admitted.signed, admitted.binding, "open");
+    const answer = await this.#ask(admitted.signed, admitted.binding, "open", undefined, secret);
     if (answer === undefined) return json(503, { error: "unavailable" });
     if (answer.status === "refused") return refusalAnswer(answer);
     return json(200, { scope: answer.scope, expiresAt: answer.expiresAt });
@@ -214,22 +218,35 @@ export class HubVisitorService {
   async #stream(request: PublicRequest): Promise<PublicAnswer> {
     const admitted = this.#admitSigned(request);
     if (admitted.status === "refused") return admitted.answer;
-    if (this.#streams >= PUBLIC_ENTRANCE_MAX_VISITOR_STREAMS) {
+    const binding = admitted.binding;
+    // The slot is taken before the first await, so concurrent opens cannot
+    // all pass the cap while the first ask is pending; one browser may hold
+    // only a few of them.
+    if (
+      this.#streams >= PUBLIC_ENTRANCE_MAX_VISITOR_STREAMS ||
+      (this.#streamsByBinding.get(binding) ?? 0) >= STREAMS_PER_BROWSER
+    ) {
       return json(503, { error: "busy" });
     }
-    const first = await this.#ask(admitted.signed, admitted.binding, "read");
-    if (first === undefined) return json(503, { error: "unavailable" });
-    if (first.status === "refused") return refusalAnswer(first);
-    const pollMs = this.#options.pollMs ?? DEFAULT_POLL_MS;
-    const encoder = new TextEncoder();
-    let last = "";
     let open = true;
     this.#streams += 1;
+    this.#streamsByBinding.set(binding, (this.#streamsByBinding.get(binding) ?? 0) + 1);
     const finish = () => {
       if (!open) return;
       open = false;
       this.#streams -= 1;
+      const held = (this.#streamsByBinding.get(binding) ?? 1) - 1;
+      if (held <= 0) this.#streamsByBinding.delete(binding);
+      else this.#streamsByBinding.set(binding, held);
     };
+    const first = await this.#ask(admitted.signed, binding, "read");
+    if (first === undefined || first.status === "refused") {
+      finish();
+      return first === undefined ? json(503, { error: "unavailable" }) : refusalAnswer(first);
+    }
+    const pollMs = this.#options.pollMs ?? DEFAULT_POLL_MS;
+    const encoder = new TextEncoder();
+    let last = "";
     const body = new ReadableStream<Uint8Array>({
       start: (controller) => {
         const emit = (answer: VisitorFetchAnswer) => {
@@ -251,6 +268,14 @@ export class HubVisitorService {
           while (going && open && !request.signal.aborted) {
             await new Promise((resolve) => setTimeout(resolve, pollMs));
             if (!open || request.signal.aborted) break;
+            // The switch going off, or this host no longer acting as hub, ends
+            // a stream already open, not only the next one.
+            if (!this.#options.serving() || !this.#load().enabled) {
+              controller.enqueue(
+                encoder.encode(`event: end\ndata: ${JSON.stringify({ reason: "closed" })}\n\n`),
+              );
+              break;
+            }
             // Every look asks the spoke again: a stopped or expired link ends here.
             const next = await this.#ask(admitted.signed, admitted.binding, "read");
             going = next !== undefined && emit(next);
@@ -277,8 +302,8 @@ export class HubVisitorService {
   async #comment(request: PublicRequest): Promise<PublicAnswer> {
     const admitted = this.#admitSigned(request);
     if (admitted.status === "refused") return admitted.answer;
-    const linkId = String(admitted.signed.grant.linkId);
-    if (!take(this.#commentRate, linkId, VISITOR_LINK_COMMENTS_PER_MINUTE, this.#options.now())) {
+    const window = `${String(admitted.signed.grant.linkId)}|${admitted.binding}`;
+    if (!take(this.#commentRate, window, VISITOR_LINK_COMMENTS_PER_MINUTE, this.#options.now())) {
       return json(429, { error: "rate-limited" });
     }
     const body = await this.#readJson(request);
@@ -298,11 +323,14 @@ export class HubVisitorService {
     const linkId = request.params.id ?? "";
     const signed = this.#load().grants.find((entry) => String(entry.grant.linkId) === linkId);
     if (signed === undefined) return { status: "refused", answer: NOT_FOUND };
-    if (!take(this.#rate, linkId, VISITOR_LINK_REQUESTS_PER_MINUTE, this.#options.now())) {
-      return { status: "refused", answer: json(429, { error: "rate-limited" }) };
-    }
     const binding = this.#checkProof(request);
     if (binding === undefined) return { status: "refused", answer: json(401, { error: "proof" }) };
+    // Windows are per link and browser key, so someone who saw only the link
+    // id cannot spend the real visitor's allowance with keys of their own.
+    const window = `${linkId}|${binding}`;
+    if (!take(this.#rate, window, VISITOR_LINK_REQUESTS_PER_MINUTE, this.#options.now())) {
+      return { status: "refused", answer: json(429, { error: "rate-limited" }) };
+    }
     return { status: "admitted", signed, binding };
   }
 
@@ -361,6 +389,7 @@ export class HubVisitorService {
     binding: string,
     kind: "open" | "read",
     comment?: string,
+    secret?: string,
   ): Promise<VisitorFetchAnswer | undefined> {
     return this.#options
       .ask(String(signed.grant.spokeMemberId), {
@@ -369,6 +398,7 @@ export class HubVisitorService {
         binding,
         kind: comment === undefined ? kind : "comment",
         ...(comment === undefined ? {} : { comment }),
+        ...(secret === undefined ? {} : { secret }),
       })
       .catch(() => undefined);
   }
@@ -396,6 +426,11 @@ export class HubVisitorService {
 }
 
 function take(windows: Map<string, number[]>, key: string, limit: number, now: number): boolean {
+  if (windows.size >= WINDOWS_MAX) {
+    for (const [held, times] of windows) {
+      if (times.every((at) => now - at >= MINUTE_MS)) windows.delete(held);
+    }
+  }
   const recent = (windows.get(key) ?? []).filter((at) => now - at < MINUTE_MS);
   const allowed = recent.length < limit;
   if (allowed) recent.push(now);

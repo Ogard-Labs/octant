@@ -48,6 +48,18 @@ export function visitorLinkSecretHash(linkId: string, secret: string): string {
     .digest("base64url");
 }
 
+/** Whether `secret` opens the link whose grant carries `secretHash`, compared in constant time. */
+export function visitorLinkSecretMatches(input: {
+  readonly linkId: string;
+  readonly secret: string;
+  readonly secretHash: string;
+}): boolean {
+  return sameBytes(
+    Buffer.from(visitorLinkSecretHash(input.linkId, input.secret)),
+    Buffer.from(input.secretHash),
+  );
+}
+
 function sameBytes(left: Buffer, right: Buffer): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }

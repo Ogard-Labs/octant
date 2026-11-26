@@ -331,6 +331,8 @@ export const VisitorFetchRequest = Schema.Struct({
   binding: digest,
   kind: Schema.Literal("open", "read", "comment"),
   comment: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_000))),
+  /** On `open` only: the secret from the link's fragment, so the spoke itself checks it before it binds. */
+  secret: Schema.optional(base64Url(43, 43)),
 }).annotations(strict);
 export type VisitorFetchRequest = typeof VisitorFetchRequest.Type;
 export const decodeVisitorFetchRequest = Schema.decodeUnknownSync(VisitorFetchRequest);

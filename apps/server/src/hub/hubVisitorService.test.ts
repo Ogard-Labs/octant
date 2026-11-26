@@ -4,6 +4,7 @@ import {
   type HubMemberId,
   type HubMembershipChangedPayload,
   type HubVisitorGrantsUpdate,
+  type VisitorLinkId,
 } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
@@ -263,6 +264,111 @@ describe("visitor links on the hub", () => {
     expect(answer.status).toBe(202);
     expect(context.spoke.view().comments.map((comment) => comment.text)).toEqual(["approve"]);
     expect(context.hub.handlers()).not.toHaveProperty("visitorApprove");
+  });
+
+  it("the spoke binds no browser that a hub names without the link's secret", async () => {
+    const context = world();
+    const link = await shareComment(context);
+    const forged = context.spoke.fetch(
+      {
+        linkId: link.linkId as VisitorLinkId,
+        revision: 1,
+        binding: "f".repeat(64),
+        kind: "open",
+      },
+      HUB,
+    );
+    expect(forged).toEqual({ status: "refused", kind: "unknown-link" });
+    const opened = await call(context.hub, "visitor-open", link.linkId, browser(), {
+      secret: link.secret,
+    });
+    expect(opened.status).toBe(200);
+  });
+
+  it("refuses a replayed proof and one outside the sixty-second skew", async () => {
+    const context = world();
+    const link = await shareComment(context);
+    const visitor = browser();
+    await call(context.hub, "visitor-open", link.linkId, visitor, { secret: link.secret });
+    const handler = context.hub.handlers().visitorComments;
+    const path = `/v/${link.linkId}/comments`;
+    const headers = visitor.headers("POST", path);
+    expect(
+      (await handler?.(request("visitor-comments", link.linkId, headers, { text: "Hi" })))?.status,
+    ).toBe(202);
+    expect(
+      (await handler?.(request("visitor-comments", link.linkId, headers, { text: "Hi" })))?.status,
+    ).toBe(401);
+    const timestamp = String(NOW - 61_000);
+    const nonce = randomBytes(12).toString("base64url");
+    const stale = new Map([
+      ["octant-visitor-key", visitor.key.publicKey],
+      [
+        "octant-visitor-proof",
+        `${timestamp}.${nonce}.${visitor.key.sign(
+          visitorProofPayload({ method: "POST", path, timestamp, nonce }),
+        )}`,
+      ],
+    ]);
+    expect(
+      (await handler?.(request("visitor-comments", link.linkId, stale, { text: "Hi" })))?.status,
+    ).toBe(401);
+  });
+
+  it("someone holding only the link id cannot spend the visitor's allowance", async () => {
+    const context = world();
+    const link = await shareComment(context);
+    const visitor = browser();
+    await call(context.hub, "visitor-open", link.linkId, visitor, { secret: link.secret });
+    const stranger = browser();
+    let limited = false;
+    for (let index = 0; index < 130; index += 1) {
+      const answer = await call(context.hub, "visitor-comments", link.linkId, stranger, {
+        text: "spam",
+      });
+      if (answer.status === 429) limited = true;
+    }
+    expect(limited).toBe(true);
+    expect(
+      (await call(context.hub, "visitor-comments", link.linkId, visitor, { text: "Hello" })).status,
+    ).toBe(202);
+  });
+
+  it("one browser holds at most four streams, even when it opens them all at once", async () => {
+    const context = world();
+    const link = await shareComment(context);
+    const visitor = browser();
+    await call(context.hub, "visitor-open", link.linkId, visitor, { secret: link.secret });
+    const answers = await Promise.all(
+      Array.from({ length: 6 }, () => call(context.hub, "visitor-stream", link.linkId, visitor)),
+    );
+    expect(answers.filter((answer) => answer.status === 200)).toHaveLength(4);
+    expect(answers.filter((answer) => answer.status === 503)).toHaveLength(2);
+    for (const answer of answers) {
+      if (answer.body instanceof ReadableStream) await answer.body.cancel();
+    }
+    expect(context.hub.status().streams).toBe(0);
+  });
+
+  it("turning the visitor switch off ends a stream already open", async () => {
+    const context = world();
+    const link = await shareComment(context);
+    const visitor = browser();
+    await call(context.hub, "visitor-open", link.linkId, visitor, { secret: link.secret });
+    const stream = await call(context.hub, "visitor-stream", link.linkId, visitor);
+    if (!(stream.body instanceof ReadableStream)) throw new Error("no stream");
+    const reader = stream.body.getReader();
+    await reader.read();
+    await context.hub.setEnabled(false, { kind: "local-window" });
+    const decoder = new TextDecoder();
+    let text = "";
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      text += decoder.decode(next.value);
+    }
+    expect(text).toContain("event: end");
+    expect(context.hub.status().streams).toBe(0);
   });
 
   it("answers every visitor route 404 while the hub's visitor switch is off", async () => {

@@ -3028,7 +3028,12 @@ person's work without any service Octant runs (maintainer decision,
   at most 256 KiB, and holds at most 500 queued deliveries or 32 MiB for at
   most 24 hours while its spoke is away. A visitor link expires after 24
   hours by default and 7 days at most, and is bound to the first browser that
-  opens it (decision H35).
+  opens it with its secret, which the spoke itself checks before it binds
+  (decision H35). Each browser key on a link takes 120 requests and 10
+  comments a minute and holds at most 4 of the entrance's 64 streams, so
+  someone who saw only a link id cannot spend the visitor's allowance; a
+  stream ends when the hub's visitor switch goes off or the host stops
+  acting as hub.
 
 #### Visitor links
 
