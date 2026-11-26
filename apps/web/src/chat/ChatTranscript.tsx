@@ -1,5 +1,4 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
-import { TurnSubagentRows } from "../agents/threadSubagents";
 import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
 import { ConversationInputs } from "../continuity/ConversationInputs";
@@ -50,6 +49,7 @@ import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import {
+  NO_TURN_ACTIVITY,
   runningStepTitle,
   settledTurnFoldsActivity,
   toolStepsActivity,
@@ -1163,32 +1163,24 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 ]
           }
         />
-        {toolActivity === undefined ? (
-          <TurnSubagentRows
-            window={{
-              from: props.subagentsFrom,
-              ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
-            }}
-          />
-        ) : (
-          <TurnActivityRows
-            activity={toolActivity}
-            {...(workedForInFold && workedFor !== undefined ? { workedFor } : {})}
-            running={props.attempt.outcome === "queued" || props.attempt.outcome === "streaming"}
-            settled={
-              props.attempt.outcome === "completed" ||
-              props.attempt.outcome === "failed" ||
-              props.attempt.outcome === "interrupted" ||
-              props.attempt.outcome === "cancelled"
-            }
-            {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
-            {...(props.canvasPreview === undefined ? {} : { canvasPreview: props.canvasPreview })}
-            subagents={{
-              from: props.subagentsFrom,
-              ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
-            }}
-          />
-        )}
+        <TurnActivityRows
+          // A turn whose subagents left no tool row still lists them, at its level.
+          activity={toolActivity ?? NO_TURN_ACTIVITY}
+          {...(workedForInFold && workedFor !== undefined ? { workedFor } : {})}
+          running={props.attempt.outcome === "queued" || props.attempt.outcome === "streaming"}
+          settled={
+            props.attempt.outcome === "completed" ||
+            props.attempt.outcome === "failed" ||
+            props.attempt.outcome === "interrupted" ||
+            props.attempt.outcome === "cancelled"
+          }
+          {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
+          {...(props.canvasPreview === undefined ? {} : { canvasPreview: props.canvasPreview })}
+          subagents={{
+            from: props.subagentsFrom,
+            ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
+          }}
+        />
         {props.attempt.tasks === undefined || props.attempt.tasks.length === 0 ? null : (
           <ThreadTasksPanel
             tasks={{

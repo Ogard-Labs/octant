@@ -350,6 +350,13 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
   const replyDetail = sources.replyDetail;
   if (replyDetail !== undefined) {
     const keywords = ["reply detail", "thinking", "tool calls", "expand", "collapse"];
+    // "hide steps" and "quiet" name only the quieter levels: shared by every
+    // command, a search for them ranked the cycle first, which from Low steps
+    // to Medium and shows more.
+    const levelKeywords = (level: ReplyDetailLevel) =>
+      level === "answers" || level === "failures"
+        ? [...keywords, level, "hide steps", "quiet"]
+        : [...keywords, level];
     const thread = replyDetail.thread;
     if (thread !== undefined) {
       commands.push({
@@ -366,10 +373,14 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
         if (level === thread.level) continue;
         commands.push({
           id: `thread:reply-detail:${level}`,
-          title: `Show ${REPLY_DETAIL_LABELS[level].toLowerCase()} reply detail in this thread`,
+          // "Show answers only in this thread", not "answers only reply detail".
+          title:
+            level === "answers" || level === "failures"
+              ? `Show ${REPLY_DETAIL_LABELS[level].toLowerCase()} in this thread`
+              : `Show ${REPLY_DETAIL_LABELS[level].toLowerCase()} reply detail in this thread`,
           group: "Threads",
           detail: REPLY_DETAIL_DESCRIPTIONS[level],
-          keywords: [...keywords, level],
+          keywords: levelKeywords(level),
           action: { kind: "run", run: () => thread.onSet(level) },
         });
       }
@@ -391,7 +402,7 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
         title: `Set the default reply detail to ${REPLY_DETAIL_LABELS[level]}`,
         group: "Settings",
         detail: "Threads without their own level follow it",
-        keywords: [...keywords, "default", level],
+        keywords: [...levelKeywords(level), "default"],
         action: { kind: "run", run: () => replyDetail.onSetDefault(level) },
       });
     }

@@ -29,3 +29,11 @@ export function mobileReplyDetailPresentation(
     toolDetailOpen: opening.toolDetail,
   };
 }
+
+/**
+ * The level the phone draws: it has no Answers only or Failures only view yet,
+ * so those read as Low, the quietest level it draws, and hide nothing.
+ */
+export function phoneReplyDetail(level: ReplyDetailLevel): ReplyDetailLevel {
+  return level === "answers" || level === "failures" ? "low" : level;
+}

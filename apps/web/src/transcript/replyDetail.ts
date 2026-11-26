@@ -66,22 +66,19 @@ export function useThreadReplyDetail(thread: ReplyDetailThread): ThreadReplyDeta
 
 /** The words Settings, the thread menu, and the command palette use for each level. */
 export const REPLY_DETAIL_LABELS: Readonly<Record<ReplyDetailLevel, string>> = {
+  answers: "Answers only",
+  failures: "Failures only",
   low: "Low",
   medium: "Medium",
   high: "High",
 };
 
 export const REPLY_DETAIL_DESCRIPTIONS: Readonly<Record<ReplyDetailLevel, string>> = {
+  answers: "Only the message and the final reply; a finished turn's steps wait behind one line.",
+  failures: "Tool calls show while they run; only failed and unfinished ones stay.",
   low: "Thinking stays folded, and a finished turn's tool calls fold behind one line.",
   medium: "Thinking stays folded with its first line showing, and tool calls stay listed.",
   high: "Thinking, tool calls, and each call's recorded result stay open.",
-};
-
-/** The same levels said short enough for a menu row at phone width. */
-export const REPLY_DETAIL_MENU_DESCRIPTIONS: Readonly<Record<ReplyDetailLevel, string>> = {
-  low: "Thinking and finished tool calls folded",
-  medium: "Thinking's first line, tool calls listed",
-  high: "Thinking, tool calls, and results open",
 };
 
 const NO_CHOICES: ReadonlyMap<string, boolean> = new Map();

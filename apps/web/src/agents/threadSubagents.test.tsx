@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadSubagentsTray } from "./ComposerSubagentsTray";
 import { observedChildFixture } from "./agentActivityFixtures";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
+import { ReplyDetailContext } from "../transcript/replyDetail";
 import { ThreadSubagentsProvider, TurnSubagentRows } from "./threadSubagents";
 
 const threadId = "11111111-1111-4111-8111-111111111111";
@@ -82,6 +83,39 @@ describe("TurnSubagentRows", () => {
       /^Inspect parser, 55555555-5555-4555-8555-555555555555, Working/,
     );
     expect(screen.queryByText("Later batch")).toBeNull();
+  });
+
+  it("at Answers only keeps failed and waiting subagents and counts the rest as hidden", async () => {
+    const { client: agents } = client([
+      run("90000000-0000-4000-8000-000000000001", { task: "Done batch" }),
+      run("90000000-0000-4000-8000-000000000002", {
+        task: "Broken batch",
+        lifecycleStatus: "failed",
+      }),
+      run("90000000-0000-4000-8000-000000000003", {
+        task: "Asking batch",
+        lifecycleStatus: "waiting",
+      }),
+    ]);
+    render(
+      <ThreadSubagentsProvider client={agents} threadId={threadId}>
+        <ReplyDetailContext.Provider value="answers">
+          <TurnActivityRows
+            activity={{ rows: [], reasoning: "" }}
+            running={false}
+            settled
+            subagents={{ from: "2026-11-17T09:59:00.000Z" }}
+          />
+        </ReplyDetailContext.Provider>
+      </ThreadSubagentsProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "Subagents" });
+    expect(
+      within(list)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent),
+    ).toEqual([expect.stringContaining("Broken batch"), expect.stringContaining("Asking batch")]);
+    expect(screen.getByRole("button", { name: "1 step hidden" })).toBeVisible();
   });
 
   it("lists a turn's subagents when the turn left no tool row of its own", async () => {

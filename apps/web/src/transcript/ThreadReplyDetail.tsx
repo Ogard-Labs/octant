@@ -5,7 +5,6 @@ import { octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import {
   REPLY_DETAIL_LABELS,
-  REPLY_DETAIL_MENU_DESCRIPTIONS,
   REPLY_DETAIL_LEVELS,
   ReplyDetailContext,
   useThreadReplyDetail,
@@ -35,6 +34,15 @@ export function ThreadReplyDetailScope(props: {
 }
 
 const USE_DEFAULT = "default";
+
+/** The same levels said short enough for a menu row at phone width. */
+const REPLY_DETAIL_MENU_DESCRIPTIONS: Readonly<Record<ReplyDetailLevel, string>> = {
+  answers: "Message and reply, steps hidden",
+  failures: "Only failed calls stay",
+  low: "Thinking and finished tool calls folded",
+  medium: "Thinking's first line, tool calls listed",
+  high: "Thinking, tool calls, and results open",
+};
 
 /**
  * The thread's own Reply detail choice: Use default, or a level that stays
