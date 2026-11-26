@@ -3305,6 +3305,26 @@ Canvas's text, and a Canvas's mirrored or exported files are files: another
 thread that reads them with its own file tools is not marked, as for any file a
 marked thread writes.
 
+An in-place restore writes back only a restore point the thread recorded on the
+checkout it targets. A point is either the checkout as it stood before one of
+the thread's turns, which `conversation-turn-started` records with its
+`checkoutId`, or what one of its restores replaced, which the restore result
+records with the `checkoutId` it ran on. That includes the files part of a
+rewind. Worktrees of one repository share Git objects, so another checkout's
+point would apply there and overwrite work it never saw. The host refuses any
+other point as a `conflict` before it takes an undo point or touches a file,
+and it refuses as `unavailable` when it cannot read the thread's points. A
+point that recorded no checkout (journaled before turns or restores recorded
+one) is trusted only on a thread whose every recorded turn names the target
+checkout. A turn that recorded none counts as having run elsewhere, so a thread
+holding one has moved (maintainer decision, 2026-11-26). The conversation page
+offers Undo restore only for the thread's newest restore that ran, and only
+when that restore belongs to the thread's current checkout by the same rule.
+After a move to a replacement checkout, the page carries no `restoreUndo` until
+a restore runs there. The renderer offers Restore files to this point only on a
+message whose recorded checkout is the view's, and a declined approval leaves
+the earlier Undo restore in place.
+
 An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
 this point and Undo restore) overwrites a checkout other threads may share, so
 the host refuses it, as a `conflict` before Git is touched and before any undo

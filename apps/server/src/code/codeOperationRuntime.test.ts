@@ -82,6 +82,7 @@ import {
   type CodeEvidenceReference,
   type CodeRuntimeWork,
   type CodeThread,
+  type CodeCheckoutId,
   type CodeThreadId,
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
@@ -1284,6 +1285,13 @@ describe("CodeOperationRuntime", () => {
         title: "Restoring thread",
       });
       fixture.setOtherThread(restoringThread);
+      recordRestorePoint(
+        fixture,
+        restoringThread.id,
+        checkoutId,
+        { worktree: "c".repeat(40), index: "d".repeat(40) },
+        90,
+      );
       const capability = "A".repeat(43);
       const windowAuthorityStore = new WindowAuthorityStore();
       windowAuthorityStore.register({ windowId, capability, now: 0 });
@@ -1361,6 +1369,72 @@ describe("CodeOperationRuntime", () => {
     },
   );
 
+  it("refuses a restore point from the checkout a thread moved off and offers no Undo restore there", async () => {
+    const movedCheckoutId = decodeCodeCheckoutId("90000000-0000-4000-8000-000000000097");
+    const fixture = runtimeFixture({
+      movedCheckout: decodeCodeCheckoutIdentity({
+        id: movedCheckoutId,
+        repositoryId: thread().repositoryId,
+        kind: "managed-worktree",
+        availability: "available",
+        head: { kind: "branch", name: "octant/moved", oid: "a".repeat(40) },
+        ownershipReceiptId: "90000000-0000-4000-8000-000000000098",
+        observedAt: "2026-07-30T12:00:00.000Z",
+      }),
+    });
+    const beforeTurn = { worktree: "1".repeat(40), index: "2".repeat(40) };
+    const replaced = { worktree: "3".repeat(40), index: "4".repeat(40) };
+    try {
+      fixture.appendOperationEvent({
+        threadId,
+        operationId: operationId(40),
+        expectedCursor: 0,
+        event: decodeCodeOperationEvent({
+          kind: "conversation-turn-started",
+          providerInstanceId: thread().providerInstanceId,
+          modelId: thread().modelId,
+          sessionId,
+          prompt: fixture.prompt,
+          checkoutId,
+          checkpoint: beforeTurn,
+        }),
+      });
+      recordRestorePoint(fixture, threadId, checkoutId, replaced, 41);
+      const before = await fixture.runtime.conversation(windowId, threadId, 0, 50);
+      expect(before.restoreUndo).toEqual(replaced);
+
+      fixture.setThread(decodeCodeThread({ ...thread(), checkoutId: movedCheckoutId }));
+      const after = await fixture.runtime.conversation(windowId, threadId, 0, 50);
+      expect(after.restoreUndo).toBeUndefined();
+      const window = await fixture.runtime.conversationWindow(windowId, threadId, { limit: 50 });
+      expect(window.status === "ok" ? window.window.restoreUndo : "unread").toBeUndefined();
+
+      for (const [index, point] of [beforeTurn, replaced].entries()) {
+        await expect(
+          fixture.runtime.execute(windowId, {
+            kind: "restore-git-checkpoint",
+            operationId: operationId(50 + index * 2),
+            gitOperationId: operationId(51 + index * 2) as never,
+            threadId,
+            checkoutId: movedCheckoutId,
+            checkpoint: point as never,
+          }),
+        ).resolves.toMatchObject({
+          kind: "operation-failed",
+          failure: {
+            category: "conflict",
+            message:
+              "That restore point was recorded in another checkout, so it cannot be restored here. Nothing changed.",
+          },
+        });
+      }
+      expect(fixture.restoredTrees()).toBe(0);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   describe("an in-place restore beside a turn that is still preparing to start", () => {
     const restoringThreadId = decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1");
 
@@ -1392,6 +1466,13 @@ describe("CodeOperationRuntime", () => {
           title: "Restoring thread",
           ...(restoringProjectId === undefined ? {} : { projectId: restoringProjectId }),
         }),
+      );
+      recordRestorePoint(
+        fixture,
+        restoringThreadId,
+        checkoutId,
+        { worktree: "c".repeat(40), index: "d".repeat(40) },
+        90,
       );
       const starting = fixture.runtime.execute(windowId, {
         kind: "start-provider-turn",
@@ -21170,3 +21251,33 @@ describe("pull request line notes runtime admission", () => {
     }
   });
 });
+
+/**
+ * Journal a restore that ran on `ranOn` and replaced `replaced`, so the thread
+ * holds `replaced` as a restore point of that checkout.
+ */
+function recordRestorePoint(
+  fixture: ReturnType<typeof runtimeFixture>,
+  of: CodeThreadId,
+  ranOn: CodeCheckoutId,
+  replaced: { readonly worktree: string; readonly index: string },
+  id: number,
+) {
+  fixture.appendOperationEvent({
+    threadId: of,
+    operationId: operationId(id),
+    expectedCursor: 0,
+    event: decodeCodeOperationEvent({
+      kind: "operation-result",
+      result: {
+        kind: "git-mutation-state",
+        operationId: operationId(id),
+        gitOperationId: operationId(id + 1),
+        mutation: "restore-checkpoint",
+        state: "completed",
+        undo: replaced,
+        checkoutId: ranOn,
+      },
+    }),
+  });
+}

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ActorId,
+  CodeCheckpoint,
   CodeOperationEventFrame,
   MAX_CODE_CONVERSATION_TURN_STEPS,
   ReplayCursor,
@@ -1348,6 +1349,137 @@ describe("CodeOperationEventStore", () => {
     store.append({ threadId, operationId, expectedCursor: 3, event: restore(undefined) });
     expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).restoreUndo).toBeUndefined();
     fixture.connection.close();
+  });
+
+  describe("restore points and the checkout they came from", () => {
+    const firstCheckout = decodeCodeCheckoutId("89000000-0000-4000-8000-0000000000c1");
+    const movedCheckout = decodeCodeCheckoutId("89000000-0000-4000-8000-0000000000c2");
+    const checkpoint = Schema.decodeUnknownSync(CodeCheckpoint);
+    const beforeFirstTurn = checkpoint({ worktree: "1".repeat(40), index: "2".repeat(40) });
+    const replacedOnFirst = checkpoint({ worktree: "3".repeat(40), index: "4".repeat(40) });
+    const replacedOnMoved = checkpoint({ worktree: "5".repeat(40), index: "6".repeat(40) });
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000033",
+      digest: "a".repeat(64),
+      byteLength: 4,
+    });
+
+    function turnOn(
+      store: ReturnType<typeof createStore>,
+      index: number,
+      checkoutId: typeof firstCheckout | undefined,
+      checkpoint?: typeof beforeFirstTurn,
+    ) {
+      store.append({
+        threadId,
+        operationId: turnOperation(index),
+        expectedCursor: 0,
+        event: decodeCodeOperationEvent({
+          kind: "conversation-turn-started",
+          providerInstanceId: "89000000-0000-4000-8000-000000000040",
+          modelId: "model-one",
+          sessionId: "89000000-0000-4000-8000-000000000050",
+          prompt,
+          ...(checkoutId === undefined ? {} : { checkoutId }),
+          ...(checkpoint === undefined ? {} : { checkpoint }),
+        }),
+      });
+    }
+
+    function restoreOn(
+      store: ReturnType<typeof createStore>,
+      index: number,
+      checkoutId: typeof firstCheckout | undefined,
+      undo: typeof beforeFirstTurn,
+    ) {
+      const id = turnOperation(index);
+      store.append({
+        threadId,
+        operationId: id,
+        expectedCursor: 0,
+        event: decodeCodeOperationEvent({
+          kind: "operation-result",
+          result: {
+            kind: "git-mutation-state",
+            operationId: id,
+            gitOperationId: "89000000-0000-4000-8000-000000000060",
+            mutation: "restore-checkpoint",
+            state: "completed",
+            undo,
+            ...(checkoutId === undefined ? {} : { checkoutId }),
+          },
+        }),
+      });
+    }
+
+    function offered(store: ReturnType<typeof createStore>, checkoutId: typeof firstCheckout) {
+      const page = store.conversation({ threadId, afterCursor: 0, limit: 10, checkoutId });
+      const window = store.conversationWindow({ threadId, limit: 10, checkoutId });
+      // Both reads a client opens a thread with must agree on the way back.
+      expect(window.status === "ok" ? window.window.restoreUndo : "unread").toEqual(
+        page.restoreUndo,
+      );
+      return page.restoreUndo;
+    }
+
+    it("offers Undo restore only for a restore that ran on the thread's current checkout", () => {
+      const fixture = openJournal();
+      const store = createStore(fixture.journal);
+      turnOn(store, 900, firstCheckout, beforeFirstTurn);
+      restoreOn(store, 901, firstCheckout, replacedOnFirst);
+      expect(offered(store, firstCheckout)).toEqual(replacedOnFirst);
+
+      // The thread moved, and nothing has been restored on its new checkout.
+      turnOn(store, 902, movedCheckout);
+      expect(offered(store, movedCheckout)).toBeUndefined();
+
+      restoreOn(store, 903, movedCheckout, replacedOnMoved);
+      expect(offered(store, movedCheckout)).toEqual(replacedOnMoved);
+      expect(offered(store, firstCheckout)).toBeUndefined();
+      fixture.connection.close();
+    });
+
+    it("trusts a restore that recorded no checkout only while every turn ran on the current one", () => {
+      const fixture = openJournal();
+      const store = createStore(fixture.journal);
+      turnOn(store, 910, firstCheckout, beforeFirstTurn);
+      restoreOn(store, 911, undefined, replacedOnFirst);
+      expect(offered(store, firstCheckout)).toEqual(replacedOnFirst);
+      expect(offered(store, movedCheckout)).toBeUndefined();
+      expect(store.restorePointRecorded(threadId, firstCheckout, replacedOnFirst)).toBe(true);
+      expect(store.restorePointRecorded(threadId, movedCheckout, replacedOnFirst)).toBe(false);
+
+      // A turn that recorded no checkout could have run anywhere.
+      turnOn(store, 912, undefined);
+      expect(offered(store, firstCheckout)).toBeUndefined();
+      expect(store.restorePointRecorded(threadId, firstCheckout, replacedOnFirst)).toBe(false);
+      fixture.connection.close();
+    });
+
+    it("knows a restore point only on the checkout its turn or restore ran on", () => {
+      const fixture = openJournal();
+      const store = createStore(fixture.journal);
+      turnOn(store, 920, firstCheckout, beforeFirstTurn);
+      restoreOn(store, 921, firstCheckout, replacedOnFirst);
+      turnOn(store, 922, movedCheckout);
+
+      expect(store.restorePointRecorded(threadId, firstCheckout, beforeFirstTurn)).toBe(true);
+      expect(store.restorePointRecorded(threadId, firstCheckout, replacedOnFirst)).toBe(true);
+      expect(store.restorePointRecorded(threadId, movedCheckout, beforeFirstTurn)).toBe(false);
+      expect(store.restorePointRecorded(threadId, movedCheckout, replacedOnFirst)).toBe(false);
+      // A point no turn or restore of this thread recorded is nobody's.
+      expect(store.restorePointRecorded(threadId, firstCheckout, replacedOnMoved)).toBe(false);
+      expect(store.restorePointRecorded(otherThreadId, firstCheckout, beforeFirstTurn)).toBe(false);
+      // The same tree at another commit is another point.
+      expect(
+        store.restorePointRecorded(
+          threadId,
+          firstCheckout,
+          checkpoint({ ...beforeFirstTurn, head: "7".repeat(40) }),
+        ),
+      ).toBe(false);
+      fixture.connection.close();
+    });
   });
 
   it("reads a thread's small history even when unrelated aggregates dominate the journal", () => {

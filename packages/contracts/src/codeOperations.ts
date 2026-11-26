@@ -1506,6 +1506,12 @@ const GitMutationResult = Schema.Struct({
    * failed one, which may have moved files before it stopped.
    */
   undo: Schema.optional(CodeCheckpoint),
+  /**
+   * The checkout a restore ran on, so its way back is offered and accepted
+   * only there. Absent on every other mutation, and on restores journaled
+   * before the host recorded it.
+   */
+  checkoutId: Schema.optional(CodeCheckoutId),
 }).annotations(strict);
 const PullRequestUrl = Schema.String.pipe(
   Schema.maxLength(2_048),

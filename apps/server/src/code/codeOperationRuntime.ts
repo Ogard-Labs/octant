@@ -1822,6 +1822,15 @@ export function createCodeOperationRuntime(
     ...(options.describeImages === undefined ? {} : { describeImages: options.describeImages }),
     conversationTurns: (threadId, read) =>
       codeThreadTurns((page) => events.conversation(page), threadId, read),
+    restorePointRecorded: ({ threadId, checkoutId, checkpoint }) => {
+      try {
+        return events.restorePointRecorded(threadId, checkoutId, checkpoint)
+          ? "recorded"
+          : "unrecorded";
+      } catch {
+        return "unreadable";
+      }
+    },
     ...(options.supportsSessionRollback === undefined
       ? {}
       : {
@@ -2864,6 +2873,7 @@ export function createCodeOperationRuntime(
         afterCursor,
         limit,
         providerInstanceId: thread.providerInstanceId,
+        checkoutId: thread.checkoutId,
       });
     },
     conversationWindow: async (windowId, threadId, request) => {
@@ -2880,6 +2890,7 @@ export function createCodeOperationRuntime(
         ...(request.before === undefined ? {} : { before: request.before }),
         ...(request.through === undefined ? {} : { through: request.through }),
         providerInstanceId: thread.providerInstanceId,
+        checkoutId: thread.checkoutId,
       });
     },
     mergeForkContext: (windowId, forkThreadId, throughOperationId, contextInputPolicy) =>
