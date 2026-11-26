@@ -33,6 +33,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
+import { runApprovalAnswerConformance } from "@octant/provider-sdk/conformance";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -3190,6 +3191,53 @@ describe("Claude execution policy", () => {
       await acquired.close();
     },
   );
+
+  it("keeps an approval for the session when the thread does, whatever the host default", async () => {
+    await expect(
+      runApprovalAnswerConformance({
+        remembersForSession: true,
+        pending: async (hostDefault) => {
+          const f = harness("subscription", hostDefault);
+          const acquired = await acquire(f.driver);
+          await Effect.runPromise(
+            acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+          );
+          const open = f.opens[0]!;
+          const ask = async (toolUseId: string) => {
+            const approval = Effect.runPromise(
+              Stream.runHead(
+                Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+                  Stream.filter(
+                    (event) => event.sessionId === sessionId && event.kind === "approval-request",
+                  ),
+                ),
+              ),
+            );
+            await Promise.resolve();
+            const request = {
+              toolName: "Edit",
+              input: { file_path: `${projectRoot}/src/app.ts`, old_string: "a", new_string: "b" },
+              toolUseId,
+              signal: new AbortController().signal,
+            };
+            await open.preToolUse({ sessionId: "sdk-session-1", projectRoot, ...request });
+            return Promise.race([
+              approval.then(() => "asked" as const),
+              open.canUseTool(request).then(() => "ran" as const),
+            ]);
+          };
+          expect(await ask("edit-first")).toBe("asked");
+          return {
+            connection: acquired.connection,
+            sessionId,
+            requestId: "request-1",
+            remembered: async () => (await ask("edit-again")) === "ran",
+            close: acquired.close,
+          };
+        },
+      }),
+    ).resolves.toMatchObject({ sessionAnswerRemembered: true });
+  });
 
   it.each(["current-session", "project-default"] as const)(
     "correlates approval answers atomically and degrades %s reuse to the active session",

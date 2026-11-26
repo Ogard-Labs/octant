@@ -264,6 +264,9 @@
   /* Ambient loops, not interaction durations: a spinner turn and the breathing
      dot that says something is live. */
   --oct-motion-spin: 900ms;
+  /* a spinner's turn under reduced motion: slow enough to trouble nobody, and
+     still a turn, since a frozen spinner reads as a hung app */
+  --oct-motion-crawl: 2s;
   --oct-motion-pulse: 1.6s;
   /* CSS fallback for the Flowing ground: one slow drift, not an interaction. */
   --oct-motion-flowing: 36s;
@@ -1804,16 +1807,6 @@ input.switch:checked::after {
 .codeblock .ok {
   color: var(--oct-success-fg);
 }
-.kbd {
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  padding: var(--oct-space-1) var(--oct-space-2);
-  border: 1px solid var(--oct-border);
-  border-bottom-width: 2px;
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface-warm);
-  color: var(--oct-fg-2);
-}
 
 /* ─── segmented control ─────────────────────────────────────────────── */
 /* The one enclosed track: the same 28px track of 24px items that
@@ -2138,33 +2131,91 @@ input.switch:checked::after {
   box-shadow: 0 0 0 2px var(--oct-bg);
 }
 
-/* ─── spinner ─────────────────────────────────────────────────────────
-   Under prefers-reduced-motion the rotation stops, so the arc alone has
-   to read as "busy" — that is why it is a visible three-quarter ring. */
-.spinner {
-  display: inline-block;
-  width: var(--oct-icon-md);
-  height: var(--oct-icon-md);
-  border: 2px solid var(--oct-border);
-  border-top-color: var(--oct-accent-fg);
-  border-radius: var(--oct-radius-pill);
-  animation: oct-spin var(--oct-motion-spin) linear infinite;
-  vertical-align: -3px;
-}
-.spinner-sm {
-  width: var(--oct-icon-sm);
-  height: var(--oct-icon-sm);
-  border-width: 2px;
-}
-.spinner-lg {
-  width: 28px;
-  height: 28px;
-  border-width: 3px;
-}
 @keyframes oct-spin {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ─── the three small marks ───────────────────────────────────────────
+   One rule each for the spinner, the key cap and the status dot that
+   OctantSpinner, OctantKbd and OctantStatusDot draw. A feature places them
+   and never repaints them. */
+
+.octant-spinner {
+  flex: none;
+  animation: oct-spin var(--oct-motion-spin) linear infinite;
+}
+
+/* A chord is set in the interface face, as a native menu sets its
+   shortcuts: it takes the face of the text it stands in, where the browser's
+   own style for a kbd is the mono face. */
+.octant-kbd {
+  color: var(--oct-meta);
+  font-family: inherit;
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.octant-kbd[data-form="cap"] {
+  display: inline-block;
+  padding: 0 var(--oct-space-1);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  line-height: 1.4;
+}
+
+/* Resting is a share of the ink, so the dot lands at the same weight on any
+   fill and on glass; a status takes its role's own ink. */
+.octant-status-dot {
+  display: inline-block;
+  flex: none;
+  width: var(--oct-space-2);
+  height: var(--oct-space-2);
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 22%, transparent);
+}
+
+.octant-status-dot[data-size="sm"] {
+  width: 6px;
+  height: 6px;
+}
+
+.octant-status-dot[data-tone="active"] {
+  background: color-mix(in oklab, var(--oct-fg) 45%, transparent);
+}
+
+.octant-status-dot[data-tone="success"] {
+  background: var(--oct-success);
+}
+
+.octant-status-dot[data-tone="warning"] {
+  background: var(--oct-warn);
+}
+
+.octant-status-dot[data-tone="danger"] {
+  background: var(--oct-danger);
+}
+
+.octant-status-dot[data-tone="accent"] {
+  background: var(--oct-accent);
+}
+
+.octant-status-dot[data-live="true"] {
+  animation: oct-pulse var(--oct-motion-pulse) ease-in-out infinite;
+}
+
+/* Octant's own Reduce motion setting, as the system's below: a spinner turns
+   slowly, since a frozen one reads as a hung app, and a live dot holds still,
+   since the word beside it already says it is live. */
+html[data-octant-reduced-motion="true"] .octant-spinner {
+  animation-duration: var(--oct-motion-crawl);
+}
+
+html[data-octant-reduced-motion="true"] .octant-status-dot[data-live="true"] {
+  animation: none;
 }
 
 /* ─── skeleton ──────────────────────────────────────────────────────── */
@@ -2252,13 +2303,6 @@ input.switch:checked::after {
    not a second button. */
 .octant-tooltip__key {
   margin-inline-start: var(--oct-space-2);
-  padding: 0 var(--oct-space-1);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-muted);
-  font-family: inherit;
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
 }
 /* The rail's chip: one word, centred beside its button, as small as the
    label allows because it must lie over the sidebar. */
@@ -3145,12 +3189,6 @@ input.switch:checked::after {
 .runstatus .sep {
   opacity: 0.6;
 }
-.runstatus .spinner {
-  width: 11px;
-  height: 11px;
-  border-width: 1.5px;
-  vertical-align: 0;
-}
 
 /* ─── dock rows ───────────────────────────────────────────────────────
    The Environment-panel pattern: an icon, a label, and either a value or
@@ -3633,8 +3671,7 @@ input.switch:checked::after {
 .check-row.is-fail .icon {
   color: var(--oct-danger-fg);
 }
-.check-row.is-pending .icon,
-.check-row.is-pending .spinner {
+.check-row.is-pending .icon {
   color: var(--oct-warn-fg);
 }
 .check-row.is-unknown .icon {
@@ -9123,9 +9160,6 @@ html[data-octant-native-host="true"]
   flex: 1;
   border-bottom: 1px dotted var(--oct-border);
 }
-.keyrow .kbd {
-  flex: 0 0 auto;
-}
 
 /* ─── compaction ──────────────────────────────────────────────────────
    The conversation was rewritten underneath the user. That is a fact
@@ -10077,10 +10111,18 @@ html[data-octant-native-host="true"]
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
-  /* the spinner keeps turning — a frozen spinner reads as a hung app —
-     but slowly enough not to trigger anyone */
-  .spinner {
-    animation-duration: 2s !important;
+  /* The spinner keeps turning, slowly enough to trouble nobody: a frozen
+     spinner reads as a hung app. It says so above every other rule, because a
+     surface that stills all of its own motion (the remote shell and pairing
+     set one iteration on everything inside them) would otherwise stop it
+     after a single turn. */
+  html .octant-spinner {
+    animation-duration: var(--oct-motion-crawl) !important;
+    animation-iteration-count: infinite !important;
+  }
+  /* A live dot holds still: the word beside it already says it is live. */
+  html .octant-status-dot[data-live="true"] {
+    animation: none !important;
   }
   .skeleton::after {
     display: none;

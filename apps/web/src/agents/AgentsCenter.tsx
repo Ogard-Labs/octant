@@ -31,6 +31,7 @@ import {
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantStatusDot } from "../ui/base/OctantStatusDot";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   agentRunAcknowledgementLabel,
@@ -466,11 +467,7 @@ function AgentsCenterListBody(props: {
                     className="agents-center-row__state"
                     data-lifecycle={summary.lifecycleStatus}
                   >
-                    <span
-                      aria-hidden="true"
-                      className="agents-center-row__dot"
-                      data-tone={agentStatusTone(summary.lifecycleStatus)}
-                    />
+                    <OctantStatusDot tone={agentStatusTone(summary.lifecycleStatus)} />
                     {agentRunLifecycleLabel(summary.lifecycleStatus)}
                   </span>
                   <span className="agents-center-row__quiet">

@@ -3852,6 +3852,46 @@ describe("forking a Work thread from one of its turns", () => {
     expect(fixture.record).not.toHaveBeenCalled();
   });
 
+  it("carries what the person sent into a carried turn while it ran, and no later turn's", async () => {
+    const fixture = forkFixture();
+    const steered = (turnKey: typeof first, messageId: string, body: string) =>
+      fixture.turns.applySteeredMessage({
+        kind: "thread-message-steered",
+        mode: "work",
+        threadId: ids.thread as never,
+        turnKey: String(turnKey),
+        messageId,
+        body,
+        steeredAt: now,
+      });
+    steered(first, "72000000-0000-4000-8000-000000000071", "Skip the appendix.");
+    steered(first, "72000000-0000-4000-8000-000000000072", "Cite sources.");
+    steered(second, "72000000-0000-4000-8000-000000000073", "Add a chart.");
+
+    await fixture.service.execute(ids.window, forkThrough(first));
+    const carried = fixture.turns.listForThread(forkId);
+    expect(carried.map((turn) => turn.steeredMessages?.map((message) => message.body))).toEqual([
+      ["Skip the appendix.", "Cite sources."],
+    ]);
+    // Journaled for the fork's own turn, inside the unit that creates it, so a
+    // restart rebuilds what the live fork shows.
+    const journaled = fixture.persistence.journal.append.mock.calls.flatMap(([request]) =>
+      request.events.flatMap((event: { readonly eventName: string; readonly payload: unknown }) =>
+        event.eventName === "thread.message-steered@1" ? [event.payload] : [],
+      ),
+    );
+    expect(journaled).toEqual([
+      expect.objectContaining({
+        threadId: forkId,
+        turnKey: String(carried[0]?.requestId),
+        body: "Skip the appendix.",
+        steeredAt: now,
+      }),
+      expect.objectContaining({ threadId: forkId, body: "Cite sources." }),
+    ]);
+    expect(fixture.persistence.journal.transaction).toHaveBeenCalledOnce();
+  });
+
   it("marks a fork of a marked source before it exists", async () => {
     const fixture = forkFixture({ marked: true });
 
@@ -3974,6 +4014,34 @@ describe("searching Work message text", () => {
       [String(archivedId), "archived", "The release moved to Friday.", [{ start: 4, end: 11 }]],
     ]);
     expect(String(result.hits[0]?.turnId)).toBe("72000000-0000-4000-8000-000000000301");
+  });
+
+  it("finds what the person sent into a running turn, after its prompt and before its reply", async () => {
+    const fixture = serviceFixture({
+      turns: [
+        {
+          ...searchTurn({
+            threadId: ids.thread,
+            index: 1,
+            prompt: "Draft the brief",
+            response: "Left the appendix out.",
+          }),
+          steeredMessages: [
+            {
+              messageId: "72000000-0000-4000-8000-000000000391",
+              body: "Skip the appendix",
+              steeredAt: now,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      (await fixture.service.searchTranscript(ids.window, "appendix")).hits.map(
+        (hit) => hit.snippet,
+      ),
+    ).toEqual(["Skip the appendix"]);
   });
 
   it("searches no thread whose Project is not an active Work Project", async () => {

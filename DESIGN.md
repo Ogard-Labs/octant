@@ -633,20 +633,21 @@ its fills from the float (`--octant-float-control`, `-hover`, `-pressed`,
 
 ### Motion
 
-| Token                    | Value                            | Use                                |
-| ------------------------ | -------------------------------- | ---------------------------------- |
-| `--oct-motion-fast`      | 150ms                            | Feedback; an overlay arriving      |
-| `--oct-motion-base`      | 200ms                            | Geometry; a switch thumb           |
-| `--oct-dur-fast`         | 100ms                            | An overlay leaving                 |
-| `--oct-motion-panel`     | 300ms                            | The sidebar sliding open or closed |
-| `--oct-motion-spin`      | 900ms                            | A spinner turn                     |
-| `--oct-motion-pulse`     | 1.6s                             | A live dot                         |
-| `--oct-motion-flowing`   | 36s                              | The Flowing ground's CSS fallback  |
-| `--oct-motion-ground-in` | 1200ms                           | A drawn ground fading in           |
-| `--oct-ease-standard`    | `ease`                           | Ordinary transitions               |
-| `--oct-ease-motion`      | `cubic-bezier(0.22, 1, 0.36, 1)` | Overlays arriving                  |
-| `--oct-ease-color`       | `cubic-bezier(0.4, 0, 0.2, 1)`   | Overlays leaving, colour           |
-| `--oct-ease-panel`       | `cubic-bezier(0.32, 0.72, 0, 1)` | The sidebar's slide                |
+| Token                    | Value                            | Use                                 |
+| ------------------------ | -------------------------------- | ----------------------------------- |
+| `--oct-motion-fast`      | 150ms                            | Feedback; an overlay arriving       |
+| `--oct-motion-base`      | 200ms                            | Geometry; a switch thumb            |
+| `--oct-dur-fast`         | 100ms                            | An overlay leaving                  |
+| `--oct-motion-panel`     | 300ms                            | The sidebar sliding open or closed  |
+| `--oct-motion-spin`      | 900ms                            | A spinner turn                      |
+| `--oct-motion-crawl`     | 2s                               | A spinner turn under reduced motion |
+| `--oct-motion-pulse`     | 1.6s                             | A live dot                          |
+| `--oct-motion-flowing`   | 36s                              | The Flowing ground's CSS fallback   |
+| `--oct-motion-ground-in` | 1200ms                           | A drawn ground fading in            |
+| `--oct-ease-standard`    | `ease`                           | Ordinary transitions                |
+| `--oct-ease-motion`      | `cubic-bezier(0.22, 1, 0.36, 1)` | Overlays arriving                   |
+| `--oct-ease-color`       | `cubic-bezier(0.4, 0, 0.2, 1)`   | Overlays leaving, colour            |
+| `--oct-ease-panel`       | `cubic-bezier(0.32, 0.72, 0, 1)` | The sidebar's slide                 |
 
 - **Overlays** (menu, context menu, select, combobox, popover, tooltip, hover
   card, dialog, sheet, their scrims) fade in over 150ms and out over 100ms. A
@@ -666,7 +667,9 @@ its fills from the float (`--octant-float-control`, `-hover`, `-pressed`,
   is `--oct-disabled-opacity` (0.75), no hover fill, no pointer events.
 - **Reduced motion** (system or setting) removes every transition and holds
   every drawn ground on a still frame. Running state always has a word or shape
-  as well as motion.
+  as well as motion. A spinner is the one thing that keeps moving, one slow
+  turn per `--oct-motion-crawl`, because a frozen spinner reads as a hung
+  app; a live dot holds still.
 
 ### Focus
 
@@ -1167,6 +1170,22 @@ is costly to render mounts only while open.
 - **Do** pass `unstyled` when the feature draws the frame (a toolbar search, a
   stepper's middle). **Don't** repaint a field from a feature stylesheet.
 
+### OctantKbd
+
+- **Purpose.** Every keyboard chord the interface shows.
+- **Anatomy.** A `kbd` in one of two forms. **cap** (the default) is the boxed
+  key: in a sentence, a tooltip, a field, Review's actions and the command
+  palette's shortcut badge. **bare** is the quiet chord at the end of a row (a
+  sidebar row, the model picker), where a box on every row would read as a
+  column of buttons. `decorative` hides it from a screen reader where the
+  control's own name or description already says the chord.
+- **Tokens.** 12px in the meta ink, regular weight, in the face of the text it
+  stands in, as a native menu sets its shortcuts. The cap adds 0 by 4px
+  padding, one `--oct-border` line and `--oct-radius-sm`.
+- **Don't** set its ink, face, size or box from a feature stylesheet, which may
+  only place it. The hand-drawn hints used three typefaces in seven paints
+  (counted 2026-11-25).
+
 ### OctantMenu
 
 - **Purpose.** A dropdown of radio choices (default) or actions.
@@ -1276,6 +1295,42 @@ is costly to render mounts only while open.
 - **Tokens.** A 4px round track in `--octant-divider-strong` (3:1 on a card in
   both modes); a 14px round thumb in the primary with a 2px page-colour ring.
 - **States.** Disabled 0.75; grab cursor while dragging. Native range keys.
+
+### OctantSpinner
+
+- **Purpose.** Every "this is running" mark: a loading state, a running turn,
+  tool row, task or thread, a busy button.
+- **Anatomy.** The open ring (`LoaderCircle`) at `size` 12, 14, 16 (the
+  default) or 20, in the ink of the control it stands in. It is decoration
+  beside a word that says what is running; `label` names the wait where
+  nothing beside it does.
+- **Tokens.** One turn per `--oct-motion-spin`, from the one keyframe
+  `oct-spin` and the one rule `.octant-spinner`.
+- **States.** Under reduced motion, from the system or from the setting, it
+  turns once per `--oct-motion-crawl`: a frozen spinner reads as a hung
+  app. Until 2026-11-25 one spinner did that and the rest stopped.
+- **Don't** animate a glyph from a feature stylesheet or switch a spin on from
+  a parent's state attribute; render the spinner for that state. The one
+  thing that turns by another keyframe is a model endpoint's status ring.
+
+### OctantStatusDot
+
+- **Purpose.** The dot that says what state something is in: an agent run, a
+  host's connection, a listening server, an active filter.
+- **Anatomy.** A filled circle, 8px beside a row's text or 6px (`small`) in a
+  chip or a dense list. `tone` is `neutral` (resting or unknown, the
+  default), `active` (running or connected with nothing to report), or a
+  status role: `success`, `warning`, `danger`, `accent`. `live` breathes
+  while the thing it marks is going on.
+- **Tokens.** Neutral is the ink at 22% and active at 45%, so the dot lands at
+  the same weight on any fill and on glass; a status takes `--oct-success`,
+  `--oct-warn`, `--oct-danger` or `--oct-accent`. The pulse is
+  `--oct-motion-pulse`, and holds still under reduced motion.
+- **Accessibility.** Always hidden from a screen reader: colour never carries a
+  state alone, so the word beside the dot is what is read.
+- **Don't** use it for a ring, a meter, an unread mark, a swatch, a pager or a
+  chart mark, or for one of the categorical palette hues; those are meanings
+  of their own and keep their own marks.
 
 ### OctantSwitch
 
@@ -1975,6 +2030,7 @@ but never repaint a shared control.
 | `theme/surfaceLanguageContract.test.ts`                                              | Faces; each type role defined once; one page shell; one page table                                                                                                                                                                                                                                                                                        |
 | `theme/alignmentContract.test.ts`                                                    | Band gaps and insets, rail faces, dock bar, Settings rhythm, the one hairline                                                                                                                                                                                                                                                                             |
 | `theme/composerColumnsContract.test.ts`, `theme/interfaceTypographyContract.test.ts` | Composer columns; interface typography reach                                                                                                                                                                                                                                                                                                              |
+| `ui/smallMarksContract.test.ts`                                                      | One spin keyframe and one rule that turns it; no `kbd` outside `OctantKbd` and no hint's ink, face or box in a feature stylesheet; the migrated state dots only placed, never redrawn                                                                                                                                                                     |
 | `ui/iconScaleContract.test.ts`, `ui/focusOwnershipContract.test.ts`                  | Icon sizes and stroke; focus ownership                                                                                                                                                                                                                                                                                                                    |
 | `theme/translucencyContract.test.ts`                                                 | One coat on the shell and clear panes under glass; dense float with no backdrop filter under host glass; no backdrop filter on a surface inside a translucent shell; opaque under reduced transparency and increased contrast; the coat floors computed from the role colours                                                                             |
 | `theme/plainWordsContract.test.ts`                                                   | No sentence a person can read says "target", "authoritative" or a type's name from the code; a loading state carries no message                                                                                                                                                                                                                           |

@@ -6,7 +6,6 @@ import {
   Folder,
   GitBranch,
   LayoutPanelTop,
-  LoaderCircle,
   Monitor,
   Radio,
 } from "../ui/icons";
@@ -15,6 +14,8 @@ import type { ThreadBoardPullRequestSummary } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import type { RunningThreadFact } from "./dockThreadOverviewModel";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
+import { OctantStatusDot } from "../ui/base/OctantStatusDot";
 
 export interface DockThreadFacts {
   readonly project?: string;
@@ -173,11 +174,15 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
         >
           {servers.map((server) => (
             <div className="dock-card__row" key={server.id}>
-              <span
-                aria-hidden="true"
+              <OctantStatusDot
                 className="dock-card__dot"
-                data-listening={server.listening ? "true" : "false"}
+                small
+                tone={server.listening ? "success" : "neutral"}
               />
+              {/* The dot is hidden from a screen reader, and here nothing else
+                  said whether the server answers: the row named only the
+                  server and its port. */}
+              <span className="sr-only">{server.listening ? "Listening" : "Not listening"}</span>
               <span className="dock-card__label">{server.label}</span>
               <span className="dock-card__meta">{`:${String(server.port)}`}</span>
             </div>
@@ -266,7 +271,7 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
               type="button"
               variant="bare"
             >
-              <LoaderCircle aria-hidden="true" className="dock-card__spinner" size={14} />
+              <OctantSpinner className="dock-card__spinner" size={14} />
               <span className="dock-card__label">{thread.title}</span>
               {thread.projectName === undefined ? null : (
                 <span className="dock-card__meta">{thread.projectName}</span>
@@ -335,7 +340,7 @@ function TaskRow(props: { readonly task: DockThreadBackgroundTask; readonly runn
       variant="bare"
     >
       {props.running ? (
-        <LoaderCircle aria-hidden="true" className="dock-card__spinner" size={14} />
+        <OctantSpinner className="dock-card__spinner" size={14} />
       ) : (
         <Check aria-hidden="true" className="dock-card__icon" size={14} />
       )}

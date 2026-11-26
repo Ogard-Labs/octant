@@ -115,7 +115,12 @@ function cookieValue(request: Request): string | undefined {
   return undefined;
 }
 
-function hasViewGrant(ctx: ServiceContext, request: Request, id: string, share: StoredShare) {
+function hasViewGrant(
+  ctx: ServiceContext,
+  request: Request,
+  id: string,
+  share: Pick<StoredShare, "revision">,
+) {
   const token = cookieValue(request);
   return (
     token !== undefined &&
@@ -255,17 +260,16 @@ function viewImage(
   if (!ctx.limiter.allow("image", client)) {
     return new Response("Too many requests", { status: 429, headers });
   }
-  if (!isShareId(id)) return missing();
-  const lookup = ctx.store.lookup(id);
-  if (lookup.status !== "active") return missing();
-  const { share } = lookup;
-  if (share.passwordHash !== null && !hasViewGrant(ctx, request, id, share)) return missing();
-  const image = (share.document.images ?? []).find((each) => each.sha256 === sha256);
-  if (image?.data === undefined) return missing();
-  return carriedImageResponse(request, image, {
-    ...headers,
-    "cross-origin-resource-policy": "same-origin",
+  const answer = ctx.store.withImages(id, (share) => {
+    if (share.passwordHash !== null && !hasViewGrant(ctx, request, id, share)) return undefined;
+    const image = share.images.find((each) => each.sha256 === sha256);
+    if (image === undefined) return undefined;
+    return carriedImageResponse(request, image, {
+      ...headers,
+      "cross-origin-resource-policy": "same-origin",
+    });
   });
+  return answer ?? missing();
 }
 
 function redirect(ctx: ServiceContext, path: string, extra?: Record<string, string>): Response {

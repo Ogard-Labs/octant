@@ -1142,7 +1142,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Transcribe with",
           scope: "app",
           keywords:
-            "voice transcription transcribe speech to text microphone dictation whisper stt model off",
+            "voice transcription transcribe speech to text microphone dictation whisper stt model off apple speech on-device local mac offline download model",
         },
         {
           id: settingId("dictation-language"),

@@ -128,37 +128,15 @@ export function createSelectedExtensionResolver(options: {
       // original Project/mode/provider catalog first, then the actual thread;
       // arbitrary stale epochs still refuse and no activation is carried over.
       let scopedSelections = selections;
-      if (
-        selections.some((selection) => selection.catalogEpoch !== effectiveSnapshot.catalogEpoch)
-      ) {
-        const draftEffective = options.resolveEffectiveState(snapshot, {
-          scope: { ...effectiveSnapshot.scope, threadId: null },
-        });
-        const draftCatalogs = buildCatalogs(snapshot, draftEffective, {
-          mode,
-          threadId: null,
-          projectId: String(thread.projectId),
-          threadVersion: 0,
-          providerInstanceId: thread.providerInstanceId,
-          modelId: thread.modelId,
-        });
-        const rebound: Array<ExtensionSelection> = [];
-        for (const selection of selections) {
-          if (selection.catalogEpoch === effectiveSnapshot.catalogEpoch) {
-            rebound.push(selection);
-            continue;
-          }
-          const result = revalidateExtensionSelection(
-            selection,
-            draftCatalogs.addressing,
-            "provider-handoff",
-          );
-          if (result.kind === "blocked")
-            return unavailable(`Selected extension is unavailable (${result.reason}).`);
-          rebound.push({ ...selection, catalogEpoch: effectiveSnapshot.catalogEpoch });
-        }
-        scopedSelections = rebound;
-      }
+      const rebound = rebindDraftSelections(selections, effectiveSnapshot.catalogEpoch, () =>
+        draftAddressing(options.resolveEffectiveState, snapshot, effectiveSnapshot, thread, mode),
+      );
+      const refused = rebound.find((result) => result.kind === "blocked");
+      if (refused?.kind === "blocked")
+        return unavailable(`Selected extension is unavailable (${refused.reason}).`);
+      scopedSelections = rebound.flatMap((result) =>
+        result.kind === "selected" ? [result.selection] : [],
+      );
       // A pin is resolved here, against the same catalog the turn's own
       // selections are checked against, so it carries the package identity
       // and epoch a selection needs (observed: a pin built from the id alone
@@ -317,7 +295,57 @@ function selectedToolSet(input: {
   };
 }
 
-function pinnedSelections(
+/**
+ * A new-task draft is selected before its thread exists. A selection made
+ * under the draft's scope is validated against that original Project, mode and
+ * provider catalog and then bound to the thread's; any other stale epoch is
+ * refused, and no activation is carried over.
+ */
+export function rebindDraftSelections(
+  selections: ReadonlyArray<ExtensionSelection>,
+  epoch: ExtensionAddressingCatalog["epoch"],
+  draftCatalog: () => ExtensionAddressingCatalog,
+): ReadonlyArray<
+  | { readonly kind: "selected"; readonly selection: ExtensionSelection }
+  | { readonly kind: "blocked"; readonly reason: string }
+> {
+  let catalog: ExtensionAddressingCatalog | undefined;
+  return selections.map((selection) => {
+    if (selection.catalogEpoch === epoch) return { kind: "selected", selection };
+    catalog ??= draftCatalog();
+    const result = revalidateExtensionSelection(selection, catalog, "provider-handoff");
+    return result.kind === "blocked"
+      ? { kind: "blocked", reason: result.reason }
+      : { kind: "selected", selection: { ...selection, catalogEpoch: epoch } };
+  });
+}
+
+/** The addressing catalog of a thread's scope as its new-task draft saw it. */
+export function draftAddressing(
+  resolveEffectiveState: (
+    snapshot: ExtensionSnapshot,
+    query: ExtensionEffectiveStateQuery,
+  ) => ExtensionEffectiveSnapshot,
+  snapshot: ExtensionSnapshot,
+  effective: ExtensionEffectiveSnapshot,
+  thread: Pick<ExtensionSelectionSubject, "providerInstanceId" | "modelId"> & {
+    readonly projectId: string | null;
+  },
+  mode: ExtensionSelectionSubject["mode"],
+): ExtensionAddressingCatalog {
+  const draft = resolveEffectiveState(snapshot, { scope: { ...effective.scope, threadId: null } });
+  return buildCatalogs(snapshot, draft, {
+    mode,
+    threadId: null,
+    projectId: thread.projectId === null ? null : String(thread.projectId),
+    threadVersion: 0,
+    providerInstanceId: thread.providerInstanceId,
+    modelId: thread.modelId,
+  }).addressing;
+}
+
+/** The selections a Project's pins add to a turn, beside the ones it names itself. */
+export function pinnedSelections(
   pinnedExtensionIds: ReadonlyArray<string>,
   explicit: ReadonlyArray<ExtensionSelection>,
   catalog: ExtensionAddressingCatalog,

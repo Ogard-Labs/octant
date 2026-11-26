@@ -216,6 +216,30 @@ describe("parseServerLaunchConfig", () => {
     });
   });
 
+  it("takes the speech helper only from the desktop app, at an absolute path", () => {
+    const helper = "/Applications/Octant.app/Contents/Resources/native/octant-speech-helper";
+    expect(
+      parseServerLaunchConfig({
+        OCTANT_HOST_SERVICE_MODE: "desktop",
+        OCTANT_SPEECH_HELPER_PATH: helper,
+      }),
+    ).toMatchObject({ speechHelperPath: helper });
+    for (const mode of ["foreground", "web", "service"]) {
+      expect(
+        parseServerLaunchConfig({
+          OCTANT_HOST_SERVICE_MODE: mode,
+          OCTANT_SPEECH_HELPER_PATH: helper,
+        }),
+      ).not.toHaveProperty("speechHelperPath");
+    }
+    expect(() =>
+      parseServerLaunchConfig({
+        OCTANT_HOST_SERVICE_MODE: "desktop",
+        OCTANT_SPEECH_HELPER_PATH: "octant-speech-helper",
+      }),
+    ).toThrow("OCTANT_SPEECH_HELPER_PATH must be an absolute path");
+  });
+
   it("enables packaged provider smoke control only for the exact harness flag", () => {
     expect(parseServerLaunchConfig({ OCTANT_PACKAGED_PROVIDER_SMOKE_CONTROL: "1" })).toMatchObject({
       packagedProviderSmokeControl: true,

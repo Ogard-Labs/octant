@@ -14,6 +14,7 @@ import {
   decodeCodeThreadCreated,
   decodeCodeThreadUpdated,
   decodeNativeSessionHistoryImported,
+  decodeThreadMessageSteered,
   NATIVE_SESSION_HISTORY_IMPORTED_EVENT,
   decodeWorkThreadRewound,
   decodeWorkTurnAccepted,
@@ -25,6 +26,7 @@ import {
 } from "@octant/contracts";
 import { WorkThreadCreated, WorkThreadUpdated } from "@octant/contracts/work-threads";
 import { ParseResult, Schema } from "effect";
+import { THREAD_MESSAGE_STEERED } from "../messageQueue/threadMessageSteeredRecord";
 import { readActiveChatTurnIds, readChatContent } from "./chatProjection";
 import type { Projection } from "./projection";
 import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
@@ -302,6 +304,21 @@ export class ThreadSearchProjection implements Projection {
             ? decodeCodeThreadCreated(event.payload).thread
             : decodeCodeThreadUpdated(event.payload).thread;
         index.setTitle("code", String(thread.id), thread.title);
+        return;
+      }
+      case THREAD_MESSAGE_STEERED: {
+        // What the person sent into a running turn is their words in that
+        // turn, so it joins the turn's prompt document and leaves with it.
+        const steered = decodeThreadMessageSteered(event.payload);
+        const at = {
+          mode: steered.mode,
+          threadId: String(steered.threadId),
+          turnKey: steered.turnKey,
+          // The turn's own document already holds the anchor a hit opens.
+          anchorId: "",
+        } as const;
+        if (!index.hasTurn(at)) return;
+        index.putPart({ ...at, field: "prompt" }, `steered:${steered.messageId}`, 1, steered.body);
         return;
       }
       case "canvas.created@1":

@@ -1225,6 +1225,12 @@ export interface CodeOperationTurnPort {
      */
     readonly rememberedForProjectBy?: CodeProjectAnswerApprover;
     /**
+     * The host's own person answered. Only their allow is kept for the
+     * thread's session; an allow from anyone else, a device held below Full or
+     * one the hub introduced, covers the one call.
+     */
+    readonly answeredByPerson?: true;
+    /**
      * Who the answer's receipt on the asking turn names: the request's own
      * actor, which may differ from whoever started the turn.
      */
@@ -5110,7 +5116,10 @@ export class CodeOperationService {
         );
       case "answer-provider-input":
         return this.#providerInput(command, thread, root.checkoutRoot, initiator);
-      case "answer-provider-approval":
+      case "answer-provider-approval": {
+        // Only the person's answer is kept, and only while the request still
+        // speaks for them: a device lowered after it asked answers once.
+        const byPerson = initiator === "user" && admissionCurrent?.() !== false;
         return this.#providerResult(
           command.operationId,
           await this.#options.turns.answerApproval({
@@ -5121,7 +5130,7 @@ export class CodeOperationService {
             windowId,
             // A standing Project answer is the person's alone: a device the
             // hub introduced answers as an agent and allows only this once.
-            ...(command.rememberForProject === true && initiator === "user"
+            ...(command.rememberForProject === true && byPerson
               ? {
                   rememberedForProjectBy:
                     personActor?.kind === "remote-device"
@@ -5129,9 +5138,11 @@ export class CodeOperationService {
                       : { kind: "window" as const, windowId },
                 }
               : {}),
+            ...(byPerson ? { answeredByPerson: true as const } : {}),
             answeredAs: requestedAs,
           }),
         );
+      }
       case "force-stop-provider-turn":
         return this.#providerResult(
           command.operationId,

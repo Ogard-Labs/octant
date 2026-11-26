@@ -956,28 +956,6 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-
   margin-inline-start: 0;
 }
 
-.turn-header[data-outcome="streaming"] .turn-header__status > svg,
-.turn-header[data-outcome="running"] .turn-header__status > svg {
-  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
-}
-
-@keyframes turn-header-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .turn-header[data-outcome="streaming"] .turn-header__status > svg,
-  .turn-header[data-outcome="running"] .turn-header__status > svg {
-    animation: none;
-  }
-}
-
-html[data-octant-reduced-motion="true"] .turn-header svg {
-  animation: none;
-}
-
 .turn-header__time {
   margin-inline-start: auto;
   flex: 0 0 auto;
@@ -1213,11 +1191,6 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 .turn-activity__disclosure[data-state="failed"] .turn-activity__outcome,
 .turn-activity__disclosure[data-state="failed"] .turn-activity__status-icon {
   color: var(--oct-danger-fg);
-}
-
-.turn-activity__disclosure[data-state="started"] .turn-activity__status-icon,
-.turn-activity__disclosure[data-state="running"] .turn-activity__status-icon {
-  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
 }
 
 /* The journaled summary, expanded: detail-size mono on a surface set into
@@ -1487,14 +1460,6 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   .turn-activity__chevron {
     transition: none;
   }
-
-  .turn-activity__status-icon {
-    animation: none;
-  }
-}
-
-html[data-octant-reduced-motion="true"] .turn-activity__status-icon {
-  animation: none;
 }
 
 /* The mark for the owned checkbox recipe. `appearance: none` removes the

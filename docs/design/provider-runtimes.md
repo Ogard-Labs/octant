@@ -61,12 +61,12 @@ provider's wire behaviour, gated by the thread's
 [guardrail level](../architecture.md#security-and-authority) (on by default at
 every level; the person turns it off per account or per thread):
 
-| Provider     | With the setup off                                                                                                                                  | With the setup on                                                                                                                                                                                        | Built                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool; `WebSearch` and `WebFetch` only in Work and Code outside Plan                                 | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
-| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off; `web_search = "disabled"`                               | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
-| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`, `VIBE_DISABLED_TOOLS='["web_search","web_fetch"]'` | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer                                                                      | Reviewed with `auto-approve`, in Code (`harnessAutoReview` supported); with the setup on, the skill (registry skills included), Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable; `accept-edits` at Accept edits; questions on 3.0.3 through the questionnaire                                             |
-| OpenCode     | Skills and project config off, `skill` denied; `websearch` and `webfetch` denied at every level; Octant's denies outrank saved grants; `once` only  | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, the MCP servers and permission rules in the person's own configuration, and in a trusted Project outside Plan `OPENCODE_DISABLE_PROJECT_CONFIG` unset; outside folders at Full access; Reviewed through Octant Shield at Auto |
+| Provider     | With the setup off                                                                                                                                  | With the setup on                                                                                                                                                                                        | Built                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool; `WebSearch` and `WebFetch` only in Work and Code outside Plan                                 | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                            |
+| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off; `web_search = "disabled"`                               | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                            |
+| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`, `VIBE_DISABLED_TOOLS='["web_search","web_fetch"]'` | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer                                                                      | Reviewed with `auto-approve`, in Code (`harnessAutoReview` supported); with the setup on, the skill (registry skills included), Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable; `accept-edits` at Accept edits; questions on 3.0.3 through the questionnaire                                                     |
+| OpenCode     | Skills and project config off, `skill` denied; `websearch` and `webfetch` denied at every level; Octant's denies outrank saved grants; `once` only  | The person's own permission rules; "always" answers in Work; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                 | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval in Work answered `always`, its delegation followed as child runs, the MCP servers and permission rules in the person's own configuration, and in a trusted Project outside Plan `OPENCODE_DISABLE_PROJECT_CONFIG` unset; outside folders at Full access; Reviewed through Octant Shield at Auto |
 
 OpenCode reads its instruction files as it does on its own, at every level
 and with the setup on or off: no launch sets `OPENCODE_DISABLE_CLAUDE_CODE`
@@ -2042,7 +2042,10 @@ is `{decision}`. An approval is answered `once` unless approvals are
 remembered for the Project and the person let OpenCode run as itself
 ([Key providers](#key-providers)): `always` saves a grant in OpenCode's data
 directory, which it shares with the person's own use, outside Octant's
-revocation. Then it is answered `always` (built): the answer is journaled
+revocation. A Code thread's approval is answered `once` on either of the
+thread's settings, whatever the host's default
+([The thread's own persistence](#the-threads-own-persistence)), and does not
+say a grant is saved. In Work it is answered `always` (built): the answer is journaled
 like any other, and the approval's description says the grant lives in
 OpenCode's own settings for the repository, where clearing it is the way to
 revoke it. OpenCode then makes later matching edits without asking and
@@ -2611,15 +2614,12 @@ agent, shipped profile or added.
   (permission persistence `current-session`), an approval chooses it, so the
   agent stops asking for that call as Octant itself would. A one-call answer
   (`scope: "once"`: an automatic reviewer's, or one on a child run's behalf)
-  and persistence `project-default` choose `allow_once`. The driver reads
-  the host's default persistence, which every ACP driver (shipped profile or
-  added agent) is given; one built without it fails closed to
-  `project-default`. A Code thread keeps its own persistence: one set to
-  `project-default` sends each answer as a one-call answer, so a host
-  default of `current-session` cannot widen it. The reverse, a
-  `current-session` thread under a `project-default` host default, still
-  chooses `allow_once` and the agent may ask again; carrying the thread's
-  setting on each answer needs a provider SDK change. Offered
+  and persistence `project-default` choose `allow_once`. Every ACP driver
+  (shipped profile or added agent) is given the host's default persistence
+  for an answer that names none; one built without it fails closed to
+  `project-default`. A Code thread keeps its own persistence, as
+  [The thread's own persistence](#the-threads-own-persistence) describes.
+  Offered
   `allow_always` with no `allow_once`, any other approval is refused and
   nothing is sent, and a helper run denies such a request on arrival, as
   described for [Google Antigravity](#google-antigravity). Before this, only
@@ -2650,6 +2650,41 @@ agent, shipped profile or added.
   clients either steer this way or cancel the turn and resend; cancelling
   would discard the work under way, and an agent that does not take a
   second prompt would fail the turn, so the flag is per profile.
+
+### The thread's own persistence
+
+A Code answer carries the thread's own permission persistence through the
+provider SDK, so the host's default neither widens nor narrows it (built, for
+every provider). A thread set to `project-default` sends each answer as a
+one-call answer. A thread set to `current-session` sends each allow with
+`ProviderApprovalAnswer.persistence`, and a driver uses that in place of the
+host's default: an ACP agent gets its `allow_always`, Codex is answered
+`acceptForSession` (never from its own sandbox, above), and Claude Code's gate
+reuses the answer, so the runtime is not asked again for the same action while
+that session lives. Claude Code's reuse is the live session's and is not
+carried into the session a later turn resumes.
+
+`scope: "once"` wins over it: a reviewer's answer, one on a child run's
+behalf, an owner device's, and one given after the setting changed mid-turn
+still hold for one call. So does an allow from anyone but the host's own
+person, such as a device held at Approve and steer or one the hub introduced;
+where an agent offers only `allow_always`, they can deny it and only the
+person can approve it. A denial carries none. A driver that cannot hold an
+answer to the session keeps asking: OpenCode is answered `once`, because its
+`always` covers a pattern wider than the approved call and on 2.x outlives the
+session, and Pi has no remembered answer. The Octant Harness remembers its
+own session answers and reads no persistence.
+
+A runtime process kept between turns that may hold session answers never
+serves the thread's next turn once it is set to `project-default` (a running
+turn keeps the setting it started with): the acquire input names the thread's
+setting, which the Codex lease and the retained ACP session take into account.
+While another thread of the folder still runs on the old Codex process, the
+switched thread's next turn waits briefly and then reports the conflict, as
+after a level change. Octant ends the process; what an agent itself saved
+under `allow_always` is the agent's own. Both fields are optional, so a driver
+that ignores them follows the host's default as before, and
+`runApprovalAnswerConformance` holds a driver to these rules.
 
 ### Own sandboxes checked and not switched
 

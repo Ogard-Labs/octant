@@ -43,6 +43,7 @@ import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import { EnvironmentMark, type EnvironmentMarkProps } from "./EnvironmentMark";
 import { PaneDockToolGroup, PaneDockToolsContext } from "./PaneDockTools";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 /** The surfaces that show a thread itself: what a resting pane's tool buttons open their tools for. */
 const TOOL_OWNER_SURFACE_KINDS: ReadonlySet<string> = new Set([
@@ -782,7 +783,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                       // began, so the chip names the state and no elapsed time.
                       // With tabs open, each tab carries its own thread's state.
                       <span className="workspace-pane__status">
-                        <span aria-hidden="true" className="spinner spinner-sm" />
+                        <OctantSpinner size={12} />
                         Running
                       </span>
                     ) : waiting ? (
@@ -849,7 +850,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                             title={workspaceSurfaceTitle(entry, props.liveThreadTitles)}
                           >
                             {tabState(entry, props) === "running" ? (
-                              <span aria-hidden="true" className="spinner spinner-sm" />
+                              <OctantSpinner size={14} />
                             ) : props.showProviderIcons === false ||
                               !["chat-thread", "work-thread", "code-overview"].includes(
                                 entry.kind,

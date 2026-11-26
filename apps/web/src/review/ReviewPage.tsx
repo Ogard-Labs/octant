@@ -27,6 +27,7 @@ import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantKbd } from "../ui/base/OctantKbd";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import {
@@ -466,7 +467,7 @@ export function ReviewPage(props: ReviewPageProps) {
                   {legend.map((item) => (
                     <span className="review-legend__item" key={item.label}>
                       {item.keys.map((key) => (
-                        <kbd key={key}>{key}</kbd>
+                        <OctantKbd key={key}>{key}</OctantKbd>
                       ))}{" "}
                       {item.label}
                     </span>
@@ -580,7 +581,7 @@ export function ReviewPage(props: ReviewPageProps) {
                     variant="outline"
                   >
                     <Check aria-hidden="true" size={14} />
-                    Settle <kbd>{chord("review-complete")}</kbd>
+                    Settle <OctantKbd>{chord("review-complete")}</OctantKbd>
                   </OctantButton>
                   <OctantButton
                     aria-expanded={composing}
@@ -604,7 +605,7 @@ export function ReviewPage(props: ReviewPageProps) {
                     variant="outline"
                   >
                     <CornerUpLeft aria-hidden="true" size={14} />
-                    Send back <kbd>{chord("review-send-back")}</kbd>
+                    Send back <OctantKbd>{chord("review-send-back")}</OctantKbd>
                   </OctantButton>
                   <OctantPopover
                     onOpenChange={setSnoozeOpen}
@@ -613,7 +614,7 @@ export function ReviewPage(props: ReviewPageProps) {
                     trigger={
                       <>
                         <Clock aria-hidden="true" size={14} />
-                        Snooze <kbd>{chord("review-snooze")}</kbd>
+                        Snooze <OctantKbd>{chord("review-snooze")}</OctantKbd>
                       </>
                     }
                     triggerDisabled={pending}
@@ -646,7 +647,7 @@ export function ReviewPage(props: ReviewPageProps) {
                     type="button"
                     variant="ghost"
                   >
-                    Open <kbd>{chord("review-open")}</kbd>
+                    Open <OctantKbd>{chord("review-open")}</OctantKbd>
                   </OctantButton>
                   <OctantButton
                     onClick={() => props.onMarkSeen(selected)}
@@ -654,7 +655,7 @@ export function ReviewPage(props: ReviewPageProps) {
                     type="button"
                     variant="ghost"
                   >
-                    Mark seen <kbd>{chord("review-mark-seen")}</kbd>
+                    Mark seen <OctantKbd>{chord("review-mark-seen")}</OctantKbd>
                   </OctantButton>
                 </div>
                 {composing ? (

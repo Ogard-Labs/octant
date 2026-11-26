@@ -126,6 +126,23 @@ function service(
 }
 
 describe("GithubCatalogueService", () => {
+  it("passes the closed reason to GitHub and never serves one reason's page for another", async () => {
+    const { service: catalogue, port } = service();
+    const base = {
+      kind: "issues",
+      owner: "octant",
+      name: "octant",
+      pageSize: 10,
+      state: "closed",
+    } as const;
+    await catalogue.read({ ...base, closedReason: "completed" }, signal());
+    await catalogue.read({ ...base, closedReason: "not-planned" }, signal());
+    expect(port.listIssues.mock.calls.map((call) => (call as unknown[])[0])).toMatchObject([
+      { closedReason: "completed" },
+      { closedReason: "not-planned" },
+    ]);
+  });
+
   it("serves a fresh repository page with per-operation capability state on every row", async () => {
     const { service: catalogue } = service();
     const response = await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());

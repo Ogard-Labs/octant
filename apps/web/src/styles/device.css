@@ -444,16 +444,6 @@
   transform: translateX(-50%);
 }
 
-.device-spinner {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--oct-border);
-  border-top-color: var(--oct-fg);
-  border-radius: var(--oct-radius-pill);
-  animation: oct-spin var(--oct-motion-spin) linear infinite;
-}
-
 /* ─── cards on the stage: setup, picker, diagnostics ───────────────── */
 .device-card {
   align-self: center;
@@ -659,26 +649,10 @@
 
 /* ─── motion ───────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .device-spinner {
-    animation: none;
-  }
-
-  .device-spinner {
-    border-top-color: var(--oct-meta);
-  }
-
   .device-touch {
     animation-name: device-touch-still;
     animation-timing-function: steps(1, end);
   }
-}
-
-html[data-octant-reduced-motion="true"] .device-spinner {
-  animation: none;
-}
-
-html[data-octant-reduced-motion="true"] .device-spinner {
-  border-top-color: var(--oct-meta);
 }
 
 html[data-octant-reduced-motion="true"] .device-touch {

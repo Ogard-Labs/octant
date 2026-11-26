@@ -356,16 +356,6 @@
   transform: rotate(180deg);
 }
 
-.thread-tasks[data-state="running"] .thread-tasks__header-icon {
-  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .thread-tasks[data-state="running"] .thread-tasks__header-icon {
-    animation: none;
-  }
-}
-
 .thread-tasks__list {
   display: grid;
   max-height: 12rem;
@@ -408,16 +398,6 @@
 .thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark,
 .thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark > svg {
   color: var(--octant-accent-text);
-}
-
-.thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark > svg {
-  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark > svg {
-    animation: none;
-  }
 }
 
 .thread-tasks__summary {

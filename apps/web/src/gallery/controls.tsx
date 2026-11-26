@@ -2,6 +2,9 @@ import { Bell, Check, Plus, Settings, Trash2 } from "../ui/icons";
 import { useState, type ReactNode } from "react";
 import { IconButton } from "../shell/IconButton";
 import { OctantBadge } from "../ui/base/OctantBadge";
+import { OctantKbd } from "../ui/base/OctantKbd";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
+import { OctantStatusDot } from "../ui/base/OctantStatusDot";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import {
@@ -482,6 +485,57 @@ function Labels() {
   const [view, setView] = useState<ReadonlyArray<string>>(["list"]);
   return (
     <>
+      <Specimen
+        adapters={["OctantSpinner"]}
+        props={`size={12 | 14 | 16 | 20}; label names the wait when no word beside it does`}
+        note="the one spinner; it turns slowly under reduced motion"
+      >
+        <div className="gallery-row">
+          <OctantSpinner size={12} />
+          <OctantSpinner size={14} />
+          <OctantSpinner />
+          <OctantSpinner size={20} />
+          <span className="oct-row-detail">
+            <OctantSpinner size={14} /> Loading issues
+          </span>
+        </div>
+      </Specimen>
+      <Specimen
+        adapters={["OctantStatusDot"]}
+        props={`tone="neutral | active | success | warning | danger | accent"; small; live`}
+        note="a state's dot, always beside the word that says the state"
+        wide
+      >
+        <div className="gallery-row">
+          {(["neutral", "active", "success", "warning", "danger", "accent"] as const).map(
+            (tone) => (
+              <span className="oct-row-detail" key={tone}>
+                <OctantStatusDot tone={tone} /> {tone}
+              </span>
+            ),
+          )}
+          <span className="oct-row-detail">
+            <OctantStatusDot small tone="success" /> small
+          </span>
+          <span className="oct-row-detail">
+            <OctantStatusDot live tone="active" /> live
+          </span>
+        </div>
+      </Specimen>
+      <Specimen
+        adapters={["OctantKbd"]}
+        props={`form="cap | bare"; decorative hides it where the control already says the chord`}
+        note="a chord: a boxed cap in a sentence or a field, a bare hint at the end of a row"
+      >
+        <div className="gallery-row">
+          <span className="oct-row-detail">
+            Search <OctantKbd>⌘K</OctantKbd>
+          </span>
+          <span className="oct-row-detail">
+            New thread <OctantKbd form="bare">⌘N</OctantKbd>
+          </span>
+        </div>
+      </Specimen>
       <Specimen
         adapters={["OctantBadge"]}
         props={`variant="default | secondary | destructive | outline | dashed | success | warning"`}

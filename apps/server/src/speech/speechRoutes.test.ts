@@ -1,15 +1,18 @@
 import {
   decodeProviderInstance,
   decodeSpeechFailureResponse,
+  decodeSpeechLocalEngineStatus,
   decodeSpeechStatusResponse,
+  SPEECH_LOCAL_MAX_PCM_BYTES,
   decodeSpeechTranscript,
   type ProviderInstance,
   type VoiceSettings,
 } from "@octant/contracts";
-import { REMOTE_TRANSCRIPTION_BUDGET } from "@octant/domain";
+import { LOCAL_SPEECH_PAIRED_REASON, REMOTE_TRANSCRIPTION_BUDGET } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import type { AppleSpeechEngine } from "./appleSpeechEngine";
 import type { SpeechAdapter } from "./speechAdapter";
 import { createSpeechRouteHandler } from "./speechRoutes";
 
@@ -53,12 +56,23 @@ const configured: VoiceSettings = {
 
 import { createSpeechGates } from "./speechGates";
 
+function fakeEngine(engine: Partial<AppleSpeechEngine>): AppleSpeechEngine {
+  return {
+    status: async () => ({ status: "ready", language: "nb-NO" as never }),
+    download: async () => ({ status: "downloading", language: "nb-NO" as never, fraction: 0 }),
+    transcribe: async () => ({ status: "completed", text: "hei" }),
+    dispose: () => undefined,
+    ...engine,
+  };
+}
+
 function setup(
   options: {
     readonly settings?: VoiceSettings;
     readonly instances?: ReadonlyArray<ProviderInstance>;
     readonly adapter?: Partial<SpeechAdapter>;
     readonly now?: () => number;
+    readonly engine?: Partial<AppleSpeechEngine>;
   } = {},
 ) {
   const windowAuthorityStore = new WindowAuthorityStore();
@@ -81,6 +95,7 @@ function setup(
     listInstances: () => options.instances ?? [compatible()],
     windowAuthorityStore,
     makeAdapter: () => ({ transcribe, synthesize }),
+    ...(options.engine === undefined ? {} : { localEngine: fakeEngine(options.engine) }),
     now: options.now ?? (() => nowMs),
   });
   return { handler, transcribe, synthesize, gates };
@@ -593,5 +608,244 @@ describe("speech routes", () => {
     );
     expect(long?.status).toBe(400);
     expect(synthesize).not.toHaveBeenCalled();
+  });
+});
+
+const local: VoiceSettings = { ...configured, transcriptionEngine: "apple-speech" };
+
+/** The clip a window makes for the on-device engine: 16 kHz mono 16-bit PCM. */
+function pcmClip(pcm: Uint8Array): Uint8Array {
+  const bytes = Buffer.alloc(44 + pcm.byteLength);
+  bytes.write("RIFF", 0);
+  bytes.writeUInt32LE(36 + pcm.byteLength, 4);
+  bytes.write("WAVEfmt ", 8);
+  bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20);
+  bytes.writeUInt16LE(1, 22);
+  bytes.writeUInt32LE(16_000, 24);
+  bytes.writeUInt32LE(32_000, 28);
+  bytes.writeUInt16LE(2, 32);
+  bytes.writeUInt16LE(16, 34);
+  bytes.write("data", 36);
+  bytes.writeUInt32LE(pcm.byteLength, 40);
+  bytes.set(pcm, 44);
+  return bytes;
+}
+
+describe("on-device transcription", () => {
+  const pcm = Uint8Array.from([1, 2, 3, 4]);
+  const dictate = (handler: ReturnType<typeof setup>["handler"], body: FormData) =>
+    handler(request("/api/speech/transcriptions", { method: "POST", body }));
+
+  it("turns a dictation into text on this computer without calling the saved endpoint", async () => {
+    const asked = vi.fn<AppleSpeechEngine["transcribe"]>(async () => ({
+      status: "completed",
+      text: "hei fra mac",
+    }));
+    const { handler, transcribe } = setup({
+      settings: {
+        ...local,
+        language: "no",
+        dictionary: ["Octant" as never, "worktree" as never],
+      },
+      engine: { transcribe: asked },
+    });
+
+    const response = await dictate(handler, clip(pcmClip(pcm)));
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("cache-control")).toContain("no-store");
+    expect(decodeSpeechTranscript(await response?.json())).toEqual({ text: "hei fra mac" });
+    expect(asked).toHaveBeenCalledWith(
+      expect.objectContaining({ language: "no", dictionary: ["Octant", "worktree"] }),
+    );
+    expect([...(asked.mock.calls[0]?.[0].pcm ?? [])]).toEqual([...pcm]);
+    expect(transcribe).not.toHaveBeenCalled();
+  });
+
+  it("lets a language the request names win over the setting", async () => {
+    const asked = vi.fn<AppleSpeechEngine["transcribe"]>(async () => ({
+      status: "completed",
+      text: "",
+    }));
+    const { handler } = setup({
+      settings: { ...local, language: "no" },
+      engine: { transcribe: asked },
+    });
+    expect((await dictate(handler, clip(pcmClip(pcm), "en-GB")))?.status).toBe(200);
+    expect(asked).toHaveBeenCalledWith(expect.objectContaining({ language: "en-GB" }));
+  });
+
+  it("never falls back to the endpoint when the engine is missing, not ready or fails", async () => {
+    for (const engine of [
+      undefined,
+      {
+        transcribe: async () => ({
+          status: "unavailable" as const,
+          engine: { status: "not-downloaded" as const, language: "nb-NO" as never },
+        }),
+      },
+      {
+        transcribe: async () => ({
+          status: "failed" as const,
+          providerFailure: { category: "provider-failed" as const, message: "It stopped." },
+        }),
+      },
+    ]) {
+      const { handler, transcribe } = setup({
+        settings: local,
+        ...(engine === undefined ? {} : { engine }),
+      });
+      const response = await dictate(handler, clip(pcmClip(pcm)));
+      expect(response?.ok).toBe(false);
+      decodeSpeechFailureResponse(await response?.json());
+      expect(transcribe).not.toHaveBeenCalled();
+    }
+  });
+
+  it("names Voice settings when the model is not on this Mac", async () => {
+    const { handler } = setup({
+      settings: local,
+      engine: {
+        transcribe: async () => ({
+          status: "unavailable",
+          engine: { status: "not-downloaded", language: "nb-NO" as never },
+        }),
+      },
+    });
+    const response = await dictate(handler, clip(pcmClip(pcm)));
+    expect(response?.status).toBe(412);
+    expect(decodeSpeechFailureResponse(await response?.json())).toEqual({
+      error:
+        "Apple's speech model for this language is not on this Mac. Download it in Voice settings.",
+      category: "unavailable",
+      settingsTarget: { section: "voice", setting: "transcription" },
+    });
+  });
+
+  it("refuses a clip in another shape, an empty one and one past two minutes before native code sees it", async () => {
+    const asked = vi.fn<AppleSpeechEngine["transcribe"]>(async () => ({
+      status: "completed",
+      text: "",
+    }));
+    const { handler } = setup({ settings: local, engine: { transcribe: asked } });
+    const stereo = pcmClip(pcm);
+    stereo[22] = 2;
+    const lying = pcmClip(pcm);
+    lying[40] = 200;
+    for (const [audio, status] of [
+      [wav, 400],
+      [stereo, 400],
+      [lying, 400],
+      [pcmClip(new Uint8Array(0)), 400],
+      [pcmClip(new Uint8Array(3)), 400],
+      [pcmClip(new Uint8Array(SPEECH_LOCAL_MAX_PCM_BYTES + 2)), 413],
+    ] as const) {
+      expect((await dictate(handler, clip(audio)))?.status).toBe(status);
+    }
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("refuses a paired device and tells it dictation is unavailable", async () => {
+    const asked = vi.fn<AppleSpeechEngine["transcribe"]>();
+    const { handler, transcribe } = setup({ settings: local, engine: { transcribe: asked } });
+    const status = decodeSpeechStatusResponse(
+      await (await handler(pairedRequest("/api/speech/status")))?.json(),
+    );
+    expect(status.transcription).toMatchObject({
+      status: "unavailable",
+      reason: LOCAL_SPEECH_PAIRED_REASON,
+    });
+    const sent = await handler(
+      pairedRequest("/api/speech/transcriptions", { method: "POST", body: clip(pcmClip(pcm)) }),
+    );
+    expect(sent?.status).toBe(412);
+    for (const method of ["GET", "POST"]) {
+      expect((await handler(pairedRequest("/api/speech/local-engine", { method })))?.status).toBe(
+        403,
+      );
+    }
+    expect(asked).not.toHaveBeenCalled();
+    expect(transcribe).not.toHaveBeenCalled();
+  });
+
+  it("reports the engine in the status a window reads", async () => {
+    const asked = vi.fn<AppleSpeechEngine["status"]>(async () => ({
+      status: "ready",
+      language: "nb-NO" as never,
+    }));
+    const { handler } = setup({
+      settings: { ...local, language: "no" },
+      engine: { status: asked },
+    });
+    const status = decodeSpeechStatusResponse(
+      await (await handler(request("/api/speech/status")))?.json(),
+    );
+    expect(status.transcription).toEqual({ status: "ready", engine: "apple-speech" });
+    expect(asked).toHaveBeenCalledWith("no");
+  });
+
+  it("does not ask the engine about itself while an endpoint transcribes", async () => {
+    const asked = vi.fn<AppleSpeechEngine["status"]>();
+    const { handler } = setup({ engine: { status: asked } });
+    expect((await handler(request("/api/speech/status")))?.status).toBe(200);
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("fetches the model only when a window asks for it", async () => {
+    const download = vi.fn<AppleSpeechEngine["download"]>(async () => ({
+      status: "downloading",
+      language: "nb-NO" as never,
+      fraction: 0,
+    }));
+    const { handler } = setup({
+      settings: local,
+      engine: {
+        status: async () => ({ status: "not-downloaded", language: "nb-NO" as never }),
+        download,
+      },
+    });
+    const seen = await handler(request("/api/speech/local-engine?language=no"));
+    expect(decodeSpeechLocalEngineStatus(await seen?.json())).toEqual({
+      status: "not-downloaded",
+      language: "nb-NO",
+    });
+    await dictate(handler, clip(pcmClip(pcm)));
+    expect(download).not.toHaveBeenCalled();
+    const started = await handler(
+      request("/api/speech/local-engine?language=no", { method: "POST" }),
+    );
+    expect(started?.status).toBe(202);
+    expect(decodeSpeechLocalEngineStatus(await started?.json()).status).toBe("downloading");
+    expect(download).toHaveBeenCalledWith("no");
+    const wrong = await handler(
+      request("/api/speech/local-engine?language=not%20a%20tag", { method: "POST" }),
+    );
+    expect(wrong?.status).toBe(400);
+    expect(download).toHaveBeenCalledOnce();
+  });
+
+  it("refuses the engine's state to a request without window authority", async () => {
+    const { handler } = setup({ settings: local, engine: {} });
+    const response = await handler(
+      request("/api/speech/local-engine", { method: "POST", capability: "omit" }),
+    );
+    expect(response?.status).toBe(401);
+  });
+
+  it("says a host without the engine cannot use it", async () => {
+    const { handler } = setup();
+    const seen = await handler(request("/api/speech/local-engine"));
+    expect(decodeSpeechLocalEngineStatus(await seen?.json()).status).toBe("unsupported");
+  });
+
+  it("holds an on-device dictation to the same two at a time", async () => {
+    const { handler, gates } = setup({ settings: local, engine: {} });
+    const first = gates.transcription.tryAcquire("local");
+    const second = gates.transcription.tryAcquire("local");
+    expect((await dictate(handler, clip(pcmClip(pcm))))?.status).toBe(503);
+    first?.();
+    expect((await dictate(handler, clip(pcmClip(pcm))))?.status).toBe(200);
+    second?.();
   });
 });

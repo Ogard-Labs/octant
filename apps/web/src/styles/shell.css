@@ -1724,10 +1724,6 @@ html[data-octant-density="compact"]
   color: var(--oct-warn-fg);
 }
 
-.sidebar-navigation__thread-state[data-activity="working"] > svg {
-  animation: octant-thread-spin var(--oct-motion-spin) linear infinite;
-}
-
 .sidebar-navigation__thread-when {
   display: inline-flex;
   flex: none;
@@ -1743,18 +1739,6 @@ html[data-octant-density="compact"]
   flex: none;
   border-radius: var(--oct-radius-pill);
   background: var(--oct-fg-2);
-}
-
-@keyframes octant-thread-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sidebar-navigation__thread-state[data-activity="working"] > svg {
-    animation: none;
-  }
 }
 
 /* Provider identity sits small at the end of the row's last line. It is stable
@@ -4195,9 +4179,4 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
 
 .sidebar-item__key {
   margin-inline-start: auto;
-  color: var(--oct-meta);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-regular);
-  letter-spacing: 0;
 }

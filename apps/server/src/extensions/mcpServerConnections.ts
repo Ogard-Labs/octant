@@ -107,6 +107,10 @@ export function describeMcpServerConnection(input: {
       reason: "Finish signing in with the verification code.",
       ...at,
     };
+  // An attempt the host could not settle still holds the server, and only its
+  // sign-in control can check or cancel it.
+  if (signIn.kind === "status-unavailable" || signIn.kind === "cancel-pending")
+    return { state: "needs-sign-in", reason: signIn.message, ...at };
   if (observation?.state === "connected") return { state: "connected", ...at };
   if (observation?.state === "connecting") return { state: "connecting", ...at };
   if (observation?.state === "failed")

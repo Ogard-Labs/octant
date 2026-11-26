@@ -62,8 +62,8 @@ describe("HostSelector", () => {
 
   it("renders a healthy dot when the selected host is connected", () => {
     render(<HostSelector hosts={[localHealthy, studioHealthy]} selectedHostId={LOCAL_HOST_ID} />);
-    const dot = document.querySelector(".host-selector__dot");
-    expect(dot).toHaveClass("host-selector__dot--healthy");
+    const dot = screen.getByTestId("host-selector").querySelector(".octant-status-dot");
+    expect(dot).toHaveAttribute("data-tone", "success");
   });
 
   it("renders a fixed Project host without offering alternate selection", () => {
@@ -91,22 +91,22 @@ describe("HostSelector", () => {
     expect(screen.getByTestId("host-selector")).toHaveClass("host-selector--environment");
   });
 
-  it("renders an unavailable fixed host without the healthy dot class", () => {
+  it("renders an unavailable fixed host with a danger dot", () => {
     render(
       <HostSelector
         fixedHostId={LOCAL_HOST_ID}
         hosts={[{ ...localHealthy, health: "unavailable", capabilities: ["chat"] }, studioHealthy]}
       />,
     );
-    const dot = document.querySelector(".host-selector__dot");
-    expect(dot).toHaveClass("host-selector__dot--disconnected");
+    const dot = screen.getByTestId("host-selector").querySelector(".octant-status-dot");
+    expect(dot).toHaveAttribute("data-tone", "danger");
     expect(screen.getByText("Host unavailable")).toBeInTheDocument();
   });
 
-  it("renders a stale fixed host with a warning dot class", () => {
+  it("renders a stale fixed host with a warning dot", () => {
     render(<HostSelector fixedHostId={LAPTOP} hosts={[localHealthy, laptopStale]} />);
-    const dot = document.querySelector(".host-selector__dot");
-    expect(dot).toHaveClass("host-selector__dot--stale");
+    const dot = screen.getByTestId("host-selector").querySelector(".octant-status-dot");
+    expect(dot).toHaveAttribute("data-tone", "warning");
     expect(screen.getByText("Stale connection")).toBeInTheDocument();
   });
 

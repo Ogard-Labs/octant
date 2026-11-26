@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  GithubCatalogueReadResponse,
   decodeGithubCatalogueReadRequest,
   decodeGithubCatalogueReadResponse,
   decodeGithubRecentRepositoryCommand,
 } from "./githubCatalogue";
+import { decodeHostAnswer } from "./hostAnswer";
 
 const repositoryRow = {
   nodeId: "R_kgDOG8x1Aa",
@@ -593,6 +595,93 @@ describe("GitHub catalogue contracts", () => {
         issue: { ...issue, body: "Authorization: bearer ghp_abcdefghijklmnopqrstuv" },
         freshness: { status: "fresh" },
       }),
+    ).toThrow();
+  });
+
+  it("carries why a closed issue was closed, and still reads an answer without it", () => {
+    const row = {
+      number: 7,
+      title: "Crash on launch",
+      state: "closed",
+      author: "octocat",
+      updatedAt: "2026-08-28T09:00:00Z",
+      url: "https://github.com/octant/octant/issues/7",
+    };
+    const page = (extra: Record<string, unknown>) => ({
+      kind: "issues",
+      page: {
+        rows: [{ ...row, ...extra }],
+        sort: "updated-desc",
+        hasNextPage: false,
+        freshness: { status: "fresh" },
+      },
+    });
+    for (const stateReason of ["completed", "not-planned", "duplicate"]) {
+      expect(decodeGithubCatalogueReadResponse(page({ stateReason }))).toMatchObject({
+        page: { rows: [{ stateReason }] },
+      });
+    }
+    expect(decodeGithubCatalogueReadResponse(page({}))).toMatchObject({
+      page: { rows: [{ number: 7, state: "closed" }] },
+    });
+    expect(() => decodeGithubCatalogueReadResponse(page({ stateReason: "reopened" }))).toThrow();
+    // A client drops a field a newer host added rather than losing the list.
+    expect(
+      decodeHostAnswer(GithubCatalogueReadResponse)(page({ addedByANewerHost: true })),
+    ).toMatchObject({ page: { rows: [{ number: 7 }] } });
+
+    const detail = {
+      kind: "issue",
+      issue: {
+        ...row,
+        stateReason: "not-planned",
+        createdAt: "2026-08-20T09:00:00Z",
+        labels: [],
+        body: "",
+        bodyTruncated: false,
+        comments: [],
+      },
+      freshness: { status: "fresh" },
+    };
+    expect(decodeGithubCatalogueReadResponse(detail)).toMatchObject({
+      issue: { stateReason: "not-planned" },
+    });
+
+    const search = {
+      kind: "search",
+      page: {
+        rows: [{ ...row, kind: "issue", stateReason: "duplicate" }],
+        sort: "updated-desc",
+        hasNextPage: false,
+        freshness: { status: "fresh" },
+      },
+    };
+    expect(decodeGithubCatalogueReadResponse(search)).toMatchObject({
+      page: { rows: [{ stateReason: "duplicate" }] },
+    });
+  });
+
+  it("narrows an issue read by closed reason only when it reads closed issues", () => {
+    const base = { kind: "issues", owner: "octant", name: "octant", pageSize: 20 };
+    for (const closedReason of ["completed", "not-planned"]) {
+      expect(
+        decodeGithubCatalogueReadRequest({ ...base, state: "closed", closedReason }),
+      ).toMatchObject({ closedReason });
+    }
+    for (const state of ["open", "all", undefined]) {
+      expect(() =>
+        decodeGithubCatalogueReadRequest({
+          ...base,
+          ...(state === undefined ? {} : { state }),
+          closedReason: "completed",
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeGithubCatalogueReadRequest({ ...base, state: "closed", closedReason: "duplicate" }),
+    ).toThrow();
+    expect(() =>
+      decodeGithubCatalogueReadRequest({ ...base, state: "closed", reason: "completed" }),
     ).toThrow();
   });
 });

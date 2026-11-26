@@ -327,6 +327,7 @@
   --oct-ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
   --oct-ease-standard: ease;
   --oct-motion-base: 200ms;
+  --oct-motion-crawl: 2s;
   --oct-motion-fast: 150ms;
   --oct-motion-flowing: 36s;
   --oct-motion-panel: 300ms;

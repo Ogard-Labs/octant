@@ -534,7 +534,7 @@ describe("SplitWorkspace", () => {
     expect(within(handle).getByText("Needs you")).toBeVisible();
     expect(screen.queryByText("Running")).not.toBeInTheDocument();
     // The chip states the wait; it has no spinner to suggest work is going on.
-    expect(handle.querySelector(".spinner")).toBeNull();
+    expect(handle.querySelector("svg.octant-spinner")).toBeNull();
 
     rerender(
       <SplitWorkspace

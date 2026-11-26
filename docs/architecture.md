@@ -7879,9 +7879,56 @@ ls-remote` against the thread's remote and the GitHub reads they already
   frame was lost and a goal-loop round on the same feed still waits for the
   turn to settle; a feed that did lose its place ends as before. A separate
   frame for the message was rejected because an older client cannot decode a
-  frame kind it does not know. An open desktop Code transcript shows the
-  message when the turn settles or the transcript is read again; showing it
-  there at once is a follow-up. When the running turn is
+  frame kind it does not know. An open desktop Code transcript has no such
+  frame and its operation stream carries no steered message either, so it
+  takes the message in when the window hears the `thread-message-queue` change
+  the message leaves the queue with: an open thread whose running turn this
+  view follows reads its two newest turns and takes only their
+  `steeredMessages` from that read. A view that loaded the thread settled does
+  not follow a turn started in another window, a Zen card, a split pane or by
+  an agent, because a provider turn is journaled on the operation and the
+  thread's own stream never hears of it. It learns of one from the thread
+  list, which the window re-reads on the `code-navigation` notice a turn start
+  raises (a paired browser on its list refresh): when the list says the open
+  thread is working at an activity sequence the view has not looked at, the
+  view reads the conversation once and follows the turn through the same poll
+  and operation stream a read at open starts. When the activity moved but the
+  list says the thread is settled, as for a turn that started and finished
+  between two reads of the list, the view looks at the newest turn alone and
+  reads the conversation only for a turn it does not show or one that runs; a
+  host without the window read gets no such look. This costs one light read
+  in each open view of the thread whenever its activity moves while settled,
+  including once after each turn the view itself followed or sent. A queued
+  turn that becomes the newest as the followed one ends is read once by the
+  followed turn's poll and streamed in its place, unless it is a turn this
+  window is sending or streams itself. It does not look while it follows a
+  running turn, is sending one itself, or is still on its first read, so it
+  never opens a second stream or reopens a turn it settled; a turn waiting on
+  the person does not stop it looking, and a look that fails is tried again
+  five seconds later, since a settled thread's activity may not move again;
+  a first read of the thread that failed leaves its activity to be looked at
+  too. Any read of the conversation while this window's own send streams a
+  turn, such as the one a rename from another window brings, keeps that turn's
+  rows and tool steps as shown, because the send's stream writes the reply
+  row it created and a second stream of the turn is refused. The steered messages are held apart from the transcript and only ever grow, so the read
+  cannot roll back the reply, tool steps or tasks the stream is writing, and
+  a slower read of the conversation cannot take a shown message away. Reading
+  on every `code-navigation` notice was rejected because most of those say
+  nothing about the open thread; a new operation event or frame was rejected
+  because an older client cannot decode it. A paired browser's Code surface
+  subscribes to no change feed, so it takes the messages in on the running
+  turn's own poll (within about two seconds) and on its five-second list
+  refresh. Each such read costs the host the two turns' fold, the thread's
+  steered-message records and, on a thread with earlier turns, one usage row
+  per earlier turn, so one queue change costs a window one read per open Code
+  thread whose running turn it follows; a turn found through a read is polled
+  at the same price every two seconds anyway. The phone holds no stream of a
+  Code turn, so it re-reads the thread on a short cadence while its newest
+  turn runs or a turn waits. While it shows the newest turns settled, it looks
+  at the newest turn alone, without its text, every ten seconds while in
+  front (the price of one poll), and refreshes once when the host's newest
+  turn is not the one it shows, even one that already finished, or runs or
+  waits again; an anchored search page does not look. When the running turn is
   one the queue admitted itself, that message stays at the head as
   `accepted` until its turn settles, and the message behind it is offered to
   that turn under the same checks, one at a time, in order. A message
@@ -7911,9 +7958,17 @@ ls-remote` against the thread's remote and the GitHub reads they already
   context and a thread export carry each steered message as a user message
   of its turn, after that turn's prompt, with the time it was sent, under the
   same limits and redaction as the turn's other messages. The conversation a
-  Code compaction's handover summary reads carries them too, in the order
-  they were sent, after their turn's prompt, each under a source of its own
-  that names the turn and the message. The message is not marked as dispatching
+  Work or Code thread's compaction summary reads, a Code handover summary's
+  included, and the earlier-turn context a Work turn rebuilds carry them too,
+  in the order they were sent, after their turn's prompt, each under a source
+  of its own that names the turn and the message; every other message keeps
+  its source, so a saved summary still covers what it covered. A `#thread`
+  mention, a Side Chat's source and an agent's read of another thread carry
+  them as user lines of their turn, message search finds them with their
+  turn's prompt, and a Work fork copies those of the turns it carries. A turn
+  a rewind removed takes its messages with it in all of these. Search indexes
+  a message when it is journaled, so one sent before this rule is found after
+  the next index rebuild. The message is not marked as dispatching
   before the steer: a restart while the runtime takes it also ends the turn
   that took it, and the still-queued message then follows the ordinary
   restart rules rather than being lost. Which runtimes steer is the provider
@@ -8120,7 +8175,7 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   | Claude Code  | Own subagents off; `WebSearch` and `WebFetch` kept only in Work and Code outside Plan, asking below Full access; Project skills off; no setting sources, so home config and skills never read | All on by default: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers, claude.ai connectors, and installed plugins start in every Project at every level but Plan, where only the servers the person marked "Read-only — allowed in Plan" start ([Plan and Chat tool parity](#security-and-authority)); a Project's `.mcp.json` waits for that Project's trust (maintainer decision, 2026-11-14; [detail](design/provider-runtimes.md#key-providers)). `EnterWorktree`, `ExitWorktree`, and `REPL` are offered outside Plan and take the shell's approval rules. In Work and Code outside Plan, Claude Code's whole built-in tool set less a short withheld list, with any tool Octant has no rule of its own for asking below Full access (the account's claude.ai service tools included) and session-internal tools such as `ToolSearch` and the task tools running unasked, and no cap on tool calls in a turn ([detail](design/provider-runtimes.md#full-built-in-tool-set)); background commands and `Monitor` command watches, which in Code keep running as live tasks after the person's turn completes, each turn the runtime then starts opened as a runtime-started turn, and in Work are held inside the person's turn ([detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)); `Workflow` with subagents on, its agents shown as child runs under the call and its run held inside the person's turn ([detail](design/provider-runtimes.md#workflows)); `ScheduleWakeup`, `CronCreate`, `CronList`, and `CronDelete`, answered from the thread's Octant-owned wake-ups ([detail](design/provider-runtimes.md#wake-ups-the-model-schedules)); Claude Code's own `EnterPlanMode` and `ExitPlanMode` in Code as level changes the person approves, applied from the next session, except that entering Plan applies inside the running turn, the gate holding the session to Plan ([detail](design/provider-runtimes.md#plan-mode-as-level-changes)); an empty Code thread started from a session of the same account and folder begun outside Octant, adopted only by the person, journaled, and marked as carrying outside content ([detail](design/provider-runtimes.md#sessions-started-outside-octant)) |
   | Codex        | Own subagents off (the app-server leased with its subagent switches false); Project skills disabled by path; in Chat every person-added tool server switched off by name                      | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                   | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on, the person's tool servers on in Chat, and its own subagents at every level, each shown as a child run with its approvals and app-tool calls answered through the parent's approval path; with the account's setup off, its own subagents stay off (the app-server leased with its subagent switches false) unless the thread chose On, the Project lists Codex under Trusted providers, or a Work or Code thread runs at Full access                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
   | Mistral Vibe | Project and home skills off; Project context off. It runs through the ACP bridge either way                                                                                                   | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                   | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills (registry skills included where the person's configuration opts in), Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents; its own subagents in Work and Code outside Plan, shown as child runs; a subagent's request names no tool (3.0.3 source, read 2026-11-14), so its approval says "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with Allow and Deny under the thread's level; a subagent runs as one of the person's own custom or installed agents at every level there, and may approve its own tools as in Vibe itself; Octant cannot see those calls, so each child run names the agent and says so, and a run as any agent but Vibe's read-only `explore` marks the thread as having read outside content (maintainer decisions, 2026-11-14); its `accept-edits` mode at Accept edits in Work and Code; its questions on 3.0.3 through the shared questionnaire (maintainer decision, 2026-11-14). Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-  | OpenCode     | Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`. Shell and delegation follow the level in Work as in Code either way                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                     | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with `.env` files and Octant's protected files refused (at Full access only the provider sign-ins, as Octant's own file tools; maintainer decision, 2026-11-15); any other outside folder asks below Full access and is refused in Plan (maintainer decision, 2026-11-14). At Full access it reaches outside folders, and in a trusted Project outside Plan it loads the Project's own `opencode.json(c)` and `.opencode` agents, commands, plugins, and tools as on its own, `OPENCODE_DISABLE_PROJECT_CONFIG` unset, accepting that their rules can override Octant's in that Project ([why](design/provider-runtimes.md#key-providers); maintainer decision, 2026-11-14). In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+  | OpenCode     | Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`. Shell and delegation follow the level in Work as in Code either way                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                     | With the setup on: its skills on, and a remembered 2.x approval in Work answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with `.env` files and Octant's protected files refused (at Full access only the provider sign-ins, as Octant's own file tools; maintainer decision, 2026-11-15); any other outside folder asks below Full access and is refused in Plan (maintainer decision, 2026-11-14). At Full access it reaches outside folders, and in a trusted Project outside Plan it loads the Project's own `opencode.json(c)` and `.opencode` agents, commands, plugins, and tools as on its own, `OPENCODE_DISABLE_PROJECT_CONFIG` unset, accepting that their rules can override Octant's in that Project ([why](design/provider-runtimes.md#key-providers); maintainer decision, 2026-11-14). In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
   A turn has an origin. A person's send starts one; a runtime may also
   start one by itself when background work it ran finishes or reports.
@@ -8605,7 +8660,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   each launch writes its posture into its connection-private configuration,
   and a launch that names no posture denies all; the tool bridge serves one
   session and refuses a call that names another; a 2.x approval is answered
-  `once`, and `always` only when the person remembers approvals for the
+  `once`, and in Work `always` only when the person remembers approvals for the
   Project and let OpenCode run as itself, with the approval saying the grant
   lives in OpenCode's own store; Octant's denies outrank grants saved in
   OpenCode itself; app-managed tools are reported only for the exact release the
@@ -8854,6 +8909,32 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and `/api/speech/synthesis` behind window authority, sniffs and bounds the
   audio, persists nothing, and reports each direction `ready`, `unconfigured`,
   or `unavailable` with the Settings link that fixes it.
+  **Apple Speech on this Mac** is a Transcribe with choice (Voice settings'
+  `transcriptionEngine`; absent keeps the endpoint, so nothing changes for
+  anyone who does not pick it). It runs on the host, not in the window: the
+  desktop app passes its signed `octant-speech-helper` (macOS 26 or later,
+  Apple's `SpeechAnalyzer` with `DictationTranscriber`) to its own host only,
+  so a headless, Linux or Windows host, an older macOS, and a host the app did
+  not start report it `unsupported` and Settings does not offer it. While it is
+  chosen the host calls no transcription endpoint for anyone: it serves only
+  the host's own windows, refuses a paired phone or browser and reports it
+  transcription `unavailable` (their recording would otherwise leave the
+  device it was made on for another computer), and an agent's
+  `octant_transcribe` is not offered. Reason: "turned into text on this Mac"
+  stays true only where the window and the engine are on the same Mac. The
+  window decodes its clip and sends 16 kHz mono 16-bit PCM in a plain WAV (at
+  most 130 seconds); the host checks every header field and hands the samples
+  to one helper process per request over stdin, with the language (absent: the
+  Mac's own first language) and the dictionary as `contextualStrings`. Nothing
+  is written to a file or log; the helper exits when its stdin closes, so a
+  cancelled dictation, a stopped host or a crashed host leaves none running,
+  and a helper that crashes, stalls past 110 seconds or answers something
+  unreadable fails only that request. Dictations share the same two host
+  slots. Apple's speech model is fetched by macOS from Apple only when the
+  person presses Download in Voice settings, with progress and failure shown
+  there and the fetch named in the host data map; no audio or text is sent.
+  The helper uses no `SFSpeechRecognizer`, so Apple's speech recognition
+  permission is not asked; the microphone permission is the app's, as before.
   An attended Work or Code agent outside Plan can use `octant_transcribe`
   only when its provider carries Octant tools and transcription is ready.
   The host checks that a file under the turn's current folder contains supported
@@ -12505,7 +12586,8 @@ settle; the rule is in
 **Work fork.** `fork-work-thread` creates a Work thread in the source's
 Project on the source's provider and model, with a `forkedFrom` origin naming
 the source thread and a finished Work turn, and copies the source's turns
-through that point as carried turns in one journal unit with its creation.
+through that point as carried turns in one journal unit with its creation,
+each with the messages the person sent into it while it ran.
 The host checks, as for a Code fork, that the source's Project is readable by
 the confirming window and that every carried turn exists and has settled. The
 fork's first own turn on a provider that keeps its own session starts a new
@@ -14863,7 +14945,8 @@ successful connect (kept after an idle close), and the installed `mcp.json`
 read from disk for the transport. Reading it never connects, signs in,
 discovers endpoints or lists tools, so a server no task has used yet reads
 Ready rather than Connected. States, most decisive first: Off (package or
-server switched off), Needs sign-in (sign-in-again, consent pending, client
+server switched off), Needs sign-in (sign-in-again, consent pending, an attempt
+whose status or cancellation is not confirmed, client
 setup required for a registered-client connector, or a
 catalog connector that signs in and has no sign-in while not connected;
 signed out alone is only an offer, since a hosted server that takes a key or
@@ -14882,6 +14965,23 @@ connects again on its next turn. Reconnect connects nothing itself and never
 replays a failed call; it is the person's act, at a local window or a device the host's own person paired (maintainer decision, 2026-11-12; any other device session may read the listing only). Rationale: connecting from
 Settings would discover tools outside a task's authority, so the person's
 action only clears what blocks the next authorized connect.
+
+A thread says so itself when its next turn would get a server that reads Needs
+sign-in, and carries the same sign-in control
+([Thread view](design/thread-view.md#server-sign-in)). The host decides which
+servers those are (`/api/extensions/connections`, `thread-sign-in`) from the
+thread's mode and id, the selections the next turn would carry, and the `@` names
+its draft could not select: the Project's pins (Work and Code), those selections
+and those names, each put through the checks the turn itself makes against the
+thread's own activation. It does not ask the sessions, because a turn drops a
+server whose connection failed, the composer refuses it, and a missing sign-in is
+what makes it fail. A thread whose turns carry no extension tools (a Project on
+a server, Strict on Windows, or in Work and Code a model known not to carry
+Octant's tools) names none. The answer is told only to a principal the sign-in routes admit, a local
+window or a device the host's own person paired; every other device session is
+refused, so it is never shown a sign-in it cannot do. The read writes nothing,
+and no address, code or token passes through it: the sign-in and its one-time
+relay are the routes below, unchanged.
 
 For an existing host-owned HTTP OAuth session, an approved explicit invocation
 checks the exact retained grant owner again before dispatch. Credential access
@@ -17247,7 +17347,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   the mode control's tooltip says while such a turn runs). A persistence
   change alone therefore does not ask again: the allow is delivered for that
   one call (`scope: "once"`), so nothing is remembered beyond what either
-  setting allows. Plan still refuses an allow. Every answer the host refuses
+  setting allows. Otherwise a Code thread that keeps answers for its session
+  names that on each allow, in place of the host's default
+  ([Provider runtimes](design/provider-runtimes.md#the-threads-own-persistence)). Plan still refuses an allow. Every answer the host refuses
   names its reason in words, among them a request that no longer waits (it
   was answered, withdrawn, or its turn ended), Plan, and a provider session
   that is gone; a delivered answer is journaled as `approval-answered` on the
@@ -19280,7 +19382,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     threads remain openable, and new threads wait for standing to be confirmed
     whenever the phone switches its selected computer.
     The phone refreshes standing while its start or thread screen is in the
-    foreground and when it returns, so host-side changes reach open screens.
+    foreground and when it returns, so host-side changes reach open screens; a
+    refresh that meets a read still running is owed once that read settles. A
+    paired browser refreshes it the same way while its page is visible, when
+    the page becomes visible, and when the network returns. The open This
+    browser device panel shows that level and its explanation, and names none
+    until the host has confirmed one.
     Routes that change something but rode a read action before (revising or
     refreshing a Canvas, a connector's sign-in and operations) carry their own
     write actions, and the local-servers commands route and the server proxy
@@ -22345,7 +22452,9 @@ defers, and it owns the architectural rules behind it.
 Silicon technical preview with the provider-neutral plugin/skill marketplace.
 It needs macOS 15 Sequoia or later: the app bundle declares 15.0 because the
 bundled Simulator accessibility and camera tools need it, while the core
-helpers declare 14.0 and are covered by the app's floor. Macs on macOS 14
+helpers declare 14.0 and are covered by the app's floor. The speech helper
+declares macOS 26 and is started only there; packaging builds it with an
+installed Xcode that has the macOS 26 SDK and fails without one. Macs on macOS 14
 must not update past the last version released before this requirement. The
 update feed does not guard against it (maintainer decision, 2026-11-22): an
 older installed copy on macOS 14 can still download a newer build, through the
