@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeProjectId, type ThreadBoardPullRequestSummaries } from "@octant/contracts";
-import type { SidebarRowPropertyVisibility } from "@octant/contracts/shell";
+import {
+  DEFAULT_SIDEBAR_ROW_PROPERTIES,
+  type SidebarRowPropertyVisibility,
+} from "@octant/contracts/shell";
 import {
   ProjectThreadList,
   ProjectThreadRows,
@@ -87,7 +90,7 @@ describe("ProjectThreadRows", () => {
     );
 
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    expect(within(row).getByText("#12 open")).toBeVisible();
+    expect(within(row).getByText("#12")).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
     expect(within(row).getByTitle("Pull request #12 · open · checks passing")).toHaveAttribute(
       "data-state",
@@ -118,10 +121,48 @@ describe("ProjectThreadRows", () => {
     const chip = within(row).getByTitle(
       "Pull request #327 · open · checks passing and 15 more pull requests",
     );
-    expect(chip).toHaveTextContent(/^#327 open\+15$/);
+    expect(chip).toHaveTextContent(/^#327\+15$/);
     expect(row).toHaveAccessibleName(
       "Controller foundation, pull request #327 open and 15 more pull requests",
     );
+  });
+
+  it("counts a thread's issues from its navigation entry alone, and hides them with the Pull request property", () => {
+    const entry = {
+      ...thread,
+      linkedIssues: [
+        {
+          issue: { forge: "linear", identifier: "OCT-7", issueId: "node" },
+          source: "created-from",
+          linkedAt: "2026-11-26T09:00:00.000Z",
+        },
+      ],
+      touchedIssues: {
+        items: [
+          { forge: "linear", identifier: "OCT-7", observedAt: "2026-11-26T10:00:00.000Z" },
+          { forge: "linear", identifier: "OCT-8", observedAt: "2026-11-26T10:00:00.000Z" },
+        ],
+        hiddenCount: 0,
+      },
+    } as never;
+    const { rerender } = render(
+      <ProjectThreadRows actions={{}} onSelectThread={vi.fn()} threads={[entry]} />,
+    );
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    expect(within(row).getByTitle("Linear issue OCT-7")).toHaveTextContent(/^OCT-7$/);
+    expect(within(row).getByTitle("Wrote to 1 issue besides OCT-7")).toHaveTextContent(/^1$/);
+    expect(row).toHaveAccessibleName(/issue OCT-7, and 1 issue/);
+
+    rerender(
+      <SidebarRowPropertiesContext.Provider
+        value={{ ...DEFAULT_SIDEBAR_ROW_PROPERTIES.projects, pullRequest: false }}
+      >
+        <ProjectThreadRows actions={{}} onSelectThread={vi.fn()} threads={[entry]} />
+      </SidebarRowPropertiesContext.Provider>,
+    );
+    expect(
+      within(screen.getByRole("button", { name: /Controller foundation/ })).queryByText("OCT-7"),
+    ).toBeNull();
   });
 
   it("keeps a long thread list bounded to the visible window", async () => {
@@ -1709,7 +1750,7 @@ describe("ProjectThreadRows display properties", () => {
     renderRows(projectsDefaults);
 
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    expect(within(row).getByText("#12 open")).toBeVisible();
+    expect(within(row).getByText("#12")).toBeVisible();
     expect(within(row).getByText("feature/x")).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
     expect(row).toHaveAccessibleName(
@@ -1727,7 +1768,7 @@ describe("ProjectThreadRows display properties", () => {
     });
 
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    expect(within(row).queryByText("#12 open")).toBeNull();
+    expect(within(row).queryByText("#12")).toBeNull();
     expect(within(row).queryByText("feature/x")).toBeNull();
     expect(within(row).queryByText("2h")).toBeNull();
     expect(row.querySelector(".sidebar-navigation__thread-state")).toBeNull();

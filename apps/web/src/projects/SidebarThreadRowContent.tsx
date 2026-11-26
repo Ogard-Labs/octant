@@ -1,6 +1,8 @@
-import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
+import type { PullRequestStackPlace, ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
-import { Bot, GitBranch, GitPullRequest, Network, type IconComponent } from "../ui/icons";
+import { pullRequestStateMark } from "../code/pullRequestState";
+import { stackPlaceSentence } from "../code/stackPlace";
+import { Bot, CircleDot, GitBranch, Layers, Network, type IconComponent } from "../ui/icons";
 import { ProjectMark } from "./ProjectMark";
 import { CoordinatorMark, WorkerMark } from "./coordinatorMarks";
 import type { ReactNode } from "react";
@@ -24,6 +26,21 @@ const PULL_REQUEST_STATE_WORD: Readonly<Record<ThreadRowPullRequest["state"], st
 function morePullRequestsWords(more: number | undefined): string {
   if (more === undefined || more <= 0) return "";
   return ` and ${String(more)} more ${more === 1 ? "pull request" : "pull requests"}`;
+}
+
+/** "pull request #12 open and 15 more pull requests": the mark's name, said once. */
+function pullRequestWords(pullRequest: ThreadRowPullRequest, more: number | undefined): string {
+  return `pull request #${String(pullRequest.identity.number)} ${PULL_REQUEST_STATE_WORD[pullRequest.state]}${morePullRequestsWords(more)}`;
+}
+
+/** "4 issues": how many other issues a thread wrote to. */
+function issueCountWords(count: number): string {
+  return `${String(count)} ${count === 1 ? "issue" : "issues"}`;
+}
+
+/** "in a stack of 3": the stack mark's name. */
+function stackWords(stack: PullRequestStackPlace): string {
+  return `in a stack of ${String(stack.size)}`;
 }
 
 /** The longest branch a row writes out before it folds the middle away. */
@@ -64,6 +81,9 @@ export function sidebarThreadRowLabel(input: {
   readonly pullRequest?: ThreadRowPullRequest | undefined;
   /** The thread's pull requests beyond `pullRequest`. */
   readonly morePullRequests?: number | undefined;
+  readonly stack?: PullRequestStackPlace | undefined;
+  readonly issueKey?: { readonly reference: string } | undefined;
+  readonly issueCount?: number | undefined;
 }): string {
   return [
     input.title,
@@ -71,7 +91,12 @@ export function sidebarThreadRowLabel(input: {
     input.branch,
     input.pullRequest === undefined
       ? undefined
-      : `pull request #${String(input.pullRequest.identity.number)} ${PULL_REQUEST_STATE_WORD[input.pullRequest.state]}${morePullRequestsWords(input.morePullRequests)}`,
+      : pullRequestWords(input.pullRequest, input.morePullRequests),
+    input.stack === undefined ? undefined : stackWords(input.stack),
+    input.issueKey === undefined ? undefined : `issue ${input.issueKey.reference}`,
+    input.issueCount === undefined || input.issueCount <= 0
+      ? undefined
+      : `${input.issueKey === undefined ? "" : "and "}${issueCountWords(input.issueCount)}`,
     input.state ?? input.age,
   ]
     .filter((part): part is string => part !== undefined && part !== "")
@@ -87,9 +112,11 @@ export function sidebarThreadRowLabel(input: {
  * the branch in the monospace face. Its end carries the thread's state in words
  * (Working 14m, Needs you) when it has one to report, and otherwise how long
  * ago it moved. The title is the strongest text in the row, on a line of its
- * own. A third line appears only when there is something to put on it: the pull
- * request and its state, or who started the thread. The provider's mark sits at
- * the end of whichever line is last.
+ * own. A third line appears only when there is something to put on it: who
+ * started the thread, a worker's coordinator, and the thread's counted marks
+ * (its pull requests in the first one's state colour, its stack, the issue it
+ * belongs to and how many others it wrote to). The provider's mark sits at the
+ * end of whichever line is last.
  *
  * Which facts appear is still each view's own property choice: a caller passes
  * only what its view currently shows, and an absent fact leaves no gap. A row
@@ -123,6 +150,12 @@ export function SidebarThreadRowContent(props: {
    * so a thread that worked through many is not read as having one.
    */
   readonly morePullRequests?: number;
+  /** Where the thread's stacked pull request stands; the row counts the stack's layers. */
+  readonly stack?: PullRequestStackPlace;
+  /** The issue the thread belongs to, named by its key. */
+  readonly issueKey?: { readonly reference: string; readonly name: string };
+  /** How many other issues the thread's tool calls wrote to. */
+  readonly issueCount?: number;
   readonly checkout?: ThreadCheckoutChip;
   /** The short age, or the time a snoozed thread returns. */
   readonly age?: { readonly label: string; readonly title?: string };
@@ -135,10 +168,16 @@ export function SidebarThreadRowContent(props: {
 }) {
   const startedBy = useAgentThreadName(props.threadId);
   const hasPlace = props.projectName !== undefined || props.checkout !== undefined;
+  const issueCount = props.issueCount ?? 0;
   const hasDetail =
     startedBy !== undefined ||
     props.coordinatorName !== undefined ||
-    props.pullRequest !== undefined;
+    props.pullRequest !== undefined ||
+    props.stack !== undefined ||
+    props.issueKey !== undefined ||
+    issueCount > 0;
+  const pullRequestMark =
+    props.pullRequest === undefined ? undefined : pullRequestStateMark(props.pullRequest.state);
   const StateIcon = props.state?.icon;
   const trailing =
     props.state !== undefined ? (
@@ -242,19 +281,61 @@ export function SidebarThreadRowContent(props: {
               </span>
             </span>
           )}
-          {props.pullRequest === undefined ? null : (
+          {/* Each count is one mark: a glyph and a number, named in words for
+              a screen reader and a tooltip, so a list of rows can be scanned
+              for how much each thread carries. The hover card lists them. */}
+          {props.pullRequest === undefined || pullRequestMark === undefined ? null : (
             <span
+              aria-label={pullRequestWords(props.pullRequest, props.morePullRequests)}
               className="sidebar-navigation__thread-pr sidebar-navigation__thread-pr-mark"
+              data-pr-state={pullRequestMark.tone}
               data-state={props.pullRequest.state}
+              role="img"
               title={`Pull request #${String(props.pullRequest.identity.number)} · ${PULL_REQUEST_STATE_WORD[props.pullRequest.state]}${props.pullRequest.checks === "passing" ? " · checks passing" : ""}${morePullRequestsWords(props.morePullRequests)}`}
             >
-              <GitPullRequest aria-hidden="true" size={12} />
-              {`#${String(props.pullRequest.identity.number)} ${PULL_REQUEST_STATE_WORD[props.pullRequest.state]}`}
+              <pullRequestMark.Icon aria-hidden="true" size={12} />
+              <span aria-hidden="true">{`#${String(props.pullRequest.identity.number)}`}</span>
               {props.morePullRequests === undefined || props.morePullRequests <= 0 ? null : (
-                <span className="sidebar-navigation__thread-pr-more">
+                <span aria-hidden="true" className="sidebar-navigation__thread-pr-more">
                   +{String(props.morePullRequests)}
                 </span>
               )}
+            </span>
+          )}
+          {props.stack === undefined ? null : (
+            <span
+              aria-label={stackWords(props.stack)}
+              className="sidebar-navigation__thread-count"
+              data-count="stack"
+              role="img"
+              title={stackPlaceSentence(props.stack)}
+            >
+              <Layers aria-hidden="true" size={12} />
+              <span aria-hidden="true">{String(props.stack.size)}</span>
+            </span>
+          )}
+          {props.issueKey === undefined ? null : (
+            <span
+              aria-label={`issue ${props.issueKey.reference}`}
+              className="sidebar-navigation__thread-count"
+              data-count="issue-key"
+              role="img"
+              title={props.issueKey.name}
+            >
+              <CircleDot aria-hidden="true" size={12} />
+              <span aria-hidden="true">{props.issueKey.reference}</span>
+            </span>
+          )}
+          {issueCount <= 0 ? null : (
+            <span
+              aria-label={`${props.issueKey === undefined ? "" : "and "}${issueCountWords(issueCount)}`}
+              className="sidebar-navigation__thread-count"
+              data-count="issues"
+              role="img"
+              title={`Wrote to ${issueCountWords(issueCount)}${props.issueKey === undefined ? "" : ` besides ${props.issueKey.reference}`}`}
+            >
+              <CircleDot aria-hidden="true" size={12} />
+              <span aria-hidden="true">{String(issueCount)}</span>
             </span>
           )}
           {provider}

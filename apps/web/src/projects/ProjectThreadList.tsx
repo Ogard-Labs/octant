@@ -37,6 +37,8 @@ import {
 import { SIDEBAR_THREAD_STATUS_LABEL } from "@octant/domain/sidebar-thread-status-policy";
 import {
   morePullRequestsThanTheFirst,
+  NO_THREAD_ROW_COUNTS,
+  threadRowCounts,
   THREAD_ROW_MENU_INLINE_PULL_REQUESTS,
   threadRowPullRequestDestinations,
 } from "./threadRowPullRequests";
@@ -658,6 +660,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
   }
   const rowPullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
   const morePullRequests = morePullRequestsThanTheFirst(props.thread.pullRequests);
+  const rowCounts = shows.pullRequest ? threadRowCounts(props.thread) : NO_THREAD_ROW_COUNTS;
   const rowCheckout =
     shows.branch && props.hideCheckoutFact !== true ? props.thread.checkoutChip : undefined;
   // A snoozed row says when it comes back, not when it was last touched; a row
@@ -682,6 +685,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         title: props.thread.title,
         ...(rowCheckout === undefined ? {} : { branch: rowCheckout.label }),
         ...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest, morePullRequests }),
+        ...rowCounts,
         ...(rowState.label === undefined ? {} : { state: rowState.label }),
         ...(rowAge === undefined ? {} : { age: rowAge.title ?? rowAge.label }),
       })}
@@ -732,6 +736,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
           : { workerOf: props.thread.coordinatorTitle })}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest, morePullRequests })}
+        {...rowCounts}
         {...(rowState.state === undefined ? {} : { state: rowState.state })}
         threadId={props.thread.threadId}
         unread={rowState.unread}

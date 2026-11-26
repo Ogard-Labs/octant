@@ -89,7 +89,7 @@ describe("SidebarThreadRowContent", () => {
       /^Approvals in side chat$/,
     );
     expect(container.querySelector(".sidebar-navigation__thread-detail")).toHaveTextContent(
-      "#1205 open",
+      "#1205",
     );
   });
 
@@ -195,6 +195,62 @@ describe("SidebarThreadRowContent", () => {
   });
 });
 
+describe("SidebarThreadRowContent counted marks", () => {
+  it("reads a row with 22 pull requests as one mark counted +21 in the open colour", () => {
+    render(
+      <SidebarThreadRowContent morePullRequests={21} pullRequest={pullRequest} title="Phone app" />,
+    );
+    const mark = screen.getByRole("img", {
+      name: "pull request #1205 open and 21 more pull requests",
+    });
+    expect(mark).toHaveAttribute("data-pr-state", "open");
+    expect(mark).toHaveTextContent(/^#1205\+21$/);
+    expect(mark).toHaveAttribute("title", "Pull request #1205 · open and 21 more pull requests");
+  });
+
+  it("shows a thread's touched issues as a count, and the key of the issue it belongs to", () => {
+    const { rerender } = render(<SidebarThreadRowContent issueCount={25} title="Phone app" />);
+    expect(screen.getByRole("img", { name: "25 issues" })).toHaveTextContent(/^25$/);
+    expect(screen.getByRole("img", { name: "25 issues" })).toHaveAttribute(
+      "title",
+      "Wrote to 25 issues",
+    );
+
+    rerender(
+      <SidebarThreadRowContent
+        issueCount={3}
+        issueKey={{ reference: "OCT-1001", name: "Linear issue OCT-1001, Phone app, In Progress" }}
+        title="Phone app"
+      />,
+    );
+    const key = screen.getByRole("img", { name: "issue OCT-1001" });
+    expect(key).toHaveTextContent(/^OCT-1001$/);
+    expect(key).toHaveAttribute("title", "Linear issue OCT-1001, Phone app, In Progress");
+    expect(screen.getByRole("img", { name: "and 3 issues" })).toHaveAttribute(
+      "title",
+      "Wrote to 3 issues besides OCT-1001",
+    );
+  });
+
+  it("shows how many layers a stacked pull request's stack has", () => {
+    render(
+      <SidebarThreadRowContent
+        pullRequest={pullRequest}
+        stack={{ position: 2, size: 3, parent: 1204 }}
+        title="Stacked"
+      />,
+    );
+    const stack = screen.getByRole("img", { name: "in a stack of 3" });
+    expect(stack).toHaveTextContent(/^3$/);
+    expect(stack).toHaveAttribute("title", "Layer 2 of 3 of a stack, on #1204");
+  });
+
+  it("opens no third line for a thread with no pull requests, stack or issues", () => {
+    const { container } = render(<SidebarThreadRowContent issueCount={0} title="Quiet" />);
+    expect(container.querySelector(".sidebar-navigation__thread-detail")).toBeNull();
+  });
+});
+
 describe("sidebarThreadRowLabel", () => {
   it("reads the title, the Project, the branch, the pull request and then the state", () => {
     expect(
@@ -207,6 +263,22 @@ describe("sidebarThreadRowLabel", () => {
         age: "3h",
       }),
     ).toBe("Fix the editor return key, octant, fix-return, pull request #1205 open, Working 14m");
+  });
+
+  it("names every counted mark in the row's one name, after the pull request", () => {
+    expect(
+      sidebarThreadRowLabel({
+        title: "Phone app",
+        pullRequest,
+        morePullRequests: 21,
+        stack: { position: 1, size: 2 },
+        issueKey: { reference: "OCT-1001" },
+        issueCount: 24,
+        age: "3h",
+      }),
+    ).toBe(
+      "Phone app, pull request #1205 open and 21 more pull requests, in a stack of 2, issue OCT-1001, and 24 issues, 3h",
+    );
   });
 
   it("falls back to the time when the thread has no state, and leaves out what a view hides", () => {

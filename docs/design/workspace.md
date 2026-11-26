@@ -3156,14 +3156,32 @@ line names where the thread lives, in a fixed order (the Project's mark and name
 then the branch in the mono face) and ends with the thread's state in words
 (Working 14m, Needs you) or, with none to report, how long ago it moved. The
 title is the strongest text on a line of its own. A third line appears only for
-the pull request and its state, who started the thread or a worker's
-coordinator, and the provider's mark ends the last line. The Project tree's top
+who started the thread, a worker's coordinator, or the thread's counted marks,
+and the provider's mark ends the last line. The Project tree's top
 line is the branch alone, because the Project is its heading. A row with no place
 to name carries its state or time at the end of the title line. The row is one
-button whose accessible name reads title, Project, branch, pull request, then
-state or time; a state is never colour alone. A thread with more than one pull
-request names the first in the order below and counts the rest after it in the
-meta ink (#327 open +15); its name says "and 15 more pull requests".
+button whose accessible name reads title, Project, branch, the counted marks,
+then state or time; a state is never colour alone.
+
+The counted marks let a person scan the list for how much each thread carries
+(maintainer decision, 2026-11-26). Each is a 12px glyph and a number, and each
+has its own tooltip and name:
+
+- **Pull requests:** the first pull request in the order below, by its state
+  glyph and number, in that state's colour, with the rest counted after it
+  (#327 +15). Its name says "pull request #327 open and 15 more pull requests".
+- **Stack:** when one of those pull requests stands in a stack, a layers glyph
+  and the stack's size (its tooltip says "Layer 2 of 4 of a stack, on #326").
+- **Issue:** the key of the issue the thread belongs to (its Linear key, or #3
+  for GitHub). A thread belongs to an issue when it is linked to exactly one, or,
+  linked to none, when its tool calls wrote to exactly one.
+- **Issues:** how many other issues its tool calls wrote to.
+
+The marks come from the navigation entry the host already sends; drawing a row
+asks no forge or tracker anything. The row's **Pull request** property shows or
+hides all four, and the details card below keeps the full lists. In a narrow
+sidebar the issue key truncates first, so the counts after it stay whole; its
+tooltip and name keep the whole key.
 
 Pointing at a row, or focusing it, opens its details card after a short delay,
 beside the sidebar: the title and age, the states in words, then, while the
