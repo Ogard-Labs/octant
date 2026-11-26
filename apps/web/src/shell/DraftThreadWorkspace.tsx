@@ -1133,12 +1133,17 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         onCreateThread={(input) => {
           if (!workingFolderValid) return false;
-          const submitted = {
-            ...input,
-            ...(issueContext === undefined ? {} : { issueContext }),
-            ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
-            ...(terminalSession === undefined ? {} : { terminalSession }),
-          };
+          // A start that stays on the draft brings the source it was submitted
+          // with: the draft's own was cleared for the next task meanwhile.
+          const submitted =
+            input.stay !== undefined
+              ? input
+              : {
+                  ...input,
+                  ...(issueContext === undefined ? {} : { issueContext }),
+                  ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
+                  ...(terminalSession === undefined ? {} : { terminalSession }),
+                };
           if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
             return props.onCreateCodeThread(
               { ...submitted, ...(workingFolder === undefined ? {} : { workingFolder }) },
@@ -1154,8 +1159,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             submitted.deliveryTarget.outcomeKind,
             submitted.images,
             submitted.threadMentionIds,
-            issueContext,
-            linearIssueContext,
+            submitted.issueContext,
+            submitted.linearIssueContext,
             submitted.computerUseSelection,
             submitted.extensionSelections,
             submitted.executionPolicy,

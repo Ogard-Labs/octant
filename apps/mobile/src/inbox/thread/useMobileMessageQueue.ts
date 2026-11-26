@@ -112,6 +112,7 @@ export function useMobileMessageQueue(input: {
     items: snapshot?.items ?? [],
     error,
     changing,
+    allowChanges,
     enqueue: (prompt: string, typedByPerson: boolean) =>
       change((transport, scope, expectedVersion) =>
         queueMobileFollowUp({

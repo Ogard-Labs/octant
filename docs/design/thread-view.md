@@ -836,9 +836,11 @@ to-do draft does not. The Chat and Work start composers do not start and stay
 yet: their create path opens the new thread and resets the draft as part of
 creating it, so ⌘↩ there sends as Enter does.
 
-Shift-click in the Code start composer's model picker adds a model beside the
-chosen one, up to four in all, and Shift-click again takes it out (maintainer
-decision D2, 2026-11-26). Before Send the composer says how many threads will
+Shift-click (or Shift+Enter or Shift+Space on a focused row) in the Code
+start composer's model picker adds a model beside the chosen one, up to four
+in all, and doing it again takes it out (maintainer decision D2, 2026-11-26).
+The chosen model stays chosen, and the model list is then a multi-select list
+for assistive technology. Before Send the composer says how many threads will
 start and on which models, with **Use one model** to go back, and Send reads
 **Start N threads**. Each model gets an ordinary create of its own, in a new
 worktree whatever the Project's habit, one after another; the first worktree
@@ -849,8 +851,10 @@ every model; a model added beside the chosen one starts on its own default
 options and takes the plugin and connector choices only when it is of the
 same provider family, since both were made for the chosen model, and a model
 that cannot take the attached images is refused for itself by the host.
-Start and stay sends the plugin and connector chips with that start and
-clears them from the next draft. Several
+Start and stay sends the plugin and connector chips and the **Create from**
+issue or terminal session with that start, to every model it starts on, and
+clears them from the next draft; a start that created nothing gives them back,
+the source only while the next draft has no prompt or source of its own. Several
 models need a chosen model to start beside. The host admits each one as it would any other, and the composer stays
 on the draft and lists each model's outcome: a refused model shows its reason
 and leaves the threads that started running. A reviewed planner proposal is one

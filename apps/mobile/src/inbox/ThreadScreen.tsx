@@ -859,6 +859,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
       {resumeOffer === undefined ? null : <ResumeBar busy={resumeBusy} offer={resumeOffer} />}
       {selected.mode === "chat" ? null : (
         <QueuedMessages
+          allowChanges={queue.allowChanges}
           changing={queue.changing}
           error={queue.error}
           items={queue.items}

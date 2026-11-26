@@ -77,8 +77,9 @@ export interface ComposerModelPickerProps {
   /** Existing threads return the promise that confirms or refuses the model change. */
   readonly onSelect: (selection: ModelPickerSelection) => void | Promise<void>;
   /**
-   * Shift-click adds a model to, or takes it out of, the models a start
-   * composer also starts the prompt on; they show checked beside the chosen one.
+   * Shift-click (or Shift+Enter, Shift+Space) adds a model to, or takes it
+   * out of, the models a start composer also starts the prompt on, keeping
+   * the chosen one; they show checked beside it.
    */
   readonly onShiftSelect?: (selection: ModelPickerSelection) => void;
   readonly alsoSelected?: ReadonlyArray<ModelPickerSelection>;
@@ -624,6 +625,22 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             }
             chooseRow(row);
           }}
+          onKeyDown={(event) => {
+            // Not every browser carries Shift into the click a key makes, so
+            // the keyboard's way to add a model is read from the key itself.
+            const addTo = props.onShiftSelect;
+            if (
+              addTo === undefined ||
+              !event.shiftKey ||
+              (event.key !== "Enter" && event.key !== " ") ||
+              unavailable ||
+              controlsDisabled
+            ) {
+              return;
+            }
+            event.preventDefault();
+            addTo({ providerInstanceId: group.instance.id, modelId });
+          }}
           role="option"
           title={picker.unavailableReason}
           type="button"
@@ -1014,6 +1031,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           ) : null}
           <div
             aria-label="Models"
+            {...(props.onShiftSelect === undefined ? {} : { "aria-multiselectable": true })}
             className="composer-model-picker__models"
             role="listbox"
             ref={modelsElement}

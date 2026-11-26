@@ -327,6 +327,11 @@ export interface CodeComposerSubmitInput {
   };
   readonly images?: ReadonlyArray<File>;
   readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
+  /**
+   * The Create from source. A start that stays on the draft names the one it
+   * was submitted with here, since the draft's own is cleared for the next
+   * task; any other start takes the draft's current one.
+   */
   readonly issueContext?: GithubIssueContextRequest;
   readonly linearIssueContext?: LinearIssueContextRequest;
   readonly terminalSession?: TerminalSessionImportRequest;
@@ -377,6 +382,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     [props.providerGroups, isServer],
   );
   const [draftPrompt, setPrompt] = useNewTaskPrompt();
+  // A start the composer stays on settles later, against the draft as it is then.
+  const latestDraftPrompt = useRef(draftPrompt);
+  latestDraftPrompt.current = draftPrompt;
+  const latestStashSource = useRef(props.stashSource);
+  latestStashSource.current = props.stashSource;
   const typedScope = useNewTaskTypedScope();
   const prompt = props.fixedPrompt ?? draftPrompt;
   const drafts = useContext(NewTaskDraftsContext);
@@ -1138,15 +1148,24 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         ? [primaryModel, ...extraModels]
         : [primaryModel];
       const sentReceipts = extensionDraft.stagedReceipts;
+      const sentSource = props.stashSource?.current;
       setPrompt("");
       images.clearAfterAccepted();
       // Chips beside the prompt leave with it, or the next draft would carry
-      // a plugin or connector choice into threads it was never chosen for.
+      // a plugin or connector choice, or a Create from issue or terminal
+      // session, into threads it was never chosen for.
       extensionDraft.clear();
+      if (sentSource !== undefined) props.stashSource?.change(undefined);
       setShortId(newShortId());
       const run = async () => {
         const threadMentionIds = await threadMentions.resolveForSend();
-        const base = input(threadMentionIds);
+        // Every model's thread starts from the source this submission captured.
+        const base: CodeComposerSubmitInput = {
+          ...input(threadMentionIds),
+          ...(sentSource?.kind === "github" ? { issueContext: sentSource.request } : {}),
+          ...(sentSource?.kind === "linear" ? { linearIssueContext: sentSource.request } : {}),
+          ...(sentSource?.kind === "terminal" ? { terminalSession: sentSource.request } : {}),
+        };
         const startOne = async (
           selection: ModelPickerSelection | undefined,
           branch: string,
@@ -1204,9 +1223,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               result.outcome.status === "refused" && result.outcome.threadId === undefined,
           )
         ) {
+          const nextDraftStarted =
+            latestDraftPrompt.current !== "" || latestStashSource.current?.current !== undefined;
           setPrompt((current) => (current === "" ? sentPrompt : current));
           if (staged.length > 0) images.restore(staged);
           if (sentReceipts.length > 0) extensionDraft.restore(sentReceipts);
+          if (sentSource !== undefined && !nextDraftStarted) {
+            latestStashSource.current?.change(sentSource);
+          }
         }
       };
       stayStarts.current = stayStarts.current.then(run, run).catch(() => undefined);
@@ -1455,7 +1479,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                         ...extraModels,
                       ]
                         .map(modelLabel)
-                        .join(", ")}. Shift-click a model to add or remove it (up to ${String(
+                        .join(
+                          ", ",
+                        )}. Shift-click a model, or press Shift+Enter on it, to add or remove it (up to ${String(
                         MAX_FAN_OUT_MODELS,
                       )}).`,
                       action: (

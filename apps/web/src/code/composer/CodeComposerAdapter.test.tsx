@@ -3,6 +3,8 @@ import { decodeProviderInstance, decodeProviderModelId } from "@octant/contracts
 import { decodeExtensionSelection } from "@octant/contracts/extensions";
 import type { PickerGroup } from "@octant/domain";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, useState } from "react";
+import type { NewTaskCreateFromSelection } from "../../composer/useNewTaskPrompt";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -206,6 +208,107 @@ describe("CodeComposerAdapter", () => {
     expect(onCreateThread.mock.calls[1]?.[0]).not.toHaveProperty("extensionSelections");
   });
 
+  it("⌘↩ starts every model's thread from the chosen issue, and the next draft starts from none", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn((_input: CodeComposerSubmitInput) => true);
+    const group = twoModelGroup();
+    const issue = {
+      kind: "github" as const,
+      request: { owner: "octo", name: "repo", number: 7 },
+      label: "octo/repo#7",
+    };
+    function Harness() {
+      const [source, setSource] = useState<NewTaskCreateFromSelection | undefined>(issue);
+      return (
+        <>
+          <output aria-label="Create from">{source?.label ?? "none"}</output>
+          <CodeComposerAdapter
+            {...defaultProps}
+            providerGroups={[group]}
+            selectedProviderInstanceId={group.instance.id}
+            selectedModelId={decodeProviderModelId("model-one")}
+            onCreateThread={onCreateThread}
+            stashSource={{ current: source, change: setSource }}
+            startsInBackground
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.keyboard("{Shift>}");
+    await user.click(screen.getByRole("option", { name: "Model Two" }));
+    await user.keyboard("{/Shift}{Escape}");
+    const prompt = screen.getByRole("textbox", { name: "First message" });
+    await user.type(prompt, "Fix issue 7");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(2));
+    for (const [input] of onCreateThread.mock.calls) {
+      expect(input.issueContext).toEqual(issue.request);
+    }
+    expect(screen.getByRole("status", { name: "Create from" })).toHaveTextContent("none");
+
+    await user.click(screen.getByRole("button", { name: "Use one model" }));
+    await user.type(prompt, "Unrelated task");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(3));
+    expect(onCreateThread.mock.calls[2]?.[0]).not.toHaveProperty("issueContext");
+  });
+
+  it("gives the issue back when a start that stays created nothing, unless the next draft began", async () => {
+    const user = userEvent.setup();
+    let refuse: () => void = () => undefined;
+    const onCreateThread = vi.fn(
+      (input: CodeComposerSubmitInput) =>
+        new Promise<boolean>((resolve) => {
+          refuse = () => {
+            input.stay?.report({ status: "refused", reason: "The provider is not signed in." });
+            resolve(false);
+          };
+        }),
+    );
+    const issue = {
+      kind: "github" as const,
+      request: { owner: "octo", name: "repo", number: 7 },
+      label: "octo/repo#7",
+    };
+    function Harness() {
+      const [source, setSource] = useState<NewTaskCreateFromSelection | undefined>(issue);
+      return (
+        <>
+          <output aria-label="Create from">{source?.label ?? "none"}</output>
+          <CodeComposerAdapter
+            {...defaultProps}
+            onCreateThread={onCreateThread}
+            stashSource={{ current: source, change: setSource }}
+            startsInBackground
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+    const prompt = screen.getByRole("textbox", { name: "First message" });
+    await user.type(prompt, "Fix issue 7");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    const createFrom = screen.getByRole("status", { name: "Create from" });
+    expect(createFrom).toHaveTextContent("none");
+    await act(async () => refuse());
+    await waitFor(() => expect(createFrom).toHaveTextContent("octo/repo#7"));
+    expect(prompt).toHaveValue("Fix issue 7");
+
+    // A refusal that lands once the next draft is under way leaves that draft alone.
+    await user.clear(prompt);
+    await user.type(prompt, "Again");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(2));
+    await user.type(prompt, "Next task");
+    await act(async () => refuse());
+    await screen.findAllByText(/The provider is not signed in\./);
+    expect(createFrom).toHaveTextContent("none");
+    expect(prompt).toHaveValue("Next task");
+  });
+
   it("offers neither ⌘↩ start-and-stay nor several models where the create path cannot carry them", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn((_input: CodeComposerSubmitInput) => true);
@@ -231,6 +334,34 @@ describe("CodeComposerAdapter", () => {
     expect(onCreateThread.mock.calls[0]?.[0]).not.toHaveProperty("stay");
   });
 
+  it("adds a model beside the chosen one from the keyboard with Shift+Enter", async () => {
+    const user = userEvent.setup();
+    const onSelectProvider = vi.fn();
+    const group = twoModelGroup();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        providerGroups={[group]}
+        selectedProviderInstanceId={group.instance.id}
+        selectedModelId={decodeProviderModelId("model-one")}
+        onSelectProvider={onSelectProvider}
+        startsInBackground
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    expect(screen.getByRole("listbox", { name: "Models" })).toHaveAttribute(
+      "aria-multiselectable",
+      "true",
+    );
+    fireEvent.keyDown(screen.getByRole("option", { name: "Model Two" }), {
+      key: "Enter",
+      shiftKey: true,
+    });
+    await user.keyboard("{Escape}");
+    expect(await screen.findByText(/Starts 2 threads/)).toBeInTheDocument();
+    expect(onSelectProvider).not.toHaveBeenCalled();
+  });
+
   it("brings the prompt and its files back when no start created anything", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn((input: CodeComposerSubmitInput) => {
@@ -251,6 +382,7 @@ describe("CodeComposerAdapter", () => {
       },
     });
     await screen.findByText("pasted-text-1.txt");
+    await user.clear(prompt);
     await user.type(prompt, "Fix the login bug");
     await user.keyboard("{Meta>}{Enter}{/Meta}");
     expect(await screen.findByText(/The provider is not signed in\./)).toBeInTheDocument();
@@ -1236,7 +1368,6 @@ describe("CodeComposerAdapter", () => {
 
 // Interaction coverage beyond static markup.
 import { createRoot } from "react-dom/client";
-import { act } from "react";
 import type { ComposerInputElement } from "../../composer/ComposerInput";
 
 describe("CodeComposerAdapter interactions", () => {
