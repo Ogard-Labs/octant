@@ -2,8 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkTerminalTools,
   watchWorkTerminalsLeftBehind,
+  workTerminalCeilingHolds,
+  type WorkTerminalCeiling,
   type WorkTerminalStart,
 } from "./workAgentTerminal";
+
+const start = (folder: string, overrides: Partial<WorkTerminalStart> = {}): WorkTerminalStart => ({
+  folder,
+  strict: false,
+  executionPolicy: "auto-accept-edits",
+  current: () => true,
+  ...overrides,
+});
 
 const WORK_THREAD = "33333333-3333-4333-8333-333333333333";
 const call = (body: unknown) => ({ name: "octant_terminal", inputJson: JSON.stringify(body) });
@@ -56,6 +66,9 @@ function terminals() {
 const folder = { current: "/work/folder" };
 const started: { current: WorkTerminalStart | undefined } = { current: undefined };
 const shell = { current: "/bin/zsh" };
+const ceiling: { current: WorkTerminalCeiling } = {
+  current: { strict: false, executionPolicy: "full-access" },
+};
 
 function tools(
   overrides: {
@@ -72,6 +85,7 @@ function tools(
     projectId: "77777777-7777-4777-8777-777777777777",
     terminals: service as never,
     posture: () => posture,
+    ceiling: () => ceiling.current,
     current: () => true,
     ...(overrides.ask === undefined ? {} : { ask: overrides.ask }),
     protections: async () => ({ launch: {}, end: overrides.end ?? (async () => undefined) }),
@@ -102,6 +116,7 @@ describe("a Work thread's terminal", () => {
     folder.current = "/work/folder";
     started.current = undefined;
     shell.current = "/bin/zsh";
+    ceiling.current = { strict: false, executionPolicy: "full-access" };
   });
 
   it("asks before each command below Full access, and runs it in the thread's folder at its level", async () => {
@@ -184,6 +199,7 @@ describe("a Work thread's terminal", () => {
       terminals: service as never,
       folder: async () => "/work/folder",
       posture: () => "full-access",
+      ceiling: () => ({ strict: false, executionPolicy: "full-access" }),
       current: () => active,
       protections: async () => {
         active = false;
@@ -215,9 +231,9 @@ describe("a Work thread's terminal", () => {
 
   it("ends a shell as soon as its thread is archived or moves to another folder, and keeps one still in place", async () => {
     const started = new Map<string, WorkTerminalStart>([
-      ["archived", { folder: "/work/a" }],
-      ["moved", { folder: "/work/b" }],
-      ["kept", { folder: "/work/c" }],
+      ["archived", start("/work/a")],
+      ["moved", start("/work/b")],
+      ["kept", start("/work/c")],
     ]);
     // The projection the sweep reads, still as it was when the journal tells its listeners.
     const now = new Map<string, string | undefined>([
@@ -232,9 +248,9 @@ describe("a Work thread's terminal", () => {
         listeners.push(listener as never);
         return () => undefined;
       },
-      alsoOn: [],
       started,
       folderNow: async (threadId) => now.get(threadId),
+      ceilingNow: () => ({ strict: false, executionPolicy: "auto-accept-edits" }),
       terminate,
       onError: (error) => {
         throw error;
@@ -275,5 +291,101 @@ describe("a Work thread's terminal", () => {
     const command = "x".repeat(8_192);
     await tools({ ask }).set.execute(call({ operation: "run", command }));
     expect(ask.mock.calls[0]?.[1]).toBe(command);
+  });
+
+  it("is confined at the thread's level below Full access outside Strict, and runs natively only at Full access", async () => {
+    const launched = async (posture: "approval-gated" | "auto-accept-edits" | "full-access") => {
+      const service = terminals();
+      const set = createWorkTerminalTools({
+        threadId: WORK_THREAD,
+        projectId: "77777777-7777-4777-8777-777777777777",
+        terminals: service as never,
+        folder: async () => "/work/folder",
+        posture: () => posture,
+        ceiling: () => ({ strict: false, executionPolicy: posture }),
+        current: () => true,
+        ask: async () => "approved",
+        // What a turn outside Strict with no chosen policy prepares.
+        protections: async () => ({ launch: { strict: false }, end: async () => undefined }),
+        platform: "darwin",
+        strict: () => false,
+        shell: () => "/bin/zsh",
+        recordExternalContentIngestion: () =>
+          ({ kind: "ignored", reason: "not-tainting" }) as never,
+        uuid: () => crypto.randomUUID(),
+        startedIn: { get: () => undefined, set: () => undefined },
+      });
+      await set.execute(call({ operation: "run", command: "ls" }));
+      return service.launch.mock.calls[0]?.[0];
+    };
+    for (const posture of ["approval-gated", "auto-accept-edits"] as const) {
+      const request = await launched(posture);
+      expect(request).toMatchObject({ executionPolicy: posture });
+      // No `strict: false`: the launch is confined, as the thread's own commands are.
+      expect(request?.["strict"]).not.toBe(false);
+    }
+    expect(await launched("full-access")).toMatchObject({ strict: false });
+  });
+
+  it("keeps a shell only while the thread's ceiling is as wide as the one it started under", () => {
+    const at = (overrides: Partial<WorkTerminalCeiling> = {}) => ({
+      strict: false,
+      executionPolicy: "auto-accept-edits" as const,
+      ...overrides,
+    });
+    expect(workTerminalCeilingHolds(start("/w"), at())).toBe(true);
+    // Wider than it started: it runs narrower than the thread, which is safe.
+    expect(workTerminalCeilingHolds(start("/w"), at({ executionPolicy: "full-access" }))).toBe(
+      true,
+    );
+    expect(workTerminalCeilingHolds(start("/w", { strict: true }), at())).toBe(true);
+    // Narrower, Plan, Strict turned on, or a scope or policy that no longer holds: it ends.
+    expect(workTerminalCeilingHolds(start("/w"), at({ executionPolicy: "approval-gated" }))).toBe(
+      false,
+    );
+    expect(workTerminalCeilingHolds(start("/w"), at({ executionPolicy: "plan" }))).toBe(false);
+    expect(workTerminalCeilingHolds(start("/w"), at({ strict: true }))).toBe(false);
+    expect(workTerminalCeilingHolds(start("/w", { current: () => false }), at())).toBe(false);
+  });
+
+  it("stops a shell whose thread's level narrowed before the next call reaches it", async () => {
+    const service = terminals();
+    await tools({ posture: "full-access", service }).set.execute(
+      call({ operation: "run", command: "npm run dev" }),
+    );
+    expect(started.current).toMatchObject({ executionPolicy: "full-access" });
+    ceiling.current = { strict: false, executionPolicy: "approval-gated" };
+    const next = tools({ posture: "approval-gated", service, ask: async () => "approved" });
+    expect(await next.set.execute(call({ operation: "write", command: "x" }))).toMatchObject({
+      isError: true,
+      result: { error: "terminal-ceiling-changed" },
+    });
+    expect(service.terminate).toHaveBeenCalledTimes(1);
+    expect(service.write).not.toHaveBeenCalledWith(expect.anything(), "x");
+  });
+
+  it("ends a running shell from the journal once Strict turns on, with no terminal call", async () => {
+    const started = new Map<string, WorkTerminalStart>([["thread", start("/work/a")]]);
+    let strict = false;
+    const listeners: Array<() => void> = [];
+    const terminate = vi.fn(async (_threadId: string) => undefined);
+    watchWorkTerminalsLeftBehind({
+      subscribeCommitted: (listener) => {
+        listeners.push(() => listener({ events: [] }));
+        return () => undefined;
+      },
+      started,
+      folderNow: async () => "/work/a",
+      ceilingNow: () => ({ strict, executionPolicy: "auto-accept-edits" }),
+      terminate,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    strict = true;
+    // A settings change, not a thread event, still prompts the sweep.
+    for (const listener of listeners) listener();
+    await vi.waitFor(() => expect(terminate).toHaveBeenCalledWith("thread"));
+    expect(started.size).toBe(0);
   });
 });

@@ -33,6 +33,8 @@ export async function prepareProjectTerminalProtections(
     readonly mode: "code" | "work";
     readonly executionPolicy: ProviderExecutionPolicy;
     readonly workThreadId?: string;
+    /** A Work thread's agent terminal, which outlives the turn running when it starts. */
+    readonly outlivesParentTurn?: true;
   },
   network: ProviderRuntimeNetworkPort | undefined,
 ): Promise<ProjectTerminalProtection> {
@@ -44,6 +46,7 @@ export async function prepareProjectTerminalProtections(
     provider: "terminal",
     executionRoute: "terminal",
     ...(input.workThreadId === undefined ? {} : { parentThreadId: input.workThreadId }),
+    ...(input.outlivesParentTurn === true ? { outlivesParentTurn: true } : {}),
   });
   if (admitted.status === "refused") return admitted;
   const turn = admitted.turn;

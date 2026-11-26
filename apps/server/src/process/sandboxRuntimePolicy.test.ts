@@ -111,7 +111,7 @@ describe("sandbox host-tool lifetime", () => {
   });
 });
 describe("a terminal admitted under a running turn", () => {
-  it("inherits the turn's ceiling but outlives it, while a helper ends with its parent", async () => {
+  it("lets only a terminal marked to outlive its turn do so, while a person's terminal and a helper end with it", async () => {
     const parentCleanups = new Map<string, Set<() => Promise<void>>>();
     const ended: string[] = [];
     configureSandboxRestrictionsAuthority({
@@ -149,14 +149,23 @@ describe("a terminal admitted under a running turn", () => {
       threadId: "terminal",
       provider: "terminal",
       executionRoute: "terminal",
+      outlivesParentTurn: true,
+    });
+    // A person's own Work-task terminal says nothing, and ends with the turn as before.
+    const personal = beginSandboxTurn({
+      ...request,
+      threadId: "personal",
+      provider: "terminal",
+      executionRoute: "terminal",
     });
     const helper = beginSandboxTurn({ ...request, threadId: "helper", provider: "codex" });
     expect(terminal.status).toBe("admitted");
+    expect(personal.status).toBe("admitted");
     expect(helper.status).toBe("admitted");
     // The parent turn finishes: its cleanups run.
     for (const cleanup of parentCleanups.get("session") ?? []) await cleanup();
-    expect(ended).toEqual(["helper"]);
+    expect(ended.sort()).toEqual(["helper", "personal"]);
     if (terminal.status === "admitted") await terminal.turn.end();
-    expect(ended).toEqual(["helper", "terminal"]);
+    expect(ended).toContain("terminal");
   });
 });

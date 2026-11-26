@@ -18,6 +18,13 @@ export interface SandboxTurnRequest {
   readonly root: string;
   readonly provider: string;
   readonly parentThreadId?: string;
+  /**
+   * Set only for a Work thread's agent terminal: it takes its thread's
+   * ceiling at start but outlives the turn running then, and ends when that
+   * ceiling narrows instead. Every other child, a person's own Work-task
+   * terminal included, ends with the parent turn.
+   */
+  readonly outlivesParentTurn?: true;
 }
 export interface SandboxTurnPolicy {
   readonly strict?: boolean;
@@ -75,11 +82,11 @@ export function beginSandboxTurn(request: SandboxTurnRequest): SandboxTurnAdmiss
       networkSnapshots.delete(selection.context.sessionId);
     });
   }
-  // A terminal takes its thread's ceiling at start but owns its own lifetime:
-  // it ends when it is closed, not when the turn that was running then ends.
-  // Ending it with that turn killed a Work thread's dev server as soon as the
-  // reply that started it finished. A helper still ends with its parent.
-  if (parent === undefined || request.executionRoute === "terminal") return result;
+  // A Work thread's agent terminal takes its thread's ceiling at start but
+  // owns its own lifetime: ending it with that turn killed a dev server as
+  // soon as the reply that started it finished. Its owner ends it when the
+  // ceiling narrows instead.
+  if (parent === undefined || request.outlivesParentTurn === true) return result;
   const turn = result.turn;
   const remove = registerSandboxCleanup(parent, async () => {
     await turn.end();

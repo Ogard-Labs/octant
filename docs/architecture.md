@@ -1880,13 +1880,20 @@ returns its output so far with `commandCompleted: false`, in Code, Work and a
 helper's terminal alike (maintainer decision, 2026-11-26). While that command
 still owns the terminal, a new `run` is refused as busy rather than typed into
 it, and `read`, `write` and `stop` still work; the next `read` after it ends
-reports its exit code. The terminal keeps that command, and the shell it
-started in, across turns; the completion line follows that shell. In
-Work it is one shell per thread in the thread's folder, at the thread's level
-and confined as its own commands are; a routine's run is offered none. It
-outlives the turn that started it, under Strict too, and ends when the agent
-stops it or as soon as the thread is archived or deleted, its Project unbound,
-or its folder changed.
+reports its exit code. One that returned to its shell's prompt without
+saying how it ended (an interrupt) no longer holds the terminal, and `read`
+says it ended with its exit code unknown. The completion is typed in the same
+input the shell parses with the command, so a program reading its input
+cannot take it, and it follows the shell the terminal started in, which the
+terminal keeps, with that command, across turns. In Work it is one shell per
+thread in the thread's folder, at the thread's level and confined as its own
+commands are; on macOS and Linux it is confined at that level below Full
+access even outside Strict, and runs natively only at Full access outside
+Strict. A routine's run is offered none. It outlives the turn that started
+it, under Strict too, and ends when the agent stops it or as soon as the
+thread is archived or deleted, its Project unbound, its folder changed, or
+its ceiling narrowed: Plan, a narrower level, Strict turned on, or its
+sandbox scope or chosen policy no longer current.
 
 ## Modes: Chat, Work, and Code
 
@@ -16721,8 +16728,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Kernel-owned scopes cover detached descendants, not only a process group.
 
     Personal Project terminals own an admitted policy and broker lifetime;
-    Work terminals also inherit their thread's current protection ceiling,
-    taken when they start; the end of the turn running then does not end them.
+    Work terminals also inherit their thread's current protection ceiling.
+    A person's own Work-task terminal ends with the turn running when it
+    started. A Work thread's agent terminal takes that ceiling at start,
+    outlives the turn, and ends once the thread's ceiling narrows instead.
     Configured folder grants and network policy reach the actual PTY launcher,
     including at Full access under Strict. Their proxy grants no inference
     endpoints, and closing the terminal revokes it and verifies the native

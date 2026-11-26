@@ -168,6 +168,7 @@ import {
   createWorkTerminalTools,
   watchWorkTerminalsLeftBehind,
   workAgentTerminalId,
+  type WorkTerminalCeiling,
   type WorkTerminalStart,
 } from "../work/workAgentTerminal";
 import { providerTakesFileNatively, supportsConversationInput } from "./conversationInputs";
@@ -518,6 +519,22 @@ export function wireWork(deps: WorkDependencies) {
           );
       }
     });
+    // The ceiling a Work thread holds now: its Strict value, and the level its
+    // running turn holds, or its own between turns.
+    const workThreadCeilingNow = (threadId: string): WorkTerminalCeiling | undefined => {
+      try {
+        const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        if (thread === undefined) return undefined;
+        return {
+          strict: resolveThreadStrict(threadId),
+          executionPolicy: workThreadAccessOf(
+            runningWorkTurns.get(threadId)?.access ?? thread.access,
+          ).executionPolicy,
+        };
+      } catch {
+        return undefined;
+      }
+    };
     // The folder a Work thread works in now: undefined once it is archived,
     // deleted, or its Project no longer binds it as it did.
     const workThreadFolderNow = async (threadId: WorkThreadId) => {
@@ -539,11 +556,12 @@ export function wireWork(deps: WorkDependencies) {
     };
     // A Work thread's agent shell ends as the change that leaves it behind is
     // committed (an archive, a deletion, a move to another folder, the
-    // Project's relink or archive), not at the agent's next terminal call.
+    // Project's relink or archive, or a narrower level or Strict), not at the
+    // agent's next terminal call.
     const unsubscribeWorkTerminalFolders = watchWorkTerminalsLeftBehind({
       subscribeCommitted: (listener) => persistence.journal.subscribeCommitted(listener),
-      alsoOn: [THREAD_RETENTION_EVENT_NAMES.threadPurged],
       started: workTerminalFolders,
+      ceilingNow: (threadId) => workThreadCeilingNow(threadId),
       folderNow: async (threadId) => {
         try {
           return await workThreadFolderNow(decodeWorkThreadId(threadId));
@@ -1335,11 +1353,17 @@ export function wireWork(deps: WorkDependencies) {
                 projectId: String(input.thread.projectId),
                 terminals: workTerminals,
                 folder: currentRoot,
-                posture: () =>
-                  workThreadAccessOf(
-                    runningWorkTurns.get(String(input.thread.id))?.access ?? input.thread.access,
-                  ).executionPolicy,
+                // The running turn's level, as the other families read it: a
+                // call that arrives with no turn running asks, rather than
+                // taking the level the thread was composed at.
+                posture: () => runningLevel().posture,
                 current: () => workThreadProjection.read(input.thread.id)?.lifecycle === "active",
+                // Between calls a thread that cannot be read holds nothing.
+                ceiling: () =>
+                  workThreadCeilingNow(String(input.thread.id)) ?? {
+                    strict: true,
+                    executionPolicy: "plan",
+                  },
                 ask: async (summary, command, signal) => {
                   const outcome = await nativeHarnessApprovals.ask({
                     threadId: String(input.thread.id),
@@ -1371,12 +1395,13 @@ export function wireWork(deps: WorkDependencies) {
                       mode: "work",
                       executionPolicy,
                       workThreadId: String(input.thread.id),
+                      outlivesParentTurn: true,
                     },
                     deps.providerRuntimeNetwork,
                   );
                   return prepared.status === "refused"
                     ? { refused: prepared.message }
-                    : { launch: prepared.launch, end: prepared.end };
+                    : { launch: prepared.launch, end: prepared.end, current: prepared.current };
                 },
                 platform: process.platform,
                 strict: () => resolveThreadStrict(String(input.thread.id)),
