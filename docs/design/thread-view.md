@@ -330,7 +330,7 @@ edge, and its accessible name also says whose the level is ("Reply
 detail: High, this thread's own" or "Reply detail: Low, the default"). As a
 bare glyph in the composer row it read as one of two unexplained list icons.
 Its radio items are **Use default (Low)**
-(naming the current default; "Follow the level in Settings") and the three
+(naming the current default; "Follow the level in Settings") and the five
 levels, with short descriptions that fit a phone-width menu: "Message and
 reply, steps hidden", "Only failed calls stay", "Thinking and
 finished tool calls folded", "Thinking's first line, tool calls listed",
