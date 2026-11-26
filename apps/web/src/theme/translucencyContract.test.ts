@@ -35,6 +35,19 @@ describe("window glass", () => {
     for (const pop of css.matchAll(/--octant-shadow-pop:\s*([^;]*);/g)) {
       expect(pop[1]?.trim().startsWith("var(--octant-float-rim),")).toBe(true);
     }
+    // A composer notice floats on its own soft shadow and carries the same rim.
+    const notice =
+      /\.callout\.composer-notice,\s*\.thread-column > \.callout\s*\{([^}]*)\}/.exec(
+        read("styles/octant.css"),
+      )?.[1] ?? "";
+    expect(notice).toContain("box-shadow: var(--octant-float-rim), var(--oct-shadow-float);");
+    // The picture-in-picture draws one lit line under Glass, not its own on top of the rim.
+    const pip =
+      /html\[data-octant-host-vibrancy="active"\]:not\([^)]*\)\s*:is\(([^)]*)\)\s*\{([^}]*)\}/.exec(
+        read("styles/components.css"),
+      ) ?? [];
+    expect(pip[1]).toContain(".thread-activity-pip__card");
+    expect(pip[2]?.trim()).toBe("box-shadow: var(--octant-shadow-pop);");
   });
 
   it("draws a float dense and without a backdrop filter in the desktop app whether Glass is on or off", () => {

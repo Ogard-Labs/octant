@@ -323,7 +323,10 @@ under the fill).
   or, under Glass, the workspace colour, at 94%. letters and read as noise (maintainer request, 2026-11-15).
 - **A float's edge catches the light under Glass.** Every floating surface's
   shadow (`--octant-shadow-pop`) starts with a rim slot, `--octant-float-rim`,
-  that is an empty shadow everywhere except under the host's Glass rule, which
+  that is an empty shadow everywhere except under the host's Glass rule (a
+  composer notice card carries the same slot before its own soft shadow, and the
+  activity picture-in-picture drops its own highlight there so the line is not
+  drawn twice), which
   lights it as a 1px inset line along the top inside edge (white at 22% in dark,
   85% in light). It reads as the rim of a glass pane where a blur cannot be
   used. Reduced transparency and increased contrast draw none, because the
@@ -630,12 +633,12 @@ fetched, never emoji.
 | 3 Well     | A segmented track, a history capsule, a command block, a stepper              | `--octant-well` or the field paint                         | one hairline at most                              |
 | 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet, the tour card | `--octant-float-glass` (see [Translucency](#translucency)) | `--octant-shadow-pop`                             |
 
-| Shadow token               | Dark                                                                   | Light                                                                  | Use                                             |
-| -------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------- |
-| `--octant-shadow-pop`      | `0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%)` | Every floating surface                          |
-| `--octant-shadow-overlay`  | `0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%)` | A small float drawn by a feature (tooltip card) |
-| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                    | `0 4px 18px -6px` ink 7%                                               | The composer and a picker pinned to it          |
-| `--octant-shadow-hairline` | `0 0 0 1px var(--octant-border)`                                       | the same                                                               | A ring where an outline cannot be used          |
+| Shadow token               | Dark                                                                                            | Light                                                                                           | Use                                                                                                 |
+| -------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `--octant-shadow-pop`      | `var(--octant-float-rim), 0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%)` | `var(--octant-float-rim), 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%)` | Every floating surface; the rim slot is lit only under window Glass ([Translucency](#translucency)) |
+| `--octant-shadow-overlay`  | `0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%)`                          | `0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%)`                          | A small float drawn by a feature (tooltip card)                                                     |
+| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                                             | `0 4px 18px -6px` ink 7%                                                                        | The composer and a picker pinned to it                                                              |
+| `--octant-shadow-hairline` | `0 0 0 1px var(--octant-border)`                                                                | the same                                                                                        | A ring where an outline cannot be used                                                              |
 
 The resting shadow tokens (`--octant-shadow-xs`, `-sm`, `-md`, `-lg`,
 `-control`, `-control-pressed`, `-selected`, `-well`, `-primary`,

@@ -811,6 +811,20 @@ html[data-octant-reduced-motion="true"]
   backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
 }
 
+/* Under window Glass the floating shadow already lights the top edge, so the
+   overlay drops its own highlight rather than paint the same line twice. */
+html[data-octant-host-vibrancy="active"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  :is(
+    .octant-glass--overlay,
+    .thread-activity-pip__card,
+    .thread-activity-pip__collapsed-controls
+  ) {
+  box-shadow: var(--octant-shadow-pop);
+}
+
 /* ── Accessibility and capability fallbacks ────────────────────────── */
 
 /* Reduced transparency (app setting or OS): opaque floating surface. */

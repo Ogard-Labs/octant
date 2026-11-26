@@ -598,11 +598,12 @@ describe("the public-block visual language", () => {
     expect(/\n\.callout > svg\s*\{([^}]*)\}/.exec(css)?.[1] ?? "").toMatch(
       /background:\s*color-mix\(in oklab, var\(--callout-tone\) 20%, transparent\)[^}]*color:\s*var\(--callout-tone\)/,
     );
-    // One soft float shadow and a short rise on entry (200ms), none under reduced motion.
+    // One soft float shadow after the float's rim slot (lit only under Glass),
+    // and a short rise on entry (200ms), none under reduced motion.
     expect(group).toMatch(/justify-items:\s*start/);
     expect(floating).toMatch(/width:\s*fit-content/);
     expect(floating).toMatch(/max-width:\s*min\(480px, 100%\)/);
-    expect(floating).toMatch(/box-shadow:\s*var\(--oct-shadow-float\)/);
+    expect(floating).toMatch(/box-shadow:\s*var\(--octant-float-rim\), var\(--oct-shadow-float\)/);
     expect(floating).toMatch(/animation:\s*composer-notice-in var\(--oct-motion-base\)/);
     expect(css).toMatch(/@keyframes composer-notice-in\s*\{\s*from\s*\{[^}]*translateY\(4px\)/);
     expect(css).toMatch(
