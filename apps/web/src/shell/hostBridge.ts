@@ -319,6 +319,8 @@ export type HubAdministrationOperation =
   | "act-projects"
   | "wake-hardware-address"
   | "push"
+  | "public"
+  | "public-funnel"
   | "direct-push"
   | "direct-push-environment"
   | "direct-push-credential"

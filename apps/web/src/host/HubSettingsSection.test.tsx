@@ -1765,3 +1765,76 @@ describe("HubSettingsSection sign-in requests", () => {
     expect(screen.queryByText("Sign-in requests from the hub")).toBeNull();
   });
 });
+
+describe("HubSettingsSection public entrance", () => {
+  const hubWithEntrance = (publicEntrance: unknown) => ({
+    hub: {
+      enabled: true,
+      roster: {
+        roster: {
+          standbyOrder: [],
+          members: [{ memberId: "m-1", name: "Mac mini", role: "hub", owner: false }],
+        },
+      },
+    },
+    spoke: { membership: "none" },
+    publicEntrance,
+  });
+
+  it("is off until the window turns it on, and offers Funnel only once it is open", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: hubWithEntrance({ enabled: false, listening: false, funnel: { enabled: false } }),
+      },
+      public: { status: 200, body: { status: "changed", enabled: true } },
+    });
+
+    const toggle = await screen.findByRole("switch", { name: "Public entrance" });
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryByRole("switch", { name: "Tailscale Funnel" })).not.toBeInTheDocument();
+    await user.click(toggle);
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "public")?.body).toEqual({ enabled: true }),
+    );
+  });
+
+  it("turns Funnel on at port 443 and shows where the person's own front points", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: hubWithEntrance({
+          enabled: true,
+          listening: true,
+          address: "http://127.0.0.1:41234",
+          funnel: { enabled: false },
+        }),
+      },
+      "public-funnel": { status: 200, body: { status: "changed", enabled: true, port: 443 } },
+    });
+
+    expect(await screen.findByText(/http:\/\/127\.0\.0\.1:41234/)).toBeVisible();
+    await user.click(await screen.findByRole("switch", { name: "Tailscale Funnel" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "public-funnel")?.body).toEqual({
+        enabled: true,
+        port: 443,
+      }),
+    );
+  });
+
+  it("says why Tailscale refused Funnel", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: {
+        status: 200,
+        body: hubWithEntrance({ enabled: true, listening: true, funnel: { enabled: false } }),
+      },
+      "public-funnel": { status: 409, body: { status: "refused", kind: "funnel-not-allowed" } },
+    });
+    await user.click(await screen.findByRole("switch", { name: "Tailscale Funnel" }));
+    expect(await screen.findByText(/^Tailscale refused Funnel/)).toBeVisible();
+  });
+});

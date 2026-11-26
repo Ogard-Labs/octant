@@ -152,6 +152,8 @@ export interface RemoteGatewayServices {
   /** How long a device paired now stays paired; the host setting, 30 days when absent. */
   readonly registrationLifetime?: () => PairedDeviceLifetime;
   /** Told once when a person approves a device pairing directly, so every connected device hears of it. */
+  /** Told after remote access is paused or resumed, so the public entrance closes or reopens with it. */
+  readonly onRemoteAccessPauseChanged?: (paused: boolean) => void;
   readonly onDevicePaired?: (device: {
     readonly deviceId: string;
     readonly name: string;
@@ -805,6 +807,7 @@ function assembleServices(
     remoteAccessPaused,
     setRemoteAccessPaused: (input) => {
       paused = lifecycle.setRemoteAccessPaused({ paused: input.paused, actor: input.actor });
+      options.onRemoteAccessPauseChanged?.(paused);
       if (paused) {
         outsideAgentAccess.abort();
         outsideAgentAccess = new AbortController();

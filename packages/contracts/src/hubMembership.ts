@@ -63,6 +63,8 @@ export const HubMembershipChange = Schema.Literal(
   "push-forwarded",
   "push-refused",
   "direct-push-switch-changed",
+  "public-entrance-switch-changed",
+  "public-funnel-changed",
   "direct-push-environment-changed",
   "direct-push-credential-changed",
   "provision-switch-changed",

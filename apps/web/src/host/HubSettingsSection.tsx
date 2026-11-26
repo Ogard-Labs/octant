@@ -34,6 +34,12 @@ import {
   type OwnerKeyMismatchRow,
   type OwnerRow,
 } from "./HubOwnerPanels";
+import {
+  HubPublicEntranceSection,
+  PUBLIC_ENTRANCE_REFUSALS,
+  readPublicEntrance,
+  type PublicEntranceView,
+} from "./HubPublicEntranceSection";
 import { PairingCodeQr } from "./PairingCodeQr";
 
 /**
@@ -297,6 +303,7 @@ interface HubStatus {
   readonly directPush?: DirectPushView;
   readonly provision?: ProvisionView;
   readonly signIn?: SignInView;
+  readonly publicEntrance?: PublicEntranceView;
   /** Whether this computer takes work other members delegate; absent where delegation is not composed. */
   readonly delegationAccepting?: boolean;
   readonly link?: {
@@ -807,6 +814,40 @@ export function HubSettingsSection({
           ? "Push sender is on. A computer uses it only if its person ticked Push."
           : "Push sender is off. The hub forgot its counts.",
       );
+    }
+    await refresh();
+  };
+
+  const setPublicEntrance = async (on: boolean) => {
+    const reply = await act(
+      "public",
+      { enabled: on },
+      "changed",
+      on
+        ? "Octant could not open the public entrance."
+        : "Octant could not close the public entrance.",
+      PUBLIC_ENTRANCE_REFUSALS,
+    );
+    if (reply !== undefined) {
+      setMessage(
+        on
+          ? "Public entrance is open on this computer. Turn on Funnel, or point your own front at it."
+          : "Public entrance is closed.",
+      );
+    }
+    await refresh();
+  };
+
+  const setPublicFunnel = async (on: boolean) => {
+    const reply = await act(
+      "public-funnel",
+      on ? { enabled: true, port: 443 } : { enabled: false },
+      "changed",
+      on ? "Octant could not turn Funnel on." : "Octant could not turn Funnel off.",
+      PUBLIC_ENTRANCE_REFUSALS,
+    );
+    if (reply !== undefined) {
+      setMessage(on ? "Funnel carries the public entrance on port 443." : "Funnel is off.");
     }
     await refresh();
   };
@@ -1770,6 +1811,16 @@ export function HubSettingsSection({
         </SettingsSection>
       )}
 
+      {status?.publicEntrance === undefined ||
+      (!hubOn && status.link?.membership !== "member") ? null : (
+        <HubPublicEntranceSection
+          busy={busy}
+          onEntrance={(on) => void setPublicEntrance(on)}
+          onFunnel={(on) => void setPublicFunnel(on)}
+          view={status.publicEntrance}
+        />
+      )}
+
       {!hubOn || status === undefined ? null : (
         <SettingsSection title="Push sender">
           <div className="setgroup">
@@ -2552,6 +2603,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const grant = readGrant(field(spoke, "grant"));
   const wake = readWake(field(body, "wake"));
   const push = readPush(field(body, "push"));
+  const publicEntrance = readPublicEntrance(field(body, "publicEntrance"));
   const directPush = readDirectPush(field(body, "directPush"));
   const provision = readProvision(field(body, "provision"));
   const signIn = readSignIn(field(body, "signIn"));
@@ -2589,6 +2641,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       ...(directPush === undefined ? {} : { directPush }),
       ...(provision === undefined ? {} : { provision }),
       ...(signIn === undefined ? {} : { signIn }),
+      ...(publicEntrance === undefined ? {} : { publicEntrance }),
       ...(typeof delegationAccepting === "boolean" ? { delegationAccepting } : {}),
       link: {
         membership,
@@ -2626,6 +2679,7 @@ function readStatus(body: unknown): HubStatus | undefined {
     ...(directPush === undefined ? {} : { directPush }),
     ...(provision === undefined ? {} : { provision }),
     ...(signIn === undefined ? {} : { signIn }),
+    ...(publicEntrance === undefined ? {} : { publicEntrance }),
   };
 }
 

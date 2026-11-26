@@ -1068,6 +1068,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "hub stand-in remove <member-id-or-name>" },
   { octant: "hub wake on|off" },
   { octant: "hub push on|off" },
+  { octant: "hub public on [--port 443|10000] [--own-front] | off | status" },
   { octant: "hub provision on|off" },
   { octant: "hub offer update-channel stable|preview|candidate [--mirror <signed-feed.json>]" },
   { octant: "hub offer plugin <catalog-id> <entry-id> <sha256:digest>" },

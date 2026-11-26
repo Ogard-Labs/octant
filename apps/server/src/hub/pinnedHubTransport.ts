@@ -20,6 +20,8 @@ export type HubFetchInit = {
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: string;
   readonly signal?: AbortSignal;
+  /** The most answer bytes this request takes; absent, 256 KiB. */
+  readonly maxResponseBytes?: number;
 };
 
 export type HubFetch = (url: string, init?: HubFetchInit) => Promise<Response>;
@@ -142,7 +144,7 @@ export function createPinnedHubTransport(network: HubNetwork = SYSTEM_NETWORK): 
             let received = 0;
             incoming.on("data", (chunk: Buffer) => {
               received += chunk.byteLength;
-              if (received > MAX_RESPONSE_BYTES) {
+              if (received > (init.maxResponseBytes ?? MAX_RESPONSE_BYTES)) {
                 secure.destroy();
                 reject(new Error("response too large"));
                 return;

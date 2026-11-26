@@ -68,12 +68,12 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 4         | 2       | 2            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
-| [Hubs and Nightly](#hubs-and-nightly)                                                 | 9         | 2       | 6            | 1                   |
+| [Hubs and Nightly](#hubs-and-nightly)                                                 | 9         | 2       | 7            | 0                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 1       | 0            | 0                   |
-| **All areas**                                                                         | **323**   | **216** | **102**      | **5**               |
+| **All areas**                                                                         | **323**   | **216** | **103**      | **4**               |
 
 ## Principles and hard lines
 
@@ -2459,7 +2459,7 @@ Pairing issues a revocable device key; the private listener serves HTTPS on one 
 - **Pause remote access** refuses every device and outside agent until resumed, keeping records, keys and grants; a local window or `octant auth resume` turns it on or off, a Full device only on (maintainer decision, 2026-11-22). **Sign out all other devices** keeps only the asking device (maintainer decision, 2026-11-22).
 - A party the host already trusts approves every new device (maintainer decision, 2026-11-12).
 - The listener binds only a person-selected private address and port after the person confirms it, every state-changing request carries a device-key proof, and nothing authority-bearing queues offline.
-- The hub's public entrance is a separate listener with its own closed route table and never relaxes the listener's rule; Pause remote access closes it too (maintainer decision, 2026-11-26; designed, not built; [Hub public entrance](#hub-public-entrance)).
+- The hub's public entrance is a separate listener with its own closed route table and never relaxes the listener's rule; Pause remote access closes it too (maintainer decision, 2026-11-26; built; [Hub public entrance](#hub-public-entrance)).
 - An agent's debug session (`octant_debug`) runs unasked at Full access, with one approval per session below it, and is refused in Plan (maintainer decisions, 2026-11-12 and 2026-11-13); a Full device drives one as a window does, other devices are refused.
 
 Not built yet:
@@ -3922,8 +3922,9 @@ A person's hub may open one narrow public entrance, through a front the person c
 - Limits: a webhook endpoint takes 60 requests a minute and a 256 KiB body and holds at most 500 deliveries or 32 MiB for 24 hours; a visitor link expires after 24 hours by default and 7 days at most (decision H35).
 - The person's own paired phone or computer reaches its hosts through the entrance on a channel pinned to the host key and certificate from pairing, so the hub and the front see only ciphertext; pairing stays on the private network or QR, and the relay is off by default (decision H36). Phone push for the store build still goes through the minimal Octant push gateway.
 - Visitor text and webhook payloads are outside content and never instructions or grants.
+- Built: the separate loopback listener and its closed route table, the switch and the Funnel front in Settings and `octant hub public`, Pause and the end of the hub role closing it, and a member forwarding to the hub. Not built yet: visitor links, webhook triggers, the device relay, failover of the entrance, and a bind for a front on another machine. A real Funnel URL reached from mobile data is a maintainer check.
 
-Status: Designed, not built. Since: 2026-11-26. Detail: [Hub and spokes: public entrance](hub-and-spokes.md#public-entrance), [failover](hub-and-spokes.md#the-public-entrance-during-failover) and [decisions](hub-and-spokes.md#decisions).
+Status: Partly built. Since: 2026-11-26. Detail: [Hub and spokes: public entrance](hub-and-spokes.md#public-entrance), [failover](hub-and-spokes.md#the-public-entrance-during-failover) and [decisions](hub-and-spokes.md#decisions).
 
 ### Shared sign-ins, delegation and provisioning
 

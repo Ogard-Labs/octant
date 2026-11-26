@@ -2163,6 +2163,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "hub delegated work delegation take accept stop pause other members requests running carries on",
         },
         {
+          id: settingId("hub-public-entrance"),
+          label: "Public entrance",
+          scope: "host",
+          keywords:
+            "hub public entrance internet visitor links webhooks relay away from home off by default",
+        },
+        {
+          id: settingId("hub-public-funnel"),
+          label: "Tailscale Funnel",
+          scope: "host",
+          keywords: "hub public entrance tailscale funnel port 443 tls front own tunnel proxy",
+        },
+        {
           id: settingId("hub-push-sender"),
           label: "Push sender",
           scope: "host",

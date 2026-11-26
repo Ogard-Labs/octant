@@ -992,6 +992,93 @@ describe("octant hub push", () => {
   });
 });
 
+describe("octant hub public", () => {
+  it("reads on, off and status with a Funnel port or the person's own front", () => {
+    expect(resolveHubCliCommand(["public", "on"], {})).toEqual({
+      action: "public",
+      mode: "on",
+      front: "funnel",
+      port: 443,
+    });
+    expect(resolveHubCliCommand(["public", "on"], { port: "10000" })).toEqual({
+      action: "public",
+      mode: "on",
+      front: "funnel",
+      port: 10000,
+    });
+    expect(resolveHubCliCommand(["public", "on"], { "own-front": true })).toEqual({
+      action: "public",
+      mode: "on",
+      front: "own",
+    });
+    expect(resolveHubCliCommand(["public", "off"], {})).toEqual({ action: "public", mode: "off" });
+    expect(resolveHubCliCommand(["public", "status"], {})).toEqual({
+      action: "public",
+      mode: "status",
+    });
+    expect(resolveHubCliCommand(["public", "on"], { port: "8080" })).toBeUndefined();
+    expect(resolveHubCliCommand(["public", "on"], { port: "8443" })).toBeUndefined();
+    expect(
+      resolveHubCliCommand(["public", "on"], { port: "443", "own-front": true }),
+    ).toBeUndefined();
+    expect(resolveHubCliCommand(["public", "off"], { port: "443" })).toBeUndefined();
+    expect(resolveHubCliCommand(["public"], {})).toBeUndefined();
+  });
+
+  it("turns the entrance on and then Funnel, and turns both off", async () => {
+    const on = await fixture((request) =>
+      request.path === "/api/desktop/hub/public"
+        ? ok({ status: "changed", enabled: true })
+        : ok({ status: "changed", enabled: true, port: 443 }),
+    );
+    expect(await on.run({ action: "public", mode: "on", front: "funnel", port: 443 })).toBe(0);
+    expect(on.sent.map((request) => [request.path, request.body])).toEqual([
+      ["/api/desktop/hub/public", { enabled: true }],
+      ["/api/desktop/hub/public/funnel", { enabled: true, port: 443 }],
+    ]);
+    expect(on.text()).toContain("Funnel");
+
+    const off = await fixture((request) =>
+      ok({ status: "changed", enabled: false, ...(request.path.endsWith("funnel") ? {} : {}) }),
+    );
+    expect(await off.run({ action: "public", mode: "off" })).toBe(0);
+    expect(off.sent.map((request) => request.path)).toEqual([
+      "/api/desktop/hub/public/funnel",
+      "/api/desktop/hub/public",
+    ]);
+  });
+
+  it("turns only the entrance on for the person's own front and prints where to point it", async () => {
+    const host = await fixture((request) =>
+      request.method === "GET"
+        ? ok({
+            hub: { enabled: true },
+            spoke: { membership: "none" },
+            publicEntrance: {
+              enabled: true,
+              listening: true,
+              address: "http://127.0.0.1:41234",
+              funnel: { enabled: false },
+            },
+          })
+        : ok({ status: "changed", enabled: true }),
+    );
+    expect(await host.run({ action: "public", mode: "on", front: "own" })).toBe(0);
+    expect(host.sent.filter((request) => request.method === "POST")).toHaveLength(1);
+    expect(host.text()).toContain("http://127.0.0.1:41234");
+  });
+
+  it("says why Funnel was refused", async () => {
+    const host = await fixture((request) =>
+      request.path === "/api/desktop/hub/public"
+        ? ok({ status: "changed", enabled: true })
+        : { status: 409, body: { status: "refused", kind: "funnel-not-allowed" } },
+    );
+    expect(await host.run({ action: "public", mode: "on", front: "funnel", port: 443 })).toBe(1);
+    expect(host.errors()).toContain("funnel-not-allowed");
+  });
+});
+
 describe("octant hub failover commands", () => {
   const STANDBY = "33333333-3333-4333-8333-333333333333";
   const roster = (extra: Record<string, unknown> = {}) => ({

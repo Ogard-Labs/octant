@@ -83,16 +83,12 @@ const IGNORED_DIRECTORIES = new Set([
  */
 export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   [
-    "packages/contracts/src/hubPublic.ts",
-    "The public entrance's contracts land one stack layer before the entrance listener and services that import them. Remove when the hub's public entrance imports them.",
-  ],
-  [
     "packages/domain/src/hubPublicPolicy.ts",
-    "The public entrance's pure checks land with its contracts, one stack layer before the hub services that call them. Remove when the hub's webhook and visitor services import it.",
+    "The public entrance's pure delivery and visitor-link rules, read only by publicEntranceCrypto.ts until the webhook receiver and visitor links on the hub call them. Remove when the webhook receiver imports it.",
   ],
   [
     "apps/server/src/hub/publicEntranceCrypto.ts",
-    "The public entrance's crypto lands with its contracts and pure checks, one stack layer before the entrance listener and services that import it. Remove when the hub's public entrance imports it.",
+    "The public entrance's visitor-link, webhook-signature and sealing crypto, built with its contracts ahead of the features that call it (webhook triggers and visitor links on the hub). Remove when the webhook receiver imports it.",
   ],
   [
     "apps/desktop/src/browserDownloadSource.native-smoke.ts",
@@ -723,9 +719,10 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/hub/sign-in-request",
     "/api/hub/sign-in-outcome",
     "/api/hub/window-guest",
+    "/api/hub/public/forward",
   ].map((endpoint): [string, string] => [
     endpoint,
-    "Member-to-member request that a hub, standby, or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts, failoverService.ts, wakeService.ts, spokeWakeService.ts, pushService.ts, spokePushService.ts, provisionService.ts, spokeProvisionService.ts, signInService.ts, spokeSignInService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
+    "Member-to-member request that a hub, standby, or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts, failoverService.ts, wakeService.ts, spokeWakeService.ts, pushService.ts, spokePushService.ts, provisionService.ts, spokeProvisionService.ts, signInService.ts, spokeSignInService.ts, publicEntranceForwarding.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
   ]),
   [
     "/api/hub/usage",

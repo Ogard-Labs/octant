@@ -51,6 +51,20 @@ export type HubCliCommand =
   | { readonly action: "auto-apply"; readonly kind: HubAutoApplyKind; readonly enabled: boolean }
   | { readonly action: "stand-in"; readonly step: "join-code" }
   | { readonly action: "stand-in"; readonly step: "remove"; readonly member: string }
+  /**
+   * This host's public entrance. `on` turns it on and then the built-in Funnel
+   * front on one public port, or with the person's own front only the entrance;
+   * `off` turns Funnel off and then the entrance.
+   */
+  | {
+      readonly action: "public";
+      readonly mode: "on";
+      readonly front: "funnel";
+      readonly port: 443 | 10000;
+    }
+  | { readonly action: "public"; readonly mode: "on"; readonly front: "own" }
+  | { readonly action: "public"; readonly mode: "off" }
+  | { readonly action: "public"; readonly mode: "status" }
   | {
       readonly action: "certificate";
       readonly mode: "status" | "disable" | "enable";
@@ -227,6 +241,22 @@ export function resolveHubCliCommand(
       }
       return undefined;
     }
+    case "public": {
+      const [mode] = rest;
+      if (rest.length !== 1) return undefined;
+      if (mode === "off") return only() ? { action, mode } : undefined;
+      if (mode === "status") return only() ? { action, mode } : undefined;
+      if (mode !== "on" || !only("port", "own-front") || !isSwitch(flags["own-front"])) {
+        return undefined;
+      }
+      if (flags["own-front"] === true) {
+        return flags.port === undefined ? { action, mode, front: "own" } : undefined;
+      }
+      // 8443 is where the private listener serves by default, so it is not offered here.
+      const port = flags.port === undefined ? "443" : flags.port;
+      if (port !== "443" && port !== "10000") return undefined;
+      return { action, mode, front: "funnel", port: port === "443" ? 443 : 10000 };
+    }
     case "certificate": {
       if (rest.length !== 0 || !only("enable", "disable", "status", "acknowledge-transparency")) {
         return undefined;
@@ -376,6 +406,8 @@ export async function runHubCliCommand(input: Input): Promise<number> {
         : await runStandInRemove(input, command.member);
     case "certificate":
       return await runCertificate(input, command.mode, command.acknowledgeTransparency);
+    case "public":
+      return await runPublic(input, command);
   }
 }
 
@@ -453,6 +485,69 @@ async function runPush(input: Input, enabled: boolean): Promise<number> {
     enabled
       ? "The push sender is on. A spoke uses it only if its person ticked Push in its hub grant, and the hub forwards only to the gateway in its own Notifications setting.\n"
       : "The push sender is off, and the hub forgot its counts.\n",
+  );
+  return 0;
+}
+
+async function runPublic(
+  input: Input,
+  command: Extract<HubCliCommand, { action: "public" }>,
+): Promise<number> {
+  if (command.mode === "status") return await printPublicStatus(input);
+  if (command.mode === "off") {
+    const funnel = await post(input, "/api/desktop/hub/public/funnel", { enabled: false });
+    if (!isOk(funnel, "changed")) {
+      return refusal(input, funnel, "Octant could not turn Funnel off.");
+    }
+    const entrance = await post(input, "/api/desktop/hub/public", { enabled: false });
+    if (!isOk(entrance, "changed")) {
+      return refusal(input, entrance, "Octant refused to close the public entrance.");
+    }
+    input.stdout.write("The public entrance is closed, and Funnel is off.\n");
+    return 0;
+  }
+  const entrance = await post(input, "/api/desktop/hub/public", { enabled: true });
+  if (!isOk(entrance, "changed")) {
+    return refusal(input, entrance, "Octant refused to open the public entrance.");
+  }
+  if (command.front === "own") {
+    input.stdout.write(
+      "The public entrance is open on this computer only. Point your own tunnel or proxy at it:\n",
+    );
+    return await printPublicStatus(input);
+  }
+  const port = command.port;
+  const funnel = await post(input, "/api/desktop/hub/public/funnel", { enabled: true, port });
+  if (!isOk(funnel, "changed")) {
+    return refusal(input, funnel, "Octant could not turn Funnel on.");
+  }
+  input.stdout.write(
+    `The public entrance is open, and Tailscale Funnel carries it on port ${port} of this computer's tailnet name. Visitor links, webhooks and the device relay each stay off until you turn them on.\n`,
+  );
+  return 0;
+}
+
+async function printPublicStatus(input: Input): Promise<number> {
+  const response = await input.session.send({ path: "/api/desktop/hub/status", method: "GET" });
+  const entrance = field(response.body, "publicEntrance");
+  if (response.status !== 200 || entrance === undefined) {
+    input.stderr.write(
+      `${failureMessage(response, "Octant could not read the public entrance.")}\n`,
+    );
+    return 1;
+  }
+  const address = field(entrance, "address");
+  const funnel = field(entrance, "funnel");
+  input.stdout.write(
+    [
+      `Public entrance ${field(entrance, "enabled") === true ? "on" : "off"}${
+        field(entrance, "listening") === true ? ", listening" : ""
+      }${field(entrance, "paused") === true ? " (remote access is paused)" : ""}`,
+      ...(typeof address === "string" ? [`  Address on this computer  ${address}`] : []),
+      `  Funnel  ${
+        field(funnel, "enabled") === true ? `on, port ${String(field(funnel, "port"))}` : "off"
+      }`,
+    ].join("\n") + "\n",
   );
   return 0;
 }
@@ -1167,6 +1262,16 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "roster-not-newer": "That hub's roster is not newer than the one this computer holds.",
   "wake-service-off": "The wake service is off. Turn it on with `octant hub wake on`.",
   "push-service-off": "The push sender is off. Turn it on with `octant hub push on`.",
+  "not-in-a-hub": "This computer is not a hub or a member of one.",
+  "entrance-off": "The public entrance is off. Turn it on with `octant hub public on`.",
+  "remote-access-paused": "Remote access is paused. Resume it first.",
+  "port-shadows-private-listener":
+    "The private listener serves on that port, and Funnel would hide it. Use 443 or 10000.",
+  "funnel-not-allowed":
+    "Tailscale refused Funnel. Turn on HTTPS and MagicDNS, and add the funnel node attribute in your tailnet policy.",
+  "funnel-off-failed":
+    "Tailscale did not turn Funnel off. Run `tailscale funnel --https=443 off` yourself.",
+  "listener-failed": "The public entrance could not open a port on this computer.",
   "provision-service-off": "Offers are off. Turn them on with `octant hub provision on`.",
   "needs-person":
     "That proposal needs you: a routine is applied with --project <project-id>, and a routine or an endpoint row never applies on its own.",

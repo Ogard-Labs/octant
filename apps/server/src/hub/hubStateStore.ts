@@ -30,6 +30,7 @@ import {
   HubWakeSpokeTimes,
   NewMemberAlert,
   PeerGrant,
+  PublicFunnelPort,
   ProjectId,
   RosterMember,
   SignedHubRoster,
@@ -412,9 +413,23 @@ export const HubLinkState = Schema.Struct({
 }).annotations(strict);
 export type HubLinkState = typeof HubLinkState.Type;
 
+/**
+ * This host's own public entrance: the switch, the loopback port it keeps so a
+ * front's target stays the same, and the Funnel front while it is on. It belongs
+ * to the host rather than to the hub role, because a member that is not the
+ * acting hub forwards to the one that is.
+ */
+export const PublicEntranceState = Schema.Struct({
+  enabled: Schema.Boolean,
+  port: Schema.optional(Schema.Int.pipe(Schema.between(1, 65_535))),
+  funnel: Schema.optional(Schema.Struct({ port: PublicFunnelPort }).annotations(strict)),
+}).annotations(strict);
+export type PublicEntranceState = typeof PublicEntranceState.Type;
+
 export const HubState = Schema.Struct({
   hub: Schema.optional(HubSideState),
   link: Schema.optional(HubLinkState),
+  publicEntrance: Schema.optional(PublicEntranceState),
   /** Guest devices a dropped link, or the hub dropping a member window, could not revoke because the device pairing was not running; revoked once it is. */
   pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
   /** Devices that paired directly with this host, until a window clears each alert or the device is removed. */

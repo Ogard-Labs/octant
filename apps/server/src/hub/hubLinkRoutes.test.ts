@@ -469,6 +469,7 @@ describe("the hub-link routes the private listener serves", () => {
       [REMOTE_HUB_LINK_ROUTE_IDS.push, "POST", HUB_LINK_ROUTES.push],
       [REMOTE_HUB_LINK_ROUTE_IDS.pushGrant, "POST", HUB_LINK_ROUTES.pushGrant],
       [REMOTE_HUB_LINK_ROUTE_IDS.pushCopy, "PUT", HUB_LINK_ROUTES.pushCopy],
+      [REMOTE_HUB_LINK_ROUTE_IDS.publicForward, "POST", HUB_LINK_ROUTES.publicForward],
       [REMOTE_HUB_LINK_ROUTE_IDS.provisionOffer, "POST", HUB_LINK_ROUTES.provisionOffer],
       [REMOTE_HUB_LINK_ROUTE_IDS.provisionMirror, "POST", HUB_LINK_ROUTES.provisionMirror],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegate, "POST", PEER_DELEGATION_ROUTES.create],
@@ -553,5 +554,56 @@ describe("the hub-link routes the private listener serves", () => {
       );
       expect(decision.kind, path).toBe("reject");
     }
+  });
+});
+
+describe("a public request forwarded to the acting hub", () => {
+  const envelope = JSON.stringify({ method: "GET", path: "/healthz", headers: {}, body: "" });
+
+  it("refuses a forwarded request that carries no member signature", async () => {
+    const { a } = await joinedPair();
+    const response = await a.hubLink(
+      new Request(`${a.origin}${HUB_LINK_ROUTES.publicForward}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: envelope,
+      }),
+    );
+    expect(response?.status).toBe(401);
+  });
+
+  it("refuses a forwarded request signed by a host the roster does not list", async () => {
+    const { network, a } = await joinedPair();
+    const stranger = await startHubTestHost({
+      name: "Stranger",
+      address: "100.101.102.105",
+      network,
+      cleanups,
+    });
+    const response = await a.hubLink(
+      signedRequest({
+        signer: stranger,
+        recipient: a,
+        method: "POST",
+        path: HUB_LINK_ROUTES.publicForward,
+        body: envelope,
+      }),
+    );
+    expect(response?.status).toBe(401);
+  });
+
+  it("refuses forwarding to a host whose hub role is off", async () => {
+    const { a, b } = await joinedPair();
+    const response = await b.hubLink(
+      signedRequest({
+        signer: a,
+        recipient: b,
+        method: "POST",
+        path: HUB_LINK_ROUTES.publicForward,
+        body: envelope,
+      }),
+    );
+    expect(response?.status).toBe(403);
+    expect(await response?.json()).toEqual({ status: "refused", kind: "hub-role-off" });
   });
 });
