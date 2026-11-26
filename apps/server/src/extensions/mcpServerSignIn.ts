@@ -37,7 +37,7 @@ import {
 } from "@octant/host-runtime";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import type { McpAuthenticationChange } from "./agentPluginMcpSessionManager";
-import { bearerResourceMetadata } from "./mcpAuthenticationChallenge";
+import { bearerResourceMetadata, readableMetadataAddress } from "./mcpAuthenticationChallenge";
 import type { GeneratedMcpSignInPolicy, LinkedSecretPointers } from "./userAddedMcpServers";
 import type { HostOAuthService } from "../providers/oauth/hostOAuthService";
 
@@ -2574,7 +2574,7 @@ export class McpServerSignIn {
   }
 
   async #json(url: string): Promise<Record<string, unknown> | undefined> {
-    if (!isHttps(url) && !isLoopbackHttp(url)) return undefined;
+    if (!readableMetadataAddress(url)) return undefined;
     try {
       const response = await this.#request(url, { headers: { accept: "application/json" } });
       if (!response.ok) {
@@ -2900,18 +2900,6 @@ function isHttps(value: string): boolean {
   try {
     const url = new URL(value);
     return url.protocol === "https:" && !url.username && !url.password;
-  } catch {
-    return false;
-  }
-}
-
-function isLoopbackHttp(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === "http:" &&
-      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]")
-    );
   } catch {
     return false;
   }

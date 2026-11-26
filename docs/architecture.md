@@ -15018,7 +15018,8 @@ setup required for a registered-client connector, or a
 catalog connector that signs in and has no sign-in while not connected, or a
 signed-out server the person typed in by hand, not a catalog connector or
 local setup, whose last `initialize` was refused with a Bearer challenge naming
-its resource metadata (RFC 9728), read by the same parser sign-in discovery
+its resource metadata (RFC 9728) at an address discovery reads (https without
+credentials, or http on this computer), read by the same parser sign-in discovery
 uses on its own `initialize` probe; cancelling a first sign-in keeps that
 refusal, since no grant changed; signed out alone is only an offer, since a
 hosted server that takes a key or nothing reports it too, and a bare 401, or a

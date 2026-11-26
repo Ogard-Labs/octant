@@ -1,3 +1,20 @@
+/**
+ * Where sign-in discovery will read resource metadata from: https without
+ * credentials in the address, or plain http on this computer.
+ */
+export function readableMetadataAddress(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:") return !url.username && !url.password;
+    return (
+      url.protocol === "http:" &&
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]")
+    );
+  } catch {
+    return false;
+  }
+}
+
 const TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+/;
 const TOKEN68 = /^[A-Za-z0-9\-._~+/]+=*/;
 
@@ -5,9 +22,10 @@ const TOKEN68 = /^[A-Za-z0-9\-._~+/]+=*/;
  * The `resource_metadata` parameter (RFC 9728) of the Bearer challenge in a
  * `WWW-Authenticate` header, read by the challenge grammar of RFC 9110 §11.6.1:
  * one header may hold several challenges, and a parameter belongs only to the
- * challenge it follows. Both the connection's refusal and sign-in discovery
- * read the header through this, so they never disagree about what a server
- * offered.
+ * challenge it follows. Only an address discovery will read counts: a bare
+ * word is no place to start a sign-in from. Both the connection's refusal and
+ * sign-in discovery read the header through this, so they never disagree
+ * about what a server offered.
  */
 export function bearerResourceMetadata(header: string | null): string | undefined {
   if (header === null) return undefined;
@@ -54,8 +72,8 @@ export function bearerResourceMetadata(header: string | null): string | undefine
     // A value runs to the next list element; anything else (an unquoted URL)
     // is not the grammar, and a misread value would name the wrong address.
     if (!/^[ \t]*(?:,|$)/.test(rest)) return undefined;
-    if (scheme === "bearer" && token.toLowerCase() === "resource_metadata" && value.length > 0)
-      return value;
+    if (scheme === "bearer" && token.toLowerCase() === "resource_metadata")
+      return readableMetadataAddress(value) ? value : undefined;
   }
   return undefined;
 }

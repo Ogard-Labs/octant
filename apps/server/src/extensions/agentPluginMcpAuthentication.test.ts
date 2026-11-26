@@ -705,6 +705,17 @@ describe("a signed-out server the person added by hand", () => {
     expect(bare).not.toHaveProperty("signInOffered");
     const [other] = await refusedWith('Bearer x_resource_metadata="https://example.test/meta"');
     expect(other).not.toHaveProperty("signInOffered");
+    // Sign-in discovery reads metadata only from https, or http on this
+    // computer; any other value would offer a sign-in it cannot start from.
+    for (const unusable of [
+      "Bearer resource_metadata=metadata",
+      'Bearer resource_metadata="http://example.test/meta"',
+      'Bearer resource_metadata="https://user:secret@example.test/meta"',
+    ]) {
+      const [refused] = await refusedWith(unusable);
+      expect(refused).toMatchObject({ state: "failed" });
+      expect(refused).not.toHaveProperty("signInOffered");
+    }
     const [packaged] = await refusedWith(`Bearer resource_metadata="${METADATA}"`, {
       userAdded: false,
     });
@@ -757,6 +768,32 @@ describe("a signed-out server the person added by hand", () => {
       expect.objectContaining({ state: "failed", signInOffered: true }),
     ]);
     await subject.invalidateAuthentication(EXTENSION, "mcp-remote");
+    expect(subject.connectionObservations()).toEqual([]);
+  });
+
+  it("keeps a cancelled sign-in's offer through an extension change that keeps the server, until it goes", async () => {
+    const actual =
+      await vi.importActual<typeof import("./agentPluginMcpClient")>("./agentPluginMcpClient");
+    connect.mockImplementation(actual.connectAgentPluginMcpSession);
+    const subject = manager(async () => true, {
+      fetch: Object.assign(
+        async () =>
+          new Response(null, {
+            status: 401,
+            headers: { "www-authenticate": `Bearer resource_metadata="${METADATA}"` },
+          }),
+        { preconnect: () => undefined },
+      ),
+      isUserAddedSource: () => true,
+      addedByHandSource: () => true,
+    });
+    await subject.reconcile(effective());
+    await subject.invalidateAuthentication(EXTENSION, "mcp-remote", { grant: "unchanged" });
+    await subject.reconcileLifecycleSnapshot(effective() as never);
+    expect(subject.connectionObservations()).toEqual([
+      expect.objectContaining({ state: "failed", signInOffered: true }),
+    ]);
+    await subject.reconcileLifecycleSnapshot({ packages: [] } as never);
     expect(subject.connectionObservations()).toEqual([]);
   });
 

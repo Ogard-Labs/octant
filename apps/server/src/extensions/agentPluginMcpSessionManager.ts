@@ -835,7 +835,7 @@ export class AgentPluginMcpSessionManager {
    */
   async reconcileLifecycleSnapshot(snapshot: ExtensionSnapshot): Promise<void> {
     const retained = new Set<string>();
-    for (const [key, target] of this.#desired) {
+    const stillEffective = (target: AgentPluginMcpSessionKey) => {
       const packageState = snapshot.packages.find(
         (candidate) =>
           candidate.extensionId === target.extensionId &&
@@ -846,8 +846,9 @@ export class AgentPluginMcpSessionManager {
       const componentState = packageState?.components.find(
         (candidate) => candidate.component.id === target.componentId,
       );
-      if (componentState?.effectiveState.kind === "effective") retained.add(key);
-    }
+      return componentState?.effectiveState.kind === "effective";
+    };
+    for (const [key, target] of this.#desired) if (stillEffective(target)) retained.add(key);
 
     for (const [key, record] of this.#sessions) {
       if (!retained.has(key)) await this.#close(key, record);
@@ -855,9 +856,12 @@ export class AgentPluginMcpSessionManager {
     for (const key of this.#desired.keys()) {
       if (!retained.has(key)) this.#desired.delete(key);
     }
-    for (const key of this.#failures.keys()) {
-      if (!retained.has(key)) this.#failures.delete(key);
-    }
+    // A cancelled first sign-in keeps its refusal without a desired session
+    // (see invalidateAuthentication), so that refusal is judged by its own
+    // package: an unrelated extension change must not hide Sign in.
+    for (const [key, failure] of this.#failures)
+      if (!retained.has(key) && !(failure.signInOffered === true && stillEffective(failure.target)))
+        this.#failures.delete(key);
     const installed = new Set(
       snapshot.packages.flatMap((packageState) =>
         packageState.components.map((componentState) =>
