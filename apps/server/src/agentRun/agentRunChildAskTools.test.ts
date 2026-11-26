@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createProjectMemoryAccess } from "../projectMemory/projectMemoryAccess";
 import { isRoutineHostScope } from "../routineHostScope";
 import {
+  ChildComputerOwners,
   childComputerTools,
   childCredentialTools,
   childImageTools,
@@ -247,5 +248,17 @@ describe("a child's Computer use", () => {
       '{"operation":"apps"}',
       '{"operation":"stop"}',
     ]);
+  });
+});
+
+describe("the runs that own a child's Computer tool", () => {
+  it("keep a live run however many others are composed, and drop one that ended", () => {
+    const owners = new ChildComputerOwners();
+    owners.hold(childHost());
+    owners.hold({ ...childHost({ current: () => false }), runId: "ended-run" });
+    for (let index = 0; index < 300; index += 1)
+      owners.hold({ ...childHost(), runId: `other-run-${String(index)}` });
+    expect(owners.get(CHILD_RUN)?.runId).toBe(CHILD_RUN);
+    expect(owners.get("ended-run")).toBeUndefined();
   });
 });

@@ -150,6 +150,26 @@ export function childCredentialTools(input: {
 }
 
 /**
+ * The child runs `octant_computer` was composed for, by run id. A run keeps
+ * its entry for as long as it holds its grant, however many others are
+ * composed; one that ended or lost its grant is dropped at the next
+ * composition. A run is composed only while it is starting, so a run being
+ * started is never dropped.
+ */
+export class ChildComputerOwners {
+  readonly #hosts = new Map<string, AgentRunChildToolHost>();
+
+  hold(host: AgentRunChildToolHost): void {
+    for (const [runId, held] of this.#hosts) if (!held.current()) this.#hosts.delete(runId);
+    this.#hosts.set(host.runId, host);
+  }
+
+  get(runId: string): AgentRunChildToolHost | undefined {
+    return this.#hosts.get(runId);
+  }
+}
+
+/**
  * `octant_computer` for an attended child outside Plan, as its own owner: no
  * grant of its parent's covers it, and its grants and screen reservation end
  * with the run.

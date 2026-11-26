@@ -94,7 +94,7 @@ import {
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { ToolActionAuthority } from "@octant/contracts";
-import { childComputerTools } from "../agentRun/agentRunChildAskTools";
+import { ChildComputerOwners, childComputerTools } from "../agentRun/agentRunChildAskTools";
 import type { AgentRunChildToolHost } from "../agentRun/agentRunChildTools";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
 import type { AgentRunsWiring } from "./agentRuns";
@@ -162,9 +162,6 @@ export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence
     /** The level a Work thread's running turn holds; wired later, read per call. */
     readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
   };
-
-/** Child runs the Computer tool was composed for; a run ended releases its own. */
-const MAX_CHILD_COMPUTER_OWNERS = 256;
 
 export function wireComputerUse(deps: ComputerUseDependencies) {
   const {
@@ -493,7 +490,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   const leasingOffered = desktopProviders().some((entry) => entry.effective);
   // A child run operates this Mac as its own owner, under its run id: it holds
   // none of its parent's grants, and its parent holds none of its own.
-  const childOwners = new Map<string, AgentRunChildToolHost>();
+  const childOwners = new ChildComputerOwners();
   const childOwner = (owner: ComputerUseOwner) => childOwners.get(owner.threadId);
   const threadOf = (owner: ComputerUseOwner) => childOwner(owner)?.parentThreadId ?? owner.threadId;
   const childComputerAuthority = (child: AgentRunChildToolHost): ToolActionAuthority | undefined =>
@@ -693,13 +690,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     const host = childToolHost(input, "octant_computer");
     const windowId = host?.window();
     if (host === undefined || windowId === undefined || !host.attended()) return undefined;
-    childOwners.delete(host.runId);
-    childOwners.set(host.runId, host);
-    // A run composed and never started leaves its entry; the oldest go first.
-    for (const runId of childOwners.keys()) {
-      if (childOwners.size <= MAX_CHILD_COMPUTER_OWNERS) break;
-      childOwners.delete(runId);
-    }
+    childOwners.hold(host);
     return childComputerTools({
       host,
       resources: childResources,
