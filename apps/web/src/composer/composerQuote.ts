@@ -1,10 +1,14 @@
 /**
  * A quote in the composer: words taken from a reply, a terminal, or a file,
  * with the person's optional note on them. A quote lives in the prompt as its
- * own text, so the draft stays plain text: copying, pasting, stashing, and
- * restoring the draft carry the quote with it, and the prompt shows that text
- * as one chip wherever it finds it. The host never sees a quote type; the text
- * is what is sent.
+ * own text, so the draft stays plain text and the host never sees a quote
+ * type; the text is what is sent.
+ *
+ * Only a quote Octant wrote shows as a chip: one added by Add to chat (or a
+ * terminal or editor selection), a note saved from the chip, or one copied out
+ * of a composer and pasted with Octant's clipboard mark. Text that merely has
+ * a quote's shape (an agent's reply pasted in, say) stays plain, visible text,
+ * so a note inside it can never hide behind a chip as the person's own words.
  *
  * The text frames the quoted words as reference, not instructions, and fences
  * them so nothing inside can pass for the person's own request. The note
@@ -36,14 +40,43 @@ function escapeForPattern(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Anchored to nothing on either side: the person can type right against a
-// chip, and the prompt puts the quote back on its own lines (see
-// `separateComposerQuotes`). The note is a quoted string, so typing after it
-// never joins it.
+// A closing fence ends its line, so words glued to one never read as the end
+// of a quote. The header may follow other words on its line: the person can
+// type right before a chip, and the prompt puts the quote back on lines of
+// its own (`separateComposerQuotes`).
 const QUOTE_PATTERN = new RegExp(
-  `Quoted from ([^\\n]+?)${escapeForPattern(HEADER_TAIL)}\\n(\`{3,})\\n([\\s\\S]*?)\\n\\2(?:\\n${escapeForPattern(NOTE_LEAD)}("(?:[^"\\\\\\n]|\\\\.)*"))?`,
+  `Quoted from ([^\\n]+?)${escapeForPattern(HEADER_TAIL)}\\n(\`{3,})\\n([\\s\\S]*?)\\n\\2(?:\\n${escapeForPattern(NOTE_LEAD)}("(?:[^"\\\\\\n]|\\\\.)*"))?(?=\\n|$)`,
   "g",
 );
+
+/** The clipboard type a composer's copy writes beside the text: the quotes it holds that Octant wrote. */
+export const COMPOSER_QUOTE_CLIPBOARD_TYPE = "application/x-octant-composer-quotes";
+
+/**
+ * Quote texts Octant wrote in this window. A text only counts as a quote when
+ * it is exactly one of these, so the shape alone grants nothing. Kept in
+ * memory: after a reload a quote reads as the plain text it is.
+ */
+const QUOTES_WRITTEN_LIMIT = 512;
+const quotesWritten = new Set<string>();
+
+function rememberQuoteText(text: string): void {
+  quotesWritten.delete(text);
+  quotesWritten.add(text);
+  while (quotesWritten.size > QUOTES_WRITTEN_LIMIT) {
+    const oldest = quotesWritten.values().next();
+    if (oldest.done === true) break;
+    quotesWritten.delete(oldest.value);
+  }
+}
+
+/** Marks quote texts a composer copied (carried by Octant's clipboard type) as Octant's own again. */
+export function trustComposerQuotes(texts: ReadonlyArray<string>): void {
+  for (const text of texts)
+    if (findQuoteShapes(text).some((place) => place.chipText === text)) {
+      rememberQuoteText(text);
+    }
+}
 
 function readNote(written: string | undefined): string {
   if (written === undefined) return "";
@@ -82,17 +115,28 @@ export function composerQuoteText(quote: ComposerQuote): string {
   const fence = "`".repeat(Math.max(3, longestRun + 1));
   const source = oneLine(quote.source).slice(0, SOURCE_LIMIT) || "the person's selection";
   const comment = oneLine(quote.comment);
-  return [
+  const text = [
     `Quoted from ${source}${HEADER_TAIL}`,
     fence,
     body,
     fence,
     ...(comment === "" ? [] : [`${NOTE_LEAD}${JSON.stringify(comment)}`]),
   ].join("\n");
+  rememberQuoteText(text);
+  return text;
 }
 
-/** Every quote in the prompt's text, in order. */
+/** Every quote Octant wrote in the prompt's text, in order. */
 export function findComposerQuotes(value: string): ReadonlyArray<ComposerQuotePlace> {
+  return findQuoteShapes(value).filter((place) => quotesWritten.has(place.chipText));
+}
+
+/** The quote texts in `value`, for a copy to carry under Octant's clipboard type. */
+export function composerQuoteTextsIn(value: string): ReadonlyArray<string> {
+  return findComposerQuotes(value).map((place) => place.chipText);
+}
+
+function findQuoteShapes(value: string): ReadonlyArray<ComposerQuotePlace> {
   if (!value.includes(HEADER_TAIL)) return [];
   const places: Array<ComposerQuotePlace> = [];
   for (const match of value.matchAll(QUOTE_PATTERN)) {
@@ -109,24 +153,35 @@ export function findComposerQuotes(value: string): ReadonlyArray<ComposerQuotePl
 }
 
 /**
- * The prompt with every quote on lines of its own, and where the caret lands.
- * Text typed right against a quote would otherwise run into its header or its
- * closing fence, and a fence with words after it no longer closes.
+ * The prompt with each of the quotes it held before an edit (`held`, their
+ * exact texts) on lines of its own, and where the caret lands. Text typed
+ * right against a chip would otherwise run into its header or its closing
+ * fence, and a fence with words after it no longer closes. The quotes are
+ * found by their exact text, since glued words stop the pattern matching.
  */
 export function separateComposerQuotes(
   value: string,
   caret: number,
+  held: ReadonlyArray<string>,
 ): { readonly value: string; readonly caret: number } {
   let next = value;
   let at = caret;
-  for (const quote of findComposerQuotes(value).toReversed()) {
-    if (quote.end < next.length && next[quote.end] !== "\n") {
-      next = `${next.slice(0, quote.end)}\n${next.slice(quote.end)}`;
-      if (at > quote.end) at += 1;
-    }
-    if (quote.start > 0 && next[quote.start - 1] !== "\n") {
-      next = `${next.slice(0, quote.start)}\n${next.slice(quote.start)}`;
-      if (at > quote.start) at += 1;
+  for (const text of new Set(held)) {
+    let from = 0;
+    for (;;) {
+      const start = next.indexOf(text, from);
+      if (start < 0) break;
+      let end = start + text.length;
+      if (end < next.length && next[end] !== "\n") {
+        next = `${next.slice(0, end)}\n${next.slice(end)}`;
+        if (at > end) at += 1;
+      }
+      if (start > 0 && next[start - 1] !== "\n") {
+        next = `${next.slice(0, start)}\n${next.slice(start)}`;
+        if (at > start) at += 1;
+        end += 1;
+      }
+      from = end;
     }
   }
   return { value: next, caret: at };
@@ -138,11 +193,6 @@ const PREVIEW_LIMIT = 40;
 export function quotePreview(text: string): string {
   const flat = oneLine(text);
   return flat.length <= PREVIEW_LIMIT ? flat : `${flat.slice(0, PREVIEW_LIMIT - 1)}…`;
-}
-
-/** Whether the prompt carries a quote, whose words the person did not type. */
-export function holdsComposerQuote(value: string): boolean {
-  return findComposerQuotes(value).length > 0;
 }
 
 /**

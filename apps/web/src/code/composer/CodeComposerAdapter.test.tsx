@@ -58,6 +58,22 @@ const defaultProps = {
 };
 
 describe("CodeComposerAdapter", () => {
+  it("attaches a 40 KiB paste on the Code start screen as a text file", async () => {
+    render(<CodeComposerAdapter {...defaultProps} />);
+    const prompt = screen.getByRole("textbox", { name: "First message" });
+    prompt.focus();
+    fireEvent.paste(prompt, {
+      clipboardData: {
+        getData: (type: string) => (type === "text/plain" ? "x".repeat(40 * 1024) : ""),
+        files: [],
+        items: [],
+        types: ["text/plain"],
+      },
+    });
+    expect(prompt).toHaveValue("");
+    expect(await screen.findByText("pasted-text-1.txt")).toBeInTheDocument();
+  });
+
   it("keeps a reviewed proposal exact and names the create-and-start decision", async () => {
     const onCreateThread = vi.fn();
     render(

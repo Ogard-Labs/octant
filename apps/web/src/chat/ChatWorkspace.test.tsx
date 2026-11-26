@@ -1,5 +1,5 @@
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
-import { appendComposerQuote, REPLY_QUOTE_SOURCE } from "../composer/composerQuote";
+import { composerQuoteText, REPLY_QUOTE_SOURCE } from "../composer/composerQuote";
 import { decodeChatAttachment } from "@octant/contracts/chat";
 import type { ThreadMessageQueueResult } from "@octant/contracts";
 import {
@@ -2259,19 +2259,120 @@ describe("ChatWorkspace", () => {
     expect(sendTurn).toHaveBeenLastCalledWith("Ship this plan", [lateAttachmentId], [], [], [], []);
   });
 
-  it("adds a reply selection to the draft as a quote chip", async () => {
+  it("adds a reply selection to the draft as a quote chip and sends it as reference text", async () => {
     const user = userEvent.setup();
-    const controller = controllerFixture({ activeView: viewWithQuotableReplies() });
-    render(<ChatWorkspace controller={controller} providerSnapshot={providerSnapshot()} />);
+    const sendTurn = vi.fn(async (_prompt: string) => true);
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView: viewWithQuotableReplies(),
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+            sendTurn,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
 
     await addQuoteFromTranscript(user, "First quote excerpt.");
-
-    const draft = appendComposerQuote("Ship this plan", {
-      source: REPLY_QUOTE_SOURCE,
-      text: "First quote excerpt.",
-      comment: "",
+    await screen.findByRole("button", {
+      name: "Quote from an earlier reply in this thread: First quote excerpt.",
     });
-    expect(controller.setPendingDraft).toHaveBeenLastCalledWith(draft, draft.length);
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    expect(sendTurn.mock.calls[0]?.[0]).toBe(
+      composerQuoteText({ source: REPLY_QUOTE_SOURCE, text: "First quote excerpt.", comment: "" }),
+    );
+  });
+
+  it("keeps a quote added while a send is in flight for the next message", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<boolean>();
+    const sendTurn = vi.fn((_prompt: string) => pending.promise);
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView: viewWithQuotableReplies(),
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+            sendTurn,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await addQuoteFromTranscript(user, "First quote excerpt.");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    expect(sendTurn.mock.calls[0]?.[0]).not.toContain("Second quote excerpt.");
+
+    await addQuoteFromTranscript(user, "Second quote excerpt.");
+    await act(async () => pending.resolve(true));
+
+    // The quote added during the send was not part of it, so it stays.
+    expect(
+      await screen.findByRole("button", {
+        name: "Quote from an earlier reply in this thread: Second quote excerpt.",
+      }),
+    ).toBeVisible();
+    expect(
+      (screen.getByRole("textbox", { name: "Message" }) as HTMLElement & { value: string }).value,
+    ).toContain("Second quote excerpt.");
+  });
+
+  it("recalls the last sent prompt with ArrowUp, and not while an attachment waits", async () => {
+    const user = userEvent.setup();
+    const upload = vi.fn<ChatController["upload"]>(async (input) =>
+      decodeChatAttachment({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+        status: "finalized",
+        createdAt: now,
+      }),
+    );
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView: viewWithQuotableReplies(),
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+            upload,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
+    const message = screen.getByLabelText("Message");
+    message.focus();
+    await user.keyboard("{ArrowUp}");
+    expect(message).toHaveValue("Second question.");
+    await user.keyboard("{ArrowDown}");
+    expect(message).toHaveValue("");
+
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["image"], "first.png", { type: "image/png" }),
+    );
+    await screen.findByText("first.png");
+    message.focus();
+    await user.keyboard("{ArrowUp}");
+    expect(message).toHaveValue("");
   });
 
   it("keeps an attachment visible when authoritative discard fails", async () => {

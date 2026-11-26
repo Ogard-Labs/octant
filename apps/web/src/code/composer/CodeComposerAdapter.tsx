@@ -1416,6 +1416,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             input={
               <ComposerInput
                 typedScope={typedScope}
+                {...(props.creating === true || props.fixedPrompt !== undefined
+                  ? {}
+                  : { onPasteAsFile: (file: File) => void images.attach([file]) })}
                 inlineChips={mention.inlineChips}
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"

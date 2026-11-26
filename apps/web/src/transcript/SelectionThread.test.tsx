@@ -1,5 +1,7 @@
 import type { ProjectId } from "@octant/contracts/projects";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   appendComposerQuote,
@@ -71,24 +73,37 @@ describe("SelectionThreadSurface", () => {
     expect(screen.queryByRole("button", { name: "New thread from selection" })).toBeNull();
   });
 
-  it("a Work reply selection adds a quote chip to this thread's composer", () => {
-    const addToChat = vi.fn();
-    render(
-      <SelectionThreadScope mode="work" onAddToChat={addToChat} projectId={projectId}>
-        <SelectionThreadSurface>
-          <p>The plan is to split the module.</p>
-        </SelectionThreadSurface>
-      </SelectionThreadScope>,
-    );
+  it("a Work reply selection adds a quote chip to this thread's composer", async () => {
+    function WorkThread() {
+      const [draft, setDraft] = useState("");
+      return (
+        <SelectionThreadScope
+          mode="work"
+          onAddToChat={(quote) => setDraft((current) => appendComposerQuote(current, quote))}
+          projectId={projectId}
+        >
+          <SelectionThreadSurface>
+            <p>The plan is to split the module.</p>
+          </SelectionThreadSurface>
+          <label htmlFor="work-prompt">Message</label>
+          <ComposerInput
+            id="work-prompt"
+            onChange={(event) => setDraft(event.currentTarget.value)}
+            value={draft}
+          />
+        </SelectionThreadScope>
+      );
+    }
+    render(<WorkThread />);
     selectAll();
     fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
 
-    expect(addToChat).toHaveBeenCalledWith({
-      source: REPLY_QUOTE_SOURCE,
-      text: "The plan is to split the module.",
-      comment: "",
-    });
-    const draft = appendComposerQuote("", addToChat.mock.calls[0]?.[0]);
-    expect(findComposerQuotes(draft)).toHaveLength(1);
+    expect(
+      await screen.findByRole("button", {
+        name: `Quote from ${REPLY_QUOTE_SOURCE}: The plan is to split the module.`,
+      }),
+    ).toBeInTheDocument();
+    const prompt = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    expect(findComposerQuotes(prompt.value)).toHaveLength(1);
   });
 });

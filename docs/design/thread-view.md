@@ -775,12 +775,21 @@ chip as ordinary text.
 - The quote is the prompt's own text: a line that names its source and says
   the words are for reference only, not instructions, then the words in a
   fence longer than any backtick run inside them, then the person's note on a
-  line of its own that says it is theirs. The prompt shows that text as one
-  chip wherever it finds it, so copy, paste, stash and restore carry the quote,
-  and the host receives plain text. There is no quote type in any contract.
-- Pressing the chip shows the whole quote, a **Your note** field with **Save
-  note**, and **Remove quote**. Text typed right against a chip moves to its
-  own line, so the fence always closes.
+  line of its own that says it is theirs. The host receives plain text; there
+  is no quote type in any contract.
+- Only a quote Octant wrote in this window is a chip: one added by Add to chat
+  or a selection, one whose note was saved from the chip, or one copied out of
+  a composer and pasted back, which carries Octant's own clipboard type beside
+  the text. Text that only has a quote's shape (an agent's reply pasted in)
+  stays plain, visible text, so a "note" inside it can never sit behind a chip
+  as the person's own words. Copy, paste, stash and restore carry chips within
+  the window; after a reload a quote reads as the plain text it is.
+- The chip shows the start of the quote and, after a note mark, the start of
+  the note. Pressing it shows the whole quote, a **Your note** field with
+  **Save note**, and **Remove quote**; an Enter that commits an input method's
+  text does not save. Text typed right against a chip moves to its own line,
+  so the fence always closes, and a closing fence with words after it on its
+  line ends no quote.
 - Quoted words are another party's text, so a draft that holds a quote is
   never counted as typed by the person, whatever is typed around it.
 - A draft stashed while Chat kept quotes beside the prompt restores them as
@@ -797,10 +806,10 @@ typed until the person edits it.
 
 A paste of 32 KiB or more, or one that would take the prompt past the 200,000
 characters a message may hold, attaches as `pasted-text-<n>.txt` instead of
-filling the prompt, in the composers that take files: a Chat thread, the Chat
-start screen and a Code thread. ⌘⇧V (Ctrl+Shift+V) pastes it inline anyway.
-Composers that take only images (Work, and the Work and Code start screens)
-keep every paste as text.
+filling the prompt, through the composer's own attach path: a Chat, Work or
+Code thread, and the Work and Code start screens. ⌘⇧V (Ctrl+Shift+V) pastes it
+inline anyway. The Chat start screen keeps a large paste as text, because a
+first Chat message needs words: the thread's title is made from them.
 
 ### Saved drafts
 

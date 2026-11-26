@@ -287,14 +287,8 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             input={
               <ComposerInput
                 typedScope={typedScope}
-                onPasteAsFile={
-                  !ready || props.creating === true
-                    ? undefined
-                    : (file: File) => {
-                        setAttachmentNotice(undefined);
-                        setStagedFiles((current) => [...current, file]);
-                      }
-                }
+                // No onPasteAsFile: a first Chat message needs words, since its
+                // title is made from them, so a large paste stays text here.
                 renderModelChip={atMenu.renderModelChip}
                 aria-activedescendant={
                   atMenu.active !== undefined

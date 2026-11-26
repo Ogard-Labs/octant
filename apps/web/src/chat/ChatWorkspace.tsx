@@ -81,7 +81,7 @@ import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/Thr
 import { ChatPendingQuestions, ChatTranscript, type ChatTranscriptProps } from "./ChatTranscript";
 import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
 import { appendComposerQuote, REPLY_QUOTE_SOURCE } from "../composer/composerQuote";
-import { sentPromptsNewestFirst } from "../composer/sentPrompts";
+import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
@@ -1842,14 +1842,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           )}
           <ChatComposer
             typedScope={typedScope}
-            recall={
-              pendingAttachments.length > 0 ||
-              pendingPreviewSelections.length > 0 ||
-              pendingCanvasSelections.length > 0 ||
-              pendingExtensionSelections.length > 0
-                ? undefined
-                : chatPromptsNewestFirst(view)
-            }
+            recall={promptsToRecall(
+              {
+                attachments: pendingAttachments.length,
+                uploads: uploadingAttachments.length,
+                previews: pendingPreviewSelections.length,
+                canvas: pendingCanvasSelections.length,
+                receipts: pendingExtensionSelections.length,
+              },
+              () => chatPromptsNewestFirst(view),
+            )}
             stash={stash}
             readOnly={readOnly}
             benchmarkProjectId={view.thread.projectId}

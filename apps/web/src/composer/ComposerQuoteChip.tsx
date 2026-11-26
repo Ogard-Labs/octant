@@ -43,7 +43,14 @@ export function ComposerQuoteChip(props: ComposerQuoteChipProps) {
         <>
           <Quote aria-hidden="true" size={12} />
           <span className="composer-chip__text">{preview}</span>
-          {quote.comment === "" ? null : <NotebookPen aria-hidden="true" size={12} />}
+          {quote.comment === "" ? null : (
+            <>
+              <NotebookPen aria-hidden="true" size={12} />
+              <span className="composer-chip__text composer-chip__meta">
+                {quotePreview(quote.comment)}
+              </span>
+            </>
+          )}
         </>
       }
       triggerClassName="composer-chip__button"
@@ -59,7 +66,8 @@ export function ComposerQuoteChip(props: ComposerQuoteChipProps) {
         id={noteId}
         onChange={(event) => setNote(event.currentTarget.value)}
         onKeyDown={(event) => {
-          if (event.key !== "Enter" || event.shiftKey) return;
+          // An Enter that commits an input method's text is not a save.
+          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
           event.preventDefault();
           props.onChange({ ...quote, comment: note });
           setOpen(false);

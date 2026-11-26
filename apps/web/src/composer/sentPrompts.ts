@@ -18,3 +18,15 @@ export function sentPromptsNewestFirst<Item>(
   }
   return prompts;
 }
+
+/**
+ * What ArrowUp may recall: nothing while anything sits beside the prompt
+ * (counts of attachments, uploads, receipts or selections), since a recalled
+ * prompt would be sent with context it never had.
+ */
+export function promptsToRecall(
+  beside: Readonly<Record<string, number>>,
+  prompts: () => ReadonlyArray<string>,
+): ReadonlyArray<string> | undefined {
+  return Object.values(beside).some((count) => count > 0) ? undefined : prompts();
+}

@@ -27,10 +27,13 @@ import { createPortal, flushSync } from "react-dom";
 import { MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS } from "@octant/contracts/thread-message-queue";
 import { lazyOr } from "../lib/lazyOr";
 import {
+  COMPOSER_QUOTE_CLIPBOARD_TYPE,
   composerQuoteText,
+  composerQuoteTextsIn,
   findComposerQuotes,
   quotePreview,
   separateComposerQuotes,
+  trustComposerQuotes,
   type ComposerQuotePlace,
 } from "./composerQuote";
 import type { ComposerQuoteChipProps } from "./ComposerQuoteChip";
@@ -38,7 +41,9 @@ import type { ComposerQuoteChipProps } from "./ComposerQuoteChip";
 const LazyQuoteChip = lazyOr<ComposerQuoteChipProps>(
   async () => (await import("./ComposerQuoteChip")).ComposerQuoteChip,
   ({ quote }) => (
-    <span className="composer-chip__label">{`Quote · ${quotePreview(quote.text)}`}</span>
+    <span className="composer-chip__label">
+      {`Quote · ${quotePreview(quote.text)}${quote.comment === "" ? "" : ` · Note: ${quote.comment}`}`}
+    </span>
   ),
 );
 
@@ -381,6 +386,27 @@ function isCanonical(root: HTMLElement, value: string, findInline: FindInlineChi
   return true;
 }
 
+/** Writes a copy's text, and beside it, under Octant's own type, the quotes Octant wrote in it. */
+function copyText(clipboard: DataTransfer, text: string): void {
+  clipboard.setData("text/plain", text);
+  const quotes = composerQuoteTextsIn(text);
+  if (quotes.length > 0) clipboard.setData(COMPOSER_QUOTE_CLIPBOARD_TYPE, JSON.stringify(quotes));
+}
+
+/** The quotes a paste's clipboard says a composer copied, each still whole in the pasted text. */
+function copiedQuotes(clipboard: DataTransfer, text: string): ReadonlyArray<string> {
+  const marked = clipboard.getData(COMPOSER_QUOTE_CLIPBOARD_TYPE);
+  if (marked === "") return [];
+  try {
+    const quotes: unknown = JSON.parse(marked);
+    return Array.isArray(quotes)
+      ? quotes.filter((quote): quote is string => typeof quote === "string" && text.includes(quote))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 interface ChipHost {
   readonly key: string;
   readonly node: HTMLElement;
@@ -605,7 +631,12 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     const emit = (typed: string, typedCaret: number, options: { readonly typing: boolean }) => {
       const root = rootRef.current;
       if (root === null) return;
-      const { value: next, caret } = separateComposerQuotes(typed, typedCaret);
+      const { value: next, caret } = separateComposerQuotes(
+        typed,
+        typedCaret,
+        // The quotes it held before the edit, and any the edit brought in.
+        [...composerQuoteTextsIn(modelRef.current), ...composerQuoteTextsIn(typed)],
+      );
       modelRef.current = next;
       pendingRef.current = { start: caret, end: caret };
       lastSelectionRef.current = { start: caret, end: caret };
@@ -650,9 +681,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     const plainPasteRef = useRef(0);
     const pastedFilesRef = useRef(0);
 
-    const pasteText = (root: HTMLElement, text: string, asked: "plain" | "any" = "any") => {
-      const plain = asked === "plain" || Date.now() < plainPasteRef.current;
-      plainPasteRef.current = 0;
+    const pasteText = (root: HTMLElement, text: string, plain: boolean) => {
       const { start, end } = currentSelection(root);
       const tooLarge =
         new TextEncoder().encode(text).length >= PASTE_AS_FILE_BYTES ||
@@ -994,7 +1023,8 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
               ?.readText()
               .then((text) => {
                 if (plainPasteRef.current === 0 || text === "") return;
-                pasteText(root, text.replace(/\r\n?/g, "\n"), "plain");
+                plainPasteRef.current = 0;
+                pasteText(root, text.replace(/\r\n?/g, "\n"), true);
               })
               .catch(() => undefined);
           }, 50);
@@ -1025,6 +1055,10 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       onFocus,
       onBlur,
       onPaste: (event: ClipboardEvent<ComposerInputElement>) => {
+        // Any paste answers a ⌘⇧V, even one a caller takes, so the clipboard
+        // read that stands in for a shell's missing paste never pastes twice.
+        const plain = Date.now() < plainPasteRef.current;
+        plainPasteRef.current = 0;
         onPaste?.(event);
         if (event.defaultPrevented || !editable) return;
         const root = rootRef.current;
@@ -1033,7 +1067,8 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const text = event.clipboardData.getData("text/plain");
         // A paste with no text (an image the caller did not take) changes nothing.
         if (text === "") return;
-        pasteText(root, text.replace(/\r\n?/g, "\n"));
+        trustComposerQuotes(copiedQuotes(event.clipboardData, text));
+        pasteText(root, text.replace(/\r\n?/g, "\n"), plain);
       },
       onCopy: (event: ClipboardEvent<ComposerInputElement>) => {
         const root = rootRef.current;
@@ -1041,7 +1076,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const { start, end } = currentSelection(root);
         if (start === end) return;
         event.preventDefault();
-        event.clipboardData.setData("text/plain", modelRef.current.slice(start, end));
+        copyText(event.clipboardData, modelRef.current.slice(start, end));
       },
       onCut: (event: ClipboardEvent<ComposerInputElement>) => {
         const root = rootRef.current;
@@ -1049,7 +1084,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const { start, end } = currentSelection(root);
         if (start === end) return;
         event.preventDefault();
-        event.clipboardData.setData("text/plain", modelRef.current.slice(start, end));
+        copyText(event.clipboardData, modelRef.current.slice(start, end));
         if (editable) replaceSelection(root, "");
       },
       // Through React's own `onInput`, so the caller's state update lands

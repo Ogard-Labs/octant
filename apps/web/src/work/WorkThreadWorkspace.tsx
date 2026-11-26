@@ -205,7 +205,7 @@ import {
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
 import { appendComposerQuote, type ComposerQuote } from "../composer/composerQuote";
-import { sentPromptsNewestFirst } from "../composer/sentPrompts";
+import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
@@ -3660,21 +3660,24 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           input={
             <ComposerInput
               typedScope={typedScope}
-              recall={
-                images.staged.length > 0 || extensionDraft.receipts.length > 0
-                  ? undefined
-                  : sentPromptsNewestFirst(
-                      turns.flatMap((turn) =>
-                        turn.delivery === undefined
-                          ? turn.transcript.filter((entry) => entry.role === "user")
-                          : [],
-                      ),
-                      (entry) =>
-                        parseAutomationFollowUpTurnPrompt(entry.text) === undefined
-                          ? entry.text
-                          : undefined,
-                    )
-              }
+              recall={promptsToRecall(
+                { images: images.staged.length, receipts: extensionDraft.receipts.length },
+                () =>
+                  sentPromptsNewestFirst(
+                    turns.flatMap((turn) =>
+                      turn.delivery === undefined
+                        ? turn.transcript.filter((entry) => entry.role === "user")
+                        : [],
+                    ),
+                    (entry) =>
+                      parseAutomationFollowUpTurnPrompt(entry.text) === undefined
+                        ? entry.text
+                        : undefined,
+                  ),
+              )}
+              {...(readOnly || completionLocked
+                ? {}
+                : { onPasteAsFile: (file: File) => void images.attach([file]) })}
               inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"

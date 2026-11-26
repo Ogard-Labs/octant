@@ -223,6 +223,22 @@ import { act } from "react";
 import type { ComposerInputElement } from "../../composer/ComposerInput";
 
 describe("WorkComposerAdapter interactions", () => {
+  it("attaches a 40 KiB paste on the Work start screen as a text file", async () => {
+    render(<WorkComposerAdapter {...baseProps} />);
+    const prompt = screen.getByRole("textbox", { name: "First message" });
+    prompt.focus();
+    fireEvent.paste(prompt, {
+      clipboardData: {
+        getData: (type: string) => (type === "text/plain" ? "y".repeat(40 * 1024) : ""),
+        files: [],
+        items: [],
+        types: ["text/plain"],
+      },
+    });
+    expect(prompt).toHaveValue("");
+    expect(await screen.findByText("pasted-text-1.txt")).toBeInTheDocument();
+  });
+
   it("submits on Enter and cancels on Escape", async () => {
     const onCreateThread = vi.fn();
     const onCancel = vi.fn();
