@@ -38,6 +38,7 @@ import {
   decodeWorkThreadId,
   decodeWorkTurnId,
   decodeWorkTurnUpdated,
+  THREAD_RETENTION_EVENT_NAMES,
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
   personalSignInRefusals,
@@ -163,7 +164,11 @@ import { lookToolForThread } from "../image/lookTool";
 import { prepareProjectTerminalProtections } from "../code/projectTerminalProtections";
 import { terminalShellFor } from "../code/terminalShell";
 import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
-import { createWorkTerminalTools, workAgentTerminalId } from "../work/workAgentTerminal";
+import {
+  createWorkTerminalTools,
+  endWorkTerminalsLeftBehind,
+  workAgentTerminalId,
+} from "../work/workAgentTerminal";
 import { providerTakesFileNatively, supportsConversationInput } from "./conversationInputs";
 import { modelLabelOf } from "./imageDescriber";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
@@ -512,8 +517,60 @@ export function wireWork(deps: WorkDependencies) {
           );
       }
     });
+    // The folder a Work thread works in now: undefined once it is archived,
+    // deleted, or its Project no longer binds it as it did.
+    const workThreadFolderNow = async (threadId: WorkThreadId) => {
+      const thread = workThreadProjection.read(threadId);
+      if (thread?.lifecycle !== "active") return undefined;
+      const project = persistence.readProject(thread.projectId);
+      if (
+        project?.type !== "work" ||
+        project.lifecycle !== "active" ||
+        project.bindingHistory.at(-1)?.revisionId !== thread.bindingRevisionId
+      )
+        return undefined;
+      const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
+      if (selected === undefined) return undefined;
+      return resolveThreadWorkingDirectory(
+        selected,
+        thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+      ).catch(() => undefined);
+    };
+    // A Work thread's agent shell ends as the change that leaves it behind is
+    // committed (an archive, a deletion, a move to another folder, the
+    // Project's relink or archive), not at the agent's next terminal call.
+    const unsubscribeWorkTerminalFolders = persistence.journal.subscribeCommitted((append) => {
+      if (
+        workTerminalFolders.size === 0 ||
+        !append.events.some(
+          (event) =>
+            event.aggregateType === "work-thread" ||
+            event.aggregateType === "project" ||
+            event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged,
+        )
+      )
+        return;
+      void endWorkTerminalsLeftBehind({
+        started: workTerminalFolders,
+        folderNow: async (threadId) => {
+          try {
+            return await workThreadFolderNow(decodeWorkThreadId(threadId));
+          } catch {
+            return undefined;
+          }
+        },
+        terminate: async (threadId) => {
+          await deps.codeOperationRuntime?.terminals
+            ?.terminate(workAgentTerminalId(threadId))
+            .catch(() => undefined);
+        },
+      }).catch((error: unknown) =>
+        console.error("[work terminal] A shell left behind did not stop.", error),
+      );
+    });
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
+        unsubscribeWorkTerminalFolders();
         unsubscribeKeptWorkSessionTerms();
         await outlivingWorkSessions.close();
       }),
@@ -993,21 +1050,7 @@ export function wireWork(deps: WorkDependencies) {
             ? threadWorkingDirectoryCurrent(input.projectRoot, input.projectRoot)
             : undefined;
         const currentRoot = async () => {
-          const thread = workThreadProjection.read(input.thread.id);
-          if (thread?.lifecycle !== "active") return undefined;
-          const project = persistence.readProject(thread.projectId);
-          if (
-            project?.type !== "work" ||
-            project.lifecycle !== "active" ||
-            project.bindingHistory.at(-1)?.revisionId !== thread.bindingRevisionId
-          )
-            return undefined;
-          const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
-          if (selected === undefined) return undefined;
-          const root = await resolveThreadWorkingDirectory(
-            selected,
-            thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
-          ).catch(() => undefined);
+          const root = await workThreadFolderNow(input.thread.id);
           return root === input.projectRoot && pinnedRoot?.() === true ? root : undefined;
         };
         const speechTurnAllowed = () => {

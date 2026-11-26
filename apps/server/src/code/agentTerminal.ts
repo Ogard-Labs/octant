@@ -45,7 +45,17 @@ export function createAgentTerminal(options: {
         const began = generation;
         const launch = await options.launch();
         if ("refused" in launch) return answer("terminal-unavailable", launch.refused);
-        if (closed || began !== generation) return answer("tool-closed");
+        // The scope the launch prepared stays ours to release until the
+        // service has started the shell: a launch that never reaches it, or
+        // fails before it keeps a record, would leave the terminal's id
+        // admitted, and every later start refused as still stopping.
+        const release = async () => {
+          await launch.onClosed?.().catch(() => undefined);
+        };
+        if (closed || began !== generation) {
+          await release();
+          return answer("tool-closed");
+        }
         try {
           const starting = terminals.launch({
             ...launch,
@@ -58,6 +68,9 @@ export function createAgentTerminal(options: {
           const snapshot = await starting;
           return snapshot.status === "running" ? undefined : terminalSnapshot(snapshot);
         } catch (error) {
+          // Releasing twice is safe: a launch that failed after keeping its
+          // record has already released it.
+          await release();
           return answer(
             "terminal-unavailable",
             error instanceof Error ? error.message : "The terminal could not start.",

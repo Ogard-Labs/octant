@@ -100,6 +100,8 @@ export function createWorkTerminalTools(input: {
   const { ask } = input;
   const tools = createAgentTerminalTools({
     terminal: terminal.port,
+    // The completion line is typed in the syntax of the shell the terminal opens.
+    shell: input.shell,
     uuid: input.uuid,
     authorityFailure: stale,
     posture: input.posture,
@@ -137,4 +139,26 @@ export function createWorkTerminalTools(input: {
       return tools.execute(call);
     },
   };
+}
+
+/**
+ * Ends each Work thread's shell whose thread is no longer active in the folder
+ * it started in: archived, deleted, its Project unbound, or moved to another
+ * folder. Run on each committed change, so a dev server left in the old
+ * folder stops then rather than at the agent's next terminal call.
+ */
+export async function endWorkTerminalsLeftBehind(input: {
+  /** Where each thread's shell was started, by thread id; ended ones are removed. */
+  readonly started: Map<string, string>;
+  /** The thread's active folder now; undefined when it has none. */
+  readonly folderNow: (threadId: string) => Promise<string | undefined>;
+  readonly terminate: (threadId: string) => Promise<void>;
+}): Promise<void> {
+  for (const [threadId, folder] of [...input.started]) {
+    if ((await input.folderNow(threadId)) === folder) continue;
+    // A start since this check began owns the entry now.
+    if (input.started.get(threadId) !== folder) continue;
+    input.started.delete(threadId);
+    await input.terminate(threadId);
+  }
 }

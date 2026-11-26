@@ -75,7 +75,11 @@ export function beginSandboxTurn(request: SandboxTurnRequest): SandboxTurnAdmiss
       networkSnapshots.delete(selection.context.sessionId);
     });
   }
-  if (parent === undefined) return result;
+  // A terminal takes its thread's ceiling at start but owns its own lifetime:
+  // it ends when it is closed, not when the turn that was running then ends.
+  // Ending it with that turn killed a Work thread's dev server as soon as the
+  // reply that started it finished. A helper still ends with its parent.
+  if (parent === undefined || request.executionRoute === "terminal") return result;
   const turn = result.turn;
   const remove = registerSandboxCleanup(parent, async () => {
     await turn.end();

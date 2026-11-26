@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createWorkTerminalTools } from "./workAgentTerminal";
+import { createWorkTerminalTools, endWorkTerminalsLeftBehind } from "./workAgentTerminal";
 
 const WORK_THREAD = "33333333-3333-4333-8333-333333333333";
 const call = (body: unknown) => ({ name: "octant_terminal", inputJson: JSON.stringify(body) });
@@ -45,6 +45,7 @@ function tools(
     readonly posture?: "plan" | "approval-gated" | "auto-accept-edits" | "full-access";
     readonly ask?: (summary: string) => Promise<"approved" | "denied">;
     readonly service?: ReturnType<typeof terminals>;
+    readonly end?: () => Promise<void>;
   } = {},
 ) {
   const service = overrides.service ?? terminals();
@@ -56,7 +57,7 @@ function tools(
     posture: () => posture,
     current: () => true,
     ...(overrides.ask === undefined ? {} : { ask: overrides.ask }),
-    protections: async () => ({ launch: {}, end: async () => undefined }),
+    protections: async () => ({ launch: {}, end: overrides.end ?? (async () => undefined) }),
     platform: "darwin",
     strict: () => true,
     shell: () => "/bin/zsh",
@@ -180,5 +181,41 @@ describe("a Work thread's terminal", () => {
     await set.execute(call({ operation: "run", command: "ls" }));
     const admit = service.launch.mock.calls[0]?.[0]["admit"];
     expect(typeof admit === "function" && admit()).toBe(false);
+  });
+
+  it("releases the sandbox it prepared when the shell cannot start, so a later start is not refused", async () => {
+    const service = terminals();
+    service.launch.mockRejectedValueOnce(new Error("The shell could not be spawned."));
+    const end = vi.fn(async () => undefined);
+    const { set } = tools({ posture: "full-access", service, end });
+    expect(await set.execute(call({ operation: "run", command: "ls" }))).toMatchObject({
+      isError: true,
+      result: { error: "terminal-unavailable" },
+    });
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  it("ends a shell as soon as its thread is archived or moves to another folder, and keeps one still in place", async () => {
+    const started = new Map([
+      ["archived", "/work/a"],
+      ["moved", "/work/b"],
+      ["kept", "/work/c"],
+    ]);
+    const now = new Map<string, string | undefined>([
+      ["archived", undefined],
+      ["moved", "/work/b/docs"],
+      ["kept", "/work/c"],
+    ]);
+    const terminate = vi.fn(async (_threadId: string) => undefined);
+    await endWorkTerminalsLeftBehind({
+      started,
+      folderNow: async (threadId) => now.get(threadId),
+      terminate,
+    });
+    expect(terminate.mock.calls.map(([threadId]) => threadId).sort()).toEqual([
+      "archived",
+      "moved",
+    ]);
+    expect([...started.keys()]).toEqual(["kept"]);
   });
 });
