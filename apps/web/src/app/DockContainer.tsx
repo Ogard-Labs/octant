@@ -213,6 +213,7 @@ export interface DockContainerProps {
   readonly requestedAgentReview?: {
     readonly threadKey: string;
     readonly request: AgentResultReviewRequest;
+    readonly fromSubagentTab?: true;
   };
   readonly requestedAgentView?: {
     readonly threadKey: string;
@@ -386,8 +387,11 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
           ? {
               requestedAgentReview: requestedAgentReview.request,
               onAgentReviewBack: () => {
-                // A saved review is opened from the Agents page and returns there.
-                actions.openSubagentInAgents(String(requestedAgentReview.request.packet.runId));
+                // A saved review returns where it was opened: the Agents page,
+                // or, from a subagent's own tab, that tab, still open beside it.
+                if (requestedAgentReview.fromSubagentTab !== true) {
+                  actions.openSubagentInAgents(String(requestedAgentReview.request.packet.runId));
+                }
                 actions.setRequestedAgentReview(undefined);
               },
             }

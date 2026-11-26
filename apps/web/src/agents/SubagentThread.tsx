@@ -15,6 +15,10 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
+import {
+  AGENT_RUN_CAPACITY_WAITING_REASON,
+  AGENT_RUN_DEPENDENCY_WAITING_REASON,
+} from "@octant/domain";
 import { AgentRunResults } from "./AgentRunResults";
 import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
 import { SubagentStatusIcon, subagentRoleWord, subagentStatusWord } from "./subagentStatus";
@@ -176,10 +180,17 @@ export function SubagentThread(props: {
   // its session (a provider wait or a usage limit ends the turn), so a message
   // resumes it instead, under the host's own eligibility check.
   const canSteer = managed && lifecycle === "running";
+  // A run held before it starts (for another subagent, or for room at its
+  // provider) has no session yet; Resume would only release the hold and the
+  // message would never reach it, so the composer waits until it runs.
+  const heldBeforeStart =
+    lifecycle === "waiting" &&
+    (row.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON ||
+      row.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON);
   const canResume =
     managed &&
     (lifecycle === "completed" ||
-      lifecycle === "waiting" ||
+      (lifecycle === "waiting" && !heldBeforeStart) ||
       (lifecycle === "interrupted" &&
         row.recoveryReason !== "restart-without-resumable-execution"));
   // Retry stays for any run that stopped, as on the Agents page: an
@@ -210,7 +221,11 @@ export function SubagentThread(props: {
   };
 
   const disabledReason =
-    canSteer || canResume ? undefined : "This subagent cannot take a message now.";
+    canSteer || canResume
+      ? undefined
+      : heldBeforeStart
+        ? "It has not started yet. You can message it once it runs."
+        : "This subagent cannot take a message now.";
   // A command carries at most this much; the draft stays so it can be shortened.
   const tooLong =
     message.length > MAX_MESSAGE_CHARACTERS
@@ -402,7 +417,9 @@ export function SubagentThread(props: {
                         ? "Steer it while it works"
                         : canResume
                           ? "Ask it to continue"
-                          : "It cannot take a message now"
+                          : heldBeforeStart
+                            ? "You can message it once it starts"
+                            : "It cannot take a message now"
                     }
                     value={draft}
                   />

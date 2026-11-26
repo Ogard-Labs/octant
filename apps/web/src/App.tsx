@@ -1464,6 +1464,8 @@ function LaunchedShell(
   const [requestedAgentReview, setRequestedAgentReview] = useState<{
     readonly threadKey: string;
     readonly request: AgentResultReviewRequest;
+    /** Opened from a subagent's own tab, which stays open beside the review. */
+    readonly fromSubagentTab?: true;
   }>();
   // Documents a turn wrote, per thread, and which the dock already offered.
   // Session-local presentation: nothing here is authority, and a reopened
@@ -5032,7 +5034,7 @@ function LaunchedShell(
     if (String(request.packet.parentThreadId) !== String(dockThreadId)) return;
     setSelectedProjectPullRequest(undefined);
     openDockTab("review");
-    setRequestedAgentReview({ threadKey: dockThreadKey, request });
+    setRequestedAgentReview({ threadKey: dockThreadKey, request, fromSubagentTab: true });
   }
   function openSubagentInDock(runId?: string) {
     if (dockThreadKey === undefined) return;

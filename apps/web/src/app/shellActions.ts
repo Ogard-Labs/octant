@@ -367,7 +367,12 @@ export type ShellActions = {
   >;
   readonly setRequestedAgentReview: Dispatch<
     SetStateAction<
-      { readonly threadKey: string; readonly request: AgentResultReviewRequest } | undefined
+      | {
+          readonly threadKey: string;
+          readonly request: AgentResultReviewRequest;
+          readonly fromSubagentTab?: true;
+        }
+      | undefined
     >
   >;
   readonly setRequestedAgentView: Dispatch<

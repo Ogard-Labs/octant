@@ -191,6 +191,28 @@ describe("SubagentThread", () => {
     expect(runs.steer).not.toHaveBeenCalled();
   });
 
+  it("takes no message for a subagent still waiting to start, so nothing sent is lost", async () => {
+    const runs = client("waiting");
+    const summary = runs.parentSummary as ReturnType<typeof vi.fn>;
+    const first = await (
+      summary.getMockImplementation() as () => Promise<{
+        readonly entries: ReadonlyArray<Record<string, unknown>>;
+      }>
+    )();
+    summary.mockImplementation(async () => ({
+      ...first,
+      parentThreadId,
+      entries: first.entries.map((entry) => ({
+        ...entry,
+        recoveryReason: "waiting-on-dependencies",
+      })),
+    }));
+    view(runs);
+    const field = await screen.findByRole("textbox");
+    expect(field).toHaveAttribute("aria-disabled", "true");
+    expect(runs.resume).not.toHaveBeenCalled();
+  });
+
   it("offers Retry for an interrupted subagent, as the Agents page does", async () => {
     view(client("interrupted"));
     expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();

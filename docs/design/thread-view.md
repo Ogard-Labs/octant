@@ -725,6 +725,10 @@ commands and authority:
   (Resume with the message);
 - a run that failed or was interrupted also offers Retry above the composer,
   as the Agents page does.
+- a run held before it starts (waiting for another subagent, or for room at
+  its provider) takes no message until it runs: releasing the hold starts it
+  on its original task, so the host refuses a message there rather than report
+  it delivered and drop it.
 
 A subagent the provider runs itself is read only: a line, "Runs inside the
 provider. Octant can read it but not steer it.", stands where the composer
