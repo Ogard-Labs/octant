@@ -65,47 +65,59 @@ export function windowsShellArguments(
 }
 
 /**
- * The lines typed around an agent's command so the terminal says it finished
- * and with what exit code, in the syntax of the shell it runs in, and the
- * pattern that reads it back. Windows PowerShell has no POSIX `printf` and
- * its `$?` is a Boolean, so a POSIX marker never printed there and every
- * command timed out. Command Prompt cannot print an escape character, so its
- * marker is plain text ending its line. The pattern needs the marker's whole
- * frame (the closing BEL, or the line end), so a read that stops inside
- * `exit=127` is not taken as exit code 1, and takes a signed code, as Windows
- * reports. The shell's echo of the typed line never matches: there the exit
- * code is still a variable, not digits.
+ * How an agent's command is typed so its shell reports that it finished and
+ * with what exit code, and the pattern that reads that back.
+ *
+ * The completion is part of the same input the shell parses with the command,
+ * never a second line typed ahead into the terminal: a foreground program
+ * that reads its input (a dev server, a test watcher) swallowed a typed-ahead
+ * line, and a Ctrl-C flushed it, so the command never said it finished.
+ *
+ * Windows PowerShell has no POSIX `printf` and its `$?` is a Boolean, and
+ * Command Prompt cannot print an escape character, so both print a plain-text
+ * marker ending its line; PowerShell does too because a Windows 10 console
+ * host may drop an OSC sequence. The pattern needs the marker's whole frame
+ * (the closing BEL, or the line end), so a read that stops inside `exit=127`
+ * is not taken as exit code 1, and takes a signed code, as Windows reports.
+ * The shell's echo of the typed input never matches: there the exit code is
+ * still a variable, not digits.
  */
 export function terminalCompletion(
   shell: string,
   marker: string,
-): { readonly before?: string; readonly command: string; readonly pattern: RegExp } {
-  const framed = new RegExp(`\\u001b\\]777;octant=${marker};exit=(-?\\d+)\\u0007`, "g");
+): { readonly wrap: (command: string) => string; readonly pattern: RegExp } {
+  const plain = new RegExp(
+    `octant=${marker};exit=(-?\\d+)(?:\\u001b\\[[0-9;?]*[A-Za-z])*\\r?\\n`,
+    "g",
+  );
   switch (win32.basename(shell).toLowerCase()) {
     case "powershell.exe":
     case "pwsh.exe":
-      // A failed cmdlet sets `$?` but leaves `$LASTEXITCODE` as the last
-      // native program left it, so a failed `cmd /c exit 7` followed by a
-      // failed `Get-Item` reported 7. Clearing `$LASTEXITCODE` first fixed
-      // that but changed what the command itself read, so the newest error
-      // record is noted instead: a new one means PowerShell failed (1), and
-      // none means a native program did. `$?` is read first, before anything
-      // else resets it.
+      // A native program sets `$LASTEXITCODE` (to a new value, even an equal
+      // number) and nothing else does, so its code is reported when it ran,
+      // even where a failed native program also leaves an error record
+      // ($PSNativeCommandUseErrorActionPreference). Otherwise `$?` and the
+      // newest error record decide: a failed cmdlet, or one run with
+      // -ErrorAction Ignore that leaves no record, reports 1 rather than an
+      // earlier program's code. `$LASTEXITCODE` itself is never assigned, so
+      // a later command still reads what the last program left.
       return {
-        before: "$octantLastError = $Error[0]",
-        command: `$octantOk = $?; $octantExit = if ($octantOk) { 0 } elseif ($Error.Count -gt 0 -and -not [object]::ReferenceEquals($Error[0], $octantLastError)) { 1 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }; [Console]::Write("$([char]27)]777;octant=${marker};exit=$octantExit$([char]7)")`,
-        pattern: framed,
+        wrap: (command) =>
+          `$octantLastError = $Error[0]; $octantLastExit = $global:LASTEXITCODE; . { ${command} }; $octantOk = $?; $octantExit = if (-not [object]::ReferenceEquals($global:LASTEXITCODE, $octantLastExit) -and $LASTEXITCODE) { $LASTEXITCODE } elseif ($octantOk -and ($Error.Count -eq 0 -or [object]::ReferenceEquals($Error[0], $octantLastError))) { 0 } else { 1 }; [Console]::WriteLine("octant=${marker};exit=$octantExit")`,
+        pattern: plain,
       };
     case "cmd.exe":
+      // A successful built-in leaves ERRORLEVEL as it was, so `(call )` sets
+      // it to 0 first; `%^ERRORLEVEL%` is expanded when `call` runs, after the
+      // command, not when the line is read.
       return {
-        command: `echo octant=${marker};exit=%ERRORLEVEL%`,
-        // The console host may clear the rest of the line before its end.
-        pattern: new RegExp(
-          `octant=${marker};exit=(-?\\d+)(?:\\u001b\\[[0-9;?]*[A-Za-z])*\\r?\\n`,
-          "g",
-        ),
+        wrap: (command) => `(call ) & (${command}) & call echo octant=${marker};exit=%^ERRORLEVEL%`,
+        pattern: plain,
       };
     default:
-      return { command: `printf '\\033]777;octant=${marker};exit=%s\\007' "$?"`, pattern: framed };
+      return {
+        wrap: (command) => `{ ${command}\r}; printf '\\033]777;octant=${marker};exit=%s\\007' "$?"`,
+        pattern: new RegExp(`\\u001b\\]777;octant=${marker};exit=(-?\\d+)\\u0007`, "g"),
+      };
   }
 }

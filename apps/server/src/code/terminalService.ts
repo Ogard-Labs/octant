@@ -1,4 +1,4 @@
-import { delimiter } from "node:path";
+import { delimiter, win32 } from "node:path";
 import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
 import type { TerminalLaunchInput, TerminalProcessHandle } from "./terminalProcessPort";
 import { startServerTerminal, type ServerTerminalLogin } from "../serverProjects/serverTerminal";
@@ -358,12 +358,24 @@ export class TerminalService {
     return snapshot;
   }
 
-  /** The shell a terminal started in, and an agent's command still running in it. */
-  agentCommand(terminalId: string): { readonly shell?: string; readonly pending?: string } {
+  /**
+   * The shell a terminal started in, an agent's command still running in it,
+   * and whether the shell itself is in the foreground: at its prompt, with no
+   * program of the command left running.
+   */
+  agentCommand(terminalId: string): {
+    readonly shell?: string;
+    readonly pending?: string;
+    readonly shellAtPrompt?: boolean;
+  } {
     const record = this.#require(terminalId);
+    const foreground = record.status === "running" ? record.process?.foreground?.() : undefined;
     return {
       ...(record.shell === undefined ? {} : { shell: record.shell }),
       ...(record.agentCommand === undefined ? {} : { pending: record.agentCommand }),
+      ...(foreground === undefined || record.shell === undefined
+        ? {}
+        : { shellAtPrompt: foreground === win32.basename(record.shell) }),
     };
   }
 

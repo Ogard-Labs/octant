@@ -35,6 +35,31 @@ describe("TerminalService", () => {
     expect(service.agentCommand("agent-terminal")).toEqual({ shell: "/bin/zsh" });
   });
 
+  it("says the shell is at its prompt only when it, not a program it started, holds the foreground", async () => {
+    let foreground: string | undefined = "node";
+    const port = { start: vi.fn(() => ({ ...fakeProcess(), foreground: () => foreground })) };
+    const service = new TerminalService({
+      port,
+      inheritedEnvironment: {},
+      credentials: { resolve: async () => "unused" },
+    });
+    await service.launch({
+      terminalId: "agent-terminal",
+      shell: "/bin/zsh",
+      cwd: "/repo",
+      stateScope: "work:test",
+      columns: 80,
+      rows: 24,
+      credentialReferences: [],
+    });
+    expect(service.agentCommand("agent-terminal")).toMatchObject({ shellAtPrompt: false });
+    foreground = "zsh";
+    expect(service.agentCommand("agent-terminal")).toMatchObject({ shellAtPrompt: true });
+    // A platform that cannot say (a Windows console) claims nothing.
+    foreground = undefined;
+    expect(service.agentCommand("agent-terminal")).not.toHaveProperty("shellAtPrompt");
+  });
+
   it("refuses to replace an exited terminal until its protection cleanup succeeds", async () => {
     const process = fakeProcess();
     const port = { start: vi.fn(() => process) };

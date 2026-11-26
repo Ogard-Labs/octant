@@ -73,41 +73,58 @@ describe("how a terminal command says it finished", () => {
       .map((token) => `\u001b[93m${token}\u001b[0m`)
       .join(" ")}\r\n`;
 
-  it("writes a POSIX shell's line with printf and reads its framed code", () => {
-    const { before, command, pattern } = terminalCompletion("/bin/zsh", marker);
-    expect(before).toBeUndefined();
-    expect(command).toContain("printf");
-    const transcript = `% ${command}\r\n\u001b]777;octant=${marker};exit=0\u0007`;
-    expect(codes(transcript, pattern)).toEqual(["0"]);
-  });
-
-  it.each([powershell, pwsh])(
-    "writes %s's line without printf, telling a failed cmdlet from a failed program without touching $LASTEXITCODE",
+  it.each(["/bin/zsh", powershell, pwsh, cmd])(
+    "types %s's completion in the same input as the command, so a program reading its input cannot take it",
     (shell) => {
-      const { before, command, pattern } = terminalCompletion(shell, marker);
-      expect(command).not.toContain("printf");
-      // A follow-up command that reads $LASTEXITCODE must still see the program's code.
-      expect(`${before ?? ""}\n${command}`).not.toMatch(/\$(global:)?LASTEXITCODE\s*=/);
-      // A failed cmdlet after a failed native program shows as a new error record.
-      expect(before).toBe("$octantLastError = $Error[0]");
-      expect(command).toContain("ReferenceEquals($Error[0], $octantLastError)");
-      expect(command.indexOf("$?")).toBeLessThan(command.indexOf("$Error"));
-      expect(command.indexOf("$Error")).toBeLessThan(command.indexOf("$LASTEXITCODE"));
-      const echoed = colouredEcho(before ?? "") + colouredEcho(command);
-      expect(codes(echoed, pattern)).toEqual([]);
-      expect(
-        codes(`${echoed}\u001b]777;octant=${marker};exit=1\u0007PS C:\\work> `, pattern),
-      ).toEqual(["1"]);
-      expect(codes(`${echoed}\u001b]777;octant=${marker};exit=-1\u0007`, pattern)).toEqual(["-1"]);
+      const typed = terminalCompletion(shell, marker).wrap("npm run dev");
+      // One input the shell parses before it runs anything: the command, then the completion.
+      expect(typed.indexOf("npm run dev")).toBeGreaterThanOrEqual(0);
+      expect(typed.indexOf("npm run dev")).toBeLessThan(typed.indexOf(`octant=${marker}`));
+      expect(typed.split("\r").length).toBeLessThanOrEqual(2);
     },
   );
 
-  it("writes Command Prompt's line as plain text ending its line, with a signed code", () => {
-    const { before, command, pattern } = terminalCompletion(cmd, marker);
-    expect(before).toBeUndefined();
-    expect(command).toContain("%ERRORLEVEL%");
-    // The console host echoes the typed line after its prompt, then prints the marker.
-    const echoed = `C:\\work>${command}\r\n`;
+  it("groups a POSIX command in braces ahead of printf and reads its framed code", () => {
+    const { wrap, pattern } = terminalCompletion("/bin/zsh", marker);
+    const typed = wrap("npm test &");
+    // A newline before the closing brace keeps a command ending in & valid.
+    expect(typed.startsWith("{ npm test &\r}; printf")).toBe(true);
+    const echoed = `% { npm test &\r\ncursh> ${typed.split("\r")[1]}\r\n`;
+    expect(codes(echoed, pattern)).toEqual([]);
+    expect(codes(`${echoed}\u001b]777;octant=${marker};exit=0\u0007`, pattern)).toEqual(["0"]);
+  });
+
+  it.each([powershell, pwsh])(
+    "runs %s's command dot-sourced and reports a program's code over its error record, without assigning $LASTEXITCODE",
+    (shell) => {
+      const { wrap, pattern } = terminalCompletion(shell, marker);
+      const typed = wrap("cmd /c exit 7");
+      expect(typed).not.toContain("printf");
+      expect(typed).toContain(". { cmd /c exit 7 }; $octantOk = $?;");
+      // A later command still reads what the last program left.
+      expect(typed).not.toMatch(/\$(global:)?LASTEXITCODE\s*=[^=]/);
+      // A program that ran (even under $PSNativeCommandUseErrorActionPreference, which also
+      // leaves an error record) reports its own code, checked before the error record.
+      expect(typed.indexOf("ReferenceEquals($global:LASTEXITCODE")).toBeLessThan(
+        typed.indexOf("$octantOk -and"),
+      );
+      // A failed cmdlet, or one under -ErrorAction Ignore that leaves no record, reports 1.
+      expect(typed).toContain("} else { 1 }");
+      // Plain text ending its line: a Windows 10 console host may drop an OSC sequence.
+      expect(typed).toContain(`[Console]::WriteLine("octant=${marker};exit=$octantExit")`);
+      const echoed = colouredEcho(typed);
+      expect(codes(echoed, pattern)).toEqual([]);
+      expect(codes(`${echoed}octant=${marker};exit=7\r\nPS C:\\work> `, pattern)).toEqual(["7"]);
+      expect(codes(`${echoed}octant=${marker};exit=-1\r\n`, pattern)).toEqual(["-1"]);
+    },
+  );
+
+  it("starts Command Prompt's line at ERRORLEVEL 0 and expands it after the command, with a signed code", () => {
+    const { wrap, pattern } = terminalCompletion(cmd, marker);
+    const typed = wrap("cd");
+    // A successful built-in such as cd leaves ERRORLEVEL as it was, so it is set to 0 first.
+    expect(typed).toBe(`(call ) & (cd) & call echo octant=${marker};exit=%^ERRORLEVEL%`);
+    const echoed = `C:\\work>${typed}\r\n`;
     expect(codes(echoed, pattern)).toEqual([]);
     expect(codes(`${echoed}octant=${marker};exit=0\r\n\r\nC:\\work>`, pattern)).toEqual(["0"]);
     expect(codes(`${echoed}octant=${marker};exit=-1073741510\u001b[K\r\n`, pattern)).toEqual([
@@ -117,7 +134,7 @@ describe("how a terminal command says it finished", () => {
 
   it.each([
     ["/bin/zsh", `\u001b]777;octant=${marker};exit=12`],
-    [powershell, `\u001b]777;octant=${marker};exit=12`],
+    [powershell, `octant=${marker};exit=12`],
     [cmd, `octant=${marker};exit=12`],
   ])("does not read %s's marker cut off mid-read as a finished command", (shell, partial) => {
     const { pattern } = terminalCompletion(shell, marker);

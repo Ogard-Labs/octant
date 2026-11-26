@@ -110,7 +110,7 @@ describe("Code app-managed tools", () => {
       expect.objectContaining({
         kind: "write-terminal",
         terminalId: threadId,
-        data: expect.stringMatching(/^pwd\rprintf .*octant=.*exit=/),
+        data: expect.stringMatching(/^\{ pwd\r\}; printf .*octant=.*exit=/),
       }),
     );
     expect(result).toEqual({
@@ -382,7 +382,8 @@ describe("Code app-managed tools", () => {
   describe("a command still running past run's wait", () => {
     // One terminal across turns: its transcript, and what the host keeps with it.
     function sharedTerminal(shell?: string) {
-      const kept: { shell?: string; pending?: string } = shell === undefined ? {} : { shell };
+      const kept: { shell?: string; pending?: string; shellAtPrompt?: boolean } =
+        shell === undefined ? {} : { shell };
       let output = "$ ";
       const written: string[] = [];
       let now = 0;
@@ -458,6 +459,25 @@ describe("Code app-managed tools", () => {
       }
     });
 
+    it("is let go, exit code unknown, once the shell is back at its prompt without its completion", async () => {
+      const terminal = sharedTerminal();
+      try {
+        await terminal.run("sleep 60");
+        // Ctrl-C at the shell: it returns to its prompt, and no completion is printed.
+        terminal.print("^C\n$ ");
+        terminal.kept.shellAtPrompt = true;
+        expect(await terminal.read()).toMatchObject({
+          isError: false,
+          result: { commandCompleted: false, commandEnded: true },
+        });
+        expect(terminal.kept.pending).toBeUndefined();
+        expect(await terminal.run("pwd")).not.toMatchObject({ result: { error: "terminal-busy" } });
+        expect(terminal.written).toHaveLength(2);
+      } finally {
+        terminal.restore();
+      }
+    });
+
     it("reports its exit code on a later read once it ends, and then takes a new run", async () => {
       const terminal = sharedTerminal();
       try {
@@ -517,7 +537,7 @@ describe("Code app-managed tools", () => {
       name: CODE_TERMINAL_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "run", command: "cd" }),
     });
-    expect(written[0]).toContain("%ERRORLEVEL%");
+    expect(written[0]).toContain("%^ERRORLEVEL%");
     expect(written[0]).not.toContain("printf");
     expect(result).toMatchObject({ result: { commandCompleted: true, commandExitCode: 0 } });
   });

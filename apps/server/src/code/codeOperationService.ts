@@ -491,6 +491,7 @@ export interface CodeOperationTerminalPort {
   readonly agentCommand?: (terminalId: string) => {
     readonly shell?: string;
     readonly pending?: string;
+    readonly shellAtPrompt?: boolean;
   };
   readonly noteAgentCommand?: (terminalId: string, pending: string | undefined) => void;
   readonly observe?: (
@@ -2823,7 +2824,11 @@ export class CodeOperationService {
       readonly checkoutId: CodeCheckoutIdentity["id"];
       readonly terminalId: CodeTerminalId;
     },
-  ): Promise<{ readonly shell?: string; readonly pending?: string }> {
+  ): Promise<{
+    readonly shell?: string;
+    readonly pending?: string;
+    readonly shellAtPrompt?: boolean;
+  }> {
     await this.#requireOwnedTerminal(windowId, input, true);
     return this.#options.terminals.agentCommand?.(input.terminalId) ?? {};
   }

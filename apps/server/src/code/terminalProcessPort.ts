@@ -61,6 +61,8 @@ export const MAX_TERMINAL_ROWS = 500;
 
 export interface PtyProcess {
   readonly pid: number;
+  /** The name of the terminal's foreground process, where the platform reports it. */
+  readonly process?: string;
   write(data: string): void;
   resize(columns: number, rows: number): void;
   onData(listener: (data: string) => void): { dispose(): void };
@@ -86,6 +88,12 @@ export interface TerminalProcessHandle {
   resume(): void;
   close(): Promise<void>;
   readonly receiptReady?: Promise<void>;
+  /**
+   * The name of the process in the terminal's foreground, or undefined where
+   * the platform cannot say: a Windows console reports its shell whatever
+   * runs in it.
+   */
+  foreground?(): string | undefined;
 }
 
 export interface TerminalLaunchInput {
@@ -474,6 +482,7 @@ export class TerminalProcessPort {
       },
       pause: () => pty.pause(),
       resume: () => pty.resume(),
+      foreground: () => (this.#dependencies.platform === "win32" ? undefined : pty.process),
       close: () => {
         releaseOwnership();
         closeOperation ??= this.#close(pty, () => shellExited);
