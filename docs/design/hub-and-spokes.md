@@ -1146,6 +1146,15 @@ same grant only on spokes that ticked Standby:
 | Act            | Act on the spoke as a paired device would, within the Projects the person names: create threads, send turns, answer questions. Approvals stay on the spoke (below)                                    |
 | Usage          | Read the spoke's provider plan-limit readings, the windows its own Limits view shows, through `GET /api/hub/usage` (maintainer decision C, 2026-11-26). Never a credential, thread, or cost           |
 
+**Status and Usage stay with the hub itself.** A standby standing in uses
+the spoke's grant for what keeps the network running (the roster, wakes,
+push), but it may not read `/api/hub/status` or `/api/hub/usage`: both
+answer only a request signed by the hub the spoke joined, even when the
+spoke ticked Standby. This is a deliberate narrow reading of the Standby
+item (maintainer decision, 2026-11-26): what a spoke's threads are doing and
+which provider accounts it holds are not needed to stand in, so a standby
+that is compromised or wrongly promoted learns neither.
+
 **Provisioning** offers are data, never code paths. The kinds are: an update
 channel (the hub may mirror the signed update feed, because the feed signature,
 not the server, is the trust root), a plugin or skill from the hub's catalog
