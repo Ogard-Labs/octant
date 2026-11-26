@@ -427,9 +427,9 @@ describe("ChatTranscript", () => {
 
     // A parked limit is a one-line record in the transcript; the strip above the
     // composer carries its actions.
-    expect(screen.getByTestId("usage-limit-record")).toHaveTextContent(
-      "The provider reached a temporary rate limit.",
-    );
+    const limitRecord = screen.getByTestId("usage-limit-record");
+    expect(limitRecord).toBeVisible();
+    expect(limitRecord).toHaveTextContent("The provider reached a temporary rate limit.");
     expect(screen.getByRole("button", { name: "Fetch page, failed" })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Web search/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1 step hidden" })).toBeVisible();
