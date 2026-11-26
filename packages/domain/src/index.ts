@@ -266,6 +266,7 @@ export * from "./hubAndSpokesPolicy";
 export * from "./hubThreadMovePolicy";
 export * from "./hubProvisionPolicy";
 export * from "./hubSignInPolicy";
+export * from "./hubPublicPolicy";
 export * from "./hubPushPolicy";
 export * from "./hubWakePolicy";
 export * from "./hubGuestPolicy";

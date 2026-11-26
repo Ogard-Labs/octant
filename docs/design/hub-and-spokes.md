@@ -4467,8 +4467,10 @@ limits, and the device relay's channel design.
     for the signature schemes, the five-minute timestamp window, dedupe keys,
     and link validity. Tests first: a delivery whose timestamp is older than
     five minutes is refused; a redelivered webhook id starts no second run; a
-    link signed by a key the roster does not list is refused. **Linux
-    container: yes.**
+    link signed by a key the roster does not list is refused. Built: the
+    contracts, the pure checks, and the signing, signature and sealing
+    crypto on the server, with nothing yet calling them. **Linux container:
+    yes.**
 23. **The entrance on the hub.** The separate listener, its route table,
     limits, and health served by the acting hub only; the Funnel switch in
     Settings and `octant hub public`; Pause; forwarding to the acting hub.

@@ -105,6 +105,14 @@ const GRANT_ITEM_COPY: Readonly<Record<HubGrantItem, { label: string; line: stri
     label: "Usage",
     line: "Read this computer's provider plan-limit readings. No sign-ins, threads, or costs.",
   },
+  public: {
+    label: "Public",
+    line: "Carry visitor links and webhook deliveries between the hub's public entrance and this computer. This computer checks each one.",
+  },
+  relay: {
+    label: "Relay",
+    line: "Carry your own paired devices to this computer through the hub, as traffic the hub cannot read.",
+  },
 };
 
 const REFUSAL_COPY: Readonly<Record<string, string>> = {
