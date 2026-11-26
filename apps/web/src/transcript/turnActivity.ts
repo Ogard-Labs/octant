@@ -58,6 +58,13 @@ export type TurnActivityRow =
       readonly decision: ReviewDecision;
     };
 
+/**
+ * A turn with no recorded steps. A turn whose subagents left no tool row (a
+ * provider's own child seen only through its observations) is drawn with it,
+ * so its subagents meet the same Reply detail level as any other turn's.
+ */
+export const NO_TURN_ACTIVITY: TurnActivity = { rows: [], reasoning: "" };
+
 export interface TurnActivity {
   readonly rows: ReadonlyArray<TurnActivityRow>;
   /** Accumulated reasoning-channel text, in arrival order. */

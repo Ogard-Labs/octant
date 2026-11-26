@@ -118,7 +118,7 @@ import { PullRequestBabysitDialog } from "./PullRequestBabysitDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
-import { TurnSubagentRows, type TurnSubagentWindow } from "../agents/threadSubagents";
+import type { TurnSubagentWindow } from "../agents/threadSubagents";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { CodeCheckoutBar } from "./CodeCheckoutBar";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -171,7 +171,11 @@ import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
-import { runningStepTitle, settledTurnFoldsActivity } from "../transcript/turnActivity";
+import {
+  NO_TURN_ACTIVITY,
+  runningStepTitle,
+  settledTurnFoldsActivity,
+} from "../transcript/turnActivity";
 import { latestTurnTasks, splitTurnTasks } from "./transcriptActivity";
 import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
@@ -210,6 +214,7 @@ import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
 import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import { messageTiming, useTurnSendPreference } from "../messageQueue/turnSendPreference";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
@@ -417,6 +422,7 @@ export interface CodeThreadWorkspaceProps {
  */
 export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const readOnly = props.readOnly === true;
+  const turnSendPreference = useTurnSendPreference();
   const worktreeLaunch = useContext(WorktreeLaunchContext)?.launches.get(props.threadId);
   const continuation = useContinuationInputPolicy("code", String(props.threadId), props.serverUrl);
   const view =
@@ -1496,7 +1502,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       };
     },
   };
-  async function submitFollowUp(toolCatalogHandoff = false) {
+  // ⌘↩ (Ctrl+↩) sends this one message the opposite way to this client's
+  // choice for messages sent while a turn runs.
+  async function submitFollowUp(toolCatalogHandoff = false, opposite = false) {
     if (props.controller.draftReviewFindingReferencesInvalid) {
       setSendNotice(
         "A saved review reference is unreadable. Clear this draft and prepare the findings again from Review before sending.",
@@ -1564,6 +1572,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           },
           () => attachments.releaseQueueClaim(captured),
           { text: draft, revision: draftRevision },
+          // The choice is for messages sent while a turn runs; one queued on
+          // an idle thread behind a paused or held queue keeps its default.
+          busy ? messageTiming(turnSendPreference, opposite) : undefined,
         );
       } catch {
         attachments.releaseQueueClaim(captured);
@@ -1647,7 +1658,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (pathMentions.handleKeyDown(event)) return;
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    void submitFollowUp();
+    void submitFollowUp(false, event.metaKey || event.ctrlKey);
   }
 
   /**
@@ -2596,40 +2607,36 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                               />
                             )}
                             {gallery}
-                            {activity === undefined ? (
-                              <CodeTurnSubagents window={subagentWindows.get(message.id)} />
-                            ) : (
-                              <TurnActivityRows
-                                activity={activity}
-                                {...(workedForInFold && workedFor !== undefined
-                                  ? { workedFor }
-                                  : {})}
-                                publishedSnapshotRuntime={(toolCallId) =>
-                                  publishedSnapshotRunRuntimeFor(props.canvasClient, {
-                                    mode: "code",
-                                    threadId: String(thread.id),
-                                    toolCallId,
-                                  })
-                                }
-                                running={message.status === "incomplete"}
-                                settled={
-                                  message.status === "completed" ||
-                                  message.status === "failed" ||
-                                  message.status === "interrupted"
-                                }
-                                {...subagentWindowProp(subagentWindows.get(message.id))}
-                                {...(canvasClient === undefined
-                                  ? {}
-                                  : {
-                                      canvasPreview: (preview: ThreadCanvasPreviewReceipt) => (
-                                        <CanvasPreviewMiniature
-                                          client={canvasClient}
-                                          preview={preview}
-                                        />
-                                      ),
-                                    })}
-                              />
-                            )}
+                            <TurnActivityRows
+                              // A turn whose subagents left no tool row still
+                              // lists them, at its level.
+                              activity={activity ?? NO_TURN_ACTIVITY}
+                              {...(workedForInFold && workedFor !== undefined ? { workedFor } : {})}
+                              publishedSnapshotRuntime={(toolCallId) =>
+                                publishedSnapshotRunRuntimeFor(props.canvasClient, {
+                                  mode: "code",
+                                  threadId: String(thread.id),
+                                  toolCallId,
+                                })
+                              }
+                              running={message.status === "incomplete"}
+                              settled={
+                                message.status === "completed" ||
+                                message.status === "failed" ||
+                                message.status === "interrupted"
+                              }
+                              {...subagentWindowProp(subagentWindows.get(message.id))}
+                              {...(canvasClient === undefined
+                                ? {}
+                                : {
+                                    canvasPreview: (preview: ThreadCanvasPreviewReceipt) => (
+                                      <CanvasPreviewMiniature
+                                        client={canvasClient}
+                                        preview={preview}
+                                      />
+                                    ),
+                                  })}
+                            />
                             {/* The turn's Canvases sit between its steps and its
                             reply, so a summary reads first and the reply adds to
                             it rather than introducing it. */}
@@ -3523,7 +3530,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               cellClassName: "composer-actions",
               sending: busy,
               send: {
-                ariaLabel: queueFollowUp ? "Queue message" : "Send follow-up",
+                ariaLabel: !queueFollowUp
+                  ? "Send follow-up"
+                  : !busy
+                    ? "Queue message"
+                    : turnSendPreference === "queue"
+                      ? "Queue for the next turn"
+                      : "Send into the running turn",
                 disabled: !canSend,
                 onSend: () => void submitFollowUp(),
               },
@@ -4135,10 +4148,6 @@ function codeSubagentWindows(
   }
   close(undefined);
   return windows;
-}
-
-function CodeTurnSubagents(props: { readonly window: TurnSubagentWindow | undefined }) {
-  return props.window === undefined ? null : <TurnSubagentRows window={props.window} />;
 }
 
 function subagentWindowProp(window: TurnSubagentWindow | undefined): {

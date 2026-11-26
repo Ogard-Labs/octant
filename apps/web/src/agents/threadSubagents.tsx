@@ -141,12 +141,22 @@ function subagentName(row: SubagentRow): string {
  * from the pane's shared read, so a turn outside a pane that has one draws
  * nothing.
  */
-export function TurnSubagentRows(props: { readonly window: TurnSubagentWindow }) {
+export function TurnSubagentRows(props: {
+  readonly window: TurnSubagentWindow;
+  /** Lists only the subagents this keeps, as Answers only does. */
+  readonly only?: (row: SubagentRow) => boolean;
+  /**
+   * The window's rows, when the caller already built them to count them; the
+   * thread's whole list is not built again for the same turn.
+   */
+  readonly rows?: ReadonlyArray<SubagentRow>;
+}) {
   const subagents = useContext(ThreadSubagentsContext);
   const onOpen = useContext(ThreadSubagentOpenContext);
   const providers = useSubagentProviders();
-  const rows =
-    subagents === undefined || subagents.status !== "ready"
+  const windowRows =
+    props.rows ??
+    (subagents === undefined || subagents.status !== "ready"
       ? []
       : subagentRowsInWindow(
           buildSubagentRows({
@@ -155,7 +165,8 @@ export function TurnSubagentRows(props: { readonly window: TurnSubagentWindow })
             ...(providers === undefined ? {} : { providers }),
           }),
           props.window,
-        );
+        ));
+  const rows = windowRows.filter((row) => props.only?.(row) ?? true);
   const live = rows.some((row) => isActiveAgentHierarchyStatus(row.lifecycleStatus));
   const now = useNow(live);
   if (rows.length === 0) return null;

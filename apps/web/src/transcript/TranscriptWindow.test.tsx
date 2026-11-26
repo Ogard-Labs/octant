@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { TranscriptWindow } from "./TranscriptWindow";
+import { TurnActivityRows } from "./TurnActivityRows";
+import { ReplyDetailContext } from "./replyDetail";
 
 // Indexing a 1,000-row history takes about 3 s on a loaded laptop and went past
 // 5 s on merge-queue runners, failing tests that only check Find completes.
@@ -288,6 +290,42 @@ describe("TranscriptWindow", () => {
     ).toBeInTheDocument();
     expect(mountedCount()).toBeLessThan(80);
     expect(screen.getByRole("button", { name: "Row 500" })).toBeInTheDocument();
+  });
+
+  it("shows the steps a quiet Reply detail level hides while Find is open, and finds them", async () => {
+    const turn = {
+      reasoning: "",
+      rows: [
+        {
+          kind: "tool" as const,
+          id: "call-1",
+          toolName: "Bash",
+          state: "completed" as const,
+          summary: "migrated the schema",
+        },
+      ],
+    };
+    render(
+      <ReplyDetailContext.Provider value="answers">
+        <TranscriptWindow
+          itemKey={(item: Row) => item.id}
+          items={[{ id: "turn-1", label: "Turn" }]}
+          listLabel="Transcript"
+          renderItem={() => <TurnActivityRows activity={turn} running={false} settled />}
+          restoreKey="thread-quiet"
+        />
+      </ReplyDetailContext.Provider>,
+    );
+    expect(screen.queryByRole("button", { name: /^Bash/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "1 step hidden" })).toBeVisible();
+
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    expect(await screen.findByRole("button", { name: /^Bash/ })).toBeVisible();
+    fireEvent.change(input, { target: { value: "Bash" } });
+    expect(
+      await screen.findByText("1 of 1", {}, { timeout: FIND_INDEXED_WITHIN_MS }),
+    ).toBeInTheDocument();
   });
 
   it("cancels an unfinished search when Find closes", async () => {

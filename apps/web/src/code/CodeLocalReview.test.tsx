@@ -408,7 +408,7 @@ it.each([false, true])(
     ).toBe(false);
     expect(f.queue.execute).not.toHaveBeenCalled();
     if (busy) {
-      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
       await waitFor(() => expect(f.queue.execute).toHaveBeenCalledOnce());
       expect(f.queue.execute.mock.calls[0]?.[0]).toMatchObject({
         kind: "enqueue",
@@ -627,7 +627,7 @@ it("keeps a live captured version and its selected anchor through metadata recon
         .mocked(f.client.executeOperation)
         .mock.calls.some(([command]) => command.kind === "start-provider-turn"),
     ).toBe(false);
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
     expect(f.queue.execute.mock.calls[0]?.[0]).toMatchObject({
       kind: "enqueue",
       payload: { reviewFindingReferences: f.prepared.references },

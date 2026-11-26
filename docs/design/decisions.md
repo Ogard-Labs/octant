@@ -1547,15 +1547,15 @@ Unsent drafts stay on the client that typed them. Messages sent while a turn run
 - Every dispatch rechecks authority through ordinary admission. Changed authority, uncertain delivery, a cancel and a Work Done mark hold the queue until a person resumes it. (maintainer request, 2026-11-12)
 - A paired device queues on a thread it may send to and edits its own; one the host's own person paired at Full manages the whole queue. (maintainer decision, 2026-11-13)
 - A steered message is a user message of its turn everywhere it is carried. (maintainer decision, 2026-11-21)
-- The phone's Work and Code composer queues a follow-up while a turn runs and lists, edits and removes waiting messages (maintainer request, 2026-11-26).
+- The phone's Work and Code composer queues a follow-up while a turn runs and lists, edits, removes and sends now its waiting messages (maintainer request, 2026-11-26).
 - A quote from a reply, a terminal or a file is one chip held as the prompt's own text, framed as reference, not instructions; only a quote Octant wrote in the window is a chip, and pasted quote-shaped text stays plain (maintainer decision, 2026-11-26).
 - A large paste attaches as a text file where the composer takes files, and ⌘⇧V pastes it inline (maintainer decision, 2026-11-26). The Chat start screen keeps it as text, since a first Chat message needs words for its title.
 - ArrowUp in an empty thread composer recalls the person's own sent prompts in that thread, newest first.
+- A per-client While a turn runs setting, Steer by default, decides whether a Work or Code message sent during a turn steers it or waits; ⌘↩ does the opposite for one message. A waiting message's Send now moves it to the front of what can still move and lets it steer under the ordinary checks; a device another person paired moves only its own (maintainer decision, 2026-11-26).
 - On the Code start composer, ⌘↩ starts the thread in the background and keeps a fresh draft, and one prompt may start on up to four models, each an ordinary create in its own worktree (maintainer decision, 2026-11-26).
 
 Not built yet:
 
-- Send now in the phone's queue: the phone lists, edits and removes queued messages but does not offer it yet.
 - Start and stay on the Chat and Work start composers: built for Code first.
 
 Status: Partly built. Detail: [Architecture: Persistence](../architecture.md#persistence).
@@ -2897,11 +2897,12 @@ Status: Built. Detail: [Settings: Usage](settings.md#usage) and [DESIGN.md: Icon
 
 ### Reply detail
 
-Reply detail chooses how much of a turn's thinking and tool calls the transcript shows open: Low, Medium or High. Settings › Text sets the default, Low unless changed; a thread may set its own level, which stays with it.
+Reply detail chooses how much of a turn's thinking and tool calls the transcript shows: Answers only, Failures only, Low, Medium or High. Settings › Text sets the default, Low unless changed; a thread may set its own level, which stays with it.
 
 - It is presentation only: it never changes what a model is asked or a client fetches, and shows nothing the transcript does not hold.
 - A thread's own level wins over the default and is drawn alike in every window, on the phone and in a paired browser.
 - The levels live in the host's shell settings, out of thread journals and export. A window, or a device paired by the host's own person, writes them ([Paired devices act as the person](#paired-devices-act-as-the-person); maintainer decision, 2026-11-13); other clients read them only. Purging a thread removes its level.
+- Answers only and Failures only sit below Low and hide rather than fold (maintainer decision, 2026-11-26). Approvals, questions, credential requests, Shield and reviewer decisions, errors, failed or unfinished calls, and failed or waiting subagents and tasks always show, and every hidden step shows while Find is open. A level a reader does not know reads as Low.
 - A running turn ends with one working line under its reply, and only a change of step is announced (maintainer decision, 2026-11-24).
 - A turn's durations are journaled host facts, never renderer guesses, and a call whose bounds cannot be trusted shows no time.
 

@@ -59,20 +59,14 @@ import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
   OctantMenu,
-  OctantMenuCheckboxItem,
   OctantMenuGroup,
   OctantMenuGroupLabel,
-  OctantMenuItem as OctantMenuActionItem,
   OctantMenuPopup,
   OctantMenuPortal,
   OctantMenuPositioner,
   OctantMenuRadioGroup,
   OctantMenuRadioItem,
   OctantMenuRoot,
-  OctantMenuSeparator,
-  OctantMenuSub,
-  OctantMenuSubPopup,
-  OctantMenuSubTrigger,
   OctantMenuTrigger,
   type OctantMenuItem,
 } from "../ui/base/OctantMenu";
@@ -136,7 +130,6 @@ import {
   SIDEBAR_THREAD_STATUS_LABEL,
   SIDEBAR_THREAD_STATUS_ORDER,
 } from "@octant/domain/sidebar-thread-status-policy";
-import { type SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 import { groupThreadsByProject, nestFollowUpThreads } from "./projectThreadGrouping";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { lineageParentTitle } from "./threadLineage";
@@ -162,6 +155,7 @@ import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { threadRowFileDrop } from "./sidebarRowDrop";
 import { LazyPartBoundary } from "../shell/windowNotice";
 import { AddRepositoryToComputerContext } from "./addRepositoryToComputerContext";
+import type { ProjectViewFilterKit } from "./ProjectViewFilterMenuItems";
 import type { ProjectActionsMenuProps } from "./ProjectActionsMenuItems";
 import {
   lazy,
@@ -183,6 +177,23 @@ const ProjectActionsMenuItems = lazy(() =>
     default: module.ProjectActionsMenuItems,
   })),
 );
+
+const ProjectViewFilterMenuItems = lazy(() =>
+  import("./ProjectViewFilterMenuItems").then((module) => ({
+    default: module.ProjectViewFilterMenuItems,
+  })),
+);
+
+/** What the filter items read that the sidebar also holds, handed in so the items import none of it. */
+const PROJECT_VIEW_FILTER_KIT: ProjectViewFilterKit = {
+  normalizeFilters: normalizeProjectViewFilters,
+  rowPropertiesForView: SIDEBAR_ROW_PROPERTIES_FOR_VIEW,
+  rowPropertyLabels: SIDEBAR_ROW_PROPERTY_LABELS,
+  rowPropertiesAll: sidebarRowPropertiesAll,
+  statusOrder: SIDEBAR_THREAD_STATUS_ORDER,
+  statusLabel: SIDEBAR_THREAD_STATUS_LABEL,
+  ThreadListViewGroup,
+};
 
 interface OtherModeProjectsHint {
   readonly message: string;
@@ -1993,38 +2004,6 @@ function CodeProjectViewChip(props: {
   );
 }
 
-const PROJECT_VIEW_LIFECYCLE_OPTIONS = [
-  { id: "active", label: "Active" },
-  { id: "archived", label: "Archived" },
-  { id: "all", label: "All" },
-] as const;
-const PROJECT_VIEW_GROUPING_OPTIONS = [
-  { id: "project", label: "Project" },
-  { id: "environment", label: "Environment" },
-  { id: "status", label: "Status" },
-  { id: "none", label: "None" },
-] as const;
-const PROJECT_VIEW_SORTING_OPTIONS = [
-  { id: "recency", label: "Recency" },
-  { id: "alphabetical", label: "Alphabetical" },
-  { id: "created", label: "Created time" },
-  { id: "status", label: "Status" },
-] as const;
-const PROJECT_VIEW_ACTIVITY_OPTIONS = [
-  { id: "all", label: "Any activity" },
-  { id: "today", label: "Today" },
-  { id: "3-days", label: "Last 3 days" },
-  { id: "7-days", label: "Last 7 days" },
-  { id: "14-days", label: "Last 14 days" },
-  { id: "30-days", label: "Last 30 days" },
-  { id: "custom", label: "Custom range" },
-] as const;
-
-const SIDEBAR_ROW_PROPERTY_VIEW_LABELS: Readonly<Record<SidebarRowPropertyView, string>> = {
-  projects: "Shown on Projects rows",
-  activity: "Shown on Activity rows",
-};
-
 function ProjectViewFilterMenu(props: {
   readonly environmentOptions: ReadonlyArray<ProjectViewEnvironment>;
   readonly filters: ProjectViewFilters;
@@ -2047,6 +2026,8 @@ function ProjectViewFilterMenu(props: {
   const rangeOpen = props.rangeOpen;
   const setRangeOpen = props.onRangeOpenChange;
   const triggerRef = useRef<HTMLButtonElement>(null);
+  // The items load when the menu first opens and stay drawn after.
+  const [wanted, setWanted] = useState(false);
   const options = useMemo(() => {
     const local = { id: "local", name: "Local" };
     return [local, ...props.environmentOptions.filter((option) => option.id !== local.id)].filter(
@@ -2070,20 +2051,9 @@ function ProjectViewFilterMenu(props: {
     props.onChange({ ...props.filters, ...change });
   }
 
-  function toggleEnvironment(id: string): void {
-    if (environmentSelection.length === 0) {
-      update({ environmentIds: [id] });
-      return;
-    }
-    const next = environmentSelection.includes(id)
-      ? environmentSelection.filter((candidate) => candidate !== id)
-      : [...environmentSelection, id];
-    update({ environmentIds: next });
-  }
-
   return (
     <>
-      <OctantMenuRoot>
+      <OctantMenuRoot onOpenChange={(next) => next && setWanted(true)}>
         <OctantMenuTrigger
           ref={triggerRef}
           aria-label={triggerLabel}
@@ -2092,149 +2062,34 @@ function ProjectViewFilterMenu(props: {
         >
           <ListFilter aria-hidden="true" size={16} />
         </OctantMenuTrigger>
-        <OctantMenuPortal>
-          <OctantMenuPositioner align="end" className="outline-none window-no-drag" side="bottom">
-            <OctantMenuPopup aria-label="Project view filters" className="min-w-[14rem]">
-              {props.arrangement === undefined || props.onArrangementChange === undefined ? null : (
-                <>
-                  <ThreadListViewGroup
-                    arrangement={props.arrangement}
-                    onChange={props.onArrangementChange}
-                  />
-                  <OctantMenuSeparator />
-                </>
-              )}
-              <OctantMenuGroup>
-                <OctantMenuGroupLabel>Filters</OctantMenuGroupLabel>
-                <FilterRadioSubmenu
-                  label="Lifecycle"
-                  onValueChange={(value) => {
-                    const option = PROJECT_VIEW_LIFECYCLE_OPTIONS.find(
-                      (candidate) => candidate.id === value,
-                    );
-                    if (option !== undefined) update({ lifecycle: option.id });
-                  }}
-                  options={PROJECT_VIEW_LIFECYCLE_OPTIONS}
-                  value={props.filters.lifecycle}
-                />
-                <OctantMenuSub>
-                  <OctantMenuSubTrigger>Environment</OctantMenuSubTrigger>
-                  <OctantMenuSubPopup>
-                    <OctantMenuCheckboxItem
-                      checked={environmentSelection.length === 0}
-                      onCheckedChange={(checked) => {
-                        if (checked) update({ environmentIds: [] });
-                      }}
-                    >
-                      All environments
-                    </OctantMenuCheckboxItem>
-                    {options.map((option) => (
-                      <OctantMenuCheckboxItem
-                        checked={environmentSelection.includes(option.id)}
-                        key={option.id}
-                        onCheckedChange={() => toggleEnvironment(option.id)}
-                      >
-                        {option.name}
-                      </OctantMenuCheckboxItem>
-                    ))}
-                  </OctantMenuSubPopup>
-                </OctantMenuSub>
-                <OctantMenuCheckboxItem
-                  checked={props.filters.showEmptyProjects}
-                  onCheckedChange={(checked) => update({ showEmptyProjects: checked })}
-                >
-                  Show empty Projects
-                </OctantMenuCheckboxItem>
-              </OctantMenuGroup>
-              <OctantMenuSeparator />
-              <OctantMenuGroup>
-                <FilterRadioSubmenu
-                  label="Group by"
-                  onValueChange={(value) => {
-                    const option = PROJECT_VIEW_GROUPING_OPTIONS.find(
-                      (candidate) => candidate.id === value,
-                    );
-                    if (option !== undefined) update({ grouping: option.id });
-                  }}
-                  options={PROJECT_VIEW_GROUPING_OPTIONS}
-                  value={props.filters.grouping}
-                />
-                <FilterRadioSubmenu
-                  label="Sort by"
-                  onValueChange={(value) => {
-                    const option = PROJECT_VIEW_SORTING_OPTIONS.find(
-                      (candidate) => candidate.id === value,
-                    );
-                    if (option !== undefined) update({ sorting: option.id });
-                  }}
-                  options={PROJECT_VIEW_SORTING_OPTIONS}
-                  value={props.filters.sorting}
-                />
-                {props.onPresentationChange === undefined ? null : (
-                  <FilterRadioSubmenu
-                    label="Show views as"
-                    onValueChange={(value) => {
-                      const option = PROJECT_VIEW_PRESENTATION_OPTIONS.find(
-                        (candidate) => candidate.id === value,
-                      );
-                      if (option !== undefined) props.onPresentationChange?.(option.id);
-                    }}
-                    options={PROJECT_VIEW_PRESENTATION_OPTIONS}
-                    value={props.presentation}
-                  />
-                )}
-              </OctantMenuGroup>
-              <OctantMenuSeparator />
-              <SidebarRowPropertyMenu
-                onChange={props.onRowPropertiesChange}
-                view={props.rowPropertyView}
-                visibility={props.rowProperties}
+        {/* The items load when the menu first opens, not with the sidebar. */}
+        {wanted ? (
+          <LazyPartBoundary what="the Project view filters">
+            <Suspense fallback={null}>
+              <ProjectViewFilterMenuItems
+                activeCount={activeCount}
+                environmentOptions={options}
+                filters={props.filters}
+                kit={PROJECT_VIEW_FILTER_KIT}
+                onChange={props.onChange}
+                onRangeOpen={() => setRangeOpen(true)}
+                presentation={props.presentation}
+                rowProperties={props.rowProperties}
+                rowPropertyView={props.rowPropertyView}
+                onRowPropertiesChange={props.onRowPropertiesChange}
+                {...(props.onPresentationChange === undefined
+                  ? {}
+                  : { onPresentationChange: props.onPresentationChange })}
+                {...(props.arrangement === undefined || props.onArrangementChange === undefined
+                  ? {}
+                  : {
+                      arrangement: props.arrangement,
+                      onArrangementChange: props.onArrangementChange,
+                    })}
               />
-              <OctantMenuSeparator />
-              <ProjectViewStatusMenu
-                onChange={(statuses) => update({ statuses })}
-                statuses={props.filters.statuses}
-              />
-              <OctantMenuSub>
-                <OctantMenuSubTrigger>Activity</OctantMenuSubTrigger>
-                <OctantMenuSubPopup>
-                  <OctantMenuRadioGroup
-                    onValueChange={(value) => {
-                      const option = PROJECT_VIEW_ACTIVITY_OPTIONS.find(
-                        (candidate) => candidate.id === value,
-                      );
-                      if (option !== undefined) update({ activity: option.id });
-                    }}
-                    value={props.filters.activity}
-                  >
-                    {PROJECT_VIEW_ACTIVITY_OPTIONS.map((option) => (
-                      <OctantMenuRadioItem
-                        closeOnClick
-                        key={option.id}
-                        value={option.id}
-                        onClick={() => {
-                          if (option.id === "custom") setRangeOpen(true);
-                        }}
-                      >
-                        {option.label}
-                      </OctantMenuRadioItem>
-                    ))}
-                  </OctantMenuRadioGroup>
-                </OctantMenuSubPopup>
-              </OctantMenuSub>
-              {activeCount === 0 ? null : (
-                <>
-                  <OctantMenuSeparator />
-                  <OctantMenuActionItem
-                    onClick={() => props.onChange(normalizeProjectViewFilters(undefined))}
-                  >
-                    Reset filters
-                  </OctantMenuActionItem>
-                </>
-              )}
-            </OctantMenuPopup>
-          </OctantMenuPositioner>
-        </OctantMenuPortal>
+            </Suspense>
+          </LazyPartBoundary>
+        ) : null}
       </OctantMenuRoot>
       <OctantDialog
         label="Custom activity range"
@@ -2302,134 +2157,6 @@ function ProjectViewFilterMenu(props: {
         </div>
       </OctantDialog>
     </>
-  );
-}
-
-/**
- * Which properties the rows of the view you are looking at carry.
- *
- * The submenu edits one view at a time, the one on screen, and says which in
- * its own label: turning Pull request off in the Activity feed leaves the
- * Project tree exactly as it was.
- */
-function SidebarRowPropertyMenu(props: {
-  readonly onChange: (properties: SidebarRowPropertyVisibility) => void;
-  readonly view: SidebarRowPropertyView;
-  readonly visibility: SidebarRowPropertyVisibility;
-}) {
-  const supported = SIDEBAR_ROW_PROPERTIES_FOR_VIEW[props.view];
-  const anyShown = supported.some((property) => props.visibility[property]);
-  return (
-    <OctantMenuSub>
-      <OctantMenuSubTrigger>Property visibility</OctantMenuSubTrigger>
-      <OctantMenuSubPopup>
-        <OctantMenuGroup>
-          <OctantMenuGroupLabel>
-            {SIDEBAR_ROW_PROPERTY_VIEW_LABELS[props.view]}
-          </OctantMenuGroupLabel>
-          {supported.map((property) => (
-            <OctantMenuCheckboxItem
-              checked={props.visibility[property]}
-              key={property}
-              onCheckedChange={(checked) =>
-                props.onChange({ ...props.visibility, [property]: checked })
-              }
-            >
-              {SIDEBAR_ROW_PROPERTY_LABELS[property]}
-            </OctantMenuCheckboxItem>
-          ))}
-        </OctantMenuGroup>
-        <OctantMenuSeparator />
-        <OctantMenuActionItem
-          closeOnClick={false}
-          onClick={() => props.onChange(sidebarRowPropertiesAll(props.view, !anyShown))}
-        >
-          {anyShown ? "Hide all" : "Show all"}
-        </OctantMenuActionItem>
-      </OctantMenuSubPopup>
-    </OctantMenuSub>
-  );
-}
-
-/**
- * Which thread statuses a saved view lists.
- *
- * Nothing ticked means no constraint rather than nothing shown, the same way
- * this menu's environment filter reads, so a reader who opens the submenu and
- * closes it again has not quietly emptied their sidebar. "Any status" is the
- * way back to that state without unticking each word.
- */
-function ProjectViewStatusMenu(props: {
-  readonly onChange: (statuses: ReadonlyArray<SidebarThreadStatus>) => void;
-  readonly statuses: ReadonlyArray<SidebarThreadStatus> | undefined;
-}) {
-  const selected = props.statuses ?? [];
-  return (
-    <OctantMenuSub>
-      <OctantMenuSubTrigger>Status</OctantMenuSubTrigger>
-      <OctantMenuSubPopup>
-        <OctantMenuGroup>
-          <OctantMenuGroupLabel>Thread status</OctantMenuGroupLabel>
-          {SIDEBAR_THREAD_STATUS_ORDER.map((status) => (
-            <OctantMenuCheckboxItem
-              checked={selected.includes(status)}
-              key={status}
-              onCheckedChange={(checked) =>
-                props.onChange(
-                  checked
-                    ? SIDEBAR_THREAD_STATUS_ORDER.filter(
-                        (candidate) => candidate === status || selected.includes(candidate),
-                      )
-                    : selected.filter((candidate) => candidate !== status),
-                )
-              }
-            >
-              {SIDEBAR_THREAD_STATUS_LABEL[status]}
-            </OctantMenuCheckboxItem>
-          ))}
-        </OctantMenuGroup>
-        <OctantMenuSeparator />
-        <OctantMenuActionItem closeOnClick={false} onClick={() => props.onChange([])}>
-          Any status
-        </OctantMenuActionItem>
-      </OctantMenuSubPopup>
-    </OctantMenuSub>
-  );
-}
-
-/** The same two choices Settings › Code offers for the Project view switcher. */
-const PROJECT_VIEW_PRESENTATION_OPTIONS = [
-  { id: "dropdown", label: "Dropdown" },
-  { id: "inline", label: "Buttons" },
-] as const satisfies ReadonlyArray<{
-  readonly id: ProjectViewSwitcherPresentation;
-  readonly label: string;
-}>;
-
-function FilterRadioSubmenu(props: {
-  readonly label: string;
-  readonly onValueChange: (value: string) => void;
-  readonly options: ReadonlyArray<{ readonly id: string; readonly label: string }>;
-  readonly value: string;
-}) {
-  return (
-    <OctantMenuSub>
-      <OctantMenuSubTrigger>{props.label}</OctantMenuSubTrigger>
-      <OctantMenuSubPopup>
-        <OctantMenuRadioGroup
-          onValueChange={(value) => {
-            if (typeof value === "string") props.onValueChange(value);
-          }}
-          value={props.value}
-        >
-          {props.options.map((option) => (
-            <OctantMenuRadioItem closeOnClick={false} key={option.id} value={option.id}>
-              {option.label}
-            </OctantMenuRadioItem>
-          ))}
-        </OctantMenuRadioGroup>
-      </OctantMenuSubPopup>
-    </OctantMenuSub>
   );
 }
 

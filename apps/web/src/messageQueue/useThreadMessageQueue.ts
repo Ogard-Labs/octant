@@ -44,7 +44,7 @@ type QueueChange =
       readonly typedByPerson?: true;
       readonly expectedVersion?: ThreadMessageQueueSnapshot["version"];
     }
-  | { readonly kind: "remove"; readonly messageId: string }
+  | { readonly kind: "remove" | "send-now"; readonly messageId: string }
   | { readonly kind: "reorder"; readonly messageIds: ReadonlyArray<string> }
   | { readonly kind: "pause" | "resume" };
 export type QueueAcknowledgment = "accepted" | "refused" | "unknown";
@@ -66,6 +66,8 @@ export interface ThreadMessageQueue {
     accepted?: () => void,
     onRefused?: () => void | Promise<void>,
     draft?: QueueDraft,
+    /** `next-turn`: the person chose Queue, so it never steers the running turn. */
+    timing?: "next-turn",
   ) => Promise<QueueAcknowledgment>;
   readonly change: (change: QueueChange) => Promise<QueueAcknowledgment>;
   readonly refresh: () => Promise<void>;
@@ -348,12 +350,23 @@ export function useThreadMessageQueue(options: {
         pending.current = undefined;
         setUncertain(false);
         if (result !== undefined && result.status !== "refused") apply(result.snapshot);
+        const command = receipt.command;
         setMessage(
           result?.status === "refused"
-            ? `The host refused this queue change: ${result.reason.replaceAll("-", " ")}.`
+            ? (result.message ??
+                `The host refused this queue change: ${result.reason.replaceAll("-", " ")}.`)
             : result?.status === "conflict"
               ? "The queue changed in another window. Review it and try again; your draft is kept."
-              : undefined,
+              : result?.status === "applied" &&
+                  command.kind === "enqueue" &&
+                  command.timing === "next-turn" &&
+                  result.snapshot.items.some(
+                    (item) =>
+                      String(item.messageId) === String(command.messageId) &&
+                      item.waitsForNextTurn !== true,
+                  )
+                ? "This host cannot keep a message for the next turn, so this one may steer the running turn."
+                : undefined,
         );
         return accepted ? "accepted" : "refused";
       } finally {
@@ -372,6 +385,7 @@ export function useThreadMessageQueue(options: {
       accepted?: () => void,
       onRefused?: () => void | Promise<void>,
       draft?: QueueDraft,
+      timing?: "next-turn",
     ): Promise<QueueAcknowledgment> => {
       if (
         !available ||
@@ -390,6 +404,7 @@ export function useThreadMessageQueue(options: {
         requestId: crypto.randomUUID(),
         messageId: crypto.randomUUID(),
         payload,
+        ...(timing === undefined ? {} : { timing }),
       });
       let settled = false;
       return execute(

@@ -246,7 +246,7 @@ export class ThreadMessageQueueService {
         if (command.kind === "pause" || command.kind === "resume" || command.kind === "reorder")
           return refused("unauthorized");
         if (
-          (command.kind === "edit" || command.kind === "remove") &&
+          (command.kind === "edit" || command.kind === "remove" || command.kind === "send-now") &&
           state.items.some(
             (item) =>
               String(item.messageId) === String(command.messageId) &&
@@ -298,6 +298,7 @@ export class ThreadMessageQueueService {
                 revision: decodeAggregateVersion(1),
                 createdAt: decodeTime(this.#clock()),
                 queuedBy: windowId,
+                ...(command.timing === "next-turn" ? { waitsForNextTurn: true as const } : {}),
               },
             ],
           },
@@ -381,6 +382,50 @@ export class ThreadMessageQueueService {
           this.#unsteerable.delete(item.messageId);
           if (content !== undefined) await this.#release(content, "removed", true);
         }
+        return outcome === "unavailable" ? refused("storage-unavailable") : result(outcome);
+      }
+      if (command.kind === "send-now") {
+        // The person's own press: the message goes to the front of what can
+        // still move and may steer the running turn, through the same checks
+        // as any message. A pause or a hold stays the person's to lift first.
+        if (state.paused) return refused("paused");
+        if (state.holdReason !== undefined) return refused(state.holdReason);
+        const item = state.items.find(
+          (value) => String(value.messageId) === String(command.messageId),
+        );
+        if (item === undefined) return refused("not-found");
+        if (item.status !== "queued" || this.#steering.has(item.messageId))
+          return refused("not-editable");
+        const { waitsForNextTurn: _waits, ...rest } = item;
+        const sent = { ...rest, revision: decodeAggregateVersion(item.revision + 1) };
+        const others = state.items.filter((value) => value !== item);
+        // Messages already on their way, or offered to the turn, stay ahead
+        // of it, and it goes ahead of every message that can still move. One
+        // offered to the turn can sit behind a message waiting for the next
+        // turn; that one moves back behind the message sent now, so the next
+        // turn still starts with it (a paired phone's Send now never steers).
+        const onTheirWay = (value: (typeof others)[number]) =>
+          value.status !== "queued" || this.#steering.has(value.messageId);
+        // A restricted device may move only its own message: everyone else's
+        // keep their order, so it goes just behind the last one on its way.
+        // Moving an offered message ahead of a waiting one would let it start
+        // the next turn first if the runtime declines it.
+        const lastOnTheirWay = others.findLastIndex(onTheirWay);
+        const outcome = this.#store.write(
+          {
+            ...state,
+            items: this.#isRestrictedDevice(windowId)
+              ? [...others.slice(0, lastOnTheirWay + 1), sent, ...others.slice(lastOnTheirWay + 1)]
+              : [
+                  ...others.filter(onTheirWay),
+                  sent,
+                  ...others.filter((value) => !onTheirWay(value)),
+                ],
+          },
+          { command, ...actor },
+        );
+        // A runtime that would not take it before is asked again on this press.
+        if (outcome === "applied") this.#unsteerable.delete(item.messageId);
         return outcome === "unavailable" ? refused("storage-unavailable") : result(outcome);
       }
       if (command.kind === "reorder") {
@@ -590,7 +635,7 @@ export class ThreadMessageQueueService {
         // The running turn is the head's own: a message this queue admitted
         // stays at the head until its turn settles, and the next one may
         // still be steered into it.
-        await this.#steerBehindAccepted(scope);
+        await this.#steerFirstSteerable(scope, 1);
         return;
       }
       if (reconciled.status === "not-admitted") {
@@ -705,7 +750,11 @@ export class ThreadMessageQueueService {
       if (head === undefined) return;
     }
     if (inspection.status === "busy") {
-      this.#steer(scope, head.messageId, content, auth.windowId);
+      // A message the person chose to queue waits for the next turn; one
+      // sent to steer behind it (⌘↩ under Queue) still goes into this one.
+      if (head.waitsForNextTurn !== true)
+        this.#steer(scope, head.messageId, content, auth.windowId);
+      else await this.#steerFirstSteerable(scope, 0);
       return;
     }
     this.#unsteerable.delete(head.messageId);
@@ -765,15 +814,18 @@ export class ThreadMessageQueueService {
     } else this.#hold(state, "delivery-unknown");
   }
   /**
-   * Offers the message behind the head to the running turn when that turn is
-   * the head's own, which this queue admitted. Only that one message is
-   * offered, under the same pause, hold, authority and binding checks as the
-   * head, so the queue's order holds. A check that fails leaves it for the
-   * head's ordinary dispatch to judge, and holds nothing.
+   * Offers one message to the running turn: the first from `from` on that
+   * the person did not keep for the next turn. Behind an accepted head
+   * (`from` 1) the turn is the head's own; past a waiting head (`from` 0) a
+   * message sent to steer goes into the turn while the waiting ones keep
+   * their places for the next. Only that one message is offered, under the
+   * same pause, hold, authority and binding checks as the head, so the order
+   * of the messages that steer holds. A check that fails leaves it for the
+   * ordinary dispatch to judge, and holds nothing.
    */
-  async #steerBehindAccepted(scope: ThreadMessageQueueScope): Promise<void> {
+  async #steerFirstSteerable(scope: ThreadMessageQueueScope, from: 0 | 1): Promise<void> {
     const state = this.#store.state(scope);
-    const next = state.items[1];
+    const next = state.items.slice(from).find((item) => item.waitsForNextTurn !== true);
     if (
       this.#port.steer === undefined ||
       next === undefined ||

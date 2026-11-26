@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThreadTasksPanel } from "./ThreadTasksPanel";
+import { ReplyDetailContext } from "./replyDetail";
+import { RevealHiddenStepsContext } from "./revealHiddenSteps";
 describe("ThreadTasksPanel", () => {
   it("shows the ordered plan while the turn runs and folds it from the keyboard", async () => {
     const user = userEvent.setup();
@@ -134,5 +136,75 @@ describe("ThreadTasksPanel", () => {
       />,
     );
     expect(container.querySelector(".thread-tasks[data-running]")).toBeNull();
+  });
+
+  describe("at Answers only", () => {
+    const tasks = [
+      { id: "t1", state: "completed" as const, summary: "Watch CI on the branch head" },
+      { id: "t2", state: "waiting" as const, summary: "Choose a branch" },
+      { id: "t3", state: "completed" as const, summary: "Commit the evidence" },
+    ];
+
+    it("keeps a task waiting on the person and puts the others behind one line", async () => {
+      const user = userEvent.setup();
+      render(
+        <ReplyDetailContext.Provider value="answers">
+          <ThreadTasksPanel tasks={{ running: false, tasks }} />
+        </ReplyDetailContext.Provider>,
+      );
+      expect(screen.getByText("Choose a branch")).toBeVisible();
+      expect(screen.queryByText("Watch CI on the branch head")).toBeNull();
+      await user.click(screen.getByRole("button", { name: "2 tasks hidden" }));
+      expect(screen.getByText("Watch CI on the branch head")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Hide tasks" }));
+      expect(screen.queryByText("Watch CI on the branch head")).toBeNull();
+    });
+
+    it("keeps the task in hand in sight while the turn runs, and nothing routine", () => {
+      const running = [
+        { id: "t1", state: "completed" as const, summary: "Read the failing test" },
+        { id: "t2", state: "running" as const, summary: "Run the tests" },
+      ];
+      render(
+        <ReplyDetailContext.Provider value="answers">
+          <ThreadTasksPanel tasks={{ running: true, tasks: running }} />
+        </ReplyDetailContext.Provider>,
+      );
+      expect(screen.getByText("Run the tests")).toBeVisible();
+      expect(screen.queryByText("Read the failing test")).toBeNull();
+      expect(screen.queryByRole("button", { name: /tasks hidden/ })).toBeNull();
+    });
+
+    it("draws every task's text while Find is open, so Find can match it", () => {
+      render(
+        <RevealHiddenStepsContext.Provider value>
+          <ReplyDetailContext.Provider value="answers">
+            <ThreadTasksPanel tasks={{ running: false, tasks }} />
+          </ReplyDetailContext.Provider>
+        </RevealHiddenStepsContext.Provider>,
+      );
+      for (const task of tasks) expect(screen.getByText(task.summary)).toBeVisible();
+    });
+
+    it("has one control for the hidden tasks, which never hides a waiting task", async () => {
+      const user = userEvent.setup();
+      render(
+        <ReplyDetailContext.Provider value="answers">
+          <ThreadTasksPanel tasks={{ running: false, tasks }} />
+        </ReplyDetailContext.Provider>,
+      );
+      await user.click(screen.getByRole("button", { name: "2 tasks hidden" }));
+      expect(screen.getAllByRole("button")).toHaveLength(1);
+      expect(screen.getByText("Choose a branch")).toBeVisible();
+    });
+
+    it("leaves the Tasks dock panel's list whole", () => {
+      render(
+        <ReplyDetailContext.Provider value="answers">
+          <ThreadTasksPanel alwaysOpen tasks={{ running: false, tasks }} />
+        </ReplyDetailContext.Provider>,
+      );
+      expect(screen.getByText("Watch CI on the branch head")).toBeVisible();
+    });
   });
 });

@@ -216,13 +216,51 @@ boundary and a compact tab row without a second horizontal divider.
 
 **Reply detail** chooses how much of a turn's work the transcript shows open.
 Settings › Text › Reading › Reply detail (`replyDetail`) is the default
-every thread starts at: one `OctantToggleGroup` of three levels whose
+every thread starts at: one `OctantToggleGroup` of five levels whose
 description reads "Where every thread starts unless it sets its own." followed
 by the chosen level's sentence. A thread may set its own level, which then
 stays with that thread: it survives a reload, every window and paired device
 of the host draws it, and changing the default never moves it. A thread that
 never chose follows the default. The levels apply the same in Chat, Work, and
-Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
+Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn. From
+quietest to fullest (maintainer decision, 2026-11-26; "Zen" was not used as a
+name, because Zen is already Octant's assistant space and its Mod+Shift+Z
+binding):
+
+- **Answers only**: "Only the message and the final reply; a finished turn's
+  steps wait behind one line." A turn shows the person's message and the reply.
+  Thinking, tool calls, tasks and subagents are left out, except a subagent
+  or a task that failed or waits on the person; a finished turn shows one "N
+  steps hidden" line that opens them in place, with **Hide steps** to put them
+  away again. A turn's task list, drawn apart from its steps, has its own "N
+  tasks hidden" line and **Hide tasks** the same way, and while the turn runs
+  it keeps the task in hand in sight, which the Working line, naming only a
+  running tool, cannot say; the Tasks dock panel always shows the whole list. A turn whose subagents left no tool row is
+  drawn the same way. A running turn shows
+  no rows at all: its "Working · 12s · step" line already names the current
+  step. Every mode draws a turn's reply as one body beside its activity rows,
+  and a provider's interim narration is part of that body, so the whole body
+  is the reply. An inline thinking or tool part inside a body (an older
+  message format) stays as at Low: it has no line of its own to open it, so
+  hiding it would lose it.
+- **Failures only**: "Tool calls show while they run; only failed and
+  unfinished ones stay." A call shows while it runs and stays only if it
+  failed or never finished; the calls that succeeded wait behind the same "N
+  steps hidden" line. Thinking, tasks and subagent rows stay as at Low.
+
+At both quiet levels a turn's rows are drawn flat, never inside Low's settled
+fold, so what they keep is always in sight, and opened steps are flat too. A
+settled turn's duration, which Low's fold carries, is a line of its own there.
+Opening the hidden steps or tasks is a disclosure like any other: a change of
+level puts it back. Approvals, questions, credential requests, errors and a
+parked usage limit are drawn outside the activity rows and never hidden, and
+the rows always keep a failed call, a call that never finished, every Octant
+Shield or provider-review decision, and a task that failed or waits on the
+person. A published page or a created automation, which the turn delivered,
+stays in view. While the transcript's Find is open, every hidden step shows,
+folded as at Low, and at Answers only a turn's whole task list is drawn open
+(Failures only keeps task lists as at Low), so a search reaches all of a turn
+and nothing hidden is lost.
 
 - **Low** (default): "Thinking stays folded, and a finished turn's tool calls
   fold behind one line." Thinking is shut, tool rows are listed while the turn
@@ -302,8 +340,9 @@ edge, and its accessible name also says whose the level is ("Reply
 detail: High, this thread's own" or "Reply detail: Low, the default"). As a
 bare glyph in the composer row it read as one of two unexplained list icons.
 Its radio items are **Use default (Low)**
-(naming the current default; "Follow the level in Settings") and the three
-levels, with short descriptions that fit a phone-width menu: "Thinking and
+(naming the current default; "Follow the level in Settings") and the five
+levels, with short descriptions that fit a phone-width menu: "Message and
+reply, steps hidden", "Only failed calls stay", "Thinking and
 finished tool calls folded", "Thinking's first line, tool calls listed",
 "Thinking, tool calls, and results open". A client that cannot change the
 level shows no menu (a paired browser the host's own person paired changes it
@@ -311,7 +350,8 @@ as a local window does; any other paired browser shows none).
 
 **Change reply detail in this thread** (`reply-detail-cycle`, Mod+Shift+D by
 default, remappable in Settings › Keyboard shortcuts) steps the thread in front
-through Low, Medium, High and back to Low, setting its own level, and says so
+through Answers only, Failures only, Low, Medium, High and back to Answers
+only, setting its own level, and says so
 in a status toast ("Reply detail: Medium" over "This thread:" and the level's
 sentence). A thread is in front only while it is on screen: behind Settings,
 Usage, Review, Zen, or any other page that covers the workspace, the chord does
@@ -355,7 +395,12 @@ else from the settings document, through `GET /api/reply-detail`
 (`settings.read-non-secret`, read-only, at most 128 KiB): the phone when a
 thread opens and when the app returns to the foreground, a paired browser when
 its workspace opens, when the mode changes, and when the window regains focus.
-Until an answer arrives, or if none can, they draw Low. On the phone the
+Until an answer arrives, or if none can, they draw Low. A level the reader
+does not know, such as one added after it was built, reads as Low while the
+levels it knows still draw; an older phone that cannot read the answer at all
+draws Low for every thread. The phone has no quiet view yet, so it draws
+Answers only and Failures only as Low; a paired browser draws them as a
+window does. On the phone the
 reasoning panel opens at High and shows its first line at Medium. A run of
 consecutive tool calls draws as one rail of 28pt rows, each with a round
 status mark (a finished call shows its check alone; Running and Failed keep
@@ -1079,8 +1124,10 @@ completion, or authority from the subagent group.
 
 ## Message queue and Stop
 
-While a turn runs, its composer keeps a **Queue message**
-action and shows a
+While a turn runs, its composer keeps a send action that says what it will do
+(**Queue message** in Chat; in Work and Code **Send into the running turn** or
+**Queue for the next turn**, by this client's **While a turn runs** setting)
+and shows a
 **Stop turn** control beside it; that control stays disabled until the host has
 admitted the turn. Accepted messages appear in the queue count. The idle action
 sends normally when there are no pending messages or queue holds.
@@ -1093,8 +1140,31 @@ host's current version; conflicting edits refresh the list and preserve the
 person's unsent text. A failed enqueue leaves the draft and attachments in the
 composer. Reopening a thread reads the accepted queue from the host without
 resending it. Queue controls remain keyboard accessible and wrap at narrow
-widths. There is no separate steering control: steering goes through the
-queue's own send.
+widths. Steering goes through the queue's own send.
+
+Settings › General › Composer › **While a turn runs** chooses, for this client
+only, what a Work or Code message sent during a turn does: **Steer** (the
+default) offers it to the running turn where its runtime steers, **Queue**
+keeps it for the next turn (maintainer decision D1, 2026-11-26). ⌘↩ (Ctrl+↩)
+does the other for one message. The host never learns the setting; each
+message it holds says only whether it waits ("Waits for the next turn" in the
+queue). A message sent to steer while an earlier one waits goes into the
+running turn ahead of it; the waiting ones keep their order for the next turn.
+Each waiting Work or Code message has **Send now**, which moves it to the
+front of the messages that can still move, but never ahead of one already on
+its way or offered to the running turn, and lets it steer the running turn
+under the same checks as any message; a message its runtime refused before is
+asked again. A host from before Send now rejects the command, and the client
+shows that as a refusal asking to update the computer's Octant, never as a
+lost request that blocks the composer. On a paused or held queue the host refuses Send now with the
+pause or hold reason, so the person resumes first; Chat, which never steers,
+does not offer it. A host from before this choice refuses the unknown field,
+and the client then sends the message once more without it, so it may steer,
+and says so. The send button names Steer or Queue only while a turn runs; with
+no turn running and messages still queued, or the queue paused or held, it
+reads **Queue message**, and the message is queued without the setting, so it
+may steer the first turn after Resume. A browser that blocks storage reads the
+setting as Steer, and a choice made there lasts for the window only.
 
 In Work and Code a message sent while the turn runs is steered into that
 turn where its runtime steers (maintainer decision, 2026-11-21;
@@ -1122,8 +1192,12 @@ On the paired phone, a Work or Code thread's composer stays editable while a
 turn runs; what the person sends then joins the host's queue and waits for
 that turn to end, since the host never steers a paired device's message. The
 queue shows above the phone's composer, and each message the host still holds
-unsent can be edited or removed there. Send now, and a choice between Steer
-and Queue, wait on the queue-control design on the issue that owns them.
+unsent can be edited, removed or sent now there. A paired device's message
+still never steers, so on the phone Send now moves it to the front for the
+next turn, and the phone has no Steer or Queue choice. A device paired by
+someone other than the host's own person may move only its own message: Send
+now there leaves everyone else's messages in their order and puts it just
+behind the last one already on its way or offered to the running turn.
 
 ## Scheduled wake-ups
 

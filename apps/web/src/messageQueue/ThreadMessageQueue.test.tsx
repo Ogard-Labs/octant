@@ -354,4 +354,59 @@ describe("compact message queue controls", () => {
       "false",
     );
   });
+  it("Send now on a waiting Work message asks the host to send it into the running turn", async () => {
+    const user = userEvent.setup();
+    const host = queueTestHost();
+    const messageId = crypto.randomUUID();
+    host.apply(
+      decodeThreadMessageQueueCommand({
+        kind: "enqueue",
+        scope: { mode: "work", threadId },
+        requestId: crypto.randomUUID(),
+        messageId,
+        expectedVersion: 0,
+        payload: { mode: "work", prompt: "Also check the docs" },
+        timing: "next-turn",
+      }),
+    );
+    function Harness() {
+      return (
+        <ThreadMessageQueue
+          queue={useThreadMessageQueue({ mode: "work", threadId, client: host })}
+        />
+      );
+    }
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: "1 queued" }));
+    expect(screen.getByText("Waits for the next turn")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Send queued message 1 now" }));
+    await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
+    expect(host.execute.mock.calls[0]?.[0]).toMatchObject({ kind: "send-now", messageId });
+    await waitFor(() => expect(screen.queryByText("Waits for the next turn")).toBeNull());
+  });
+
+  it("offers no Send now in Chat, which never steers", async () => {
+    const user = userEvent.setup();
+    const host = queueTestHost();
+    host.apply(
+      decodeThreadMessageQueueCommand({
+        kind: "enqueue",
+        scope: { mode: "chat", threadId },
+        requestId: crypto.randomUUID(),
+        messageId: crypto.randomUUID(),
+        expectedVersion: 0,
+        payload: { mode: "chat", prompt: "Later" },
+      }),
+    );
+    function Harness() {
+      return (
+        <ThreadMessageQueue
+          queue={useThreadMessageQueue({ mode: "chat", threadId, client: host })}
+        />
+      );
+    }
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: "1 queued" }));
+    expect(screen.queryByRole("button", { name: "Send queued message 1 now" })).toBeNull();
+  });
 });

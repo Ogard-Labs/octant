@@ -345,6 +345,36 @@ describe("shell bootstrap contracts", () => {
     expect(() => decodeShellSettings({ ...settings, replyDetail: "verbose" })).toThrow();
   });
 
+  it("keeps the two quiet levels below Low", () => {
+    expect(decodeShellSettings({ ...settings, replyDetail: "answers" }).replyDetail).toBe(
+      "answers",
+    );
+    expect(
+      decodeShellSettings({
+        ...settings,
+        threadReplyDetail: [{ mode: "code", threadId: "thread-1", level: "failures" }],
+      }).threadReplyDetail,
+    ).toEqual([{ mode: "code", threadId: "thread-1", level: "failures" }]);
+  });
+
+  it("an unknown level from another host version reads as Low", () => {
+    expect(
+      decodeReplyDetailReading({
+        defaultLevel: "quietest",
+        threads: [
+          { mode: "work", threadId: "thread-1", level: "someday" },
+          { mode: "chat", threadId: "thread-2", level: "answers" },
+        ],
+      }),
+    ).toEqual({
+      defaultLevel: "low",
+      threads: [
+        { mode: "work", threadId: "thread-1", level: "low" },
+        { mode: "chat", threadId: "thread-2", level: "answers" },
+      ],
+    });
+  });
+
   it("reads settings saved before per-thread reply detail as every thread following the default", () => {
     const { threadReplyDetail: _omitted, ...withoutThreadLevels } = settings;
     expect(decodeShellSettings(withoutThreadLevels).threadReplyDetail).toEqual([]);

@@ -232,6 +232,9 @@ export function ThreadMessageQueue({
               {item.status === "queued" && item.steering === true && (
                 <span role="status">Sending into the running turn</span>
               )}
+              {item.status === "queued" && item.waitsForNextTurn === true && (
+                <span>Waits for the next turn</span>
+              )}
               <div className="thread-message-queue__actions">
                 <OctantButton
                   type="button"
@@ -269,6 +272,22 @@ export function ThreadMessageQueue({
                 >
                   Move down
                 </OctantButton>
+                {snapshot.scope.mode === "chat" ? null : (
+                  // Chat never steers; in Work and Code the message goes first
+                  // and may steer the running turn where its runtime steers.
+                  <OctantButton
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Send queued message ${index + 1} now`}
+                    disabled={disabled || !editable || held}
+                    onClick={() =>
+                      void queue.change({ kind: "send-now", messageId: item.messageId })
+                    }
+                  >
+                    Send now
+                  </OctantButton>
+                )}
                 <OctantButton
                   type="button"
                   size="sm"

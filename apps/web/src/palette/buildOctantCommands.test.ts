@@ -72,6 +72,8 @@ describe("the Reply detail commands", () => {
         .map((command) => command.title),
     ).toEqual([
       "Change reply detail in this thread",
+      "Show answers only in this thread",
+      "Show failures only in this thread",
       "Show low reply detail in this thread",
       "Show high reply detail in this thread",
       "Use the default reply detail in this thread",
@@ -86,6 +88,24 @@ describe("the Reply detail commands", () => {
     expect(onSet).toHaveBeenLastCalledWith(undefined);
   });
 
+  it("finds a quieter level first for a search for hiding steps", () => {
+    const commands = buildOctantCommands(
+      sources({
+        replyDetail: {
+          defaultLevel: "low",
+          onSetDefault: vi.fn(),
+          thread: { level: "low", override: undefined, onSet: vi.fn() },
+        },
+      }),
+    );
+    expect(filterOctantCommands(commands, "hide steps")[0]?.id).toBe("thread:reply-detail:answers");
+    expect(
+      filterOctantCommands(commands, "hide steps").some((command) =>
+        ["thread:reply-detail-cycle", "thread:reply-detail:high"].includes(command.id),
+      ),
+    ).toBe(false);
+  });
+
   it("still changes the default, and offers no thread commands when no thread is in front", () => {
     const onSetDefault = vi.fn();
     const commands = buildOctantCommands(
@@ -96,7 +116,12 @@ describe("the Reply detail commands", () => {
       commands
         .filter((command) => command.id.startsWith("settings:reply-detail:"))
         .map((command) => command.title),
-    ).toEqual(["Set the default reply detail to Medium", "Set the default reply detail to High"]);
+    ).toEqual([
+      "Set the default reply detail to Answers only",
+      "Set the default reply detail to Failures only",
+      "Set the default reply detail to Medium",
+      "Set the default reply detail to High",
+    ]);
     run(commands, "settings:reply-detail:high");
     expect(onSetDefault).toHaveBeenCalledWith("high");
   });

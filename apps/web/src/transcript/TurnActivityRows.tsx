@@ -1,5 +1,12 @@
 import type { ThreadCanvasPreviewReceipt, ThreadToolCallRecord } from "@octant/contracts";
-import { TurnSubagentRows, type TurnSubagentWindow } from "../agents/threadSubagents";
+import {
+  subagentRowsInWindow,
+  ThreadSubagentsContext,
+  TurnSubagentRows,
+  type TurnSubagentWindow,
+} from "../agents/threadSubagents";
+import { buildSubagentRows } from "../agents/subagentRows";
+import { useSubagentProviders } from "../agents/subagentProviders";
 import type { ToolOutsideContentMark } from "@octant/contracts/shield";
 import { SHIELD_WATCHER_LABEL_WORDS } from "@octant/domain/shield-watcher-policy";
 import { ChatRichText } from "../chat/ChatRichText";
@@ -25,6 +32,7 @@ import {
 import type { IconComponent } from "../ui/icons";
 import {
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -33,6 +41,8 @@ import {
   type ToggleEvent,
 } from "react";
 import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
+import { RevealHiddenStepsContext } from "./revealHiddenSteps";
+import "./turn-activity-quiet.css";
 import {
   callTimingLabel,
   countToolKinds,
@@ -263,6 +273,14 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   // turn alone: expanding one settled turn must not re-fold another that the
   // user already opened.
   const disclosures = useReplyDisclosures();
+  // A quiet level's hidden steps come back for Find, or when the person opens
+  // the turn's "N steps hidden" line. The line's choice is one of this turn's
+  // disclosures, so a change of level forgets it like the others: opened at
+  // Failures only, the steps must not stay open after a switch to Answers only.
+  const findOpen = useContext(RevealHiddenStepsContext);
+  const stepsOpened = disclosures.isOpen(HIDDEN_STEPS_DISCLOSURE, false);
+  const setStepsOpened = (open: boolean) => disclosures.choose(HIDDEN_STEPS_DISCLOSURE, open);
+  const subagentRows = useTurnSubagentRows(props.subagents);
   const [revealedSummaryIds, setRevealedSummaryIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -292,9 +310,36 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const hasReasoningTiming = !hasReasoning && activity.reasoningMs !== undefined;
   // A turn whose subagents left no tool row (a provider's own child seen only
   // through its observations) still lists them.
-  if (!hasRows && !hasReasoning && !hasReasoningTiming) {
-    return props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />;
+  const hides = disclosures.opening.hides;
+  if (!hasRows && !hasReasoning && !hasReasoningTiming && hides === "nothing") {
+    return props.subagents === undefined ? null : (
+      <TurnSubagentRows rows={subagentRows} window={props.subagents} />
+    );
   }
+
+  // At a quiet level the rows are drawn flat, never inside the settled fold,
+  // so a kept failure or decision is always in sight. What the level hides is
+  // counted into one line; opening it, or Find, shows every step flat too.
+  const quiet = (() => {
+    if (hides === "nothing") return undefined;
+    const closedRows = quietActivityRows(activity.rows, hides, settled && !running);
+    const thinkingHides = hides === "steps" && (hasReasoning || hasReasoningTiming);
+    const attentionSubagents = subagentRows.filter(subagentFailedOrWaiting).length;
+    const hiddenWhenClosed =
+      activity.rows.length -
+      closedRows.length +
+      (thinkingHides ? 1 : 0) +
+      (hides === "steps" ? subagentRows.length - attentionSubagents : 0);
+    const open = findOpen || stepsOpened || hiddenWhenClosed === 0;
+    return {
+      open,
+      rows: open ? activity.rows : closedRows,
+      showThinking: open || !thinkingHides,
+      subagents: !open && hides === "steps" ? ("attention" as const) : ("all" as const),
+      hiddenWhenClosed,
+      attentionSubagents,
+    };
+  })();
 
   const pinnedRows = alwaysVisibleActivityRows(activity);
   const pinnedIds = new Set(pinnedRows.map(rowKey));
@@ -437,6 +482,98 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     </div>
   ) : null;
 
+  // A published page or a created automation is what the turn delivered, so
+  // it stays in view at every level.
+  const deliverables = (
+    <>
+      {routineRows.length === 0 ? null : (
+        <ul aria-label="Created automations" className="turn-activity__routines">
+          {routineRows.map((row) => (
+            <li key={rowKey(row)}>
+              <RoutineReceiptCard routine={row.routine} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {publishedPages.length === 0 ? null : (
+        <ul aria-label="Published pages" className="turn-activity__published">
+          {publishedPages.map((row) => (
+            <li className="turn-activity__published-page" key={rowKey(row)}>
+              <PublishedPageCard page={row.published} />
+              {row.published.snapshot === undefined ? null : (
+                <PublishedSnapshot
+                  snapshot={row.published.snapshot}
+                  title={row.published.title ?? "Published page"}
+                  {...withRuntime(props.publishedSnapshotRuntime?.(row.id))}
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+
+  if (quiet !== undefined) {
+    // A running turn at Answers only says what it does in its Working line.
+    const offerHidden = !quiet.open && !(hides === "steps" && running);
+    const offerHide = quiet.open && stepsOpened && !findOpen && quiet.hiddenWhenClosed > 0;
+    const showSubagents =
+      props.subagents !== undefined &&
+      (quiet.subagents === "all" ? subagentRows.length > 0 : quiet.attentionSubagents > 0);
+    const thinking = quiet.showThinking ? thinkingDisclosure : null;
+    // The caller leaves the turn's duration out of its header when Low's
+    // settled fold would carry it; a quiet level draws no fold, so the
+    // duration is its own line here, open or not.
+    const workedFor = settled && !running ? props.workedFor : undefined;
+    if (
+      workedFor === undefined &&
+      !offerHidden &&
+      !offerHide &&
+      quiet.rows.length === 0 &&
+      thinking === null &&
+      !showSubagents &&
+      routineRows.length === 0 &&
+      publishedPages.length === 0
+    ) {
+      return null;
+    }
+    return (
+      <div className="turn-activity" {...(running ? { "data-live": "true" } : {})}>
+        {workedFor === undefined ? null : <p className="turn-activity__worked-for">{workedFor}</p>}
+        {offerHidden || offerHide ? (
+          <OctantButton
+            aria-expanded={offerHide}
+            className="turn-activity__hidden-steps"
+            onClick={() => setStepsOpened(offerHidden)}
+            size="sm"
+            type="button"
+            variant="link"
+          >
+            {offerHide
+              ? "Hide steps"
+              : quiet.hiddenWhenClosed === 1
+                ? "1 step hidden"
+                : `${quiet.hiddenWhenClosed} steps hidden`}
+          </OctantButton>
+        ) : null}
+        {activity.truncated === true && quiet.open ? (
+          <p className="turn-activity__truncated">Earliest steps kept</p>
+        ) : null}
+        {thinking}
+        {quiet.rows.map(renderDisclosure)}
+        {showSubagents && props.subagents !== undefined ? (
+          <TurnSubagentRows
+            {...(quiet.subagents === "attention" ? { only: subagentFailedOrWaiting } : {})}
+            rows={subagentRows}
+            window={props.subagents}
+          />
+        ) : null}
+        {deliverables}
+      </div>
+    );
+  }
+
   // Live turns keep every row in one stable list so a tool finishing does not
   // remount its disclosure (and clear the open state the user just set). The
   // pinned/foldable split only applies once the outer settled fold is active.
@@ -495,32 +632,10 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
       ) : (
         <>{renderRows(activity.rows)}</>
       )}
-      {props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />}
-      {routineRows.length === 0 ? null : (
-        <ul aria-label="Created automations" className="turn-activity__routines">
-          {routineRows.map((row) => (
-            <li key={rowKey(row)}>
-              <RoutineReceiptCard routine={row.routine} />
-            </li>
-          ))}
-        </ul>
+      {props.subagents === undefined ? null : (
+        <TurnSubagentRows rows={subagentRows} window={props.subagents} />
       )}
-      {publishedPages.length === 0 ? null : (
-        <ul aria-label="Published pages" className="turn-activity__published">
-          {publishedPages.map((row) => (
-            <li className="turn-activity__published-page" key={rowKey(row)}>
-              <PublishedPageCard page={row.published} />
-              {row.published.snapshot === undefined ? null : (
-                <PublishedSnapshot
-                  snapshot={row.published.snapshot}
-                  title={row.published.title ?? "Published page"}
-                  {...withRuntime(props.publishedSnapshotRuntime?.(row.id))}
-                />
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      {deliverables}
     </div>
   );
 }
@@ -847,4 +962,49 @@ function withRuntime(runtime: DesignRunRuntime | undefined): {
   readonly runRuntime?: DesignRunRuntime;
 } {
   return runtime === undefined ? {} : { runRuntime: runtime };
+}
+
+/**
+ * The rows a quiet Reply detail level still shows. Failures only keeps a call
+ * while it runs and afterwards only when it failed or never finished; Answers
+ * only keeps no running step, since the turn's Working line names it. Both
+ * keep every Octant Shield or reviewer decision and every failed call, and
+ * Answers only keeps a task that failed or waits on the person.
+ */
+function quietActivityRows(
+  rows: ReadonlyArray<TurnActivityRow>,
+  hides: "succeeded-calls" | "steps",
+  settled: boolean,
+): ReadonlyArray<TurnActivityRow> {
+  return rows.filter((row) => {
+    if (row.kind === "review" || row.state === "failed") return true;
+    if (row.kind === "task") return hides === "succeeded-calls" || row.state === "waiting";
+    if (row.state === "completed") return false;
+    // Started or running: live, or unfinished once the turn settled.
+    return hides === "succeeded-calls" || settled;
+  });
+}
+
+/** A subagent that failed or waits on the person: Answers only still lists it. */
+function subagentFailedOrWaiting(row: { readonly lifecycleStatus: string }): boolean {
+  return row.lifecycleStatus === "failed" || row.lifecycleStatus === "waiting";
+}
+
+/** The disclosure id of a quiet level's "N steps hidden" line. */
+const HIDDEN_STEPS_DISCLOSURE = "quiet:hidden-steps";
+
+/** The subagents a turn started, as its rows list them; none without a window. */
+function useTurnSubagentRows(window: TurnSubagentWindow | undefined) {
+  const subagents = useContext(ThreadSubagentsContext);
+  const providers = useSubagentProviders();
+  return window === undefined || subagents === undefined || subagents.status !== "ready"
+    ? []
+    : subagentRowsInWindow(
+        buildSubagentRows({
+          entries: subagents.entries,
+          observations: subagents.observations,
+          ...(providers === undefined ? {} : { providers }),
+        }),
+        window,
+      );
 }

@@ -70,4 +70,15 @@ describe("durable thread message queue contract", () => {
       decodeThreadMessageQueuePayload({ mode: "work", prompt: "x".repeat(200000) }).prompt,
     ).toHaveLength(200000);
   });
+  it("carries a message's wait for the next turn and Send now", () => {
+    expect(decodeThreadMessageQueueCommand({ ...command, timing: "next-turn" })).toMatchObject({
+      timing: "next-turn",
+    });
+    expect(() => decodeThreadMessageQueueCommand({ ...command, timing: "now" })).toThrow();
+    const { payload: _payload, ...rest } = command;
+    expect(decodeThreadMessageQueueCommand({ ...rest, kind: "send-now" })).toMatchObject({
+      kind: "send-now",
+      messageId: command.messageId,
+    });
+  });
 });

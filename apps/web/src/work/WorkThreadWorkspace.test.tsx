@@ -3,6 +3,7 @@ import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
 import { automationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
+import { writeTurnSendPreference } from "../messageQueue/turnSendPreference";
 import {
   decodeWorkThreadTranscript,
   decodeWorkTurnState,
@@ -14,7 +15,12 @@ import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { WorkTurnClientFailure } from "@octant/client-runtime/work-turn-client";
 import { WorkRequestClientFailure } from "@octant/client-runtime/work-request-client";
-import { decodeProjectSummary, decodeWorkThread, decodeWorkThreadId } from "@octant/contracts";
+import {
+  decodeProjectSummary,
+  decodeThreadMessageQueueSnapshot,
+  decodeWorkThread,
+  decodeWorkThreadId,
+} from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -39,7 +45,7 @@ const modelId = "model-one" as never;
 const alternateProviderId = "80000000-0000-4000-8000-0000000000b2" as never;
 const alternateModelId = "model-two" as never;
 
-function queuedWorkClients() {
+function queuedWorkClients(status: "running" | "completed" = "running") {
   const threadClient: WorkThreadClient = {
     searchTranscript: vi.fn(),
     bootstrap: vi.fn(),
@@ -49,13 +55,13 @@ function queuedWorkClients() {
   };
   const turnClient: WorkTurnClient = {
     transcript: vi.fn(async () =>
-      decodeWorkThreadTranscript({ threadId, turns: [workTurn({ status: "running" })] }),
+      decodeWorkThreadTranscript({ threadId, turns: [workTurn({ status })] }),
     ),
     transcriptWindow: vi.fn(async () =>
       decodeWorkThreadTranscriptWindow({
         version: 1,
         threadId,
-        turns: [workTurn({ status: "running" })],
+        turns: [workTurn({ status })],
         liveCursor: 0,
         hasEarlier: false,
         hasLater: false,
@@ -97,7 +103,9 @@ describe("Work host queue", () => {
     );
     const composer = await screen.findByLabelText("Work prompt");
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("button", { name: "Send into the running turn" }),
+      ).toBeInTheDocument(),
     );
     await user.type(composer, "First");
     fireEvent.paste(composer, {
@@ -107,7 +115,7 @@ describe("Work host queue", () => {
       },
     });
     await screen.findByAltText("first.png");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
     await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
     expect(clients.turnClient.putAttachment).toHaveBeenCalledOnce();
     const command = host.execute.mock.calls[0]?.[0];
@@ -135,11 +143,72 @@ describe("Work host queue", () => {
     expect(composer).toHaveValue("New draft");
     expect(screen.queryByAltText("first.png")).not.toBeInTheDocument();
     expect(screen.getByAltText("later.png")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
     expect(await screen.findByRole("button", { name: "2 queued" })).toBeVisible();
     unmount();
     expect(clients.turnClient.startFirstTurn).not.toHaveBeenCalled();
     expect(clients.turnClient.discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it("⌘↩ steers when the default is Queue, and the send button says it queues", async () => {
+    writeTurnSendPreference("queue");
+    try {
+      const host = queueTestHost();
+      const user = userEvent.setup();
+      render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          messageQueueClient={host}
+          {...queuedWorkClients()}
+          threadId={threadId}
+          title="Draft brief"
+        />,
+      );
+      const composer = await screen.findByLabelText("Work prompt");
+      await user.type(composer, "Wait for the next turn");
+      await user.click(await screen.findByRole("button", { name: "Queue for the next turn" }));
+      await waitFor(() => expect(composer).toHaveValue(""));
+      await user.type(composer, "Steer this one");
+      await user.keyboard("{Meta>}{Enter}{/Meta}");
+      await waitFor(() => expect(host.execute).toHaveBeenCalledTimes(2));
+      expect(host.execute.mock.calls[0]?.[0]).toMatchObject({ timing: "next-turn" });
+      expect(host.execute.mock.calls[1]?.[0]).not.toHaveProperty("timing");
+    } finally {
+      writeTurnSendPreference("steer");
+    }
+  });
+
+  it("queues a message on an idle thread with a paused queue without the running-turn choice", async () => {
+    writeTurnSendPreference("queue");
+    try {
+      const host = queueTestHost();
+      host.publish(
+        decodeThreadMessageQueueSnapshot({
+          scope: { mode: "work", threadId },
+          version: 1,
+          paused: true,
+          items: [],
+        }),
+      );
+      const user = userEvent.setup();
+      render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          messageQueueClient={host}
+          {...queuedWorkClients("completed")}
+          threadId={threadId}
+          title="Draft brief"
+        />,
+      );
+      const composer = await screen.findByLabelText("Work prompt");
+      await user.type(composer, "After Resume");
+      await user.click(await screen.findByRole("button", { name: "Queue message" }));
+      await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
+      expect(host.execute.mock.calls[0]?.[0]).toMatchObject({ kind: "enqueue" });
+      expect(host.execute.mock.calls[0]?.[0]).not.toHaveProperty("timing");
+    } finally {
+      writeTurnSendPreference("steer");
+    }
   });
 
   it.each([false, true])(
@@ -172,7 +241,7 @@ describe("Work host queue", () => {
         },
       });
       await screen.findByAltText("kept.png");
-      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
       if (retry) {
         await screen.findByText(/host has not confirmed/);
         fireEvent.paste(composer, {
@@ -206,7 +275,7 @@ describe("Work host queue", () => {
     const composer = await screen.findByLabelText("Work prompt");
     await user.type(composer, "Keep this");
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send into the running turn" })).toBeDisabled();
     expect(composer).toHaveValue("Keep this");
     expect(clients.turnClient.startFirstTurn).not.toHaveBeenCalled();
   });

@@ -2029,6 +2029,8 @@ describe("ProjectSidebarSection code project views", () => {
     trigger.focus();
     await user.keyboard("{ArrowDown}");
     expect(await screen.findByRole("menuitem", { name: "Lifecycle" })).toBeVisible();
+    // The items load when the menu first opens; keyboard focus still lands in it.
+    await waitFor(() => expect(document.activeElement?.closest("[role='menu']")).not.toBeNull());
     expect(screen.getByRole("menuitemcheckbox", { name: "Show empty Projects" })).toBeVisible();
     await user.click(await screen.findByRole("menuitem", { name: "Environment" }));
     expect(await screen.findByRole("menuitemcheckbox", { name: "All environments" })).toBeVisible();

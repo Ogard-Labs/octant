@@ -29,7 +29,7 @@ const REFUSALS: Partial<Record<ThreadMessageQueueRefusalReason, string>> = {
   "queue-full": "The queue is full. Wait for a message to go first.",
   "invalid-payload": "The host could not take that message.",
   "storage-unavailable": "The host could not store the message.",
-  paused: "The queue is paused on the host.",
+  paused: "The queue is paused on the host. Resume it on your computer first.",
 };
 
 function refusal(reason: ThreadMessageQueueRefusalReason): string {
@@ -154,6 +154,24 @@ export function removeMobileQueuedMessage(input: {
 }): Promise<ThreadMessageQueueSnapshot> {
   return run(input.transport, {
     kind: "remove",
+    ...base(input.scope, input.expectedVersion),
+    messageId: input.messageId,
+  });
+}
+
+/**
+ * Moves a waiting message to the front of the queue. The host may then steer
+ * it into the running turn, never a paired device's own message, which waits
+ * at the front for the next turn.
+ */
+export function sendMobileQueuedMessageNow(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly scope: MobileQueueScope;
+  readonly expectedVersion: number;
+  readonly messageId: string;
+}): Promise<ThreadMessageQueueSnapshot> {
+  return run(input.transport, {
+    kind: "send-now",
     ...base(input.scope, input.expectedVersion),
     messageId: input.messageId,
   });

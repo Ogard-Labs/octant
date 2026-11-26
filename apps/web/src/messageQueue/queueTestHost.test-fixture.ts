@@ -38,6 +38,7 @@ export function queueTestHost() {
               revision: 0,
               createdAt: "2026-10-03T10:00:00.000Z",
               payload: command.payload,
+              ...(command.timing === "next-turn" ? { waitsForNextTurn: true } : {}),
             },
           ]
         : command.kind === "remove"
@@ -56,7 +57,14 @@ export function queueTestHost() {
               ? command.messageIds.flatMap((id) =>
                   previous.items.filter((item) => item.messageId === id),
                 )
-              : previous.items;
+              : command.kind === "send-now"
+                ? [
+                    ...previous.items
+                      .filter((item) => item.messageId === command.messageId)
+                      .map(({ waitsForNextTurn: _waits, ...item }) => item),
+                    ...previous.items.filter((item) => item.messageId !== command.messageId),
+                  ]
+                : previous.items;
     const next = decodeThreadMessageQueueSnapshot({
       ...previous,
       items,

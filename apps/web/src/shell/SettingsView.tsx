@@ -64,6 +64,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
 import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
 import { NextMessageSuggestionsSettings } from "../settings/NextMessageSuggestionsSettings";
+import { TurnSendSettings } from "../settings/TurnSendSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -2710,6 +2711,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             onChange={(next) => props.onSettingsChange({ nextMessageSuggestions: next })}
             value={props.settings.nextMessageSuggestions}
           />
+          <TurnSendSettings focused={focusedSetting === settingId("while-turn-runs")} />
         </div>
       </SettingsSection>
       {/* Outside the desktop app the one row says this copy never updates
