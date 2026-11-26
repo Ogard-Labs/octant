@@ -140,11 +140,6 @@ function senders(actions: ThreadRestShellActions) {
         }));
     }
   };
-  const senders: Record<
-    OctantMode,
-    (threadId: string, change: ThreadRestChange) => Promise<RestOutcome>
-  > = { code: sendCode, chat: sendChat, work: sendWork };
-
   const send: Record<
     OctantMode,
     (threadId: string, change: ThreadRestChange) => Promise<RestOutcome>

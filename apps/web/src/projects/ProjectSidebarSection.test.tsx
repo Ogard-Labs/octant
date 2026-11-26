@@ -615,6 +615,26 @@ describe("ProjectSidebarSection pinned ordering", () => {
     type: "chat",
   } as ProjectSummary;
 
+  it("moves focus into a Project's menu, opened with Enter, once its items load", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projects={[pinnedAlpha]}
+      />,
+    );
+    screen.getByRole("button", { name: "Project actions for Alpha" }).focus();
+    await user.keyboard("{Enter}");
+    const first = await screen.findByRole("menuitem", { name: "Open Project" });
+    await waitFor(() => expect(first).toHaveFocus());
+  });
+
   it("disables manual moves for pinned Projects while a sort is active", async () => {
     const user = userEvent.setup();
     render(

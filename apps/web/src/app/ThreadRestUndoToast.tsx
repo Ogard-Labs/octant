@@ -58,7 +58,14 @@ export function ThreadRestUndoToast(props: {
 }
 
 /** Draws the window's Undo notice, if one is offered. */
-export function ThreadRestUndoHost() {
+export function ThreadRestUndoHost(props: {
+  /**
+   * The host this window drives. An Undo sends through the actions of the
+   * window that offered it, so a notice never outlives that window's host.
+   */
+  readonly hostKey: string;
+}) {
+  useEffect(() => threadRestUndoStore.dismiss, [props.hostKey]);
   const notice = useSyncExternalStore(
     threadRestUndoStore.subscribe,
     threadRestUndoStore.current,

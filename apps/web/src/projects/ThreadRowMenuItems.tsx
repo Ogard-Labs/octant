@@ -44,9 +44,9 @@ import type { IconComponent } from "../ui/icons";
 import type { ThreadRowActions } from "./ThreadRowMenu";
 
 /*
- * The thread row's right-click menu, kept out of the window's first load: a
- * row draws it once its menu opens, and the module loads right after the first
- * load, before anyone can right-click (`ProjectThreadList`).
+ * The thread row's right-click menu, kept out of the window's first load: it
+ * loads when a row's menu first opens, and the row keeps it drawn after that
+ * (`ProjectThreadList`).
  */
 
 function PullRequestMenuItems(props: {

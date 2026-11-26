@@ -36,29 +36,17 @@ function carriesFiles(transfer: DataTransfer | null): transfer is DataTransfer {
   return transfer !== null && [...transfer.types].includes("Files");
 }
 
-let fileDropRow: HTMLElement | null = null;
-function markFileDropRow(row: HTMLElement | null): void {
-  if (fileDropRow === row) return;
-  if (fileDropRow !== null) delete fileDropRow.dataset.fileDropOver;
-  fileDropRow = row;
-  if (row !== null) row.dataset.fileDropOver = "true";
-}
-
-function threadRowAt(target: EventTarget): HTMLElement | null {
-  return target instanceof Element
-    ? target.closest<HTMLElement>(".sidebar-navigation__thread[data-thread-id]")
-    : null;
-}
-
 /**
- * Files from the computer dropped on a thread row, handled once for the whole
- * sidebar: the row opens its thread with its own click, and the files wait
- * for that thread's composer, which attaches them through its own path and
- * limits. Only a drag that carries files lights the row; a dragged row or
- * text passes over it untouched.
+ * Files from the computer dropped on a thread row, wherever the row is drawn
+ * (the sidebar, a server's Projects, a Project's overview): the row opens its
+ * thread through `open`, never through its click, which a cancelled drag may
+ * have told to ignore the next press. The files then wait for that thread's
+ * composer, which attaches them through its own path and limits. Only a drag
+ * that carries files lights the row; a dragged row or text passes over it.
  */
-export function sidebarFileDropHandlers(
-  offer: ((threadId: string, files: ReadonlyArray<File>) => void) | undefined,
+export function threadRowFileDrop(
+  open: () => void,
+  offer: ((files: ReadonlyArray<File>) => void) | undefined,
 ): {
   readonly onDragOver?: (event: DragEvent<HTMLElement>) => void;
   readonly onDragLeave?: (event: DragEvent<HTMLElement>) => void;
@@ -67,27 +55,24 @@ export function sidebarFileDropHandlers(
   if (offer === undefined) return {};
   return {
     onDragOver: (event) => {
-      const row = threadRowAt(event.target);
-      if (row === null || !carriesFiles(event.dataTransfer)) return markFileDropRow(null);
+      if (!carriesFiles(event.dataTransfer)) return;
       event.preventDefault();
-      void import("./sidebar-row-drop.css");
+      // Only the lit row's look; a stylesheet that fails to load costs nothing else.
+      void import("./sidebar-row-drop.css").catch(() => undefined);
       event.dataTransfer.dropEffect = "copy";
-      markFileDropRow(row);
+      event.currentTarget.dataset.fileDropOver = "true";
     },
     onDragLeave: (event) => {
-      const into = event.relatedTarget;
-      if (!(into instanceof Node && event.currentTarget.contains(into))) markFileDropRow(null);
+      delete event.currentTarget.dataset.fileDropOver;
     },
     onDrop: (event) => {
-      markFileDropRow(null);
-      const row = threadRowAt(event.target);
-      const threadId = row?.dataset.threadId;
-      if (row === null || threadId === undefined || !carriesFiles(event.dataTransfer)) return;
+      delete event.currentTarget.dataset.fileDropOver;
+      if (!carriesFiles(event.dataTransfer)) return;
       event.preventDefault();
       const files = [...event.dataTransfer.files];
       if (files.length === 0) return;
-      row.click();
-      offer(threadId, files);
+      open();
+      offer(files);
     },
   };
 }

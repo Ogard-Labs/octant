@@ -59,7 +59,8 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { couldNotLoad, WindowNoticeContext } from "../shell/windowNotice";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
@@ -601,18 +602,24 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // The offer store loads on its own, so Chat's first load does not carry it.
   const takeOfferedFile = useRef<(file: File) => void>(() => {});
   const offeredThreadId = view === undefined ? undefined : String(view.thread.id);
+  const sayWindowNotice = useContext(WindowNoticeContext);
   useEffect(() => {
     if (offeredThreadId === undefined) return;
     let stop: (() => void) | undefined;
     let closed = false;
-    void import("../composer/threadFileOffers").then(({ takeChatFiles }) => {
-      if (!closed) stop = takeChatFiles(offeredThreadId, (file) => takeOfferedFile.current(file));
-    });
+    void import("../composer/threadFileOffers").then(
+      ({ takeChatFiles }) => {
+        if (!closed) stop = takeChatFiles(offeredThreadId, (file) => takeOfferedFile.current(file));
+      },
+      () => {
+        if (!closed) sayWindowNotice?.(couldNotLoad("files dropped on this thread's row"));
+      },
+    );
     return () => {
       closed = true;
       stop?.();
     };
-  }, [offeredThreadId]);
+  }, [offeredThreadId, sayWindowNotice]);
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">

@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { isApplePlatform } from "../platform";
 import {
   takesThreadRestUndoChord,
+  ThreadRestUndoHost,
   ThreadRestUndoToast,
   THREAD_REST_UNDO_MS,
 } from "./ThreadRestUndoToast";
+import { threadRestUndoStore } from "./threadRestUndoStore";
 
 afterEach(() => vi.useRealTimers());
 
@@ -108,5 +110,30 @@ describe("the sidebar Undo notice", () => {
       apple ? { key: "z", metaKey: true } : { key: "z", ctrlKey: true },
     );
     expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops an offered Undo when the window moves to another host or closes", () => {
+    const view = render(<ThreadRestUndoHost hostKey="http://127.0.0.1:4000" />);
+    act(() =>
+      threadRestUndoStore.offer({
+        sequence: 1_000,
+        title: "Settled",
+        detail: "Plan",
+        undo: vi.fn(),
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Undo" })).toBeVisible();
+    view.rerender(<ThreadRestUndoHost hostKey="https://other-host.example" />);
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    act(() =>
+      threadRestUndoStore.offer({
+        sequence: 1_001,
+        title: "Pinned",
+        detail: "Plan",
+        undo: vi.fn(),
+      }),
+    );
+    view.unmount();
+    expect(threadRestUndoStore.current()).toBeUndefined();
   });
 });

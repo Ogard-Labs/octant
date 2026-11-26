@@ -2,6 +2,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ThreadRowActions } from "../projects/ThreadRowMenu";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import type { ShellActions } from "./shellActions";
+import { couldNotLoad } from "../shell/windowNotice";
 
 export type ThreadRestRowActions = Pick<
   ThreadRowActions,
@@ -76,8 +77,10 @@ export function threadRestRowActions(
     lastRestChange += 1;
     const sequence = lastRestChange;
     const before = actions.threadRestRow(mode, threadId);
-    void import("./threadRestRun").then(({ runThreadRestChange }) =>
-      runThreadRestChange({ actions, mode, threadId, change, sequence, before }),
+    void import("./threadRestRun").then(
+      ({ runThreadRestChange }) =>
+        runThreadRestChange({ actions, mode, threadId, change, sequence, before }),
+      () => actions.setThreadExportNotice(couldNotLoad("this change to the thread")),
     );
   };
   const rowActions = (mode: OctantMode): ThreadRestRowActions => ({

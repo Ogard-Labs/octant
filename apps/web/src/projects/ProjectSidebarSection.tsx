@@ -155,7 +155,8 @@ import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { morePullRequestsThanTheFirst } from "./threadRowPullRequests";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
-import { sidebarFileDropHandlers } from "./sidebarRowDrop";
+import { threadRowFileDrop } from "./sidebarRowDrop";
+import { LazyPartBoundary } from "../shell/windowNotice";
 import { AddRepositoryToComputerContext } from "./addRepositoryToComputerContext";
 import type { ProjectActionsMenuProps } from "./ProjectActionsMenuItems";
 import {
@@ -861,7 +862,6 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         aria-label="Projects"
         className="project-nav window-no-drag"
         data-sidebar-row-drop="list"
-        {...sidebarFileDropHandlers(drag?.offerFiles)}
       >
         <div className="project-nav__list">
           {/* Views sort and filter Projects; with none yet the row only said
@@ -1395,10 +1395,12 @@ function ProjectStatusRollup(props: {
 }
 
 function ProjectActionsMenu(props: ProjectActionsMenuProps) {
-  const [open, setOpen] = useState(false);
+  // The items load when the menu first opens and stay drawn after, so the
+  // menu's close animation runs as it always has.
+  const [wanted, setWanted] = useState(false);
   const onAddToAnotherComputer = useContext(AddRepositoryToComputerContext);
   return (
-    <OctantMenuRoot onOpenChange={setOpen}>
+    <OctantMenuRoot onOpenChange={(next) => next && setWanted(true)}>
       <OctantMenuTrigger
         aria-label={`Project actions for ${props.project.name}`}
         className="project-row__action project-row__action--icon inline-flex items-center justify-center window-no-drag"
@@ -1407,16 +1409,18 @@ function ProjectActionsMenu(props: ProjectActionsMenuProps) {
         <MoreHorizontal aria-hidden="true" size={14} />
       </OctantMenuTrigger>
       {/* The items load when the menu first opens, not with the sidebar. */}
-      {open ? (
-        <Suspense fallback={null}>
-          <ProjectActionsMenuItems
-            {...props}
-            colors={PROJECT_ACTION_COLORS}
-            onAddToAnotherComputer={onAddToAnotherComputer}
-            railFullReason={RAIL_FULL_REASON}
-            railLimit={RAIL_PROJECT_LIMIT}
-          />
-        </Suspense>
+      {wanted ? (
+        <LazyPartBoundary what="this Project's menu">
+          <Suspense fallback={null}>
+            <ProjectActionsMenuItems
+              {...props}
+              colors={PROJECT_ACTION_COLORS}
+              onAddToAnotherComputer={onAddToAnotherComputer}
+              railFullReason={RAIL_FULL_REASON}
+              railLimit={RAIL_PROJECT_LIMIT}
+            />
+          </Suspense>
+        </LazyPartBoundary>
       ) : null}
     </OctantMenuRoot>
   );
@@ -1693,6 +1697,13 @@ function ActivityThreadButton(props: {
         props.onSelectThread(props.thread.navigationId);
       }}
       onDoubleClick={() => tabs?.keep(props.thread.threadId)}
+      {...threadRowFileDrop(
+        () => {
+          tabs?.openAsPreview(props.thread.threadId);
+          props.onSelectThread(props.thread.navigationId);
+        },
+        drag === null ? undefined : (files) => drag.offerFiles(props.thread.threadId, files),
+      )}
       {...(drag === null
         ? {}
         : {
