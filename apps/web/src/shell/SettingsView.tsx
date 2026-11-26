@@ -3210,27 +3210,38 @@ function AppearanceSection({
   if (page === "background") {
     const theme = props.themeController;
     return (
-      <section aria-label="Background" className="settings-section-stack" id="settings-background">
-        {/* A refused save answers here: the theme editor that showed it is on
-            Appearance and Text, not on this page. Drawn only when there is
-            one, so no empty slot opens a gap above the page's one section. */}
-        {theme?.error === undefined ? null : (
-          <OctantAlert className="settings-view__error" tone="danger">
-            {theme.error}
-          </OctantAlert>
-        )}
+      <section
+        aria-label="Background"
+        className="settings-section-stack settings-background-page"
+        id="settings-background"
+      >
+        {/* A refused save answers here, in the slot the theme editor gives it
+            on Appearance and Text: that editor is not on this page. */}
+        <div aria-live="polite" className="settings-feedback-slot">
+          {theme?.error === undefined ? null : (
+            <OctantAlert className="settings-view__error" tone="danger">
+              {theme.error}
+            </OctantAlert>
+          )}
+        </div>
         {theme === undefined || !isAvailable("app-background") ? (
           <SettingsSection title="Source and effect">
             <SettingsState kind="empty">
               The background cannot be changed in this window.
             </SettingsState>
           </SettingsSection>
+        ) : theme.draft === undefined ? (
+          // A change made before the theme has been read has no draft to
+          // join and would be dropped without a word, so the controls wait.
+          <p className="settings-view__empty" role="status">
+            Loading Background settings…
+          </p>
         ) : (
           <SettingsSection className="settings-app-background" title="Source and effect">
             <AppBackgroundSettings
-              background={(theme.draft ?? theme.settings)?.appBackground ?? DEFAULT_APP_BACKGROUND}
+              background={theme.draft.appBackground ?? DEFAULT_APP_BACKGROUND}
               focused={focusedSetting === settingId("app-background")}
-              increasedContrast={(theme.draft ?? theme.settings)?.increasedContrast === true}
+              increasedContrast={theme.draft.increasedContrast === true}
               library={props.backgroundImageLibrary}
               onChange={(appBackground) => {
                 void theme.applyPatch({ appBackground });

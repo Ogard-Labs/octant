@@ -1105,12 +1105,14 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    shrinks below zero, so the stack's gap still opened a blank row above the
    first section. Taken out of flow, the slot occupies no track at all. */
 .settings-theme-editor,
+.settings-background-page,
 .host-settings,
 .settings-view .provider-settings {
   position: relative;
 }
 
 .settings-theme-editor > .settings-feedback-slot:first-child,
+.settings-background-page > .settings-feedback-slot:first-child,
 .host-settings > .settings-feedback-slot:first-child,
 .settings-view .provider-settings > .provider-settings__message-slot:first-child {
   position: absolute;
@@ -1126,6 +1128,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    over the page's tab row, so enabling a provider failed with no reason. A
    status line still fits the strip and keeps the reserved geometry. */
 .settings-theme-editor > .settings-feedback-slot:first-child:has(.callout),
+.settings-background-page > .settings-feedback-slot:first-child:has(.callout),
 .host-settings > .settings-feedback-slot:first-child:has(.callout),
 .settings-view .provider-settings > .provider-settings__message-slot:first-child:has(.callout) {
   position: static;

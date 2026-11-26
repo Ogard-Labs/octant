@@ -1740,6 +1740,18 @@ describe("SettingsView", () => {
     );
   });
 
+  it("holds the Background controls until the theme has been read", () => {
+    renderSettings({
+      initialDeepLink: { section: "background" },
+      themeController: { draft: undefined, applyPatch: vi.fn(async () => false) } as never,
+    });
+    const page = within(screen.getByRole("main"));
+    expect(page.getByRole("status")).toHaveTextContent("Loading Background settings…");
+    expect(
+      page.queryByRole("combobox", { name: "Application background" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("draws the look on Appearance, the fonts and reading on Text, and neither on the other", () => {
     renderSettings({
       themeController: {
