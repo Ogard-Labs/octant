@@ -2036,6 +2036,10 @@ export function useCodeController(options: CodeControllerOptions) {
         // settles nothing here.
         const historyRead = () => {
           if (!isActive(request, threadGeneration, mounted)) return;
+          // A read that recovers a history that never loaded is the fork's
+          // first read to succeed, so it brings the first inherited page: a
+          // new fork has no turn activity that would read the fork again.
+          if (settledHistory.current !== "loaded") void readFirstInheritedPage();
           setConversationHistory("loaded");
           setTurnError((current) =>
             current === HISTORY_UNAVAILABLE_MESSAGE || current === HISTORY_UNREFRESHED_MESSAGE
@@ -2142,8 +2146,6 @@ export function useCodeController(options: CodeControllerOptions) {
           if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
             return true;
           conversationCursor = hydrated.nextCursor ?? conversationCursor;
-          // It may be the first read of the thread to succeed.
-          if (unread) void readFirstInheritedPage();
           unread = false;
           historyRead();
           if (hydrated.incomplete) startConversationPoll();

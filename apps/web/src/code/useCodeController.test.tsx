@@ -5391,6 +5391,64 @@ describe("useCodeController conversation window", () => {
     },
   );
 
+  it("shows a new fork's inherited turns when a rename reads it after its first read failed", async () => {
+    const sourceId = "10000000-0000-4000-8000-000000000077" as CodeThreadId;
+    const source = turnsOf("source", 50);
+    const forkPoint = source[29];
+    if (forkPoint === undefined) throw new Error("fixture");
+    const host = windowedHost({
+      [ids.thread]: {
+        turns: turnsOf("fork", 3),
+        forkedFrom: { threadId: sourceId, throughOperationId: forkPoint.operationId },
+      },
+      [sourceId]: { turns: source },
+    });
+    const renamed = deferred<void>();
+    let lastSequence = 1;
+    const readThread = host.client.thread;
+    const client = fakeClient({
+      ...host.client,
+      thread: vi.fn(async (threadId: CodeThreadId, signal?: AbortSignal) => ({
+        ...(await readThread(threadId, signal)),
+        lastSequence: lastSequence as never,
+      })),
+      subscribe: vi.fn((_id, _cursor, signal) =>
+        (async function* () {
+          await renamed.promise;
+          yield {
+            threadId: ids.thread,
+            sequence: 2,
+            event: { kind: "thread-updated", thread: thread(2) },
+          } as never;
+          yield* idleStream(signal);
+        })(),
+      ) as never,
+    });
+    vi.mocked(host.client.conversationWindow).mockRejectedValueOnce(new Error("offline"));
+    // A new fork has run no turn, so the list reports no activity for it.
+    const navigation = { bootstrap: bootstrap(1) };
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigation,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.conversationHistory).toBe("unavailable"));
+
+    // Another window renames the fork, and reading it for that succeeds.
+    lastSequence = 2;
+    renamed.resolve();
+    await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+    await waitFor(() => expect(result.current.conversation).toHaveLength(46));
+    expect(result.current.conversation[0]).toMatchObject({
+      text: "source prompt 10",
+      sourceThreadId: sourceId,
+    });
+    unmount();
+  });
+
   it("falls back to the whole forward read when the host has no window route", async () => {
     const conversationWindow = vi.fn(async () => {
       throw new CodeClientFailure(
