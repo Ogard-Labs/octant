@@ -3315,10 +3315,15 @@ would apply there and overwrite work it never saw. `restore-git-checkpoint`
 refuses any other point as a `conflict` before it takes an undo point or
 touches a file, and refuses as `unavailable` when it cannot read the thread's
 points. The files part of a rewind takes the same check on the turn checkpoint
-it would put back: its preview reports the files `unavailable` with reason
-`other-checkout` (or `unreadable`), and the rewind itself is refused as
-`unavailable` before any file or turn changes; the conversation-only rewind is
-still offered. A
+it would put back. When the point belongs to another checkout, the preview
+reports the files `unavailable` with reason `unreadable` and detail
+`other-checkout`, and a rewind that includes files is refused as `unavailable`
+before any file or turn changes. A rewind of the conversation only is still
+offered. The detail is a field of its own, not a new reason: a phone built
+before it decodes only the reasons it knows, so a new reason would fail the
+whole preview and leave the phone unable to rewind at all. A host answer drops
+a field the phone does not know, so an older phone still decodes the preview,
+shows its own sentence for `unreadable`, and rewinds the conversation only. A
 point that recorded no checkout (journaled before turns or restores recorded
 one) is trusted only on a thread whose every recorded turn names the target
 checkout. A turn that recorded none counts as having run elsewhere, so a thread

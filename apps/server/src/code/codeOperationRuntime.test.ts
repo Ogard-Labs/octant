@@ -1447,7 +1447,9 @@ describe("CodeOperationRuntime", () => {
         }),
       ).resolves.toMatchObject({
         kind: "rewind-preview",
-        files: { kind: "unavailable", reason: "other-checkout" },
+        // A phone built before the detail existed decodes only the reasons it
+        // knows; it drops the unknown field and still offers the conversation.
+        files: { kind: "unavailable", reason: "unreadable", detail: "other-checkout" },
       });
       await expect(
         fixture.runtime.execute(windowId, {

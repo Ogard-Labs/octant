@@ -327,6 +327,33 @@ describe("mobile fork and rewind", () => {
     );
   });
 
+  it("says a Code rewind's files stay put when their point was saved in another checkout", async () => {
+    const { transport, authenticatedFetch } = transportReturning({});
+    authenticatedFetch.mockImplementationOnce(async (input) => {
+      const command = JSON.parse(String(input.body));
+      return new Response(
+        JSON.stringify({
+          kind: "rewind-preview",
+          operationId: command.operationId,
+          fromOperationId: uuid(5),
+          removedTurns: 1,
+          rollback: "handoff",
+          files: { kind: "unavailable", reason: "unreadable", detail: "other-checkout" },
+        }),
+        { status: 200 },
+      );
+    });
+    const preview = await previewMobileCodeRewind(transport, {
+      threadId: uuid(700) as never,
+      checkoutId: uuid(701) as never,
+      fromOperationId: uuid(5),
+    });
+    expect(preview.files).toEqual({
+      kind: "unavailable",
+      reason: "This point was saved in another checkout, so only the conversation can go back.",
+    });
+  });
+
   it("shows the host's own sentence when a Code rewind is refused", async () => {
     const { transport, authenticatedFetch } = transportReturning({});
     authenticatedFetch.mockImplementationOnce(async (input) => {

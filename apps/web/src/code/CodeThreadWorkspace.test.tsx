@@ -2205,7 +2205,11 @@ describe("CodeThreadWorkspace", () => {
       operationId: "30000000-0000-4000-8000-000000000001",
       fromOperationId: "20000000-0000-4000-8000-000000000001",
       removedTurns: 1,
-      files: { kind: "unavailable" as const, reason: "other-checkout" as const },
+      files: {
+        kind: "unavailable" as const,
+        reason: "unreadable" as const,
+        detail: "other-checkout" as const,
+      },
       rollback: "handoff" as const,
     }));
     render(

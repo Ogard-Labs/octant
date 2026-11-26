@@ -52,9 +52,9 @@ export const MOBILE_REWIND_FILES_UNAVAILABLE: Readonly<
   unrecorded:
     "A turn after this point changed files without a recorded checkpoint, so the files cannot be put back. Rewind the conversation only.",
   unreadable: "The files could not be compared with this point.",
-  "other-checkout":
-    "This point was saved in another checkout, so only the conversation can go back.",
 };
+const MOBILE_REWIND_FILES_FROM_OTHER_CHECKOUT =
+  "This point was saved in another checkout, so only the conversation can go back.";
 
 /** Said when a phone cannot put files back; the conversation can still go back. */
 export const MOBILE_REWIND_FILES_NEED_COMPUTER =
@@ -468,7 +468,13 @@ export async function previewMobileCodeRewind(
           }
         : result.files.kind === "unchanged"
           ? { kind: "unchanged" }
-          : { kind: "unavailable", reason: MOBILE_REWIND_FILES_UNAVAILABLE[result.files.reason] },
+          : {
+              kind: "unavailable",
+              reason:
+                result.files.detail === "other-checkout"
+                  ? MOBILE_REWIND_FILES_FROM_OTHER_CHECKOUT
+                  : MOBILE_REWIND_FILES_UNAVAILABLE[result.files.reason],
+            },
   };
 }
 

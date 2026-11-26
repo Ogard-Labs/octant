@@ -1858,7 +1858,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 }
               : preview.files.kind === "unchanged"
                 ? { kind: "unchanged" }
-                : { kind: "unavailable", reason: REWIND_FILES_UNAVAILABLE[preview.files.reason] },
+                : {
+                    kind: "unavailable",
+                    reason:
+                      preview.files.detail === "other-checkout"
+                        ? REWIND_FILES_FROM_OTHER_CHECKOUT
+                        : REWIND_FILES_UNAVAILABLE[preview.files.reason],
+                  },
         };
       });
     } catch {
@@ -3877,7 +3883,7 @@ function nextOwnUserMessage(
 
 /** Why a rewind's files cannot come back, as the dialog says it. */
 const REWIND_FILES_UNAVAILABLE: Readonly<
-  Record<"server-project" | "plan" | "unrecorded" | "unreadable" | "other-checkout", string>
+  Record<"server-project" | "plan" | "unrecorded" | "unreadable", string>
 > = {
   "server-project":
     "A thread in a Project on a server takes no checkpoints, so only the conversation can be rewound. Git on the server is the way back for files.",
@@ -3885,9 +3891,9 @@ const REWIND_FILES_UNAVAILABLE: Readonly<
   unrecorded:
     "A turn after this point changed files without a recorded checkpoint, so only the conversation can be rewound.",
   unreadable: "The checkout could not be read, so only the conversation can be rewound.",
-  "other-checkout":
-    "This point was recorded in another checkout, so only the conversation can be rewound.",
 };
+const REWIND_FILES_FROM_OTHER_CHECKOUT =
+  "This point was recorded in another checkout, so only the conversation can be rewound.";
 
 function previousAssistantMessage(
   messages: ReadonlyArray<CodeController["conversation"][number]>,

@@ -77,6 +77,7 @@ import {
   type CodeCheckpoint,
   type CodeCheckoutIdentity,
   type CodeConversationTurn,
+  type CodeRewindFilesUnavailableDetail,
   type CodeRewindFilesUnavailableReason,
   type CodeEvidenceReference,
   type CodeEvidenceContentId,
@@ -250,9 +251,9 @@ const REWIND_FILES_UNAVAILABLE: Readonly<Record<CodeRewindFilesUnavailableReason
   unrecorded:
     "A turn after this point changed files without a recorded checkpoint, so the files cannot be put back. Rewind the conversation only.",
   unreadable: "The checkout could not be read, so the files cannot be put back. Try again.",
-  "other-checkout":
-    "This point was recorded in another checkout, so its files cannot be put back here. Rewind the conversation only.",
 };
+const REWIND_FILES_FROM_OTHER_CHECKOUT =
+  "This point was recorded in another checkout, so its files cannot be put back here. Rewind the conversation only.";
 /**
  * Pull request operations, which a server thread runs with this host's `gh`
  * by repository and branch name alone. Only the GitHub remote check reads
@@ -6302,7 +6303,11 @@ export class CodeOperationService {
   ):
     | { readonly kind: "checkpoint"; readonly checkpoint: CodeCheckpoint }
     | { readonly kind: "unchanged" }
-    | { readonly kind: "unavailable"; readonly reason: CodeRewindFilesUnavailableReason } {
+    | {
+        readonly kind: "unavailable";
+        readonly reason: CodeRewindFilesUnavailableReason;
+        readonly detail?: CodeRewindFilesUnavailableDetail;
+      } {
     if (checkout.kind === "remote-root") return { kind: "unavailable", reason: "server-project" };
     if (thread.executionPolicy === "plan") return { kind: "unavailable", reason: "plan" };
     const point = chooseCodeRewindFilePoint(all, String(fromOperationId));
@@ -6316,7 +6321,8 @@ export class CodeOperationService {
         checkoutId: checkout.id,
         checkpoint: point.checkpoint,
       }) ?? "unreadable";
-    if (recorded === "unrecorded") return { kind: "unavailable", reason: "other-checkout" };
+    if (recorded === "unrecorded")
+      return { kind: "unavailable", reason: "unreadable", detail: "other-checkout" };
     if (recorded === "unreadable") return { kind: "unavailable", reason: "unreadable" };
     return point;
   }
@@ -6391,7 +6397,9 @@ export class CodeOperationService {
         return this.#failed(
           command.operationId,
           "unavailable",
-          REWIND_FILES_UNAVAILABLE[point.reason],
+          point.detail === "other-checkout"
+            ? REWIND_FILES_FROM_OTHER_CHECKOUT
+            : REWIND_FILES_UNAVAILABLE[point.reason],
         );
       if (point.kind === "unchanged") files = "unchanged";
       else {

@@ -1795,17 +1795,26 @@ const RunReviewResult = Schema.Struct({
 /**
  * Why a rewind's files cannot be put back: a thread on a registered server
  * takes no checkpoints, a Plan thread writes nothing, a turn wrote files the
- * host never recorded, the checkout could not be read, or the point was
- * recorded in another checkout than the one the thread is on now.
+ * host never recorded, or the checkout could not be read.
  */
 export const CodeRewindFilesUnavailableReason = Schema.Literal(
   "server-project",
   "plan",
   "unrecorded",
   "unreadable",
-  "other-checkout",
 );
 export type CodeRewindFilesUnavailableReason = typeof CodeRewindFilesUnavailableReason.Type;
+/**
+ * A finer reason beside `reason`: `other-checkout` says the point was recorded
+ * in another checkout than the one the thread is on now, sent with the reason
+ * `unreadable`. It is a field of its own rather than a reason because a phone
+ * built before it decodes only the reasons it knows and would refuse the whole
+ * preview, so it could not rewind at all; a host answer drops a field it does
+ * not know, so that phone still decodes the preview, shows its own sentence
+ * for `unreadable`, and rewinds the conversation only.
+ */
+export const CodeRewindFilesUnavailableDetail = Schema.Literal("other-checkout");
+export type CodeRewindFilesUnavailableDetail = typeof CodeRewindFilesUnavailableDetail.Type;
 /**
  * What a rewind would change. `rollback` says how the conversation continues
  * after it: `native` when the provider can cut its own session back to the
@@ -1826,6 +1835,7 @@ const RewindPreviewResult = Schema.Struct({
     Schema.Struct({
       kind: Schema.Literal("unavailable"),
       reason: CodeRewindFilesUnavailableReason,
+      detail: Schema.optional(CodeRewindFilesUnavailableDetail),
     }).annotations(strict),
   ),
   rollback: Schema.Literal("native", "handoff"),
