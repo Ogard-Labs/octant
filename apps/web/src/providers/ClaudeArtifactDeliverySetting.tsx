@@ -26,6 +26,10 @@ export const CLAUDE_ARTIFACTS_TELEMETRY_WARNING =
  * with Claude Code's usage telemetry on, so the warning stays under the
  * switch and enabling asks again in a dialog that repeats it.
  */
+/** What the switch does, with the data that leaves this computer in the same sentence. */
+const PUBLISHES =
+  "Lets Work and Code threads publish to your claude.ai account instead of a Canvas; a page published leaves this computer.";
+
 export function ClaudeArtifactDeliverySetting(props: ClaudeArtifactDeliverySettingProps) {
   const [confirming, setConfirming] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
@@ -38,15 +42,10 @@ export function ClaudeArtifactDeliverySetting(props: ClaudeArtifactDeliverySetti
       <SettingRow
         // A switch that cannot be turned on says why in words, not only on
         // hover: the reason is then the row's sentence.
-        description={
-          unsupportedReason ??
-          "Lets Work and Code threads publish to your claude.ai account instead of a Canvas; a page published leaves this computer."
-        }
+        description={unsupportedReason ?? PUBLISHES}
         more={
           <>
-            {unsupportedReason === undefined
-              ? null
-              : "Lets Work and Code threads publish to your claude.ai account instead of a Canvas; a page published leaves this computer. "}
+            {unsupportedReason === undefined ? null : `${PUBLISHES} `}
             This account’s threads can publish documents, reports, and pages. Canvas stays the
             default; each thread chooses artifacts for itself. Claude asks before every publish, and
             Plan never publishes.
