@@ -25,6 +25,7 @@ import {
 import type { IconComponent } from "../ui/icons";
 import {
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -32,7 +33,7 @@ import {
   type ReactNode,
   type ToggleEvent,
 } from "react";
-import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
+import { RevealHiddenStepsContext, thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
 import {
   callTimingLabel,
   countToolKinds,
@@ -52,6 +53,7 @@ import type { DesignRunRuntime } from "../canvas/blocks/designRunningFrame";
 import {
   alwaysVisibleActivityRows,
   groupActivityRows,
+  quietActivityRows,
   settledTurnActivitySummary,
   type ActivityItem,
   type TurnActivity,
@@ -263,6 +265,10 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   // turn alone: expanding one settled turn must not re-fold another that the
   // user already opened.
   const disclosures = useReplyDisclosures();
+  // A quiet level's hidden steps come back for Find, or when the person opens
+  // the turn's "N steps hidden" line; the line's choice stays with this turn.
+  const findOpen = useContext(RevealHiddenStepsContext);
+  const [stepsOpened, setStepsOpened] = useState(false);
   const [revealedSummaryIds, setRevealedSummaryIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -295,6 +301,15 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   if (!hasRows && !hasReasoning && !hasReasoningTiming) {
     return props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />;
   }
+
+  const hides = disclosures.opening.hides;
+  const quiet = (() => {
+    if (hides === "nothing" || findOpen || stepsOpened) return undefined;
+    const kept = quietActivityRows(activity.rows, hides, settled && !running);
+    const thinkingHidden = hides === "steps" && (hasReasoning || hasReasoningTiming);
+    const hidden = activity.rows.length - kept.length + (thinkingHidden ? 1 : 0);
+    return hidden === 0 ? undefined : { kept, hidden };
+  })();
 
   const pinnedRows = alwaysVisibleActivityRows(activity);
   const pinnedIds = new Set(pinnedRows.map(rowKey));
@@ -437,11 +452,90 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     </div>
   ) : null;
 
+  // A published page or a created automation is what the turn delivered, so
+  // it stays in view at every level.
+  const deliverables = (
+    <>
+      {routineRows.length === 0 ? null : (
+        <ul aria-label="Created automations" className="turn-activity__routines">
+          {routineRows.map((row) => (
+            <li key={rowKey(row)}>
+              <RoutineReceiptCard routine={row.routine} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {publishedPages.length === 0 ? null : (
+        <ul aria-label="Published pages" className="turn-activity__published">
+          {publishedPages.map((row) => (
+            <li className="turn-activity__published-page" key={rowKey(row)}>
+              <PublishedPageCard page={row.published} />
+              {row.published.snapshot === undefined ? null : (
+                <PublishedSnapshot
+                  snapshot={row.published.snapshot}
+                  title={row.published.title ?? "Published page"}
+                  {...withRuntime(props.publishedSnapshotRuntime?.(row.id))}
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+
+  if (quiet !== undefined) {
+    // A running turn at Answers only says what it does in its Working line.
+    const offerHidden = !(hides === "steps" && running);
+    if (
+      !offerHidden &&
+      quiet.kept.length === 0 &&
+      routineRows.length === 0 &&
+      publishedPages.length === 0
+    ) {
+      return null;
+    }
+    return (
+      <div className="turn-activity" {...(running ? { "data-live": "true" } : {})}>
+        {offerHidden ? (
+          <OctantButton
+            aria-expanded="false"
+            className="turn-activity__hidden-steps"
+            onClick={() => setStepsOpened(true)}
+            size="sm"
+            type="button"
+            variant="link"
+          >
+            {quiet.hidden === 1 ? "1 step hidden" : `${quiet.hidden} steps hidden`}
+          </OctantButton>
+        ) : null}
+        {hides === "steps" ? null : thinkingDisclosure}
+        {renderRows(quiet.kept)}
+        {hides === "steps" || props.subagents === undefined ? null : (
+          <TurnSubagentRows window={props.subagents} />
+        )}
+        {deliverables}
+      </div>
+    );
+  }
+
   // Live turns keep every row in one stable list so a tool finishing does not
   // remount its disclosure (and clear the open state the user just set). The
   // pinned/foldable split only applies once the outer settled fold is active.
   return (
     <div className="turn-activity" {...(running ? { "data-live": "true" } : {})}>
+      {hides !== "nothing" && stepsOpened && !findOpen ? (
+        <OctantButton
+          aria-expanded="true"
+          className="turn-activity__hidden-steps"
+          onClick={() => setStepsOpened(false)}
+          size="sm"
+          type="button"
+          variant="link"
+        >
+          Hide steps
+        </OctantButton>
+      ) : null}
       {activity.truncated === true ? (
         <p className="turn-activity__truncated">Earliest steps kept</p>
       ) : null}
@@ -496,31 +590,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         <>{renderRows(activity.rows)}</>
       )}
       {props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />}
-      {routineRows.length === 0 ? null : (
-        <ul aria-label="Created automations" className="turn-activity__routines">
-          {routineRows.map((row) => (
-            <li key={rowKey(row)}>
-              <RoutineReceiptCard routine={row.routine} />
-            </li>
-          ))}
-        </ul>
-      )}
-      {publishedPages.length === 0 ? null : (
-        <ul aria-label="Published pages" className="turn-activity__published">
-          {publishedPages.map((row) => (
-            <li className="turn-activity__published-page" key={rowKey(row)}>
-              <PublishedPageCard page={row.published} />
-              {row.published.snapshot === undefined ? null : (
-                <PublishedSnapshot
-                  snapshot={row.published.snapshot}
-                  title={row.published.title ?? "Published page"}
-                  {...withRuntime(props.publishedSnapshotRuntime?.(row.id))}
-                />
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      {deliverables}
     </div>
   );
 }

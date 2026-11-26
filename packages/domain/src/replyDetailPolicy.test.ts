@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   effectiveReplyDetail,
   nextReplyDetailLevel,
+  replyDetailOpening,
   thinkingPreviewLine,
   withThreadReplyDetail,
 } from "./replyDetailPolicy";
@@ -42,10 +43,24 @@ describe("a thread's Reply detail level", () => {
     expect(next.at(-1)).toEqual({ ...work, level: "low" });
   });
 
-  it("steps Low, Medium, High and back to Low", () => {
+  it("steps from Answers only through Failures only, Low, Medium and High, then back", () => {
+    expect(nextReplyDetailLevel("answers")).toBe("failures");
+    expect(nextReplyDetailLevel("failures")).toBe("low");
     expect(nextReplyDetailLevel("low")).toBe("medium");
     expect(nextReplyDetailLevel("medium")).toBe("high");
-    expect(nextReplyDetailLevel("high")).toBe("low");
+    expect(nextReplyDetailLevel("high")).toBe("answers");
+  });
+
+  it("hides steps only at the two quiet levels, folded like Low", () => {
+    expect(replyDetailOpening("answers")).toEqual({ ...replyDetailOpening("low"), hides: "steps" });
+    expect(replyDetailOpening("failures").hides).toBe("succeeded-calls");
+    expect(replyDetailOpening("low").hides).toBe("nothing");
+    expect(replyDetailOpening("high").hides).toBe("nothing");
+  });
+
+  it("keeps a quiet level per thread like any other", () => {
+    const threads = withThreadReplyDetail([], work, "answers");
+    expect(effectiveReplyDetail({ defaultLevel: "high", threads }, work)).toBe("answers");
   });
 });
 

@@ -349,7 +349,15 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
 
   const replyDetail = sources.replyDetail;
   if (replyDetail !== undefined) {
-    const keywords = ["reply detail", "thinking", "tool calls", "expand", "collapse"];
+    const keywords = [
+      "reply detail",
+      "thinking",
+      "tool calls",
+      "expand",
+      "collapse",
+      "hide steps",
+      "quiet",
+    ];
     const thread = replyDetail.thread;
     if (thread !== undefined) {
       commands.push({
@@ -366,7 +374,11 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
         if (level === thread.level) continue;
         commands.push({
           id: `thread:reply-detail:${level}`,
-          title: `Show ${REPLY_DETAIL_LABELS[level].toLowerCase()} reply detail in this thread`,
+          // "Show answers only in this thread", not "answers only reply detail".
+          title:
+            level === "answers" || level === "failures"
+              ? `Show ${REPLY_DETAIL_LABELS[level].toLowerCase()} in this thread`
+              : `Show ${REPLY_DETAIL_LABELS[level].toLowerCase()} reply detail in this thread`,
           group: "Threads",
           detail: REPLY_DETAIL_DESCRIPTIONS[level],
           keywords: [...keywords, level],

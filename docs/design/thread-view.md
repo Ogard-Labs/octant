@@ -215,13 +215,39 @@ boundary and a compact tab row without a second horizontal divider.
 
 **Reply detail** chooses how much of a turn's work the transcript shows open.
 Settings › Text › Reading › Reply detail (`replyDetail`) is the default
-every thread starts at: one `OctantToggleGroup` of three levels whose
+every thread starts at: one `OctantToggleGroup` of five levels whose
 description reads "Where every thread starts unless it sets its own." followed
 by the chosen level's sentence. A thread may set its own level, which then
 stays with that thread: it survives a reload, every window and paired device
 of the host draws it, and changing the default never moves it. A thread that
 never chose follows the default. The levels apply the same in Chat, Work, and
-Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
+Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn. From
+quietest to fullest (maintainer decision, 2026-11-26; "Zen" was not used as a
+name, because Zen is already Octant's assistant space and its Mod+Shift+Z
+binding):
+
+- **Answers only**: "Only the message and the final reply; a finished turn's
+  steps wait behind one line." A turn shows the person's message and the reply.
+  Thinking, tool calls, tasks and subagent rows are left out; a finished turn
+  shows one "N steps hidden" line in the muted ink that opens them in place,
+  as at Low, with **Hide steps** to put them away again. A running turn shows
+  no rows at all: its "Working · 12s · step" line already names the current
+  step. Every mode draws a turn's reply as one body beside its activity rows,
+  and a provider's interim narration is part of that body, so the whole body
+  is the reply; an inline thinking or tool part inside a body is left out
+  the same way.
+- **Failures only**: "Tool calls show while they run; only failed and
+  unfinished ones stay." A call shows while it runs and stays only if it
+  failed or never finished; the calls that succeeded wait behind the same "N
+  steps hidden" line. Thinking, tasks and subagent rows stay as at Low.
+
+At both quiet levels, approvals, questions, credential requests, errors and a
+parked usage limit are drawn outside the activity rows and never hidden, and
+the rows always keep a failed call, a call that never finished, every Octant
+Shield or provider-review decision, and a task that failed or waits on the
+person. A published page or a created automation, which the turn delivered,
+stays in view. While the transcript's Find is open, every hidden step shows,
+folded as at Low, so a search reaches all of a turn and nothing hidden is lost.
 
 - **Low** (default): "Thinking stays folded, and a finished turn's tool calls
   fold behind one line." Thinking is shut, tool rows are listed while the turn
@@ -302,7 +328,8 @@ detail: High, this thread's own" or "Reply detail: Low, the default"). As a
 bare glyph in the composer row it read as one of two unexplained list icons.
 Its radio items are **Use default (Low)**
 (naming the current default; "Follow the level in Settings") and the three
-levels, with short descriptions that fit a phone-width menu: "Thinking and
+levels, with short descriptions that fit a phone-width menu: "Message and
+reply, steps hidden", "Only failed calls stay", "Thinking and
 finished tool calls folded", "Thinking's first line, tool calls listed",
 "Thinking, tool calls, and results open". A client that cannot change the
 level shows no menu (a paired browser the host's own person paired changes it
@@ -310,7 +337,8 @@ as a local window does; any other paired browser shows none).
 
 **Change reply detail in this thread** (`reply-detail-cycle`, Mod+Shift+D by
 default, remappable in Settings › Keyboard shortcuts) steps the thread in front
-through Low, Medium, High and back to Low, setting its own level, and says so
+through Answers only, Failures only, Low, Medium, High and back to Answers
+only, setting its own level, and says so
 in a status toast ("Reply detail: Medium" over "This thread:" and the level's
 sentence). A thread is in front only while it is on screen: behind Settings,
 Usage, Review, Zen, or any other page that covers the workspace, the chord does
@@ -354,7 +382,12 @@ else from the settings document, through `GET /api/reply-detail`
 (`settings.read-non-secret`, read-only, at most 128 KiB): the phone when a
 thread opens and when the app returns to the foreground, a paired browser when
 its workspace opens, when the mode changes, and when the window regains focus.
-Until an answer arrives, or if none can, they draw Low. On the phone the
+Until an answer arrives, or if none can, they draw Low. A level the reader
+does not know, such as one added after it was built, reads as Low while the
+levels it knows still draw; an older phone that cannot read the answer at all
+draws Low for every thread. The phone has no quiet view yet, so it draws
+Answers only and Failures only as Low; a paired browser draws them as a
+window does. On the phone the
 reasoning panel opens at High and shows its first line at Medium. A run of
 consecutive tool calls draws as one rail of 28pt rows, each with a round
 status mark (a finished call shows its check alone; Running and Failed keep

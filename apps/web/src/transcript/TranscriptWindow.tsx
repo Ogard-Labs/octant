@@ -20,6 +20,7 @@ import {
 import { TranscriptOutputLimitNote } from "./outputLimitNote";
 import { useTranscriptFindIndex } from "./useTranscriptFindIndex";
 import { TranscriptFindBar } from "./TranscriptFindBar";
+import { RevealHiddenStepsContext } from "./replyDetail";
 import { ArrowDown } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { scrollMemory, type TranscriptScrollMemory } from "./transcriptScrollMemory";
@@ -805,69 +806,71 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   );
 
   return (
-    <div
-      className={props.className}
-      data-transcript-scroll-margin={String(scrollMargin)}
-      data-transcript-window=""
-      onBlur={onFocusOut}
-      onFocus={onFocusIn}
-      onKeyDown={onKeyDown}
-      onScroll={onScroll}
-      ref={scrollElementRef}
-      {...(props.ariaLabel === undefined ? {} : { "aria-label": props.ariaLabel })}
-      {...(props.role === undefined ? {} : { role: props.role })}
-      style={props.style}
-    >
-      {findActive ? (
-        <div className="transcript-find-anchor">
-          <TranscriptFindBar
-            count={findCount}
-            current={currentFindIndex}
-            pending={find.pending}
-            onClose={closeFind}
-            onQueryChange={(query) => {
-              revealAfterQueryRef.current = true;
-              setFindQuery(query);
-              setFindIndex(0);
-            }}
-            onStep={stepFind}
-            ref={findInputRef}
-            query={findQuery}
-          />
-        </div>
-      ) : null}
-      <div data-transcript-lead="" ref={leadRef}>
-        {props.lead}
-      </div>
-      {list}
-      <div data-transcript-trail="" ref={trailRef}>
-        {compactionPlacement === undefined || compactionPlacement.trailing.length === 0 ? null : (
-          <div className={props.listClassName}>
-            {compactionPlacement.trailing.map((receipt) => (
-              <CompactionDivider key={String(receipt.compactionId)} receipt={receipt} />
-            ))}
+    <RevealHiddenStepsContext.Provider value={findActive}>
+      <div
+        className={props.className}
+        data-transcript-scroll-margin={String(scrollMargin)}
+        data-transcript-window=""
+        onBlur={onFocusOut}
+        onFocus={onFocusIn}
+        onKeyDown={onKeyDown}
+        onScroll={onScroll}
+        ref={scrollElementRef}
+        {...(props.ariaLabel === undefined ? {} : { "aria-label": props.ariaLabel })}
+        {...(props.role === undefined ? {} : { role: props.role })}
+        style={props.style}
+      >
+        {findActive ? (
+          <div className="transcript-find-anchor">
+            <TranscriptFindBar
+              count={findCount}
+              current={currentFindIndex}
+              pending={find.pending}
+              onClose={closeFind}
+              onQueryChange={(query) => {
+                revealAfterQueryRef.current = true;
+                setFindQuery(query);
+                setFindIndex(0);
+              }}
+              onStep={stepFind}
+              ref={findInputRef}
+              query={findQuery}
+            />
           </div>
-        )}
-        {props.trail}
-        <TranscriptOutputLimitNote restoreKey={props.restoreKey} />
-      </div>
-      {awayFromEnd ? (
-        <div className="transcript-jump-anchor">
-          <OctantButton
-            className="transcript-jump"
-            onClick={jumpToLatest}
-            size="sm"
-            variant="secondary"
-          >
-            <ArrowDown aria-hidden="true" />
-            Jump to latest
-          </OctantButton>
+        ) : null}
+        <div data-transcript-lead="" ref={leadRef}>
+          {props.lead}
         </div>
-      ) : null}
-      <div aria-live="polite" className="sr-only" data-transcript-live="">
-        {liveMessage}
+        {list}
+        <div data-transcript-trail="" ref={trailRef}>
+          {compactionPlacement === undefined || compactionPlacement.trailing.length === 0 ? null : (
+            <div className={props.listClassName}>
+              {compactionPlacement.trailing.map((receipt) => (
+                <CompactionDivider key={String(receipt.compactionId)} receipt={receipt} />
+              ))}
+            </div>
+          )}
+          {props.trail}
+          <TranscriptOutputLimitNote restoreKey={props.restoreKey} />
+        </div>
+        {awayFromEnd ? (
+          <div className="transcript-jump-anchor">
+            <OctantButton
+              className="transcript-jump"
+              onClick={jumpToLatest}
+              size="sm"
+              variant="secondary"
+            >
+              <ArrowDown aria-hidden="true" />
+              Jump to latest
+            </OctantButton>
+          </div>
+        ) : null}
+        <div aria-live="polite" className="sr-only" data-transcript-live="">
+          {liveMessage}
+        </div>
       </div>
-    </div>
+    </RevealHiddenStepsContext.Provider>
   );
 }
 

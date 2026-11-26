@@ -1,6 +1,6 @@
 import { effectiveReplyDetail } from "@octant/domain/reply-detail-policy";
 import { describe, expect, it } from "vitest";
-import { mobileReplyDetailPresentation } from "./replyDetailPresentation";
+import { mobileReplyDetailPresentation, phoneReplyDetail } from "./replyDetailPresentation";
 
 const reasoning = "**Compare** the fixtures.\nThe second is stale.";
 
@@ -39,5 +39,14 @@ describe("a reply on the phone at each Reply detail level", () => {
     };
     expect(effectiveReplyDetail(reading, { mode: "code", threadId: "thread-1" })).toBe("high");
     expect(effectiveReplyDetail(reading, { mode: "code", threadId: "thread-2" })).toBe("medium");
+  });
+
+  it("draws the quiet levels it has no view for yet as Low", () => {
+    expect(phoneReplyDetail("answers")).toBe("low");
+    expect(phoneReplyDetail("failures")).toBe("low");
+    expect(phoneReplyDetail("medium")).toBe("medium");
+    expect(mobileReplyDetailPresentation(phoneReplyDetail("answers"), reasoning)).toEqual(
+      mobileReplyDetailPresentation("low", reasoning),
+    );
   });
 });

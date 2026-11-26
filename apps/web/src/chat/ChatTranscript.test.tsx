@@ -8,6 +8,7 @@ import { decodeThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import type { PickerGroup } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { ChatPendingQuestions, ChatTranscript } from "./ChatTranscript";
+import { ReplyDetailContext } from "../transcript/replyDetail";
 import { SideTaskProvider } from "../followUps/SideTaskCards";
 
 const now = "2026-07-20T08:00:00.000Z";
@@ -382,6 +383,54 @@ describe("ChatTranscript", () => {
     await userEvent.click(fold);
     expect(screen.getByRole("button", { name: "Web search, done" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Fetch page, failed" })).toBeInTheDocument();
+  });
+
+  it("at Answers only keeps the reply, a failed call and a parked limit, and hides the rest", () => {
+    const current = viewFixture();
+    const completed = current.turns[0]!.attempts[1]!;
+    const parked = current.turns[0]!.attempts[0]!;
+    render(
+      <ReplyDetailContext.Provider value="answers">
+        <ChatTranscript
+          view={viewFixture({
+            turns: [
+              {
+                ...current.turns[0]!,
+                attempts: [
+                  {
+                    ...parked,
+                    outcome: "waiting",
+                    usageLimit: {
+                      kind: "temporary",
+                      resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+                    },
+                  },
+                  {
+                    ...completed,
+                    toolSteps: [
+                      {
+                        toolCallId: "call-1",
+                        toolName: "Web search",
+                        state: "completed",
+                        summary: "3 results",
+                      },
+                      { toolCallId: "call-2", toolName: "Fetch page", state: "failed" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          })}
+        />
+      </ReplyDetailContext.Provider>,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The provider reached a temporary rate limit.",
+    );
+    expect(screen.getByRole("button", { name: "Fetch page, failed" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Web search/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1 step hidden" })).toBeVisible();
   });
 
   it("shows no tool group for an attempt that called no tool", () => {

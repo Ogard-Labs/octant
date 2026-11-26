@@ -11,7 +11,14 @@ import type { OctantMode } from "@octant/contracts/modes";
  * shows open. Presentation only; nothing here reaches a model or a route.
  */
 
-export const REPLY_DETAIL_LEVELS: ReadonlyArray<ReplyDetailLevel> = ["low", "medium", "high"];
+/** Quietest first: Answers only, Failures only, Low, Medium, High. */
+export const REPLY_DETAIL_LEVELS: ReadonlyArray<ReplyDetailLevel> = [
+  "answers",
+  "failures",
+  "low",
+  "medium",
+  "high",
+];
 
 export interface ReplyDetailThread {
   readonly mode: OctantMode;
@@ -27,21 +34,45 @@ export interface ReplyDetailOpening {
   readonly toolCalls: boolean;
   /** Whether each tool row shows the summary the transcript already holds. */
   readonly toolDetail: boolean;
+  /**
+   * What the level leaves out of a turn until the person or Find asks for it:
+   * nothing; the calls that succeeded (Failures only); or every step, leaving
+   * the message and the reply (Answers only). Approvals, questions, errors,
+   * Shield decisions and failed or unfinished calls are never left out.
+   */
+  readonly hides: "nothing" | "succeeded-calls" | "steps";
 }
 
+const FOLDED = { thinking: false, thinkingPreview: false, toolCalls: false, toolDetail: false };
+
 const OPENING: Readonly<Record<ReplyDetailLevel, ReplyDetailOpening>> = {
-  low: { thinking: false, thinkingPreview: false, toolCalls: false, toolDetail: false },
-  medium: { thinking: false, thinkingPreview: true, toolCalls: true, toolDetail: false },
-  high: { thinking: true, thinkingPreview: false, toolCalls: true, toolDetail: true },
+  answers: { ...FOLDED, hides: "steps" },
+  failures: { ...FOLDED, hides: "succeeded-calls" },
+  low: { ...FOLDED, hides: "nothing" },
+  medium: {
+    thinking: false,
+    thinkingPreview: true,
+    toolCalls: true,
+    toolDetail: false,
+    hides: "nothing",
+  },
+  high: {
+    thinking: true,
+    thinkingPreview: false,
+    toolCalls: true,
+    toolDetail: true,
+    hides: "nothing",
+  },
 };
 
 export function replyDetailOpening(level: ReplyDetailLevel): ReplyDetailOpening {
   return OPENING[level];
 }
 
-/** Low, then Medium, then High, then Low again: what the shortcut steps through. */
+/** Each level from quietest to fullest, then back to the quietest: what the shortcut steps through. */
 export function nextReplyDetailLevel(level: ReplyDetailLevel): ReplyDetailLevel {
-  return level === "low" ? "medium" : level === "medium" ? "high" : "low";
+  const index = REPLY_DETAIL_LEVELS.indexOf(level);
+  return REPLY_DETAIL_LEVELS[(index + 1) % REPLY_DETAIL_LEVELS.length] ?? "low";
 }
 
 function sameThread(entry: ThreadReplyDetail, thread: ReplyDetailThread): boolean {

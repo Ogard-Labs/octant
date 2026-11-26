@@ -537,9 +537,11 @@ export const UsageBarStyle = Schema.Literal("smooth", "pixelated");
 export type UsageBarStyle = typeof UsageBarStyle.Type;
 /**
  * How much of an agent's work a transcript shows open. Presentation only: it
- * never changes what is asked of a model or what a client fetches.
+ * never changes what is asked of a model or what a client fetches. Answers
+ * only and Failures only sit below Low and hide steps rather than fold them.
  */
-export const ReplyDetailLevel = Schema.Literal("low", "medium", "high");
+export const REPLY_DETAIL_LEVEL_VALUES = ["answers", "failures", "low", "medium", "high"] as const;
+export const ReplyDetailLevel = Schema.Literal(...REPLY_DETAIL_LEVEL_VALUES);
 export type ReplyDetailLevel = typeof ReplyDetailLevel.Type;
 
 /** One thread's own Reply detail level, which wins over the default. */
@@ -572,9 +574,32 @@ export type ThreadReplyDetails = typeof ThreadReplyDetails.Type;
  * whole of what this route discloses from the host's shell settings.
  */
 export const REPLY_DETAIL_PATH = "/api/reply-detail";
+
+function isReplyDetailLevel(value: string): value is ReplyDetailLevel {
+  return REPLY_DETAIL_LEVEL_VALUES.some((level) => level === value);
+}
+
+/**
+ * A level as a device reads it: one this version does not know, such as a
+ * level added after the device was built, reads as Low, the quiet level every
+ * reader draws, instead of failing the whole answer and every thread's level
+ * with it. The host's own settings stay strict.
+ */
+const ReadReplyDetailLevel = Schema.transform(Schema.String, ReplyDetailLevel, {
+  strict: true,
+  decode: (value) => (isReplyDetailLevel(value) ? value : "low"),
+  encode: (level) => level,
+});
+
 export const ReplyDetailReading = Schema.Struct({
-  defaultLevel: ReplyDetailLevel,
-  threads: ThreadReplyDetails,
+  defaultLevel: ReadReplyDetailLevel,
+  threads: Schema.Array(
+    Schema.Struct({
+      mode: OctantMode,
+      threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+      level: ReadReplyDetailLevel,
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_THREAD_REPLY_DETAILS)),
 }).annotations(strict);
 export type ReplyDetailReading = typeof ReplyDetailReading.Type;
 export const decodeReplyDetailReading = Schema.decodeUnknownSync(ReplyDetailReading);

@@ -29,7 +29,7 @@ describe("reading the host's reply detail from a paired client", () => {
   it("reads nothing, so the quiet default draws, when the host refuses or answers off-contract", async () => {
     for (const answer of [
       () => new Response(null, { status: 404 }),
-      () => Response.json({ defaultLevel: "verbose", threads: [] }),
+      () => Response.json({ defaultLevel: 3, threads: [] }),
       () => {
         throw new Error("offline");
       },
@@ -38,6 +38,20 @@ describe("reading the host's reply detail from a paired client", () => {
         readMobileReplyDetail({ transport: transportAnswering(answer).transport }),
       ).resolves.toBeUndefined();
     }
+  });
+
+  it("reads a level it does not know as Low and keeps the levels it knows", async () => {
+    const answer = () =>
+      Response.json({
+        defaultLevel: "verbose",
+        threads: [{ mode: "code", threadId: "thread-1", level: "answers" }],
+      });
+    await expect(
+      readMobileReplyDetail({ transport: transportAnswering(answer).transport }),
+    ).resolves.toEqual({
+      defaultLevel: "low",
+      threads: [{ mode: "code", threadId: "thread-1", level: "answers" }],
+    });
   });
 
   it("reads over a paired browser's product fetch", async () => {

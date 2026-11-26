@@ -10,7 +10,7 @@ import type { TurnActivity } from "./turnActivity";
 import { MarkdownLinkActionsContext } from "../markdown/markdownLinkActions";
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
 import type { ReactNode } from "react";
-import { ReplyDetailContext } from "./replyDetail";
+import { ReplyDetailContext, RevealHiddenStepsContext } from "./replyDetail";
 import { RoutineOpenContext } from "./RoutineReceiptCard";
 
 const mixed: TurnActivity = {
@@ -1180,5 +1180,109 @@ describe("a Canvas preview's row", () => {
 
     expect(draw).toHaveBeenCalledWith(preview);
     expect(screen.getByText("Previewed version")).toBeTruthy();
+  });
+});
+
+describe("the quiet Reply detail levels", () => {
+  const shieldDenial = {
+    kind: "review" as const,
+    id: "review-deny",
+    summary: "bash: rm -rf build",
+    decision: {
+      reviewer: "provider" as const,
+      verdict: "deny" as const,
+      reason: "Deletes outside the task.",
+      decidedAt: "2026-10-31T00:00:00.000Z" as never,
+    },
+  };
+  const turn: TurnActivity = {
+    reasoning: "Check the failing suite first.",
+    rows: [
+      { kind: "tool", id: "call-1", toolName: "Bash", state: "completed", summary: "exit 0" },
+      {
+        kind: "tool",
+        id: "call-2",
+        toolName: "Read",
+        state: "failed",
+        summary: "Path is outside the checkout.",
+      },
+      { kind: "tool", id: "call-3", toolName: "Write", state: "completed", summary: "Saved" },
+      shieldDenial,
+      { kind: "task", id: "task-1", state: "waiting", summary: "Choose a branch" },
+    ],
+  };
+
+  function atLevel(level: ReplyDetailLevel, node: ReactNode, findOpen = false) {
+    return (
+      <RevealHiddenStepsContext.Provider value={findOpen}>
+        <ReplyDetailContext.Provider value={level}>{node}</ReplyDetailContext.Provider>
+      </RevealHiddenStepsContext.Provider>
+    );
+  }
+
+  it("Failures only hides a successful call and keeps a failed one", async () => {
+    const user = userEvent.setup();
+    render(atLevel("failures", <TurnActivityRows activity={turn} running={false} settled />));
+
+    expect(screen.getByRole("button", { name: /^Read, failed/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Bash/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Write/ })).toBeNull();
+    expect(screen.getByRole("note")).toHaveTextContent("Denied by the provider's review");
+    // Thinking stays, folded as at Low; only the succeeded calls are hidden.
+    expect(screen.getByRole("button", { name: "Thinking" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "2 steps hidden" }));
+    expect(screen.getByRole("button", { name: /^Bash/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Hide steps" }));
+    expect(screen.queryByRole("button", { name: /^Bash/ })).toBeNull();
+  });
+
+  it("Failures only shows a call while it runs", () => {
+    const running: TurnActivity = {
+      reasoning: "",
+      rows: [
+        { kind: "tool", id: "call-1", toolName: "Bash", state: "completed", summary: "exit 0" },
+        { kind: "tool", id: "call-2", toolName: "Read", state: "running", summary: "a.ts" },
+      ],
+    };
+    render(atLevel("failures", <TurnActivityRows activity={running} running />));
+    expect(screen.getByRole("button", { name: /^Read/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Bash/ })).toBeNull();
+  });
+
+  it("Answers only keeps approvals, questions and errors", () => {
+    render(atLevel("answers", <TurnActivityRows activity={turn} running={false} settled />));
+
+    // A reviewer's decision, a failed call, and a task waiting on the person stay.
+    expect(screen.getByRole("note")).toHaveTextContent("Denied by the provider's review");
+    expect(screen.getByRole("button", { name: /^Read, failed/ })).toBeVisible();
+    expect(screen.getAllByText("Choose a branch")[0]).toBeVisible();
+    // Thinking and the succeeded calls wait behind one line.
+    expect(screen.queryByRole("button", { name: "Thinking" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Bash/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "3 steps hidden" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("Answers only leaves a running turn to its Working line", () => {
+    const running: TurnActivity = {
+      reasoning: "Looking.",
+      rows: [{ kind: "tool", id: "call-1", toolName: "Read", state: "running", summary: "a.ts" }],
+    };
+    const { container } = render(
+      atLevel("answers", <TurnActivityRows activity={running} running />),
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("Find reveals hidden steps", () => {
+    render(atLevel("answers", <TurnActivityRows activity={turn} running={false} settled />, true));
+    expect(screen.getByRole("button", { name: "Thinking" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Bash/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /steps hidden/ })).toBeNull();
+    // The rows are in the document for Find to match, folded as at Low.
+    expect(screen.getByText("exit 0")).toBeInTheDocument();
   });
 });

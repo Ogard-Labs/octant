@@ -4,7 +4,7 @@ import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import { ChevronRight } from "../ui/icons";
 import { useContext, useMemo, type ToggleEvent } from "react";
 import { ChatRichText } from "../chat/ChatRichText";
-import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
+import { RevealHiddenStepsContext, thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
 import { SelectionThreadSurface } from "./SelectionThread";
 import { useEvenReveal } from "./useEvenReveal";
 
@@ -44,6 +44,10 @@ function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
   // Hooks run for prose parts too, so a part keeps its hook order if a
   // streaming parse turns it from one kind into another.
   const disclosures = useReplyDisclosures();
+  const findOpen = useContext(RevealHiddenStepsContext);
+  // The quiet levels leave out an inline step as they leave out an activity
+  // row: a failed call stays, and Find shows them all.
+  const hides = findOpen ? "nothing" : disclosures.opening.hides;
   const openByLevel =
     part.kind === "tool"
       ? disclosures.opening.toolDetail
@@ -52,6 +56,12 @@ function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
   const onToggle = (event: ToggleEvent<HTMLDetailsElement>) =>
     disclosures.choose("part", event.currentTarget.open);
   if (part.kind === "tool") {
+    if (
+      part.status !== "failed" &&
+      (hides === "steps" || (hides === "succeeded-calls" && part.status === "done"))
+    ) {
+      return null;
+    }
     return (
       <details className="thinking" onToggle={onToggle} open={open}>
         <summary aria-label={`Tool · ${part.name} · ${part.status}`}>
@@ -64,6 +74,7 @@ function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
     );
   }
   if (part.kind === "reasoning") {
+    if (hides === "steps") return null;
     const preview =
       disclosures.opening.thinkingPreview && !open ? thinkingPreviewLine(part.text) : "";
     return (

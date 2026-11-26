@@ -1341,6 +1341,12 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-
   font-size: var(--oct-text-xs);
 }
 
+/* A quiet Reply detail level's one line for the steps it hides; it opens them
+   in place, and "Hide steps" puts them away again. */
+.turn-activity__hidden-steps {
+  align-self: flex-start;
+}
+
 .turn-activity__empty-detail {
   margin: 0;
   color: var(--oct-meta);

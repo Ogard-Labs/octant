@@ -1,6 +1,7 @@
 import { readMobileReplyDetail, type MobileRemoteTransport } from "@octant/client-runtime";
 import type { OctantMode, ReplyDetailLevel, ReplyDetailReading } from "@octant/contracts";
 import { effectiveReplyDetail } from "@octant/domain/reply-detail-policy";
+import { phoneReplyDetail } from "../../ui/replyDetailPresentation";
 import { useEffect, useState } from "react";
 import { AppState } from "react-native";
 
@@ -34,5 +35,5 @@ export function useThreadReplyDetail(input: {
     };
   }, [transport, mode, threadId]);
   if (reading === undefined || mode === undefined || threadId === undefined) return "low";
-  return effectiveReplyDetail(reading, { mode, threadId });
+  return phoneReplyDetail(effectiveReplyDetail(reading, { mode, threadId }));
 }

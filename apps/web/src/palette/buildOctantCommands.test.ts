@@ -72,6 +72,8 @@ describe("the Reply detail commands", () => {
         .map((command) => command.title),
     ).toEqual([
       "Change reply detail in this thread",
+      "Show answers only in this thread",
+      "Show failures only in this thread",
       "Show low reply detail in this thread",
       "Show high reply detail in this thread",
       "Use the default reply detail in this thread",
@@ -96,7 +98,12 @@ describe("the Reply detail commands", () => {
       commands
         .filter((command) => command.id.startsWith("settings:reply-detail:"))
         .map((command) => command.title),
-    ).toEqual(["Set the default reply detail to Medium", "Set the default reply detail to High"]);
+    ).toEqual([
+      "Set the default reply detail to Answers only",
+      "Set the default reply detail to Failures only",
+      "Set the default reply detail to Medium",
+      "Set the default reply detail to High",
+    ]);
     run(commands, "settings:reply-detail:high");
     expect(onSetDefault).toHaveBeenCalledWith("high");
   });
