@@ -651,6 +651,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // Resolves with the reason a file was not attached, at once or while it
   // uploaded, so a row drop can name it after a later file clears the
   // composer's warning and a large paste only names a file that Chat took.
+  // A discard of a file not kept is never awaited: a row drop hands over its
+  // next file only once this one has a verdict, and Send is enabled again as
+  // soon as no upload is in flight, so waiting on the host's discard left a
+  // gap in which a message went out without the rest of the drop.
   const attachChatFile = (file: File): Promise<string | undefined> => {
     // A pasted image usually has no file name; name it once so the chip,
     // its remove control, and any failure message all agree.
@@ -721,7 +725,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         ) {
           cancelledUploadsRef.current.delete(String(attachmentId));
           settleUpload();
-          await discardAttachmentRef
+          void discardAttachmentRef
             .current({ threadId: view.thread.id, attachmentId })
             .catch(() => undefined);
           return "The attachment was cancelled.";
@@ -740,7 +744,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         ) {
           cancelledUploadsRef.current.delete(String(attachmentId));
           settleUpload();
-          await discardAttachmentRef
+          void discardAttachmentRef
             .current({ threadId: view.thread.id, attachmentId })
             .catch(() => undefined);
           return "The attachment was cancelled.";
@@ -750,7 +754,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         return undefined;
       } catch {
         settleUpload();
-        await discardAttachmentRef
+        void discardAttachmentRef
           .current({ threadId: view.thread.id, attachmentId })
           .catch(() => undefined);
         const message = `${displayName} could not be attached. Paste or choose it again to retry.`;

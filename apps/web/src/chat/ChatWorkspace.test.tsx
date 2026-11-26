@@ -762,6 +762,42 @@ describe("Chat host queue", () => {
     );
   });
 
+  it("hands a drop's next file over without waiting for a refused file's discard", async () => {
+    const upload = vi.fn<ChatController["upload"]>(async (input) => {
+      if (input.displayName === "huge.png") throw new Error("too large");
+      return decodeChatAttachment({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+        status: "finalized",
+        createdAt: now,
+      });
+    });
+    // The host's discard never answers here; Send must not open in that wait.
+    const discard = vi.fn<ChatController["discard"]>(() => new Promise(() => {}));
+    render(
+      <ChatWorkspace
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ upload, discard })}
+      />,
+    );
+    const { offerFilesToThread } = await import("../composer/threadImageOffers");
+    const files = ["huge.png", "small.png"].map(
+      (name) => new File(["x"], name, { type: "image/png" }),
+    );
+    void offerFilesToThread("chat", threadId, files, () => {});
+    await waitFor(() => expect(discard).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(upload.mock.calls.map(([input]) => input.displayName)).toEqual([
+        "huge.png",
+        "small.png",
+      ]),
+    );
+  });
+
   it("keeps an uncertain enqueue separate from normal sending after the active turn finishes", async () => {
     const host = queueTestHost();
     const user = userEvent.setup();

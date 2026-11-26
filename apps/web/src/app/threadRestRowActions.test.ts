@@ -149,13 +149,21 @@ describe("Undo after a sidebar state change", () => {
     );
   });
 
-  it("puts back the pin of a settled, pinned thread when Mark done is undone", () => {
-    const before = { title: "T", completedAt: "2026-11-25T10:00:00.000Z", pinned: true };
-    expect(inverseThreadRestChange({ kind: "mark-done" }, before, new Date())).toEqual([
-      { kind: "reopen" },
-      { kind: "settle" },
-      { kind: "pin" },
-    ]);
+  it("puts back the pin of a settled, pinned thread when Mark done is undone", async () => {
+    const shell = shellActions();
+    shell.threadRestRow.mockReturnValue({
+      title: "T",
+      completedAt: "2026-11-25T10:00:00.000Z",
+      pinned: true,
+    });
+    threadRestRowActions(shell).code.onMarkThreadDone?.(CODE_ID);
+    await vi.waitFor(() => expect(shell.offered).toHaveLength(1));
+    shell.offered[0]?.undo();
+    await vi.waitFor(() => expect(shell.setCodeThreadPin).toHaveBeenCalledWith(CODE_ID, true));
+    // Settle drops the pin, so the pin goes back only after it.
+    expect(shell.completeCodeThread.mock.invocationCallOrder[0]).toBeLessThan(
+      shell.setCodeThreadPin.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it("does not settle again after Undo's reopen is refused", async () => {
