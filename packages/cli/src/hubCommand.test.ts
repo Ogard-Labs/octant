@@ -1484,6 +1484,10 @@ describe("octant hub visitor", () => {
     expect(
       resolveHubCliCommand(["visitor", "share", "code", "t"], { hours: "200" }),
     ).toBeUndefined();
+    // A bare --hours names no lifetime, so it is refused rather than read as one hour.
+    expect(
+      resolveHubCliCommand(["visitor", "share", "code", "t"], { hours: true }),
+    ).toBeUndefined();
   });
 
   it("prints a new link once, with its secret in the fragment", async () => {

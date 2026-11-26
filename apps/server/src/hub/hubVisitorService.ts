@@ -260,7 +260,11 @@ export class HubVisitorService {
             return false;
           }
           const text = JSON.stringify(answer.projection ?? null);
-          if (text !== last) {
+          // A browser that is not reading keeps one snapshot waiting, not one
+          // per change: each is near the whole projection. `last` stays put, so
+          // the first look after it reads again sends the thread as it is then.
+          const backedUp = controller.desiredSize !== null && controller.desiredSize <= 0;
+          if (text !== last && !backedUp) {
             last = text;
             controller.enqueue(encoder.encode(`data: ${text}\n\n`));
           }

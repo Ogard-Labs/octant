@@ -312,6 +312,8 @@ export function resolveHubCliCommand(
       if (mode !== "share" || rest.length !== 3 || !only("comment", "hours")) return undefined;
       if ((first !== "code" && first !== "chat") || second === undefined) return undefined;
       if (flags.comment !== undefined && !isSwitch(flags.comment)) return undefined;
+      // A bare --hours parses as true, which Number would read as one hour.
+      if (flags.hours !== undefined && typeof flags.hours !== "string") return undefined;
       const hours = flags.hours === undefined ? undefined : Number(flags.hours);
       // A link lasts a day unless the person says otherwise, and never more than a week.
       if (hours !== undefined && !(Number.isInteger(hours) && hours >= 1 && hours <= 168)) {

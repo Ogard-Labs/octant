@@ -44,6 +44,7 @@ function world() {
   const spokeKey = keyPair();
   const records: HubMembershipChangedPayload[] = [];
   let thread: "open" | "waiting" = "open";
+  let edits = 0;
   const hubs: HubVisitorService[] = [];
   const spoke = new SpokeVisitorService({
     state: memoryState(),
@@ -63,7 +64,7 @@ function world() {
         title: "Fix the login page",
         archived: false,
         state: thread === "waiting" ? "owner-deciding" : "idle",
-        messages: [{ role: "agent", text: "Working on it." }],
+        messages: [{ role: "agent", text: edits === 0 ? "Working on it." : `Edit ${edits}` }],
       }),
     },
     taint: () => true,
@@ -92,6 +93,9 @@ function world() {
     records,
     waitForApproval: () => {
       thread = "waiting";
+    },
+    edit: () => {
+      edits += 1;
     },
   };
 }
@@ -389,5 +393,28 @@ describe("visitor links on the hub", () => {
     const context = world();
     await context.hub.setEnabled(false, { kind: "local-window" });
     expect(context.hub.handlers()).toEqual({});
+  });
+
+  it("holds at most one unread snapshot for a browser that stops reading, and sends it the newest", async () => {
+    const context = world();
+    const link = await shareComment(context);
+    const visitor = browser();
+    await call(context.hub, "visitor-open", link.linkId, visitor, { secret: link.secret });
+    const stream = await call(context.hub, "visitor-stream", link.linkId, visitor);
+    if (!(stream.body instanceof ReadableStream)) throw new Error("no stream");
+    const reader = stream.body.getReader();
+    // The browser reads nothing while the thread changes on every poll.
+    for (let index = 0; index < 10; index += 1) {
+      context.edit();
+      await new Promise((resolve) => setTimeout(resolve, 8));
+    }
+    const decoder = new TextDecoder();
+    // What waited is the snapshot from before it stopped; none of the ten in between.
+    const waiting = await reader.read();
+    expect(decoder.decode(waiting.value)).toContain("Working on it.");
+    // Once it reads again, the next snapshot is the thread as it is now.
+    const latest = await reader.read();
+    expect(decoder.decode(latest.value)).toContain("Edit 10");
+    await reader.cancel();
   });
 });

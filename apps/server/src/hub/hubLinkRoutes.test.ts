@@ -16,7 +16,7 @@ import {
   type SignedHubRoster,
 } from "@octant/contracts";
 import { hubRosterSigningPayload } from "@octant/domain";
-import { HUB_LINK_HEADER, signHubLinkRequest } from "./hubLink";
+import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, signHubLinkRequest } from "./hubLink";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
 import { createPinnedHubTransport } from "./pinnedHubTransport";
 import { REMOTE_HUB_LINK_ROUTE_IDS, createRemoteRoutePolicy } from "../remoteRoutePolicy";
@@ -618,5 +618,116 @@ describe("a public request forwarded to the acting hub", () => {
     );
     expect(response?.status).toBe(403);
     expect(await response?.json()).toEqual({ status: "refused", kind: "hub-role-off" });
+  });
+});
+
+describe("a visitor fetch from a named standby", () => {
+  const FAILOVER_AFTER_MS = 60;
+
+  async function family() {
+    const network = new HubTestNetwork();
+    const start = (name: string, last: number) =>
+      startHubTestHost({
+        name,
+        address: `100.101.102.${last}`,
+        network,
+        cleanups,
+        failoverAfterMs: FAILOVER_AFTER_MS,
+      });
+    const hub = await start("Mac mini", 103);
+    const standby = await start("Standby", 104);
+    const spoke = await start("Laptop", 105);
+    hub.hub.enable(window);
+    for (const member of [standby, spoke]) {
+      const minted = hub.hub.mintJoinCode({ owner: false });
+      if (minted.status !== "minted") throw new Error(minted.status);
+      await member.spoke.startJoin({ code: minted.code });
+      const pending = hub.administration.listPendingPairings().at(-1);
+      if (pending === undefined) throw new Error("No pairing to approve.");
+      hub.administration.approvePairing({ ticketId: pending.ticketId });
+      const joined = await member.spoke.finishJoin(window);
+      if (joined.status !== "joined") throw new Error(JSON.stringify(joined));
+    }
+    standby.spoke.setGrant(
+      { items: ["roster", "introduce", "owners", "standby"], actProjects: [] },
+      window,
+    );
+    spoke.spoke.setGrant(
+      { items: ["roster", "introduce", "owners", "standby", "public"], actProjects: [] },
+      window,
+    );
+    const ordered = await hub.hub.setStandbyOrder([decodeHubMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    const shared = await spoke.spokeVisitors.share({
+      mode: "code",
+      threadId: "t-1",
+      scope: "read",
+    });
+    if (shared.status !== "shared") throw new Error(JSON.stringify(shared));
+    const secret = shared.url.split("#k=")[1] ?? "";
+    // A browser that has not opened the link yet, so the fetch needs only a valid link.
+    const open = JSON.stringify({
+      linkId: shared.linkId,
+      revision: 1,
+      binding: "a".repeat(64),
+      kind: "open",
+      secret,
+    });
+    const fetchAs = (signer: HubTestHost) =>
+      spoke.hubLink(
+        new Request(`${spoke.origin}${HUB_LINK_ROUTES.publicVisitorFetch}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            [HUB_PEER_KEY_HEADER]: signer.hostPublicKey,
+            [HUB_LINK_HEADER]: signHubLinkRequest({
+              signHostPayload: signer.signHostPayload,
+              senderMemberId: signer.hostId,
+              recipientMemberId: spoke.hostId,
+              method: "POST",
+              path: HUB_LINK_ROUTES.publicVisitorFetch,
+              body: open,
+              now: Date.now(),
+            }),
+          },
+          body: open,
+        }),
+      );
+    return { network, hub, standby, spoke, fetchAs };
+  }
+
+  it("is refused while the hub is still reachable, and answered once the standby stands in", async () => {
+    const { network, hub, standby, spoke, fetchAs } = await family();
+    await standby.failover.tick();
+    await spoke.failover.tick();
+
+    const early = await fetchAs(standby);
+    expect(early?.status).toBe(403);
+    expect(await early?.json()).toEqual({ status: "refused", kind: "hub-reachable" });
+    // The refusal bound nothing, so the link still opens once the standby may serve it.
+    expect(spoke.spokeVisitors.view().links[0]?.opened).toBe(false);
+
+    network.stop(hub.address);
+    await new Promise((resolve) => setTimeout(resolve, FAILOVER_AFTER_MS + 40));
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+
+    const standingIn = await fetchAs(standby);
+    expect(standingIn?.status).toBe(200);
+    expect(await standingIn?.json()).toMatchObject({ status: "ok", scope: "read" });
+  });
+
+  it("is refused from a standby when the spoke's person did not tick Standby, even with the hub out of reach", async () => {
+    const { network, hub, standby, spoke, fetchAs } = await family();
+    spoke.spoke.setGrant(
+      { items: ["roster", "introduce", "owners", "public"], actProjects: [] },
+      window,
+    );
+    network.stop(hub.address);
+    await new Promise((resolve) => setTimeout(resolve, FAILOVER_AFTER_MS + 40));
+
+    const refused = await fetchAs(standby);
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toEqual({ status: "refused", kind: "item-not-granted" });
   });
 });

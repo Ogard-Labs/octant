@@ -33,7 +33,7 @@ export function mintVisitorLinkSecret(): string {
   return randomBytes(32).toString("base64url");
 }
 
-/** Sixteen random bytes: a link id or an endpoint id. */
+/** Sixteen random bytes: a link id, an endpoint id, or a visitor comment id. */
 export function mintPublicId(): string {
   // An id that began with "-" would read as a flag to `octant hub`.
   for (;;) {

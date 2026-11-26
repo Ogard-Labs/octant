@@ -3243,7 +3243,9 @@ Designed, not built (maintainer decision, 2026-11-26):
   has already claimed starts nothing, so a split network in which both hubs
   forward the same delivery still runs it once.
 - **Links keep working.** The spoke checks every visitor fetch, so a link the
-  spoke revoked is refused on the standby as on the hub.
+  spoke revoked is refused on the standby as on the hub. The spoke answers a
+  standby's fetch only while its person ticked Standby and the spoke itself
+  cannot reach the hub; a named standby is refused while the hub is up.
 
 ### Wake service
 

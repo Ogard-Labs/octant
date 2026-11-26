@@ -7,10 +7,24 @@ import type {
   VisitorLinkId,
 } from "@octant/contracts";
 import { VISITOR_PROJECTION_MAX_BYTES } from "@octant/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
 import { publicKeyFingerprint } from "./hubCrypto";
 import { SpokeVisitorService, type VisitorThreadRead } from "./spokeVisitorService";
+
+// Lets a test make the next random id one that base64url would start with "-".
+const randomness = vi.hoisted(() => ({ dashFirst: 0 }));
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return {
+    ...actual,
+    randomBytes: (size: number) => {
+      if (randomness.dashFirst === 0) return actual.randomBytes(size);
+      randomness.dashFirst -= 1;
+      return Buffer.alloc(size, 0xf8);
+    },
+  };
+});
 
 const SPOKE = "11111111-1111-4111-8111-111111111111" as HubMemberId;
 const HUB = "22222222-2222-4222-8222-222222222222";
@@ -41,6 +55,7 @@ function setup(
     granted?: () => boolean;
     paused?: () => boolean;
     sendGrants?: (update: HubVisitorGrantsUpdate) => Promise<boolean>;
+    hubMemberId?: () => string;
   } = {},
 ) {
   let now = 1_800_000_000_000;
@@ -53,7 +68,7 @@ function setup(
     publicGranted: options.granted ?? (() => true),
     remoteAccessPaused: options.paused ?? (() => false),
     hub: {
-      target: () => ({ memberId: "22222222-2222-4222-8222-222222222222" }),
+      target: () => ({ memberId: options.hubMemberId?.() ?? HUB }),
       sendGrants:
         options.sendGrants ??
         (async (update) => {
@@ -266,6 +281,17 @@ describe("visitor comments", () => {
     expect(context.tainted).toEqual([]);
   });
 
+  it("never gives a comment an id the CLI would read as a flag", async () => {
+    const context = setup();
+    const link = await shared(context);
+    context.service.fetch(fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }), HUB);
+    randomness.dashFirst = 1;
+    context.service.fetch(fetchOf(link.linkId, "comment", BROWSER, { comment: "hello" }), HUB);
+    randomness.dashFirst = 0;
+    const [comment] = context.service.view().comments;
+    expect(comment?.commentId.startsWith("-")).toBe(false);
+  });
+
   it("a read-only link takes no comment", async () => {
     const context = setup();
     const link = await shared(context, "read");
@@ -375,5 +401,20 @@ describe("visitor comments", () => {
     await Promise.all([first, second]);
     expect(sent.at(-1)).toBe(2);
     expect(context.service.view().published).toBe(true);
+  });
+
+  it("hands its live links to a promoted hub it switched to, though the old hub took them", async () => {
+    let hub = HUB;
+    const context = setup({ hubMemberId: () => hub });
+    await shared(context, "read");
+    await context.service.look();
+    expect(context.sent).toHaveLength(1);
+
+    hub = "33333333-3333-4333-8333-333333333333";
+    await context.service.look();
+    expect(context.sent).toHaveLength(2);
+    expect((context.sent[1] as HubVisitorGrantsUpdate).grants).toHaveLength(1);
+    await context.service.look();
+    expect(context.sent).toHaveLength(2);
   });
 });

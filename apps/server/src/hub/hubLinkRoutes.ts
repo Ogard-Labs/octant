@@ -595,6 +595,14 @@ export function createHubLinkRouteHandler(
       if (sender.status === "refused") {
         return refused(SENDER_REFUSAL_STATUS.has(sender.kind) ? 401 : 403, sender.kind);
       }
+      // A named standby serves a visitor only while it stands in: for a spoke
+      // whose person ticked Standby, and only while this spoke cannot reach the
+      // hub. Roster identity alone would let it read a shared thread any time.
+      if (sender.status === "standby") {
+        const allowed = options.spoke.hubMayUse("standby");
+        if (allowed.status === "refused") return refused(403, allowed.kind);
+        if (!(await options.failover.hubUnreachable())) return refused(403, "hub-reachable");
+      }
       if (options.spokeVisitors === undefined) return refused(404, "invalid");
       let fetchRequest;
       try {

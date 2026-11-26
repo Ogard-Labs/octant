@@ -7,7 +7,6 @@
 // comment waits as a Request; only the person's Send delivers it, and then as
 // outside content that taints the thread.
 
-import { randomBytes } from "node:crypto";
 import {
   HubMemberId,
   VISITOR_COMMENT_MAX_CHARACTERS,
@@ -143,6 +142,8 @@ export class SpokeVisitorService {
   #publishing: Promise<boolean> = Promise.resolve(true);
   /** Counts link changes; a send clears `unpublished` only if none came while it was out. */
   #revision = 0;
+  /** The hub that took the last list; a promoted hub holds none of it yet. */
+  #publishedTo: string | undefined;
 
   constructor(options: SpokeVisitorServiceOptions) {
     this.#options = options;
@@ -339,7 +340,9 @@ export class SpokeVisitorService {
 
   async #publishNow(): Promise<boolean> {
     const hub = this.#options.hub;
-    if (hub === undefined || hub.target() === undefined) return false;
+    // Read before the send: a hub switched to meanwhile counts as not yet sent to.
+    const target = hub?.target();
+    if (hub === undefined || target === undefined) return false;
     const revision = this.#revision;
     const granted = this.#options.publicGranted();
     const now = this.#options.now();
@@ -354,16 +357,23 @@ export class SpokeVisitorService {
     // stays, and the next look sends the newer list.
     if (sent && revision === this.#revision) {
       this.#publishedGranted = granted;
+      this.#publishedTo = target.memberId;
       const { unpublished: _unpublished, ...rest } = this.#prune(this.#load(), now);
       this.#save(rest);
     }
     return sent;
   }
 
-  /** Sends the list again when the hub has not taken it, or when the Public item changed since. */
+  /** Sends the list again when the hub has not taken it, or when the Public item or the hub changed since. */
   async look(): Promise<void> {
     const granted = this.#options.publicGranted();
-    if (this.#load().unpublished !== true && granted === this.#publishedGranted) return;
+    if (
+      this.#load().unpublished !== true &&
+      granted === this.#publishedGranted &&
+      this.#options.hub?.target()?.memberId === this.#publishedTo
+    ) {
+      return;
+    }
     await this.publish();
   }
 
@@ -383,7 +393,8 @@ export class SpokeVisitorService {
       comments: [
         ...held.comments,
         {
-          commentId: randomBytes(16).toString("base64url"),
+          // The person passes the id back to `octant hub visitor send`.
+          commentId: mintPublicId(),
           linkId,
           text: text.slice(0, VISITOR_COMMENT_MAX_CHARACTERS),
           at: now,
