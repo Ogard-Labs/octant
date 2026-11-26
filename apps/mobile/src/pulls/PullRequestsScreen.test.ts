@@ -229,6 +229,13 @@ describe("the phone's pull requests", () => {
     expect(seen("mobile-pr-detail")?.textContent).toContain("Merge queued");
   });
 
+  it("offers to turn off auto-merge someone turned on in GitHub, though Octant's own switch says off", async () => {
+    await press("mobile-pr-row-47");
+    expect(seen("mobile-pr-merge-when-ready-off")).toBeDefined();
+    await press("mobile-pr-merge-when-ready-off");
+    expect(seen("mobile-pr-merge-when-ready-off")).toBeUndefined();
+  });
+
   it("refuses to offer the confirm step for a pull request the computer says is not mergeable", async () => {
     await press("mobile-pr-row-47");
     await press("mobile-pr-merge-open");

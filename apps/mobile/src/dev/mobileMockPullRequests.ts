@@ -122,6 +122,9 @@ function seedRows(hostId: string, ids: MockPullRequestIds): MockRow[] {
         checks: "passing",
         mergeability: "conflicting",
         review: "changes-requested",
+        // Auto-merge turned on in GitHub itself: Octant holds no switch for it.
+        merging: "auto-merge",
+        autoMerge: false,
         linkedThreads: [{ threadId: UNLISTED_THREAD_ID, title: "Code colours in dark mode" }],
       },
     ];
