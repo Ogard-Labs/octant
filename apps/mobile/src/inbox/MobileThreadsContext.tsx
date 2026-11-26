@@ -92,6 +92,7 @@ const sealedThreads = () =>
   }));
 // What the sealed list was last read or written as, this run: undefined while
 // it has not been read yet.
+const KEPT_READ_AGAIN_MS = 5_000;
 let lastKept: { readonly text: string | undefined } | undefined;
 
 /** What was read now, and the rows of the computers that did not answer. */
@@ -390,11 +391,21 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
       );
       setRestored(true);
     };
-    sealedThreads()
-      .load()
-      .then(restore, () => restore(null));
+    // A read that fails says nothing of what is kept (the sealed file stays when
+    // the key store does not answer), so it is read again, and nothing is
+    // written over the list until it has been read.
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const read = () => {
+      sealedThreads()
+        .load()
+        .then(restore, () => {
+          if (!gone) retry = setTimeout(read, KEPT_READ_AGAIN_MS);
+        });
+    };
+    read();
     return () => {
       gone = true;
+      clearTimeout(retry);
     };
   }, [canRestore]);
   useEffect(() => {

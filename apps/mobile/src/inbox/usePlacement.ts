@@ -14,7 +14,7 @@ import { MOBILE_COPY, mobileModelLabel } from "../copy";
 import { useMobileSession } from "../session/MobileSessionContext";
 import type { MobileHostHealthKind } from "../session/MobileHostSessionHub";
 import { presentPlacementDisabledReason } from "./placementDisabledReason";
-import { chosenReasoningLabel } from "./modelSettings";
+import { chosenReasoningLabel, keptModelChoice } from "./modelSettings";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { selectMobilePlacementTransport } from "./placementTransport";
 import { useRemoteSessionStanding } from "./useRemoteSessionStanding";
@@ -27,6 +27,7 @@ import { useRemoteSessionStanding } from "./useRemoteSessionStanding";
  * host when the remembered placement host is offline; the Home composer must
  * not, because it names the host it will use.
  */
+
 export function usePlacement(options: { readonly fallbackToFirstHost: boolean }) {
   const {
     environment,
@@ -82,9 +83,8 @@ export function usePlacement(options: { readonly fallbackToFirstHost: boolean })
   const [modelOptionId, setModelOptionIdState] = useState<string | undefined>();
   const [chosenValues, setChosenValues] = useState<ProviderModelOptionValues>({});
   useEffect(() => {
-    if (modelOptionId === undefined && models.options[0] !== undefined) {
-      setModelOptionIdState(models.options[0].id);
-    }
+    const kept = keptModelChoice(modelOptionId, models.options);
+    if (kept !== modelOptionId) setModelOptionIdState(kept);
   }, [modelOptionId, models.options]);
   const selectedModel: MobileModelOption | undefined = useMemo(
     () => models.options.find((option) => option.id === modelOptionId),

@@ -154,10 +154,10 @@ export function useChatThread(
     });
   };
 
-  const send = async () => {
-    // Read now, before anything is awaited: the claim is of the text being sent.
-    const typedClaim = typedClaimFor(typedScope, prompt);
-    if (!enabled || transport === undefined || view === undefined || identity === undefined) return;
+  // The model and settings the person chose that the thread does not run yet:
+  // they go with the next message sent, never with one that waits in the queue.
+  const chosenChange = (() => {
+    if (view === undefined) return undefined;
     const decoded =
       modelOptionId === undefined ? undefined : decodeMobileModelOptionId(modelOptionId);
     const needsChange =
@@ -169,6 +169,24 @@ export function useChatThread(
       chosen: chosenValues,
       thread: view.thread.modelOptionValues,
     });
+    return { decoded, needsChange, settingsToSend };
+  })();
+  const choiceWaits =
+    chosenChange !== undefined &&
+    (chosenChange.needsChange || chosenChange.settingsToSend !== undefined);
+
+  const send = async () => {
+    // Read now, before anything is awaited: the claim is of the text being sent.
+    const typedClaim = typedClaimFor(typedScope, prompt);
+    if (
+      !enabled ||
+      transport === undefined ||
+      view === undefined ||
+      identity === undefined ||
+      chosenChange === undefined
+    )
+      return;
+    const { decoded, needsChange, settingsToSend } = chosenChange;
     const valuesChanged = settingsToSend !== undefined;
     return runMutation({
       guard,
@@ -289,6 +307,7 @@ export function useChatThread(
     setModelOptionId,
     modelOptionValues,
     setModelOptionValue,
+    choiceWaits,
     reconnecting,
     refresh,
     attach: attachments.attach,

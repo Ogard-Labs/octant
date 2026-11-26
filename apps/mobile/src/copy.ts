@@ -94,6 +94,8 @@ export const MOBILE_COPY = {
   queueWaiting: "Queued",
   queueSending: "Sending",
   queueRemove: "Remove from queue",
+  queueKeepsThreadModel:
+    "The model you chose goes with a message sent after this turn. Send it when the turn ends.",
   queueEdit: "Edit",
   queueSave: "Save",
   queueCancelEdit: "Cancel",
@@ -339,6 +341,7 @@ export const MOBILE_COPY = {
   projectTerminalLine: "Command",
   projectTerminalRun: "Run",
   projectTerminalInterruptLabel: "Send Control-C",
+  projectTerminalPaste: "Paste",
   projectTerminalControlKey: "Control",
   projectTerminalTypeHint: "Opens the keyboard to type into the shell.",
   projectTerminalEnded: "The shell ended. Close and open the terminal again for a new one.",

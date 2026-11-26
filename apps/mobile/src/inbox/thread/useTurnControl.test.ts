@@ -126,7 +126,7 @@ describe("queueing behind a running turn", () => {
     });
     await act(async () => control.queueMessage(false));
     expect(new Set(sent)).toEqual(new Set([unanswered[0]?.id]));
-    expect(unanswered).toEqual([{ id: sent[0], text: "And the docs" }]);
+    expect(unanswered).toEqual([{ id: sent[0], text: "And the docs", typedByPerson: false }]);
     expect(prompts).toEqual([""]);
   });
 

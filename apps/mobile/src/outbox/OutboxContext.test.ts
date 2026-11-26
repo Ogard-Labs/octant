@@ -2,10 +2,9 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OutboxProvider, useOutbox, type OutboxApi } from "./OutboxContext";
+import { OutboxProvider, sendWaitingMessage, useOutbox, type OutboxApi } from "./OutboxContext";
 import type { WaitingMessage } from "./outbox";
 import { OutboxStore } from "./outboxStore";
-import { queueMobileMessage } from "@octant/client-runtime";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -85,14 +84,7 @@ beforeEach(() => {
     keep: async (text) => {
       held.kept = text ?? null;
     },
-    send: ({ message: entry, stillWanted, transport: to }) =>
-      queueMobileMessage({
-        transport: to,
-        scope: { mode: entry.mode, threadId: entry.threadId },
-        messageId: entry.id,
-        prompt: entry.text,
-        stillWanted,
-      }),
+    send: sendWaitingMessage,
     reasons: { tooOld: "old", otherComputer: "other", pairedAgain: "again" },
     now: () => new Date(),
   });
@@ -113,6 +105,16 @@ describe("a message written while its computer is out of reach", () => {
     expect(sent.map((command) => command.messageId)).toEqual([id]);
     expect(waiting()).toEqual([]);
     expect(held.kept).toBeNull();
+  });
+
+  it("says the person typed it when it leaves, as its first attempt said", async () => {
+    await render("unavailable");
+    act(() => void outbox.keep({ ...message(), attempted: true, typedByPerson: true }));
+    await render("ready");
+    await render("ready");
+    expect(sent.map((command) => command.payload)).toEqual([
+      expect.objectContaining({ prompt: "And the docs", typedByPerson: true }),
+    ]);
   });
 
   it("is sent after the app was closed and opened again", async () => {

@@ -49,7 +49,11 @@ export function useTurnControl(
     readonly unanswered: UnansweredMessage | undefined;
     readonly noteUnanswered: (message: UnansweredMessage | undefined) => void;
     /** Sent, and no answer came: kept under its id until the computer says. */
-    readonly onUnanswered: (message: { readonly id: string; readonly text: string }) => boolean;
+    readonly onUnanswered: (message: {
+      readonly id: string;
+      readonly text: string;
+      readonly typedByPerson: boolean;
+    }) => boolean;
     readonly onStopped: () => void;
   },
 ): TurnControl {
@@ -154,7 +158,7 @@ export function useTurnControl(
             // Files do not wait on the phone, so a message with them stays here.
             const held =
               input.attachmentIds.length === 0 &&
-              input.onUnanswered({ id: messageId, text: prompt });
+              input.onUnanswered({ id: messageId, text: prompt, typedByPerson });
             if (!held) {
               ui.setError("No answer came. Your draft stays here; send it again.");
               return;

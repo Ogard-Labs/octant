@@ -107,6 +107,7 @@ function renderChatTranscript(
     setModelOptionId: vi.fn(),
     modelOptionValues: {},
     setModelOptionValue: vi.fn(),
+    choiceWaits: false,
     reconnecting: false,
     refresh: vi.fn(async () => {}),
     attach: vi.fn(async () => {}),

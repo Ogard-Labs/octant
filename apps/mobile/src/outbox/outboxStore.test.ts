@@ -128,7 +128,7 @@ describe("the messages that wait", () => {
     expect(store.read().unsaved).toBe(true);
   });
 
-  it("writes nothing over what it could not read", async () => {
+  it("writes nothing over what it could not read, and says the message is not kept yet", async () => {
     const at = phone("kept");
     const store = new OutboxStore({
       ...at.ports,
@@ -141,6 +141,8 @@ describe("the messages that wait", () => {
     await settle();
     expect(at.held.kept).toBe("kept");
     expect(store.read().outbox.messages.map((entry) => entry.id)).toEqual(["A"]);
+    // Closing the app now would lose it, so the screen warns as for a failed write.
+    expect(store.read().unsaved).toBe(true);
     close();
   });
 

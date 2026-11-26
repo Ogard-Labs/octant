@@ -37,6 +37,17 @@ export function useOutbox(): OutboxApi {
   return value;
 }
 
+/** A waiting message goes through the thread's queue, as it would have at once. */
+export const sendWaitingMessage: OutboxPorts["send"] = ({ message, stillWanted, transport }) =>
+  queueMobileMessage({
+    transport,
+    scope: { mode: message.mode, threadId: message.threadId },
+    messageId: message.id,
+    prompt: message.text,
+    typedByPerson: message.typedByPerson === true,
+    stillWanted,
+  });
+
 const PORTS: Pick<OutboxPorts, "now" | "reasons" | "send"> = {
   now: () => new Date(),
   reasons: {
@@ -44,14 +55,7 @@ const PORTS: Pick<OutboxPorts, "now" | "reasons" | "send"> = {
     otherComputer: MOBILE_COPY.outboxOtherComputer,
     pairedAgain: MOBILE_COPY.outboxPairedAgain,
   },
-  send: ({ message, stillWanted, transport }) =>
-    queueMobileMessage({
-      transport,
-      scope: { mode: message.mode, threadId: message.threadId },
-      messageId: message.id,
-      prompt: message.text,
-      stillWanted,
-    }),
+  send: (input) => sendWaitingMessage(input),
 };
 
 let liveStore: OutboxStore | undefined;

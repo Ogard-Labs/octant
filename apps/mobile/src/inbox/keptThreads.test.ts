@@ -100,6 +100,21 @@ describe("the thread list kept on the phone", () => {
     expect(kept.rows.some((entry) => entry.threadId === "t0")).toBe(false);
   });
 
+  it("keeps each computer's newest threads, however many another computer has", () => {
+    const rows = [
+      ...Array.from({ length: KEPT_ROWS }, (_, index) =>
+        row(`s${index}`, "studio", { freshness: "2026-11-26T10:00:00.000Z" }),
+      ),
+      row("older", "laptop", { freshness: "2026-11-01T10:00:00.000Z" }),
+    ];
+    const kept = restoreKeptThreads(
+      keptThreadsText({ rows, projects: [], standings: none }, [studio, laptop]) ?? null,
+      [studio, laptop],
+    );
+    expect(kept.rows.filter((entry) => entry.hostId === "studio")).toHaveLength(KEPT_ROWS);
+    expect(kept.rows.some((entry) => entry.threadId === "older")).toBe(true);
+  });
+
   it("reads text it cannot make sense of as no list, and skips rows that are not threads", () => {
     expect(restoreKeptThreads("not json", [studio]).rows).toEqual([]);
     expect(restoreKeptThreads(JSON.stringify({ version: 9, hosts: {} }), [studio]).rows).toEqual(

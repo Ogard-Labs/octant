@@ -76,7 +76,8 @@ export function NewThreadProvider(props: {
     | undefined;
 }) {
   const { onOpenThread, onTodoLinked, onTodoStartOpened, todoStart } = props;
-  const { environment, transport, hosts, hostsLoaded, setPlacementHostId } = useMobileSession();
+  const { environment, transport, hosts, hostsLoaded, placementHostId, setPlacementHostId } =
+    useMobileSession();
   const { refresh } = useMobileThreads();
   const [creating, setCreating] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -478,7 +479,9 @@ export function NewThreadProvider(props: {
         modelDriverKind={selectedModel?.driverKind}
         onSelectHost={setPlacementHostId}
         placementLabel={placementLabel}
-        selectedHostId={placementTransport?.hostId}
+        // The person's choice, also while that computer is out of reach, so
+        // the menu stays to choose another.
+        selectedHostId={placementHostId ?? placementTransport?.hostId}
         placementDisabledReason={placementDisabledReason}
         projectLabel={chosenProject?.name}
         projects={projectChoices}

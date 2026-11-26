@@ -16,7 +16,7 @@ import { space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import { useMobileThreads } from "../inbox/MobileThreadsContext";
 import { ThreadScreen } from "../inbox/ThreadScreen";
-import { columnsChange, listColumnWidth, showsColumns } from "./columns";
+import { columnsChange, listColumnWidth, openThreadKey, showsColumns } from "./columns";
 import type { MobileStackParams } from "./routes";
 
 type OpenThread = (row: MobileInboxRow, focusTurnId?: string) => void;
@@ -156,7 +156,7 @@ function OpenThreadColumn(props: {
   return (
     <ThreadScreen
       focusTurnId={focusTurnId}
-      key={rowKey(row)}
+      key={openThreadKey(rowKey(row), focusTurnId)}
       onOpenThread={props.onOpenThread}
       selected={row}
     />

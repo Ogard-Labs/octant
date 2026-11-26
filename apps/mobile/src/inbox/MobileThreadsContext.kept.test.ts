@@ -9,9 +9,16 @@ const phone = vi.hoisted(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   return {
     secure: new Map<string, string>(),
+    /** Reads the key store refuses next, as it may while the phone is locked. */
+    secureFailures: 0,
     files: new Map<string, string>(),
     session: undefined as unknown,
-    inbox: { rows: [] as ReadonlyArray<unknown>, reachable: true },
+    inbox: {
+      rows: [] as ReadonlyArray<unknown>,
+      reachable: true,
+      /** Computers that cannot be reached while the others answer. */
+      offline: [] as ReadonlyArray<string>,
+    },
     projects: [{ projectId: "travel", name: "Travel" }] as ReadonlyArray<unknown>,
     // The shared packages are the same through a restart, and slow to load again.
     runtime: undefined as typeof import("@octant/client-runtime") | undefined,
@@ -21,7 +28,13 @@ const phone = vi.hoisted(() => {
 
 vi.mock("../hosts/expoSecureStorage", () => ({
   createExpoSecureStringStorage: () => ({
-    getItem: async (key: string) => phone.secure.get(key) ?? null,
+    getItem: async (key: string) => {
+      if (phone.secureFailures > 0) {
+        phone.secureFailures -= 1;
+        throw new Error("The key store did not answer.");
+      }
+      return phone.secure.get(key) ?? null;
+    },
     setItem: async (key: string, value: string) => void phone.secure.set(key, value),
     deleteItem: async (key: string) => void phone.secure.delete(key),
   }),
@@ -53,7 +66,18 @@ vi.mock("@octant/client-runtime", async (importOriginal) => {
     ...actual,
     listAllHostsMobileInbox: async (transports: ReadonlyArray<MobileRemoteTransport>) =>
       phone.inbox.reachable
-        ? { rows: phone.inbox.rows, failures: [] }
+        ? {
+            rows: phone.inbox.rows.filter(
+              (entry) => !phone.inbox.offline.includes((entry as MobileInboxRow).hostId),
+            ),
+            failures: transports
+              .filter(({ hostId }) => phone.inbox.offline.includes(hostId))
+              .map(({ hostId }) => ({
+                hostId,
+                category: "offline",
+                message: "The computer cannot be reached.",
+              })),
+          }
         : {
             rows: [],
             failures: transports.map(({ hostId }) => ({
@@ -83,14 +107,20 @@ const transport: MobileRemoteTransport = {
   hostId: studio,
   authenticatedFetch: async () => Response.json({}),
 };
-function pairedWith(hostKeyFingerprint: string) {
+const laptop = "22222222-2222-4222-8222-222222222222";
+function pairedWith(hostKeyFingerprint: string, alsoLaptop = false) {
   phone.session = {
     environment: { kind: "live" },
-    hosts: [{ hostId: studio, label: "Studio Mac", hostKeyFingerprint, keyId: "device-key" }],
+    hosts: [
+      { hostId: studio, label: "Studio Mac", hostKeyFingerprint, keyId: "device-key" },
+      ...(alsoLaptop
+        ? [{ hostId: laptop, label: "Laptop", hostKeyFingerprint: "key-l", keyId: "device-key" }]
+        : []),
+    ],
     hostsLoaded: true,
     hostsError: undefined,
     health: [],
-    transports: [transport],
+    transports: alsoLaptop ? [transport, { ...transport, hostId: laptop }] : [transport],
   };
 }
 
@@ -138,13 +168,13 @@ afterEach(() => {
 describe("the thread list after a restart", () => {
   it("is there while the computer cannot be reached, with its Project, and nothing readable on disk", async () => {
     pairedWith("key-1");
-    phone.inbox = { rows: [row], reachable: true };
+    phone.inbox = { rows: [row], reachable: true, offline: [] };
     const first = await launch();
     expect(first.threads().rows.map((entry) => entry.threadId)).toEqual(["plan-the-trip"]);
     first.quit();
     expect([...phone.files.values()].join("")).not.toContain("Plan the trip");
 
-    phone.inbox = { rows: [], reachable: false };
+    phone.inbox = { rows: [], reachable: false, offline: [] };
     const later = await launch();
     const [kept] = later.threads().rows;
     expect(kept?.title).toBe("Plan the trip");
@@ -155,13 +185,13 @@ describe("the thread list after a restart", () => {
 
   it("still lets a message wait for a computer that said this phone may write there", async () => {
     pairedWith("key-1");
-    phone.inbox = { rows: [row], reachable: true };
+    phone.inbox = { rows: [row], reachable: true, offline: [] };
     const first = await launch();
     await act(async () => first.threads().noteStanding(studio, { actsAsHostPerson: true }));
     await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
     first.quit();
 
-    phone.inbox = { rows: [], reachable: false };
+    phone.inbox = { rows: [], reachable: false, offline: [] };
     const later = await launch();
     expect(later.threads().lastStanding(studio)).toEqual({ actsAsHostPerson: true });
     later.quit();
@@ -172,12 +202,33 @@ describe("the thread list after a restart", () => {
     repaired.quit();
   });
 
-  it("gives way to what the computer says once it answers", async () => {
-    pairedWith("key-1");
-    phone.inbox = { rows: [row], reachable: true };
+  it("is kept, not written over, through a run that could not read it", async () => {
+    pairedWith("key-1", true);
+    phone.inbox = { rows: [row], reachable: true, offline: [] };
     (await launch()).quit();
 
-    phone.inbox = { rows: [], reachable: true };
+    // Its first read fails, the key store answers again, and the laptop answers
+    // while the studio is out of reach.
+    const laptopRow = { ...row, hostId: laptop, threadId: "pack" };
+    phone.inbox = { rows: [laptopRow], reachable: true, offline: [studio] };
+    phone.secureFailures = 1;
+    try {
+      (await launch()).quit();
+    } finally {
+      phone.secureFailures = 0;
+    }
+    phone.inbox = { rows: [], reachable: false, offline: [] };
+    const later = await launch();
+    expect(later.threads().rows.map((entry) => entry.threadId)).toContain("plan-the-trip");
+    later.quit();
+  });
+
+  it("gives way to what the computer says once it answers", async () => {
+    pairedWith("key-1");
+    phone.inbox = { rows: [row], reachable: true, offline: [] };
+    (await launch()).quit();
+
+    phone.inbox = { rows: [], reachable: true, offline: [] };
     const later = await launch();
     expect(later.threads().rows).toEqual([]);
     later.quit();
@@ -185,11 +236,11 @@ describe("the thread list after a restart", () => {
 
   it("is not shown for a computer paired again under another key", async () => {
     pairedWith("key-1");
-    phone.inbox = { rows: [row], reachable: true };
+    phone.inbox = { rows: [row], reachable: true, offline: [] };
     (await launch()).quit();
 
     pairedWith("key-2");
-    phone.inbox = { rows: [], reachable: false };
+    phone.inbox = { rows: [], reachable: false, offline: [] };
     const later = await launch();
     expect(later.threads().rows).toEqual([]);
     later.quit();
@@ -197,9 +248,9 @@ describe("the thread list after a restart", () => {
 
   it("keeps nothing read under a pairing the computer was paired again from, while the app runs", async () => {
     pairedWith("key-1");
-    phone.inbox = { rows: [row], reachable: true };
+    phone.inbox = { rows: [row], reachable: true, offline: [] };
     const running = await launch();
-    phone.inbox = { rows: [], reachable: false };
+    phone.inbox = { rows: [], reachable: false, offline: [] };
     pairedWith("key-2");
     await running.again();
     expect(running.threads().rows).toEqual([]);
@@ -212,10 +263,10 @@ describe("the thread list after a restart", () => {
 
   it("does not bring back Project names a computer no longer has", async () => {
     pairedWith("key-1");
-    phone.inbox = { rows: [row], reachable: true };
+    phone.inbox = { rows: [row], reachable: true, offline: [] };
     (await launch()).quit();
 
-    phone.inbox = { rows: [], reachable: true };
+    phone.inbox = { rows: [], reachable: true, offline: [] };
     phone.projects = [];
     const later = await launch();
     expect(later.threads().projects).toEqual([]);

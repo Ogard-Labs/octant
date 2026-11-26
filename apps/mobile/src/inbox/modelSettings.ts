@@ -53,3 +53,18 @@ export function chatSettingsToSend(input: {
     Object.entries(a).every(([id, value]) => b[id] === value);
   return same(chosen, thread) ? undefined : chosen;
 }
+
+/**
+ * The model New thread keeps once a computer's list is read. Another computer
+ * lists its own models, so a choice its list does not hold falls back to its
+ * first, and a new thread never starts on the last computer's model. Nothing
+ * changes while no list is read.
+ */
+export function keptModelChoice(
+  chosen: string | undefined,
+  options: ReadonlyArray<{ readonly id: string }>,
+): string | undefined {
+  const first = options[0];
+  if (first === undefined) return chosen;
+  return chosen !== undefined && options.some((option) => option.id === chosen) ? chosen : first.id;
+}

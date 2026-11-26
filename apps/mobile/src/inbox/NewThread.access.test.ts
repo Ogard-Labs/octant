@@ -193,3 +193,40 @@ it("keeps existing threads openable while the placement host refuses new threads
     session.placementHostId = hostA;
   }
 });
+
+it("keeps the computer menu in New thread while the chosen computer is out of reach", async () => {
+  const noop = () => undefined;
+  const offline = "33333333-3333-4333-8333-333333333333";
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const render = async () =>
+    act(async () =>
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          children: createElement(MobileThreadsProvider, {
+            children: createElement(NewThreadProvider, {
+              onOpenThread: noop,
+              children: createElement(NewButton),
+            }),
+          }),
+        }),
+      ),
+    );
+  const menu = () =>
+    container.querySelector<HTMLElement>('[data-testid="mobile-home-composer-host-label"]');
+  session.hosts = [...hosts, { hostId: offline, label: "Mini" }];
+  listInbox.mockResolvedValue({ rows: [], failures: [] });
+  try {
+    await render();
+    await act(async () => container.querySelector<HTMLElement>('[data-testid="new"]')?.click());
+    session.placementHostId = offline;
+    await render();
+    // A menu, not a plain label: the person can still choose a reachable computer.
+    expect(menu()?.getAttribute("role")).toBe("button");
+  } finally {
+    act(() => root.unmount());
+    session.placementHostId = hostA;
+    session.hosts = hosts;
+  }
+});

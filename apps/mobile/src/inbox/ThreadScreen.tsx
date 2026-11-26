@@ -373,7 +373,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           mode: selected.mode,
           threadId: selected.threadId,
         });
-  const keepForLater = (text: string, unansweredId?: string): boolean => {
+  const keepForLater = (text: string, typedByPerson: boolean, unansweredId?: string): boolean => {
     if (selected === undefined) return false;
     const refused = outbox.keep({
       id: unansweredId ?? globalThis.crypto.randomUUID(),
@@ -383,6 +383,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
       text,
       writtenAt: new Date().toISOString(),
       ...(unansweredId === undefined ? {} : { attempted: true }),
+      ...(typedByPerson ? { typedByPerson: true } : {}),
     });
     if (refused !== undefined && refused !== "") ui.setError(refused);
     return refused === undefined;
@@ -390,7 +391,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
   // Files stay with the draft: they go through the computer as they are added.
   const sendLater = () => {
     const keepIt = () => {
-      if (keepForLater(prompt.trim(), isUnanswered ? unanswered?.id : undefined)) {
+      const typed = typedClaimFor(typedScope, prompt).typedByPerson === true;
+      if (keepForLater(prompt.trim(), typed, isUnanswered ? unanswered?.id : undefined)) {
         drafts.noteUnanswered(draftKey, undefined);
         drafts.noteMayBeSent(draftKey, undefined);
         sentPrompt("");
@@ -428,6 +430,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
     unanswered?.words ===
     JSON.stringify([prompt.trim(), pendingAttachments.map((attachment) => attachment.id)]);
   const queueNow = () => {
+    // A queued Chat message runs on the thread's model as it is then; a model
+    // or setting chosen since goes only with a message sent once the turn ends.
+    if (mode === "chat" && chat.choiceWaits) {
+      ui.setError(MOBILE_COPY.queueKeepsThreadModel);
+      return;
+    }
     // The claim is of the words pressed Send on, read before anything is awaited.
     const typed = typedClaimFor(typedScope, prompt).typedByPerson === true;
     if (isUnanswered) void turnControl.queueMessage(typed);
@@ -482,7 +490,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
       drafts.noteUnanswered(draftKey, message);
       drafts.noteMayBeSent(draftKey, message === undefined ? undefined : prompt);
     },
-    onUnanswered: ({ id, text }) => keepForLater(text, id),
+    onUnanswered: ({ id, text, typedByPerson }) => keepForLater(text, typedByPerson, id),
   });
   // Where the queue cannot be read, a running turn still closes the composer.
   const queues = mayAct && turnLive && turnControl.queue !== undefined;

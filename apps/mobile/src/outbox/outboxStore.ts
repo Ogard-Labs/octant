@@ -130,7 +130,13 @@ export class OutboxStore {
   async #change(next: (outbox: Outbox) => Outbox): Promise<boolean> {
     const outbox = next(this.#snapshot.outbox);
     if (outbox !== this.#snapshot.outbox) this.#publish({ ...this.#snapshot, outbox });
-    if (!this.#loaded) return false;
+    if (!this.#loaded) {
+      // Nothing is kept until the phone's list is read, so a change made
+      // before then is unsaved until the read lets it be written.
+      if (outbox.messages.length > 0 && !this.#snapshot.unsaved)
+        this.#publish({ ...this.#snapshot, unsaved: true });
+      return false;
+    }
     try {
       await this.#ports.keep(outbox.messages.length === 0 ? undefined : JSON.stringify(outbox));
       if (this.#snapshot.unsaved) this.#publish({ ...this.#snapshot, unsaved: false });

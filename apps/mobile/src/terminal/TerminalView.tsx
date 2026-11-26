@@ -1,4 +1,5 @@
 import { LegendList } from "@legendapp/list/react-native";
+import * as Clipboard from "expo-clipboard";
 import { resolveTerminalColorProjection } from "@octant/theme";
 import { memo, useMemo, useRef, useState } from "react";
 import {
@@ -195,6 +196,12 @@ export function TerminalView(props: TerminalViewProps) {
           control={control}
           onControl={() => setControl((held) => !held)}
           onKey={(key) => send(terminalKeyData(key, props.snapshot.modes))}
+          // The hidden field has no edit menu, so the row offers Paste itself.
+          onPaste={() =>
+            void Clipboard.getStringAsync().then((text) => {
+              if (text.length > 0) send(pastedText(text, props.snapshot.modes));
+            })
+          }
           onText={send}
         />
       ) : null}
@@ -281,6 +288,7 @@ function KeyRow(props: {
   readonly control: boolean;
   readonly onControl: () => void;
   readonly onKey: (key: TerminalKey) => void;
+  readonly onPaste: () => void;
   readonly onText: (text: string) => void;
 }) {
   const { colors } = useTheme();
@@ -314,6 +322,15 @@ function KeyRow(props: {
         testID="mobile-project-terminal-interrupt"
       >
         <Text style={label}>⌃C</Text>
+      </Pressable>
+      <Pressable
+        accessibilityLabel={MOBILE_COPY.projectTerminalPaste}
+        accessibilityRole="button"
+        onPress={props.onPaste}
+        style={keyStyle}
+        testID="mobile-terminal-key-paste"
+      >
+        <Text style={label}>{MOBILE_COPY.projectTerminalPaste}</Text>
       </Pressable>
       {KEYS.map((key) => (
         <Pressable

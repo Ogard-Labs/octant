@@ -10,6 +10,7 @@ import { CanvasHtmlImportSheet } from "./CanvasHtmlImportSheet";
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
 vi.mock("expo-blur", () => ({ BlurView: () => null }));
+vi.mock("expo-clipboard", () => ({ getStringAsync: async () => "echo one\necho two" }));
 vi.mock("expo-document-picker", () => ({}));
 vi.mock("expo-file-system", () => ({ File: class {}, Paths: { cache: { uri: "cache:" } } }));
 vi.mock("expo-image-picker", () => ({}));
@@ -148,10 +149,16 @@ describe("the phone's Project terminal", () => {
     await type("mobile-terminal-input", "ls");
     await press("mobile-terminal-key-up");
     await press("mobile-project-terminal-interrupt");
+    // The field has no edit menu; Paste in the row sends the clipboard as one paste.
+    await press("mobile-terminal-key-paste");
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(calls.filter((call) => call.body.kind === "write").map((call) => call.body)).toEqual([
       { kind: "write", projectId, terminalId, data: "ls" },
       { kind: "write", projectId, terminalId, data: "\u001b[A" },
       { kind: "write", projectId, terminalId, data: "\u0003" },
+      { kind: "write", projectId, terminalId, data: "echo one\recho two" },
     ]);
 
     await act(async () => {

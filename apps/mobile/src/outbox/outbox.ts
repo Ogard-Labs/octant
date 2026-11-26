@@ -26,6 +26,11 @@ export interface WaitingMessage {
   readonly refused?: string;
   /** It was sent and no answer came, so its computer may already have it. */
   readonly attempted?: boolean;
+  /**
+   * The person typed it. Every attempt says so alike: the computer takes a
+   * repeat under the same id only as the same message.
+   */
+  readonly typedByPerson?: boolean;
 }
 
 export interface Outbox {
@@ -159,7 +164,8 @@ function isMessage(value: unknown): value is WaitingMessage {
     ) &&
     (entry.mode === "chat" || entry.mode === "work" || entry.mode === "code") &&
     (entry.refused === undefined || typeof entry.refused === "string") &&
-    (entry.attempted === undefined || typeof entry.attempted === "boolean")
+    (entry.attempted === undefined || typeof entry.attempted === "boolean") &&
+    (entry.typedByPerson === undefined || typeof entry.typedByPerson === "boolean")
   );
 }
 

@@ -56,14 +56,17 @@ export function keptThreadsText(
   read: KeptThreads,
   pairings: ReadonlyArray<KeptPairing>,
 ): string | undefined {
-  const rows = sortMobileInboxRows(read.rows).slice(0, KEPT_ROWS);
+  const rows = sortMobileInboxRows(read.rows);
   const hosts: Record<string, KeptHost> = {};
   for (const { hostId, hostKeyFingerprint, keyId } of pairings) {
     const standing = read.standings.get(hostId);
     const kept: KeptHost = {
       fingerprint: hostKeyFingerprint,
       keyId,
-      rows: rows.filter((row) => row.hostId === hostId).map(lasting),
+      rows: rows
+        .filter((row) => row.hostId === hostId)
+        .slice(0, KEPT_ROWS)
+        .map(lasting),
       projects: read.projects
         .filter((project) => project.hostId === hostId)
         .map(({ projectId, name }) => ({ projectId, name })),
@@ -147,5 +150,5 @@ export function restoreKeptThreads(
         })),
       );
   }
-  return { rows: sortMobileInboxRows(rows).slice(0, KEPT_ROWS), projects, standings };
+  return { rows: sortMobileInboxRows(rows), projects, standings };
 }
