@@ -3913,7 +3913,9 @@ until that session is resumed; a person's resume of such a waiter is refused
 meanwhile, as for a run parked on dependencies. A parent session is
 `recovery-required` only after a restart, and restart reconciliation has already
 interrupted every capacity and provider-slot waiter, so resuming that session
-restarts none of them; only a run parked on dependencies is still held then. A run waiting on dependencies or a slot holds no
+restarts none of them; only a run parked on dependencies is still held then,
+including one whose dependencies had finished but which found no free slot, since
+it stays parked on its dependencies until a slot frees. A run waiting on dependencies or a slot holds no
 slot, and neither does one waiting for the provider to take another request
 ([Provider capacity](#context-and-usage-accounting)). Admission separately caps unfinished children (any active status,
 waiting included) at 16 per parent and 32 per host as the runaway guard.
