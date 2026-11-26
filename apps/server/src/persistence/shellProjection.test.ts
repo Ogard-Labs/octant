@@ -274,6 +274,26 @@ describe("ShellProjection", () => {
     ).toMatchObject({ surface: sideChatSurface });
   });
 
+  it("restores a subagent's tab with its run and parent thread", () => {
+    const code = workspace.layouts.code;
+    if (code.kind !== "pane") throw new Error("fixture Code layout must be a pane");
+    const subagentSurface = {
+      kind: "agent-run" as const,
+      id: code.surface.id,
+      mode: "code" as const,
+      title: "Find the flaky test",
+      parentThreadId: "70000000-0000-4000-8000-000000000051",
+      runId: "70000000-0000-4000-8000-000000000052",
+    };
+
+    expect(
+      decodePersistedWindowWorkspace({
+        ...workspace,
+        layouts: { ...workspace.layouts, code: { ...code, surface: subagentSurface } },
+      }).layouts.code,
+    ).toMatchObject({ surface: subagentSurface });
+  });
+
   it("restores a Side Chat surface that names no sidecar as the mode welcome surface", () => {
     const work = workspace.layouts.work;
     if (work.kind !== "pane") throw new Error("fixture Work layout must be a pane");

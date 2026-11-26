@@ -201,6 +201,7 @@ import type { ShellClient } from "@octant/client-runtime/shell-client";
 import type { ThemeClient } from "@octant/client-runtime/theme-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
+import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts";
 import { decodeAppleProjectPath } from "@octant/contracts/apple-toolchain";
 import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import {
@@ -4995,7 +4996,37 @@ function LaunchedShell(
       );
     }
   }
+  /**
+   * A subagent opens as a thread of its own, in the pane the person is
+   * working in, titled with its task. One the window cannot find among its
+   * thread's runs (a provider's own child seen only through its observations)
+   * opens on the Agents page as before.
+   */
   function openSubagent(runId?: string) {
+    if (runId !== undefined && dockThreadId !== undefined && agentRunClient !== undefined) {
+      const parentThreadId = decodeAgentRunParentThreadId(String(dockThreadId));
+      const mode = activeMode;
+      void agentRunClient
+        .parentSummary(parentThreadId)
+        .then((summary) => {
+          const entry = summary.entries.find((candidate) => String(candidate.runId) === runId);
+          if (entry === undefined) {
+            openSubagentInDock(runId);
+            return;
+          }
+          return controller.openAgentRun({
+            mode,
+            title: entry.task,
+            parentThreadId,
+            runId: decodeAgentRunId(runId),
+          });
+        })
+        .catch(() => openSubagentInDock(runId));
+      return;
+    }
+    openSubagentInDock(runId);
+  }
+  function openSubagentInDock(runId?: string) {
     if (dockThreadKey === undefined) return;
     setAddAgentInvokedByThread((current) => {
       if (current.has(dockThreadKey)) return current;

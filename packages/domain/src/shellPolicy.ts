@@ -1295,14 +1295,16 @@ function paneOwnContext(pane: WorkspacePane): WorkspaceContextKey | undefined {
 
 /**
  * Surfaces that hold no Project of their own: the welcome, Settings, a Side
- * Chat, and Files, which follow the lead. A pane showing one carries no
- * context and reaches nothing.
+ * Chat, a subagent, and Files, which follow the lead. A pane showing one
+ * carries no context and reaches nothing; a subagent's reads are authorized
+ * by its parent thread on every request.
  */
 function surfaceNamesNoProject(surface: WorkspaceTab): boolean {
   return (
     surface.kind === "welcome" ||
     surface.kind === "settings" ||
     surface.kind === "side-chat" ||
+    surface.kind === "agent-run" ||
     surface.kind === "files"
   );
 }
@@ -1962,6 +1964,8 @@ export function sameWorkspaceSurface(a: WorkspaceTab, b: WorkspaceTab): boolean 
       return b.kind === "preview" && String(a.targetId) === String(b.targetId);
     case "canvas":
       return b.kind === "canvas" && String(a.canvasId) === String(b.canvasId);
+    case "agent-run":
+      return b.kind === "agent-run" && String(a.runId) === String(b.runId);
   }
 }
 

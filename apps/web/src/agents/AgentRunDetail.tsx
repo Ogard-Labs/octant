@@ -499,6 +499,9 @@ function replyBlocks(entries: ReadonlyArray<AgentRunConversationEntry>): Readonl
 }> {
   const blocks: Array<{ key: number; kind: "assistant" | "status"; text: string }> = [];
   for (const entry of entries) {
+    // Tool steps are drawn where a subagent opens as its own tab; this compact
+    // page keeps to what it said.
+    if (entry.kind === "tool") continue;
     const last = blocks.at(-1);
     if (entry.kind === "assistant" && last?.kind === "assistant") {
       last.text += entry.text;

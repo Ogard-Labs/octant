@@ -42,6 +42,7 @@ import {
   type WorkspaceTab,
   type WorkspaceTabId,
 } from "@octant/contracts";
+import type { AgentRunId, AgentRunParentThreadId } from "@octant/contracts";
 import type { CanvasId } from "@octant/contracts/canvas";
 import type {
   PreviewHostId,
@@ -176,6 +177,14 @@ export interface PreviewTabInput {
   readonly boundCodeThreadId?: CodeThreadId;
 }
 
+/** A subagent to open as a thread of its own, from the thread that started it. */
+export interface AgentRunTabInput {
+  readonly mode: OctantMode;
+  readonly title: string;
+  readonly parentThreadId: AgentRunParentThreadId;
+  readonly runId: AgentRunId;
+}
+
 export interface CanvasTabInput {
   readonly mode: OctantMode;
   readonly title: string;
@@ -247,6 +256,10 @@ type WorkspaceIntent =
   | {
       readonly kind: "open-side-chat";
       readonly sidecar: SideChatSidecar;
+    }
+  | {
+      readonly kind: "open-agent-run";
+      readonly tab: AgentRunTabInput;
     }
   | { readonly kind: "focus-pane"; readonly paneId: PaneId }
   | {
@@ -832,6 +845,14 @@ export function useShellController(options: ShellControllerOptions) {
       await enqueueMutation({ kind: "workspace", intent: { kind: "set-mode", mode: tab.mode } });
     }
     await enqueueMutation({ kind: "workspace", intent: { kind: "open-preview", tab } });
+  }
+
+  /** Opens a subagent as a thread of its own, in the pane the person is working in. */
+  async function openAgentRun(tab: AgentRunTabInput): Promise<void> {
+    if (authoritative?.workspace.activeMode !== tab.mode) {
+      await enqueueMutation({ kind: "workspace", intent: { kind: "set-mode", mode: tab.mode } });
+    }
+    await enqueueMutation({ kind: "workspace", intent: { kind: "open-agent-run", tab } });
   }
 
   async function openCanvas(tab: CanvasTabInput): Promise<void> {
@@ -1441,6 +1462,7 @@ export function useShellController(options: ShellControllerOptions) {
     openCodeSurface,
     openPreview,
     openCanvas,
+    openAgentRun,
     openProject,
     openSideChat,
     openSettings,
@@ -1819,6 +1841,34 @@ function createWorkspaceMutation(
         title: intent.tab.title,
         canvasId: intent.tab.canvasId,
         projectId: intent.tab.projectId,
+      };
+      const existing = findVisibleSurfacePane(layout, surface);
+      return {
+        operation: {
+          kind: "open-surface",
+          mode,
+          paneId: (existing ?? preferredPane(latest.workspace, mode)).paneId,
+          surface,
+        },
+        message:
+          existing === undefined ? `${intent.tab.title} opened.` : `${intent.tab.title} selected.`,
+        activatedSurfaceId: existing?.surface.id ?? surface.id,
+      };
+    }
+    case "open-agent-run": {
+      if (intent.tab.mode !== mode) {
+        throw {
+          category: "invalid",
+          message: "This subagent belongs to a different mode than the active workspace.",
+        };
+      }
+      const surface: WorkspaceTab = {
+        kind: "agent-run",
+        id: newTabId(),
+        mode,
+        title: intent.tab.title,
+        parentThreadId: intent.tab.parentThreadId,
+        runId: intent.tab.runId,
       };
       const existing = findVisibleSurfacePane(layout, surface);
       return {

@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AppReleaseRing } from "./appUpdates";
 
 import { AppleProjectPath } from "./appleToolchain";
+import { AgentRunId, AgentRunParentThreadId } from "./agentRun";
 import { ChatThreadId } from "./chat";
 import { CodeProjectFilePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
@@ -1664,6 +1665,22 @@ const CanvasWorkspaceTab = Schema.Struct({
 }).annotations(strict);
 
 /**
+ * A subagent opened as a thread of its own: its conversation, headed by the
+ * thread that started it. It stores the two identities and its title only,
+ * never the conversation or any authority; every read reauthorizes the run
+ * against its parent thread, and a run that is gone or no longer readable
+ * restores as an unavailable placeholder that links back to the parent.
+ */
+const AgentRunWorkspaceTab = Schema.Struct({
+  kind: Schema.Literal("agent-run"),
+  id: WorkspaceTabId,
+  mode: OctantMode,
+  title: Schema.NonEmptyTrimmedString,
+  parentThreadId: AgentRunParentThreadId,
+  runId: AgentRunId,
+}).annotations(strict);
+
+/**
  * The authoritative surface a pane shows. Still named `WorkspaceTab` because
  * persisted state addresses surfaces by this identity —
  * `EnvironmentTabPresentation.tabId` and every journaled layout carry
@@ -1692,6 +1709,7 @@ export const WorkspaceTab = Schema.Union(
   SideChatWorkspaceTab,
   PreviewWorkspaceTab,
   CanvasWorkspaceTab,
+  AgentRunWorkspaceTab,
 );
 export type WorkspaceTab = typeof WorkspaceTab.Type;
 

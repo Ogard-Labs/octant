@@ -1,5 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { ThreadSubagentOpenContext, ThreadSubagentsContext } from "../agents/threadSubagents";
 import { ThreadInfo, useThreadInfoAttention, useThreadInfoPanel } from "./ThreadInfo";
 
 function PendingReview(props: { readonly pending: boolean }) {
@@ -86,5 +88,47 @@ describe("ThreadInfo", () => {
     fireEvent.keyDown(screen.getByRole("region", { name: "Thread info" }), { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Thread info" })).toBeNull();
     expect(screen.getByRole("button", { name: "Thread info" })).toHaveFocus();
+  });
+
+  it("lists the thread's running subagents, then the earlier ones, and opens each", () => {
+    const entry = (runId: string, task: string, lifecycleStatus: string) => ({
+      runId,
+      requestId: `request-${runId}`,
+      parentThreadId: "11111111-1111-4111-8111-111111111111",
+      role: "research",
+      task,
+      lifecycleStatus,
+      executionKind: "octant-managed",
+      usageQuality: "provider-reported",
+      resultAcknowledgement: { required: false, acknowledged: false },
+      version: 1,
+      updatedAt: "2026-11-26T10:00:00.000Z",
+    });
+    const onOpen = vi.fn();
+    render(
+      <ThreadSubagentsContext
+        value={
+          {
+            status: "ready",
+            entries: [
+              entry("22222222-2222-4222-8222-222222222221", "Find the flaky test", "running"),
+              entry("22222222-2222-4222-8222-222222222222", "Read the changelog", "completed"),
+            ],
+            observations: [],
+          } as never
+        }
+      >
+        <ThreadSubagentOpenContext value={onOpen}>
+          <ThreadInfo>
+            <p>Other rows</p>
+          </ThreadInfo>
+        </ThreadSubagentOpenContext>
+      </ThreadSubagentsContext>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Thread info" }));
+    expect(screen.getByText("1 running")).toBeVisible();
+    expect(screen.getByText("Previous")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /^Open Read the changelog/ }));
+    expect(onOpen).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222");
   });
 });

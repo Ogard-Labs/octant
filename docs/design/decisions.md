@@ -3057,6 +3057,7 @@ Agents may propose routines and delegate work, but only the thread's agent start
 - The Agents dock shows and controls subagents without starting them. A provider-started subagent reads "Started by <provider>" and has no managed controls (maintainer request, 2026-11-15); it offers Stop only while the running turn can stop that one alone.
 - A subagent's model, summary and usage show only where the runtime reports them, never zero; the summary reaches the person, never the parent's context. A dependency is named only where the window may read that run.
 - Subagents show in the transcript and Environment as one summary per pane (maintainer requests, 2026-11-16, 2026-11-17 and 2026-11-18).
+- A subagent Octant started opens as a thread of its own, in a pane beside its parent and never over it, since the host lets a window read a run only while a pane shows the parent: its brief, replies, tool steps (kept as bounded conversation entries) and the person's notes, live, with the normal composer steering a running one and continuing a finished or parked one through Resume with the message; a run held before it starts takes no message, a provider-run one is read only, and Thread info lists the thread's subagents (maintainer decision, 2026-11-26).
 
 Not built yet:
 
