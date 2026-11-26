@@ -31,6 +31,22 @@ import {
   type MobilePullRequest,
 } from "./pullRequestPresentation";
 
+/** A pull request the computer just merged: no Merge, nothing on its way. */
+export function mergedRow(row: CodeProjectPullRequestRow): CodeProjectPullRequestRow {
+  const { merging: _merging, ...rest } = row;
+  return { ...rest, state: "merged" };
+}
+
+/** The row as Merge when ready now stands, so its own off switch is offered. */
+export function withMergeWhenReady(
+  row: CodeProjectPullRequestRow,
+  on: boolean,
+): CodeProjectPullRequestRow {
+  const { merging, ...rest } = row;
+  if (on) return { ...rest, merging: "auto-merge" };
+  return merging === "auto-merge" ? rest : row;
+}
+
 /**
  * One pull request: where it stands, its failing checks, the threads that
  * work on it, and Merge. Merging re-reads the pull request on the computer
@@ -96,7 +112,10 @@ export function PullRequestDetailScreen(props: {
   const merge = usePullRequestMerge({
     transport,
     target,
-    onMerged: () => void reload(),
+    // The overview lists open pull requests only, so a merged one is marked
+    // here from the computer's answer rather than read back.
+    onMerged: () => setRow(mergedRow),
+    onMergeWhenReady: (on) => setRow((current) => withMergeWhenReady(current, on)),
   });
 
   const styles = useMemo(

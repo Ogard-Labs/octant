@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
-import { readMobileSubagents, stopMobileSubagent } from "./mobileSubagentsClient";
+import {
+  readMobileLiveTasks,
+  readMobileSubagents,
+  stopMobileLiveTasks,
+  stopMobileSubagent,
+} from "./mobileSubagentsClient";
 
 const threadId = "70000000-0000-4000-8000-000000000001";
 const runId = "70000000-0000-4000-8000-000000000002";
@@ -72,7 +77,7 @@ describe("a thread's subagents on the phone", () => {
     const read = await readMobileSubagents({ transport, threadId });
     expect(sent[0]).toMatchObject({
       path: "/api/agent-runs/parent-summary",
-      query: `parentThreadId=${threadId}`,
+      query: `?parentThreadId=${threadId}`,
     });
     expect(read).toEqual({
       status: "listed",
@@ -155,5 +160,46 @@ describe("a thread's subagents on the phone", () => {
         body: { parentThreadId: threadId, observationId: "obs-1" },
       },
     ]);
+  });
+
+  it("keeps those at work and the newest past its bound, and says some were left out", async () => {
+    const run = (index: number, lifecycleStatus: string) => ({
+      runId: `run-${index}`,
+      task: `Task ${index}`,
+      lifecycleStatus,
+      createdAt: at,
+      updatedAt: at,
+    });
+    // The computer lists runs oldest first; one started early still runs.
+    const entries = [
+      run(0, "running"),
+      ...Array.from({ length: 99 }, (_, index) => run(index + 1, "completed")),
+    ];
+    const { transport } = host(() => Response.json({ parentThreadId: threadId, entries }));
+    const read = await readMobileSubagents({ transport, threadId });
+    if (read.status !== "listed") throw new Error("The subagents were not listed.");
+    const ids = read.subagents.map((subagent) => subagent.id);
+    expect(ids).toHaveLength(64);
+    expect(ids).toContain("run-0");
+    expect(ids).toContain("run-99");
+    expect(ids).not.toContain("run-1");
+    expect(read.truncated).toBe(true);
+  });
+
+  it("reads a thread's background tasks, and says so when the computer stopped none", async () => {
+    const { sent, transport } = host(({ path }) =>
+      path.endsWith("/stop")
+        ? Response.json({ kind: "code-live-tasks-stopped", stopped: false })
+        : Response.json({ threadId, tasks: [{ taskId: "t1" }], turnRunning: true }),
+    );
+    expect(await readMobileLiveTasks({ transport, mode: "code", threadId })).toEqual({
+      status: "listed",
+      tasks: [{ taskId: "t1" }],
+      turnRunning: true,
+    });
+    expect(sent[0]).toMatchObject({ path: "/api/code-live-tasks", query: `?threadId=${threadId}` });
+    expect(await stopMobileLiveTasks({ transport, mode: "code", threadId })).toMatchObject({
+      status: "refused",
+    });
   });
 });

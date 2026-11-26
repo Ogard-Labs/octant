@@ -18,6 +18,8 @@ export interface ThreadSubagents {
   readonly liveTasks: ReadonlyArray<MobileLiveTask>;
   /** The computer refused: this device may not read the thread's subagents. */
   readonly refused: boolean;
+  /** The computer holds more than the phone shows: the oldest finished ones are left out. */
+  readonly truncated: boolean;
   readonly refresh: () => void;
 }
 
@@ -37,6 +39,7 @@ export function useThreadSubagents(input: {
   const [subagents, setSubagents] = useState<ReadonlyArray<MobileSubagent>>([]);
   const [liveTasks, setLiveTasks] = useState<ReadonlyArray<MobileLiveTask>>([]);
   const [refused, setRefused] = useState(false);
+  const [truncated, setTruncated] = useState(false);
   const [tick, setTick] = useState(0);
   const reading = useRef<AbortController | undefined>(undefined);
 
@@ -44,6 +47,7 @@ export function useThreadSubagents(input: {
     setSubagents([]);
     setLiveTasks([]);
     setRefused(false);
+    setTruncated(false);
   }, [transport, threadId]);
 
   const working = turnLive || subagents.some((subagent) => mobileSubagentIsActive(subagent.status));
@@ -63,6 +67,7 @@ export function useThreadSubagents(input: {
       if (controller.signal.aborted) return;
       if (read.status === "listed") {
         setSubagents(read.subagents);
+        setTruncated(read.truncated);
         setRefused(false);
       } else if (read.status === "refused") {
         setSubagents([]);
@@ -82,5 +87,5 @@ export function useThreadSubagents(input: {
   }, [transport, threadId, mode, working, tick]);
 
   const refresh = useCallback(() => setTick((value) => value + 1), []);
-  return { subagents, liveTasks, refused, refresh };
+  return { subagents, liveTasks, refused, truncated, refresh };
 }

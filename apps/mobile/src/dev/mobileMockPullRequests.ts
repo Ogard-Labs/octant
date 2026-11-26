@@ -129,7 +129,8 @@ function seedRows(hostId: string, ids: MockPullRequestIds): MockRow[] {
 
 /**
  * One computer's pull-request routes: the list, its refresh, the re-read a
- * merge makes first, and the merge itself, which the list then shows merged.
+ * merge makes first, the merge, and Merge when ready. As on a computer, the
+ * list holds open pull requests only, so a merged one leaves it.
  */
 export function createMockPullRequests(hostId: string, ids: MockPullRequestIds) {
   const rows = seedRows(hostId, ids);
@@ -138,7 +139,7 @@ export function createMockPullRequests(hostId: string, ids: MockPullRequestIds) 
       version: 1,
       query: { version: 1 },
       projects: [],
-      rows,
+      rows: rows.filter((row) => row.state === "open"),
       repositoriesTruncated: false,
       pullRequestsTruncated: false,
       freshness: { status: "fresh", lastSuccessfulRefreshAt: NOW },
@@ -211,6 +212,15 @@ export function createMockPullRequests(hostId: string, ids: MockPullRequestIds) 
         row.state = "merged";
         return json({ status: "merged", number: row.number, method: "squash", mergedAt: NOW });
       }
+      case "/api/code/project-pull-requests/merge-when-ready": {
+        const command =
+          typeof body === "object" && body !== null && "target" in body ? body : undefined;
+        const row = named(command?.target);
+        if (command === undefined || row === undefined) return new Response("", { status: 404 });
+        if ("kind" in command && command.kind === "enable") row.merging = "auto-merge";
+        else row.merging = undefined;
+        return json({ status: "applied", view: switches(row) });
+      }
       case "/api/code/project-pull-requests/switches": {
         const row = named(body);
         if (row === undefined) return new Response("", { status: 404 });
@@ -256,7 +266,10 @@ function switches(row: MockRow) {
       repositoryName: row.repositoryName,
       number: row.number,
     },
-    mergeWhenReady: { status: "off" },
+    mergeWhenReady:
+      row.merging === "auto-merge"
+        ? { status: "on", method: "squash", enabledAt: NOW, waitingOn: [] }
+        : { status: "off" },
     autoFix:
       row.babysit === undefined
         ? { status: "off" }

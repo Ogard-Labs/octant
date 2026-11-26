@@ -121,7 +121,7 @@ export async function readMobileSubagents(input: {
     response = await input.transport.authenticatedFetch({
       method: "GET",
       path: "/api/agent-runs/parent-summary",
-      query: `parentThreadId=${encodeURIComponent(input.threadId)}`,
+      query: `?parentThreadId=${encodeURIComponent(input.threadId)}`,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
   } catch {
@@ -134,8 +134,15 @@ export async function readMobileSubagents(input: {
     const body = record(await response.json());
     if (body === undefined || !Array.isArray(body.entries)) return { status: "unavailable" };
     const observations = Array.isArray(body.observations) ? body.observations.slice(0, 64) : [];
+    // The computer lists runs oldest first. Past the bound the phone keeps
+    // those still at work, then the newest, so what can be stopped is shown.
+    const runs = body.entries.flatMap((entry) => octantStarted(entry) ?? []);
+    const kept = [
+      ...runs.filter((run) => mobileSubagentIsActive(run.status)),
+      ...runs.filter((run) => !mobileSubagentIsActive(run.status)).reverse(),
+    ].slice(0, 64);
     const subagents = [
-      ...body.entries.slice(0, 64).flatMap((entry) => octantStarted(entry) ?? []),
+      ...runs.filter((run) => kept.includes(run)),
       ...observations.flatMap((child) => {
         try {
           const decoded = decodeHostAnswer(AgentObservedChild)(child);
@@ -163,6 +170,8 @@ export type MobileSubagentStop =
 
 const STOP_REFUSED = "The subagent could not be stopped. Nothing changed.";
 const STOP_NOT_LIVE = "This subagent already finished.";
+const LIVE_TASKS_NOT_STOPPED =
+  "The background tasks were not stopped. A running turn keeps them; stop the turn first.";
 
 /**
  * Asks the computer to stop one subagent. An Octant-started run is cancelled
@@ -240,7 +249,7 @@ export async function readMobileLiveTasks(input: {
     response = await input.transport.authenticatedFetch({
       method: "GET",
       path: liveTasksPath(input.mode),
-      query: `threadId=${encodeURIComponent(input.threadId)}`,
+      query: `?threadId=${encodeURIComponent(input.threadId)}`,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
   } catch {
@@ -287,7 +296,13 @@ export async function stopMobileLiveTasks(input: {
         threadId: input.threadId,
       }),
     });
-    return response.ok ? { status: "stop-requested" } : { status: "refused", message: refused };
+    if (!response.ok) return { status: "refused", message: refused };
+    // The computer answers 200 with stopped false when it stopped nothing: a
+    // running turn holds the session, or the tasks had already ended.
+    const body = record(await response.json());
+    return body?.stopped === true
+      ? { status: "stop-requested" }
+      : { status: "refused", message: LIVE_TASKS_NOT_STOPPED };
   } catch {
     return { status: "refused", message: refused };
   }

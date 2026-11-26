@@ -284,6 +284,10 @@ try:
             if report.stat().st_mtime >= started and "Octant" in report.name:
                 shutil.copy2(report, artifacts / report.name)
         (artifacts / "drive.json").write_text(json.dumps({"steps": drive_steps, "runs": outcomes}, indent=2) + "\n")
+        # Recorded first, so the screenshots and logs of a failed drive are kept;
+        # the run still fails.
+        if not all(outcome["passed"] for outcome in outcomes):
+            raise RuntimeError("A hand-driven run failed; drive.json names the device.")
     for label, size, appearance, method in () if drive_steps else (
         ("standard", "large", "light", "testColdDemoReplyForegroundAndReset"),
         ("large-text", "accessibility-extra-large", "light", "testLargeTextEntryAndReply"),
@@ -340,8 +344,11 @@ finally:
                 # only the UUID this fixture created, then verify absence.
                 pass
             run(["xcrun", "simctl", "delete", device], timeout=120)
+        # Every Simulator this run created is gone, the drive's iPad too.
+        owned = ([device] if device is not None else []) + extra_devices
+        if owned:
             remaining = run(["xcrun", "simctl", "list", "devices", "-j"], capture=True)
-            if device in remaining:
+            if any(entry in remaining for entry in owned):
                 raise RuntimeError("Owned Simulator cleanup is incomplete.")
         if ACTIVE:
             raise RuntimeError("Owned build/test command cleanup is incomplete.")

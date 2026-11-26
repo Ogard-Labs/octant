@@ -32,6 +32,8 @@ export function usePullRequestMerge(input: {
   readonly transport: MobileRemoteTransport | undefined;
   readonly target: MobilePullRequestTarget | undefined;
   readonly onMerged?: () => void;
+  /** The computer turned Merge when ready on or off, as it now says. */
+  readonly onMergeWhenReady?: (on: boolean) => void;
 }) {
   const { deviceKeyStore, guestHubStore } = useMobileSession();
   // A host may ask a paired phone's merge for an owner unlock first; this phone
@@ -49,7 +51,7 @@ export function usePullRequestMerge(input: {
   }, [deviceKeyStore, guestHubStore]);
   const [step, setStep] = useState<PullRequestMergeStep>();
   const [notice, setNotice] = useState<string | undefined>();
-  const { transport, target, onMerged } = input;
+  const { transport, target, onMerged, onMergeWhenReady } = input;
 
   async function begin(mode: "merge" | "when-ready"): Promise<void> {
     if (transport === undefined || target === undefined) return;
@@ -89,6 +91,8 @@ export function usePullRequestMerge(input: {
           ownerUnlock,
         );
         setNotice(mergeWhenReadyOutcomeCopy(outcome));
+        if (outcome.status === "applied")
+          onMergeWhenReady?.(outcome.view.mergeWhenReady.status === "on");
       }
     } catch {
       setNotice("The host did not answer. Nothing was confirmed; check the pull request.");
@@ -101,11 +105,10 @@ export function usePullRequestMerge(input: {
     if (transport === undefined || target === undefined) return;
     setStep({ kind: "sending" });
     try {
-      setNotice(
-        mergeWhenReadyOutcomeCopy(
-          await setMobileMergeWhenReady(transport, { ...target, enabled: false }),
-        ),
-      );
+      const outcome = await setMobileMergeWhenReady(transport, { ...target, enabled: false });
+      setNotice(mergeWhenReadyOutcomeCopy(outcome));
+      if (outcome.status === "applied")
+        onMergeWhenReady?.(outcome.view.mergeWhenReady.status === "on");
     } catch {
       setNotice("The host did not answer. Merge when ready may still be on.");
     } finally {

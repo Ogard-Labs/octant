@@ -92,6 +92,8 @@ export function SubagentsSheet(props: {
   readonly onClose: () => void;
   readonly subagents: ReadonlyArray<MobileSubagent>;
   readonly liveTasks: ReadonlyArray<MobileLiveTask>;
+  /** Only the subagents at work and the newest finished ones are listed. */
+  readonly truncated?: boolean;
   readonly providerDirectory: ReadonlyArray<MobileProviderDirectoryEntry>;
   /** Absent where this device may not stop anything. */
   readonly onStop?: ((subagent: MobileSubagent) => Promise<string | undefined>) | undefined;
@@ -260,6 +262,14 @@ export function SubagentsSheet(props: {
               </Text>
             ) : null}
             {ordered.map(row)}
+            {props.truncated === true ? (
+              <Text
+                style={[typography.caption, { color: colors.textSecondary }]}
+                testID="mobile-subagents-truncated"
+              >
+                {MOBILE_COPY.subagentsTruncated}
+              </Text>
+            ) : null}
             {props.liveTasks.length === 0 ? null : (
               <View testID="mobile-live-tasks">
                 <Text style={[styles.section, { color: colors.textSecondary }]}>

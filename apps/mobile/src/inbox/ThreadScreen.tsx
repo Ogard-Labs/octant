@@ -1154,6 +1154,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
         onClose={() => setAgentsOpen(false)}
         providerDirectory={models.providerDirectory}
         subagents={threadAgents.subagents}
+        truncated={threadAgents.truncated}
         visible={agentsOpen}
         {...(mayAct && transport !== undefined
           ? {

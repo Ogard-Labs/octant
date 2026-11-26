@@ -205,6 +205,16 @@ describe("the phone's pull requests", () => {
     expect(seen("mobile-pr-detail")?.textContent).toContain("Merged");
   });
 
+  it("offers Merge when ready's off switch once the computer turned it on, and drops it once off", async () => {
+    await press("mobile-pr-row-44");
+    expect(seen("mobile-pr-merge-when-ready-off")).toBeUndefined();
+    await press("mobile-pr-merge-when-ready-open");
+    await press("mobile-pr-merge-confirm");
+    expect(seen("mobile-pr-merge-when-ready-off")).toBeDefined();
+    await press("mobile-pr-merge-when-ready-off");
+    expect(seen("mobile-pr-merge-when-ready-off")).toBeUndefined();
+  });
+
   it("refuses to offer the confirm step for a pull request the computer says is not mergeable", async () => {
     await press("mobile-pr-row-47");
     await press("mobile-pr-merge-open");

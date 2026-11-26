@@ -1203,6 +1203,10 @@ function createMockTransport(input: {
   return {
     hostId: input.hostId,
     async authenticatedFetch(request) {
+      // The real transport puts the query after the path as given, so one
+      // without its "?" reaches no route; the sample computer refuses it too.
+      if (request.query !== undefined && request.query !== "" && !request.query.startsWith("?"))
+        return new Response(null, { status: 404 });
       const pullRequestAnswer = pullRequests(request);
       if (pullRequestAnswer !== undefined) return pullRequestAnswer;
       if (request.method === "GET" && request.path === "/api/agent-runs/parent-summary") {
