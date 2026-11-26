@@ -14,7 +14,8 @@ export function TurnSendSettings(props: { readonly focused: boolean }) {
   const preference = useTurnSendPreference();
   return (
     <SettingRow
-      description="In Work and Code, a message you send while a turn runs either steers that turn, where its model can take it, or waits in the queue for the next turn. ⌘↩ (Ctrl+↩) does the other for one message. Kept on this device only."
+      description="In Work and Code, a message you send while a turn runs steers that turn or waits for the next one."
+      more="Steer offers it to the running turn where its model can take it. ⌘↩ (Ctrl+↩) does the other for one message. Kept on this device only."
       focused={props.focused}
       label="While a turn runs"
       scope="app"
