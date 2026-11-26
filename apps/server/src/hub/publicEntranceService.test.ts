@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HubMembershipChangedPayload } from "@octant/contracts";
@@ -22,11 +23,15 @@ function setup(
     readonly privateListenerPort?: number;
     readonly failFunnel?: boolean;
     readonly failFunnelOff?: () => boolean;
+    /** A state another run of the service left, as after a restart. */
+    readonly state?: HubStatePort;
+    readonly paused?: boolean;
+    readonly now?: () => number;
   } = {},
 ) {
   const folder = mkdtempSync(join(tmpdir(), "octant-public-entrance-"));
   folders.push(folder);
-  const state: HubStatePort = createHubStateStore(folder);
+  const state: HubStatePort = options.state ?? createHubStateStore(folder);
   const calls: string[][] = [];
   const exec: TailscaleExec = async (_file, args) => {
     calls.push([...args]);
@@ -41,7 +46,7 @@ function setup(
       : { exitCode: 0, stdout: "", stderr: "" };
   };
   const recorded: HubMembershipChangedPayload[] = [];
-  let paused = false;
+  let paused = options.paused ?? false;
   let role = options.role ?? "hub";
   const service = new PublicEntranceService({
     state,
@@ -51,6 +56,7 @@ function setup(
     remoteAccessPaused: () => paused,
     privateListenerPort: () => options.privateListenerPort,
     role: () => role,
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
   services.push(service);
   return {
@@ -215,12 +221,11 @@ describe("pausing remote access", () => {
 
     await pause(true);
     expect(service.status().listening).toBe(false);
-    try {
-      await fetch(`http://127.0.0.1:${port}/healthz`);
-      expect.unreachable("the entrance still answered while paused");
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-    }
+    const answered = await fetch(`http://127.0.0.1:${port}/healthz`).then(
+      () => true,
+      () => false,
+    );
+    expect(answered).toBe(false);
     expect(calls[0]).toEqual(["funnel", "--https=443", "off"]);
     expect(service.status().funnel).toEqual({ enabled: false });
 
@@ -229,5 +234,76 @@ describe("pausing remote access", () => {
     await pause(false);
     expect(await health(service)).toBe(200);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("what the person did not ask for", () => {
+  it("refuses to turn the entrance on while remote access is paused, and resuming leaves it off", async () => {
+    const { service, pause } = setup({ paused: true });
+    expect(await service.setEnabled(true, WINDOW)).toEqual({
+      status: "refused",
+      kind: "remote-access-paused",
+    });
+    await pause(false);
+    expect(service.status()).toMatchObject({ enabled: false, listening: false });
+  });
+
+  it("turns Funnel off before resuming when the pause could not, and stays closed until it goes", async () => {
+    let failOff = false;
+    let now = 1_000_000;
+    const { service, calls, pause } = setup({ failFunnelOff: () => failOff, now: () => now });
+    await service.setEnabled(true, WINDOW);
+    await service.setFunnel({ enabled: true }, WINDOW);
+    failOff = true;
+    await pause(true);
+    expect(service.status().funnel).toEqual({ enabled: true, port: 443 });
+
+    await pause(false);
+    expect(service.status().listening).toBe(false);
+    expect(await health(service)).toBe("refused");
+
+    failOff = false;
+    calls.length = 0;
+    now += 60_000;
+    await pause(false);
+    expect(calls).toContainEqual(["funnel", "--https=443", "off"]);
+    expect(service.status()).toMatchObject({ listening: true, funnel: { enabled: false } });
+    expect(await health(service)).toBe(200);
+  });
+
+  it("turns Funnel off rather than leave it aimed at a port another program took", async () => {
+    const first = setup();
+    await first.service.setEnabled(true, WINDOW);
+    await first.service.setFunnel({ enabled: true }, WINDOW);
+    const saved = first.service.status().port;
+    await first.service.close();
+    const squatter = createServer((_request, response) => response.end("someone else"));
+    await new Promise<void>((resolve) => squatter.listen(saved, "127.0.0.1", () => resolve()));
+    try {
+      const restarted = setup({ state: first.state });
+      await restarted.service.reconcile();
+      expect(restarted.calls).toContainEqual(["funnel", "--https=443", "off"]);
+      expect(restarted.service.status()).toMatchObject({
+        listening: true,
+        funnel: { enabled: false },
+      });
+      expect(restarted.service.status().port).not.toBe(saved);
+    } finally {
+      await new Promise<void>((resolve) => squatter.close(() => resolve()));
+    }
+  });
+
+  it("stays closed once the host stops, whatever a later look finds", async () => {
+    const { service } = setup();
+    await service.setEnabled(true, WINDOW);
+    const port = service.status().port;
+    await service.close();
+    await service.reconcile();
+    expect(service.status().listening).toBe(false);
+    const answered = await fetch(`http://127.0.0.1:${port}/healthz`).then(
+      () => true,
+      () => false,
+    );
+    expect(answered).toBe(false);
   });
 });

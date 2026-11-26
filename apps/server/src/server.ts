@@ -2338,6 +2338,7 @@ export function startOctantServer(
       privateListenerController,
       privateListenerSetting,
       providerCredentialRoutes,
+      publicEntrance,
       secretStoresRoutes,
       remoteHost,
       threadRetention,
@@ -2658,10 +2659,18 @@ export function startOctantServer(
               // Promise.resolve().then() so synchronous throws become
               // rejections that are captured and settled together. The first
               // deterministic failure (remote before local) is propagated.
+              // The public entrance is a listener of its own; it closes with the
+              // others, and a later look cannot reopen it.
+              const publicStop = Promise.resolve().then(() => publicEntrance.close());
               if (remoteHost.gateway() === undefined) {
-                return Promise.resolve(localServer.stop(closeActiveConnections));
+                return Promise.all([
+                  publicStop.catch(() => undefined),
+                  localServer.stop(closeActiveConnections),
+                ]).then(() => undefined);
               }
-              const remoteStop = Promise.resolve().then(() => privateListenerController.disable());
+              const remoteStop = Promise.resolve().then(() =>
+                Promise.all([privateListenerController.disable(), publicStop]),
+              );
               const localStop = Promise.resolve().then(() =>
                 localServer.stop(closeActiveConnections),
               );

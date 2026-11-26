@@ -7,6 +7,7 @@
 import {
   decodePublicForwardAnswer,
   decodePublicForwardEnvelope,
+  PUBLIC_FORWARD_MAX_WIRE_BYTES,
   type PublicForwardAnswer,
   type PublicForwardEnvelope,
 } from "@octant/contracts";
@@ -40,6 +41,7 @@ export async function forwardToActingHub(input: {
     body: JSON.stringify(input.envelope),
     headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
     now: input.now,
+    maxResponseBytes: PUBLIC_FORWARD_MAX_WIRE_BYTES,
   });
   if (answer.status === "unreachable" || !answer.response.ok) return undefined;
   try {

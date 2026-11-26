@@ -3268,6 +3268,8 @@ export function wireRemote(deps: RemoteDependencies) {
     privateListenerController,
     privateListenerSetting,
     providerCredentialRoutes,
+    /** Closed with the host's listeners, so a stopping host leaves no public port open. */
+    publicEntrance,
     remoteHost,
     secretStoresRoutes,
     threadRetention,

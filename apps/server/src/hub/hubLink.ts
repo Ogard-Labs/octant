@@ -158,6 +158,8 @@ export async function sendHubLinkRequest(input: {
   readonly now: number;
   /** For a request whose answer waits on another request of the receiver's own; absent, eight seconds. */
   readonly timeoutMs?: number;
+  /** For a route whose answer may pass the transport's usual 256 KiB. */
+  readonly maxResponseBytes?: number;
 }): Promise<HubLinkAnswer> {
   const pinned = input.transport(input.target);
   const body = input.body ?? "";
@@ -180,6 +182,7 @@ export async function sendHubLinkRequest(input: {
       },
       ...(input.body === undefined ? {} : { body: input.body }),
       signal: AbortSignal.timeout(input.timeoutMs ?? HUB_LINK_REQUEST_TIMEOUT_MS),
+      ...(input.maxResponseBytes === undefined ? {} : { maxResponseBytes: input.maxResponseBytes }),
     });
     return { status: "answered", response };
   } catch {

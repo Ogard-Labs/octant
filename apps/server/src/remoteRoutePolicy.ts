@@ -13,6 +13,7 @@ import {
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
+  PUBLIC_FORWARD_MAX_WIRE_BYTES,
   REMOTE_PUSH_DELIVERY_HEADERS,
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
@@ -565,8 +566,8 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowQuery: false,
     allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
     allowedContentTypes: ["application/json"],
-    maxBodyBytes: 786_432,
-    maxResponseBytes: 786_432,
+    maxBodyBytes: PUBLIC_FORWARD_MAX_WIRE_BYTES,
+    maxResponseBytes: PUBLIC_FORWARD_MAX_WIRE_BYTES,
   },
   {
     id: REMOTE_HUB_LINK_ROUTE_IDS.pushGrant,

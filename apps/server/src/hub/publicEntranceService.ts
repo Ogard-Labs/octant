@@ -38,13 +38,19 @@ export interface PublicEntranceServiceOptions {
   readonly handlers?: () => PublicEntranceHandlers;
   /** Hands a request to the acting hub over the pinned private transport. */
   readonly forward?: (envelope: PublicForwardEnvelope) => Promise<PublicForwardAnswer | undefined>;
+  /** Only tests replace the clock that spaces out a refused Funnel off. */
+  readonly now?: () => number;
 }
 
 export type PublicEntranceSwitchOutcome =
   | { readonly status: "changed"; readonly enabled: boolean }
   | {
       readonly status: "refused";
-      readonly kind: "not-in-a-hub" | "listener-failed" | "funnel-off-failed";
+      readonly kind:
+        | "not-in-a-hub"
+        | "remote-access-paused"
+        | "listener-failed"
+        | "funnel-off-failed";
     };
 
 export type PublicFunnelOutcome =
@@ -82,6 +88,14 @@ export class PublicEntranceService {
   /** One change at a time, so a pause and a switch cannot open and close the listener out of order. */
   #queue: Promise<unknown> = Promise.resolve();
   #funnelOffRetryAt = 0;
+  /**
+   * Set when a pause or a lost role could not turn Funnel off. Resuming must not
+   * reopen the port Funnel still points at, since that would put the entrance
+   * back on the internet without the person turning Funnel on again.
+   */
+  #funnelOffOwed = false;
+  /** Set once the host stops; no later look reopens the listener. */
+  #closed = false;
 
   constructor(options: PublicEntranceServiceOptions) {
     this.#options = options;
@@ -112,6 +126,11 @@ export class PublicEntranceService {
       if (enabled && this.#options.role() === "none") {
         return { status: "refused", kind: "not-in-a-hub" } as const;
       }
+      // Saving the switch on while paused would let the next resume open an
+      // entrance whose enable was refused.
+      if (enabled && this.#options.remoteAccessPaused()) {
+        return { status: "refused", kind: "remote-access-paused" } as const;
+      }
       const saved = this.#saved();
       if (!enabled && saved?.funnel !== undefined) {
         // Turning the entrance off turns its front off first; a front left
@@ -133,7 +152,12 @@ export class PublicEntranceService {
         actingPrincipal: principal,
       });
       const opened = await this.#reconcile();
-      if (enabled && !opened) return { status: "refused", kind: "listener-failed" } as const;
+      if (enabled && !opened) {
+        // A refused enable leaves the switch as it was, so no later look opens it.
+        this.#save({ ...this.#savedOrOff(), enabled: current?.enabled === true });
+        await this.#reconcile();
+        return { status: "refused", kind: "listener-failed" } as const;
+      }
       return { status: "changed", enabled } as const;
     });
   }
@@ -195,6 +219,7 @@ export class PublicEntranceService {
   }
 
   close(): Promise<void> {
+    this.#closed = true;
     return this.#serially(async () => {
       const entrance = this.#entrance;
       this.#entrance = undefined;
@@ -206,12 +231,15 @@ export class PublicEntranceService {
     const saved = this.#saved();
     const paused = this.#options.remoteAccessPaused();
     const role = this.#options.role();
-    const open = saved?.enabled === true && !paused && role !== "none";
+    const open = !this.#closed && saved?.enabled === true && !paused && role !== "none";
+    if (saved?.funnel === undefined) this.#funnelOffOwed = false;
+    if (!open && saved?.funnel !== undefined && (paused || role === "none")) {
+      this.#funnelOffOwed = true;
+    }
     if (
-      !open &&
       saved?.funnel !== undefined &&
-      (paused || role === "none") &&
-      Date.now() >= this.#funnelOffRetryAt
+      this.#funnelOffOwed &&
+      this.#now() >= this.#funnelOffRetryAt
     ) {
       // The pause or the end of the hub role is the journaled act; the front
       // goes with it, and only the person turns it back on. A refused off is
@@ -221,11 +249,12 @@ export class PublicEntranceService {
       if (off.status === "done") {
         this.#save({ ...saved, funnel: undefined });
         this.#funnelOffRetryAt = 0;
+        this.#funnelOffOwed = false;
       } else {
-        this.#funnelOffRetryAt = Date.now() + FUNNEL_OFF_RETRY_MS;
+        this.#funnelOffRetryAt = this.#now() + FUNNEL_OFF_RETRY_MS;
       }
     }
-    if (!open) {
+    if (!open || this.#funnelOffOwed) {
       const entrance = this.#entrance;
       this.#entrance = undefined;
       await entrance?.close();
@@ -235,8 +264,19 @@ export class PublicEntranceService {
     try {
       this.#entrance = await this.#start(saved.port ?? 0);
     } catch {
-      // The saved port is taken; a fresh one changes the front's target, which
-      // the status shows the person.
+      // The saved port is taken. Funnel still sends the internet to it, and so
+      // to whatever program holds it now, outside the closed route table; the
+      // front goes before a fresh port opens, and only the person turns it on
+      // again, at the new port.
+      if (saved.funnel !== undefined) {
+        const off = await this.#funnel.off(saved.funnel.port);
+        if (off.status !== "done") {
+          this.#funnelOffOwed = true;
+          this.#funnelOffRetryAt = this.#now() + FUNNEL_OFF_RETRY_MS;
+          return false;
+        }
+        this.#save({ ...saved, funnel: undefined });
+      }
       try {
         this.#entrance = await this.#start(0);
       } catch {
@@ -263,6 +303,10 @@ export class PublicEntranceService {
     if (this.#saved()?.enabled !== true || this.#options.remoteAccessPaused()) return "closed";
     const role = this.#options.role();
     return role === "hub" ? "serve" : role === "member" ? "forward" : "closed";
+  }
+
+  #now(): number {
+    return this.#options.now?.() ?? Date.now();
   }
 
   #saved(): PublicEntranceState | undefined {

@@ -201,6 +201,14 @@ export const decodeHubPublicFunnelRequest = Schema.decodeUnknownSync(HubPublicFu
 export const PUBLIC_FORWARD_MAX_BODY_BYTES = 512 * 1024;
 
 /**
+ * The most bytes a forwarded request or answer takes on the private link: the
+ * largest body as base64 inside its JSON envelope, with room for headers. The
+ * route policy and the pinned transport both hold to it, so neither cuts off
+ * an answer the other let through.
+ */
+export const PUBLIC_FORWARD_MAX_WIRE_BYTES = 768 * 1024;
+
+/**
  * A request a member's entrance admitted and hands to the acting hub over the
  * pinned private transport, unchanged except for the headers the entrance
  * never passes on (cookies, credentials, and forwarding claims).
