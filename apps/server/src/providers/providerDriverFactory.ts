@@ -44,6 +44,10 @@ import { addedAcpAgentProfile, withAddedAcpAgentLaunch } from "./addedAcpAgent";
 import type { AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import {
+  type AntigravityStatusLineBridge,
+  makeAntigravityStatusLineUsageFacts,
+} from "./antigravityStatusLineUsage";
 import { makeDevinPlanUsageFacts } from "./devinPlanUsage";
 import { makeMistralVibeUsageFacts } from "./mistralVibeUsage";
 import { makeOpenCodeDriver, type OpenCodeProtectedPaths } from "./openCodeDriver";
@@ -66,6 +70,7 @@ export interface ProviderDriverFactoryOptions {
   /** Shared runtime port for ACP-speaking agents, including the OpenCode 2 preview. */
   readonly acpProcess?: AcpProcessPort;
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
+  readonly antigravityStatusLineBridge?: AntigravityStatusLineBridge;
   readonly hasPendingAcpInstallScripts?: (
     instance: Extract<ProviderInstance, { readonly driverKind: "acp-agent" }>,
   ) => Promise<boolean>;
@@ -181,6 +186,21 @@ export function makeProviderDriver(
           ...(options.credentialResolver === undefined
             ? {}
             : { credentialResolver: options.credentialResolver }),
+        }),
+      };
+    }
+    if (
+      instance.driverKind === "antigravity" &&
+      options.antigravityStatusLineBridge !== undefined
+    ) {
+      return {
+        ...driver,
+        contextFacts: makeAntigravityStatusLineUsageFacts({
+          instanceId: instance.id,
+          ...(configuration.authentication === undefined
+            ? {}
+            : { authentication: configuration.authentication }),
+          bridge: options.antigravityStatusLineBridge,
         }),
       };
     }

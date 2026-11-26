@@ -2,6 +2,7 @@ import {
   decodeProviderUsageLimitsSnapshot,
   type ProviderUsageLimitsSnapshot,
 } from "@octant/contracts";
+import type { AntigravityStatusLineStatus } from "./antigravityStatusLineUsage";
 import { principalActsAsHostPerson } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
@@ -14,8 +15,19 @@ export interface ProviderUsageLimitsRouteService {
   }) => Promise<ProviderUsageLimitsSnapshot>;
 }
 
+export interface AntigravityStatusLineRouteActions {
+  readonly status: () => AntigravityStatusLineStatus;
+  readonly connect: () => Promise<AntigravityStatusLineStatus>;
+  readonly disconnect: () => Promise<{
+    readonly restored: boolean;
+    readonly status: AntigravityStatusLineStatus;
+  }>;
+  readonly openTerminal: () => { readonly opened: boolean; readonly message?: string };
+}
+
 export function createProviderUsageLimitsRouteHandler(dependencies: {
   readonly service: ProviderUsageLimitsRouteService;
+  readonly antigravityStatusLine?: AntigravityStatusLineRouteActions;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
   readonly allowedRendererHttpOrigin?: string | null;
@@ -25,7 +37,23 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
     const url = new URL(request.url);
     const isList = url.pathname === "/api/provider-usage-limits";
     const isRefresh = url.pathname === "/api/provider-usage-limits/refresh";
-    if (!isList && !isRefresh) return undefined;
+    const isAgyStatus = url.pathname === "/api/provider-usage-limits/antigravity-statusline";
+    const isAgyConnect =
+      url.pathname === "/api/provider-usage-limits/antigravity-statusline/connect";
+    const isAgyDisconnect =
+      url.pathname === "/api/provider-usage-limits/antigravity-statusline/disconnect";
+    const isAgyOpenTerminal =
+      url.pathname === "/api/provider-usage-limits/antigravity-statusline/open-terminal";
+    if (
+      !isList &&
+      !isRefresh &&
+      !isAgyStatus &&
+      !isAgyConnect &&
+      !isAgyDisconnect &&
+      !isAgyOpenTerminal
+    ) {
+      return undefined;
+    }
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname))
       return response({ message: "Provider limits require loopback." }, 400, null);
@@ -33,7 +61,8 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
       return response({ message: "Renderer origin is not allowed." }, 400, null);
     if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: cors(origin) });
-    if ((isList && request.method !== "GET") || (isRefresh && request.method !== "POST")) {
+    const expectsGet = isList || isAgyStatus;
+    if ((expectsGet && request.method !== "GET") || (!expectsGet && request.method !== "POST")) {
       return response({ message: "Provider limits method is not supported." }, 405, origin);
     }
     if (url.search !== "")
@@ -61,6 +90,34 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
         error instanceof WindowAuthorityError ? 401 : 400,
         origin,
       );
+    }
+    if (isAgyStatus || isAgyConnect || isAgyDisconnect || isAgyOpenTerminal) {
+      const agy = dependencies.antigravityStatusLine;
+      if (agy === undefined) {
+        return response(
+          { message: "Antigravity status-line capture is unavailable." },
+          503,
+          origin,
+        );
+      }
+      try {
+        if (isAgyStatus) return response(agy.status(), 200, origin);
+        if (isAgyConnect) {
+          const status = await agy.connect();
+          return response(status, 200, origin);
+        }
+        if (isAgyDisconnect) {
+          const result = await agy.disconnect();
+          return response(result, 200, origin);
+        }
+        return response(agy.openTerminal(), 200, origin);
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "Antigravity status-line action failed.";
+        return response({ message }, 400, origin);
+      }
     }
     try {
       const value = isRefresh

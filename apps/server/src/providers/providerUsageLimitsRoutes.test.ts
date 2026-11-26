@@ -108,6 +108,78 @@ describe("provider usage limit routes", () => {
     ).toBe(200);
     expect(refresh).toHaveBeenCalledOnce();
   });
+
+  it("authenticates Antigravity status-line status, connect, disconnect, and open-terminal actions", async () => {
+    const agy = {
+      status: vi.fn(() => ({ connected: false })),
+      connect: vi.fn(async () => ({ connected: true })),
+      disconnect: vi.fn(async () => ({ restored: true, status: { connected: false } })),
+      openTerminal: vi.fn(() => ({ opened: true })),
+    };
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const route = createProviderUsageLimitsRouteHandler({
+      service: { snapshot: vi.fn(() => snapshot), refresh: vi.fn(async () => snapshot) },
+      antigravityStatusLine: agy,
+      windowAuthorityStore: store,
+      now: () => 1,
+    });
+    const headers = { "x-octant-window-capability": capability };
+
+    const statusResp = await route(
+      new Request("http://127.0.0.1/api/provider-usage-limits/antigravity-statusline", { headers }),
+    );
+    expect(statusResp?.status).toBe(200);
+    expect(await statusResp?.json()).toEqual({ connected: false });
+
+    const connectResp = await route(
+      new Request("http://127.0.0.1/api/provider-usage-limits/antigravity-statusline/connect", {
+        method: "POST",
+        headers,
+      }),
+    );
+    expect(connectResp?.status).toBe(200);
+    expect(await connectResp?.json()).toEqual({ connected: true });
+
+    const terminalResp = await route(
+      new Request(
+        "http://127.0.0.1/api/provider-usage-limits/antigravity-statusline/open-terminal",
+        { method: "POST", headers },
+      ),
+    );
+    expect(terminalResp?.status).toBe(200);
+    expect(await terminalResp?.json()).toEqual({ opened: true });
+
+    const disconnectResp = await route(
+      new Request("http://127.0.0.1/api/provider-usage-limits/antigravity-statusline/disconnect", {
+        method: "POST",
+        headers,
+      }),
+    );
+    expect(disconnectResp?.status).toBe(200);
+    expect(await disconnectResp?.json()).toEqual({ restored: true, status: { connected: false } });
+
+    // Wrong method and missing auth fail closed.
+    expect(
+      (
+        await route(
+          new Request("http://127.0.0.1/api/provider-usage-limits/antigravity-statusline/connect", {
+            method: "GET",
+            headers,
+          }),
+        )
+      )?.status,
+    ).toBe(405);
+    expect(
+      (
+        await route(
+          new Request("http://127.0.0.1/api/provider-usage-limits/antigravity-statusline/connect", {
+            method: "POST",
+          }),
+        )
+      )?.status,
+    ).toBe(401);
+  });
 });
 
 function fixture(service: {

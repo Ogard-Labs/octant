@@ -17,6 +17,7 @@ describe("provider limits reporting", () => {
     expect(unavailableLimitsReason("devin", undefined)).toBe("not-ready");
     expect(unavailableLimitsReason("opencode", "silent")).toBe("not-ready");
     expect(unavailableLimitsReason("mistral-vibe", undefined)).toBe("not-ready");
+    expect(unavailableLimitsReason("antigravity", undefined)).toBe("not-ready");
   });
 
   it("closes the question for runtimes that never report and for local models", () => {

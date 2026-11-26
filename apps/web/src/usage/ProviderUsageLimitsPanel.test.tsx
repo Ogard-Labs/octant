@@ -657,4 +657,84 @@ describe("ProviderUsageLimitsPanel", () => {
     expect(screen.getByText(/Overage in use/)).toBeVisible();
     expect(screen.getAllByText(/Resets in /).length).toBeGreaterThanOrEqual(2);
   });
+
+  it("renders Antigravity status-line windows with Gemini and Claude & GPT labels and connect/terminal controls", async () => {
+    const agyId = "33333333-3333-4333-8333-333333333333" as ProviderInstanceId;
+    const agyInstance = {
+      id: agyId,
+      displayName: "Google Antigravity",
+      driverKind: "antigravity",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      configuration: { kind: "antigravity-acp", binaryPath: "/usr/local/bin/agy" },
+      version: 1,
+      createdAt: "2026-08-23T12:00:00.000Z",
+      updatedAt: "2026-08-23T12:00:00.000Z",
+    } as ProviderInstance;
+    const data = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: "2026-08-23T12:00:00.000Z",
+      entries: [
+        {
+          providerInstanceId: agyId,
+          status: "available",
+          source: "provider-runtime",
+          observedAt: "2026-08-23T12:00:00.000Z",
+          limits: {
+            providerInstanceId: agyId,
+            scope: "account",
+            requests: { status: "unavailable" },
+            tokens: { status: "unavailable" },
+            concurrency: { status: "unavailable" },
+            retry: { status: "inactive" },
+            quota: "available",
+            source: "runtime-reported",
+            confidence: "high",
+            updatedAt: "2026-08-23T12:00:00.000Z",
+            rateLimitWindows: [
+              {
+                window: "gemini:five_hour",
+                status: "allowed",
+                utilization: 0.04,
+                resetsAt: "2026-08-23T14:00:00.000Z",
+                observedAt: "2026-08-23T12:00:00.000Z",
+              },
+              {
+                window: "claude_gpt:seven_day",
+                status: "allowed",
+                utilization: 0,
+                observedAt: "2026-08-23T12:00:00.000Z",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const openTerminal = vi.fn(async () => ({ opened: true }));
+    const disconnect = vi.fn(async () => ({ restored: true, status: { connected: false } }));
+    render(
+      <ProviderUsageLimitsPanel
+        client={{
+          list: async () => data,
+          refresh: async () => data,
+          antigravityStatusLineStatus: async () => ({
+            connected: true,
+            planTier: "Google AI Ultra",
+          }),
+          connectAntigravityStatusLine: async () => ({ connected: true }),
+          disconnectAntigravityStatusLine: disconnect,
+          openAntigravityTerminal: openTerminal,
+        }}
+        instances={[agyInstance]}
+      />,
+    );
+    expect(await screen.findByText("Gemini · 5-hour window")).toBeVisible();
+    expect(screen.getByText("Claude & GPT · 7-day window")).toBeVisible();
+    expect(screen.getByText(/Google AI Ultra/)).toBeVisible();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Open agy in terminal" }));
+    expect(openTerminal).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
 });

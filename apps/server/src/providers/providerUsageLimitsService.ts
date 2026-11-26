@@ -66,6 +66,7 @@ export interface ProviderUsageLimitsServiceOptions {
   readonly refreshTimeoutMs?: number;
   readonly schedule?: (callback: () => void, intervalMs: number) => ReturnType<typeof setInterval>;
   readonly cancelSchedule?: (handle: ReturnType<typeof setInterval>) => void;
+  readonly onStop?: () => void;
 }
 
 const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60_000;
@@ -170,6 +171,7 @@ export class ProviderUsageLimitsService {
 
   stop(): void {
     this.#refreshAbortController?.abort();
+    this.#options.onStop?.();
     if (this.#scheduleHandle === undefined) return;
     const cancel = this.#options.cancelSchedule ?? clearInterval;
     cancel(this.#scheduleHandle);
