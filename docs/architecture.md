@@ -1880,11 +1880,12 @@ returns its output so far with `commandCompleted: false`, in Code, Work and a
 helper's terminal alike (maintainer decision, 2026-11-26). While that command
 still owns the terminal, a new `run` is refused as busy rather than typed into
 it, and `read`, `write` and `stop` still work; the next `read` after it ends
-reports its exit code. One that returned to its shell's prompt without
-saying how it ended, after the agent interrupted it, no longer holds the
-terminal, and `read` says it ended with its exit code unknown; one never
-interrupted stays busy until it ends or is stopped, since a shell in the
-foreground may be in its own `read` rather than at its prompt. The completion is typed in the same
+reports its exit code. It stops holding the terminal only when it ends, when
+it is stopped, or when the agent has sent it Ctrl-C through `write` and its
+shell is back in the foreground with no completion; then `read` says it ended
+with its exit code unknown. A shell in the foreground alone frees nothing,
+since it may be in its own `read` rather than at its prompt, and Windows
+cannot report the foreground at all. The completion is typed in the same
 input the shell parses with the command, so a program reading its input
 cannot take it, and it follows the shell the terminal started in, which the
 terminal keeps, with that command, across turns. In Work it is one shell per
