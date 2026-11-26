@@ -7,9 +7,9 @@ How Settings is organised and what its particular pages hold. The kit every Sett
 Settings opens as a sheet over the app (`OctantSheet`): a floating surface
 at most 1040 by 760px, on the float fill with the pop shadow, over the sheet's
 own scrim. The app behind it stays mounted and live, and returns exactly as it
-was when Settings closes. In the desktop app the window behind is dimmed and
-blurred while Settings is open, as behind a dialog and the same on every
-page, so Settings is the one thing in front
+was when Settings closes. The window behind is dimmed and blurred while
+Settings is open, the same on every page and in every window that shows the
+sheet, so Settings is the one thing in front
 ([Translucency](../../DESIGN.md#translucency)); a change to the theme or the
 accent shows on the sheet itself and, softened, behind it. The sheet holds the Settings rail and the page, divided by one
 line; the rail is 232px wide there and is not resized (the saved sidebar

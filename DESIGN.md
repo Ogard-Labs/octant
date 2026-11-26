@@ -338,13 +338,17 @@ under the fill).
   Reduced transparency and a window with Glass off make it opaque. A browser keeps the frosted fills,
   where the blur is drawn over an opaque page.
 - **Settings and a dialog dim and soften the window behind them.** Behind
-  either, in the desktop app, the layers that hold content (the rail, the
+  the Settings sheet, in every window that shows it (the desktop app on any
+  system, full screen included, and a browser), and behind a dialog in the
+  desktop app's Mac window, the layers that hold content (the rail, the
   sidebar, the title band, the workspace and its docks) blur past reading
-  (5px) and stay at 92%. Settings' scrim is the sheet's own, lighter than a
-  dialog's (the scrim colour at 34%, 20% in a light theme), and it is the same
-  on every Settings page, Appearance and Sidebar included (maintainer
-  decision, 2026-11-26: over an untouched window with a 6% shade, the thread
-  behind competed with Settings' own text). In the desktop app the sheet
+  (5px) and stay at 92%. Reduced transparency, the app's setting or the
+  system's, and increased contrast draw no blur. Settings' scrim is the
+  sheet's own, lighter than a dialog's (the scrim colour at 34%, 20% in a
+  light theme), and it is the same on every Settings page, Appearance and
+  Sidebar included (maintainer decision, 2026-11-26: over an untouched window,
+  with a 6% shade in the Mac window, the thread behind competed with Settings'
+  own text). In the desktop app the sheet
   itself is solid, the float with no blur (maintainer request, 2026-11-15):
   under Glass the window lets the apps behind it through, and no blur in the
   page can reach them. An 80% fill over a 28px backdrop blur, then a 96% fill,

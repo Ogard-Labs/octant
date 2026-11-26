@@ -70,27 +70,35 @@ describe("window glass", () => {
     expect(Number(alpha)).toBeGreaterThanOrEqual(92);
   });
 
-  it("dims and softens the window behind Settings as behind a dialog in the desktop app, and draws the sheet solid", () => {
+  it("dims and softens the window behind Settings in every window and behind a dialog in the desktop app, and draws the sheet solid", () => {
     const css = read("styles/components.css");
-    const modalFade =
-      /html\[data-octant-native-host="true"\]:not\(([\s\S]*?)\):has\(:is\(\.octant-dialog__popup, \.octant-sheet__popup\)\[data-open\]\)\s*\.shell-frame\s*>\s*:is\(([^)]*)\)\s*\{([^}]*)\}/.exec(
-        css,
-      );
-    // Behind a dialog or the Settings sheet the content layers blur past
-    // reading; the ground and frame stay.
+    // One rule softens the window for both: Settings in every window that
+    // shows it as a sheet (the Mac window's mark is absent in full screen, on
+    // Windows and Linux and in a browser), a dialog where the mark is set.
+    const softened = String.raw`html:not\(([^)]*)\):is\(\s*:has\(\.octant-sheet__popup\[data-open\]\),\s*\[data-octant-native-host="true"\]:has\(\.octant-dialog__popup\[data-open\]\)\s*\)\s*\.shell-frame\s*>\s*:is\(([^)]*)\)\s*\{([^}]*)\}`;
+    const modalFade = new RegExp(String.raw`\n${softened}`).exec(css);
+    // The content layers blur past reading; the ground and frame stay.
     for (const layer of [".sidebar-rail", ".sidebar", ".window-chrome", ".workspace-layer"]) {
       expect(modalFade?.[2]).toContain(layer);
     }
     expect(Number(/blur\((\d+)px\)/.exec(modalFade?.[3] ?? "")?.[1])).toBeGreaterThanOrEqual(4);
+    // Barely dimmed as well as blurred: the scrim is a separate layer.
+    expect(modalFade?.[3]).toContain("opacity: 0.92;");
     expect(modalFade?.[3]).not.toMatch(/visibility|display|pointer-events/);
-    // Reduced transparency and increased contrast draw no blur.
+    // The app's reduced transparency and increased contrast draw no blur, and
+    // neither does the system's reduced transparency, which sets no mark.
     expect(modalFade?.[1]).toContain('[data-octant-reduced-transparency="true"]');
     expect(modalFade?.[1]).toContain('[data-octant-increased-contrast="true"]');
-    // One rule softens the window, whichever Settings page is open: none names
-    // the sheet alone, a page, or a mark on the sheet.
-    expect(
-      css.match(/\.octant-sheet__popup\)?\[data-open\]\)\s*\.shell-frame/g) ?? [],
-    ).toHaveLength(1);
+    const systemReduced =
+      new RegExp(String.raw`@media \(prefers-reduced-transparency: reduce\) \{\s*${softened}`).exec(
+        css,
+      )?.[3] ?? "";
+    expect(systemReduced).toContain("filter: none;");
+    expect(systemReduced).toContain("opacity: 1;");
+    // The window is softened the same whichever Settings page is open: the
+    // rule and its system override are the only two that name the open sheet,
+    // and neither names a page or a mark on the sheet.
+    expect(css.match(/\.octant-sheet__popup\[data-open\]/g) ?? []).toHaveLength(2);
     // The scrim behind Settings is the sheet's own, the one a browser draws:
     // the desktop app no longer thins it to a shade too faint to set Settings
     // apart from the thread behind it.
