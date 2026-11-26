@@ -24,7 +24,7 @@ const ACCESS_NOTES: Readonly<Record<WorkDefaultAccess, string>> = {
 };
 
 /**
- * Settings › Work: what a new Work thread starts with. A thread keeps what it
+ * Settings › Chat & Work: what a new Work thread starts with. A thread keeps what it
  * started with, so changing these never changes one that already exists.
  */
 export function WorkSettingsView(props: {
@@ -69,7 +69,7 @@ export function WorkSettingsView(props: {
   return (
     <SettingsSection
       description="What new Work threads start with. Existing threads keep theirs."
-      title="New threads"
+      title="Work defaults"
     >
       <div className="settings-feedback-slot" aria-live="polite">
         {props.controller.message === undefined ? null : (

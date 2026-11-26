@@ -2265,7 +2265,7 @@ html[data-octant-increased-contrast="true"]
   font-size: var(--oct-text-xs);
 }
 
-/* Settings > GitHub: open sections for account, capabilities, and
+/* Settings > Integrations, GitHub: open sections for account, capabilities, and
    connection; no animation is used, so Reduced Motion needs no override. */
 .github-settings,
 .linear-settings {

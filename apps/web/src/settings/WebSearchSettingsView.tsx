@@ -27,7 +27,7 @@ import { SettingRow, SettingsCompactRow, SettingsSection, SettingsState } from "
 export interface WebSearchSettingsViewProps {
   readonly client?: Pick<HostControlClient, "readWebSearch" | "setWebSearch" | "setWebSearchKey">;
   readonly focusedSetting?: string;
-  /** Opens the research route in Settings › Chat. */
+  /** Opens the research route in Settings › Chat & Work. */
   readonly onOpenResearchRoute?: () => void;
   /** Supplies ids for new entries; tests pass a fixed sequence. */
   readonly newId?: () => string;

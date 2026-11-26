@@ -3193,7 +3193,7 @@ function LaunchedShell(
     windowCapability: props.projectWindowCapability,
   });
   // Where the list lives: this host by default, or another computer the
-  // person chose in Settings › To-dos, reached through this window's own
+  // person chose in Settings › Data & storage, reached through this window's own
   // pairing with it. No to-do is sent anywhere else, and nothing is queued
   // for a computer that cannot be reached.
   const todoListHost = useTodoListHost(launchedClients.todoListHostClient, machineChanges.todos);
@@ -9105,6 +9105,7 @@ function LaunchedShell(
       .map((section) => ({
         sectionId: section.id,
         label: section.label,
+        alsoFoundAs: section.alsoFoundAs,
         onOpen: () => void controller.openSettings({ section: section.id }),
       })),
     dockTools: dockToolSurfaces.filter(

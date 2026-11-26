@@ -31,10 +31,10 @@ export type PluginSettingsSectionModuleResult =
   | { readonly kind: "unknown"; readonly entryPoint: string };
 
 function GitHubSettingsAdapter(props: PluginSettingsSectionProps): ReactElement {
-  return createElement(
-    GitHubSettingsSectionModule,
-    props.githubClient === undefined ? {} : { githubClient: props.githubClient },
-  );
+  return createElement(GitHubSettingsSectionModule, {
+    ...(props.githubClient === undefined ? {} : { githubClient: props.githubClient }),
+    ...(props.focusedSetting === undefined ? {} : { focusedSetting: props.focusedSetting }),
+  });
 }
 
 function LinearSettingsAdapter(props: PluginSettingsSectionProps): ReactElement {

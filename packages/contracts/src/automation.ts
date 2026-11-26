@@ -628,7 +628,7 @@ export type AutomationRunFailureReason = typeof AutomationRunFailureReason.Type;
 /**
  * A person's per-routine choice to run at the level its Project's new threads
  * start at (the Code Project's mode or Settings › Code › Access, or
- * Settings › Work for a Work Project), Full access included, instead of
+ * Settings › Chat & Work for a Work Project), Full access included, instead of
  * asking first. Absent asks first, as every routine did before. Only a person
  * at a window on this host sets it; a routine an agent proposed never has it.
  * It is part of the definition, so every change to it is journaled.

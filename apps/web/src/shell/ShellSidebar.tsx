@@ -664,7 +664,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
                 ) : null}
                 {props.chatErrorMessage === undefined ? null : (
                   <OctantButton
-                    onClick={() => props.onOpenSettings({ section: "chat" })}
+                    onClick={() => props.onOpenSettings({ section: "chat-work" })}
                     type="button"
                     variant="ghost"
                   >

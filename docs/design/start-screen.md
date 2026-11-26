@@ -884,7 +884,7 @@ and is never pre-selected; Auto uses the provider's own reviewer or
 [Octant Shield](../architecture.md#octant-shield), so it is listed for every
 runtime, and where no reviewer can run the picker shows it unavailable with
 the reason; the pick becomes the default for every new Work and Code thread
-until changed in Settings › Work or Settings › Code, or for one Project) — and ends in one primary action, Start a task,
+until changed in Settings › Chat & Work or Settings › Code, or for one Project) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Setup also asks once whether
 Octant may check for updates, and does not ask again whatever the answer
 (maintainer request, 2026-11-12). The question is an Updates card on the

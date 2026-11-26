@@ -1,6 +1,7 @@
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import { buildTurnDiagnosticsReport } from "@octant/domain";
 import { decodeChatBootstrap } from "@octant/contracts/chat";
+import { decodeTodoListHostView } from "@octant/contracts/todos";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { ProviderInstance, SettingsDeepLink } from "@octant/contracts";
 import { readFileSync } from "node:fs";
@@ -13,6 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import { settingsPastFirstRun } from "../App.test-fixtures";
 import { HostPlatformContext } from "../platform";
 import { SettingsView, type SettingsViewProps } from "./SettingsView";
+import { TodoListHostSettingsContext } from "../todos/TodoListHostSettings";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -201,7 +203,7 @@ describe("SettingsView", () => {
   it("lets the reader choose to wait for finished replies from Chat settings", async () => {
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
-    navigateTo("Chat");
+    navigateTo("Chat & Work");
     const control = screen.getByRole("switch", { name: "Stream replies" });
     expect(control).toHaveAttribute("aria-checked", "true");
     await userEvent.setup().click(control);
@@ -443,6 +445,130 @@ describe("SettingsView", () => {
     unmount();
     renderSettings({ initialDeepLink: { section: "access", setting: "safe-networks" } });
     expect(screen.getByRole("heading", { level: 1, name: "Permissions" })).toBeVisible();
+  });
+
+  it.each([
+    ["chat", "Chat & Work"],
+    ["work", "Chat & Work"],
+    ["device-tools", "Computer use"],
+    ["github", "Integrations"],
+    ["linear", "Integrations"],
+    ["todos", "Data & storage"],
+  ] as const)(
+    "opens a link to the folded %s page on %s, which has no row of its own",
+    (section, page) => {
+      renderSettings({ initialDeepLink: { section } });
+      expect(screen.getByRole("heading", { level: 1, name: page })).toBeVisible();
+      const rail = screen.getByRole("navigation", { name: "Settings sections" });
+      expect(within(rail).getByRole("button", { name: page })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      for (const folded of ["Chat", "Work", "Device tools", "GitHub", "Linear", "To-dos"]) {
+        expect(within(rail).queryByRole("button", { name: folded })).toBeNull();
+      }
+    },
+  );
+
+  it("holds Chat's and Work's defaults on one page, each under its own heading", () => {
+    renderSettings({
+      chatController: chatControllerFixture(),
+      workSettings: {
+        busy: false,
+        message: undefined,
+        settings: { defaultAccess: "ask-first", strict: false, restartContinuation: true },
+        update: vi.fn(async () => true),
+      } as never,
+    });
+    navigateTo("Chat & Work");
+    expect(
+      within(screen.getByRole("main"))
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual(["Chat defaults", "Work defaults", "Replies"]);
+  });
+
+  it("lands a limit's old Permissions link on its row on Limits", () => {
+    renderSettings({
+      initialDeepLink: { section: "permissions", setting: "coordinators-per-project" },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "Limits" })).toBeVisible();
+    const row = screen.getByRole("group", { name: "Coordinators per Project setting" });
+    expect(row).toHaveAttribute("data-focused", "true");
+    expect(row).toContainElement(document.activeElement as HTMLElement);
+    expect(
+      within(screen.getByRole("main"))
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual([
+      "Tool steps",
+      "Wake-ups and messages",
+      "Octant Shield",
+      "Coordinators",
+      "Pull requests",
+      "Waiting",
+      "Routines",
+    ]);
+  });
+
+  it("leaves no limit behind on Permissions", () => {
+    renderSettings();
+    navigateTo("Permissions");
+    expect(screen.queryByRole("heading", { name: "Tool steps" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Wake-ups and messages" })).toBeNull();
+    expect(screen.queryByRole("spinbutton", { name: "Coordinators per Project" })).toBeNull();
+  });
+
+  it("lands Device tools' old link on its row at the end of Computer use", () => {
+    renderSettings({
+      initialDeepLink: { section: "device-tools", setting: "managed-tools-update-check" },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "Computer use" })).toBeVisible();
+    expect(
+      screen.getByRole("group", { name: "Check device tools for updates setting" }),
+    ).toHaveAttribute("data-focused", "true");
+    // Each row on the page has a name no other row has.
+    const names = screen.getAllByTestId("setting-row").map((row) => row.getAttribute("aria-label"));
+    expect(names.filter((name, index) => names.indexOf(name) !== index)).toEqual([]);
+  });
+
+  it("lands To-dos' old link on its row on Data & storage", () => {
+    const props: SettingsViewProps = {
+      initialDeepLink: { section: "todos", setting: "todo-list-host" },
+      nativeBoundsAvailable: true,
+      onResetLayout: vi.fn(),
+      onResetNativeBounds: vi.fn(),
+      onSearchChange: vi.fn(),
+      onSettingsChange: vi.fn(),
+      search: "",
+      settings: defaultShellSettings(),
+      sidebarVibrancySupported: true,
+    };
+    render(
+      <TodoListHostSettingsContext.Provider
+        value={{
+          read: {
+            status: "ready",
+            view: decodeTodoListHostView({
+              kind: "todo-list-host",
+              thisHostId: "11111111-1111-4111-8111-111111111111",
+              choice: { kind: "this-host" },
+              ownListEmpty: true,
+            }),
+          },
+          computers: [],
+          choose: vi.fn(async () => undefined),
+        }}
+      >
+        <SettingsView {...props} />
+      </TodoListHostSettingsContext.Provider>,
+    );
+    expect(screen.getByRole("heading", { level: 1, name: "Data & storage" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 2, name: "To-dos" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Keep the list on setting" })).toHaveAttribute(
+      "data-focused",
+      "true",
+    );
   });
 
   it("keeps links to settings moved out of Host and Data on the pages that hold them now", () => {
@@ -961,7 +1087,7 @@ describe("SettingsView", () => {
   it("keeps the active Chat field and draft when another default is saved", () => {
     const controller = chatControllerFixture();
     const { props, rerender } = renderSettings({ chatController: controller });
-    navigateTo("Chat");
+    navigateTo("Chat & Work");
     const field = screen.getByLabelText("Instructions for new Chat threads");
     field.focus();
     fireEvent.change(field, { target: { value: "An unfinished draft" } });
@@ -988,7 +1114,7 @@ describe("SettingsView", () => {
     } as ChatController;
     renderSettings({ chatController });
 
-    navigateTo("Chat");
+    navigateTo("Chat & Work");
     expect(screen.getByRole("heading", { name: "Chat defaults" })).toBeVisible();
     expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveTextContent(
       "Automatic",
@@ -2183,7 +2309,7 @@ describe("SettingsView", () => {
   it("keeps 64 tool steps a turn below Full access and every step at Full access until the person sets a number", async () => {
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
-    navigateTo("Permissions");
+    navigateTo("Limits");
     expect(screen.getByRole("heading", { name: "Tool steps" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Tool steps kept per turn" })).toHaveValue(64);
     const fullAccess = screen.getByRole("spinbutton", {
@@ -2339,37 +2465,35 @@ describe("SettingsView", () => {
       recordRecentRepository: vi.fn(),
     };
     renderSettings({ githubClient: githubClient as never });
-    navigateTo("GitHub");
+    navigateTo("Integrations");
     expect(await screen.findByText("octocat")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh status" })).toBeEnabled();
+    // On a page two integrations share, a heading says whose it is.
+    expect(screen.getByRole("heading", { level: 2, name: "GitHub connection" })).toBeVisible();
   });
 
   it("explains that the GitHub connection stays on the host when no client is available", () => {
     renderSettings();
-    navigateTo("GitHub");
-    expect(screen.getByText(/set up on the computer that owns it/i)).toBeInTheDocument();
+    navigateTo("Integrations");
+    expect(screen.getByRole("region", { name: "GitHub" })).toHaveTextContent(
+      /set up on the computer that owns it/i,
+    );
     expect(screen.queryByRole("button", { name: "Refresh status" })).not.toBeInTheDocument();
   });
 
-  it("replaces integration account controls when navigating between Settings pages", () => {
+  it("draws each enabled integration under its own name on Integrations, GitHub first", () => {
     renderSettings({
       effectivePlugins: new Map([
         ["github-integration", true],
         ["linear-integration", true],
       ]),
     });
-    navigateTo("GitHub");
-    expect(screen.getByRole("region", { name: "GitHub" })).toHaveTextContent("inspect the account");
-
-    navigateTo("Linear");
-    expect(screen.queryByRole("region", { name: "GitHub" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Linear" })).toHaveTextContent(
-      "inspect the workspace",
-    );
-
-    navigateTo("GitHub");
-    expect(screen.queryByRole("region", { name: "Linear" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "GitHub" })).toHaveTextContent("inspect the account");
+    navigateTo("Integrations");
+    const github = screen.getByRole("region", { name: "GitHub" });
+    const linear = screen.getByRole("region", { name: "Linear" });
+    expect(github).toHaveTextContent("inspect the account");
+    expect(linear).toHaveTextContent("inspect the workspace");
+    expect(github.compareDocumentPosition(linear) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
   it("replaces old controls with an error for an unknown page and recovers on a known page", () => {
@@ -2391,16 +2515,69 @@ describe("SettingsView", () => {
     expect(screen.getByRole("region", { name: "Linear" })).toBeInTheDocument();
   });
 
-  it("omits the GitHub section when the github-integration plugin is not effective", () => {
+  it("takes a switched-off integration's section off Integrations and keeps the other", () => {
     renderSettings({
-      effectivePlugins: new Map([["github-integration", false]]),
+      effectivePlugins: new Map([
+        ["github-integration", false],
+        ["linear-integration", true],
+      ]),
     });
-    expect(screen.queryByRole("button", { name: "GitHub" })).not.toBeInTheDocument();
+    navigateTo("Integrations");
+    expect(screen.queryByRole("region", { name: "GitHub" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Linear" })).toBeInTheDocument();
   });
 
-  it("omits Linear when the plugin is not effective", () => {
-    renderSettings({ effectivePlugins: new Map([["linear-integration", false]]) });
-    expect(screen.queryByRole("button", { name: "Linear" })).not.toBeInTheDocument();
+  it("offers no Integrations page, and no row of it in search, once every integration is off", async () => {
+    const found = () =>
+      within(screen.getByRole("listbox", { name: "Settings search results" }))
+        .queryAllByRole("option")
+        .map((option) => option.textContent);
+    const { unmount } = renderSettings({ search: "disconnect linear" });
+    await waitFor(() => expect(found().join("\n")).toContain("Disconnect Linear"));
+    unmount();
+
+    renderSettings({
+      effectivePlugins: new Map([
+        ["github-integration", false],
+        ["linear-integration", false],
+      ]),
+      search: "disconnect linear",
+    });
+    expect(screen.queryByRole("option", { name: /Disconnect Linear/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Integrations" })).not.toBeInTheDocument();
+  });
+
+  it("brings a GitHub row into view from a link to the old GitHub page", async () => {
+    const githubClient = {
+      authenticationSnapshot: vi.fn(async () => ({
+        state: "ready",
+        account: { login: "octocat", gitProtocol: "https", scopes: ["repo"] },
+        capabilities: [{ kind: "repository-catalogue", available: true }],
+      })),
+      executeAuthenticationCommand: vi.fn(),
+      readCatalogue: vi.fn(),
+      recordRecentRepository: vi.fn(),
+    };
+    renderSettings({
+      githubClient: githubClient as never,
+      initialDeepLink: { section: "github", setting: "github-connection" },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "Integrations" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Connection setting" })).toHaveAttribute(
+      "data-focused",
+      "true",
+    );
+  });
+
+  it("opens General for a link to an integration whose plugin is off everywhere", async () => {
+    renderSettings({
+      effectivePlugins: new Map([
+        ["github-integration", false],
+        ["linear-integration", false],
+      ]),
+      initialDeepLink: { section: "linear", setting: "linear-connection" },
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "General" })).toBeVisible();
   });
 
   it("shows Linear through the plugin Settings contribution when effective", async () => {
@@ -2418,8 +2595,7 @@ describe("SettingsView", () => {
       effectivePlugins: new Map([["linear-integration", true]]),
       integrationClient: integrationClient as never,
     });
-    expect(screen.getByRole("button", { name: "Linear" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Linear" }));
+    navigateTo("Integrations");
     expect(await screen.findByRole("button", { name: "Connect" })).toBeEnabled();
   });
 
@@ -2479,7 +2655,7 @@ describe("SettingsView", () => {
       `#${updates.id}`,
     );
 
-    navigateTo("Work");
+    navigateTo("Chat & Work");
     expect(screen.queryByRole("navigation", { name: "On this page" })).toBeNull();
   });
 

@@ -462,7 +462,7 @@ locale variables, `TMPDIR`, `DEVELOPER_DIR`, and the Android SDK and `adb`
 variables), never provider keys, tokens, broker credentials, or other `OCTANT_*`
 values. The same updater state machine as the driver checks
 `registry.npmjs.org` daily only when the person turns automatic updates on in
-Settings › Device tools; it is off by default, a saved choice is kept, and a
+Settings › Computer use › Device tool updates; it is off by default, a saved choice is kept, and a
 manual check or Update still works. A newer release stages with its dependency closure resolved
 in-app (no npm or Bun is available inside the packaged app), each package
 integrity-verified, and activates only while idle and after its entrypoint

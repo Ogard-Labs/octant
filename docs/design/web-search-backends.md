@@ -194,7 +194,7 @@ predates it, for no gain the label does not already give.
 
 A native harness thread in Work and Code follows `automatic`. A turn offers
 one search, never `web-search` beside a provider's own. The route's existing
-control in Settings › Chat and on a thread stays the only place it is chosen:
+control in Settings › Chat & Work and on a thread stays the only place it is chosen:
 the policy decides only which of Octant's backends may answer, and adds no
 second switch.
 
@@ -372,9 +372,9 @@ Extensions ([Settings](settings.md#groups-and-pages)). It shows:
   statements the kind takes;
 - a line saying the policy covers only these backends, while a provider's own
   search and a vendor runtime's own web tools run as they do on their own,
-  with a link to the research route in Settings › Chat.
+  with a link to the research route in Settings › Chat & Work.
 
-Settings › Chat keeps the research route; its SearXNG address field moves here as the first backend
+Settings › Chat & Work keeps the research route; its SearXNG address field moves here as the first backend
 entry, and a link to the old field opens this page.
 
 ## Migration

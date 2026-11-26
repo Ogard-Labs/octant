@@ -23,6 +23,7 @@ import { SettingRow, SettingsFactList, SettingsSection, SettingsState } from "./
 
 export interface GitHubConnectionSettingsProps {
   readonly client: GithubClient;
+  readonly focusedSetting?: string | undefined;
 }
 
 type SnapshotState =
@@ -49,7 +50,10 @@ const CAPABILITY_LABELS: Readonly<Record<GithubCapabilityKind, string>> = {
 
 const GITHUB_APPLICATIONS_URL = "https://github.com/settings/applications";
 
-export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsProps) {
+export function GitHubConnectionSettings({
+  client,
+  focusedSetting,
+}: GitHubConnectionSettingsProps) {
   const [snapshotState, setSnapshotState] = useState<SnapshotState>({ kind: "loading" });
   const [commandBusy, setCommandBusy] = useState(false);
   const [commandError, setCommandError] = useState<string>();
@@ -122,7 +126,10 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
 
   return (
     <section aria-label="GitHub" className="github-settings" id="settings-github">
-      <SettingsSection description="GitHub authentication on the selected host." title="Account">
+      <SettingsSection
+        description="GitHub authentication on the selected host."
+        title="GitHub account"
+      >
         <SettingsFactList
           facts={[
             { label: "State", value: STATE_LABELS[snapshot.state] },
@@ -154,7 +161,7 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
       </SettingsSection>
 
       {snapshot.capabilities.length === 0 ? null : (
-        <SettingsSection description="GitHub data available to Octant." title="Capabilities">
+        <SettingsSection description="GitHub data available to Octant." title="GitHub capabilities">
           <ul className="setgroup github-settings__capabilities">
             {snapshot.capabilities.map((capability) => (
               <li key={capability.kind}>
@@ -184,11 +191,12 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
                 "This host's GitHub token is stored in gh's plaintext config file, so Octant blocks GitHub until it moves. Moving it keeps the same token and account; Octant writes it to this host's secure credential store and only then lets gh drop the plaintext copy. If the secure store is unavailable the credential is left untouched.",
             }
           : {})}
-        title="Connection"
+        title="GitHub connection"
       >
         <div className="setgroup">
           <SettingRow
             description="Set up, refresh access, or move the sign-in to secure storage."
+            focused={focusedSetting === "github-connection"}
             label="Connection"
             labelledBySection
             scope="host"
@@ -302,7 +310,7 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
             <ChevronDown aria-hidden="true" size={14} />
           </OctantButton>
         }
-        title="Diagnostics"
+        title="GitHub diagnostics"
       >
         {diagnosticsOpen ? (
           <SettingsFactList
@@ -349,6 +357,7 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
           <div className="setgroup">
             <SettingRow
               description="Removes the sign-in from this host. It stays authorized on GitHub until you revoke it there."
+              focused={focusedSetting === "github-logout"}
               label="Log out"
               labelledBySection
               scope="host"

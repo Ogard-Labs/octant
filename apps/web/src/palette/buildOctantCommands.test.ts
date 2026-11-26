@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { RefreshCw } from "../ui/icons";
 import { buildOctantCommands, type OctantCommandSources } from "./buildOctantCommands";
 import { keybindingActionForCommand } from "./commandKeybinding";
-import type { OctantCommand } from "./commandModel";
+import { filterOctantCommands, type OctantCommand } from "./commandModel";
+import { octantSettingsCommandPages } from "../settings/octantSettingsNavigation";
 
 function sources(overrides: Partial<OctantCommandSources> = {}): OctantCommandSources {
   return {
@@ -216,6 +217,28 @@ describe("the destination, sidebar and dock commands", () => {
     tool.action.run();
     expect(onOpenDockTool).toHaveBeenCalledWith({ id: "files", label: "Files" });
     expect(keybindingActionForCommand("workspace:toggle-sidebar")).toBe("toggle-sidebar");
+  });
+
+  // GitHub, Linear, Device tools and To-dos were Settings pages a person could
+  // type into the palette; their settings now sit on another page.
+  it("finds a Settings page by the name of a page it took in", () => {
+    const commands = buildOctantCommands(
+      sources({
+        settingsPages: octantSettingsCommandPages.map((page) => ({
+          sectionId: page.id,
+          label: page.label,
+          alsoFoundAs: page.alsoFoundAs,
+          onOpen: vi.fn(),
+        })),
+      }),
+    );
+    const first = (query: string) => filterOctantCommands(commands, query)[0]?.title;
+    expect(first("github")).toBe("Settings: Integrations");
+    expect(first("linear")).toBe("Settings: Integrations");
+    expect(first("device tools")).toBe("Settings: Computer use");
+    expect(first("to-dos")).toBe("Settings: Data & storage");
+    expect(first("settings: chat")).toBe("Settings: Chat & Work");
+    expect(first("limits")).toBe("Settings: Limits");
   });
 
   it("offers no dock tool when the host cannot open one", () => {

@@ -9,6 +9,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * The registry in the renderer decides which of these sections are currently
  * available (only sections with working content are shown). The contract
  * enumerates the full IA so any app surface can request a deep link by name.
+ *
+ * A page that was folded into another keeps its identifier here (`profile`,
+ * `chat`, `github`, `todos` and the like), so a link an earlier build wrote
+ * still decodes; the renderer opens the page that holds its settings now.
  */
 export const SETTINGS_SECTION_IDS = [
   "general",
@@ -19,6 +23,7 @@ export const SETTINGS_SECTION_IDS = [
   "keybindings",
   "chat",
   "work",
+  "chat-work",
   "code",
   "providers",
   "harness",
@@ -29,8 +34,10 @@ export const SETTINGS_SECTION_IDS = [
   "device-tools",
   "github",
   "linear",
+  "integrations",
   "permissions",
   "access",
+  "limits",
   "memory",
   "secret-stores",
   "data",

@@ -208,7 +208,7 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
   Thinking, the fold and every row start open on the summary the transcript
   already holds, still clipped behind Show all past 1,200 characters. While a
   reply streams, its thinking is open and grows as it arrives, and a running
-  turn's tool rows are open; Settings › Chat › Stream replies still alone
+  turn's tool rows are open; Settings › Chat & Work › Stream replies still alone
   decides whether the partial answer shows, at every level.
 
 ### Turn activity rows

@@ -168,10 +168,12 @@ import {
   findSetting,
   isSettingAvailable,
   listAvailableSections,
+  withoutAbsentContributions,
   searchSettings,
   settingId,
 } from "../settings/registry";
 import { octantSettingsRegistry } from "../settings/octantSettingsRegistry";
+import { currentSettingsLink } from "../settings/movedSettings";
 import { OctantLimitsSettings } from "../settings/OctantLimitsSettings";
 import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
@@ -407,17 +409,17 @@ const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Obj
 
 const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>> = {
   general: "Your profile, defaults, updates, and alerts.",
-  work: "What new Work threads start with.",
+  "chat-work": "What new Chat and Work threads start with.",
   voice: "Speech, text-to-speech, and image providers.",
-  "computer-use": "Let agents use apps on this Mac.",
-  "device-tools": "Simulator and emulator tools, and their updates.",
+  "computer-use": "Let agents use apps on this Mac, and keep the simulator tools current.",
   providers: "Connect providers, sign in, and pick default models.",
   harness: "Models you add by key or run locally.",
   skills: "Review skills, then trust and enable only what you want.",
   "web-search": "Where web search may send queries.",
-  github: "GitHub connection on the selected host.",
+  integrations: "The accounts Octant connects to on the selected host.",
   host: "Octant's background service.",
   permissions: "Files agents may not touch, places they may reach, and what you have allowed.",
+  limits: "How far an agent runs on its own before Octant stops it or asks you.",
   memory: "What Octant remembers about you, and how to keep things out.",
   data: "What this host stores and how to back it up.",
   "secret-stores": "Use a password manager for API keys.",
@@ -429,66 +431,6 @@ const APPEARANCE_SECTION = (): SettingsSectionEntry =>
 const SIDEBAR_SECTION = (): SettingsSectionEntry => findSection(octantSettingsRegistry, "sidebar")!;
 const HOST_SECTION = (): SettingsSectionEntry => findSection(octantSettingsRegistry, "host")!;
 
-/**
- * Settings that moved to another page keep answering the links that name
- * their old one: an empty state, a doc, or a remote client built against the
- * earlier layout still lands on the control.
- */
-const MOVED_SETTINGS: ReadonlyArray<{
-  readonly from: SettingsSectionId;
-  readonly setting: string;
-  readonly to: SettingsSectionId;
-}> = [
-  { from: "host", setting: "host-automation-notifications", to: "general" },
-  ...["public-links", "public-link-service", "browser-site-approvals", "tool-approvals"].map(
-    (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
-  ),
-  { from: "general", setting: "marketplace-fetches", to: "skills" },
-  { from: "chat", setting: "chat-searxng-url", to: "web-search" },
-  { from: "appearance", setting: "stream-replies", to: "chat" },
-  { from: "appearance", setting: "project-view-switcher", to: "code" },
-  ...[
-    "sidebar-width",
-    "sidebar-destinations",
-    "sidebar-more",
-    "mode-switcher",
-    "thread-provider-icons",
-    "sidebar-background",
-    "sidebar-projects-branch",
-    "sidebar-projects-pull-request",
-    "sidebar-projects-last-updated",
-    "sidebar-projects-status",
-    "sidebar-activity-project",
-    "sidebar-activity-branch",
-    "sidebar-activity-pull-request",
-    "sidebar-activity-last-updated",
-    "sidebar-activity-status",
-  ].map((setting) => ({ from: "appearance" as const, setting, to: "sidebar" as const })),
-  { from: "host", setting: "data-map", to: "data" },
-  { from: "host", setting: "thread-retention", to: "data" },
-];
-
-/**
- * Pages that were folded into another keep answering their own links, with
- * or without a setting. Profile and Notifications each held one or two
- * controls and Access was the other half of what an agent may touch and
- * reach, so the sidebar listed three pages a person rarely needed alone.
- */
-const MERGED_PAGES: Readonly<Partial<Record<SettingsSectionId, SettingsSectionId>>> = {
-  profile: "general",
-  notifications: "general",
-  access: "permissions",
-};
-
-function currentSettingsLink(link: SettingsDeepLink): SettingsDeepLink {
-  const moved = MOVED_SETTINGS.find(
-    (entry) => entry.from === link.section && entry.setting === link.setting,
-  );
-  const section = moved === undefined ? link.section : moved.to;
-  const merged = MERGED_PAGES[section] ?? section;
-  return merged === link.section ? link : { ...link, section: merged };
-}
-
 export function SettingsView(props: SettingsViewProps) {
   const capabilities: SettingsNativeCapabilities = {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
@@ -498,18 +440,22 @@ export function SettingsView(props: SettingsViewProps) {
   };
   const hostEffectivePlugins = useFirstPartyPluginsEffective();
   const effectivePlugins = props.effectivePlugins ?? hostEffectivePlugins;
-  const availableSections = listAvailableSections(octantSettingsRegistry, capabilities).filter(
-    (section) => isSettingsSectionAvailable(section.id, effectivePlugins),
+  const availableSections = withoutAbsentContributions(
+    listAvailableSections(octantSettingsRegistry, capabilities),
+    (contributedSection) => isSettingsSectionAvailable(contributedSection, effectivePlugins),
   );
-  const pluginSettingsEntryPoints = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const section of availableSections) {
-      const contribution = resolveSettingsSectionContribution(section.id, effectivePlugins);
-      if (contribution?.entryPoint !== undefined) {
-        map.set(section.id, contribution.entryPoint);
-      }
-    }
-    return map;
+  // Integrations draws the section each enabled plugin contributes, in the
+  // order the page registers their rows.
+  const integrationEntryPoints = useMemo(() => {
+    const contributed = new Set(
+      availableSections
+        .find((section) => section.id === "integrations")
+        ?.settings.flatMap((setting) => setting.contributedSection ?? []),
+    );
+    return [...contributed].flatMap(
+      (sectionId) =>
+        resolveSettingsSectionContribution(sectionId, effectivePlugins)?.entryPoint ?? [],
+    );
   }, [availableSections, effectivePlugins]);
   const route = useSettingsRoute({
     availableSections,
@@ -903,7 +849,7 @@ export function SettingsView(props: SettingsViewProps) {
                       onHarnessEndpointChange={setHarnessEndpoint}
                       onCatalogEntryChange={setCatalogEntry}
                       harnessEndpointOpen={subPage !== undefined}
-                      pluginSettingsEntryPoints={pluginSettingsEntryPoints}
+                      integrationEntryPoints={integrationEntryPoints}
                       props={{ ...savingProps, sandboxInitialScope: route.sandboxScope }}
                     />
                   </SecretStoresClientContext.Provider>
@@ -1029,7 +975,7 @@ interface ActiveSectionContentProps {
   readonly onHarnessEndpointChange: (endpointName: string | undefined) => void;
   readonly onCatalogEntryChange: (entryName: string | undefined) => void;
   readonly harnessEndpointOpen: boolean;
-  readonly pluginSettingsEntryPoints: ReadonlyMap<string, string>;
+  readonly integrationEntryPoints: ReadonlyArray<string>;
   readonly props: SettingsViewProps;
   readonly capabilities: SettingsNativeCapabilities;
 }
@@ -1041,7 +987,7 @@ function ActiveSectionContent({
   onHarnessEndpointChange,
   onCatalogEntryChange,
   harnessEndpointOpen,
-  pluginSettingsEntryPoints,
+  integrationEntryPoints,
   props,
   capabilities,
 }: ActiveSectionContentProps) {
@@ -1052,19 +998,6 @@ function ActiveSectionContent({
   // endpoints, so their "connect one" actions land on the add-endpoint row.
   const openModelEndpoints = () =>
     onApplyDeepLink({ section: "harness", setting: settingId("model-endpoints") });
-  const pluginEntryPoint = pluginSettingsEntryPoints.get(activeSection);
-  if (pluginEntryPoint !== undefined) {
-    return (
-      <PluginSettingsSection
-        entryPoint={pluginEntryPoint}
-        focusedSetting={focusedSetting}
-        githubClient={props.githubClient}
-        integrationClient={props.integrationClient}
-        linearProjects={props.linearProjects}
-        onProjectLinearTargetChange={props.onProjectLinearTargetChange}
-      />
-    );
-  }
   switch (activeSection) {
     // The folded pages are never the active one (their links are redirected
     // before they reach the route); they share the page that holds them now.
@@ -1072,6 +1005,24 @@ function ActiveSectionContent({
     case "profile":
     case "notifications":
       return <GeneralSection focusedSetting={focusedSetting} props={props} />;
+    case "integrations":
+    case "github":
+    case "linear":
+      return (
+        <div className="settings-section-stack" id="settings-integrations">
+          {integrationEntryPoints.map((entryPoint) => (
+            <PluginSettingsSection
+              entryPoint={entryPoint}
+              focusedSetting={focusedSetting}
+              githubClient={props.githubClient}
+              integrationClient={props.integrationClient}
+              key={entryPoint}
+              linearProjects={props.linearProjects}
+              onProjectLinearTargetChange={props.onProjectLinearTargetChange}
+            />
+          ))}
+        </div>
+      );
     case "appearance":
       return (
         <AppearanceSection
@@ -1086,11 +1037,14 @@ function ActiveSectionContent({
       );
     case "keybindings":
       return <KeybindingsSection focusedSetting={focusedSetting} />;
+    case "chat-work":
     case "chat":
+    case "work":
       // Stream replies is this app's own preference, so it stays on the page
-      // while the host's Chat defaults are still loading or unreachable.
+      // while the host's Chat defaults are still loading or unreachable. It
+      // covers every mode's transcript, so it follows both sets of defaults.
       return (
-        <div className="settings-section-stack" id="settings-chat">
+        <div className="settings-section-stack" id="settings-chat-work">
           {props.chatController?.bootstrap === undefined ? null : (
             <ChatSettingsView
               {...(props.chatController.settingsMessage === undefined
@@ -1101,6 +1055,17 @@ function ActiveSectionContent({
                 ? {}
                 : { providerSnapshot: props.providerController.snapshot })}
               settings={props.chatController.bootstrap.settings}
+            />
+          )}
+          {props.workSettings === undefined ? (
+            <p className="settings-view__empty" role="status">
+              Work settings are unavailable on this host.
+            </p>
+          ) : (
+            <WorkSettingsView
+              controller={props.workSettings}
+              focusedSetting={focusedSetting}
+              providerSnapshot={props.providerController?.snapshot}
             />
           )}
           <SettingsSection title="Replies">
@@ -1120,20 +1085,6 @@ function ActiveSectionContent({
               </SettingRow>
             </div>
           </SettingsSection>
-        </div>
-      );
-    case "work":
-      return props.workSettings === undefined ? (
-        <p className="settings-view__empty" role="status">
-          Work settings are unavailable on this host.
-        </p>
-      ) : (
-        <div className="settings-section-stack" id="settings-work">
-          <WorkSettingsView
-            controller={props.workSettings}
-            focusedSetting={focusedSetting}
-            providerSnapshot={props.providerController?.snapshot}
-          />
         </div>
       );
     case "code":
@@ -1232,6 +1183,7 @@ function ActiveSectionContent({
         </div>
       );
     case "computer-use":
+    case "device-tools":
       return (
         <>
           <ComputerUseSettingsView
@@ -1254,13 +1206,11 @@ function ActiveSectionContent({
               />
             </>
           )}
+          <ManagedToolsSettingsView
+            {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+            focusedSetting={focusedSetting}
+          />
         </>
-      );
-    case "device-tools":
-      return (
-        <ManagedToolsSettingsView
-          {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
-        />
       );
     case "providers":
       // The catalog of every provider Octant can set up sits under the ones
@@ -1886,6 +1836,29 @@ function ActiveSectionContent({
               </SettingRow>
             </div>
           </SettingsSection>
+          {props.canvasClient?.publicLinkSettings === undefined ? null : (
+            <SettingsSection title="Public links">
+              <div className="setgroup">
+                <PublicLinkSettings
+                  externalUrlHost={props.hostBridge}
+                  client={props.canvasClient}
+                  focusedSetting={focusedSetting}
+                />
+              </div>
+            </SettingsSection>
+          )}
+          {props.extensionClient === undefined ? null : (
+            <RememberedToolApprovalsPanel
+              client={props.extensionClient}
+              projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            />
+          )}
+        </div>
+      );
+    case "limits":
+      return (
+        <div className="settings-section-stack" id="settings-limits">
           <SettingsSection title="Tool steps">
             <div className="setgroup">
               <SettingRow
@@ -1944,30 +1917,6 @@ function ActiveSectionContent({
             onSettingsChange={props.onSettingsChange}
             settings={props.settings}
           />
-          {props.canvasClient?.publicLinkSettings === undefined ? null : (
-            <SettingsSection title="Public links">
-              <div className="setgroup">
-                <PublicLinkSettings
-                  externalUrlHost={props.hostBridge}
-                  client={props.canvasClient}
-                  focusedSetting={focusedSetting}
-                />
-              </div>
-            </SettingsSection>
-          )}
-          {props.extensionClient === undefined ? null : (
-            <RememberedToolApprovalsPanel
-              client={props.extensionClient}
-              projectNames={props.projectNames ?? NO_PROJECT_NAMES}
-              {...(focusedSetting === undefined ? {} : { focusedSetting })}
-            />
-          )}
-        </div>
-      );
-    case "todos":
-      return (
-        <div className="settings-section-stack" id="settings-todos">
-          <TodoListHostSettings />
         </div>
       );
     case "memory":
@@ -1981,6 +1930,7 @@ function ActiveSectionContent({
         </div>
       );
     case "data":
+    case "todos":
       return (
         <div className="settings-section-stack" id="settings-data">
           {props.hostControlClient !== undefined ? (
@@ -2039,6 +1989,7 @@ function ActiveSectionContent({
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           )}
+          <TodoListHostSettings focusedSetting={focusedSetting} />
         </div>
       );
     case "web-search":
@@ -2047,7 +1998,7 @@ function ActiveSectionContent({
           {...(props.hostControlClient === undefined ? {} : { client: props.hostControlClient })}
           {...(focusedSetting === undefined ? {} : { focusedSetting })}
           onOpenResearchRoute={() =>
-            onApplyDeepLink({ section: "chat", setting: settingId("chat-research-backend") })
+            onApplyDeepLink({ section: "chat-work", setting: settingId("chat-research-backend") })
           }
         />
       );

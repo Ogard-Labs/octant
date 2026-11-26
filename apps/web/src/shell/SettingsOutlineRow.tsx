@@ -15,8 +15,9 @@ export const SETTINGS_OUTLINE_PAGES: ReadonlySet<string> = new Set([
   "harness",
   "code",
   "computer-use",
-  "github",
+  "integrations",
   "permissions",
+  "limits",
   "data",
   "sync",
 ]);

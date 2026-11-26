@@ -31,8 +31,8 @@ const THIS_HOST = "this-host";
 const FACT =
   "One computer keeps your to-do list. Every window and phone you connect shows it. A computer you choose is reached through this window's pairing with it.";
 
-/** Settings › To-dos: which computer keeps the person's list. */
-export function TodoListHostSettings() {
+/** Settings › Data & storage › To-dos: which computer keeps the person's list. */
+export function TodoListHostSettings(props: { readonly focusedSetting?: string | undefined }) {
   const value = useContext(TodoListHostSettingsContext);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
@@ -72,6 +72,7 @@ export function TodoListHostSettings() {
                 ? "To keep the list on another computer, pair it in Other computers."
                 : "The list can move only while this computer has no to-dos."
           }
+          focused={props.focusedSetting === "todo-list-host"}
           label="Keep the list on"
           scope="host"
           settingId="todo-list-host"

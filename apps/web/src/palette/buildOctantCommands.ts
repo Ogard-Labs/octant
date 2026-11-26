@@ -109,6 +109,8 @@ export interface CommandDestination {
 export interface CommandSettingsPage {
   readonly sectionId: string;
   readonly label: string;
+  /** Names of pages this one took in, which a person may still type. */
+  readonly alsoFoundAs?: ReadonlyArray<string>;
   readonly onOpen: () => void;
 }
 
@@ -221,7 +223,7 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
       id: `settings-page:${page.sectionId}`,
       title: `Settings: ${page.label}`,
       group: "Go to",
-      keywords: ["settings", "preferences", "page", page.label],
+      keywords: ["settings", "preferences", "page", page.label, ...(page.alsoFoundAs ?? [])],
       action: { kind: "run", run: page.onOpen },
     });
   }

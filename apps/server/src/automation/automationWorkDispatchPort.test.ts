@@ -481,7 +481,7 @@ describe("createAutomationWorkDispatchPort", () => {
     });
 
     // No ceiling: the turn runs at the thread's level, which a routine thread
-    // takes from Settings › Work, the level a Work Project's threads start at.
+    // takes from Settings › Chat & Work, the level a Work Project's threads start at.
     expect(vi.mocked(turns.startFirstTurn).mock.calls[0]?.[2]).toEqual({
       routineRun: { automationId: optedIn.automationId, runId: optedIn.id },
     });
