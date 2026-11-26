@@ -1279,11 +1279,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
 
   // The strip above the composer while the conversation's tail is parked on a
   // provider's usage limit. Every action rides the ordinary serialized command
-  // path, so the line changes only from what the host journaled. A move to
-  // another account or model releases the stop, and Resume now would resend
-  // the attempt there, so a released stop keeps the strip only while a resume
-  // is still scheduled for it, offering Cancel alone: a model-only change
-  // leaves that resume armed.
+  // path, so the line changes only from what the host journaled. Only a move
+  // to another account releases a Chat stop, and Resume now retries the parked
+  // attempt on its own account, the one the thread left, so a released stop
+  // keeps the strip only while a resume is still scheduled for it, offering
+  // Cancel alone.
   const stoppedAttempt = activeChatTurns(view.turns).at(-1)?.attempts.at(-1);
   const stoppedReleased =
     stoppedAttempt !== undefined && parkedStopReleased(view.thread, String(stoppedAttempt.id));

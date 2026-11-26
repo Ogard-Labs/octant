@@ -1052,11 +1052,12 @@ until the thread carries a snooze of its own. Resume at reset and Snooze
 appear only while the reset is known and still ahead. A billing stop names
 the problem and offers nothing, since no clock clears it. A scheduled resume
 that did not run says why on the line and offers Resume at reset again. The
-strip goes once the turn leaves the limit, or once a move releases the stop,
-since Resume now would send the stopped prompt on what the thread moved to: in
-Work and Code a change of account or model releases it, and in Chat only a
-change of account does, so after a Chat model switch on the same account
-Resume now still retries the parked attempt on that attempt's own model. While
+strip goes once the turn leaves the limit, or once a move releases the stop.
+In Work and Code a change of account or model releases it, and Resume now
+would send the stopped prompt on what the thread moved to. In Chat only a
+change of account does, and Resume now, a retry of the parked attempt on that
+attempt's own account and model, would go back to the limited account; after a
+Chat model switch on the same account the strip and that retry stay. While
 a resume is still scheduled for a released stop (a Work or Code model-only
 change leaves it armed) the strip stays with Cancel resume alone. It never
 shows plan meters. The transcript keeps one quiet line per
