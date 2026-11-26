@@ -54,6 +54,8 @@ type TerminalState =
       readonly kind: "open";
       readonly terminalId: CodeTerminalId;
       readonly view: ProjectTerminalView;
+      /** What is typed goes to this shell, and to no shell opened after it. */
+      readonly sender: TerminalSender;
     }
   | { readonly kind: "refused"; readonly message: string };
 
@@ -148,7 +150,7 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
           return;
         }
         running.current = terminalId;
-        setState({ kind: "open", terminalId, view: started.terminal });
+        setState({ kind: "open", terminalId, view: started.terminal, sender: opening });
         // The view measured while the shell was starting.
         if (size.current !== startSize) opening.resize(size.current.columns, size.current.rows);
       } catch {
@@ -169,6 +171,7 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
   }, [visible, transport, projectId]);
 
   const openTerminal = state.kind === "open" ? state.terminalId : undefined;
+  const shellSender = state.kind === "open" ? state.sender : undefined;
   const shellRunning = state.kind === "open" && state.view.state === "running";
   useEffect(() => {
     if (openTerminal === undefined || !shellRunning) return;
@@ -255,8 +258,11 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
         {state.kind === "refused" || snapshot === undefined ? null : (
           <TerminalView
             accepting={shellRunning}
+            // Bound to the shell drawn now: a paste whose clipboard read
+            // outlasts a close and reopen goes to that shell's closed sender,
+            // never to the new shell.
             onInput={(data) => {
-              if (openTerminal !== undefined) sender.current?.write(data);
+              if (openTerminal !== undefined) shellSender?.write(data);
             }}
             onSize={resized}
             snapshot={snapshot}

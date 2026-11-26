@@ -45,12 +45,3 @@ export function columnsChange<Row>(input: {
   }
   return { kind: "none" };
 }
-
-/**
- * The open thread's identity in its column. A thread screen looks for a search
- * hit once, when it mounts, as a pushed one does for every hit, so a second hit
- * in the same thread mounts it afresh.
- */
-export function openThreadKey(thread: string, focusTurnId: string | undefined): string {
-  return focusTurnId === undefined ? thread : `${thread}:${focusTurnId}`;
-}

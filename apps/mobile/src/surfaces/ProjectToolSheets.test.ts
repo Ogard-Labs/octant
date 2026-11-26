@@ -10,7 +10,10 @@ import { CanvasHtmlImportSheet } from "./CanvasHtmlImportSheet";
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
 vi.mock("expo-blur", () => ({ BlurView: () => null }));
-vi.mock("expo-clipboard", () => ({ getStringAsync: async () => "echo one\necho two" }));
+const clipboard = vi.hoisted(() => ({
+  read: (): Promise<string> => Promise.resolve("echo one\necho two"),
+}));
+vi.mock("expo-clipboard", () => ({ getStringAsync: () => clipboard.read() }));
 vi.mock("expo-document-picker", () => ({}));
 vi.mock("expo-file-system", () => ({ File: class {}, Paths: { cache: { uri: "cache:" } } }));
 vi.mock("expo-image-picker", () => ({}));
@@ -177,6 +180,64 @@ describe("the phone's Project terminal", () => {
       );
     });
     expect(calls.at(-1)?.body).toEqual({ kind: "stop", projectId, terminalId });
+  });
+
+  it("drops a paste whose clipboard answered only after the shell was closed and another opened", async () => {
+    const terminals: string[] = [];
+    const { transport, calls } = host((_path, body) => {
+      const terminalId = String(body.terminalId);
+      if (body.kind === "start") terminals.push(terminalId);
+      const terminal = { projectId, terminalId, state: "running", posture: "approval-gated" };
+      return body.kind === "read-output"
+        ? {
+            kind: "project-terminal",
+            terminal,
+            output: { text: "$ ", replace: false, characters: 2 },
+          }
+        : { kind: "project-terminal", terminal };
+    });
+    const sheet = (visible: boolean) =>
+      createElement(ThemeProvider, {
+        preference: "light",
+        surfaceStyle: "flat",
+        children: createElement(ProjectTerminalSheet, {
+          visible,
+          onClose: () => undefined,
+          transport,
+          projectId,
+          pollIntervalMs: 60_000,
+        }),
+      });
+    const root = await render(
+      createElement(ProjectTerminalSheet, {
+        visible: true,
+        onClose: () => undefined,
+        transport,
+        projectId,
+        pollIntervalMs: 60_000,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const slow = Promise.withResolvers<string>();
+    clipboard.read = () => slow.promise;
+    try {
+      await press("mobile-terminal-key-paste");
+      await act(async () => root.render(sheet(false)));
+      await act(async () => root.render(sheet(true)));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(terminals).toHaveLength(2);
+      await act(async () => {
+        slow.resolve("rm -rf build");
+        await slow.promise;
+      });
+      expect(calls.filter((call) => call.body.kind === "write")).toEqual([]);
+    } finally {
+      clipboard.read = () => Promise.resolve("echo one\necho two");
+    }
   });
 
   it("says why the host refused the shell", async () => {

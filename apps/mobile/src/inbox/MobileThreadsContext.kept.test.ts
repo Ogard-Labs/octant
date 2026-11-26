@@ -223,6 +223,29 @@ describe("the thread list after a restart", () => {
     later.quit();
   });
 
+  it("comes back in the same run once a failed read is read again", async () => {
+    pairedWith("key-1");
+    phone.inbox = { rows: [row], reachable: true, offline: [] };
+    (await launch()).quit();
+
+    phone.inbox = { rows: [], reachable: false, offline: [] };
+    phone.secureFailures = 1;
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const later = await launch();
+      expect(later.threads().rows).toEqual([]);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      await later.again();
+      expect(later.threads().rows.map((entry) => entry.threadId)).toEqual(["plan-the-trip"]);
+      later.quit();
+    } finally {
+      vi.useRealTimers();
+      phone.secureFailures = 0;
+    }
+  });
+
   it("gives way to what the computer says once it answers", async () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };

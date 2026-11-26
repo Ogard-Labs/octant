@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { columnsChange, listColumnWidth, openThreadKey, showsColumns } from "./columns";
+import { columnsChange, listColumnWidth, showsColumns } from "./columns";
 
 describe("list and thread columns", () => {
   it("shows columns on an iPad and iPhone Duo's inner screen, and one column on a phone", () => {
@@ -40,12 +40,5 @@ describe("list and thread columns", () => {
         pushed: [{ name: "settings" }, { name: "thread", row: "row-3" }],
       }),
     ).toEqual({ kind: "none" });
-  });
-
-  it("opens a thread afresh for each search hit in it, so an older hit loads its page", () => {
-    expect(openThreadKey("host:code:t1", "turn-a")).not.toBe(
-      openThreadKey("host:code:t1", "turn-b"),
-    );
-    expect(openThreadKey("host:code:t1", undefined)).toBe("host:code:t1");
   });
 });
