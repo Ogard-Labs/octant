@@ -177,7 +177,13 @@ The design rests on a small set of invariants that every package obeys:
   still fails. Asks a person decides on (approvals, questions, and proposals,
   marked `personDecides` in the contracts) stay strict inside an answer: an
   unknown field there refuses the whole answer, so a person is never shown less
-  than the ask authorizes. Versions are not negotiated per field.
+  than the ask authorizes. A thread's service offers are the one list read in
+  two steps: the list decodes each offer's envelope only (its id, kind, thread
+  and request time), and the kind's card decodes that whole offer with its
+  strict schema before it shows or answers anything. An offer that decode
+  refuses, or whose kind the client does not know, shows no card and takes no
+  answer, and the thread's other offers are still asked. Versions are not
+  negotiated per field.
 - **Dependencies point inward.** Apps consume packages; contracts and domain
   never import apps. Provider-specific payloads stop at the provider adapter.
 - **A provider question has one answer identity.** Each question in a provider
@@ -451,14 +457,16 @@ The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
 entry is at most 1,581,020 B (1,544 KiB), the initial CSS at most 647,699 B
-(633 KiB), and the initial JavaScript and CSS at most 1,148,496 B after gzip
+(633 KiB), and the initial JavaScript and CSS at most 1,146,505 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
 it once (maintainer decision, 2026-11-23), its picker and chip loading on first
 use. Before the workspace tree-shaking re-baseline, the maintainer also
 approved an increase for video offer schemas that the window decodes for
-Needs you (2026-11-22). Deferring that decoding is a follow-up. The question card docked above the composer, with its
+Needs you (2026-11-22); the window now decodes an offer's envelope only, and a
+kind's payload schema loads with its card, which lowered the gzip budget by the
+1,991 B measured. The question card docked above the composer, with its
 1-9 number keys, raised it again (maintainer decision, 2026-11-24), and the
 Settled thread state raised it by 1,592 B of main entry, 187 B of CSS and 358 B
 gzipped (maintainer decision, 2026-11-24). The budgets are exact bytes with no headroom, because the same

@@ -17,6 +17,7 @@
     "./canvas-client": "./src/canvasClient.ts",
     "./image-generation-client": "./src/imageGenerationClient.ts",
     "./video-generation-client": "./src/videoGenerationClient.ts",
+    "./service-offer-choices": "./src/serviceOfferChoices.ts",
     "./service-offer-client": "./src/serviceOfferClient.ts",
     "./speech-client": "./src/speechClient.ts",
     "./computer-use-client": "./src/computerUseClient.ts",

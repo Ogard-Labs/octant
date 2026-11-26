@@ -10,24 +10,19 @@ import {
 } from "./speech";
 import { personDecides } from "./hostAnswer";
 import {
-  ImageGenerationGenerateOffer,
   ImageGenerationOfferDecision,
-  ImageGenerationOfferId,
   ImageGenerationProfileView,
-  ImageGenerationSaveOffer,
   ImageGenerationScopeId,
   MAX_PENDING_IMAGE_GENERATION_OFFERS,
 } from "./imageGeneration";
-import { VideoGenerateOffer, VideoOfferDecision, VideoSaveOffer } from "./videoGeneration";
+import { ImageGenerationGenerateOffer, ImageGenerationSaveOffer } from "./imageGenerationOffers";
+import { ServiceOfferId } from "./serviceOfferEnvelope";
+import { VideoOfferDecision } from "./videoGeneration";
+import { VideoGenerateOffer, VideoSaveOffer } from "./videoGenerationOffers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
-export const SERVICE_OFFERS_PATH = "/api/offers";
-export const SERVICE_OFFERS_DECIDE_PATH = "/api/offers/decide";
 export const SERVICE_OFFER_DECISION_MAX_BYTES = 8_192;
-
-export const ServiceOfferId = ImageGenerationOfferId;
-export type ServiceOfferId = typeof ServiceOfferId.Type;
 
 export const TranscriptionOffer = Schema.Struct({
   kind: Schema.Literal("transcribe"),
@@ -43,6 +38,7 @@ export const TranscriptionOffer = Schema.Struct({
   endpointName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
   modelId: ProviderModelId,
 }).annotations(strict);
+export type TranscriptionOffer = typeof TranscriptionOffer.Type;
 export const decodeTranscriptionOffer = Schema.decodeUnknownSync(TranscriptionOffer);
 
 export const NarrationOffer = Schema.Struct({
@@ -63,6 +59,7 @@ export const NarrationOffer = Schema.Struct({
   format: SpeechSynthesisFormat,
   canRemember: Schema.optional(Schema.Boolean),
 }).annotations(strict);
+export type NarrationOffer = typeof NarrationOffer.Type;
 export const decodeNarrationOffer = Schema.decodeUnknownSync(NarrationOffer);
 
 export const ServiceOffer = Schema.Union(
@@ -97,18 +94,7 @@ export const ServiceOffersResponse = Schema.Struct({
 }).annotations(strict);
 export type ServiceOffersResponse = typeof ServiceOffersResponse.Type;
 
-export const ServiceOfferDecisionResult = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("offer-answered") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("offer-gone") }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("offer-refused"),
-    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
-  }).annotations(strict),
-);
-export type ServiceOfferDecisionResult = typeof ServiceOfferDecisionResult.Type;
-
+/** The strict decode a client runs on one listed offer before it shows or answers it. */
+export const decodeServiceOffer = Schema.decodeUnknownSync(ServiceOffer);
 export const decodeServiceOffersResponse = Schema.decodeUnknownSync(ServiceOffersResponse);
 export const decodeServiceOfferDecision = Schema.decodeUnknownSync(ServiceOfferDecision);
-export const decodeServiceOfferDecisionResult = Schema.decodeUnknownSync(
-  ServiceOfferDecisionResult,
-);
