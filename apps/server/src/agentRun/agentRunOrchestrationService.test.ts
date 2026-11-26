@@ -1573,6 +1573,17 @@ describe("AgentRun dependency graphs", () => {
     expect(persistence.getById(waiting.id)?.lifecycleStatus).toBe("waiting");
     expect(starts).not.toContain(String(waiting.id));
 
+    // Resuming the child alone does not get around its parent's pause.
+    const held = persistence.getById(waiting.id);
+    if (held === undefined) throw new Error("The waiting child is gone.");
+    expect(await orchestration.resume(waiting.id, held.version, authority)).toMatchObject({
+      kind: "run-command-failed",
+      reason: "unsupported-transition",
+      message: "The parent thread is paused. Resume it first, and this run continues.",
+    });
+    expect(persistence.getById(waiting.id)?.lifecycleStatus).toBe("waiting");
+    expect(starts).not.toContain(String(waiting.id));
+
     sessions.resume(String(ids.thread));
     await settle();
     expect(persistence.getById(waiting.id)?.lifecycleStatus).toBe("starting");

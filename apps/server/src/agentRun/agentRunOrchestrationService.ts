@@ -942,10 +942,13 @@ export class AgentRunOrchestrationService {
       waitingOnDependencies || waitingOnSlot
         ? undefined
         : await this.#processes?.checkResume?.(current);
-    // Resume cannot release a dependency hold while its parent is paused,
-    // including a pause that arrived during the asynchronous preflight.
+    // Resume cannot release a dependency or run-slot hold while its parent is
+    // paused, including a pause that arrived during the asynchronous preflight.
+    // The parent's own hold is read, not #startHeld: a person's resume is the
+    // release a restart hold on the run itself waits for.
     if (
-      current.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON &&
+      (current.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON ||
+        current.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON) &&
       this.#parentSessions?.isHeld(current.parentThreadId) === true
     ) {
       return {
