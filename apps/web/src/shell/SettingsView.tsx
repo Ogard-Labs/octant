@@ -3640,9 +3640,10 @@ function UsageSettingsSection(props: {
           />
         </SettingRow>
         <SettingRow
-          description="When a provider's usage limit stops a turn you sent and says when it resets, schedule the resume at that reset. Never for a billing problem, a turn a routine or an agent started, or a provider that refuses Octant's own continuations."
+          description="When a provider's usage limit stops a turn you sent and says when it resets, schedule the resume at that reset."
           focused={props.focusedSetting === settingId("usage-limit-resume-by-default")}
           label="Resume at reset by default"
+          more="Never for a billing problem, a turn a routine or an agent started, or a provider that refuses Octant's own continuations."
           scope="host"
           settingId="usage-limit-resume-by-default"
         >
@@ -3655,9 +3656,10 @@ function UsageSettingsSection(props: {
           />
         </SettingRow>
         <SettingRow
-          description="When a provider's usage limit stops a turn you sent and says when it resets, hide the thread until then. It starts nothing."
+          description="When a provider's usage limit stops a turn you sent and says when it resets, hide the thread until then."
           focused={props.focusedSetting === settingId("usage-limit-snooze-by-default")}
           label="Snooze until reset by default"
+          more="It starts nothing."
           scope="host"
           settingId="usage-limit-snooze-by-default"
         >
