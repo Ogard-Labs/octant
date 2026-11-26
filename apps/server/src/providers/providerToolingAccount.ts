@@ -32,9 +32,11 @@ export function resolveProviderToolingAccount(
   /** Whether the launch it mirrors is Strict; tooling commands always are. */
   strict = true,
   /**
-   * The person's provider switches and the host credentials they let through
-   * to this provider; read only outside Strict. Codex takes only the
-   * credentials: its launches carry no telemetry or self-update guard.
+   * The person's provider switches, read only outside Strict, and the host
+   * variables they let through to this provider, read only under it. Codex
+   * takes only the let-through names here: its one telemetry guard is an
+   * argument of its app-server (`codexAppServerArgs`), which the thread's
+   * lease decides, and no variable in this environment stands for it.
    */
   ownChannels: ProviderOwnChannels = DEFAULT_PROVIDER_OWN_CHANNELS,
 ): ProviderToolingAccount | undefined {
@@ -75,12 +77,12 @@ export function resolveProviderToolingAccount(
             binaryPath: instance.configuration.binaryPath,
             hostEnvironment,
             codexHome: directory,
+            credentialPassThrough: ownChannels.credentialPassThrough ?? [],
           })
         : openCodexAccountEnvironment({
             binaryPath: instance.configuration.binaryPath,
             hostEnvironment,
             codexHome: directory,
-            credentialPassThrough: ownChannels.credentialPassThrough ?? [],
           }),
       shownEnvironment: [{ name: "CODEX_HOME", value: directory }],
       directory,

@@ -952,10 +952,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("provider-credential-pass-through"),
-          label: "Credentials let through",
+          label: "Let through under Strict",
           scope: "host",
           keywords:
-            "credentials let through pass through passthrough environment variables env gh_token github_token npm_token aws keys api key secret token strip strict provider gh",
+            "credentials let through pass through passthrough environment variables env gh_token github_token npm_token aws keys api key secret token strict fixed list add provider gh",
         },
         {
           id: settingId("provider-credential-pass-through-add"),

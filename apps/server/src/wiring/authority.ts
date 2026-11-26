@@ -21,6 +21,7 @@ import {
   MAX_PENDING_IMAGE_GENERATION_OFFERS,
   type ServiceOffer,
   type WindowId,
+  type WorkAccess,
 } from "@octant/contracts";
 import {
   boundAgentRunLiveAuthority,
@@ -117,7 +118,12 @@ export function codeParentActiveTurnFrom(
 }
 
 export type AuthorityDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<FoundationsWiring, "browserAuthority" | "workThreadProjection">;
+  Pick<FoundationsWiring, "browserAuthority" | "workThreadProjection" | "resolveThreadStrict"> & {
+    /** The level a Work thread's running turn holds; wired later, read per call. */
+    readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
+    /** Whether that turn started with the kept sandbox; wired later, read per call. */
+    readonly runningWorkTurnSandbox: (threadId: string) => boolean | undefined;
+  };
 
 export function wireAuthority(deps: AuthorityDependencies) {
   const { browserAuthority, options, persistence, workThreadProjection } = deps;
@@ -498,6 +504,9 @@ export function wireAuthority(deps: AuthorityDependencies) {
       codeSessionAuthority,
       windowAuthorityStore,
       readWorkThread: (threadId) => workThreadProjection.read(threadId),
+      strict: deps.resolveThreadStrict,
+      runningWorkTurnAccess: deps.runningWorkTurnAccess,
+      runningWorkTurnSandbox: deps.runningWorkTurnSandbox,
     });
   const browserCaptureStore = new BrowserCaptureStore(persistence.dataDirectory);
   const browserCaptures = new BrowserCaptureService({

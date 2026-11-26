@@ -528,7 +528,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           ? undefined
           : (input.toolStepLimit ?? DEFAULT_THREAD_TOOL_STEPS_PER_TURN);
       // The event budget follows the same limit: off, no turn is stopped.
-      const maxEvents = turnRuntimeEventBudget(stepLimit) ?? Number.POSITIVE_INFINITY;
+      // It is one of Octant's own limits, so it stops a turn only under
+      // Strict; outside it a long turn keeps running.
+      const maxEvents =
+        (guard.strict ? turnRuntimeEventBudget(stepLimit) : undefined) ?? Number.POSITIVE_INFINITY;
       // An Octant Harness turn's runtime announces no tool call of its own:
       // every tool it has is one Octant runs for it, so the request is the
       // only sign of the call and the host gives it its row.

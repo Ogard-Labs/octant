@@ -61,7 +61,11 @@ export interface AcpEventContext {
   readonly unnamedPermissionDescription?: string;
   /** The profile's `unseenChildCalls`. */
   readonly unseenChildCalls?: { readonly readOnlyAgents: ReadonlyArray<string> };
-  /** The profile's `toleratesStrayUpdates`. */
+  /**
+   * The profile's `toleratesStrayUpdates`. Session updates are read
+   * tolerantly for every agent; the flag now only decides how a permission
+   * request with no plain allow option is read.
+   */
   readonly toleratesStrayUpdates?: true;
   /**
    * The calls Octant never saw that an agent without child sessions asked
@@ -110,10 +114,6 @@ type RuntimeEventWithoutEnvelope = ProviderRuntimeEvent extends infer RuntimeEve
     ? Omit<RuntimeEvent, "instanceId" | "sessionId" | "sequence" | "correlationId" | "occurredAt">
     : never
   : never;
-
-function protocolFailure(message: string): AcpMappedNotification {
-  return { kind: "protocol-failure", failure: { category: "protocol", message } };
-}
 
 function mappedEvent(
   context: AcpEventContext,
@@ -218,15 +218,13 @@ function mapTool(
   update: Readonly<Record<string, unknown>>,
 ): ReadonlyArray<AcpMappedNotification> {
   const providerId = normalized(update.toolCallId, LABEL_MAX_CHARACTERS);
-  if (providerId === undefined)
-    return [protocolFailure(`${context.displayName} tool update was missing an ID.`)];
+  // An update that names no call has no row to land on.
+  if (providerId === undefined) return [{ kind: "ignored" }];
   const state = context.tools.get(providerId);
   if (update.sessionUpdate === "tool_call") {
     if (state !== undefined) {
       // A repeated start restates the call: it is read as an update.
-      if (context.toleratesStrayUpdates === true)
-        return mapTool(context, { ...update, sessionUpdate: "tool_call_update" });
-      return [protocolFailure(`${context.displayName} repeated a tool start.`)];
+      return mapTool(context, { ...update, sessionUpdate: "tool_call_update" });
     }
     // A tool_call may carry its kind but no title; the kind is still the
     // provider's own bounded word for the call and reads better than a bare
@@ -248,17 +246,13 @@ function mapTool(
   }
   if (state === undefined) {
     // An update for a call never started (a subagent's call) starts it first.
-    if (context.toleratesStrayUpdates === true)
-      return [
-        ...mapTool(context, { ...update, sessionUpdate: "tool_call" }),
-        ...mapTool(context, update),
-      ];
-    return [protocolFailure(`${context.displayName} updated a tool that was not started.`)];
+    return [
+      ...mapTool(context, { ...update, sessionUpdate: "tool_call" }),
+      ...mapTool(context, update),
+    ];
   }
-  if (state.terminal) {
-    if (context.toleratesStrayUpdates === true) return [{ kind: "ignored" }];
-    return [protocolFailure(`${context.displayName} repeated a terminal tool update.`)];
-  }
+  // A finished call stays finished.
+  if (state.terminal) return [{ kind: "ignored" }];
   const title = normalized(update.title, SUMMARY_MAX_CHARACTERS);
   const toolKind = normalized(update.kind, LABEL_MAX_CHARACTERS);
   if (title !== undefined) state.title = title;
@@ -512,21 +506,27 @@ export function acpReportOfHostTool(
   return only.toolCallId;
 }
 
+/**
+ * No session update ends the turn. One this mapper cannot place (a repeated
+ * start, a call it never saw, another session's, one after the turn ended, a
+ * plan status it does not know) is read as the nearest thing it knows or
+ * dropped, because every agent release sends some and each used to fail the
+ * turn for all agents but one. Permission requests keep their own fail-closed
+ * checks.
+ */
 export function mapAcpNotification(
   context: AcpEventContext,
   notification: AcpServerNotification,
 ): ReadonlyArray<AcpMappedNotification> {
   if (notification.params.sessionId !== context.sourceSessionId) {
-    // A subagent's own session reports under its id; such an agent's turn
-    // does not fail on it.
-    if (context.toleratesStrayUpdates === true) return [{ kind: "ignored" }];
-    return [protocolFailure(`${context.displayName} update did not match the active session.`)];
+    // A subagent's own session reports under its id. Such an update is
+    // dropped, never applied to this session.
+    return [{ kind: "ignored" }];
   }
   if (context.terminal) {
     // Usage, background-command replies and scheduled wakes arrive after the
     // prompt answered; they change nothing about the finished turn.
-    if (context.toleratesStrayUpdates === true) return [{ kind: "ignored" }];
-    return [protocolFailure(`${context.displayName} sent an update after terminal state.`)];
+    return [{ kind: "ignored" }];
   }
   const update = notification.params.update;
   switch (update.sessionUpdate) {
@@ -540,16 +540,16 @@ export function mapAcpNotification(
       return mapTool(context, update);
     case "plan": {
       const entries = Array.isArray(update.entries) ? update.entries : undefined;
-      if (entries === undefined)
-        return [protocolFailure(`${context.displayName} plan update was invalid.`)];
+      if (entries === undefined) return [{ kind: "ignored" }];
       const results: AcpMappedNotification[] = [];
       const taskIds: string[] = [];
       for (const candidate of entries) {
         const item = record(candidate);
         const summary = normalized(item?.content, SUMMARY_MAX_CHARACTERS);
-        if (summary === undefined)
-          return [protocolFailure(`${context.displayName} plan entry was invalid.`)];
+        // An entry with no text has nothing to show and is left out.
+        if (summary === undefined) continue;
         const status = item?.status;
+        // A status this build does not know reads as not started.
         const normalizedStatus =
           status === "in_progress"
             ? "in-progress"
@@ -557,12 +557,7 @@ export function mapAcpNotification(
               ? "completed"
               : status === "failed"
                 ? "failed"
-                : status === "pending"
-                  ? "pending"
-                  : undefined;
-        if (normalizedStatus === undefined) {
-          return [protocolFailure(`${context.displayName} plan status was invalid.`)];
-        }
+                : "pending";
         const id = taskId(summary);
         taskIds.push(id);
         results.push(

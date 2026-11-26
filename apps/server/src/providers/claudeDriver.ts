@@ -83,6 +83,7 @@ import {
   type ClaudeQueryPort,
   type ClaudePreToolDecision,
   type ClaudeSandboxSettings,
+  type ClaudeSessionPermissionUpdate,
   type ClaudeToolDecision,
   claudeSandboxLetsCommandsOut,
 } from "./claudeAgentSdkPort";
@@ -1685,14 +1686,32 @@ interface ClaudePreToolGrant {
   readonly outsideProject?: true;
   /** A command that leaves the sandbox, asked about every time, never reused. */
   readonly unsandboxed?: true;
+  /**
+   * The call came from a working directory outside the folders the session
+   * holds. It always asks, and an allow adds that directory to what the
+   * session holds.
+   */
+  readonly outsideWorkingDirectory?: true;
 }
 
 interface ClaudePendingApprovalState extends ClaudePendingApproval {
   readonly decision: DeferredValue<ClaudeToolDecision>;
   readonly reuseKey: string;
   readonly unsandboxed?: true;
+  /**
+   * The runtime's own session rules for this call, handed back when the person
+   * keeps the approval for the session. Absent for every ask Octant keeps
+   * per call.
+   */
+  readonly sessionPermissions?: ReadonlyArray<ClaudeSessionPermissionUpdate>;
   /** The pending call for an automatic reviewer; never published. */
   readonly call?: ProviderApprovalCall | undefined;
+  /**
+   * Set when the allow was the person's and not for this one call only. An
+   * automatic reviewer's answer and one given for a helper cover one call
+   * (`ProviderApprovalAnswer.scope`), so they never set it.
+   */
+  keptByPerson?: true;
 }
 
 interface ClaudePendingQuestionState extends ClaudePendingQuestion {
@@ -4115,7 +4134,8 @@ function makeConnection(
         const terminalResult = deferred<void>();
         // Read at each launch, like every other choice here: outside Strict the
         // runtime gets the host's environment, and its telemetry and
-        // self-update follow the person's provider switches.
+        // self-update follow the person's provider switches. Under Strict it
+        // gets the fixed list plus the names the person let through.
         const strict = input.strict !== false;
         // A thread that keeps or chose a sandbox keeps the provider's own
         // channels closed as Strict does, as an ACP agent's launch does: the
@@ -4142,7 +4162,8 @@ function makeConnection(
                   ...(options.configDirectory === undefined
                     ? {}
                     : { configDirectory: options.configDirectory }),
-                  ...(strict ? {} : { strict: false, ownChannels }),
+                  ...(strict ? {} : { strict: false }),
+                  ownChannels,
                 }).pipe(Effect.provideService(Scope.Scope, scope)),
                 signal,
               );
@@ -4538,6 +4559,19 @@ function makeConnection(
             const refusal = artifactCallRefusal(request.input);
             if (refusal !== undefined) return deny(refusal);
           }
+          // What an allowed call lets the session into: the worktree it
+          // switches to, which is what that call does, and the outside
+          // working directory it was asked from, only when the person kept
+          // the answer. An automatic reviewer's allow of one command from
+          // that directory used to add the whole directory, so no later call
+          // from it reached the outside-path ask again, though nobody had
+          // reviewed those calls.
+          const holdAllowed = (keptByPerson: boolean) => {
+            holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
+            if (keptByPerson && grant.outsideWorkingDirectory === true) {
+              activeState.worktrees.add(grant.workingDirectory);
+            }
+          };
           // Outside Strict this runs only for a call Claude Code's own engine
           // asked about (or one Octant keeps asking), so Octant waives
           // nothing here: the ask reaches the person, or Reviewed's reviewer.
@@ -4547,6 +4581,7 @@ function makeConnection(
               request.toolName !== "AskUserQuestion" &&
               !CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) ||
             (!ownPermissions &&
+              grant.outsideWorkingDirectory !== true &&
               // Auto-accept edits covers exactly the file writes the gate above
               // already proved to be inside the Project. Shell, network, and
               // every other tool still ask, and so does a read or an edit
@@ -4558,7 +4593,7 @@ function makeConnection(
                 CLAUDE_SESSION_TOOLS.has(request.toolName) ||
                 isPlanShellCommand(executionPolicy, request.toolName, executionOptions.tools)))
           ) {
-            holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
+            holdAllowed(false);
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           }
@@ -4584,9 +4619,10 @@ function makeConnection(
           const reusesEarlierAnswer = () =>
             request.toolName !== "AskUserQuestion" &&
             grant.unsandboxed !== true &&
+            grant.outsideWorkingDirectory !== true &&
             activeState.approvalReuse.has(reusableApprovalKey);
           const allowUnderEarlierAnswer = (): ClaudeToolDecision => {
-            holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
+            holdAllowed(false);
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           };
@@ -4669,6 +4705,15 @@ function makeConnection(
           }
           const pending: ClaudePendingApprovalState = {
             ...mapped.request,
+            ...(grant.outsideWorkingDirectory === true &&
+            mapped.request.event.kind === "approval-request"
+              ? {
+                  event: {
+                    ...mapped.request.event,
+                    description: `Claude is working in ${grant.workingDirectory}, outside the Project's folders. Allowing lets this session work there. ${mapped.request.event.description}`,
+                  },
+                }
+              : {}),
             ...(grant.unsandboxed === true
               ? {
                   unsandboxed: true as const,
@@ -4684,6 +4729,23 @@ function makeConnection(
                         }
                       : mapped.request.event,
                 }
+              : {}),
+            // Outside Strict, in Work and Code outside Plan, a kept approval
+            // goes back as Claude's own session rule, so it stops asking for
+            // that kind of call as it does on its own: a bare allow made it
+            // ask again for every new command. The asks Octant keeps per call
+            // carry none.
+            ...(!strict &&
+            (mode === "work" || mode === "code") &&
+            executionPolicy !== "plan" &&
+            request.sessionPermissions !== undefined &&
+            grant.unsandboxed !== true &&
+            grant.outsideProject !== true &&
+            grant.outsideWorkingDirectory !== true &&
+            request.toolName !== CLAUDE_ARTIFACT_TOOL &&
+            request.toolName !== CLAUDE_ENTER_WORKTREE_TOOL &&
+            !CLAUDE_WAKEUP_TOOLS.has(request.toolName)
+              ? { sessionPermissions: request.sessionPermissions }
               : {}),
             decision: deferred<ClaudeToolDecision>(),
             reuseKey,
@@ -4730,9 +4792,7 @@ function makeConnection(
               activeState.publishedSnapshots.set(request.toolUseId, snapshot);
             }
           }
-          if (decision.behavior === "allow") {
-            holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
-          }
+          if (decision.behavior === "allow") holdAllowed(pending.keptByPerson === true);
           return decision;
         };
         const gatePreToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
@@ -4745,11 +4805,28 @@ function makeConnection(
             activeState.context?.terminal === true ||
             activeState.releasing ||
             activeState.released ||
-            request.sessionId !== activeState.claudeSessionId ||
-            // The session's working directory: the Project root, any folder
-            // of the Project's a `cd` moved the session into, or a worktree
-            // Claude moved it into that the session holds.
-            !sessionHolds(activeState, request.projectRoot)
+            request.sessionId !== activeState.claudeSessionId
+          ) {
+            return deny("Claude tool request is outside the Project.");
+          }
+          // The session's working directory is normally the Project root, a
+          // folder of the Project's a `cd` moved the session into, or a
+          // worktree it holds. Outside Strict, in Work and Code, Claude may
+          // work elsewhere as it does on its own (maintainer decision,
+          // 2026-11-25): refusing here left every call after a `cd` out of
+          // the Project refused for the rest of the session. Full access
+          // allows it as it allows any path; below it the first call asks and
+          // an allow the person keeps adds the directory to what the session
+          // holds; one that covers a single call leaves the next asking. Plan,
+          // Strict, Chat and a Full access thread that keeps its sandbox
+          // still refuse.
+          const outsideWorkingDirectory = !sessionHolds(activeState, request.projectRoot);
+          if (
+            outsideWorkingDirectory &&
+            (strict ||
+              sandboxedFullAccess ||
+              (mode !== "work" && mode !== "code") ||
+              claudeGateLevel(activeState, input.executionPolicy) === "plan")
           ) {
             return deny("Claude tool request is outside the Project.");
           }
@@ -4958,6 +5035,7 @@ function makeConnection(
           };
           const askThroughGrant = async (
             outsideProject = false,
+            fromOutsideWorkingDirectory = false,
           ): Promise<ClaudePreToolDecision> => {
             // Past the grant cap a call waits for a slot: a grant frees when
             // its call reaches `canUseTool`, its result arrives, or it expires.
@@ -4985,6 +5063,7 @@ function makeConnection(
               expiresAt: factories.authorityNow() + PRE_TOOL_GRANT_TTL_MS,
               ...(outsideProject ? { outsideProject: true as const } : {}),
               ...(asksUnsandboxed ? { unsandboxed: true as const } : {}),
+              ...(fromOutsideWorkingDirectory ? { outsideWorkingDirectory: true as const } : {}),
             });
             // Octant keeps its own ask, whatever the person's rules allow, for
             // a command leaving the sandbox (it runs with the person's whole
@@ -5017,6 +5096,16 @@ function makeConnection(
           // Plan included; the call reaches `canUseTool` and is put to them.
           if (CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName) || asksUnsandboxed)
             return askThroughGrant();
+          // Below Full access a call from a working directory the session does
+          // not hold goes through the outside-path ask, whatever the tool; a
+          // question to the person changes nothing and is put as it is.
+          if (
+            outsideWorkingDirectory &&
+            executionPolicy !== "full-access" &&
+            request.toolName !== "AskUserQuestion"
+          ) {
+            return askThroughGrant(true, true);
+          }
           const decide = (): ClaudePreToolDecision | Promise<ClaudePreToolDecision> => {
             if (executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") {
               return settledUnasked();
@@ -6164,15 +6253,24 @@ function makeConnection(
               }
               // A publish is never reused: the same input republishes the
               // file as it is now, which the person has not seen.
+              const keptForSession = answer.scope !== "once" && persistence === "current-session";
+              // An outside folder joins what the session holds on the same
+              // decision as rule reuse: a person who keeps no approvals for
+              // the session has approved this one call, not the folder.
+              if (keptForSession) pending.keptByPerson = true;
               if (
-                answer.scope !== "once" &&
-                persistence === "current-session" &&
+                keptForSession &&
                 pending.toolName !== CLAUDE_ARTIFACT_TOOL &&
                 pending.unsandboxed !== true
               ) {
                 state.approvalReuse.add(pending.reuseKey);
               }
-              pending.decision.resolve({ behavior: "allow" });
+              pending.decision.resolve({
+                behavior: "allow",
+                ...(keptForSession && pending.sessionPermissions !== undefined
+                  ? { updatedPermissions: pending.sessionPermissions }
+                  : {}),
+              });
             } else {
               pending.decision.resolve({
                 behavior: "deny",

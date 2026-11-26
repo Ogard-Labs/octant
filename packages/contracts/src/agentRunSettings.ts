@@ -56,9 +56,11 @@ const AgentRunProviderSlotWaitLimit = Schema.Int.pipe(
 export const AgentRunPolicySettings = Schema.Struct({
   workingTimeLimitMinutes: Schema.optional(AgentRunWorkingTimeLimit),
   /**
-   * A person's choice that helpers of a thread at Full access work with no
-   * time limit. Optional so settings journaled before it existed replay as
-   * limited; it never lifts the limit for a thread below Full access.
+   * Whether helpers of a thread at Full access work with no time limit.
+   * Absent is on outside Strict: a Full access thread's own turn has no such
+   * limit, so its helpers have none until the person turns this off. Under
+   * Strict absent is off, and only the person's explicit choice lifts the
+   * limit. It never lifts the limit for a thread below Full access.
    */
   noWorkingTimeLimitAtFullAccess: Schema.optional(Schema.Boolean),
   /** Optional so settings journaled before it existed replay as the default. */
@@ -109,16 +111,27 @@ export function effectiveAgentRunConcurrency(
 
 /**
  * The working-time limit for a helper's next attempt, in minutes, or `none`.
- * None needs both the person's choice and a parent thread at Full access.
+ * None needs a parent thread at Full access and the person not having turned
+ * it off; below Full access the person's limit applies. Under Strict the
+ * lift must be the person's explicit choice: with the helper's event budget
+ * gone, a helper of a Strict thread whose settings say nothing would
+ * otherwise have no bound at all, where it had this limit before.
  */
 export function agentRunWorkingTimeLimitMinutes(
   settings: Pick<
     AgentRunPolicySettings,
     "workingTimeLimitMinutes" | "noWorkingTimeLimitAtFullAccess"
   >,
-  thread: { readonly threadAtFullAccess: boolean },
+  thread: {
+    readonly threadAtFullAccess: boolean;
+    /** Strict as the host resolves it for the parent thread; unknown is Strict. */
+    readonly strict: boolean;
+  },
 ): number | "none" {
-  if (settings.noWorkingTimeLimitAtFullAccess === true && thread.threadAtFullAccess) return "none";
+  const lifted = thread.strict
+    ? settings.noWorkingTimeLimitAtFullAccess === true
+    : settings.noWorkingTimeLimitAtFullAccess !== false;
+  if (lifted && thread.threadAtFullAccess) return "none";
   return settings.workingTimeLimitMinutes ?? DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES;
 }
 

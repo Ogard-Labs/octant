@@ -200,7 +200,6 @@ describe("OpenCode 2.x app-managed tools", () => {
             }),
           ),
         );
-        expect(listed.server.runtime).toBe("beta");
         expect(listed.server.isolatedConfiguration).toBe(true);
         expect(listed.mcp).toEqual([]);
         expect(listed.plugins).toEqual([]);

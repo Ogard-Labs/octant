@@ -1234,21 +1234,26 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
 }
 
 /**
- * How a routine a thread's agent sets up comes to exist. `create-paused`
- * creates it at once with no card; it is paused in its first journaled event
- * and runs only after the person enables it, so neither the agent's word that
- * the person asked nor the thread's level can start anything. `ask-on-card`
- * waits for the person's confirmation in the thread.
+ * How a routine a thread's agent sets up comes to exist. `create-active`
+ * creates it at once, enabled, with no card; `create-paused` creates it
+ * paused in its first journaled event, to run only after the person enables
+ * it; `ask-on-card` waits for the person's confirmation in the thread.
  *
- * Below Full access only the person's own request skips the card. At Full
- * access the agent's own suggestion does too: the person chose a level where
- * nothing prompts, and a paused routine is shown in the thread and does
- * nothing until they turn it on. A turn in Plan changes nothing, so it asks,
- * and a follow-up asks at every level because a paused one would never fire.
+ * A routine the person's own message asked for is created active at every
+ * level outside Plan (maintainer decision, 2026-11-25): created paused, it
+ * never ran until the person found it in Automation Center and enabled what
+ * they had already asked for. Below Full access the agent's own suggestion
+ * waits for the card. At Full access it skips the card, since the person
+ * chose a level where nothing prompts, and starts enabled unless the person
+ * turned that off in Settings, which keeps it paused. A turn in Plan changes
+ * nothing, so it asks, and a follow-up asks at every level.
  *
- * `create-active` is the person's own choice in Settings (off by default):
- * at Full access a routine an agent creates starts enabled, since that level
- * already lets the agent act without asking.
+ * That the person asked is the agent's own word, which the host cannot check.
+ * On a thread that read outside content it is not believed, since a page the
+ * agent read can tell it to claim so: the routine is then decided as the
+ * agent's own suggestion is. Under Strict the word starts nothing either: a
+ * routine the person asked for is created paused, and one at Full access
+ * starts enabled only on the Settings choice, as before that decision.
  */
 export function decideRoutineFromAgent(input: {
   readonly requestedByPerson: boolean;
@@ -1257,17 +1262,26 @@ export function decideRoutineFromAgent(input: {
   readonly posture: "full-access" | "auto-accept-edits" | "approval-gated" | "plan" | undefined;
   /**
    * Settings' "Start agent-created routines active at Full access". On, a
-   * routine created while the turn runs at Full access starts enabled.
+   * routine the agent suggested while its turn runs at Full access starts
+   * enabled; off or absent, it starts paused.
    */
   readonly startActiveAtFullAccess?: boolean;
+  /** Strict as the host resolves it for the thread; a caller that cannot tell passes true. */
+  readonly strict: boolean;
+  /** The thread is marked as having read outside content; a caller that cannot tell passes true. */
+  readonly readOutsideContent: boolean;
 }): "create-active" | "create-paused" | "ask-on-card" {
   if (input.followUp || input.posture === "plan") return "ask-on-card";
-  if (input.posture === "full-access" && input.startActiveAtFullAccess === true) {
-    return "create-active";
+  const startsActive = input.posture === "full-access" && input.startActiveAtFullAccess === true;
+  if (input.strict) {
+    if (startsActive) return "create-active";
+    return input.requestedByPerson || input.posture === "full-access"
+      ? "create-paused"
+      : "ask-on-card";
   }
-  return input.requestedByPerson || input.posture === "full-access"
-    ? "create-paused"
-    : "ask-on-card";
+  if (input.requestedByPerson && !input.readOutsideContent) return "create-active";
+  if (input.posture !== "full-access") return "ask-on-card";
+  return startsActive ? "create-active" : "create-paused";
 }
 
 /** Whether this principal is the one that reviewed the held batch. */

@@ -32,6 +32,8 @@ export interface TaskAccessFactsDependencies {
   ) => TaskAccessSubjectFacts | undefined;
   readonly instance: (id: ProviderInstanceId) => ProviderInstance | undefined;
   readonly observed: (id: ProviderInstanceId) => ProviderObservedState | undefined;
+  /** Strict for the subject's thread now; absent reads as Strict. */
+  readonly strict?: (subject: ContextSubjectRef) => boolean;
   readonly reviewer: HostShield["describe"];
   readonly clock: () => string;
   readonly browser?: (
@@ -237,6 +239,7 @@ export function createTaskAccessFacts(deps: TaskAccessFactsDependencies) {
                     ? threadAppToolSupport(observed.capabilities, {
                         executionPolicy: (facts.effective ?? facts.selected).executionPolicy,
                         fullAccessSandbox: facts.selected.fullAccessSandbox,
+                        strict: deps.strict?.(subject),
                       })
                     : observed.capabilities[id];
                 return support === undefined ? [] : [{ id, support }];

@@ -40,20 +40,56 @@ describe("AgentRunPolicySettings", () => {
 describe("a helper's working-time limit", () => {
   const stored: { readonly workingTimeLimitMinutes?: number } = {};
 
-  it("is 120 minutes until a person chooses another", () => {
-    expect(agentRunWorkingTimeLimitMinutes(stored, { threadAtFullAccess: false })).toBe(120);
+  it("is 120 minutes below Full access until a person chooses another", () => {
+    expect(
+      agentRunWorkingTimeLimitMinutes(stored, { threadAtFullAccess: false, strict: false }),
+    ).toBe(120);
     expect(
       agentRunWorkingTimeLimitMinutes(
         { ...stored, workingTimeLimitMinutes: 45 },
-        { threadAtFullAccess: true },
+        { threadAtFullAccess: false, strict: false },
       ),
     ).toBe(45);
   });
 
-  it("is none only when the person chose that and the thread has Full access", () => {
-    const lifted = { ...stored, noWorkingTimeLimitAtFullAccess: true };
-    expect(agentRunWorkingTimeLimitMinutes(lifted, { threadAtFullAccess: true })).toBe("none");
-    expect(agentRunWorkingTimeLimitMinutes(lifted, { threadAtFullAccess: false })).toBe(120);
+  it("is none at Full access by default outside Strict, and never below it", () => {
+    for (const settings of [stored, { ...stored, noWorkingTimeLimitAtFullAccess: true }]) {
+      expect(
+        agentRunWorkingTimeLimitMinutes(settings, { threadAtFullAccess: true, strict: false }),
+      ).toBe("none");
+      expect(
+        agentRunWorkingTimeLimitMinutes(settings, { threadAtFullAccess: false, strict: false }),
+      ).toBe(120);
+    }
+  });
+
+  it("keeps the limit at Full access under Strict until the person turns the lift on", () => {
+    const strictAtFullAccess = { threadAtFullAccess: true, strict: true };
+    expect(agentRunWorkingTimeLimitMinutes(stored, strictAtFullAccess)).toBe(120);
+    expect(
+      agentRunWorkingTimeLimitMinutes({ workingTimeLimitMinutes: 45 }, strictAtFullAccess),
+    ).toBe(45);
+    expect(
+      agentRunWorkingTimeLimitMinutes(
+        { ...stored, noWorkingTimeLimitAtFullAccess: true },
+        strictAtFullAccess,
+      ),
+    ).toBe("none");
+    expect(
+      agentRunWorkingTimeLimitMinutes(
+        { ...stored, noWorkingTimeLimitAtFullAccess: true },
+        { threadAtFullAccess: false, strict: true },
+      ),
+    ).toBe(120);
+  });
+
+  it("keeps the person's limit at Full access once they turn the lift off", () => {
+    expect(
+      agentRunWorkingTimeLimitMinutes(
+        { workingTimeLimitMinutes: 45, noWorkingTimeLimitAtFullAccess: false },
+        { threadAtFullAccess: true, strict: false },
+      ),
+    ).toBe(45);
   });
 });
 

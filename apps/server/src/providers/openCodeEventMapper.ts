@@ -264,9 +264,16 @@ function toolContentText(content: unknown): string {
   return text.slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
 }
 
-function assertNever(value: never): never {
+/**
+ * An event or status this mapping does not know reports nothing, and the turn
+ * goes on. OpenCode adds event types between releases; throwing here ended the
+ * event loop and failed every session on the server over an event none of
+ * them needed. The `never` parameter keeps the switch exhaustive over the
+ * pinned SDK's types.
+ */
+function unmapped(value: never): ReadonlyArray<ProviderRuntimeEvent> {
   void value;
-  throw new Error("Unsupported provider event.");
+  return [];
 }
 
 export function mapOpenCodeEvent(
@@ -483,25 +490,9 @@ export function mapOpenCodeEvent(
       events.push(mappedEvent(context, { kind: "task-list", taskIds }, events.length));
       return events;
     }
-    case "permission.asked": {
-      const requestId = normalizeText(event.properties.id);
-      const action = normalizeText(event.properties.permission);
-      const toolCallId =
-        event.properties.tool === undefined
-          ? undefined
-          : normalizeText(event.properties.tool.callID);
-      return requestId === undefined || action === undefined
-        ? []
-        : [
-            mappedEvent(context, {
-              kind: "approval-request",
-              requestId,
-              action,
-              description: "Approval is required for this action.",
-              ...(toolCallId === undefined ? {} : { toolCallId }),
-            }),
-          ];
-    }
+    // The driver renames OpenCode's `permission.asked` to this name before
+    // mapping (`adaptOpenCodeEvent`), since the SDK types give the bare
+    // name the shape OpenCode 1 sent.
     case "permission.v2.asked": {
       const requestId = normalizeText(event.properties.id);
       const action = normalizeText(event.properties.action);
@@ -516,7 +507,8 @@ export function mapOpenCodeEvent(
             }),
           ];
     }
-    case "question.asked":
+    // A question reaches the mapper only as the driver's reading of a
+    // question form (`openCodeQuestionForm`).
     case "question.v2.asked":
       return mapQuestion(context, event.properties.id, event.properties.questions);
     case "session.status":
@@ -531,7 +523,7 @@ export function mapOpenCodeEvent(
         case "busy":
           return [];
         default:
-          return assertNever(event.properties.status);
+          return unmapped(event.properties.status);
       }
     case "session.idle":
       // A call the turn left without an outcome never reports one now.
@@ -580,6 +572,8 @@ export function mapOpenCodeEvent(
     case "installation.update-available":
     case "reference.updated":
     case "permission.v2.replied":
+    case "permission.asked":
+    case "question.asked":
     case "plugin.added":
     case "project.directories.updated":
     case "file.watcher.updated":
@@ -613,7 +607,7 @@ export function mapOpenCodeEvent(
     case "server.instance.disposed":
       return [];
     default:
-      return assertNever(event);
+      return unmapped(event);
   }
 }
 

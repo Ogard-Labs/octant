@@ -27,7 +27,6 @@ import {
   hostCodexHomeOverlayIsRelative,
 } from "./providerService";
 import { codexAccountProcessEnvironment } from "./codexProcess";
-import { codexConfiguresBedrock } from "./codexProviderCredential";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
 import { readClaudeGitIdentity } from "./claudeGitIdentity";
@@ -220,9 +219,9 @@ export function makeProviderDriver(
   const readPlanMcpServers = options.planMcpServers;
   switch (instance.driverKind) {
     case "opencode":
-      // Route selection follows the version the process attests, not the
-      // binary's file name. A released 2.x install and a 1.x install can
-      // share the name `opencode`.
+      // Compatibility follows the version the process reads, not the
+      // binary's file name: an OpenCode 1 install shares the name `opencode`
+      // and is reported incompatible by the launch.
       return {
         ...makeOpenCodeDriver({
           ...(readPlanMcpServers === undefined
@@ -241,7 +240,7 @@ export function makeProviderDriver(
             : { sessionOwnership: options.sessionOwnership }),
         }),
         // Plan windows come from the account behind the CLI's own sign-in,
-        // not from the runtime, so both OpenCode lines report them alike.
+        // not from the runtime.
         contextFacts: makeOpenCodeGoUsageFacts({
           instanceId: instance.id,
           dataDirectory: join(
@@ -298,13 +297,20 @@ export function makeProviderDriver(
         runtimeRegistry: options.runtimeRegistry,
         permissionPersistence: options.permissionPersistence,
         environment: codexEnvironment,
-        openEnvironment: (credentialPassThrough) =>
-          openCodexAccountEnvironment({
+        strictEnvironment: (credentialPassThrough) =>
+          codexAccountProcessEnvironment({
             binaryPath: instance.configuration.binaryPath,
             hostEnvironment,
             codexHome,
             ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
             credentialPassThrough,
+          }),
+        openEnvironment: () =>
+          openCodexAccountEnvironment({
+            binaryPath: instance.configuration.binaryPath,
+            hostEnvironment,
+            codexHome,
+            ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
           }),
         ...(options.credentialResolver === undefined
           ? {}
@@ -497,25 +503,17 @@ export function makeProviderDriver(
 
 /**
  * A Codex account's launch environment outside Strict, for its turns and its
- * provider terminal alike. Whether the account signs in to Amazon Bedrock is
- * read from its `config.toml` at each call, so an account moved onto Bedrock
- * gets the host's AWS credentials from its next process and one moved off it
- * loses them.
+ * provider terminal alike.
  */
 export function openCodexAccountEnvironment(input: {
   readonly binaryPath: string;
   readonly hostEnvironment: NodeJS.ProcessEnv;
   readonly codexHome: string;
   readonly inheritHostAuth?: true;
-  readonly credentialPassThrough: ReadonlyArray<string>;
 }): NodeJS.ProcessEnv {
   return codexAccountProcessEnvironment({
     ...input,
     strict: false,
-    signsInToBedrock: codexConfiguresBedrock({
-      ...input.hostEnvironment,
-      CODEX_HOME: input.codexHome,
-    }),
   });
 }
 

@@ -1928,6 +1928,15 @@ export const ProviderCapabilities = Schema.Struct({
    */
   appManagedToolsAtFullAccess: Schema.optional(Schema.Literal("mixed")),
   /**
+   * Reported by a runtime whose Work and Code launches outside Strict run
+   * with no Octant sandbox beside the person's own setup, where it cannot
+   * prove Octant's tools are the only ones entering it: such a thread below
+   * Full access is still offered them, labelled as mixed. `appManagedTools`
+   * keeps answering under Strict and in Plan. Absent means Strict changes
+   * nothing for this runtime's tools.
+   */
+  appManagedToolsOutsideStrict: Schema.optional(Schema.Literal("mixed")),
+  /**
    * The driver natively serves ACP client filesystem and terminal methods
    * (`fs/read_text_file`, `fs/write_text_file`, `terminal/*`) over its own
    * connection, independently of the app-managed tool bridge.

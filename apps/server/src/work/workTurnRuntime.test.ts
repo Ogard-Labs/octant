@@ -2429,12 +2429,12 @@ describe("WorkTurnRuntime", () => {
       expect(calls.stop).toHaveBeenCalledOnce();
     });
 
-    it("a kept local Work session outside Strict with an attachments folder is relaunched when its provider's credential list changes", async () => {
-      // The host's sandbox authority resolves this turn outside Strict.
+    it("a kept local Strict Work session with an attachments folder is relaunched when its provider's let-through list changes", async () => {
+      // The host's sandbox authority resolves this turn under Strict.
       configureSandboxRestrictionsAuthority({
         beginTurn: () => ({
           status: "admitted",
-          turn: { strict: false, summary: "", current: () => true, end: () => undefined },
+          turn: { strict: true, summary: "", current: () => true, end: () => undefined },
         }),
         validateSelection: () => true,
         registerCleanup: () => () => undefined,
@@ -2467,7 +2467,7 @@ describe("WorkTurnRuntime", () => {
         });
       try {
         expect(await turn()).toMatchObject({ kind: "completed" });
-        expect(calls.start).toHaveBeenLastCalledWith(expect.objectContaining({ strict: false }));
+        expect(calls.start).toHaveBeenLastCalledWith(expect.objectContaining({ strict: true }));
         names = [];
         expect(await turn()).toMatchObject({ kind: "completed" });
         // The kept process held GH_TOKEN; the next turn launches afresh.
@@ -3044,6 +3044,83 @@ describe("WorkTurnRuntime", () => {
     expect(loopStopped).toEqual([
       expect.objectContaining({ kind: "turn-loop-stopped", toolName: "octant_read", count: 6 }),
     ]);
+  });
+
+  it("lets a Work turn run past the event budget outside Strict, and stops one at the budget under Strict", async () => {
+    // One tool step is 64 events, so 70 discrete events pass the budget.
+    const runWith = async (strict: boolean) => {
+      const interrupt = vi.fn(() => Effect.void);
+      const events = [
+        ...Array.from({ length: 70 }, (_, index) => ({
+          instanceId: ids.provider,
+          sessionId: ids.session,
+          sequence: index + 1,
+          correlationId: "84000000-0000-4000-8000-000000000099",
+          occurredAt: "2026-11-19T12:00:00.000Z",
+          kind: "task-progress" as const,
+          taskId: "task-1",
+          status: "in-progress" as const,
+          summary: `step ${index}`,
+        })),
+        {
+          instanceId: ids.provider,
+          sessionId: ids.session,
+          sequence: 71,
+          correlationId: "84000000-0000-4000-8000-000000000099",
+          occurredAt: "2026-11-19T12:00:02.000Z",
+          kind: "completed" as const,
+        },
+      ] as ProviderRuntimeEvent[];
+      const driver: ProviderDriver = {
+        kind: "openai-compatible",
+        probe: () => Effect.die("unused"),
+        acquire: () =>
+          Effect.succeed({
+            subscribe: Effect.succeed(Stream.fromIterable(events)),
+            start: () => Effect.succeed({ sessionId: ids.session }),
+            send: () => Effect.void,
+            resume: () => Effect.void,
+            interrupt,
+            stop: () => Effect.void,
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          } as never),
+      };
+      return new WorkTurnRuntime().run({
+        command: decodeStartWorkThreadTurnCommand({
+          kind: "start-work-thread-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          prompt: "Check files",
+          authority: decodeWorkTurnAuthority({
+            hostId: "local",
+            projectId: ids.project,
+            bindingRevisionId: ids.binding,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: ids.provider,
+            modelId: "gpt-5",
+          }),
+        }),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver,
+        strict,
+        toolStepLimit: 1,
+        signal: new AbortController().signal,
+      });
+    };
+
+    expect((await runWith(false)).kind).toBe("completed");
+    expect(await runWith(true)).toEqual({
+      kind: "waiting",
+      failure: {
+        category: "interrupted",
+        message: "Provider turn exceeded the bounded event budget.",
+      },
+    });
   });
 
   it("notices provider silence past the stalled-turn limit outside Strict without stopping the Work turn", async () => {

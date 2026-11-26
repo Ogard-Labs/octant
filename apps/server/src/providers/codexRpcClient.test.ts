@@ -177,21 +177,95 @@ describe("CodexRpcClient", () => {
     await client.close();
   });
 
-  it("fails the transport on an unknown response ID", async () => {
+  it("drops a response no request is waiting for and keeps the connection open", async () => {
     const { client, stdout } = transport();
-    const exited = client.exited;
     stdout.write(`${JSON.stringify({ id: 404, result: {} })}\n`);
-    expect((await failureOf(exited)).kind).toBe("protocol");
-  });
-
-  it("fails the transport on a duplicate response", async () => {
-    const { client, stdout } = transport();
     const pending = client.request("account/read", {}, decodeAccountReadResult);
     stdout.write(`${JSON.stringify({ id: 1, result: accountResult })}\n`);
     await expect(pending).resolves.toEqual(accountResult);
-    const exited = client.exited;
+    // A repeat of an answered response settles nothing either.
     stdout.write(`${JSON.stringify({ id: 1, result: accountResult })}\n`);
-    expect((await failureOf(exited)).kind).toBe("protocol");
+    const next = client.request("account/read", {}, decodeAccountReadResult);
+    stdout.write(`${JSON.stringify({ id: 2, result: accountResult })}\n`);
+    await expect(next).resolves.toEqual(accountResult);
+    await client.close();
+  });
+
+  it("keeps the connection open when Codex sends a notification this build does not know or cannot read", async () => {
+    const { client, stdout } = transport();
+    const notifications: unknown[] = [];
+    client.onNotification((message) => notifications.push(message));
+    stdout.write(`${JSON.stringify({ method: "item/future/delta", params: { any: "thing" } })}\n`);
+    // A known method whose params a newer Codex reshaped.
+    stdout.write(
+      `${JSON.stringify({ method: "item/agentMessage/delta", params: { delta: 7 } })}\n`,
+    );
+    stdout.write(
+      `${JSON.stringify({
+        method: "item/agentMessage/delta",
+        params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", delta: "still here" },
+      })}\n`,
+    );
+    await tick();
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        method: "item/agentMessage/delta",
+        params: expect.objectContaining({ delta: "still here" }),
+      }),
+    ]);
+    const pending = client.request("account/read", {}, decodeAccountReadResult);
+    stdout.write(`${JSON.stringify({ id: 1, result: accountResult })}\n`);
+    await expect(pending).resolves.toEqual(accountResult);
+    await client.close();
+  });
+
+  it("delivers a turn's end it can only partly read, and fails the stream when the end names no thread", async () => {
+    const { client, stdout } = transport();
+    const notifications: unknown[] = [];
+    client.onNotification((message) => notifications.push(message));
+    stdout.write(
+      `${JSON.stringify({
+        method: "turn/completed",
+        params: { threadId: "thread-1", turn: { id: "turn-1", status: "failed", error: {} } },
+      })}\n`,
+    );
+    await tick();
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "failed", error: { message: "" } },
+        },
+      }),
+    ]);
+    const exited = client.exited;
+    stdout.write(`${JSON.stringify({ method: "turn/completed", params: { turn: {} } })}\n`);
+    expect(await failureOf(exited)).toMatchObject({
+      kind: "protocol",
+      message: "Codex sent invalid JSON-RPC.",
+    });
+  });
+
+  it("declines an approval request it cannot read instead of delivering or allowing it", async () => {
+    const { client, stdin, stdout } = transport();
+    const written = lines(stdin);
+    const requests: CodexServerRequest[] = [];
+    client.onRequest((message) => requests.push(message));
+    stdout.write(
+      `${JSON.stringify({
+        id: "approval-9",
+        method: "item/fileChange/requestApproval",
+        params: { threadId: "thread-1", turnId: "turn-1", futureShape: true },
+      })}\n`,
+    );
+    await tick();
+    expect(requests).toEqual([]);
+    expect(written.values).toEqual([
+      { id: "approval-9", error: { code: -32601, message: "Method not found" } },
+    ]);
+    written.dispose();
+    await client.close();
   });
 
   it("fails malformed input without exposing it", async () => {

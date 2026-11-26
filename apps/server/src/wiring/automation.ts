@@ -59,6 +59,7 @@ import { AutomationSchedulerService } from "../automation/automationSchedulerSer
 import { createRoutineProposalTools } from "../automation/routineProposalTools";
 import { createRoutineTools } from "../automation/routineTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { buildThreadRoutineDraft } from "../automation/threadRoutineDraft";
 import { isRoutineHostScope } from "../routineHostScope";
 import {
@@ -138,7 +139,11 @@ export type AutomationDependencies = {
   Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService"> &
   Pick<
     FoundationsWiring,
-    "workThreadProjection" | "workTurnProjection" | "codeEvidence" | "codeBoardEventStore"
+    | "workThreadProjection"
+    | "workTurnProjection"
+    | "codeEvidence"
+    | "codeBoardEventStore"
+    | "resolveThreadStrict"
   >;
 
 export function wireAutomation(deps: AutomationDependencies) {
@@ -160,6 +165,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     liveTurns,
     persistence,
     projectService,
+    resolveThreadStrict,
     routeCodeService,
     routineProposalService,
     serverConnection,
@@ -924,6 +930,10 @@ export function wireAutomation(deps: AutomationDependencies) {
             thread:
               persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
           }),
+        readStrict: () => resolveThreadStrict(String(thread.id)),
+        readOutsideContent: () =>
+          readThreadExternalContentTaint(persistence.connection, String(thread.id))
+            .externalContentIngested,
       }),
       createRoutineTools({
         ...turn,

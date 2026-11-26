@@ -237,9 +237,10 @@ export function threadsToolOperations(input: {
   readonly plannerThread: boolean;
   /**
    * The thread's own stored level when it is a coordinator, `undefined`
-   * otherwise. A coordinator's turn always runs under Plan's read-only gate,
-   * so its messaging and `start` follow the level a person gave the thread,
-   * not the turn's posture; a coordinator a person set to Plan gets neither.
+   * otherwise. Under Strict a coordinator's turn runs under Plan's read-only
+   * gate whatever that level is, so its messaging and `start` follow the
+   * level a person gave the thread, not the turn's posture; a coordinator a
+   * person set to Plan gets neither.
    */
   readonly coordinatorLevel?: string;
   readonly profileAllowsStart?: boolean;

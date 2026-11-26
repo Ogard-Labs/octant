@@ -12,12 +12,10 @@ describe("defaultAgentRunAuthorityCeilingForMode", () => {
     expect(ceiling.executionPolicy).toBe("plan");
   });
 
-  it("confines work to the project root without shell/git authority", () => {
-    const ceiling = defaultAgentRunAuthorityCeilingForMode("work");
-    expect(ceiling.filesystem).toBe(true);
-    expect(ceiling.shell).toBe(false);
-    expect(ceiling.git).toBe(false);
-    expect(ceiling.executionPolicy).toBe("approval-gated");
+  it("gives work the same ceiling as code, so a Work helper may hold what its thread holds", () => {
+    expect(defaultAgentRunAuthorityCeilingForMode("work")).toEqual(
+      defaultAgentRunAuthorityCeilingForMode("code"),
+    );
   });
 
   it("grants code the widest absolute ceiling, including full-access as the upper bound", () => {

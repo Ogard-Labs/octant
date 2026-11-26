@@ -765,10 +765,10 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     response: { readonly result?: unknown; readonly error?: AcpRemoteError },
   ) => {
     const request = pending.get(id);
-    if (request === undefined) {
-      failProtocol("ACP sent an unknown or duplicate response ID.");
-      return;
-    }
+    // A response no request is waiting for (one that already timed out, or a
+    // repeat) settles nothing and is dropped; ending the transport for it
+    // ended the agent's session over one late answer.
+    if (request === undefined) return;
     pending.delete(id);
     clearTimeout(request.timeout);
     if (request.idle !== undefined) forgetTools(request.idle.sessionId);
@@ -823,7 +823,14 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     }
     if (envelope.id === undefined) {
       if (envelope.method === "session/update") {
-        const params = decode(SessionUpdateParams)(envelope.params);
+        let params: typeof SessionUpdateParams.Type;
+        try {
+          params = decode(SessionUpdateParams)(envelope.params);
+        } catch {
+          // An update this build cannot read is dropped like a notification
+          // it does not know; the transport and the turn stay up.
+          return;
+        }
         trackTool(params.sessionId, params.update);
         enqueue({ kind: "notification", method: "session/update", params });
       }

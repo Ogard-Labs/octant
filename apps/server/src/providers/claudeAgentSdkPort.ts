@@ -54,9 +54,66 @@ export type ClaudePermissionMode =
   | "plan"
   | "auto";
 
+/**
+ * A rule Claude Code offers to keep after an approval, held to the session:
+ * the destination is always `session`, so it ends with the session and no
+ * settings file of the person's is written.
+ */
+export interface ClaudeSessionPermissionUpdate {
+  readonly type: "addRules";
+  readonly rules: ReadonlyArray<{ readonly toolName: string; readonly ruleContent?: string }>;
+  readonly behavior: "allow";
+  readonly destination: "session";
+}
+
+/**
+ * The allow rules among the runtime's suggested permission updates, each
+ * rewritten to session scope. A suggested mode switch, added directory, or
+ * deny rule is dropped: the thread's level and folders are the person's to
+ * change in Octant.
+ */
+export function claudeSessionPermissionUpdates(
+  suggestions: unknown,
+): ReadonlyArray<ClaudeSessionPermissionUpdate> {
+  if (!Array.isArray(suggestions)) return [];
+  const updates: ClaudeSessionPermissionUpdate[] = [];
+  for (const suggestion of suggestions as ReadonlyArray<unknown>) {
+    if (typeof suggestion !== "object" || suggestion === null) continue;
+    const { type, behavior, rules } = suggestion as Readonly<Record<string, unknown>>;
+    if (type !== "addRules" || behavior !== "allow" || !Array.isArray(rules)) continue;
+    const kept: Array<{ readonly toolName: string; readonly ruleContent?: string }> = [];
+    for (const rule of rules as ReadonlyArray<unknown>) {
+      if (typeof rule !== "object" || rule === null) continue;
+      const { toolName, ruleContent } = rule as Readonly<Record<string, unknown>>;
+      if (typeof toolName !== "string" || toolName.length === 0) continue;
+      kept.push(typeof ruleContent === "string" ? { toolName, ruleContent } : { toolName });
+    }
+    if (kept.length > 0) {
+      updates.push({ type: "addRules", rules: kept, behavior: "allow", destination: "session" });
+    }
+  }
+  return updates;
+}
+
 export type ClaudeToolDecision =
-  | { readonly behavior: "allow"; readonly updatedInput?: Readonly<Record<string, unknown>> }
+  | {
+      readonly behavior: "allow";
+      readonly updatedInput?: Readonly<Record<string, unknown>>;
+      /** Session rules the runtime keeps, so it stops asking for the same kind of call. */
+      readonly updatedPermissions?: ReadonlyArray<ClaudeSessionPermissionUpdate>;
+    }
   | { readonly behavior: "deny"; readonly message: string; readonly interrupt?: boolean };
+
+/** The decision as the SDK takes it: it types a permission update's lists as mutable arrays. */
+type ClaudeSdkToolDecision =
+  | (Omit<Extract<ClaudeToolDecision, { readonly behavior: "allow" }>, "updatedPermissions"> & {
+      readonly updatedPermissions?: Array<
+        Omit<ClaudeSessionPermissionUpdate, "rules"> & {
+          rules: Array<{ toolName: string; ruleContent?: string }>;
+        }
+      >;
+    })
+  | Extract<ClaudeToolDecision, { readonly behavior: "deny" }>;
 
 /**
  * What the PreToolUse hook may answer. Claude Code treats a hook "allow" as
@@ -82,6 +139,8 @@ export interface ClaudeToolRequest {
   readonly title?: string;
   readonly displayName?: string;
   readonly description?: string;
+  /** The session rules the runtime offers to keep if this call is allowed for the session. */
+  readonly sessionPermissions?: ReadonlyArray<ClaudeSessionPermissionUpdate>;
   readonly signal: AbortSignal;
 }
 
@@ -449,7 +508,8 @@ export type ClaudeDecodedMessage =
       readonly uuid?: string;
       readonly error?: string;
       readonly content: readonly ClaudeAssistantContent[];
-      readonly usage: ClaudeUsage;
+      /** Absent when the runtime's figures could not be read. */
+      readonly usage?: ClaudeUsage;
     }
   | {
       readonly kind: "stream-event";
@@ -501,7 +561,8 @@ export type ClaudeDecodedMessage =
       readonly stopReason: string | null;
       readonly terminalReason?: string;
       readonly durationMs?: number;
-      readonly usage: ClaudeUsage;
+      /** Absent when the runtime's figures could not be read. */
+      readonly usage?: ClaudeUsage;
       /** Cumulative runtime session cost, including restored turns. */
       readonly totalCostUsd?: number;
       /** Increment measured from the pre-prompt session snapshot, when available. */
@@ -1001,6 +1062,7 @@ interface ClaudeAgentSdkInvocationOptions {
     input: Record<string, unknown>,
     options: {
       readonly signal: AbortSignal;
+      readonly suggestions?: unknown;
       readonly blockedPath?: string;
       readonly title?: string;
       readonly displayName?: string;
@@ -1009,7 +1071,7 @@ interface ClaudeAgentSdkInvocationOptions {
       readonly requestId: string;
       readonly agentID?: unknown;
     },
-  ) => Promise<ClaudeToolDecision>;
+  ) => Promise<ClaudeSdkToolDecision>;
   readonly hooks: {
     readonly PreToolUse: readonly [
       {
@@ -1712,11 +1774,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   message: "Claude requested a tool outside the configured allowlist.",
                 };
               }
-              return input.canUseTool({
+              const sessionPermissions = claudeSessionPermissionUpdates(callback.suggestions);
+              const decision = await input.canUseTool({
                 toolName,
                 input: toolInput,
                 toolUseId: callback.toolUseID,
                 requestId: callback.requestId,
+                ...(sessionPermissions.length === 0 ? {} : { sessionPermissions }),
                 ...(callback.blockedPath === undefined
                   ? {}
                   : { blockedPath: callback.blockedPath }),
@@ -1729,6 +1793,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   : { description: callback.description }),
                 signal: callback.signal,
               });
+              if (decision.behavior !== "allow") return decision;
+              const { updatedPermissions, ...allowed } = decision;
+              if (updatedPermissions === undefined) return allowed;
+              return {
+                ...allowed,
+                updatedPermissions: updatedPermissions.map((update) => ({
+                  ...update,
+                  rules: update.rules.map((rule) => ({ ...rule })),
+                })),
+              };
             };
             const userPromptSubmit: ClaudeAgentSdkInvocationOptions["hooks"]["UserPromptSubmit"][0]["hooks"][0] =
               async (hookInput) => {
@@ -1898,7 +1972,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 // turn it starts by itself from a queued notice from the end
                 // of the person's turn.
                 CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1",
-                MCP_TOOL_TIMEOUT: "660000",
+                // Octant's default; a value the person set in their own
+                // environment, which reaches a launch outside Strict, wins.
+                MCP_TOOL_TIMEOUT: input.authEnvironment.MCP_TOOL_TIMEOUT ?? "660000",
                 // `CLAUDE_CODE_ENABLE_TASKS` is left to Claude Code: its
                 // default replaces the `TodoWrite` checklist with the task
                 // tools, and Octant adds to a provider rather than taking its

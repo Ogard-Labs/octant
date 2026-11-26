@@ -6,9 +6,10 @@
  * person cancel it, and starts the thread's turn when it comes due, through
  * the same host-turn path a message wake takes, at the thread's own level.
  *
- * Nothing fires unseen. A wake-up that came due while the host was down, or
- * while its timer was held back past the grace window, is journaled as
- * missed and waits for the person to run or cancel it. A thread archived or
+ * A wake-up that came due while the host was down, or while its timer was
+ * held back past the grace window, runs once when the host is back. Where
+ * the person turned that off in Settings it is journaled as missed and waits
+ * for them to run or cancel it. A thread archived or
  * deleted ends every wake-up it had; a purged thread's wake-ups leave with
  * its events, and nothing new is journaled for them.
  */
@@ -110,7 +111,7 @@ export interface ThreadWakeupServiceOptions {
   /**
    * The person's limits from Settings, read at each request and each due
    * time so a change applies at once. Absent is the defaults: 8 waiting a
-   * thread, and a missed wake-up waits for the person.
+   * thread, and a missed wake-up runs once when the host is back.
    */
   readonly limits?: () => ThreadWakeupLimits;
   readonly onError?: (message: string, error: unknown) => void;
@@ -185,7 +186,7 @@ export class ThreadWakeupService {
     return (
       this.#options.limits?.() ?? {
         waitingPerThread: DEFAULT_THREAD_WAKEUPS_WAITING,
-        runMissedOnReturn: false,
+        runMissedOnReturn: true,
       }
     );
   }
@@ -438,8 +439,9 @@ export class ThreadWakeupService {
         this.#arm(held);
         return;
       }
-      // The person may ask in Settings for a missed wake-up to run once on
-      // return; a recurring one then carries on from its next match.
+      // A missed wake-up runs once on return, and a recurring one then
+      // carries on from its next match, unless the person turned that off in
+      // Settings: then it waits for their Run now.
       if (due === "missed" && !this.#limits().runMissedOnReturn) {
         this.#append(held, { ...held.wakeup, status: "missed" }, "missed");
         return;

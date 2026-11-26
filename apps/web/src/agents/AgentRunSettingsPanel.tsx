@@ -204,7 +204,7 @@ export function AgentRunSettingsPanel(props: {
             settingId="subagent-no-limit-full-access"
           >
             <OctantSwitch
-              checked={settings?.noWorkingTimeLimitAtFullAccess === true}
+              checked={settings?.noWorkingTimeLimitAtFullAccess !== false}
               disabled={saving}
               label="No time limit at Full access"
               onCheckedChange={(checked) =>

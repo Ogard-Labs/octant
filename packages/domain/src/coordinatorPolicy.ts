@@ -53,21 +53,20 @@ export function coordinatorBoundsFor(
 
 /**
  * The posture a coordinator's own turn runs under, given the level its turn
- * would otherwise take. Below Full access a coordinator reads and its workers
- * write, so its file, shell and Git actions take Plan's read-only gate; at
- * Full access they follow the level (maintainer decision, 2026-11-16), since
- * the person chose to let the thread act without asking. The level stays on
- * the thread as the ceiling for the workers it starts either way.
+ * would otherwise take. Outside Strict a coordinator's file, shell and Git
+ * actions follow its thread's level like any thread's (maintainer decision,
+ * 2026-11-25): the read-only gate was a limit Octant added, and a coordinator
+ * that could not write handed every small edit to a worker. The level stays
+ * on the thread as the ceiling for the workers it starts either way.
  *
- * Following the level at Full access is a lift Octant made, so under the
- * thread's Strict a coordinator keeps Plan's read-only gate at every level,
- * Full access included, as before it.
+ * Under the thread's Strict a coordinator reads and its workers write: its
+ * own turn keeps Plan's read-only gate at every level, Full access included.
  */
 export function coordinatorTurnPosture(
   level: ProviderExecutionPolicy,
   strict: boolean,
 ): ProviderExecutionPolicy {
-  return level === "full-access" && !strict ? "full-access" : "plan";
+  return strict ? "plan" : level;
 }
 
 export interface CoordinatorRoleFacts {
@@ -165,10 +164,11 @@ export type CoordinatorStartDecision =
  * worker starts at it, whatever the call names and whether or not the
  * coordinator is marked: a coordinator is marked as soon as it reads a worker,
  * and the level is the person's own choice. Otherwise a worker's level is the
- * one named, else the coordinator's, never higher than the coordinator's, and
- * never Full access from a marked coordinator: the mark asks for confirmation
- * on risky actions, and Full access would switch that confirmation off at
- * the start.
+ * one named, else the coordinator's, never higher than the coordinator's.
+ * Under Strict it is also never Full access from a marked coordinator: there
+ * the mark asks for confirmation on risky actions, and Full access would
+ * switch that confirmation off at the start. Outside Strict the mark is only
+ * carried to the worker.
  */
 export function decideCoordinatorStart(input: {
   readonly caller:
@@ -177,6 +177,8 @@ export function decideCoordinatorStart(input: {
         readonly lifecycle: string;
         readonly level: ProviderExecutionPolicy;
         readonly marked: boolean;
+        /** Strict as the host resolved it for the caller; absent is Strict. */
+        readonly strict?: boolean;
         /**
          * The caller is its Project's designated planner: it reads as a
          * coordinator, and its starts always become proposals whatever the
@@ -252,7 +254,8 @@ export function decideCoordinatorStart(input: {
       message: "A worker cannot start at a higher level than its coordinator.",
     };
   }
-  if (caller.marked && requested === "full-access") {
+  const markCaps = caller.marked && caller.strict !== false;
+  if (markCaps && requested === "full-access") {
     return {
       status: "refused",
       reason: "policy",
@@ -261,8 +264,7 @@ export function decideCoordinatorStart(input: {
     };
   }
   const chosen: WorkerLevel = requested ?? ceiling;
-  const level: WorkerLevel =
-    caller.marked && chosen === "full-access" ? "auto-accept-edits" : chosen;
+  const level: WorkerLevel = markCaps && chosen === "full-access" ? "auto-accept-edits" : chosen;
   return { status, level };
 }
 

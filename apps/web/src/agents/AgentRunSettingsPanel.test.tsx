@@ -86,11 +86,11 @@ describe("AgentRunSettingsPanel", () => {
     );
   });
 
-  it("starts helpers at 120 working minutes and lets a person lift the limit at Full access", async () => {
+  it("starts helpers at 120 working minutes with no limit at Full access, and lets a person keep the limit there", async () => {
     const user = userEvent.setup();
     const update = vi.fn(async () => ({
       ...baseSettings({ creationPosture: "automatic", version: 2 }),
-      noWorkingTimeLimitAtFullAccess: true,
+      noWorkingTimeLimitAtFullAccess: false,
     }));
     const client = {
       current: vi.fn(async () => baseSettings({ creationPosture: "automatic", version: 1 })),
@@ -102,16 +102,16 @@ describe("AgentRunSettingsPanel", () => {
       120,
     );
     const lift = () => screen.getByRole("switch", { name: "No time limit at Full access" });
-    expect(lift()).not.toBeChecked();
+    expect(lift()).toBeChecked();
 
     await user.click(lift());
 
     expect(update).toHaveBeenCalledWith({
       creationPosture: "automatic",
-      noWorkingTimeLimitAtFullAccess: true,
+      noWorkingTimeLimitAtFullAccess: false,
       expectedVersion: 1,
     });
-    await waitFor(() => expect(lift()).toBeChecked());
+    await waitFor(() => expect(lift()).not.toBeChecked());
   });
 
   it("waits 30 minutes for a full provider until a person changes the wait", async () => {

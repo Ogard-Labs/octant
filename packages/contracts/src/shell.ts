@@ -1083,10 +1083,11 @@ export const ShellSettings = Schema.Struct({
   ),
   /**
    * Whether a wake-up that came due while the host was down or asleep runs
-   * once when the host is back. Off, the default, journals it as missed and
-   * waits for the person's Run now, as before the setting existed.
+   * once when the host is back. On by default: a wake-up the host slept
+   * through otherwise never ran. Off journals it as missed and waits for the
+   * person's Run now.
    */
-  threadWakeupsRunMissedOnReturn: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  threadWakeupsRunMissedOnReturn: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
    * How many wake turns a message may start on one thread in any hour, and
    * the hop count past which a message is carried but wakes nothing, for a
@@ -1168,12 +1169,13 @@ export const ShellSettings = Schema.Struct({
   ),
   /**
    * "Start agent-created routines active at Full access": a routine an agent
-   * creates while its turn runs at Full access starts enabled instead of
-   * paused. Off by default, which keeps every agent-created routine paused
-   * until the person enables it.
+   * suggests while its turn runs at Full access starts enabled instead of
+   * paused. On by default, since that level already lets the agent act
+   * without asking; off keeps such a routine paused until the person enables
+   * it.
    */
   agentRoutinesStartActiveAtFullAccess: Schema.optionalWith(Schema.Boolean, {
-    default: () => false,
+    default: () => true,
   }),
   /**
    * The release ring to follow, once someone has chosen one.

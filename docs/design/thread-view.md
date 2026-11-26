@@ -1024,9 +1024,11 @@ A Work or Code thread whose agent scheduled a wake-up shows one row per
 waiting wake-up above the message queue, in the composer: an alarm-clock
 icon, **Wakes** and the next fire time (weekday and local time), the
 wake-up's prompt on one line (its full text on hover), and **Cancel**. A
-wake-up that came due while Octant was not running reads **Missed** with its
-time and "Octant was not running", in primary text, with **Run now** beside
-Cancel; nothing runs it until the person chooses. With no waiting wake-up the
+wake-up that came due while Octant was not running runs once when the host is
+back, since **Run missed wake-ups on return** is on by default
+([Architecture](../architecture.md#person-memory)). With that switch off it
+reads **Missed** with its time and "Octant was not running", in primary text,
+with **Run now** beside Cancel; nothing runs it until the person chooses. With no waiting wake-up the
 rows take no space. At a narrow width the prompt drops below the time so the
 buttons never cover it. A refused change (the wake-up already fired or was
 cancelled, or the thread is busy for Run now) shows the host's sentence under

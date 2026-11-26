@@ -85,7 +85,20 @@ const Model = Schema.Struct({
   hidden: Schema.Boolean,
   supportedReasoningEfforts: Schema.Array(ReasoningEffortOption),
   defaultReasoningEffort: Schema.String,
-  inputModalities: Schema.Array(Schema.Literal("text", "image")),
+  // A modality a newer Codex lists is left out, so one new name cannot fail
+  // the whole model list.
+  inputModalities: Schema.transform(
+    Schema.Array(Schema.String),
+    Schema.Array(Schema.Literal("text", "image")),
+    {
+      strict: true,
+      decode: (modalities) =>
+        modalities.filter(
+          (modality): modality is "text" | "image" => modality === "text" || modality === "image",
+        ),
+      encode: (modalities) => modalities,
+    },
+  ),
   serviceTiers: Schema.Array(ModelServiceTier),
   defaultServiceTier: NullableString,
   isDefault: Schema.Boolean,
@@ -99,7 +112,13 @@ export type CodexModelListResult = typeof ModelListResult.Type;
 export const decodeModelListResult = decode(ModelListResult);
 
 const ThreadReference = Schema.Struct({ id: Schema.String });
-const TurnStatus = Schema.Literal("completed", "interrupted", "failed", "inProgress");
+/**
+ * `completed`, `interrupted`, `failed` or `inProgress` today. Statuses stay
+ * open strings throughout this file: a value a newer Codex adds must not make
+ * the notification that carries it undecodable, least of all the one that ends
+ * a turn. The mapper reads the values it knows and treats any other neutrally.
+ */
+const TurnStatus = Schema.String;
 /**
  * The reason the app-server reports on a failed turn. `codexErrorInfo` is the
  * classified signal (`"usageLimitExceeded"`, `"rateLimitExceeded"`, ...);
@@ -434,7 +453,7 @@ const ThreadItem = Schema.Union(
     id: Schema.String,
     command: Schema.String,
     cwd: Schema.String,
-    status: Schema.Literal("inProgress", "completed", "failed", "declined"),
+    status: Schema.String,
     aggregatedOutput: Schema.optional(Schema.NullOr(Schema.String)),
     exitCode: Schema.optional(NullableNonNegativeInteger),
     durationMs: Schema.optional(NullableNonNegativeInteger),
@@ -443,14 +462,14 @@ const ThreadItem = Schema.Union(
     type: Schema.Literal("fileChange"),
     id: Schema.String,
     changes: Schema.Array(FileUpdate),
-    status: Schema.Literal("inProgress", "completed", "failed", "declined"),
+    status: Schema.String,
   }),
   Schema.Struct({
     type: Schema.Literal("mcpToolCall"),
     id: Schema.String,
     server: Schema.String,
     tool: Schema.String,
-    status: Schema.Literal("inProgress", "completed", "failed"),
+    status: Schema.String,
     durationMs: Schema.optional(NullableNonNegativeInteger),
   }),
   Schema.Struct({
@@ -458,7 +477,7 @@ const ThreadItem = Schema.Union(
     id: Schema.String,
     namespace: Schema.NullOr(Schema.String),
     tool: Schema.String,
-    status: Schema.Literal("inProgress", "completed", "failed"),
+    status: Schema.String,
     success: Schema.NullOr(Schema.Boolean),
     durationMs: Schema.optional(NullableNonNegativeInteger),
   }),
@@ -483,7 +502,7 @@ const ThreadItem = Schema.Union(
     type: Schema.Literal("collabAgentToolCall"),
     id: Schema.String,
     tool: Schema.String,
-    status: Schema.Literal("inProgress", "completed", "failed", "interrupted"),
+    status: Schema.String,
     receiverThreadIds: Schema.Array(Schema.String).pipe(Schema.maxItems(32)),
     prompt: Schema.optional(Schema.NullOr(Schema.String)),
     /** The model a `spawnAgent` call asked for, when it named one. */
@@ -537,7 +556,7 @@ const TurnDiffNotification = Schema.Struct({
 
 const TurnPlanStep = Schema.Struct({
   step: Schema.String,
-  status: Schema.Literal("pending", "inProgress", "completed"),
+  status: Schema.String,
 });
 
 const TurnPlanNotification = Schema.Struct({
@@ -670,7 +689,16 @@ export type CodexServerNotification = {
     readonly kind: "notification";
     readonly method: Method;
     readonly params: CodexNotificationParams[Method];
-  };
+  } & (Method extends "turn/completed"
+    ? {
+        /**
+         * The completion named its thread but no turn this build could read
+         * (`readableTurnCompletion`): it ends whichever turn that thread is
+         * running, and `params.turn.id` is empty.
+         */
+        readonly turnUnreadable?: true;
+      }
+    : unknown);
 }[CodexStableNotificationMethod];
 
 const stableNotificationDecoders: Record<
@@ -879,6 +907,63 @@ function decodeRpcResponse(value: Record<string, unknown>): CodexRpcResponse {
   return hasError ? decode(CodexRpcErrorResponse)(value) : decode(CodexRpcSuccessResponse)(value);
 }
 
+/**
+ * A `turn/completed` whose params fail the schema, read by hand. It is the
+ * one notification that ends a turn, so it is never dropped as other
+ * unreadable notifications are: dropped, the turn stayed running until a
+ * stall limit that may be off. With a thread and turn id it ends that turn:
+ * failed when it carries an error of any shape or a status that is not text,
+ * and by its status otherwise. With only the thread it fails that thread's
+ * running turn. With no thread nothing says whose turn ended, so it throws
+ * and the caller fails the stream, as every undecodable notification once did.
+ */
+function readableTurnCompletion(
+  params: unknown,
+): Extract<CodexServerNotification, { readonly method: "turn/completed" }> {
+  if (!isRecord(params) || typeof params.threadId !== "string") {
+    throw new TypeError("Codex turn completion names no thread");
+  }
+  const threadId = params.threadId;
+  const turn = isRecord(params.turn) ? params.turn : undefined;
+  if (turn === undefined || typeof turn.id !== "string") {
+    return {
+      kind: "notification",
+      method: "turn/completed",
+      params: { threadId, turn: { id: "", status: "failed" } },
+      turnUnreadable: true,
+    };
+  }
+  const hasError = turn.error !== undefined && turn.error !== null;
+  if (!hasError) {
+    return {
+      kind: "notification",
+      method: "turn/completed",
+      params: {
+        threadId,
+        turn: { id: turn.id, status: typeof turn.status === "string" ? turn.status : "failed" },
+      },
+    };
+  }
+  const reported = isRecord(turn.error) ? turn.error : {};
+  return {
+    kind: "notification",
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turn.id,
+        status: "failed",
+        error: {
+          message: typeof reported.message === "string" ? reported.message : "",
+          ...(typeof reported.codexErrorInfo === "string"
+            ? { codexErrorInfo: reported.codexErrorInfo }
+            : {}),
+        },
+      },
+    },
+  };
+}
+
 export function decodeCodexServerMessage(value: unknown): CodexServerMessage {
   if (!isRecord(value)) {
     throw new TypeError("Codex server message must be an object");
@@ -893,23 +978,34 @@ export function decodeCodexServerMessage(value: unknown): CodexServerMessage {
     const id = decodeRpcId(value.id);
     if (hasOwn(stableRequestSchemas, method)) {
       const stableMethod = method as CodexStableRequestMethod;
-      return {
-        kind: "request",
-        id,
-        method: stableMethod,
-        params: stableRequestDecoders[stableMethod](value.params),
-      } as CodexServerRequest;
+      let params: unknown;
+      try {
+        params = stableRequestDecoders[stableMethod](value.params);
+      } catch {
+        // An approval, question or tool call this build cannot read is never
+        // answered as allowed: Codex is told the request is not supported,
+        // as for a method this build does not know, and the connection and
+        // every other thread on it stay up.
+        return { kind: "unsupported-request", id, method };
+      }
+      return { kind: "request", id, method: stableMethod, params } as CodexServerRequest;
     }
     return { kind: "unsupported-request", id, method };
   }
 
   if (hasOwn(stableNotificationSchemas, method)) {
     const stableMethod = method as CodexStableNotificationMethod;
-    return {
-      kind: "notification",
-      method: stableMethod,
-      params: stableNotificationDecoders[stableMethod](value.params),
-    } as CodexServerNotification;
+    let params: unknown;
+    try {
+      params = stableNotificationDecoders[stableMethod](value.params);
+    } catch {
+      if (stableMethod === "turn/completed") return readableTurnCompletion(value.params);
+      // One app-server process carries every thread, so a notification whose
+      // shape a newer Codex changed is dropped like one this build does not
+      // know. Failing it closed the connection under all of them.
+      return { kind: "unknown-notification", method };
+    }
+    return { kind: "notification", method: stableMethod, params } as CodexServerNotification;
   }
 
   return { kind: "unknown-notification", method };

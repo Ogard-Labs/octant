@@ -61,10 +61,9 @@ describe("coordinator role", () => {
     ).toMatchObject({ status: "refused", message: expect.stringContaining("at most 1") });
   });
 
-  it("runs a coordinator's own turn read-only below Full access and at the level at Full access outside Strict", () => {
-    expect(coordinatorTurnPosture("full-access", false)).toBe("full-access");
-    for (const level of ["approval-gated", "auto-accept-edits", "plan"] as const) {
-      expect(coordinatorTurnPosture(level, false)).toBe("plan");
+  it("runs a coordinator's own turn at its thread's level outside Strict, so it may write below Full access", () => {
+    for (const level of ["full-access", "approval-gated", "auto-accept-edits", "plan"] as const) {
+      expect(coordinatorTurnPosture(level, false)).toBe(level);
     }
   });
 
@@ -107,14 +106,36 @@ describe("starting workers", () => {
     });
   });
 
-  it("never starts a worker at Full access from a marked coordinator", () => {
-    const marked = { ...coordinator, level: "full-access", marked: true } as const;
+  it("never starts a worker at Full access from a marked coordinator under Strict", () => {
+    for (const strict of [true, undefined]) {
+      const marked = {
+        ...coordinator,
+        level: "full-access",
+        marked: true,
+        ...(strict === undefined ? {} : { strict }),
+      } as const;
+      expect(decideCoordinatorStart({ ...start, caller: marked })).toEqual({
+        status: "start",
+        level: "auto-accept-edits",
+      });
+      expect(
+        decideCoordinatorStart({ ...start, caller: marked, requestedLevel: "full-access" }),
+      ).toMatchObject({ status: "refused", reason: "policy" });
+    }
+  });
+
+  it("starts a marked coordinator's worker at the coordinator's level outside Strict, never above it", () => {
+    const marked = { ...coordinator, level: "full-access", marked: true, strict: false } as const;
     expect(decideCoordinatorStart({ ...start, caller: marked })).toEqual({
       status: "start",
-      level: "auto-accept-edits",
+      level: "full-access",
     });
     expect(
-      decideCoordinatorStart({ ...start, caller: marked, requestedLevel: "full-access" }),
+      decideCoordinatorStart({
+        ...start,
+        caller: { ...marked, level: "approval-gated" },
+        requestedLevel: "full-access",
+      }),
     ).toMatchObject({ status: "refused", reason: "policy" });
   });
 

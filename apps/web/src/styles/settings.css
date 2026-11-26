@@ -3949,7 +3949,7 @@ html[data-octant-increased-contrast="true"]
   min-width: 0;
 }
 
-/* Credentials let through: a variable name is one long word, so it keeps its
+/* Let through under Strict: a variable name is one long word, so it keeps its
    width and the provider beside it is cut first; past 70% of the row it
    wraps. The add form wraps on a narrow page instead of squeezing the name
    field to a few characters. */

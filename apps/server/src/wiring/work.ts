@@ -42,6 +42,7 @@ import {
   LOCAL_HOST_ID,
   personalSignInRefusals,
   type AutomationRunReference,
+  PLAN_APPROVED_TURN_PROMPT,
   RUNTIME_STARTED_TURN_PROMPT,
   type OctantMode,
   type ProjectId,
@@ -641,6 +642,10 @@ export function wireWork(deps: WorkDependencies) {
             (persistence.readShellSettings()?.settings ?? defaultShellSettings())
               .agentRoutinesStartActiveAtFullAccess,
           readPosture: readRoutinePosture,
+          readStrict: () => resolveThreadStrict(String(input.thread.id)),
+          readOutsideContent: () =>
+            readThreadExternalContentTaint(persistence.connection, String(input.thread.id))
+              .externalContentIngested,
         }),
         createRoutineTools({
           ...routineTurn,
@@ -734,6 +739,20 @@ export function wireWork(deps: WorkDependencies) {
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       onReportAdmitted: (threadId) => workThreadService.noteReportAdmitted(threadId),
       onUsageLimitStop: (threadId) => workThreadService.handOffAfterUsageLimit(threadId),
+      // The turn that carries an approved plan out starts as a wake-up's
+      // does: the host's own turn, through the ordinary admission, at the
+      // level the thread returned to. Its outcome is not read, on purpose:
+      // when a message the person queued starts first the start answers
+      // busy, and their message then runs at that level in the session that
+      // already holds the approved plan; a provider account that takes no
+      // unattended turn refuses it, and the thread waits for the person.
+      onPlanApproved: async (threadId) => {
+        // A message of the person's that is still being prepared is not yet
+        // a turn the wake-up's own check sees, and a turn started beside it
+        // would run two turns in the thread.
+        if (workTurnService.isTurnStarting(threadId)) return;
+        await workThreadWakeupPort.startTurn(String(threadId), PLAN_APPROVED_TURN_PROMPT);
+      },
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),
       persistence: {
         ...persistence,
@@ -784,7 +803,7 @@ export function wireWork(deps: WorkDependencies) {
           browserToolTransport(
             observed,
             String(input.thread.modelId),
-            appToolThreadLevel(input.thread),
+            appToolThreadLevel(input.thread, resolveThreadStrict(String(input.thread.id))),
           ) === true;
         const native = nativeHarnessComposition?.forWork(input);
         const routineBrowser =
@@ -792,7 +811,10 @@ export function wireWork(deps: WorkDependencies) {
             ? undefined
             : routineBrowserTools({
                 routineRun: input.routineRun,
-                turnLevel: appToolThreadLevel(input.thread),
+                turnLevel: appToolThreadLevel(
+                  input.thread,
+                  resolveThreadStrict(String(input.thread.id)),
+                ),
                 threadId: decodeBrowserThreadId(String(input.thread.id)),
                 currentAuthority: () =>
                   browserAuthority.resolve(decodeBrowserThreadId(String(input.thread.id)), "work"),
@@ -1163,7 +1185,7 @@ export function wireWork(deps: WorkDependencies) {
         const computer = computerToolsFor(
           computerOwner,
           undefined,
-          appToolThreadLevel(input.thread),
+          appToolThreadLevel(input.thread, resolveThreadStrict(String(input.thread.id))),
         );
         const pastThreads = !browserSupported
           ? undefined

@@ -11,6 +11,7 @@ import {
   openClaudeHostEnvironment,
   openClaudeLaunchGuards,
   openLaunchTelemetryOptOut,
+  strictClaudeHostEnvironment,
 } from "./claudeAccountIsolation";
 import { launchOwnChannels } from "./providerOwnChannels";
 
@@ -29,7 +30,11 @@ export interface ClaudeEnvironmentScopeOptions {
   readonly configDirectory?: string;
   /** Whether the launch is Strict; absent is Strict (`isolatedClaudeAccountEnvironment`). */
   readonly strict?: boolean;
-  /** The person's provider telemetry and self-update switches; read only outside Strict. */
+  /**
+   * The person's provider telemetry and self-update switches, read only
+   * outside Strict, and the host variables they let through, read only under
+   * it.
+   */
   readonly ownChannels?: ProviderOwnChannels;
 }
 
@@ -41,26 +46,6 @@ interface ClaudeEnvironmentOverrides {
   readonly ownChannels?: ProviderOwnChannels;
 }
 
-const PASSTHROUGH_VARIABLES = new Set([
-  "COLORTERM",
-  "FORCE_COLOR",
-  "HOME",
-  "LANG",
-  "LANGUAGE",
-  "LOGNAME",
-  "NO_COLOR",
-  "PATH",
-  "SHELL",
-  "SSL_CERT_DIR",
-  "SSL_CERT_FILE",
-  "TEMP",
-  "TERM",
-  "TMP",
-  "TMPDIR",
-  "TZ",
-  "USER",
-]);
-
 /**
  * Static switches every Claude launch sets; the version read keeps them too.
  * One table for both launch shapes, so the isolated and the host-directory
@@ -70,15 +55,6 @@ export const REQUIRED_GUARDS = ISOLATED_CLAUDE_LAUNCH_GUARDS;
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
-}
-
-function passthroughHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(hostEnvironment).filter(
-      ([key, value]) =>
-        value !== undefined && (PASSTHROUGH_VARIABLES.has(key) || key.startsWith("LC_")),
-    ),
-  );
 }
 
 function packagedSmokeObserverEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -128,18 +104,18 @@ export function sanitizeClaudeEnvironment(
 
   if (overrides.strict === false && authentication === "subscription") {
     // The host's own Claude sign-in, outside Strict: the host's environment
-    // less Octant's variables and other providers' keys, which keeps the
-    // host's Claude account directories, with the telemetry and self-update
-    // guards the person's provider switches keep.
+    // less Octant's variables and the variables Claude Code signs itself in
+    // with, which keeps the host's Claude account directories, with the
+    // telemetry and self-update guards the person's provider switches keep.
     return {
-      ...openClaudeHostEnvironment(hostEnvironment, overrides.ownChannels),
+      ...openClaudeHostEnvironment(hostEnvironment),
       ...packagedSmokeObserverEnvironment(hostEnvironment),
       ...openLaunchTelemetryOptOut(hostEnvironment, overrides.ownChannels),
       ...openClaudeLaunchGuards(launchOwnChannels(false, overrides.ownChannels)),
     };
   }
 
-  const environment = passthroughHostEnvironment(hostEnvironment);
+  const environment = strictClaudeHostEnvironment(hostEnvironment, overrides.ownChannels);
   Object.assign(environment, packagedSmokeObserverEnvironment(hostEnvironment));
 
   if (authentication === "subscription") {
@@ -243,16 +219,10 @@ export function makeClaudeEnvironmentScope(
 
   if (authentication === "subscription") {
     return Effect.succeed({
-      environment: sanitizeClaudeEnvironment(
-        authentication,
-        hostEnvironment,
-        options.strict === false
-          ? {
-              strict: false,
-              ...(options.ownChannels === undefined ? {} : { ownChannels: options.ownChannels }),
-            }
-          : {},
-      ),
+      environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {
+        ...(options.strict === false ? { strict: false } : {}),
+        ...(options.ownChannels === undefined ? {} : { ownChannels: options.ownChannels }),
+      }),
     });
   }
 

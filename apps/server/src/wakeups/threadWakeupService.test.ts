@@ -191,7 +191,7 @@ describe("thread wake-ups", () => {
     expect(wakeups.list("code", threadId)).toEqual([]);
   });
 
-  it("shows a wake-up that came due while the host was down as missed and fires it only when the person runs it", async () => {
+  it("shows a wake-up that came due while the host was down as missed and fires it only when the person runs it, once Settings turn running on return off", async () => {
     const time = fakeTime();
     const { journal } = openJournal(time.now);
     const before = service(time, journal, port());
@@ -207,7 +207,10 @@ describe("thread wake-ups", () => {
     // The host comes back an hour later.
     const later = fakeTime(START + 60 * 60_000);
     const code = port();
-    const after = service(later, journal, code, new Date(later.now()));
+    const after = service(later, journal, code, new Date(later.now()), {
+      waitingPerThread: 8,
+      runMissedOnReturn: false,
+    });
     after.start();
     await flush();
     expect(code.startTurn).not.toHaveBeenCalled();
@@ -225,7 +228,7 @@ describe("thread wake-ups", () => {
     expect(journaledChanges(journal)).toEqual(["scheduled", "missed", "run-requested", "fired"]);
   });
 
-  it("runs a wake-up that came due while the host was down once on return when Settings asks", async () => {
+  it("runs a wake-up that came due while the host was down once on return by default", async () => {
     const time = fakeTime();
     const { journal } = openJournal(time.now);
     const before = service(time, journal, port());
@@ -240,10 +243,7 @@ describe("thread wake-ups", () => {
 
     const later = fakeTime(START + 60 * 60_000);
     const code = port();
-    const after = service(later, journal, code, new Date(later.now()), {
-      waitingPerThread: 8,
-      runMissedOnReturn: true,
-    });
+    const after = service(later, journal, code, new Date(later.now()));
     after.start();
     await flush();
     expect(code.startTurn).toHaveBeenCalledOnce();

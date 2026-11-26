@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { decodeProviderInstance, type ProviderInstance } from "@octant/contracts";
-import { sanitizeAcpEnvironment } from "./acpProcess";
+import { acpRunsOnOwnHome, sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles } from "./acpProfiles";
 import { resolveProviderTerminal } from "./providerTerminal";
 
@@ -100,28 +100,44 @@ describe("provider terminal", () => {
     expect(launch.environment.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it("opens a provider terminal outside Strict without GH_TOKEN unless that provider's pass-through list names it", () => {
+  it("opens a provider terminal outside Strict with the person's own tool credentials, and under Strict without them", () => {
     for (const kind of ["claude", "codex"] as const) {
-      const open = (credentialPassThrough: ReadonlyArray<string>) => {
+      const open = (strict: boolean) => {
         const launch = resolveProviderTerminal({
           instance: instance(kind),
           hostEnvironment: { ...HOST, GH_TOKEN: "gh-canary", NPM_TOKEN: "npm-canary" },
           homeDirectory: "/Users/person",
           platform: "darwin",
           shell: "/bin/zsh",
-          strict: false,
-          ownChannels: (driverKind) => ({
-            telemetry: false,
-            selfUpdate: false,
-            ...(driverKind === kind ? { credentialPassThrough } : {}),
-          }),
+          strict,
         });
         if (launch.status !== "resolved") throw new Error("expected a launch");
         return launch.environment;
       };
-      expect(open([]).GH_TOKEN, kind).toBeUndefined();
-      expect(open(["GH_TOKEN"]).GH_TOKEN, kind).toBe("gh-canary");
-      expect(open(["GH_TOKEN"]).NPM_TOKEN, kind).toBeUndefined();
+      expect(open(false), kind).toMatchObject({ GH_TOKEN: "gh-canary", NPM_TOKEN: "npm-canary" });
+      expect(open(true).GH_TOKEN, kind).toBeUndefined();
+      expect(open(true).NPM_TOKEN, kind).toBeUndefined();
+    }
+  });
+
+  it("adds the names the person let through to a provider terminal under Strict, as the thread's turns do, and reads no list outside Strict", () => {
+    for (const kind of ["claude", "codex"] as const) {
+      const open = (strict: boolean, credentialPassThrough: ReadonlyArray<string>) => {
+        const launch = resolveProviderTerminal({
+          instance: instance(kind),
+          hostEnvironment: { ...HOST, GH_TOKEN: "gh-canary", NPM_TOKEN: "npm-canary" },
+          homeDirectory: "/Users/person",
+          platform: "darwin",
+          shell: "/bin/zsh",
+          strict,
+          ownChannels: () => ({ telemetry: false, selfUpdate: false, credentialPassThrough }),
+        });
+        if (launch.status !== "resolved") throw new Error("expected a launch");
+        return launch.environment;
+      };
+      expect(open(true, ["GH_TOKEN"]).GH_TOKEN, kind).toBe("gh-canary");
+      expect(open(true, ["GH_TOKEN"]).NPM_TOKEN, kind).toBeUndefined();
+      expect(open(false, ["GH_TOKEN"]), kind).toEqual(open(false, []));
     }
   });
 
@@ -298,17 +314,118 @@ describe("ACP agent terminal", () => {
   it("keeps the guarded environment for a thread that kept its sandbox outside Strict", () => {
     const { launch, managedHome } = resolveAcp(acpInstance("gemini"), {
       strict: false,
+      executionPolicy: "full-access",
       fullAccessSandbox: true,
     });
     if (launch.status !== "resolved") throw new Error("expected a launch");
     expect(launch.environment).toMatchObject(
       sanitizeAcpEnvironment(acpProviderProfiles.gemini, HOST, {
         managedHome,
-        executionPolicy: "approval-gated",
+        executionPolicy: "full-access",
         mode: "work",
         interactive: true,
       }),
     );
+  });
+
+  it("runs an ACP agent's CLI on the home a turn of the thread runs on", () => {
+    const setup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: true,
+    } as const;
+    const postures = [
+      { strict: false, nativeSetup: setup },
+      { strict: false, nativeSetup: setup, executionPolicy: "full-access" },
+      // Kept only at Full access: below it a turn starts with no sandbox.
+      { strict: false, nativeSetup: setup, fullAccessSandbox: true },
+      { strict: false, nativeSetup: setup, executionPolicy: "plan" },
+      {
+        strict: false,
+        nativeSetup: setup,
+        executionPolicy: "full-access",
+        fullAccessSandbox: true,
+      },
+      { strict: false, nativeSetup: setup, sandboxPolicySelected: true },
+      { strict: false },
+      { strict: true, nativeSetup: setup },
+    ] as const;
+    // The two agents whose own CLI a terminal opens.
+    for (const kind of ["gemini", "antigravity"] as const) {
+      const profile = acpProviderProfiles[kind];
+      for (const posture of postures) {
+        const { launch, managedHome } = resolveAcp(acpInstance(kind), posture);
+        if (launch.status !== "resolved") throw new Error("expected a launch");
+        const executionPolicy =
+          "executionPolicy" in posture ? posture.executionPolicy : "approval-gated";
+        const keptSandbox =
+          executionPolicy === "full-access" &&
+          "fullAccessSandbox" in posture &&
+          posture.fullAccessSandbox;
+        const chosenSandbox = "sandboxPolicySelected" in posture;
+        // What the process port decides for a turn of this thread.
+        const turnOnOwnHome = acpRunsOnOwnHome({
+          profile,
+          mode: "work",
+          executionPolicy,
+          strict: posture.strict,
+          ...(keptSandbox ? { fullAccessSandbox: true } : {}),
+          sandboxPolicySelected: chosenSandbox,
+          ...("nativeSetup" in posture ? { nativeSetup: posture.nativeSetup } : {}),
+        });
+        const turn = sanitizeAcpEnvironment(profile, HOST, {
+          managedHome,
+          executionPolicy,
+          mode: "work",
+          ...(posture.strict || keptSandbox || chosenSandbox ? {} : { strict: false }),
+          ...(turnOnOwnHome ? { ownHome: true } : {}),
+        });
+        const label = `${kind} ${JSON.stringify(posture)}`;
+        expect(launch.environment.HOME, label).toBe(turn.HOME);
+        expect(launch.environment.XDG_DATA_HOME, label).toBe(turn.XDG_DATA_HOME);
+        expect(launch.environment.XDG_STATE_HOME, label).toBe(turn.XDG_STATE_HOME);
+      }
+    }
+    const home = (posture: (typeof postures)[number]) => {
+      const { launch, managedHome } = resolveAcp(acpInstance("gemini"), posture);
+      if (launch.status !== "resolved") throw new Error("expected a launch");
+      return { home: launch.environment.HOME, managedHome };
+    };
+    // Gemini CLI keeps its sessions under `GEMINI_CLI_HOME`, so where a turn
+    // runs on the person's home its CLI does too.
+    expect(home(postures[0]).home).toBe(HOST.HOME);
+    expect(home(postures[2]).home).toBe(HOST.HOME);
+    const planning = home(postures[3]);
+    expect(planning.home).toBe(planning.managedHome);
+    const strict = home(postures[7]);
+    expect(strict.home).toBe(strict.managedHome);
+  });
+
+  it("adds a let-through name to an ACP agent's terminal under Strict, and not for a thread outside Strict that kept its sandbox", () => {
+    const open = (posture: {
+      readonly strict: boolean;
+      readonly executionPolicy?: "full-access";
+      readonly fullAccessSandbox?: boolean;
+    }) => {
+      const { launch } = resolveAcp(acpInstance("gemini"), {
+        ...posture,
+        hostEnvironment: { ...HOST, GH_TOKEN: "gh-canary" },
+        ownChannels: () => ({
+          telemetry: false,
+          selfUpdate: false,
+          credentialPassThrough: ["GH_TOKEN"],
+        }),
+      });
+      if (launch.status !== "resolved") throw new Error("expected a launch");
+      return launch.environment;
+    };
+    expect(open({ strict: true }).GH_TOKEN).toBe("gh-canary");
+    expect(
+      open({ strict: false, executionPolicy: "full-access", fullAccessSandbox: true }).GH_TOKEN,
+    ).toBeUndefined();
   });
 
   it("opens an ACP agent's CLI in colour while keeping its self-update guard, and leaves its turns without colour", () => {

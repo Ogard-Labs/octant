@@ -6,49 +6,13 @@ afterEach(() => {
 });
 
 describe("official OpenCode client routing", () => {
-  it("preserves the complete session policy without the deprecated prompt tools field", async () => {
-    const requests: Request[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (request: Request) => {
-        requests.push(request.clone());
-        return new Response(JSON.stringify({}), {
-          headers: { "content-type": "application/json" },
-        });
-      }),
-    );
-    const client = makeOfficialOpenCodeClient(
-      { authorization: "Basic redacted", pid: 1, url: new URL("http://127.0.0.1:41722/") },
-      "/tmp/project",
-    );
-    const permission = [
-      { permission: "bash", pattern: "*", action: "deny" },
-      { permission: "external_directory", pattern: "*", action: "deny" },
-      { permission: "*_*", pattern: "*", action: "deny" },
-      { permission: "octant-owned_*", pattern: "*", action: "allow" },
-    ] as const;
-    await client.prompt({
-      sessionId: "session-1",
-      providerId: "provider",
-      modelId: "model",
-      prompt: "hello",
-      permission: [...permission],
-    });
-    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
-      ["PATCH", "/session/session-1"],
-      ["POST", "/session/session-1/prompt_async"],
-    ]);
-    expect(await requests[0]?.json()).toEqual({ permission });
-    expect(await requests[1]?.json()).not.toHaveProperty("tools");
-  });
-
-  it("routes the beta health request through its attested API prefix", async () => {
+  it("routes the health request through the API prefix", async () => {
     const requests: Request[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (request: Request) => {
         requests.push(request);
-        return new Response(JSON.stringify({ healthy: true, version: "0.0.0-beta-18721" }), {
+        return new Response(JSON.stringify({ healthy: true, version: "2.0.22" }), {
           headers: { "content-type": "application/json" },
         });
       }),
@@ -58,8 +22,7 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
-        version: "opencode2 v0.0.0-beta-18721",
+        version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41721/"),
       },
       "/tmp/project",
@@ -67,7 +30,7 @@ describe("official OpenCode client routing", () => {
 
     await expect(client.health()).resolves.toEqual({
       healthy: true,
-      version: "opencode2 v0.0.0-beta-18721",
+      version: "opencode v2.0.22",
     });
     expect(requests).toHaveLength(1);
     expect(new URL(requests[0]!.url).pathname).toBe("/api/health");
@@ -75,32 +38,7 @@ describe("official OpenCode client routing", () => {
     expect(requests[0]!.headers.get("x-opencode-directory")).toBeNull();
   });
 
-  it("keeps legacy health routing unchanged when no beta attestation exists", async () => {
-    const requests: Request[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (request: Request) => {
-        requests.push(request);
-        return new Response(JSON.stringify({ healthy: true, version: "1.18.29" }), {
-          headers: { "content-type": "application/json" },
-        });
-      }),
-    );
-
-    const client = makeOfficialOpenCodeClient(
-      {
-        authorization: "Basic redacted",
-        pid: 1,
-        url: new URL("http://127.0.0.1:41722/"),
-      },
-      "/tmp/project",
-    );
-
-    await expect(client.health()).resolves.toEqual({ healthy: true, version: "1.18.29" });
-    expect(new URL(requests[0]!.url).pathname).toBe("/global/health");
-  });
-
-  it("lists beta providers and models from the recorded v2 catalogue", async () => {
+  it("lists providers and models from the recorded catalogue", async () => {
     const requests: Request[] = [];
     vi.stubGlobal(
       "fetch",
@@ -140,7 +78,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41724/"),
       },
@@ -214,7 +151,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41725/"),
       },
@@ -261,7 +197,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41726/"),
       },
@@ -330,23 +265,13 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41727/"),
       },
       "/tmp/project",
     );
-    const permission = [
-      { permission: "*", pattern: "*", action: "ask" },
-      { permission: "edit", pattern: "*", action: "deny" },
-      { permission: "external_directory", pattern: "*", action: "deny" },
-    ] as const;
-
     await expect(
-      client.createSession({
-        permission: [...permission],
-        model: { providerId: "openai", modelId: "gpt-5" },
-      }),
+      client.createSession({ model: { providerId: "openai", modelId: "gpt-5" } }),
     ).resolves.toEqual({
       id: "ses_1",
       directory: "/tmp/project",
@@ -358,7 +283,6 @@ describe("official OpenCode client routing", () => {
       providerId: "openai",
       modelId: "gpt-5",
       prompt: "hello",
-      permission: [...permission],
     });
     const controller = new AbortController();
     const events = await client.subscribe(controller.signal);
@@ -405,7 +329,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41728/"),
       },
@@ -427,6 +350,93 @@ describe("official OpenCode client routing", () => {
     expect(await requests[0]?.json()).toEqual({ decision: "once" });
     expect(await requests[1]?.json()).toEqual({ decision: "reject" });
     expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
+  });
+
+  it("steers a running 2.x turn, sets a session's own rules, and cancels a form it cannot show, on the release read for each", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        requests.push(request.clone());
+        return new Response(null, { status: 204 });
+      }),
+    );
+    const clientAt = (version: string) =>
+      makeOfficialOpenCodeClient(
+        {
+          authorization: "Basic redacted",
+          pid: 1,
+          version,
+          url: new URL("http://127.0.0.1:41728/"),
+        },
+        "/tmp/project",
+      );
+    const client = clientAt("opencode v2.4.1");
+
+    await client.steer?.("ses_1", "use the other file");
+    await client.cancelForm?.("ses_1", "frm_1", "not shown");
+    await client.setSessionPermissions?.("ses_1", [{ action: "*", resource: "*", effect: "ask" }]);
+
+    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
+      ["POST", "/api/session/ses_1/prompt"],
+      ["DELETE", "/api/session/ses_1/form/frm_1"],
+      ["PATCH", "/api/session/ses_1"],
+    ]);
+    expect(await requests[2]?.json()).toEqual({
+      permissions: [{ action: "*", resource: "*", effect: "ask" }],
+    });
+    // `resume: false` admits the note without scheduling a run of its own.
+    expect(await requests[0]?.json()).toEqual({
+      text: "use the other file",
+      delivery: "steer",
+      resume: false,
+    });
+    expect(new URL(requests[1]?.url ?? "").searchParams.get("message")).toBe("not shown");
+    // An older release keeps its sessions and offers no steering.
+    expect(clientAt("opencode v2.2.0").steer).toBeUndefined();
+    expect(clientAt("opencode v2.2.0").setSessionPermissions).toBeUndefined();
+    expect(clientAt("opencode v2.2.0").cancelForm).toBeDefined();
+  });
+
+  it("reads every page of a 2.x session's subagent sessions with the rules each carries", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        requests.push(request.clone());
+        return new URL(request.url).searchParams.get("cursor") === null
+          ? Response.json({
+              data: [{ id: "ses_child_1", permissions: [] }],
+              cursor: { next: "page-2" },
+            })
+          : Response.json({ data: [{ id: "ses_child_2" }], cursor: {} });
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        version: "opencode v2.4.1",
+        url: new URL("http://127.0.0.1:41728/"),
+      },
+      "/tmp/project",
+    );
+
+    expect(await client.childSessions?.("ses_1")).toEqual({
+      sessions: [
+        { id: "ses_child_1", permissions: [] },
+        { id: "ses_child_2", permissions: undefined },
+      ],
+      complete: true,
+    });
+    expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+      "/api/session",
+      "/api/session",
+    ]);
+    expect(new URL(requests[0]?.url ?? "").searchParams.get("parentID")).toBe("ses_1");
+    expect(new URL(requests[1]?.url ?? "").searchParams.get("cursor")).toBe("page-2");
   });
 
   it("registers app-managed MCP servers through the 2.x runtime MCP route and waits until connected", async () => {
@@ -462,7 +472,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41729/"),
       },
@@ -511,7 +520,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41732/"),
       },
@@ -537,7 +545,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41731/"),
       },
@@ -593,7 +600,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.2.0",
         url: new URL("http://127.0.0.1:41732/"),
       },
@@ -636,40 +642,6 @@ describe("official OpenCode client routing", () => {
     }
   });
 
-  it("forks a 1.x session through its own fork route, before the named message", async () => {
-    const requests: Request[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (request: Request) => {
-        requests.push(request.clone());
-        return new Response(
-          JSON.stringify({
-            id: "ses_fork",
-            slug: "s",
-            projectID: "p",
-            directory: "/tmp/project",
-            title: "t (fork #1)",
-            version: "1",
-            time: { created: 1, updated: 1 },
-          }),
-          { headers: { "content-type": "application/json" } },
-        );
-      }),
-    );
-    const client = makeOfficialOpenCodeClient(
-      { authorization: "Basic redacted", pid: 1, url: new URL("http://127.0.0.1:41733/") },
-      "/tmp/project",
-    );
-    expect(await client.forkSession?.("ses_source", "msg_3")).toMatchObject({
-      id: "ses_fork",
-      directory: "/tmp/project",
-    });
-    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
-      ["POST", "/session/ses_source/fork"],
-    ]);
-    expect(await requests[0]?.json()).toEqual({ messageID: "msg_3" });
-  });
-
   it("sends a flat prompt body to the 2.x session prompt route", async () => {
     const requests: Request[] = [];
     vi.stubGlobal(
@@ -686,19 +658,16 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41730/"),
       },
       "/tmp/project",
     );
-    const permission = [{ permission: "*", pattern: "*", action: "ask" }] as const;
     await client.prompt({
       sessionId: "ses_1",
       providerId: "openai",
       modelId: "gpt-5",
       prompt: "hello",
-      permission: [...permission],
     });
     const promptRequest = requests.find(
       (request) => new URL(request.url).pathname === "/api/session/ses_1/prompt",
@@ -743,7 +712,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.2.0",
         url: new URL("http://127.0.0.1:41732/"),
       },
@@ -777,7 +745,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.2.0",
         url: new URL("http://127.0.0.1:41733/"),
       },
@@ -804,7 +771,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.2.0",
         url: new URL("http://127.0.0.1:41734/"),
       },
@@ -848,7 +814,6 @@ describe("official OpenCode client routing", () => {
       {
         authorization: "Basic redacted",
         pid: 1,
-        runtime: "beta",
         version: "opencode v2.2.0",
         url: new URL("http://127.0.0.1:41734/"),
       },
@@ -867,14 +832,5 @@ describe("official OpenCode client routing", () => {
       contextAdmitted: true,
     });
     await expect(run()).rejects.toMatchObject({ contextAdmitted: false });
-  });
-
-  it("offers no command route on a 1.x runtime, whose route answers only after the run ends", () => {
-    const client = makeOfficialOpenCodeClient(
-      { authorization: "Basic redacted", pid: 1, url: new URL("http://127.0.0.1:41735/") },
-      "/tmp/project",
-    );
-    expect(client.commands).toBeUndefined();
-    expect(client.command).toBeUndefined();
   });
 });

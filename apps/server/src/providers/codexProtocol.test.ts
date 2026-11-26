@@ -539,8 +539,9 @@ describe("Codex stable 0.144.4 protocol", () => {
         startedAtMs: 10,
       },
     });
-    // Known item types keep their strict shape.
-    expect(() =>
+    // A known item type keeps its strict shape; a notification that breaks
+    // it is dropped like one this build does not know.
+    expect(
       decodeCodexServerMessage({
         method: "item/started",
         params: {
@@ -550,7 +551,65 @@ describe("Codex stable 0.144.4 protocol", () => {
           startedAtMs: 10,
         },
       }),
-    ).toThrow();
+    ).toEqual({ kind: "unknown-notification", method: "item/started" });
+  });
+
+  it("decodes the statuses, fields and modalities a newer Codex adds", () => {
+    expect(
+      decodeCodexServerMessage({
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          futureField: true,
+          turn: { id: "turn-1", status: "futureStatus", futureField: 1 },
+        },
+      }),
+    ).toEqual({
+      kind: "notification",
+      method: "turn/completed",
+      params: { threadId: "thread-1", turn: { id: "turn-1", status: "futureStatus" } },
+    });
+    expect(
+      decodeCodexServerMessage({
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { type: "mcpToolCall", id: "item-1", server: "s", tool: "t", status: "skipped" },
+          completedAtMs: 10,
+        },
+      }),
+    ).toMatchObject({ kind: "notification", params: { item: { status: "skipped" } } });
+    expect(
+      decodeCodexServerMessage({
+        method: "turn/plan/updated",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          explanation: null,
+          plan: [{ step: "Ship it", status: "blocked" }],
+        },
+      }),
+    ).toMatchObject({ kind: "notification", params: { plan: [{ status: "blocked" }] } });
+    expect(
+      decodeModelListResult({
+        data: [
+          {
+            id: "m",
+            model: "m",
+            displayName: "M",
+            hidden: false,
+            supportedReasoningEfforts: [],
+            defaultReasoningEffort: "medium",
+            inputModalities: ["text", "audio", "image"],
+            serviceTiers: [],
+            defaultServiceTier: null,
+            isDefault: true,
+          },
+        ],
+        nextCursor: null,
+      }).data[0]?.inputModalities,
+    ).toEqual(["text", "image"]);
   });
 
   it("decodes stable user-message and compaction lifecycle metadata without content", () => {
@@ -756,14 +815,79 @@ describe("Codex stable 0.144.4 protocol", () => {
     },
   );
 
-  it("rejects malformed correlations and token counts", () => {
-    expect(() =>
+  it("always reads a turn's end for a thread it can name, however the rest of the notification is shaped", () => {
+    const ended = (params: unknown) =>
+      decodeCodexServerMessage({ method: "turn/completed", params });
+    // An error object this build cannot read still says the turn failed.
+    expect(
+      ended({ threadId: "thread-1", turn: { id: "turn-1", status: "failed", error: { code: 7 } } }),
+    ).toEqual({
+      kind: "notification",
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "failed", error: { message: "" } },
+      },
+    });
+    expect(
+      ended({
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: "It stopped." },
+      }),
+    ).toMatchObject({
+      params: { turn: { id: "turn-1", status: "failed", error: { message: "" } } },
+    });
+    // What can still be read of the error is kept.
+    expect(
+      ended({
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "failed",
+          error: {
+            message: "Out of credits.",
+            codexErrorInfo: "usageLimitExceeded",
+            additionalDetails: 7,
+          },
+        },
+      }),
+    ).toMatchObject({
+      params: {
+        turn: { error: { message: "Out of credits.", codexErrorInfo: "usageLimitExceeded" } },
+      },
+    });
+    // A status that is not text cannot say the turn went well.
+    expect(ended({ threadId: "thread-1", turn: { id: "turn-1", status: 3 } })).toEqual({
+      kind: "notification",
+      method: "turn/completed",
+      params: { threadId: "thread-1", turn: { id: "turn-1", status: "failed" } },
+    });
+    // No turn id: the thread's running turn is the one that ended.
+    for (const params of [
+      { threadId: "thread-1", turn: { status: "completed" } },
+      { threadId: "thread-1", turn: "turn-1" },
+      { threadId: "thread-1" },
+    ]) {
+      expect(ended(params)).toEqual({
+        kind: "notification",
+        method: "turn/completed",
+        params: { threadId: "thread-1", turn: { id: "", status: "failed" } },
+        turnUnreadable: true,
+      });
+    }
+    // No thread either: nothing says whose turn ended, so the stream fails.
+    expect(() => ended({ turn: { id: "turn-1", status: "completed" } })).toThrow();
+    expect(() => ended(null)).toThrow();
+  });
+
+  it("drops a notification it cannot read, and declines a request it cannot read, without failing the connection", () => {
+    expect(
       decodeCodexServerMessage({
         method: "item/agentMessage/delta",
         params: { turnId: "turn-1", itemId: "item-1", delta: "missing thread" },
       }),
-    ).toThrow();
-    expect(() =>
+    ).toEqual({ kind: "unknown-notification", method: "item/agentMessage/delta" });
+    expect(
       decodeCodexServerMessage({
         id: 1,
         method: "item/commandExecution/requestApproval",
@@ -776,21 +900,23 @@ describe("Codex stable 0.144.4 protocol", () => {
           networkApprovalContext: { host: "example.test", protocol: "ftp" },
         },
       }),
-    ).toThrow();
-    expect(() =>
+    ).toEqual({
+      kind: "unsupported-request",
+      id: 1,
+      method: "item/commandExecution/requestApproval",
+    });
+    expect(
       decodeCodexServerMessage({
         id: 1,
         method: "item/fileChange/requestApproval",
         params: { threadId: "thread-1", turnId: "turn-1", startedAtMs: 20 },
       }),
-    ).toThrow();
-    expect(() =>
-      decodeCodexServerMessage({
-        method: "turn/completed",
-        params: { threadId: "thread-1", turn: { status: "completed" } },
-      }),
-    ).toThrow();
-    expect(() =>
+    ).toEqual({
+      kind: "unsupported-request",
+      id: 1,
+      method: "item/fileChange/requestApproval",
+    });
+    expect(
       decodeCodexServerMessage({
         method: "thread/tokenUsage/updated",
         params: {
@@ -815,6 +941,6 @@ describe("Codex stable 0.144.4 protocol", () => {
           },
         },
       }),
-    ).toThrow();
+    ).toEqual({ kind: "unknown-notification", method: "thread/tokenUsage/updated" });
   });
 });

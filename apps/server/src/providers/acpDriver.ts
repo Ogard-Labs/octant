@@ -1466,6 +1466,22 @@ function makeConnection(
         return;
       }
       if (state.compacting) return;
+      // The mapper drops an update that arrives after the turn ended, which is
+      // right for the turn. A tool call among them means the agent is still
+      // working for that finished turn, though, and a process kept warm in
+      // that state would report the rest of the call into the next turn, where
+      // the mapper starts a call it never saw. Such a process is closed at stop
+      // instead of parked, as a parked one is on any update. An agent whose
+      // trailing updates are known to be harmless keeps its process, as it
+      // does while parked.
+      const update = notification.params.update.sessionUpdate;
+      if (
+        state.context.terminal &&
+        profile.toleratesStrayUpdates !== true &&
+        notification.params.sessionId === state.sourceSessionId &&
+        (update === "tool_call" || update === "tool_call_update")
+      )
+        state.completed = false;
       for (const mapped of mapAcpNotification(state.context, notification)) {
         if (mapped.kind === "event") offer(mapped.event);
         else if (mapped.kind === "protocol-failure") {
@@ -1586,9 +1602,9 @@ function makeConnection(
         return;
       }
       // Offered only allow-always, an approval needs an answer that holds for
-      // the session, and a helper run's answers hold for one call. Asking the
-      // person would end in a refusal the run cannot get past, so the request
-      // is denied on arrival and the reason shown on the call.
+      // the session, and a Strict helper run's answers hold for one call.
+      // Asking the person would end in a refusal the run cannot get past, so
+      // the request is denied on arrival and the reason shown on the call.
       if (
         mapped.kind === "approval" &&
         mapped.allowOptionId === undefined &&
@@ -1769,7 +1785,7 @@ function makeConnection(
               executionPolicy,
               ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
               ...(strict ? {} : { strict: false }),
-              ...(strict || ownChannels === undefined ? {} : { ownChannels }),
+              ...(ownChannels === undefined ? {} : { ownChannels }),
               ...(apiKey === undefined ? {} : { apiKey }),
               ...(options.googleCloud === undefined ? {} : { googleCloud: options.googleCloud }),
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),

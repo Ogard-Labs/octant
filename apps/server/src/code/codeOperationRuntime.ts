@@ -547,6 +547,16 @@ export interface CodeOperationRuntimeOptions {
     availability: "down" | undefined,
     stopped: CodeStoppedTurn,
   ) => Promise<void>;
+  /**
+   * The person approved the plan the thread's turn handed over, and the thread
+   * left Plan. Fires once that turn has closed, so the host can start the turn
+   * that carries the plan out, at the level the thread returned to: approving
+   * a plan starts the work in the provider's own app, and here the person had
+   * to send another message first. A rejection is ignored: the level change is
+   * journaled and stays, and the person's next message carries the plan out.
+   * Never fires for a Strict thread, or one whose Strict cannot be resolved.
+   */
+  readonly onPlanApproved?: (threadId: CodeThreadId) => Promise<void>;
   /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
   /**
@@ -3495,6 +3505,8 @@ interface ActiveTurn {
   deltaFlushFailure?: { readonly error: unknown };
   /** Reason a forced stop journals instead of the runner's generic cancellation copy. */
   interruptMessage?: string;
+  /** The turn ended because the person approved its plan and the thread left Plan. */
+  planApproved?: true;
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
   /** The `operation-state` value and reason last journaled, whichever path wrote the frame. */
   lastPersistedState?: "running" | "waiting" | "completed" | "interrupted" | "failed";
@@ -5940,6 +5952,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ? "The thread moved to Plan at the agent's request. Its next turn runs in Plan, read-only."
         : "The plan was approved and the thread left Plan. Its next turn carries the plan out.";
     active.interruptMessage = lostText === undefined ? ended : `${ended} ${lostText}`;
+    if (change.to !== "plan") active.planApproved = true;
     active.state = "interrupted";
     this.#revokeBrowserGrants(active);
     this.#persistRuntimeWork(active, "interrupted");
@@ -7161,6 +7174,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           void this.#options
             .onProviderStop?.(active.thread.id, stoppedOnFailure.availability, stopped)
             .catch(() => undefined);
+        } else if (active.planApproved === true && !this.#strict(active.thread.id)) {
+          // Under Strict the host starts no turn of its own here: the thread
+          // waits for the person's next message, as before plans continued.
+          void this.#options.onPlanApproved?.(active.thread.id).catch(() => undefined);
         }
       });
   }
