@@ -4710,6 +4710,13 @@ describe("App", () => {
         expect(screen.getByRole("region", { name: "Subagent" })).toBeVisible();
         expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
         expect(within(reviewDock).queryByRole("region", { name: "Subagent" })).toBeNull();
+        // Ordinary Review afterwards is the working tree, not the saved diff.
+        await user.click(bandTool("Review"));
+        await user.click(bandTool("Review"));
+        expect(await screen.findByRole("button", { name: "Working tree" })).toBeVisible();
+        expect(
+          screen.queryByRole("region", { name: "Saved child review" }),
+        ).not.toBeInTheDocument();
         return;
       }
       await user.click(within(tray).getByRole("button", { name: /View all/ }));
