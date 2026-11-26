@@ -91,8 +91,10 @@ its asks appear on the parent's thread.
   servers it started, Simulators and emulators it booted, recordings and
   Computer grants stop when its run ends or is cancelled, and at once when it
   no longer holds its grant. Devices a child booted are listed on disk and shut
-  down when the host next starts; terminals, debug sessions and language
-  servers are already reaped then.
+  down when the host next starts; a device stays listed until a shutdown is
+  confirmed, so one that refused or timed out is tried again at the next
+  start. Terminals, debug sessions and language servers are already reaped
+  then. A child opens no device pane, and its results say none is shown.
 
 | Tool                                                                | Child run                                                                                                                                                                                                                                                                                                 |
 | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

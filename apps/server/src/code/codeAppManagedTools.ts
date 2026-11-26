@@ -373,7 +373,8 @@ export interface CodeAppleToolPort extends CodeDeviceEvidencePort {
       readonly checkoutId: CodeThread["checkoutId"];
     },
   ) => Promise<AppleRuntimeSnapshot | undefined>;
-  readonly requestPaneOpen: (
+  /** Absent where no pane belongs to the caller; results then claim none. */
+  readonly requestPaneOpen?: (
     windowId: WindowId,
     scope: {
       readonly authority: ToolActionAuthority;
@@ -415,7 +416,8 @@ export interface CodeAndroidToolPort extends CodeDeviceEvidencePort {
       readonly checkoutId: CodeThread["checkoutId"];
     },
   ) => Promise<AndroidRuntimeSnapshot | undefined>;
-  readonly requestPaneOpen: (
+  /** Absent where no pane belongs to the caller; results then claim none. */
+  readonly requestPaneOpen?: (
     windowId: WindowId,
     scope: {
       readonly authority: ToolActionAuthority;
@@ -2495,9 +2497,9 @@ async function appleTool(
     // it is a read under every posture and has no host action an approval
     // could bind to. Only opening a shut-down one boots, and that is gated below.
     if (destination.state === "booted" || destination.state === "booting") {
-      await apple.requestPaneOpen(options.windowId, scope, destination.simulatorId);
+      await apple.requestPaneOpen?.(options.windowId, scope, destination.simulatorId);
       return {
-        result: inAppPaneResult({
+        result: paneShown(apple, inAppPaneResult, {
           kind: "open",
           outcome: "succeeded",
           simulatorId: String(destination.simulatorId),
@@ -2516,13 +2518,13 @@ async function appleTool(
       signal,
     );
     if (decision.kind === "refused") return failure(decision.reason, decision.message);
-    await apple.requestPaneOpen(options.windowId, scope, destination.simulatorId);
+    await apple.requestPaneOpen?.(options.windowId, scope, destination.simulatorId);
     const evidence = await apple.execute(options.windowId, {
       ...request,
       approval: decision.approval,
     });
     if (evidence === undefined) return failure("apple-unavailable");
-    return appleEvidenceResult(evidence, true);
+    return appleEvidenceResult(evidence, apple.requestPaneOpen !== undefined);
   }
 
   if (signal?.aborted) return failure("tool-interrupted");
@@ -2548,12 +2550,12 @@ async function appleTool(
   if (opensPane && input.simulatorId !== undefined) {
     const simulatorId = decodeToolSimulatorId(input.simulatorId);
     if (simulatorId !== undefined) {
-      await apple.requestPaneOpen(options.windowId, scope, simulatorId);
+      await apple.requestPaneOpen?.(options.windowId, scope, simulatorId);
     }
   }
   const evidence = await apple.execute(options.windowId, request);
   if (evidence === undefined) return failure("apple-unavailable");
-  const result = appleEvidenceResult(evidence, opensPane);
+  const result = appleEvidenceResult(evidence, opensPane && apple.requestPaneOpen !== undefined);
   if (input.operation === "logs" && evidence.outcome === "succeeded") {
     if (signal?.aborted) return failure("tool-interrupted");
     const reference = evidence.artifacts.find((artifact) => artifact.kind === "log")?.reference;
@@ -2657,9 +2659,9 @@ async function androidTool(
       return failure("unavailable", "That Android emulator destination is unavailable.");
     }
     if (destination.state === "booted" || destination.state === "booting") {
-      await android.requestPaneOpen(options.windowId, scope, destination.emulatorId);
+      await android.requestPaneOpen?.(options.windowId, scope, destination.emulatorId);
       return {
-        result: inAppAndroidPaneResult({
+        result: paneShown(android, inAppAndroidPaneResult, {
           kind: "open",
           outcome: "succeeded",
           emulatorId: String(destination.emulatorId),
@@ -2678,13 +2680,13 @@ async function androidTool(
       signal,
     );
     if (decision.kind === "refused") return failure(decision.reason, decision.message);
-    await android.requestPaneOpen(options.windowId, scope, destination.emulatorId);
+    await android.requestPaneOpen?.(options.windowId, scope, destination.emulatorId);
     const evidence = await android.execute(options.windowId, {
       ...request,
       approval: decision.approval,
     });
     if (evidence === undefined) return failure("android-unavailable");
-    return androidEvidenceResult(evidence, true);
+    return androidEvidenceResult(evidence, android.requestPaneOpen !== undefined);
   }
 
   if (signal?.aborted) return failure("tool-interrupted");
@@ -2709,12 +2711,15 @@ async function androidTool(
   if (opensPane && input.emulatorId !== undefined) {
     const emulatorId = decodeToolEmulatorId(input.emulatorId);
     if (emulatorId !== undefined) {
-      await android.requestPaneOpen(options.windowId, scope, emulatorId);
+      await android.requestPaneOpen?.(options.windowId, scope, emulatorId);
     }
   }
   const evidence = await android.execute(options.windowId, request);
   if (evidence === undefined) return failure("android-unavailable");
-  const result = androidEvidenceResult(evidence, opensPane);
+  const result = androidEvidenceResult(
+    evidence,
+    opensPane && android.requestPaneOpen !== undefined,
+  );
   if (
     (input.operation === "describe-ui" || input.operation === "logs") &&
     evidence.outcome === "succeeded"
@@ -2936,6 +2941,15 @@ function androidActionRequest(
 
 const IN_APP_PANE_NOTE =
   "The Simulator is showing in Octant's iOS Simulator pane. Do not launch Simulator.app, run open -a Simulator, or start serve-sim.";
+
+/** A result names the pane only where the tool's caller has one to show it in. */
+function paneShown<T extends Record<string, unknown>>(
+  port: { readonly requestPaneOpen?: unknown },
+  shown: (result: T) => T,
+  result: T,
+): T {
+  return port.requestPaneOpen === undefined ? result : shown(result);
+}
 
 function inAppPaneResult<T extends Record<string, unknown>>(
   result: T,

@@ -68,7 +68,10 @@ function input(overrides: Parameters<typeof childHost>[0] = {}): ChildDeviceTool
   };
 }
 
-function appleService(initial: "shutdown" | "booted" = "shutdown") {
+function appleService(
+  initial: "shutdown" | "booted" = "shutdown",
+  fails: ReadonlyArray<string> = [],
+) {
   let state = initial;
   const executed: Array<{ kind: string; context: Record<string, unknown> }> = [];
   return {
@@ -85,6 +88,8 @@ function appleService(initial: "shutdown" | "booted" = "shutdown") {
       executed.push({ kind: request.kind, context });
       if (context["approvalValid"] !== true && context["executionPolicy"] !== "full-access")
         return { outcome: "unauthorized", kind: request.kind, artifacts: [], diagnostics: [] };
+      if (fails.includes(request.kind))
+        return { outcome: "failed", kind: request.kind, artifacts: [], diagnostics: [] };
       if (request.kind === "boot") state = "booted";
       if (request.kind === "shutdown") state = "shutdown";
       return {
@@ -160,6 +165,44 @@ describe("a Code child's Simulators", () => {
     expect(running.executed.map((entry) => entry.kind)).not.toContain("shutdown");
   });
 
+  it("stay on disk for a restart when they would not shut down", async () => {
+    const service = appleService("shutdown", ["shutdown"]);
+    const child = input();
+    const tools = apple(child, service);
+    await tools?.execute(call("octant_apple", { operation: "boot", simulatorId: DEVICE }));
+    await tools?.close?.();
+    expect(service.executed.map((entry) => entry.kind)).toEqual(["boot", "shutdown"]);
+    expect(
+      await new ChildBootedDeviceLedger(join(directory, "devices.json")).leftOver(),
+    ).toMatchObject([{ platform: "apple", deviceId: DEVICE }]);
+  });
+
+  it("are shut down with the run after a failed test on one that was off", async () => {
+    // Xcode may boot the Simulator before the test fails, and the cached state still reads shutdown.
+    const service = appleService("shutdown", ["test"]);
+    const child = input({ policy: "full-access" });
+    const tools = apple(child, service);
+    await tools?.execute(
+      call("octant_apple", {
+        operation: "test",
+        projectPath: "App.xcodeproj",
+        scheme: "App",
+        simulatorId: DEVICE,
+      }),
+    );
+    await tools?.close?.();
+    expect(service.executed.map((entry) => entry.kind)).toEqual(["test", "shutdown"]);
+  });
+
+  it("say no pane shows a running one, since a child opens none", async () => {
+    const tools = apple(input(), appleService("booted"));
+    const opened = await tools?.execute(
+      call("octant_apple", { operation: "open", simulatorId: DEVICE }),
+    );
+    expect(opened).toMatchObject({ isError: false, result: { kind: "open" } });
+    expect(opened?.result).not.toHaveProperty("opensInAppPane");
+  });
+
   it("refuse a test on a Simulator the run could not be held to", async () => {
     const service = appleService();
     const tools = apple(input({ policy: "full-access" }), service);
@@ -220,5 +263,32 @@ describe("a Code child's emulators", () => {
     });
     await tools?.close?.();
     expect(kinds).toEqual(["boot", "shutdown"]);
+  });
+
+  it("stay on disk for a restart when the image refuses to power off", async () => {
+    const service = {
+      discover: vi.fn(async () => undefined),
+      cancel: vi.fn(async () => true),
+      snapshot: vi.fn(() => ({
+        sdk: { available: true },
+        emulators: [{ emulatorId: "Pixel_9", name: "Pixel 9", state: "shutdown" }],
+        active: [],
+      })),
+      readScreenshotArtifact: vi.fn(),
+      readLogArtifact: vi.fn(),
+      execute: vi.fn(async (request: { kind: string }, _context: unknown) => ({
+        outcome: request.kind === "shutdown" ? "failed" : "succeeded",
+        kind: request.kind,
+        artifacts: [],
+        diagnostics: [],
+      })),
+    };
+    const child = input();
+    const tools = childAndroidTools({ ...child, android: service as never, artifactRoot: "/a" });
+    await tools?.execute(call("octant_android", { operation: "boot", emulatorId: "Pixel_9" }));
+    await tools?.close?.();
+    expect(
+      await new ChildBootedDeviceLedger(join(directory, "devices.json")).leftOver(),
+    ).toMatchObject([{ platform: "android", deviceId: "Pixel_9" }]);
   });
 });

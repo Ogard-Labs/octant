@@ -138,7 +138,8 @@ function deviceTool(
     readonly port: Pick<CodeAppManagedToolsOptions, "apple" | "android">;
     readonly stopRecording: (deviceId: string) => Promise<unknown>;
     readonly cancelActive: () => Promise<unknown>;
-    readonly stop: (device: ChildBootedDevice) => Promise<unknown>;
+    /** Whether the device is now seen stopped; until then its record stays for a restart. */
+    readonly stop: (device: ChildBootedDevice) => Promise<boolean>;
   },
 ): AppManagedToolSet | undefined {
   const { host, threads } = input;
@@ -239,8 +240,7 @@ function deviceTool(
           for (const deviceId of recordings) await built.stopRecording(deviceId);
           recordings.clear();
           for (const device of devices.values()) {
-            await built.stop(device);
-            await input.ledger.remove(device);
+            if (await built.stop(device)) await input.ledger.remove(device);
           }
           devices.clear();
         } finally {
@@ -281,18 +281,25 @@ const appleHostContext = (
   approvalValid: true,
 });
 
-/** Shuts down a Simulator a child run booted, as the host. */
+/**
+ * Shuts down a Simulator a child run booted, as the host, and answers whether
+ * it is now off. A refused or timed-out shutdown answers false, so the record
+ * a restart recovers it from is kept.
+ */
 export async function shutDownChildSimulator(
   apple: Pick<AppleToolchainService, "execute">,
   device: ChildBootedDevice,
   input: { readonly artifactRoot: string; readonly uuid: () => string },
-): Promise<void> {
+): Promise<boolean> {
   const request: AppleSimulatorRequest = {
     ...hostAction(input, device),
     kind: "shutdown",
     simulatorId: device.deviceId as never,
   };
-  await apple.execute(request, appleHostContext(device, input.artifactRoot)).catch(() => undefined);
+  const evidence = await apple
+    .execute(request, appleHostContext(device, input.artifactRoot))
+    .catch(() => undefined);
+  return evidence?.outcome === "succeeded";
 }
 
 /** `octant_apple` for an attended Code child outside Plan, on a host that lends an Apple toolchain. */
@@ -357,12 +364,9 @@ export function childAppleTools(
           else if (request.kind === "start-recording") device.recording(named, succeeded);
           else if (request.kind === "stop-recording") device.recording(named, false);
           // One whose state was unknown and would not boot was running already.
-          else if (
-            boots &&
-            !succeeded &&
-            (before === undefined || stateOf(context, named) === "shutdown")
-          )
-            await device.forget(named);
+          // Any other that failed stays held: a failed run or test may have
+          // booted it through Xcode, which leaves the cached state at shutdown.
+          else if (boots && !succeeded && before === undefined) await device.forget(named);
         }
         input.recordEvidence(evidence, startedAt);
         return evidence;
@@ -381,8 +385,8 @@ export function childAppleTools(
         const context = await contextFor(scope);
         return context === undefined ? undefined : apple.readLogArtifact(reference, context);
       },
-      // The pane belongs to the thread the person has open; a child opens none.
-      requestPaneOpen: async () => undefined,
+      // The pane belongs to the thread the person has open; a child opens none,
+      // so its results claim none.
       // Every input of a child's asks for itself.
       inputGrantIsOpen: () => false,
     };
@@ -464,12 +468,15 @@ const androidHostContext = (
   approvalValid: true,
 });
 
-/** Shuts down an emulator a child run booted, as the host. */
+/**
+ * Shuts down an emulator a child run booted, as the host, and answers whether
+ * it is now off: powered off, or not among the emulators adb sees running.
+ */
 export async function shutDownChildEmulator(
   android: Pick<AndroidToolchainService, "discover" | "execute">,
   device: ChildBootedDevice,
   input: { readonly artifactRoot: string; readonly uuid: () => string },
-): Promise<void> {
+): Promise<boolean> {
   const context = androidHostContext(device, input.artifactRoot);
   // A host that has just started knows no emulator until it has looked.
   const { approval: _approval, timeoutMs: _timeoutMs, ...looking } = hostAction(input, device);
@@ -479,7 +486,12 @@ export async function shutDownChildEmulator(
     kind: "shutdown",
     emulatorId: device.deviceId as never,
   };
-  await android.execute(request, context).catch(() => undefined);
+  const evidence = await android.execute(request, context).catch(() => undefined);
+  return (
+    evidence?.outcome === "succeeded" ||
+    (evidence?.outcome === "invalid-destination" &&
+      evidence.diagnostics.some((note) => note.message === "destination-not-booted"))
+  );
 }
 
 /** `octant_android` for an attended Code child outside Plan, on a host that lends an Android toolchain. */
@@ -546,7 +558,6 @@ export function childAndroidTools(
         const context = await contextFor(scope);
         return context === undefined ? undefined : android.readLogArtifact(reference, context);
       },
-      requestPaneOpen: async () => undefined,
       inputGrantIsOpen: () => false,
     };
     return {

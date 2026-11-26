@@ -259,17 +259,18 @@ export function wireChildTools(deps: ChildToolsDependencies): {
   return {
     settleChildDevices: async () => {
       for (const device of await ledger.leftOver()) {
-        if (device.platform === "apple")
-          await shutDownChildSimulator(deps.appleToolchainService, device, {
-            artifactRoot: appleArtifacts,
-            uuid: randomUUID,
-          });
-        else
-          await shutDownChildEmulator(deps.androidToolchainService, device, {
-            artifactRoot: androidArtifacts,
-            uuid: randomUUID,
-          });
-        await ledger.remove(device);
+        // A device not seen stopped stays on the list for the next start.
+        const stopped =
+          device.platform === "apple"
+            ? await shutDownChildSimulator(deps.appleToolchainService, device, {
+                artifactRoot: appleArtifacts,
+                uuid: randomUUID,
+              })
+            : await shutDownChildEmulator(deps.androidToolchainService, device, {
+                artifactRoot: androidArtifacts,
+                uuid: randomUUID,
+              });
+        if (stopped) await ledger.remove(device);
       }
     },
   };
