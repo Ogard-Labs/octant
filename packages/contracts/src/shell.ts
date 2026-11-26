@@ -575,10 +575,6 @@ export type ThreadReplyDetails = typeof ThreadReplyDetails.Type;
  */
 export const REPLY_DETAIL_PATH = "/api/reply-detail";
 
-function isReplyDetailLevel(value: string): value is ReplyDetailLevel {
-  return REPLY_DETAIL_LEVEL_VALUES.some((level) => level === value);
-}
-
 /**
  * A level as a device reads it: one this version does not know, such as a
  * level added after the device was built, reads as Low, the quiet level every
@@ -587,18 +583,14 @@ function isReplyDetailLevel(value: string): value is ReplyDetailLevel {
  */
 const ReadReplyDetailLevel = Schema.transform(Schema.String, ReplyDetailLevel, {
   strict: true,
-  decode: (value) => (isReplyDetailLevel(value) ? value : "low"),
+  decode: (value) => (Schema.is(ReplyDetailLevel)(value) ? value : "low"),
   encode: (level) => level,
 });
 
 export const ReplyDetailReading = Schema.Struct({
   defaultLevel: ReadReplyDetailLevel,
   threads: Schema.Array(
-    Schema.Struct({
-      mode: OctantMode,
-      threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-      level: ReadReplyDetailLevel,
-    }).annotations(strict),
+    Schema.Struct({ ...ThreadReplyDetail.fields, level: ReadReplyDetailLevel }).annotations(strict),
   ).pipe(Schema.maxItems(MAX_THREAD_REPLY_DETAILS)),
 }).annotations(strict);
 export type ReplyDetailReading = typeof ReplyDetailReading.Type;

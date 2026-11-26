@@ -1,10 +1,12 @@
 import type { ThreadCanvasPreviewReceipt, ThreadToolCallRecord } from "@octant/contracts";
 import {
-  subagentNeedsAttention,
+  subagentRowsInWindow,
+  ThreadSubagentsContext,
   TurnSubagentRows,
-  useTurnSubagentRows,
   type TurnSubagentWindow,
 } from "../agents/threadSubagents";
+import { buildSubagentRows } from "../agents/subagentRows";
+import { useSubagentProviders } from "../agents/subagentProviders";
 import type { ToolOutsideContentMark } from "@octant/contracts/shield";
 import { SHIELD_WATCHER_LABEL_WORDS } from "@octant/domain/shield-watcher-policy";
 import { ChatRichText } from "../chat/ChatRichText";
@@ -38,7 +40,9 @@ import {
   type ReactNode,
   type ToggleEvent,
 } from "react";
-import { RevealHiddenStepsContext, thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
+import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
+import { RevealHiddenStepsContext } from "./revealHiddenSteps";
+import "./turn-activity-quiet.css";
 import {
   callTimingLabel,
   countToolKinds,
@@ -58,7 +62,6 @@ import type { DesignRunRuntime } from "../canvas/blocks/designRunningFrame";
 import {
   alwaysVisibleActivityRows,
   groupActivityRows,
-  quietActivityRows,
   settledTurnActivitySummary,
   type ActivityItem,
   type TurnActivity,
@@ -316,7 +319,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     if (hides === "nothing") return undefined;
     const closedRows = quietActivityRows(activity.rows, hides, settled && !running);
     const thinkingHides = hides === "steps" && (hasReasoning || hasReasoningTiming);
-    const attentionSubagents = subagentRows.filter(subagentNeedsAttention).length;
+    const attentionSubagents = subagentRows.filter(subagentFailedOrWaiting).length;
     const hiddenWhenClosed =
       activity.rows.length -
       closedRows.length +
@@ -550,7 +553,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         {quiet.rows.map(renderDisclosure)}
         {showSubagents && props.subagents !== undefined ? (
           <TurnSubagentRows
-            onlyNeedingAttention={quiet.subagents === "attention"}
+            {...(quiet.subagents === "attention" ? { only: subagentFailedOrWaiting } : {})}
             window={props.subagents}
           />
         ) : null}
@@ -945,4 +948,46 @@ function withRuntime(runtime: DesignRunRuntime | undefined): {
   readonly runRuntime?: DesignRunRuntime;
 } {
   return runtime === undefined ? {} : { runRuntime: runtime };
+}
+
+/**
+ * The rows a quiet Reply detail level still shows. Failures only keeps a call
+ * while it runs and afterwards only when it failed or never finished; Answers
+ * only keeps no running step, since the turn's Working line names it. Both
+ * keep every Octant Shield or reviewer decision and every failed call, and
+ * Answers only keeps a task that failed or waits on the person.
+ */
+function quietActivityRows(
+  rows: ReadonlyArray<TurnActivityRow>,
+  hides: "succeeded-calls" | "steps",
+  settled: boolean,
+): ReadonlyArray<TurnActivityRow> {
+  return rows.filter((row) => {
+    if (row.kind === "review" || row.state === "failed") return true;
+    if (row.kind === "task") return hides === "succeeded-calls" || row.state === "waiting";
+    if (row.state === "completed") return false;
+    // Started or running: live, or unfinished once the turn settled.
+    return hides === "succeeded-calls" || settled;
+  });
+}
+
+/** A subagent that failed or waits on the person: Answers only still lists it. */
+function subagentFailedOrWaiting(row: { readonly lifecycleStatus: string }): boolean {
+  return row.lifecycleStatus === "failed" || row.lifecycleStatus === "waiting";
+}
+
+/** The subagents a turn started, as its rows list them; none without a window. */
+function useTurnSubagentRows(window: TurnSubagentWindow | undefined) {
+  const subagents = useContext(ThreadSubagentsContext);
+  const providers = useSubagentProviders();
+  return window === undefined || subagents === undefined || subagents.status !== "ready"
+    ? []
+    : subagentRowsInWindow(
+        buildSubagentRows({
+          entries: subagents.entries,
+          observations: subagents.observations,
+          ...(providers === undefined ? {} : { providers }),
+        }),
+        window,
+      );
 }

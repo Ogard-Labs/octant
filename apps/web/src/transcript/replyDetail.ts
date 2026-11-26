@@ -24,12 +24,6 @@ export {
 export const ReplyDetailContext = createContext<ReplyDetailLevel>("low");
 
 /**
- * True while the transcript's Find is open: the quiet levels then show every
- * step they hide, so a search reaches all of a turn and nothing hidden is lost.
- */
-export const RevealHiddenStepsContext = createContext(false);
-
-/**
  * Where Reply detail comes from and how it changes. A local window reads and
  * writes the host's shell settings; a paired browser reads the host's answer
  * and cannot change it, so it carries no setters.
@@ -80,20 +74,11 @@ export const REPLY_DETAIL_LABELS: Readonly<Record<ReplyDetailLevel, string>> = {
 };
 
 export const REPLY_DETAIL_DESCRIPTIONS: Readonly<Record<ReplyDetailLevel, string>> = {
-  answers: "Only the message and the final reply; a finished turn's steps wait behind one line.",
-  failures: "Tool calls show while they run; only failed and unfinished ones stay.",
+  answers: "Only the message and the reply; a finished turn's steps wait behind one line.",
+  failures: "Tool calls show while they run, and only failed ones stay.",
   low: "Thinking stays folded, and a finished turn's tool calls fold behind one line.",
   medium: "Thinking stays folded with its first line showing, and tool calls stay listed.",
   high: "Thinking, tool calls, and each call's recorded result stay open.",
-};
-
-/** The same levels said short enough for a menu row at phone width. */
-export const REPLY_DETAIL_MENU_DESCRIPTIONS: Readonly<Record<ReplyDetailLevel, string>> = {
-  answers: "Message and reply, steps hidden",
-  failures: "Only failed calls stay",
-  low: "Thinking and finished tool calls folded",
-  medium: "Thinking's first line, tool calls listed",
-  high: "Thinking, tool calls, and results open",
 };
 
 const NO_CHOICES: ReadonlyMap<string, boolean> = new Map();

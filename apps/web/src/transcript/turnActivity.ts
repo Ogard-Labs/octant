@@ -168,27 +168,6 @@ export function alwaysVisibleActivityRows(activity: TurnActivity): ReadonlyArray
   );
 }
 
-/**
- * The rows a quiet Reply detail level still shows. Failures only keeps a call
- * while it runs and afterwards only when it failed or never finished; Answers
- * only keeps no running step, since the turn's Working line names it. Both
- * keep every Octant Shield or reviewer decision and every failed call, and
- * Answers only keeps a task that failed or waits on the person.
- */
-export function quietActivityRows(
-  rows: ReadonlyArray<TurnActivityRow>,
-  hides: "succeeded-calls" | "steps",
-  settled: boolean,
-): ReadonlyArray<TurnActivityRow> {
-  return rows.filter((row) => {
-    if (row.kind === "review" || row.state === "failed") return true;
-    if (row.kind === "task") return hides === "succeeded-calls" || row.state === "waiting";
-    if (row.state === "completed") return false;
-    // Started or running: live, or unfinished once the turn settled.
-    return hides === "succeeded-calls" || settled;
-  });
-}
-
 /** Tool names that usually mutate files — used only for the quiet summary line. */
 function isFileEditToolName(toolName: string): boolean {
   const name = toolName.trim().toLowerCase();

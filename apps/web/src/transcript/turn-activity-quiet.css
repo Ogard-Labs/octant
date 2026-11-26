@@ -1,0 +1,5 @@
+/* A quiet Reply detail level's one line for the steps it hides; it opens them
+   in place, and "Hide steps" puts them away again. */
+.turn-activity__hidden-steps {
+  align-self: flex-start;
+}

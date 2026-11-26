@@ -349,15 +349,7 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
 
   const replyDetail = sources.replyDetail;
   if (replyDetail !== undefined) {
-    const keywords = [
-      "reply detail",
-      "thinking",
-      "tool calls",
-      "expand",
-      "collapse",
-      "hide steps",
-      "quiet",
-    ];
+    const keywords = ["reply detail", "thinking", "tool calls", "expand", "collapse"];
     const thread = replyDetail.thread;
     if (thread !== undefined) {
       commands.push({

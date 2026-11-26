@@ -20,7 +20,7 @@ import {
 import { TranscriptOutputLimitNote } from "./outputLimitNote";
 import { useTranscriptFindIndex } from "./useTranscriptFindIndex";
 import { TranscriptFindBar } from "./TranscriptFindBar";
-import { RevealHiddenStepsContext } from "./replyDetail";
+import { RevealHiddenStepsContext } from "./revealHiddenSteps";
 import { ArrowDown } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { scrollMemory, type TranscriptScrollMemory } from "./transcriptScrollMemory";

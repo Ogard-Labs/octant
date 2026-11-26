@@ -10,7 +10,8 @@ import type { TurnActivity } from "./turnActivity";
 import { MarkdownLinkActionsContext } from "../markdown/markdownLinkActions";
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
 import type { ReactNode } from "react";
-import { ReplyDetailContext, RevealHiddenStepsContext } from "./replyDetail";
+import { ReplyDetailContext } from "./replyDetail";
+import { RevealHiddenStepsContext } from "./revealHiddenSteps";
 import { RoutineOpenContext } from "./RoutineReceiptCard";
 
 const mixed: TurnActivity = {
