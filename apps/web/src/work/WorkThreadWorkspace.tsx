@@ -205,6 +205,7 @@ import {
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
 import { appendComposerQuote, type ComposerQuote } from "../composer/composerQuote";
+import { sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
@@ -3659,6 +3660,21 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           input={
             <ComposerInput
               typedScope={typedScope}
+              recall={
+                images.staged.length > 0 || extensionDraft.receipts.length > 0
+                  ? undefined
+                  : sentPromptsNewestFirst(
+                      turns.flatMap((turn) =>
+                        turn.delivery === undefined
+                          ? turn.transcript.filter((entry) => entry.role === "user")
+                          : [],
+                      ),
+                      (entry) =>
+                        parseAutomationFollowUpTurnPrompt(entry.text) === undefined
+                          ? entry.text
+                          : undefined,
+                    )
+              }
               inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"

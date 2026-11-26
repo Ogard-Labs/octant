@@ -129,6 +129,13 @@ export interface ComposerInputProps extends ForwardedAttributes {
    * whose typing a send may claim. Without one, the prompt is its own draft.
    */
   readonly typedScope?: string | undefined;
+  /**
+   * The prompts already sent in this thread, newest first. In an empty prompt
+   * ArrowUp brings them back one by one and ArrowDown walks forward again,
+   * for as long as the recalled text is unedited. A caller with attachments
+   * or other context beside the prompt passes none.
+   */
+  readonly recall?: ReadonlyArray<string> | undefined;
 }
 
 const TAG_NAME = "octant-composer-input";
@@ -455,6 +462,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       renderModelChip,
       inlineChips,
       typedScope,
+      recall,
       ...attributes
     } = props;
     const ownScope = `composer:${useId()}`;
@@ -605,12 +613,12 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
 
     // A change made from a chip of the prompt's own (a quote's note, or the
     // quote taken out): one undo step, and not the person's typing.
-    const replaceRange = (start: number, end: number, text: string) => {
+    const replaceRange = (start: number, end: number, text: string, caretAt?: number) => {
       const root = rootRef.current;
       if (root === null) return;
       const current = modelRef.current;
       const next = `${current.slice(0, start)}${text}${current.slice(end)}`;
-      const caret = start + text.length;
+      const caret = caretAt ?? start + text.length;
       modelRef.current = next;
       pendingRef.current = { start: caret, end: caret };
       lastSelectionRef.current = { start: caret, end: caret };
@@ -618,6 +626,37 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       reportedRef.current = next;
       report(root, false);
       tick();
+    };
+
+    // Which sent prompt the prompt shows, and its text as recalled: an edit
+    // makes the text the person's draft, and the arrows move the caret again.
+    const recalledRef = useRef<{ readonly index: number; readonly text: string }>({
+      index: -1,
+      text: "",
+    });
+
+    const recallStep = (root: HTMLElement, direction: "older" | "newer"): boolean => {
+      const sent = recall ?? [];
+      const current = modelRef.current;
+      const recalled = recalledRef.current;
+      const showing = current !== "" && recalled.index >= 0 && current === recalled.text;
+      if (current !== "" && !showing) return false;
+      const { start, end } = currentSelection(root);
+      if (start !== end) return false;
+      const index = showing ? recalled.index : -1;
+      if (direction === "older") {
+        if (current.slice(0, start).includes("\n")) return false;
+        const next = sent[index + 1];
+        if (next === undefined) return showing;
+        recalledRef.current = { index: index + 1, text: next };
+        replaceRange(0, current.length, next, 0);
+        return true;
+      }
+      if (!showing || current.slice(end).includes("\n")) return false;
+      const next = index > 0 ? (sent[index - 1] ?? "") : "";
+      recalledRef.current = { index: index - 1, text: next };
+      replaceRange(0, current.length, next);
+      return true;
     };
 
     const restore = (root: ComposerInputElement, direction: -1 | 1) => {
@@ -906,6 +945,15 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         if (event.key === "Enter") {
           event.preventDefault();
           replaceSelection(root, "\n");
+          return;
+        }
+        const plainArrow = !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey;
+        if (
+          plainArrow &&
+          (event.key === "ArrowUp" || event.key === "ArrowDown") &&
+          recallStep(root, event.key === "ArrowUp" ? "older" : "newer")
+        ) {
+          event.preventDefault();
           return;
         }
         const modifier = event.metaKey || event.ctrlKey;

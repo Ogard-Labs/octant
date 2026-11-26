@@ -81,6 +81,7 @@ import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/Thr
 import { ChatPendingQuestions, ChatTranscript, type ChatTranscriptProps } from "./ChatTranscript";
 import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
 import { appendComposerQuote, REPLY_QUOTE_SOURCE } from "../composer/composerQuote";
+import { sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
@@ -1841,6 +1842,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           )}
           <ChatComposer
             typedScope={typedScope}
+            recall={
+              pendingAttachments.length > 0 ||
+              pendingPreviewSelections.length > 0 ||
+              pendingCanvasSelections.length > 0 ||
+              pendingExtensionSelections.length > 0
+                ? undefined
+                : chatPromptsNewestFirst(view)
+            }
             stash={stash}
             readOnly={readOnly}
             benchmarkProjectId={view.thread.projectId}
@@ -2566,4 +2575,16 @@ function researchBackend(
   return observation?.capabilities.nativeWebResearch === "supported"
     ? { kind: "selected", backend: "provider-native" }
     : { kind: "unavailable", reason: "No compatible research backend is available." };
+}
+
+/** The person's own prompts in a Chat thread, newest first; delivered reports are the host's. */
+function chatPromptsNewestFirst(view: ChatThreadView): ReadonlyArray<string> {
+  const bodies = new Map(
+    view.contents.flatMap((content) =>
+      content.role === "user" ? [[String(content.contentId), content.body] as const] : [],
+    ),
+  );
+  return sentPromptsNewestFirst(activeChatTurns(view.turns), (turn) =>
+    turn.delivery === undefined ? bodies.get(String(turn.userMessageRef.contentId)) : undefined,
+  );
 }

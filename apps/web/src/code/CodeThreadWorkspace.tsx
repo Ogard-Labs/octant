@@ -211,6 +211,7 @@ import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
 import { appendComposerQuote, type ComposerQuote } from "../composer/composerQuote";
+import { sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
 import {
@@ -3242,6 +3243,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           input={
             <ComposerInput
               typedScope={typedScope}
+              recall={
+                attachments.staged.length > 0 || extensionDraft.receipts.length > 0
+                  ? undefined
+                  : sentPromptsNewestFirst(messages, (message) =>
+                      message.role === "user" &&
+                      message.delivery === undefined &&
+                      (message.sourceThreadId === undefined ||
+                        String(message.sourceThreadId) === String(thread.id))
+                        ? message.text
+                        : undefined,
+                    )
+              }
               inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-activedescendant={

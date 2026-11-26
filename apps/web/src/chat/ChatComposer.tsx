@@ -116,6 +116,8 @@ const MODEL_OPTION_DEFAULT_ID = "(provider default)";
 export interface ChatComposerProps {
   /** The draft this composer holds (see `threadDraftScope`). */
   readonly typedScope?: string | undefined;
+  /** This thread's sent prompts, newest first, for ArrowUp recall. */
+  readonly recall?: ReadonlyArray<string> | undefined;
   readonly stash?: ComposerStashBinding | undefined;
   readonly readOnly?: boolean;
   readonly benchmarkProjectId?: ProjectId | undefined;
@@ -632,6 +634,7 @@ export function ChatComposer(props: ChatComposerProps) {
   const input = (
     <ComposerInput
       typedScope={props.typedScope}
+      recall={props.recall}
       inlineChips={mention.inlineChips}
       renderModelChip={atMenu.renderModelChip}
       aria-activedescendant={

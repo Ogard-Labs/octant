@@ -36,6 +36,21 @@ function Prompt(props: {
   );
 }
 
+function Recalling(props: { readonly recall: ReadonlyArray<string> }) {
+  const [value, setValue] = useState("");
+  return (
+    <>
+      <label htmlFor="recalling">Message</label>
+      <ComposerInput
+        id="recalling"
+        onChange={(event) => setValue(event.currentTarget.value)}
+        recall={props.recall}
+        value={value}
+      />
+    </>
+  );
+}
+
 function Controlled(props: { readonly value: string; readonly typedScope?: string }) {
   const [value, setValue] = useState(props.value);
   const [seen, setSeen] = useState(props.value);
@@ -322,5 +337,43 @@ describe("ComposerInput", () => {
     const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
     await userEvent.type(input, "why");
     expect(composerTextWasTyped("code:q", input.value)).toBe(false);
+  });
+
+  it("ArrowUp in an empty composer brings back the last prompt sent in this thread", async () => {
+    render(<Recalling recall={["newest prompt", "older\nprompt"]} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    await userEvent.keyboard("{ArrowUp}");
+    expect(input).toHaveValue("newest prompt");
+    await userEvent.keyboard("{ArrowUp}");
+    expect(input).toHaveValue("older\nprompt");
+    // The oldest stays put; ArrowDown walks forward from the last line.
+    await userEvent.keyboard("{ArrowUp}");
+    expect(input).toHaveValue("older\nprompt");
+    input.setSelectionRange(input.value.length, input.value.length);
+    await userEvent.keyboard("{ArrowDown}");
+    expect(input).toHaveValue("newest prompt");
+    await userEvent.keyboard("{ArrowDown}");
+    expect(input).toHaveValue("");
+  });
+
+  it("editing a recalled prompt returns the arrows to the caret", async () => {
+    render(<Recalling recall={["newest prompt", "older prompt"]} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    await userEvent.keyboard("{ArrowUp}");
+    input.setSelectionRange(input.value.length, input.value.length);
+    await userEvent.keyboard("!");
+    expect(input).toHaveValue("newest prompt!");
+    await userEvent.keyboard("{ArrowUp}");
+    expect(input).toHaveValue("newest prompt!");
+  });
+
+  it("recalls nothing while the composer holds text of its own", async () => {
+    render(<Recalling recall={["newest prompt"]} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    await userEvent.type(input, "draft");
+    await userEvent.keyboard("{ArrowUp}");
+    expect(input).toHaveValue("draft");
   });
 });
