@@ -177,44 +177,49 @@ describe("handing a thread off when its account hits its usage limit", () => {
 });
 
 describe("a usage-limit stop left to the thread's account handoff", () => {
-  const onA = { providerInstanceId: "account-a" };
-  it("is left to a handoff that would move the thread to another account", () => {
-    expect(
-      stopLeftToUsageLimitHandoff(
-        { ...onA, usageLimitHandoff: { providerInstanceId: "account-b" } },
-        "stop-1",
-      ),
-    ).toBe(true);
+  const accountA = { ...work, enabled: true, displayName: "Work" };
+  const accountB = { ...personal, enabled: true, displayName: "Personal" };
+  const handingOff = {
+    providerInstanceId: String(accountA.id),
+    usageLimitHandoff: { providerInstanceId: String(accountB.id) },
+  };
+  const left = (
+    thread: Parameters<typeof stopLeftToUsageLimitHandoff>[0]["thread"],
+    options: { readonly to?: typeof accountB | undefined; readonly modelPoolOn?: boolean } = {
+      to: accountB,
+    },
+  ) =>
+    stopLeftToUsageLimitHandoff({
+      thread,
+      stopId: "stop-1",
+      modelPoolOn: options.modelPoolOn ?? false,
+      from: accountA,
+      to: "to" in options ? options.to : accountB,
+    });
+
+  it("is left to a handoff that will move the thread to another account", () => {
+    expect(left(handingOff)).toBe(true);
   });
 
   it("is left alone once a move released it, whoever made the move", () => {
-    expect(
-      stopLeftToUsageLimitHandoff(
-        { providerInstanceId: "account-b", providerHandoff: { releasedStopId: "stop-1" } },
-        "stop-1",
-      ),
-    ).toBe(true);
-    expect(
-      stopLeftToUsageLimitHandoff(
-        { providerInstanceId: "account-b", releasedStopId: "stop-1" },
-        "stop-1",
-      ),
-    ).toBe(true);
+    expect(left({ providerHandoff: { releasedStopId: "stop-1" } })).toBe(true);
+    expect(left({ releasedStopId: "stop-1" })).toBe(true);
   });
 
-  it("is not the handoff's when the opt-in is off or names the account the thread is already on", () => {
-    expect(stopLeftToUsageLimitHandoff(onA, "stop-1")).toBe(false);
+  it("is not the handoff's when the opt-in is off, refused, or already stopped on this stop", () => {
+    expect(left({})).toBe(false);
+    expect(left({ providerHandoff: { releasedStopId: "an-earlier-stop" } })).toBe(false);
+    // The account it would move to is disabled or gone, or a pool is on.
+    expect(left(handingOff, { to: { ...accountB, enabled: false } })).toBe(false);
+    expect(left(handingOff, { to: undefined })).toBe(false);
+    expect(left(handingOff, { modelPoolOn: true })).toBe(false);
+    // The opt-in names the account the thread is already on.
+    expect(left({ usageLimitHandoff: { providerInstanceId: String(accountA.id) } })).toBe(false);
+    // The handoff already acted on this stop and stopped.
     expect(
-      stopLeftToUsageLimitHandoff(
-        { ...onA, usageLimitHandoff: { providerInstanceId: "account-a" } },
-        "stop-1",
-      ),
-    ).toBe(false);
-    expect(
-      stopLeftToUsageLimitHandoff(
-        { ...onA, providerHandoff: { releasedStopId: "an-earlier-stop" } },
-        "stop-1",
-      ),
+      left({
+        usageLimitHandoff: { providerInstanceId: String(accountB.id), last: { stopId: "stop-1" } },
+      }),
     ).toBe(false);
   });
 });

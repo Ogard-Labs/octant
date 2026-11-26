@@ -2953,14 +2953,22 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
 
   // The strip above the composer while the thread's latest turn is parked on a
   // provider's usage limit; the transcript keeps only a one-line record. A move
-  // to another account releases the stop, and its Resume now would resend the
-  // prompt on the new account, so the strip goes with the release.
+  // to another account or model releases the stop, and Resume now would resend
+  // the prompt there, so a released stop keeps the strip only while a resume
+  // is still scheduled for it, offering Cancel alone: a model-only change
+  // leaves that resume armed.
   const stoppedTurn = turns.at(-1);
+  const stoppedResume =
+    stoppedTurn === undefined ||
+    thread?.usageResume === undefined ||
+    String(thread.usageResume.record.turnId) !== String(stoppedTurn.turnId)
+      ? undefined
+      : thread.usageResume;
   const usageLimitNotice =
     stoppedTurn === undefined ||
     stoppedTurn.status !== "waiting" ||
     stoppedTurn.failure?.usageLimit === undefined ||
-    latestStopReleased
+    (latestStopReleased && stoppedResume?.status !== "scheduled")
       ? undefined
       : usageLimitStripNotice({
           limit: stoppedTurn.failure.usageLimit,
@@ -2968,21 +2976,19 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             props.providerGroups ?? [],
             stoppedTurn.authority.providerInstanceId,
           ),
-          usageResume:
-            thread?.usageResume === undefined ||
-            String(thread.usageResume.record.turnId) !== String(stoppedTurn.turnId)
-              ? undefined
-              : thread.usageResume,
+          usageResume: stoppedResume,
           ...(readOnly
             ? {}
-            : {
-                ...(props.turnClient === undefined
-                  ? {}
-                  : { onResumeNow: () => void resumeWorkTurnNow(stoppedTurn) }),
-                onScheduleResume: () => scheduleUsageResume(stoppedTurn.turnId),
-                onCancelResume: cancelUsageResume,
-                ...(thread?.snooze === undefined ? { onSnoozeAtReset: snoozeAtUsageReset } : {}),
-              }),
+            : latestStopReleased
+              ? { onCancelResume: cancelUsageResume }
+              : {
+                  ...(props.turnClient === undefined
+                    ? {}
+                    : { onResumeNow: () => void resumeWorkTurnNow(stoppedTurn) }),
+                  onScheduleResume: () => scheduleUsageResume(stoppedTurn.turnId),
+                  onCancelResume: cancelUsageResume,
+                  ...(thread?.snooze === undefined ? { onSnoozeAtReset: snoozeAtUsageReset } : {}),
+                }),
         });
 
   return (

@@ -315,7 +315,16 @@ export function wireContinuation(deps: ContinuationDependencies) {
             : stop.mode === "work"
               ? workThreadProjection.read(decodeWorkThreadId(stop.threadId))
               : persistence.readCodeThread(decodeCodeThreadId(stop.threadId));
-        return current !== undefined && stopLeftToUsageLimitHandoff(current, stopId);
+        if (current === undefined) return false;
+        const target = current.usageLimitHandoff?.providerInstanceId;
+        return stopLeftToUsageLimitHandoff({
+          thread: current,
+          stopId,
+          // Chat's handoff stays put while a model pool is on; Work and Code have none.
+          modelPoolOn: "multiModelPool" in current && current.multiModelPool !== undefined,
+          from: persistence.readProviderInstance(current.providerInstanceId),
+          to: target === undefined ? undefined : persistence.readProviderInstance(target),
+        });
       },
       refusesHostContinuations: (providerInstanceId) =>
         personalSignInRefusals(

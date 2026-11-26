@@ -5631,8 +5631,10 @@ attempt the person's send or retry admitted: the scheduler's own retry is not
 one, and a default resume that stops again never arms another. The
 resume is never armed on a provider account whose sign-in refuses the host's
 continuations. Neither default arms on a stop the thread's usage-limit account
-handoff owns: its opt-in names another account, or a move already released the
-stop. The handoff's provider change waits on the new account's validation, and
+handoff owns: a move already released the stop, or the handoff would move the
+thread for it now. A handoff its policy refuses (the account is off or gone, a
+model pool is on, the thread is already on that account) or one that already
+stopped on this stop moves nothing, so the defaults still apply. The handoff's provider change waits on the new account's validation, and
 a default written meanwhile took the thread's version, so the change was
 refused and the thread stayed on the limited account. Nothing else changes: the resume fires through the same
 scheduler, inspection and ordinary turn admission as a person's opt-in.

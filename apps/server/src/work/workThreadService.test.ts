@@ -4334,7 +4334,20 @@ describe("moving a Work thread to another account", () => {
       refusesHostContinuations: () => false,
       leftToAccountHandoff: (stop) => {
         const current = fixture.projection.read(stop.threadId as never);
-        return current !== undefined && stopLeftToUsageLimitHandoff(current, stop.turnId);
+        const target = current?.usageLimitHandoff?.providerInstanceId;
+        const account = fixture.persistence.readProviderInstance as (
+          id: string,
+        ) => ReturnType<typeof fixture.persistence.readProviderInstance>;
+        return (
+          current !== undefined &&
+          stopLeftToUsageLimitHandoff({
+            thread: current,
+            stopId: stop.turnId,
+            modelPoolOn: false,
+            from: account(current.providerInstanceId),
+            to: target === undefined ? undefined : account(target),
+          })
+        );
       },
       clock: () => new Date(now),
       ...usageLimitDefaultCommands({

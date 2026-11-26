@@ -3411,6 +3411,73 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Resume now" })).not.toBeInTheDocument();
   });
 
+  it("keeps Cancel for a resume still scheduled on a stop a model change released", async () => {
+    const user = userEvent.setup();
+    const resetsAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const parked = workTurn({
+      status: "waiting",
+      failure: {
+        category: "rate-limited",
+        message: "Rate limit reached.",
+        usageLimit: { kind: "exhausted", resetsAt },
+      },
+      transcript: [
+        { role: "user", text: "Summarize the brief" },
+        { role: "assistant", text: "", status: "waiting" },
+      ],
+    });
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: workThread() }));
+    const thread = workThread({
+      version: 3,
+      providerHandoff: {
+        previousProviderInstanceId: providerId,
+        previousModelId: modelId,
+        nextProviderInstanceId: providerId,
+        nextModelId: "model-two" as never,
+        changedAt: "2026-08-01T20:05:00.000Z",
+        releasedStopId: parked.turnId,
+      },
+      usageResume: {
+        record: {
+          threadId: String(threadId),
+          turnId: String(parked.turnId),
+          providerInstanceId: providerId,
+          usageLimit: { kind: "exhausted", resetsAt },
+          resetsAt,
+          scheduledAt: "2026-08-01T20:00:00.000Z",
+        },
+        status: "scheduled",
+      },
+    } as never);
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        initialThread={thread}
+        threadClient={
+          {
+            bootstrap: vi.fn(async () => ({ threads: [thread] })),
+            execute,
+          } as unknown as WorkThreadClient
+        }
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript: vi.fn(async () => ({ threadId, turns: [parked] })) } as never}
+      />,
+    );
+
+    // The model-only change leaves the resume armed, so the strip still offers
+    // to cancel it, and nothing that would send on the new model.
+    const cancel = await screen.findByRole("button", { name: "Cancel resume" });
+    expect(screen.queryByRole("button", { name: "Resume now" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
+    await user.click(cancel);
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "cancel-work-usage-resume" }),
+      ),
+    );
+  });
+
   it("does not duplicate a turn that settles before the start response arrives", async () => {
     const user = userEvent.setup();
     const settledTurn = workTurn({

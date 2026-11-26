@@ -1158,38 +1158,43 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.controller.conversation,
     providerTurnOperationId === undefined ? undefined : String(providerTurnOperationId),
   );
-  // A move to another account releases the stop, and its Resume now would
-  // resend the prompt on the new account, so the strip goes with the release.
+  // A move to another account or model releases the stop, and Resume now
+  // would resend the prompt there, so a released stop keeps the strip only
+  // while a resume is still scheduled for it, offering Cancel alone: a
+  // model-only change leaves that resume armed.
+  const stoppedResume =
+    thread.usageResume === undefined ||
+    String(thread.usageResume.record.turnId) !== String(providerTurnOperationId)
+      ? undefined
+      : thread.usageResume;
   const usageLimitNotice =
     props.controller.turnStatus !== "waiting" ||
     props.controller.turnUsageLimit === undefined ||
-    releasedStop
+    (releasedStop && stoppedResume?.status !== "scheduled")
       ? undefined
       : usageLimitStripNotice({
           limit: props.controller.turnUsageLimit,
           provider: providerInstanceLabel(props.providerGroups ?? [], thread.providerInstanceId),
-          usageResume:
-            thread.usageResume === undefined ||
-            String(thread.usageResume.record.turnId) !== String(providerTurnOperationId)
-              ? undefined
-              : thread.usageResume,
+          usageResume: stoppedResume,
           ...(readOnly
             ? {}
-            : {
-                ...(stoppedPrompt === undefined
-                  ? {}
-                  : {
-                      onResumeNow: () =>
-                        void resumeStoppedPromptNow(
-                          props.controller,
-                          stoppedPrompt,
-                          thread.executionPolicy,
-                        ),
-                    }),
-                onScheduleResume: scheduleUsageResume,
-                onCancelResume: cancelUsageResume,
-                onSnoozeAtReset: snoozeAtUsageReset,
-              }),
+            : releasedStop
+              ? { onCancelResume: cancelUsageResume }
+              : {
+                  ...(stoppedPrompt === undefined
+                    ? {}
+                    : {
+                        onResumeNow: () =>
+                          void resumeStoppedPromptNow(
+                            props.controller,
+                            stoppedPrompt,
+                            thread.executionPolicy,
+                          ),
+                      }),
+                  onScheduleResume: scheduleUsageResume,
+                  onCancelResume: cancelUsageResume,
+                  onSnoozeAtReset: snoozeAtUsageReset,
+                }),
         });
   // The host owns follow-ups while a turn or queue is active, and refuses a
   // turn while the session compacts. Draft editing remains available while

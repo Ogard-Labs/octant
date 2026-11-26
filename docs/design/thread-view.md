@@ -1053,8 +1053,10 @@ appear only while the reset is known and still ahead. A billing stop names
 the problem and offers nothing, since no clock clears it. A scheduled resume
 that did not run says why on the line and offers Resume at reset again. The
 strip goes once the turn leaves the limit, or once a move to another account
-releases the stop, since Resume now would send the stopped prompt on the new
-account; it never shows plan meters. The transcript keeps one quiet line per
+or model releases the stop, since Resume now would send the stopped prompt
+there; while a resume is still scheduled for a released stop (a model-only
+change leaves it armed) the strip stays with Cancel resume alone. It never
+shows plan meters. The transcript keeps one quiet line per
 stop in Chat and Work, the provider's sentence and its reset as a clock time,
 and no actions. Code keeps that line for its latest provider turn only, once,
 not again beside its waiting row: an earlier stop's line goes when a later

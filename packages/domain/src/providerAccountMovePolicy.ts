@@ -244,24 +244,39 @@ export function parkedStopReleased(
 /**
  * Whether a usage-limit stop belongs to the thread's account handoff, so the
  * person's "Resume at reset" and "Snooze until reset" defaults leave it alone:
- * the opt-in names an account other than the one the thread is on, or a move
- * has already released the stop. Both act on the same stopped turn, and the
- * handoff's provider change waits on the new account's validation, so a
- * default written meanwhile won the version race and left the thread on the
- * limited account. A resume armed after the move would also send the stopped
- * turn on the account it moved to.
+ * a move already released the stop, or the handoff policy would move the
+ * thread for it now. Both act on the same stopped turn, and the handoff's
+ * provider change waits on the new account's validation, so a default written
+ * meanwhile took the thread's version and left the thread on the limited
+ * account. A handoff the policy refuses (a disabled or missing account, a
+ * multi-model pool, the account the thread is already on) or one that already
+ * stopped on this stop moves nothing, so the defaults still apply.
  */
-export function stopLeftToUsageLimitHandoff(
-  thread: Parameters<typeof parkedStopReleased>[0] & {
-    readonly providerInstanceId: string;
-    readonly usageLimitHandoff?: { readonly providerInstanceId: string } | undefined;
-  },
-  stopId: string,
-): boolean {
-  if (parkedStopReleased(thread, stopId)) return true;
-  const handoff = thread.usageLimitHandoff;
+export function stopLeftToUsageLimitHandoff(input: {
+  readonly thread: Parameters<typeof parkedStopReleased>[0] & {
+    readonly usageLimitHandoff?:
+      | {
+          readonly providerInstanceId: string;
+          readonly last?: { readonly stopId: string } | undefined;
+        }
+      | undefined;
+  };
+  readonly stopId: string;
+  readonly modelPoolOn: boolean;
+  readonly from: Parameters<typeof decideUsageLimitHandoff>[0]["from"];
+  readonly to: Parameters<typeof decideUsageLimitHandoff>[0]["to"];
+}): boolean {
+  if (parkedStopReleased(input.thread, input.stopId)) return true;
+  const handoff = input.thread.usageLimitHandoff;
   return (
-    handoff !== undefined &&
-    String(handoff.providerInstanceId) !== String(thread.providerInstanceId)
+    decideUsageLimitHandoff({
+      targetProviderInstanceId:
+        handoff === undefined ? undefined : String(handoff.providerInstanceId),
+      lastStopId: handoff?.last?.stopId,
+      limitStopId: input.stopId,
+      modelPoolOn: input.modelPoolOn,
+      from: input.from,
+      to: input.to,
+    }).kind === "hands-off"
   );
 }
