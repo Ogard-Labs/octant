@@ -20,6 +20,8 @@ type MockRow = Record<string, unknown> & {
   babysit?:
     | { readonly threadId: string; readonly status: string; readonly checks?: "all" | "required" }
     | undefined;
+  /** Merge when ready, apart from `merging`, which also says it sits in the queue. */
+  autoMerge?: boolean;
 };
 
 function base(input: {
@@ -139,7 +141,10 @@ export function createMockPullRequests(hostId: string, ids: MockPullRequestIds) 
       version: 1,
       query: { version: 1 },
       projects: [],
-      rows: rows.filter((row) => row.state === "open"),
+      // The demo's own switch state is not part of a listed row.
+      rows: rows
+        .filter((row) => row.state === "open")
+        .map(({ autoMerge: _autoMerge, ...listed }) => listed),
       repositoriesTruncated: false,
       pullRequestsTruncated: false,
       freshness: { status: "fresh", lastSuccessfulRefreshAt: NOW },
@@ -217,8 +222,7 @@ export function createMockPullRequests(hostId: string, ids: MockPullRequestIds) 
           typeof body === "object" && body !== null && "target" in body ? body : undefined;
         const row = named(command?.target);
         if (command === undefined || row === undefined) return new Response("", { status: 404 });
-        if ("kind" in command && command.kind === "enable") row.merging = "auto-merge";
-        else row.merging = undefined;
+        row.autoMerge = "kind" in command && command.kind === "enable";
         return json({ status: "applied", view: switches(row) });
       }
       case "/api/code/project-pull-requests/switches": {
@@ -267,7 +271,7 @@ function switches(row: MockRow) {
       number: row.number,
     },
     mergeWhenReady:
-      row.merging === "auto-merge"
+      (row.autoMerge ?? row.merging === "auto-merge")
         ? { status: "on", method: "squash", enabledAt: NOW, waitingOn: [] }
         : { status: "off" },
     autoFix:

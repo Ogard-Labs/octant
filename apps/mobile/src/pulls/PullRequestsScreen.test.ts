@@ -213,6 +213,8 @@ describe("the phone's pull requests", () => {
     expect(seen("mobile-pr-merge-when-ready-off")).toBeDefined();
     await press("mobile-pr-merge-when-ready-off");
     expect(seen("mobile-pr-merge-when-ready-off")).toBeUndefined();
+    // Turning Merge when ready off leaves its place in the merge queue alone.
+    expect(seen("mobile-pr-detail")?.textContent).toContain("Merge queued");
   });
 
   it("refuses to offer the confirm step for a pull request the computer says is not mergeable", async () => {

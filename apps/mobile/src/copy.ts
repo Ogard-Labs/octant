@@ -111,7 +111,8 @@ export const MOBILE_COPY = {
   subagentsTitle: "Agents",
   subagentsPillHint: "Shows each subagent in this thread.",
   subagentsEmpty: "This thread has no subagents.",
-  subagentsTruncated: "Older finished subagents are not shown here.",
+  subagentsTruncated:
+    "Not every subagent is listed here: this thread has more than the phone shows.",
   subagentsLiveTasks: (count: number): string =>
     `${count} background ${count === 1 ? "task" : "tasks"}`,
   subagentsBackgroundTasks: "Background tasks",

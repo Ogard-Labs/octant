@@ -37,16 +37,6 @@ export function mergedRow(row: CodeProjectPullRequestRow): CodeProjectPullReques
   return { ...rest, state: "merged" };
 }
 
-/** The row as Merge when ready now stands, so its own off switch is offered. */
-export function withMergeWhenReady(
-  row: CodeProjectPullRequestRow,
-  on: boolean,
-): CodeProjectPullRequestRow {
-  const { merging, ...rest } = row;
-  if (on) return { ...rest, merging: "auto-merge" };
-  return merging === "auto-merge" ? rest : row;
-}
-
 /**
  * One pull request: where it stands, its failing checks, the threads that
  * work on it, and Merge. Merging re-reads the pull request on the computer
@@ -109,13 +99,17 @@ export function PullRequestDetailScreen(props: {
       live = false;
     };
   }, [transport, open, projectId, repositoryOwner, repositoryName, number]);
+  const [mergeWhenReadyConfirmed, setMergeWhenReadyOn] = useState<boolean>();
+  const mergeWhenReadyOn = mergeWhenReadyConfirmed ?? row.merging === "auto-merge";
   const merge = usePullRequestMerge({
     transport,
     target,
     // The overview lists open pull requests only, so a merged one is marked
     // here from the computer's answer rather than read back.
     onMerged: () => setRow(mergedRow),
-    onMergeWhenReady: (on) => setRow((current) => withMergeWhenReady(current, on)),
+    // Kept apart from the row: a later read of the overview may predate the
+    // switch, and the row's `merging` also says whether it sits in the queue.
+    onMergeWhenReady: setMergeWhenReadyOn,
   });
 
   const styles = useMemo(
@@ -368,11 +362,11 @@ export function PullRequestDetailScreen(props: {
                 accessory="none"
                 label={MOBILE_COPY.pullRequestMergeWhenReadyAction}
                 labelTone={colors.accent}
-                last={row.merging !== "auto-merge" && merge.notice === undefined}
+                last={!mergeWhenReadyOn && merge.notice === undefined}
                 onPress={() => void merge.begin("when-ready")}
                 testID="mobile-pr-merge-when-ready-open"
               />
-              {row.merging === "auto-merge" ? (
+              {mergeWhenReadyOn ? (
                 <ListRow
                   accessory="none"
                   label={MOBILE_COPY.pullRequestMergeWhenReadyOff}
