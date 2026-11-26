@@ -637,9 +637,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const lastFocus = useRef(props.focusTurnId);
   const toNewest = useRef(false);
   useEffect(() => {
-    if (lastFocus.current !== undefined && props.focusTurnId === undefined) toNewest.current = true;
+    const reopened = lastFocus.current !== undefined && props.focusTurnId === undefined;
     lastFocus.current = props.focusTurnId;
-  }, [props.focusTurnId]);
+    if (!reopened) return;
+    // The same hit tapped again later jumps to it again.
+    landed.current = undefined;
+    // Chat and Work show their whole conversation, so they go to its end at
+    // once; a Code thread waits for its newest page below.
+    if (mode === "code") toNewest.current = true;
+    else void listRef.current?.scrollToEnd({ animated: false });
+  }, [mode, props.focusTurnId]);
   const shownPage = code.conversation;
   useEffect(() => {
     if (!toNewest.current || shownPage === undefined || shownPage.hasLater) return;
