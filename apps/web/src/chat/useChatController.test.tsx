@@ -2943,13 +2943,13 @@ describe("useChatController thread windows", () => {
     const { result } = renderWindowed(host, { threadWindow });
     await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
 
-    let first: Promise<void> | undefined;
+    let first: Promise<boolean> | undefined;
     act(() => {
       first = result.current.revealTurn(turnIdAt(5) as never);
     });
     await act(async () => result.current.revealTurn(turnIdAt(40) as never));
     held.resolve();
-    await act(async () => first);
+    await act(async () => expect(await first).toBe(false));
 
     expect(indexes(result.current.transcriptWindow?.detached?.view).at(-1)).toBe(40);
   });
@@ -2967,14 +2967,14 @@ describe("useChatController thread windows", () => {
     await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
     await act(async () => result.current.revealTurn(turnIdAt(40) as never));
 
-    let earlier: Promise<void> | undefined;
+    let earlier: Promise<boolean> | undefined;
     act(() => {
       earlier = result.current.revealTurn(turnIdAt(5) as never);
     });
     // Already in the run on screen, so no read; it is still the newest jump.
     await act(async () => result.current.revealTurn(turnIdAt(35) as never));
     held.resolve();
-    await act(async () => earlier);
+    await act(async () => expect(await earlier).toBe(false));
 
     expect(indexes(result.current.transcriptWindow?.detached?.view).at(-1)).toBe(40);
   });

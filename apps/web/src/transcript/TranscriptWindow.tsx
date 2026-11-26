@@ -4,6 +4,7 @@ import type { ContextSubjectRef } from "@octant/contracts/context";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import {
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -70,6 +71,8 @@ export interface TranscriptWindowProps<T> {
   readonly listRole?: "list";
   readonly listTag?: "div" | "ol";
   readonly itemTag?: "div" | "li";
+  /** Bring a quoted delivery back into the loaded history. False means the source is unavailable. */
+  readonly loadResultRow?: ((key: string) => boolean | Promise<boolean>) | undefined;
   readonly revealKey?: string;
   /**
    * Called once the `revealKey` row has been brought into view, so the owner
@@ -110,6 +113,7 @@ const FOLLOW_THRESHOLD_PX = 72;
 
 const DEFAULT_ESTIMATE_SIZE = 96;
 const DEFAULT_OVERSCAN = 8;
+const SOURCE_UNAVAILABLE = "The source delivery is unavailable.";
 /** Visiting many threads must not retain every snapshot for the session. */
 const MAX_SCROLL_MEMORY = 16;
 
@@ -189,7 +193,6 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const savedView = viewStore?.read(`transcript:${restoreKey}`);
   const resultQuote = useResultQuoteScope();
   const resultRevealKey = resultQuote?.revealRow;
-  const revealKey = resultRevealKey ?? props.revealKey;
   const firstKey = items[0] === undefined ? undefined : itemKey(items[0], 0);
   const remembered =
     (viewStore === undefined ? scrollMemory.get(restoreKey) : undefined) ??
@@ -228,7 +231,28 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     });
     return index;
   }, [items, itemKey]);
+  const missingResultRow =
+    resultRevealKey !== undefined && !keyIndex.has(resultRevealKey) ? resultRevealKey : undefined;
+  const revealKey =
+    missingResultRow === undefined ? (resultRevealKey ?? props.revealKey) : props.revealKey;
   const revealIndex = revealKey === undefined ? -1 : (keyIndex.get(revealKey) ?? -1);
+  const loadResultRow = props.loadResultRow;
+  const finishResultReveal = resultQuote?.revealed;
+  useEffect(() => {
+    if (missingResultRow === undefined) return;
+    let current = true;
+    const unavailable = () => {
+      if (!current) return;
+      finishResultReveal?.();
+      setLiveMessage(SOURCE_UNAVAILABLE);
+    };
+    void Promise.resolve(loadResultRow?.(missingResultRow)).then((available) => {
+      if (!available) unavailable();
+    }, unavailable);
+    return () => {
+      current = false;
+    };
+  }, [missingResultRow, loadResultRow, finishResultReveal]);
 
   const pinnedFromKeys = new Set<number>();
   if (props.pinnedKeys !== undefined) {
@@ -879,7 +903,11 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
             </OctantButton>
           </div>
         ) : null}
-        <div aria-live="polite" className="sr-only" data-transcript-live="">
+        <div
+          aria-live="polite"
+          className={liveMessage === SOURCE_UNAVAILABLE ? "oct-meta" : "sr-only"}
+          data-transcript-live=""
+        >
           {liveMessage}
         </div>
       </div>

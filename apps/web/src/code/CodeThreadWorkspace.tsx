@@ -2268,6 +2268,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               itemAt={messageHappenedAt}
               itemKey={(message) => message.id}
               items={messages}
+              loadResultRow={() => {
+                if (earlierConversation === "idle") loadEarlierConversation();
+                return earlierConversation === "idle" || earlierConversation === "loading";
+              }}
               key={String(props.threadId)}
               {...(revealKey === undefined ? {} : { revealKey })}
               {...(onTurnRevealed === undefined ? {} : { onRevealed: () => onTurnRevealed() })}

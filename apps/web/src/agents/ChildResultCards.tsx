@@ -236,19 +236,20 @@ export function FoldedText(props: {
     if (target === undefined) return;
     setOpen(true);
   }, [target]);
-  const content =
-    props.markdown === true ? <ChatRichText body={props.text} /> : <p>{props.text}</p>;
+  const content = (
+    <div
+      className="child-result__text"
+      data-folded={long && !open ? "true" : "false"}
+      id={id}
+      data-result-quote-target={target === undefined ? undefined : ""}
+      tabIndex={target === undefined ? undefined : -1}
+    >
+      {props.markdown === true ? <ChatRichText body={props.text} /> : <p>{props.text}</p>}
+    </div>
+  );
   return (
     <div className="child-result__text-frame">
-      <div
-        className="child-result__text"
-        data-folded={long && !open ? "true" : "false"}
-        id={id}
-        data-result-quote-target={target === undefined ? undefined : ""}
-        tabIndex={target === undefined ? undefined : -1}
-      >
-        {props.children === undefined ? content : props.children(content)}
-      </div>
+      {props.children === undefined ? content : props.children(content)}
       {long ? (
         <OctantButton
           aria-controls={id}

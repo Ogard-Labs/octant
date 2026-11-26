@@ -153,6 +153,7 @@ export interface ChatTranscriptWindowControls {
   readonly onLoadEarlier: () => void;
   readonly onLoadLater: () => void;
   readonly onJumpToLatest: () => void;
+  readonly loadResultRow?: (row: string) => Promise<boolean>;
 }
 
 export interface ChatTranscriptCheckpoints {
@@ -456,6 +457,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       itemAt={turnEndedAt}
       itemKey={(turn) => String(turn.id)}
       items={turns}
+      loadResultRow={props.transcriptWindow?.loadResultRow}
       {...(props.afterTurn === undefined ? {} : { afterItem: props.afterTurn })}
       itemTag="li"
       // Showing a different run (a jump, or Jump to latest) starts the list

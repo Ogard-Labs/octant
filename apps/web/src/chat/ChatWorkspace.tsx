@@ -21,6 +21,7 @@ import type {
 } from "@octant/contracts";
 import {
   decodeChatAttachmentId,
+  decodeChatTurnId,
   type ChatAttachmentId,
   type ChatAttempt,
   type ChatResearchRouting,
@@ -345,6 +346,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const turnActive = view !== undefined && latestActiveAttempt(view) !== undefined;
   const transcriptWindow = props.controller.transcriptWindow;
   const revealTurn = props.controller.revealTurn;
+  const loadResultRow = useCallback(
+    (row: string) => revealTurn(decodeChatTurnId(row)),
+    [revealTurn],
+  );
   // A jump target on a page that is not loaded asks the controller for that
   // page; one already loaded is revealed by the transcript without a read.
   useEffect(() => {
@@ -1808,6 +1813,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                       onLoadEarlier: () => void props.controller.loadEarlier(),
                       onLoadLater: () => void props.controller.loadLater(),
                       onJumpToLatest: props.controller.jumpToLatest,
+                      loadResultRow,
                     },
                   })}
               {...(!readOnly && checkpoints.available

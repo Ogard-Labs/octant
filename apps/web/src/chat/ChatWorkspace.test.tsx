@@ -2564,12 +2564,41 @@ describe("ChatWorkspace", () => {
       ),
     });
 
+    const reloadSource = vi.fn((_target: string) => true).mockReturnValueOnce(false);
     function Harness() {
       const [draft, setDraft] = useState("Fix this one");
+      const [detached, setDetached] = useState(true);
       return (
         <ChatWorkspace
           controller={controllerFixture({
-            activeView: view,
+            activeView: { ...view, turns: view.turns.slice(1) },
+            jumpToLatest: () => setDetached(false),
+            revealTurn: async (target) => {
+              if (!reloadSource(String(target))) return false;
+              setDetached(true);
+              return true;
+            },
+            transcriptWindow: {
+              threadKey: threadId,
+              windowed: true,
+              earlier: "idle",
+              hasEarlier: true,
+              offerEarlier: true,
+              shownRun: detached ? 1 : 0,
+              supersededTurnCount: 0,
+              ...(detached
+                ? {
+                    detached: {
+                      view,
+                      hasEarlier: false,
+                      hasLater: true,
+                      earlier: "idle" as const,
+                      later: "idle" as const,
+                      verifiedAtSupersededCount: 0,
+                    },
+                  }
+                : {}),
+            },
             pendingDraft: draft,
             setPendingDraft: setDraft,
             sendTurn,
@@ -2596,7 +2625,8 @@ describe("ChatWorkspace", () => {
     add.focus();
     expect(add).toHaveFocus();
     await user.keyboard("{Enter}");
-    await user.click(screen.getByRole("button", { name: "Hide result" }));
+    await user.click(screen.getByRole("button", { name: "Jump to latest" }));
+    expect(screen.getAllByRole("button", { name: "Show result" })).toHaveLength(1);
 
     await user.click(
       await screen.findByRole("button", {
@@ -2607,8 +2637,20 @@ describe("ChatWorkspace", () => {
     const source = screen.getByRole("button", { name: "Show source" });
     source.focus();
     await user.keyboard("{Enter}");
-    expect(first).toHaveAttribute("aria-expanded", "true");
-    expect(second).toHaveAttribute("aria-expanded", "false");
+    expect(await screen.findByText("The source delivery is unavailable.")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: /Quote from the research subagent .*Third finding/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "Show source" }));
+    expect(reloadSource).toHaveBeenCalledWith(view.turns[0]?.id);
+    expect(await screen.findByRole("button", { name: "Hide result" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Show result" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
     expect(screen.getByRole("button", { name: "Show less" })).toBeVisible();
 
     await addQuoteFromTranscript(user, "Older result without metadata");
@@ -3775,7 +3817,7 @@ describe("ChatWorkspace", () => {
   });
 
   it("asks for the page that holds a search hit the view has not loaded", async () => {
-    const revealTurn = vi.fn(async () => undefined);
+    const revealTurn = vi.fn(async () => true);
     render(
       <ChatWorkspace
         controller={controllerFixture({

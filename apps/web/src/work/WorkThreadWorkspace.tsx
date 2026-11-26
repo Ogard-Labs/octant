@@ -3066,6 +3066,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             itemAt={workRowHappenedAt}
             itemKey={(row) => row.key}
             items={transcriptRows}
+            loadResultRow={() => {
+              if (!firstPageSettled) return true;
+              if (!loaded.hasEarlier || earlierState === "failed") return false;
+              if (earlierState === "idle") void loadEarlier();
+              return true;
+            }}
             {...(revealKey === undefined ? {} : { revealKey })}
             {...(onTurnRevealed === undefined ? {} : { onRevealed: () => onTurnRevealed() })}
             lead={
