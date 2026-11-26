@@ -109,7 +109,13 @@
   /* Level 4: something that floats. One hairline outside the edge and one soft
      drop that lifts it. */
   --octant-shadow-overlay: 0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%);
-  --octant-shadow-pop: 0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%);
+  --octant-shadow-pop:
+    var(--octant-float-rim), 0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%);
+  /* A float's top inside edge catches the light only under window Glass (the
+     host's glass rule below lights it); elsewhere the slot is an empty shadow.
+     Maintainer request, 2026-11-26: floating glass should read as glass. */
+  --octant-float-rim: 0 0 transparent;
+  --octant-float-rim-lit: rgb(255 255 255 / 22%);
   /* A floating surface is frosted: the lifted fill at 66% over a blur of what
      is behind it. The blur also dims what is behind to under half. That is what
      lets the fill be this clear: a white page behind a dark menu lands the fill
@@ -240,7 +246,9 @@ html[data-octant-theme-mode="light"] {
   /* The theme's own ink, so a tinted preset's tray is not a bluish grey. */
   --octant-well: color-mix(in srgb, var(--octant-text-primary) 5%, transparent);
   --octant-shadow-overlay: 0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%);
-  --octant-shadow-pop: 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%);
+  --octant-shadow-pop:
+    var(--octant-float-rim), 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%);
+  --octant-float-rim-lit: rgb(255 255 255 / 85%);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
   --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);
@@ -262,6 +270,7 @@ html[data-octant-host-vibrancy="active"]:not(
 ) {
   --octant-float-glass: color-mix(in srgb, var(--octant-float) 96%, transparent);
   --octant-float-blur: none;
+  --octant-float-rim: inset 0 1px 0 var(--octant-float-rim-lit);
 }
 
 html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) {

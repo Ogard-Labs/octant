@@ -23,6 +23,20 @@ describe("window glass", () => {
     expect(rule).toContain("--octant-float-blur: none;");
   });
 
+  it("lights every float's top edge under Glass only, and never under reduced transparency or increased contrast", () => {
+    const css = read("styles.css");
+    const glass =
+      /html\[data-octant-host-vibrancy="active"\]:not\(([^)]*)\)\s*\{([^}]*)\}/.exec(css) ?? [];
+    expect(glass[1]).toContain('[data-octant-reduced-transparency="true"]');
+    expect(glass[1]).toContain('[data-octant-increased-contrast="true"]');
+    expect(glass[2]).toContain("--octant-float-rim: inset 0 1px 0 var(--octant-float-rim-lit);");
+    const lit = [...css.matchAll(/--octant-float-rim:\s*([^;]*);/g)].map((match) => match[1]);
+    expect(lit).toEqual(["0 0 transparent", "inset 0 1px 0 var(--octant-float-rim-lit)"]);
+    for (const pop of css.matchAll(/--octant-shadow-pop:\s*([^;]*);/g)) {
+      expect(pop[1]?.trim().startsWith("var(--octant-float-rim),")).toBe(true);
+    }
+  });
+
   it("draws a float dense and without a backdrop filter in the desktop app whether Glass is on or off", () => {
     const css = read("styles.css");
     const rule =

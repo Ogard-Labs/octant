@@ -490,14 +490,16 @@ describe("the public-block visual language", () => {
   it("gives a floating surface one hairline and one soft drop, and dims what shows through a dark menu", () => {
     const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
     // A float is the only thing that casts a shadow: one ring outside its edge
-    // and one soft drop, with no inset rim or sheen.
+    // and one soft drop, with no sheen. Its rim slot stays empty here; only
+    // window Glass lights it (see the translucency contract).
     for (const token of ["--octant-shadow-overlay", "--octant-shadow-pop"]) {
       for (const match of runtime.matchAll(new RegExp(`${token}:\\s*([^;]*);`, "g"))) {
-        const value = match[1] ?? "";
+        const value = (match[1] ?? "").replace("var(--octant-float-rim),", "");
         expect(value, token).not.toContain("inset");
         expect(value.split("),").length, token).toBeLessThanOrEqual(2);
       }
     }
+    expect(runtime).toMatch(/:root[^{]*\{[^}]*--octant-float-rim: 0 0 transparent;/);
     // The bottom panel's row has nothing of the frame's to subtract any more.
     expect(runtime).toMatch(/max\(0px, calc\(100% - 320px\)\)/);
     expect(runtime).not.toContain("sheet-inset");
