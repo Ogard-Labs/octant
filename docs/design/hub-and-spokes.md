@@ -3077,17 +3077,20 @@ card, and the standby's copy (slice 26) are not built yet.
   posting it into the thread from the server is not built yet. At most 20
   comments wait per link, 4,000 characters each, 10 a minute.
   A visitor never answers an approval, changes the model or mode, or acts on
-  the thread. Until the thread's Request is built in the window,
-  `octant hub visitor send` marks the thread as carrying outside content and
-  prints the framed comment for the person to send there themselves; the
-  CLI shows a visitor's text with its control characters replaced.
+  the thread. The CLI shows a visitor's text with its control characters
+  replaced.
 - **Ends.** A link ends when it expires, is revoked, or its thread is
   archived or moves to another member. A spoke refuses to share a thread it
   cannot find or one already archived, and while its person pauses remote
   access it answers no visitor.
-- **Streams through the hub's own entrance.** A member's entrance forwards a
-  visitor's open and comments, but not the live stream, which answers 501
-  there; a front for visitor links points at the hub's entrance.
+- **Streams through the hub's own entrance.** A member's entrance answers a
+  visitor's open, stream, and comments 501 without forwarding them: the live
+  stream does not cross members yet, and an open there would bind the link
+  to a key only that origin keeps. The viewer then says to ask for the hub's
+  address and leaves the secret in the address bar; a front for visitor
+  links points at the hub's entrance. Two tabs opening one link at once
+  settle on one stored key, and a key the browser could not store is never
+  used.
 
 #### Webhook triggers
 
@@ -4603,8 +4606,10 @@ limits, and the device relay's channel design.
     `apps/share` and leaving it unchanged. Acceptance: a revoked link stops
     on the next fetch on the hub and the standby; a comment-only visitor
     cannot answer an approval. Built for Code and Chat threads from the
-    CLI and loopback administration, with server tests and a rendered check
-    of the viewer at 1280 and 390 pixels in light and dark; not built: Work
+    CLI and loopback administration, with server tests and a headless
+    Chromium check of the viewer at 1280 and 390 pixels in light and dark
+    (no horizontal scroll) and of two tabs opening one link at once (one
+    key); not built: Work
     threads, the window's Share menu and Request card (the renderer has no
     room left for them outside a lazy chunk), step titles in the projection,
     and Send posting into the thread itself. **Linux container: yes**, with

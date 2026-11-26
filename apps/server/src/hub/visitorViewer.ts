@@ -43,24 +43,28 @@ const SCRIPT = String.raw`
       request.onerror = () => resolve(undefined);
     });
   };
+  // The spoke binds the first key that opens the link, so the key this page
+  // signs with must be the one the browser keeps. A fresh pair is made first,
+  // then one read-write transaction takes the stored pair or stores the fresh
+  // one: two tabs opening the link at once settle on one key, and a key that
+  // could not be stored is never used.
   const held = async () => {
     const db = await store();
-    const get = (key) => new Promise((resolve) => {
-      const request = db.transaction("keys").objectStore("keys").get(key);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => resolve(undefined);
+    // The private key cannot be exported: the link stays with this browser.
+    const fresh = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("keys", "readwrite");
+      const keys = tx.objectStore("keys");
+      let chosen = fresh;
+      const read = keys.get(linkId);
+      read.onsuccess = () => {
+        if (read.result !== undefined) chosen = read.result;
+        else keys.put(fresh, linkId);
+      };
+      tx.oncomplete = () => resolve(chosen);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
     });
-    let pair = await get(linkId);
-    if (pair === undefined) {
-      // The private key cannot be exported: the link stays with this browser.
-      pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
-      await new Promise((resolve) => {
-        const put = db.transaction("keys", "readwrite").objectStore("keys").put(pair, linkId);
-        put.onsuccess = resolve;
-        put.onerror = resolve;
-      });
-    }
-    return pair;
   };
 
   let keys;
@@ -105,6 +109,8 @@ const SCRIPT = String.raw`
     403: "This link is open in another browser.",
     404: "This link does not exist.",
     401: "This link could not be checked. Make sure this device's clock is set correctly, then reload.",
+    // A member's entrance carries opens and comments but not the live thread.
+    501: "This address cannot show the live thread. Ask the owner for their hub's address.",
   };
   const ended = async (response) => {
     if (response.status === 403) {
@@ -145,7 +151,11 @@ const SCRIPT = String.raw`
       const final = response.ok ? undefined : await ended(response);
       // The secret leaves the address bar once the link is opened or has
       // ended; after a passing failure it stays, so a reload can try again.
-      if (response.ok || final !== undefined) history.replaceState(null, "", location.pathname);
+      // A member's address that cannot show the thread keeps it too, so the
+      // visitor can carry the whole link to the hub's address.
+      if (response.ok || (final !== undefined && response.status !== 501)) {
+        history.replaceState(null, "", location.pathname);
+      }
       if (!response.ok) return say(final || "This link could not be opened. Reload to try again.");
       const opened = await response.json();
       await remember("scope:" + linkId, opened.scope);
@@ -174,7 +184,9 @@ const SCRIPT = String.raw`
     const note = form.querySelector(".note");
     note.textContent = response.ok
       ? "Sent to the owner. It reaches the thread only if they choose to send it."
-      : "The owner is not taking comments right now.";
+      : response.status === 429
+        ? "Too many comments at once. Wait a minute, then send it again."
+        : "The owner is not taking comments right now.";
     if (response.ok) field.value = "";
   });
 
