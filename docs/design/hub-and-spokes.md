@@ -3202,7 +3202,9 @@ desktop apps do not use the client yet (below).
   QR. A session inside a relay must be the session of the device whose key
   admitted it, so a second credential the caller holds cannot ride that
   device's tunnel. A host the hub's roster no longer lists keeps no relay:
-  the hub forgets its device keys and ends its open tunnels, and a spoke the
+  the hub forgets its device keys and ends its open tunnels. Only the hub's
+  own roster decides this: a former hub that joined another hub keeps its
+  own hosts' keys, so turning its role back on restores their relays. A spoke the
   hub removed ends the relayed tunnels it still holds. A spoke that follows
   a promoted hub sends that hub its device keys again.
 - **Off by default.** The hub's Device relay switch, each host's Relay

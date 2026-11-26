@@ -443,6 +443,10 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
   server.maxConnections = MAX_CONNECTIONS;
   server.headersTimeout = HEADER_TIMEOUT_MS;
   server.requestTimeout = REQUEST_TIMEOUT_MS;
+  // Node's closeAllConnections skips upgraded sockets and close() waits for
+  // them, so an idle device tunnel held turning the entrance off until the
+  // device left. Closing ends each relay this listener handed out.
+  const relaySockets = new Set<Duplex>();
   server.on("upgrade", (incoming: IncomingMessage, socket: Duplex, head: Buffer) => {
     const path = (incoming.url ?? "/").split("?")[0] ?? "/";
     const match = matchPublicRoute(incoming.method ?? "GET", path);
@@ -457,6 +461,8 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
       socket.end("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
       return;
     }
+    relaySockets.add(socket);
+    socket.once("close", () => relaySockets.delete(socket));
     relay(incoming, socket, head);
   });
 
@@ -508,6 +514,7 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
         closing.abort();
         server.close(() => resolve());
         server.closeAllConnections();
+        for (const socket of relaySockets) socket.destroy();
       }),
   };
 }

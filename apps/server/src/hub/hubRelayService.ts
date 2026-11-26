@@ -50,8 +50,9 @@ export interface HubRelayServiceOptions {
   readonly hubMemberId: () => string;
   /**
    * The member ids of the roster this host serves from. A host the roster no
-   * longer lists keeps no relay: its device keys are forgotten and its open
-   * tunnels end, since it can no longer withdraw them itself.
+   * longer lists keeps no relay: its device keys are forgotten (judged only
+   * while this host serves as hub) and its open tunnels end, since it can no
+   * longer withdraw them itself.
    */
   readonly members?: () => ReadonlyArray<string> | undefined;
   /** Opens the tunnel on the host; undefined when it cannot be reached or refused it. */
@@ -121,8 +122,11 @@ export class HubRelayService {
    */
   sweep(): void {
     // A host the roster dropped is forgotten even while the relay is off, so
-    // turning it back on never finds its keys.
-    const listed = this.#options.members?.();
+    // turning it back on never finds its keys. Only the hub's own roster
+    // decides that: a former hub that joined another hub reads that hub's
+    // roster, which does not list its own hosts, and their publishers would
+    // not send keys again once its role is back.
+    const listed = this.#options.serving() ? this.#options.members?.() : undefined;
     if (listed !== undefined) {
       const members = new Set(listed);
       const held = this.#load();

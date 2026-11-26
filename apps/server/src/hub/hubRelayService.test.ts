@@ -160,6 +160,32 @@ describe("the hub's device relay", () => {
     expect((await connect(url, key)).closeCode).not.toBeUndefined();
   });
 
+  it("a former hub that joined another hub keeps its own hosts' keys, and prunes by its own roster once its role is back", () => {
+    let hubRole = true;
+    let members: ReadonlyArray<string> = [HUB, HOST];
+    const OTHER = "33333333-3333-4333-8333-333333333333";
+    const service = new HubRelayService({
+      state: memoryState(),
+      serving: () => hubRole,
+      members: () => members,
+      hubMemberId: () => HUB,
+      openTunnel: async () => undefined,
+      record: () => undefined,
+    });
+    service.setEnabled(false, window);
+    service.receiveDevices(HOST, { fingerprints: [deviceKey().fingerprint] });
+    // Its role off and a member of another hub, whose roster does not list HOST.
+    hubRole = false;
+    members = [OTHER, HUB];
+    service.sweep();
+    expect(service.status().hosts).toBe(1);
+    // Back as hub, with the relay switch still off, its own roster prunes again.
+    hubRole = true;
+    members = [HUB];
+    service.sweep();
+    expect(service.status().hosts).toBe(0);
+  });
+
   it("closes every relay when its switch goes off", async () => {
     const { service, url } = await relay(32);
     const key = deviceKey();
