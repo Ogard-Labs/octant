@@ -6,8 +6,9 @@ name: Computer use driver pin
 # a newer contract, and every in-app update was refused. This job moves the
 # pin weekly on one branch and one draft pull request; a person runs the live
 # Computer use check and marks it ready, which starts CI. The job rebuilds the
-# branch from main only when upstream moved past what the branch pins, and
-# never over a commit a person pushed there.
+# branch from main only when upstream moved past what the branch pins, never
+# over a commit a person pushed there, and never under a pull request a person
+# marked ready, since that marks a live check of the head it would replace.
 #
 # Opening the pull request needs the repository setting "Allow GitHub Actions
 # to create and approve pull requests". Without it the branch is still pushed
@@ -34,10 +35,14 @@ jobs:
       pull-requests: write
     env:
       BRANCH: feature/computer-use-driver-pin
+      BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
       GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
         with:
+          # A manual run from another branch must not carry that branch's commits.
+          ref: main
           # The bot branch is compared with main commit by commit.
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
@@ -46,28 +51,42 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Compare the pin with upstream
         id: check
-        run: bun scripts/computer-use-driver-pin.ts check
+        run: bun scripts/computer-use-driver-pin.ts check | tee "$RUNNER_TEMP/body.md"
+      - name: Find this repository's open pull request for the bot branch
+        if: steps.check.outputs.newer == 'true'
+        id: pr
+        run: |
+          set -euo pipefail
+          # A fork can open a pull request from a branch with the same name;
+          # only one whose head lives in this repository counts.
+          gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+            --json number,isDraft,headRepositoryOwner \
+            --jq "[.[] | select(.headRepositoryOwner.login == \"${REPO%%/*}\")][0] // {} | \"number=\\(.number // \"\")\nready=\\(if .number then (.isDraft | not) else false end)\"" \
+            >> "$GITHUB_OUTPUT"
       - name: Move the pin on the bot branch
         if: steps.check.outputs.newer == 'true'
         id: move
         env:
           VERSION: ${{ steps.check.outputs.version }}
-          BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          READY: ${{ steps.pr.outputs.ready }}
         run: |
           set -euo pipefail
           # Exit 2 means the branch does not exist; any other failure stops the job.
           status=0
           git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then exit "$status"; fi
+          lease=""
           if [ "$status" -eq 0 ]; then
             git fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-            # Leave the branch alone when it already holds this pin, so a
-            # person's review fixes and live check stay on its head; refuse to
-            # replace commits this job did not write.
+            lease=$(git rev-parse "origin/$BRANCH")
             pinned=$(git show "origin/$BRANCH:apps/desktop/src/computerUseDriverRelease.ts")
             if [[ "$pinned" == *"version: \"$VERSION\""* ]]; then
               echo "The bot branch already pins $VERSION."
-              echo "pushed=false" >> "$GITHUB_OUTPUT"
+              echo "branch=ready" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$READY" = "true" ]; then
+              echo "::notice::The bot pull request is marked ready for review, so its tested head stays. Merge or close it, and the next run moves the pin to $VERSION."
               exit 0
             fi
             others=$(git log --format=%ae "origin/main..origin/$BRANCH" | grep -vxF "$BOT_EMAIL" || true)
@@ -93,21 +112,26 @@ jobs:
             apps/desktop/resources/licenses/cua-driver-node-runtime-NOTICE.md
           git status --short
           git -c user.name="github-actions[bot]" -c user.email="$BOT_EMAIL" \
-            commit -m "Move the bundled computer-use driver to $VERSION"
-          git push --force origin "$BRANCH"
+            commit -m "chore(desktop): move the bundled computer-use driver to $VERSION"
+          # Publish only over the exact head inspected above (or onto no
+          # branch at all), so a commit pushed meanwhile stops the run.
+          git push --force-with-lease="refs/heads/$BRANCH:$lease" origin "HEAD:refs/heads/$BRANCH"
+          echo "branch=ready" >> "$GITHUB_OUTPUT"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
       - name: Open or refresh the draft pull request
-        if: steps.move.outputs.pushed == 'true'
+        if: steps.move.outputs.branch == 'ready'
         env:
           VERSION: ${{ steps.check.outputs.version }}
-          REPO: ${{ github.repository }}
+          EXISTING: ${{ steps.pr.outputs.number }}
+          PUSHED: ${{ steps.move.outputs.pushed }}
         run: |
           set -euo pipefail
           title="Move the bundled computer-use driver to $VERSION"
-          existing=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
-            gh pr edit "$existing" --title "$title" --body-file "$RUNNER_TEMP/body.md"
-          elif ! gh pr create --draft --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"; then
-            echo "::error::Could not open the pull request. Turn on 'Allow GitHub Actions to create and approve pull requests', or open it from https://github.com/$REPO/compare/main...$BRANCH"
+          if [ -n "$EXISTING" ]; then
+            if [ "$PUSHED" = "true" ]; then
+              gh pr edit "$EXISTING" --repo "$REPO" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+            fi
+          elif ! gh pr create --repo "$REPO" --draft --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"; then
+            echo "::error::Could not open the pull request. Turn on 'Allow GitHub Actions to create and approve pull requests' and run this job again, or open it from https://github.com/$REPO/compare/main...$BRANCH"
             exit 1
           fi

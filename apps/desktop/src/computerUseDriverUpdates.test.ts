@@ -104,6 +104,29 @@ describe("Computer use driver updates", () => {
     expect(f.activate).not.toHaveBeenCalled();
   });
 
+  it("does not install an automatically staged update after the person turns automatic updates off", async () => {
+    const f = fixture();
+    f.updates.configure({ enabled: true, automaticUpdates: true });
+    f.scheduled.at(-1)?.();
+    await vi.waitFor(() => expect(f.updates.state().status).toBe("staged"));
+    f.updates.configure({ enabled: true, automaticUpdates: false });
+    expect(f.updates.state()).toEqual({ status: "idle", currentVersion: "0.24.0" });
+    f.idle();
+    await f.updates.applyWhenIdle();
+    expect(f.activate).not.toHaveBeenCalled();
+  });
+
+  it("still installs an update the person asked for while automatic updates are off", async () => {
+    const f = fixture();
+    f.updates.configure({ enabled: true, automaticUpdates: false });
+    await f.updates.check();
+    expect(f.updates.state().status).toBe("staged");
+    f.updates.configure({ enabled: true, automaticUpdates: false });
+    f.idle();
+    await f.updates.applyWhenIdle();
+    expect(f.activate).toHaveBeenCalledOnce();
+  });
+
   it("clears an interrupted update check when automatic updates are disabled", async () => {
     const f = fixture();
     let finish: (() => void) | undefined;

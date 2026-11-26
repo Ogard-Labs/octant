@@ -15313,7 +15313,9 @@ updates off in Settings › Computer use (maintainer decision, 2026-11-26,
 replacing the opt-in default). Only the person's own choice keeps updates off:
 a store saved while they were off by default reads as on. Verified updates
 stage privately, activate only while idle, and retain the previous version if
-startup fails. Octant's driver SDK is built into the app, so the app can
+startup fails; turning automatic updates off withdraws an update the daily
+check staged, while one the person asked for with Check for updates still
+installs. Octant's driver SDK is built into the app, so the app can
 follow upstream only within one wire contract. The SDK accepts a driver whose
 handshake reports the same contract `major.minor` as the one it speaks,
 whatever the driver's own version (a new contract minor can break the wire

@@ -7,7 +7,9 @@
  * was refused at the handshake.
  *
  * `check` compares upstream's newest driver release with the pin: the
- * contract, and the published schemas of the driver tools Octant calls.
+ * contract, and the canonical manifest schemas of the driver tools Octant
+ * calls. Octant sends the flat MCP form of those arguments, which the manifest
+ * does not publish, so the comparison only flags a release to read closely.
  * `apply` rewrites every pinned value for that release. The weekly
  * `computer-use-driver` workflow runs both and opens one draft pull request;
  * a person still runs the live Computer use check before it merges.
@@ -228,10 +230,10 @@ async function main(): Promise<void> {
     `Moves the bundled computer-use driver from ${pinnedVersion} to ${newest.version}.`,
     "",
     `- Contract: ${COMPUTER_DRIVER_CONTRACT.major}.${COMPUTER_DRIVER_CONTRACT.minor} → ${contract.major}.${contract.minor}${contractMoved ? " (a new contract: installs on the old Octant cannot update to this driver by themselves)" : " (unchanged)"}`,
-    `- Called tools whose published schema changed: ${changed.length === 0 ? "none" : changed.map((name) => `\`${name}\``).join(", ")}`,
+    `- Called tools whose canonical manifest schema changed: ${changed.length === 0 ? "none" : changed.map((name) => `\`${name}\``).join(", ")}`,
     `- Release notes: https://github.com/trycua/cua/releases?q=cua-driver-rs-v&expanded=true`,
     "",
-    "Before this merges, a person runs Settings › Computer use › Test on an Apple Silicon Mac with the packaged build, then has an agent observe, click and type in one app. `launch_app`, `check_permissions` and `health_report` are outside the manifest, so only that check covers them.",
+    "The manifest's schemas are upstream's canonical (`target`) form, not the flat MCP arguments Octant sends, so a change here flags a release to read closely and an empty list proves nothing. Before this merges, a person compares the flat arguments with `cua-driver describe <tool>` for each called tool, runs Settings › Computer use › Test on an Apple Silicon Mac with the packaged build, and has an agent observe, click and type in one app. `launch_app`, `check_permissions` and `health_report` are outside the manifest, so only those checks cover them.",
   ].join("\n");
   if (process.env.GITHUB_OUTPUT !== undefined)
     await appendFile(

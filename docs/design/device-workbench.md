@@ -467,7 +467,8 @@ manual check or Update still works. A newer release stages with its dependency c
 in-app (no npm or Bun is available inside the packaged app), each package
 integrity-verified, and activates only while idle and after its entrypoint
 survives a smoke launch. A staged tree that cannot start keeps the previous
-release. Extraction accepts only allowlisted tar entries (no absolute path, no
+release. Turning automatic updates off withdraws a release the daily check
+staged; one staged by a manual check still installs. Extraction accepts only allowlisted tar entries (no absolute path, no
 `..`, no `:`) and never runs an upstream installer or lifecycle script. The
 in-app resolver handles only `^`, `~`, and exact ranges, nests a conflicting
 version under its owner, and stops at 64 packages; an upstream release that
