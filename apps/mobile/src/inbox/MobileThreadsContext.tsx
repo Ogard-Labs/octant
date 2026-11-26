@@ -83,7 +83,8 @@ const liveReadUnder = new Map<string, string>();
 // And sealed on the phone, so after a restart a message can still be written
 // to a thread whose computer cannot be reached.
 let keptThreads: ReturnType<typeof createSealedText> | undefined;
-const sealedThreads = () =>
+/** Where the phone keeps its thread list, sealed under its own key. */
+export const sealedThreads = () =>
   (keptThreads ??= createSealedText({
     crypto: globalThis.crypto,
     file: sealedFile("threads.v1.sealed"),

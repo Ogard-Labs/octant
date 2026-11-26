@@ -191,22 +191,15 @@ describe("the thread list after a restart", () => {
     // Read the kept list as the app does, and wait until it holds the
     // standing: which of the app's writes landed last cannot be told apart
     // from outside, but what was kept can.
-    const keptText = async () => {
-      const { createSealedText } = await import("../outbox/sealedText");
-      const { createExpoSecureStringStorage } = await import("../hosts/expoSecureStorage");
-      const { sealedFile } = await import("../outbox/sealedFile");
-      return createSealedText({
-        storage: createExpoSecureStringStorage(),
-        file: sealedFile("threads.v1.sealed"),
-        keyName: "octant.threads.key.v1",
-        crypto: globalThis.crypto,
-      }).load();
-    };
-    for (let turn = 0; turn < 400; turn += 1) {
-      if ((await keptText())?.includes("actsAsHostPerson") === true) break;
+    // The app's own store and reader, so the check holds whatever the format.
+    const { sealedThreads } = await import("./MobileThreadsContext");
+    const { restoreKeptThreads } = await import("./keptThreads");
+    const pairing = { hostId: studio, hostKeyFingerprint: "key-1", keyId: "device-key" };
+    const keptStanding = async () =>
+      restoreKeptThreads(await sealedThreads().load(), [pairing]).standings.get(studio);
+    for (let turn = 0; turn < 400 && (await keptStanding()) === undefined; turn += 1)
       await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 5)));
-    }
-    expect(await keptText()).toContain("actsAsHostPerson");
+    expect(await keptStanding()).toEqual({ actsAsHostPerson: true });
     first.quit();
 
     phone.inbox = { rows: [], reachable: false, offline: [] };
