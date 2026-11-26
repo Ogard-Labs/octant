@@ -1394,7 +1394,10 @@ is costly to render mounts only while open.
 - **States.** Long text wraps. Glass: dense float. A notice that only reports
   something done (`leavesAfterMs`) leaves by itself, ten seconds after the
   pointer and the keyboard are off it; one the person must read or act on
-  stays until dismissed.
+  stays until dismissed. An **Undo** notice leaves after five seconds instead,
+  held the same way while the pointer or the keyboard is on it; its action acts
+  in place (`action.inPlace`), so it draws no leave-arrow, and a newer Undo
+  replaces it.
 - **Accessibility.** `role="alert"` for danger, `status` otherwise; Dismiss is
   "Dismiss notification"; the stack takes no press outside its notices.
 

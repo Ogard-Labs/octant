@@ -18,7 +18,7 @@ import type {
 } from "../chat/useChatController";
 import { deliverComposerThreadDrop } from "../chat/composerThreadDrop";
 import { projectViewEnvironmentOptionsFromHosts } from "../code/codeProjectViewModel";
-import type { CodeReadCursorStore, CodeThreadRestOutcome } from "../code/useCodeController";
+import type { CodeReadCursorStore } from "../code/useCodeController";
 import { codeThreadCoordinatorActions } from "./codeThreadCoordinatorActions";
 import { threadRestRowActions } from "./threadRestRowActions";
 import { mergeThreadRowActions } from "../projects/mergeThreadRowActions";
@@ -77,26 +77,26 @@ export interface SidebarContainerProps {
     | "completeCodeFollowUp"
     | "completeCodeThread"
     | "createChat"
+    | "editCodeThreadCoordinatorBounds"
     | "enterZen"
     | "handleSelectVisibleMode"
-    | "markCodeFollowUp"
     | "markChatThreadRead"
+    | "markCodeFollowUp"
+    | "markCodeThreadDone"
     | "markCodeThreadRead"
     | "moveProject"
-    | "requestMoveToProject"
     | "noteHandedOffDocument"
     | "openAgentsCenter"
     | "openArchive"
     | "openArtifactLibrary"
     | "openAutomationCenter"
+    | "openCoordinatorDraftInProject"
     | "openDraftInActiveProject"
     | "openDraftInProject"
-    | "openCoordinatorDraftInProject"
     | "openGithubIssues"
-    | "openImageLibrary"
     | "openHome"
+    | "openImageLibrary"
     | "openInbox"
-    | "openTodos"
     | "openLinearIssues"
     | "openNavigator"
     | "openProjectContextHealth"
@@ -110,14 +110,14 @@ export interface SidebarContainerProps {
     | "openSkillsSettings"
     | "openThreadBoard"
     | "openThreadSearch"
+    | "openTodos"
     | "pinChatThreadInPane"
-    | "pinCodeThread"
     | "pinCodeThreadInPane"
     | "pinWorkThreadInPane"
     | "renameCodeThread"
     | "reopenChatThread"
-    | "markCodeThreadDone"
     | "reopenCodeThread"
+    | "requestMoveToProject"
     | "retryActiveModeThreads"
     | "retryChat"
     | "retryProjects"
@@ -128,17 +128,19 @@ export interface SidebarContainerProps {
     | "selectMode"
     | "selectProjectPullRequestIdentity"
     | "selectWorkThread"
-    | "setProjectArchived"
-    | "setProjectColor"
+    | "setChatThreadRestartContinuation"
     | "setCodeThreadCoordinator"
-    | "editCodeThreadCoordinatorBounds"
     | "setCodeThreadCoordinatorWake"
     | "setCodeThreadMessageWake"
     | "setCodeThreadRestartContinuation"
-    | "setChatThreadRestartContinuation"
+    | "setProjectArchived"
+    | "setProjectColor"
+    | "setCodeThreadPin"
     | "setThreadExportNotice"
     | "snoozeChatThread"
     | "snoozeCodeThread"
+    | "threadRestRow"
+    | "tryWorkRestCommand"
     | "updateSettings"
     | "wakeChatThread"
     | "wakeCodeThread"
@@ -384,11 +386,9 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         });
       };
     };
-    // Settle, reopen, snooze, wake and pin are shared with the command palette.
+    // Settle, reopen, snooze, wake, pin and Mark done are shared with the
+    // command palette and with rows dragged within the sidebar.
     const rest = threadRestRowActions(actions);
-    const noteCodeThreadRest = (outcome: CodeThreadRestOutcome): void => {
-      if (outcome.status === "refused") actions.setThreadExportNotice(outcome.message);
-    };
     const noteChatThreadRest = (outcome: ChatThreadRestOutcome): void => {
       if (outcome.status === "refused") actions.setThreadExportNotice(outcome.message);
     };
@@ -433,8 +433,6 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       ...(handOffCodeThread === undefined ? {} : { onHandOffThread: handOffCodeThread }),
       onArchiveThread: (threadId) => void actions.archiveCodeThread(decodeCodeThreadId(threadId)),
       ...rest.code,
-      onMarkThreadDone: (threadId) =>
-        void actions.markCodeThreadDone(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
       onCompleteFollowUp: (threadId) =>
         void actions.completeCodeFollowUp(decodeCodeThreadId(threadId)),
       onMarkFollowUp: (threadId) => void actions.markCodeFollowUp(decodeCodeThreadId(threadId)),

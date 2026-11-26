@@ -48,6 +48,7 @@ export function buildWorkThreadNavigation(
         providerInstanceId: String(thread.providerInstanceId),
         updatedAt: thread.updatedAt,
         ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+        ...(thread.completionConfirmed === true ? { workDone: true } : {}),
         ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
         ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
         ...(thread.messageWake === true ? { messageWake: true } : {}),

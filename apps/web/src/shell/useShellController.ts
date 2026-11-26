@@ -1288,7 +1288,7 @@ export function useShellController(options: ShellControllerOptions) {
     destination: WorkspaceSurfaceDropDestination,
     projectId?: ProjectId,
   ): Promise<boolean> {
-    if (destination.kind === "composer") return false;
+    if (destination.kind === "composer" || destination.kind === "sidebar") return false;
     // Cross-Project denial for preview surfaces: a preview carries its own
     // opaque Project binding. Dropping it into a pane whose mode context is
     // bound to a different Project (or no Project) would violate the

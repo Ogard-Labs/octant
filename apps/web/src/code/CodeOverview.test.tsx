@@ -1088,6 +1088,7 @@ function controller(): CodeController {
     mergeForkContext: vi.fn(async () => undefined),
     renameThread: vi.fn(async () => true),
     pinThread: vi.fn(async () => true),
+    setThreadPin: vi.fn(async () => ({ status: "ok" as const })),
     setThreadCoordinator: vi.fn(async () => ({ status: "ok" as const })),
     setThreadCoordinatorBounds: vi.fn(async () => ({ status: "ok" as const })),
     setThreadCoordinatorDoneWhen: vi.fn(async () => ({ status: "ok" as const })),

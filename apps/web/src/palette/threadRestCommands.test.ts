@@ -23,9 +23,12 @@ function shellActions() {
     reopenCodeThread: vi.fn(async () => ({ status: "ok" as const })),
     snoozeCodeThread: vi.fn(async () => ({ status: "ok" as const })),
     wakeCodeThread: vi.fn(async () => ({ status: "ok" as const })),
-    pinCodeThread: vi.fn(async () => true),
-    runWorkRestCommand: vi.fn(async () => {}),
+    setCodeThreadPin: vi.fn(async () => ({ status: "ok" as const })),
+    markCodeThreadDone: vi.fn(async () => ({ status: "ok" as const })),
+    tryWorkRestCommand: vi.fn(async () => ({ status: "ok" as const })),
     setThreadExportNotice: vi.fn(),
+    offerThreadRestUndo: vi.fn(),
+    threadRestRow: vi.fn(() => undefined),
   };
 }
 
@@ -152,9 +155,11 @@ describe("the commands for the thread in front", () => {
     run(frontCommands("code", { pinned: true }, shell), "Unpin");
     run(frontCommands("code", { snooze: SNOOZE }, shell), "Wake");
     run(frontCommands("code", { completedAt: SNOOZE.at }, shell), "Un-settle");
+    // Sending loads with the first change.
+    await vi.dynamicImportSettled();
 
     expect(shell.completeCodeThread).toHaveBeenCalledWith(CODE_ID);
-    expect(shell.pinCodeThread.mock.calls).toEqual([
+    expect(shell.setCodeThreadPin.mock.calls).toEqual([
       [CODE_ID, true],
       [CODE_ID, false],
     ]);
@@ -166,11 +171,12 @@ describe("the commands for the thread in front", () => {
     expect(shell.reopenCodeThread).toHaveBeenCalledWith(CODE_ID);
   });
 
-  it("counts a snooze time from when it is run, not from when the list was built", () => {
+  it("counts a snooze time from when it is run, not from when the list was built", async () => {
     const shell = shellActions();
     const commands = frontCommands("chat", {}, shell);
     vi.setSystemTime(new Date("2026-11-25T10:40:00"));
     run(commands, "Snooze · In 1 hour");
+    await vi.dynamicImportSettled();
     expect(shell.snoozeChatThread).toHaveBeenCalledWith(
       CHAT_ID,
       new Date(Date.now() + 3_600_000).toISOString(),
@@ -189,11 +195,12 @@ describe("the commands for the thread in front", () => {
     );
   });
 
-  it("sends a Work thread's rest through the Work command with the row's version", () => {
+  it("sends a Work thread's rest through the Work command with the row's version", async () => {
     const shell = shellActions();
     run(frontCommands("work", {}, shell), "Settle");
     run(frontCommands("work", { snooze: SNOOZE }, shell), "Wake");
-    const built = (shell.runWorkRestCommand.mock.calls as unknown[][]).map((call) => {
+    await vi.dynamicImportSettled();
+    const built = (shell.tryWorkRestCommand.mock.calls as unknown[][]).map((call) => {
       const [threadId, command] = call as [string, (version: number) => unknown];
       return [threadId, command(4)];
     });

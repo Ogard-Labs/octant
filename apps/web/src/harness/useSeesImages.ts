@@ -10,7 +10,11 @@ import { useEffect, useMemo, useState } from "react";
  * describe one for this Project; while that answer is out, or when it
  * refuses, the composer refuses as before, and the turn still decides at
  * send. Returns `false` with the host's reason, `true` when Sees images
- * covers the model, and the picker's own answer otherwise.
+ * covers the model, and the picker's own answer otherwise. `pending` is set
+ * while that answer is out: a file another surface offers to the thread (a
+ * sidebar row drop) waits for it rather than being refused on the picker's
+ * word alone, since the offer is not tried again. A lookup that fails ends
+ * the wait with a refusal.
  */
 export function useSeesImages(options: {
   readonly readsImages: boolean | undefined;
@@ -20,7 +24,11 @@ export function useSeesImages(options: {
   readonly providerInstanceId?: string | undefined;
   readonly modelId?: string | undefined;
   readonly client?: Pick<NativeHarnessClient, "seesImages">;
-}): { readonly takesImages: boolean | undefined; readonly refusal?: string } {
+}): {
+  readonly takesImages: boolean | undefined;
+  readonly refusal?: string;
+  readonly pending?: true;
+} {
   const { readsImages, serverUrl, windowCapability, projectId, providerInstanceId, modelId } =
     options;
   const injected = options.client;
@@ -34,7 +42,7 @@ export function useSeesImages(options: {
     }
   }, [injected, serverUrl, windowCapability]);
   const [answer, setAnswer] = useState<
-    { readonly key: string; readonly availability: SeesImagesAvailability } | undefined
+    { readonly key: string; readonly availability: SeesImagesAvailability | "failed" } | undefined
   >(undefined);
   const key = `${projectId ?? ""}|${providerInstanceId ?? ""}|${modelId ?? ""}`;
   const asks =
@@ -58,13 +66,16 @@ export function useSeesImages(options: {
       .then((availability) => {
         if (!controller.signal.aborted) setAnswer({ key, availability });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!controller.signal.aborted) setAnswer({ key, availability: "failed" });
+      });
     return () => controller.abort();
   }, [asks, client, key, modelId, projectId, providerInstanceId]);
   if (readsImages !== false) return { takesImages: readsImages };
   const current = answer?.key === key ? answer.availability : undefined;
-  if (current?.kind === "available") return { takesImages: true };
-  return current === undefined
-    ? { takesImages: false }
-    : { takesImages: false, refusal: current.reason };
+  if (current === undefined)
+    return asks ? { takesImages: false, pending: true } : { takesImages: false };
+  if (current === "failed") return { takesImages: false };
+  if (current.kind === "available") return { takesImages: true };
+  return { takesImages: false, refusal: current.reason };
 }

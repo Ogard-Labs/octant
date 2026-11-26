@@ -597,6 +597,34 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       ),
     [previewCanvasClient],
   );
+  // A file dropped on this thread's sidebar row waits here for the composer
+  // and takes the same path as one chosen in it, with the same limits.
+  // The offer store loads on its own, so Chat's first load does not carry it.
+  // A failed load says nothing here: a drop loads the same module first and
+  // says so itself when it cannot, so a failure here, with nothing dropped,
+  // would only warn on every Chat thread opened.
+  const takeOfferedFile = useRef<(file: File) => Promise<string | undefined>>(
+    async () => undefined,
+  );
+  // Offers also wait while the host is asked whether Sees images can describe
+  // a picture, so one is not refused on the picker's word alone.
+  const offeredThreadId =
+    view === undefined || seesImages.pending === true ? undefined : String(view.thread.id);
+  useEffect(() => {
+    if (offeredThreadId === undefined) return;
+    let stop: (() => void) | undefined;
+    let closed = false;
+    void import("../composer/threadFileOffers").then(
+      ({ takeChatFiles }) => {
+        if (!closed) stop = takeChatFiles(offeredThreadId, (file) => takeOfferedFile.current(file));
+      },
+      () => {},
+    );
+    return () => {
+      closed = true;
+      stop?.();
+    };
+  }, [offeredThreadId]);
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
@@ -621,6 +649,124 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     );
   }
   const thread = view.thread;
+  // Resolves with the reason a file was not attached, at once or while it
+  // uploaded, so a row drop can name it after a later file clears the
+  // composer's warning and a large paste only names a file that Chat took.
+  // A discard of a file not kept is never awaited: a row drop hands over its
+  // next file only once this one has a verdict, and Send is enabled again as
+  // soon as no upload is in flight, so waiting on the host's discard left a
+  // gap in which a message went out without the rest of the drop.
+  const attachChatFile = (file: File): Promise<string | undefined> => {
+    // A pasted image usually has no file name; name it once so the chip,
+    // its remove control, and any failure message all agree.
+    const displayName = pastedImageName(file);
+    const mediaType = attachmentMediaType(file);
+    const describedImage = describesImages && COMPOSER_IMAGE_MEDIA_TYPES.includes(mediaType);
+    if (
+      isImageAttachment(file) &&
+      !describedImage &&
+      !supportsAttachmentFile(providerState.observation, view.thread.modelId, {
+        type: mediaType,
+      })
+    ) {
+      const message = `${displayName} is unavailable to the selected provider and model.`;
+      setAttachmentStatus({ kind: "failed", message });
+      return Promise.resolve(message);
+    }
+    // A turn takes at most MAX_CHAT_TURN_ATTACHMENTS files and the host
+    // refuses a send with more, so a draft past it could not go out until the
+    // person removed some. Files still uploading count, and the uploading ref
+    // is kept current here: a drop hands its files over in one tick, before
+    // the state that renders their chips does.
+    if (
+      pendingAttachmentsRef.current.length + uploadingAttachmentsRef.current.length >=
+      MAX_CHAT_TURN_ATTACHMENTS
+    ) {
+      const message = `A message can hold ${MAX_CHAT_TURN_ATTACHMENTS} attachments.`;
+      setAttachmentStatus({ kind: "failed", message });
+      return Promise.resolve(message);
+    }
+    const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
+    // A new attempt supersedes whatever an earlier one reported; a
+    // sibling upload's failure in this batch is set after this point and
+    // therefore survives until the batch drains.
+    setAttachmentStatus({ kind: "idle" });
+    uploadingAttachmentsRef.current = [
+      ...uploadingAttachmentsRef.current,
+      { id: attachmentId, displayName, file },
+    ];
+    setUploadingAttachments((current) => [...current, { id: attachmentId, displayName, file }]);
+    const settleUpload = () =>
+      setUploadingAttachments((current) => current.filter((upload) => upload.id !== attachmentId));
+    return (async (): Promise<string | undefined> => {
+      try {
+        const buffer = await file.arrayBuffer();
+        // A file that is not an image goes to the model natively or
+        // as text; one that is neither is refused before upload.
+        const refusal = isImageAttachment(file)
+          ? undefined
+          : chatFileRefusal(
+              providerState.observation,
+              view.thread.modelId,
+              { type: mediaType },
+              new Uint8Array(buffer),
+              displayName,
+            );
+        if (refusal !== undefined) {
+          cancelledUploadsRef.current.delete(String(attachmentId));
+          settleUpload();
+          if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id))
+            setAttachmentStatus({ kind: "failed", message: refusal });
+          return refusal;
+        }
+        if (
+          !mountedRef.current ||
+          activeThreadIdRef.current !== String(view.thread.id) ||
+          cancelledUploadsRef.current.has(String(attachmentId))
+        ) {
+          cancelledUploadsRef.current.delete(String(attachmentId));
+          settleUpload();
+          void discardAttachmentRef
+            .current({ threadId: view.thread.id, attachmentId })
+            .catch(() => undefined);
+          return "The attachment was cancelled.";
+        }
+        await props.controller.upload({
+          threadId: view.thread.id,
+          attachmentId,
+          displayName,
+          mediaType,
+          bytes: new Uint8Array(buffer),
+        });
+        if (
+          !mountedRef.current ||
+          activeThreadIdRef.current !== String(view.thread.id) ||
+          cancelledUploadsRef.current.has(String(attachmentId))
+        ) {
+          cancelledUploadsRef.current.delete(String(attachmentId));
+          settleUpload();
+          void discardAttachmentRef
+            .current({ threadId: view.thread.id, attachmentId })
+            .catch(() => undefined);
+          return "The attachment was cancelled.";
+        }
+        appendPendingAttachment({ id: attachmentId, displayName, file });
+        settleUpload();
+        return undefined;
+      } catch {
+        settleUpload();
+        void discardAttachmentRef
+          .current({ threadId: view.thread.id, attachmentId })
+          .catch(() => undefined);
+        const message = `${displayName} could not be attached. Paste or choose it again to retry.`;
+        if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id)) {
+          setAttachmentStatus({ kind: "failed", message });
+        }
+        return message;
+      }
+    })();
+  };
+  takeOfferedFile.current = attachChatFile;
   const connectionLost = props.controller.status === "disconnected";
   const canvasClient = props.canvasClient;
   const imageClient = props.imageGenerationClient ?? props.imageResults;
@@ -2041,107 +2187,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               ? {}
               : { threadMentions: threadMentions.composer })}
             {...(threadDropKey === undefined ? {} : { threadDropKey })}
-            onFileSelected={(file) => {
-              // A pasted image usually has no file name; name it once so the chip,
-              // its remove control, and any failure message all agree.
-              const displayName = pastedImageName(file);
-              const mediaType = attachmentMediaType(file);
-              const describedImage =
-                describesImages && COMPOSER_IMAGE_MEDIA_TYPES.includes(mediaType);
-              if (
-                isImageAttachment(file) &&
-                !describedImage &&
-                !supportsAttachmentFile(providerState.observation, view.thread.modelId, {
-                  type: mediaType,
-                })
-              ) {
-                const message = `${displayName} is unavailable to the selected provider and model.`;
-                setAttachmentStatus({ kind: "failed", message });
-                return Promise.resolve(message);
-              }
-              const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
-              // A new attempt supersedes whatever an earlier one reported; a
-              // sibling upload's failure in this batch is set after this point and
-              // therefore survives until the batch drains.
-              setAttachmentStatus({ kind: "idle" });
-              setUploadingAttachments((current) => [
-                ...current,
-                { id: attachmentId, displayName, file },
-              ]);
-              const settleUpload = () =>
-                setUploadingAttachments((current) =>
-                  current.filter((upload) => upload.id !== attachmentId),
-                );
-              // Answers, once known, why the file was not attached, so a large
-              // paste only names a file that Chat took.
-              return (async (): Promise<string | undefined> => {
-                try {
-                  const buffer = await file.arrayBuffer();
-                  // A file that is not an image goes to the model natively or
-                  // as text; one that is neither is refused before upload.
-                  const refusal = isImageAttachment(file)
-                    ? undefined
-                    : chatFileRefusal(
-                        providerState.observation,
-                        view.thread.modelId,
-                        { type: mediaType },
-                        new Uint8Array(buffer),
-                        displayName,
-                      );
-                  if (refusal !== undefined) {
-                    cancelledUploadsRef.current.delete(String(attachmentId));
-                    settleUpload();
-                    if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id))
-                      setAttachmentStatus({ kind: "failed", message: refusal });
-                    return refusal;
-                  }
-                  if (
-                    !mountedRef.current ||
-                    activeThreadIdRef.current !== String(view.thread.id) ||
-                    cancelledUploadsRef.current.has(String(attachmentId))
-                  ) {
-                    cancelledUploadsRef.current.delete(String(attachmentId));
-                    settleUpload();
-                    await discardAttachmentRef
-                      .current({ threadId: view.thread.id, attachmentId })
-                      .catch(() => undefined);
-                    return "The attachment was cancelled.";
-                  }
-                  await props.controller.upload({
-                    threadId: view.thread.id,
-                    attachmentId,
-                    displayName,
-                    mediaType,
-                    bytes: new Uint8Array(buffer),
-                  });
-                  if (
-                    !mountedRef.current ||
-                    activeThreadIdRef.current !== String(view.thread.id) ||
-                    cancelledUploadsRef.current.has(String(attachmentId))
-                  ) {
-                    cancelledUploadsRef.current.delete(String(attachmentId));
-                    settleUpload();
-                    await discardAttachmentRef
-                      .current({ threadId: view.thread.id, attachmentId })
-                      .catch(() => undefined);
-                    return "The attachment was cancelled.";
-                  }
-                  appendPendingAttachment({ id: attachmentId, displayName, file });
-                  settleUpload();
-                  return undefined;
-                } catch {
-                  settleUpload();
-                  await discardAttachmentRef
-                    .current({ threadId: view.thread.id, attachmentId })
-                    .catch(() => undefined);
-                  const message = `${displayName} could not be attached. Paste or choose it again to retry.`;
-                  if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id)) {
-                    setAttachmentStatus({ kind: "failed", message });
-                  }
-                  return message;
-                }
-              })();
-            }}
+            onFileSelected={attachChatFile}
             onModelChange={(modelId) => {
               // The same queue as the picker rail's selection: a model switch the
               // queue cannot see is one an option change cannot know it has to

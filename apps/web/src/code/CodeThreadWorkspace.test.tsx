@@ -2720,6 +2720,25 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByLabelText("Follow-up message")).toHaveFocus();
   });
 
+  it("keeps a file dropped on the row waiting until the thread is read, so its image check applies", async () => {
+    const putAttachment = vi.fn();
+    const key = threadImageOfferKey("code", String(anotherThreadId));
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          { putAttachment, discardAttachment: vi.fn(), attachment: vi.fn() } as never
+        }
+        controller={controller({})}
+        threadId={anotherThreadId}
+      />,
+    );
+    // The open thread is another one, so this thread's model is not known yet.
+    await expect(
+      threadImageOffers.offer(key, new File(["png"], "early.png", { type: "image/png" })),
+    ).resolves.toEqual({ status: "waiting" });
+    expect(putAttachment).not.toHaveBeenCalled();
+  });
+
   it("answers an offered picture with the composer's refusal when the host takes no attachments", async () => {
     render(<CodeThreadWorkspace controller={controller({})} threadId={threadId} />);
     const result = await threadImageOffers.offer(

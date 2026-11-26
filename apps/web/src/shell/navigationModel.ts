@@ -218,6 +218,11 @@ export interface ChatThreadNavigationItem {
    * Reopen clears it. Absent on Chat and Work rows.
    */
   readonly markedDone?: boolean;
+  /**
+   * A person marked this Work thread Done. Reopen clears it, so an Undo of a
+   * reopen marks it Done again. Absent on Chat and Code rows.
+   */
+  readonly workDone?: boolean;
   /** The thread's snooze as the host recorded it. Absent while it is awake. */
   readonly snooze?: {
     readonly until: string;

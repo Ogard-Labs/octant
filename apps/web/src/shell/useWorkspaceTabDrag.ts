@@ -24,6 +24,7 @@ import {
   measureComposerThreadDropZones,
   setActiveComposerThreadDropKey,
 } from "../chat/composerThreadDrop";
+import { lightSidebarRowDropZone, type SidebarRowDropState } from "../projects/sidebarRowDrop";
 
 export interface WorkspaceSurfaceDragState {
   readonly destination: WorkspaceSurfaceDropDestination | null;
@@ -50,7 +51,7 @@ export interface WorkspaceSurfaceDragHandle {
  * for the row's thread, so the row itself never learns the workspace's surface
  * vocabulary.
  */
-export interface SidebarThreadDragRow {
+export interface SidebarThreadDragRow extends SidebarRowDropState {
   readonly rowId: string;
   readonly threadId: string;
   readonly title: string;
@@ -67,6 +68,17 @@ export interface SidebarThreadDragTargets {
   readonly onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void;
   /** Whether the row's click follows a completed drag and must not open it. */
   readonly consumeThreadClickSuppression: (rowId: string) => boolean;
+  /**
+   * The row being dragged, so the sidebar can offer a Pinned or Settled
+   * target it has no group for yet. `null` while nothing is dragged.
+   */
+  readonly draggingRow: SidebarThreadDragRow | null;
+  /**
+   * Files from the computer dropped on a row: they go to that thread's
+   * composer once it is open, through its own attach path. The row opens the
+   * thread itself, the way its click does.
+   */
+  readonly offerFiles: (threadId: string, files: ReadonlyArray<File>) => void;
 }
 
 /**
@@ -81,6 +93,11 @@ export function useWorkspaceSurfaceDrag(options: {
     source: WorkspaceSurfaceDragSource,
     destination: WorkspaceSurfaceDropDestination,
   ) => void;
+  /** A sidebar row over the sidebar itself; asked after composers, before panes. */
+  readonly resolveSidebarDrop?: (
+    point: { readonly x: number; readonly y: number },
+    source: WorkspaceSurfaceDragSource,
+  ) => WorkspaceSurfaceDropDestination | null;
 }): WorkspaceSurfaceDragHandle {
   const [active, setActive] = useState<WorkspaceSurfaceDragState | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -103,6 +120,8 @@ export function useWorkspaceSurfaceDrag(options: {
       })),
     });
     if (composer !== null) return composer;
+    const sidebar = options.resolveSidebarDrop?.(point, source) ?? null;
+    if (sidebar !== null) return sidebar;
     const root = rootRef.current;
     if (root === null) return null;
     return resolveWorkspaceSurfaceDropDestination({
@@ -123,6 +142,9 @@ export function useWorkspaceSurfaceDrag(options: {
         setActive(next);
         setActiveComposerThreadDropKey(
           next?.destination?.kind === "composer" ? next.destination.composerKey : undefined,
+        );
+        lightSidebarRowDropZone(
+          next?.destination?.kind === "sidebar" ? next.destination.zone : undefined,
         );
       },
     });
@@ -169,7 +191,7 @@ export function useWorkspaceSurfaceDrag(options: {
         controller.current?.move(event.pointerId, { x: event.clientX, y: event.clientY });
       },
       onPointerUp(event) {
-        controller.current?.drop(event.pointerId);
+        controller.current?.drop(event.pointerId, { x: event.clientX, y: event.clientY });
         releaseCapture(captured.current);
         captured.current = null;
       },

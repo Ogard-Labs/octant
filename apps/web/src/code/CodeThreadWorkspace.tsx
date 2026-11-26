@@ -158,11 +158,8 @@ import type { HostId } from "@octant/contracts/host";
 import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { isImageAttachment, useCodeAttachments } from "./useCodeAttachments";
-import {
-  threadImageOfferKey,
-  useThreadImageOffers,
-  type ThreadImageVerdict,
-} from "../composer/threadImageOffers";
+import { threadImageOfferKey, type ThreadImageVerdict } from "../composer/threadImageOffers";
+import { useThreadImageOffers } from "../composer/useThreadImageOffers";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import { ThreadMentionTypeahead, useThreadMentionTypeahead } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
@@ -998,16 +995,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     refused: serverCheckout || props.pairedDevice === true,
     onFiles: (files) => void attachFiles(files),
   });
-  // A picture marked up in this thread's Browser arrives here as a file and
-  // meets the same checks as one dropped on the composer.
+  // A picture marked up in this thread's Browser, or a file dropped on the
+  // thread's sidebar row, arrives here and meets the same checks as one
+  // dropped on the composer. Offers wait until the thread is read: before
+  // that its model is unknown, and a picture would skip the image check. They
+  // also wait while the host is asked whether Sees images can describe one.
   useThreadImageOffers(
-    threadImageOfferKey("code", String(props.threadId)),
+    view === undefined || seesImages.pending === true
+      ? undefined
+      : threadImageOfferKey("code", String(props.threadId)),
     async (file, arrival): Promise<ThreadImageVerdict> => {
       let reason: string | undefined;
       if (props.attachmentClient === undefined) {
-        reason = "Image attachments are unavailable on this host.";
+        reason = isImageAttachment(file)
+          ? "Image attachments are unavailable on this host."
+          : "Attachments are unavailable on this host.";
         attachments.refuse(reason);
-      } else if (seesImages.takesImages === false) {
+      } else if (seesImages.takesImages === false && isImageAttachment(file)) {
         reason = seesImages.refusal ?? "Choose a vision model to attach images.";
         attachments.refuse(reason);
       } else {

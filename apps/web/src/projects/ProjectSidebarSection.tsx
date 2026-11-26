@@ -155,8 +155,13 @@ import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { morePullRequestsThanTheFirst } from "./threadRowPullRequests";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
+import { threadRowFileDrop } from "./sidebarRowDrop";
+import { LazyPartBoundary } from "../shell/windowNotice";
 import { AddRepositoryToComputerContext } from "./addRepositoryToComputerContext";
+import type { ProjectActionsMenuProps } from "./ProjectActionsMenuItems";
 import {
+  lazy,
+  Suspense,
   useContext,
   useEffect,
   useId,
@@ -169,6 +174,12 @@ import {
 type ThreadGroupId = "recents" | "all" | "unfiled";
 
 /** Work-only empty-state hint when the other visible mode already has Projects. */
+const ProjectActionsMenuItems = lazy(() =>
+  import("./ProjectActionsMenuItems").then((module) => ({
+    default: module.ProjectActionsMenuItems,
+  })),
+);
+
 interface OtherModeProjectsHint {
   readonly message: string;
   readonly actionLabel: string;
@@ -367,6 +378,7 @@ export interface ProjectSidebarSectionProps {
 }
 
 export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
+  const drag = useContext(SidebarThreadDragContext);
   const [projectSort, setProjectSort] = useState<ProjectSort>("manual");
   const [collapsedProjects, setCollapsedProjects] = useState<ReadonlySet<ProjectId>>(
     () => new Set(),
@@ -719,6 +731,18 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     nestThreads &&
     activityView &&
     (activity.working.length > 0 || completedThreads.length > 0);
+  // A row dragged within the sidebar pins, settles, wakes or undoes one of
+  // those; a group the list does not show yet stands in as a slot while the
+  // row is dragged, so Pinned and Settled can always be reached.
+  const draggingRow = drag?.draggingRow ?? null;
+  const pinTarget = props.threadActions?.onPinThread !== undefined;
+  const showPinSlot =
+    draggingRow !== null &&
+    pinTarget &&
+    draggingRow.pinned !== true &&
+    !(nestThreads && activityView && activity.groups.some((group) => group.id === "pinned"));
+  const showSettleSlot =
+    draggingRow !== null && draggingRow.shelf !== "completed" && completedThreads.length === 0;
   const snoozedShelf = { key: "snoozed", label: "Snoozed", threads: snoozedThreads } as const;
   const settledShelf = { key: "completed", label: "Settled", threads: completedThreads } as const;
   function renderShelf(shelf: typeof snoozedShelf | typeof settledShelf) {
@@ -729,6 +753,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       <OctantCollapsible
         className="project-archive project-shelf"
         data-shelf={shelf.key}
+        data-sidebar-row-drop={shelf.key}
         key={shelf.key}
         onToggle={(event) => {
           if (shelf.key === "completed") setCompletedShelfOpen(event.currentTarget.open);
@@ -833,7 +858,11 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     ) : undefined;
   return (
     <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>
-      <nav aria-label="Projects" className="project-nav window-no-drag">
+      <nav
+        aria-label="Projects"
+        className="project-nav window-no-drag"
+        data-sidebar-row-drop="list"
+      >
         <div className="project-nav__list">
           {/* Views sort and filter Projects; with none yet the row only said
             "All Projects" over a heading that said "Projects" again. The
@@ -843,6 +872,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             Project tree moved it into its heading, pressing the switch threw
             the switch itself 62px left and 20px down from under the pointer. */}
           {listTools}
+          {showPinSlot ? <SidebarRowDropSlot label="Pinned" zone="pinned" /> : null}
           <OctantDialogPresence>
             {projectViewEditor === undefined || projectViewState === undefined ? null : (
               <CodeProjectViewEditorDialog
@@ -894,6 +924,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                     ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
                     : {})}
                   actions={props.threadActions ?? {}}
+                  pinTarget={pinTarget}
                   counted={arrangement === "status"}
                   groups={activity.groups}
                   mode={activityMode}
@@ -968,6 +999,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             </>
           )}
           {onSelectThread === undefined ? null : renderShelf(snoozedShelf)}
+          {showSettleSlot ? <SidebarRowDropSlot label="Settled" zone="completed" /> : null}
           {onSelectThread === undefined || (nestThreads && activityView)
             ? null
             : renderShelf(settledShelf)}
@@ -1027,6 +1059,18 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         ) : null}
       </nav>
     </SidebarRowPropertiesContext.Provider>
+  );
+}
+
+/** A Pinned or Settled target shown only while a row is dragged and the list has none. */
+function SidebarRowDropSlot(props: {
+  readonly label: string;
+  readonly zone: "pinned" | "completed";
+}) {
+  return (
+    <div aria-hidden="true" className="sidebar-row-drop-slot" data-sidebar-row-drop={props.zone}>
+      {props.label}
+    </div>
   );
 }
 
@@ -1350,133 +1394,51 @@ function ProjectStatusRollup(props: {
   );
 }
 
-function ProjectActionsMenu(props: {
-  readonly canMoveDown: boolean;
-  readonly canMoveUp: boolean;
-  readonly nextProjectId?: ProjectId;
-  readonly onArchive: (projectId: ProjectId) => void;
-  readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => void;
-  readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
-  /** Starts a coordinator in a Code Project (docs/design/coordinator-threads.md). */
-  readonly onNewCoordinator?: (projectId: ProjectId) => void;
-  readonly onOpen: (project: ProjectSummary) => void;
-  readonly onReorder: (
-    projectId: ProjectId,
-    pinned: boolean,
-    beforeProjectId?: ProjectId,
-    afterProjectId?: ProjectId,
-  ) => void;
-  readonly onRestore: (projectId: ProjectId) => void;
-  readonly previousProjectId?: ProjectId;
-  readonly project: ProjectSummary;
-  readonly railPins?: {
-    readonly pinnedIds: ReadonlySet<string>;
-    readonly onChange: (projectId: ProjectId, pinned: boolean) => void;
-  };
-}) {
-  const { project } = props;
-  // An archived Project has no rail tile to pin.
-  const railPins = project.lifecycle === "archived" ? undefined : props.railPins;
-  const railPinned = railPins?.pinnedIds.has(String(project.id)) === true;
-  const railFull = !railPinned && (railPins?.pinnedIds.size ?? 0) >= RAIL_PROJECT_LIMIT;
-  const archived = project.lifecycle === "archived";
-  // An archived Project is read-only, so its colour is as fixed as its name.
-  const onColorChange = archived ? undefined : props.onColorChange;
-  // Coordinators are Code only: Work turns carry no messages for one to follow
-  // up with, and an archived Project starts nothing.
-  const onNewCoordinator = archived || project.type !== "code" ? undefined : props.onNewCoordinator;
+function ProjectActionsMenu(props: ProjectActionsMenuProps) {
+  // The items load when the menu first opens and stay drawn after, so the
+  // menu's close animation runs as it always has.
+  const [wanted, setWanted] = useState(false);
+  // Each opening, so a menu that failed to load says so again when reopened.
+  const [asked, setAsked] = useState(0);
   const onAddToAnotherComputer = useContext(AddRepositoryToComputerContext);
   return (
-    <OctantMenuRoot>
+    <OctantMenuRoot
+      onOpenChange={(next) => {
+        if (!next) return;
+        setWanted(true);
+        setAsked((count) => count + 1);
+      }}
+    >
       <OctantMenuTrigger
-        aria-label={`Project actions for ${project.name}`}
+        aria-label={`Project actions for ${props.project.name}`}
         className="project-row__action project-row__action--icon inline-flex items-center justify-center window-no-drag"
         render={<OctantButton size="icon-sm" variant="ghost" />}
       >
         <MoreHorizontal aria-hidden="true" size={14} />
       </OctantMenuTrigger>
-      <OctantMenuPortal>
-        <OctantMenuPositioner className="outline-none window-no-drag">
-          <OctantMenuPopup className="window-no-drag">
-            <OctantMenuActionItem onClick={() => props.onOpen(project)}>
-              Open Project
-            </OctantMenuActionItem>
-            {onNewCoordinator === undefined ? null : (
-              <OctantMenuActionItem onClick={() => onNewCoordinator(project.id)}>
-                New coordinator
-              </OctantMenuActionItem>
-            )}
-            {onAddToAnotherComputer === undefined || archived || project.type !== "code" ? null : (
-              <OctantMenuActionItem onClick={() => onAddToAnotherComputer(project.id)}>
-                Add to another computer…
-              </OctantMenuActionItem>
-            )}
-            <OctantMenuActionItem onClick={() => props.onMove(project.id, !project.pinned)}>
-              {project.pinned ? "Unpin Project" : "Pin Project"}
-            </OctantMenuActionItem>
-            {railPins === undefined ? null : (
-              <OctantMenuActionItem
-                disabled={railFull}
-                onClick={() => railPins.onChange(project.id, !railPinned)}
-                {...(railFull
-                  ? { "aria-description": RAIL_FULL_REASON, title: RAIL_FULL_REASON }
-                  : {})}
-              >
-                {railPinned ? "Unpin from rail" : "Pin to rail"}
-              </OctantMenuActionItem>
-            )}
-            <OctantMenuActionItem
-              disabled={!props.canMoveUp}
-              onClick={() => props.onReorder(project.id, project.pinned, props.previousProjectId)}
-            >
-              Move up
-            </OctantMenuActionItem>
-            <OctantMenuActionItem
-              disabled={!props.canMoveDown}
-              onClick={() =>
-                props.onReorder(project.id, project.pinned, undefined, props.nextProjectId)
-              }
-            >
-              Move down
-            </OctantMenuActionItem>
-            {onColorChange === undefined ? null : (
-              <OctantMenuSub>
-                <OctantMenuSubTrigger>Colour</OctantMenuSubTrigger>
-                <OctantMenuSubPopup>
-                  <OctantMenuRadioGroup
-                    onValueChange={(value) => {
-                      if (typeof value !== "string") return;
-                      const color = projectColorFromMenuValue(value);
-                      if (color !== undefined) onColorChange(project.id, color);
-                    }}
-                    value={projectColorMenuValue(project.color)}
-                  >
-                    {PROJECT_COLOR_MENU_ITEMS.map((item) => (
-                      <OctantMenuRadioItem closeOnClick key={item.value} value={item.value}>
-                        <span
-                          aria-hidden="true"
-                          className="flex size-(--oct-icon-md) items-center justify-center"
-                        >
-                          {item.icon}
-                        </span>
-                        {item.label}
-                      </OctantMenuRadioItem>
-                    ))}
-                  </OctantMenuRadioGroup>
-                </OctantMenuSubPopup>
-              </OctantMenuSub>
-            )}
-            <OctantMenuActionItem
-              onClick={() => (archived ? props.onRestore(project.id) : props.onArchive(project.id))}
-            >
-              {archived ? "Restore Project" : "Archive Project"}
-            </OctantMenuActionItem>
-          </OctantMenuPopup>
-        </OctantMenuPositioner>
-      </OctantMenuPortal>
+      {/* The items load when the menu first opens, not with the sidebar. */}
+      {wanted ? (
+        <LazyPartBoundary asked={asked} what="this Project's menu">
+          <Suspense fallback={null}>
+            <ProjectActionsMenuItems
+              {...props}
+              colors={PROJECT_ACTION_COLORS}
+              onAddToAnotherComputer={onAddToAnotherComputer}
+              railFullReason={RAIL_FULL_REASON}
+              railLimit={RAIL_PROJECT_LIMIT}
+            />
+          </Suspense>
+        </LazyPartBoundary>
+      ) : null}
     </OctantMenuRoot>
   );
 }
+
+const PROJECT_ACTION_COLORS = {
+  items: PROJECT_COLOR_MENU_ITEMS,
+  valueOf: projectColorMenuValue,
+  fromValue: projectColorFromMenuValue,
+};
 
 function sortProjects(
   projects: ReadonlyArray<ProjectSummary>,
@@ -1573,6 +1535,8 @@ function ActivityThreadList(props: {
   readonly counted?: boolean;
   /** Whose folded Status groups this window remembers. */
   readonly mode?: SidebarActivityMode;
+  /** The Pinned group takes a dragged row to pin it, where the host has list pins. */
+  readonly pinTarget?: boolean;
 }) {
   // Every other group is bounded by its day. "Earlier" is everything older than
   // a week, so it is the one group that only grows, and left open it pushed the
@@ -1632,7 +1596,14 @@ function ActivityThreadList(props: {
             ? group.threads
             : group.threads.filter((thread) => thread.navigationId === props.activeThreadId);
         return (
-          <section aria-label={group.label} className="activity-nav__group" key={group.id}>
+          <section
+            aria-label={group.label}
+            className="activity-nav__group"
+            key={group.id}
+            {...(group.id === "pinned" && props.pinTarget === true
+              ? { "data-sidebar-row-drop": "pinned" }
+              : {})}
+          >
             {folds ? (
               <h2 className="oct-nav-group sidebar-section">
                 <OctantButton
@@ -1656,6 +1627,7 @@ function ActivityThreadList(props: {
             <div className="activity-nav__threads" id={folds ? threadsId : undefined}>
               {threads.map((thread) => (
                 <ActivityThreadButton
+                  {...(group.id === "pinned" ? { inPinnedGroup: true } : {})}
                   actions={props.actions}
                   {...(props.activeThreadId === undefined
                     ? {}
@@ -1675,6 +1647,8 @@ function ActivityThreadList(props: {
 }
 
 function ActivityThreadButton(props: {
+  /** The row sits in the Pinned group, so dragging it out unpins it. */
+  readonly inPinnedGroup?: boolean;
   readonly lineageThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly actions: ThreadRowActions;
   readonly activeThreadId?: string;
@@ -1709,6 +1683,7 @@ function ActivityThreadButton(props: {
     : NO_THREAD_ROW_STATE;
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
+
   const row = (
     <OctantButton
       aria-current={selected ? "page" : undefined}
@@ -1730,6 +1705,13 @@ function ActivityThreadButton(props: {
         props.onSelectThread(props.thread.navigationId);
       }}
       onDoubleClick={() => tabs?.keep(props.thread.threadId)}
+      {...threadRowFileDrop(
+        () => {
+          tabs?.openAsPreview(props.thread.threadId);
+          props.onSelectThread(props.thread.navigationId);
+        },
+        drag === null ? undefined : (files) => drag.offerFiles(props.thread.threadId, files),
+      )}
       {...(drag === null
         ? {}
         : {
@@ -1742,6 +1724,9 @@ function ActivityThreadButton(props: {
                 ...(props.thread.projectId === undefined
                   ? {}
                   : { projectId: props.thread.projectId }),
+                ...(props.thread.pinned === true ? { pinned: true } : {}),
+                ...(props.thread.shelf === undefined ? {} : { shelf: props.thread.shelf }),
+                ...(props.inPinnedGroup === true ? { fromPinned: true } : {}),
               }),
             onPointerMove: drag.onPointerMove,
             onPointerUp: drag.onPointerUp,

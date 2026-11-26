@@ -3147,6 +3147,12 @@ export function useCodeController(options: CodeControllerOptions) {
     (threadId: CodeThreadId) => restCommand(threadId, wakeCodeThread),
     [restCommand],
   );
+  /** A list pin from a sidebar row, which has nowhere else to show a refusal. */
+  const setThreadPin = useCallback(
+    (threadId: CodeThreadId, pinned: boolean) =>
+      restCommand(threadId, (thread) => pinCodeThread(thread, pinned)),
+    [restCommand],
+  );
   /**
    * A move the person asked to run after the source thread's current turn. The
    * intent stays scoped to that thread and that turn — each queued request is
@@ -4226,6 +4232,7 @@ export function useCodeController(options: CodeControllerOptions) {
     markDraftStagedDropped: composerDraft.markStagedDropped,
     purgeThreadDraft: composerDraft.purge,
     pinThread,
+    setThreadPin,
     setThreadCoordinator,
     setThreadCoordinatorBounds,
     setThreadCoordinatorDoneWhen,
