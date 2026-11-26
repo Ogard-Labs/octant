@@ -36,14 +36,20 @@ export function ClaudeArtifactDeliverySetting(props: ClaudeArtifactDeliverySetti
   return (
     <div className="claude-artifacts-setting">
       <SettingRow
+        // A switch that cannot be turned on says why in words, not only on
+        // hover: the reason is then the row's sentence.
         description={
+          unsupportedReason ??
+          "Lets Work and Code threads publish to your claude.ai account instead of a Canvas; a page published leaves this computer."
+        }
+        more={
           <>
-            Lets this account’s Work and Code threads publish documents, reports, and pages to your
-            claude.ai account instead of making a Canvas. Canvas stays the default; each thread
-            chooses artifacts for itself. A published page leaves this computer, Claude asks before
-            every publish, and Plan never publishes.
-            {/* A switch that cannot be turned on says why in words, not only on hover. */}
-            {unsupportedReason === undefined ? null : <> {unsupportedReason}</>}
+            {unsupportedReason === undefined
+              ? null
+              : "Lets Work and Code threads publish to your claude.ai account instead of a Canvas; a page published leaves this computer. "}
+            This account’s threads can publish documents, reports, and pages. Canvas stays the
+            default; each thread chooses artifacts for itself. Claude asks before every publish, and
+            Plan never publishes.
           </>
         }
         label="Enable Claude artifacts"

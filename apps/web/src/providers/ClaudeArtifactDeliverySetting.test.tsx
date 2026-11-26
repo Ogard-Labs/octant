@@ -28,6 +28,11 @@ function claude(configuration: Record<string, unknown> = {}): ClaudeProviderInst
 const label = "Enable Claude artifacts for Claude personal";
 const telemetry = /usage telemetry to Anthropic/;
 
+/** The Settings row a control sits in: its sentence and what waits behind its More. */
+function rowOf(control: HTMLElement): HTMLElement | null {
+  return control.closest("[data-testid='setting-row']");
+}
+
 describe("Enable Claude artifacts", () => {
   it("starts off and warns under the switch that Strict turns Claude Code's usage telemetry on and otherwise leaves it to the person", () => {
     render(
@@ -90,7 +95,7 @@ describe("Enable Claude artifacts", () => {
       />,
     );
     const keyed = screen.getByRole("switch", { name: label });
-    expect(keyed).toHaveAccessibleDescription(/need a claude\.ai sign-in/);
+    expect(rowOf(keyed)).toHaveTextContent(/need a claude\.ai sign-in/);
     await userEvent.click(keyed);
     unmount();
 
@@ -122,7 +127,7 @@ describe("Enable Claude artifacts", () => {
       />,
     );
     const umbrella = screen.getByRole("switch", { name: label });
-    expect(umbrella).toHaveAccessibleDescription(/CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC/);
+    expect(rowOf(umbrella)).toHaveTextContent(/CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC/);
     await userEvent.click(umbrella);
     expect(onChange).not.toHaveBeenCalled();
   });
