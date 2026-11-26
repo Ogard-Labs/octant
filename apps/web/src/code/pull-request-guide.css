@@ -1,0 +1,89 @@
+/* The Guide tab and the Viewed list of a pull request's reading pane. */
+
+.pr-guide {
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.pr-guide__empty {
+  display: grid;
+  justify-items: start;
+  gap: var(--oct-space-2);
+}
+
+.pr-guide__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0;
+}
+
+.pr-guide__rewrite {
+  margin-inline-start: auto;
+}
+
+.pr-guide__stops {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pr-guide__stop {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  outline: none;
+}
+
+.pr-guide__stop[data-active] {
+  border-color: var(--oct-accent);
+}
+
+.pr-guide__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  font-size: var(--oct-text-detail);
+}
+
+.pr-guide__number {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.pr-guide__why {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.pr-guide__anchors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pr-guide__anchors code {
+  font-size: var(--oct-text-xs);
+}
+
+.pr-guide__viewed-count {
+  margin: 0;
+}
+
+.pr-guide__changed {
+  color: var(--oct-warn-fg);
+  font-size: var(--oct-text-xs);
+}

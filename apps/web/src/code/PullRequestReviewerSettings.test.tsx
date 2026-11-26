@@ -150,6 +150,7 @@ function makeClient(overrides?: {
   };
 
   return {
+    transport: { baseUrl: "http://127.0.0.1:4100", fetch: vi.fn(), windowCapability: "test" },
     queryProject: vi.fn(async () => projectView),
     updateProject: vi.fn(async (command) => {
       projectView = {

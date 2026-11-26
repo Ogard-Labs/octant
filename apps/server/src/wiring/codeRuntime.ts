@@ -76,6 +76,11 @@ import { PullRequestReviewerRegistry } from "../pullRequestReviewers/pullRequest
 import { createPullRequestReviewHostRuntime } from "../pullRequestReviewers/pullRequestReviewHostRuntime";
 import { createPullRequestReviewRouteHandler } from "../pullRequestReviewers/pullRequestReviewRoutes";
 import { PullRequestReviewService } from "../pullRequestReviewers/pullRequestReviewService";
+import { createBundledPullRequestGuideWriter } from "../pullRequestGuides/bundledPullRequestGuideWriter";
+import { createPullRequestGuideRouteHandler } from "../pullRequestGuides/pullRequestGuideRoutes";
+import { PullRequestGuideService } from "../pullRequestGuides/pullRequestGuideService";
+import { GhPullRequestViewedPort } from "../code/ghPullRequestViewedPort";
+import { decodePullRequestViewedView } from "@octant/contracts/pull-request-guide";
 import {
   SECOND_MODEL_PULL_REQUEST_REVIEWER_DISPLAY_NAME,
   SECOND_MODEL_PULL_REQUEST_REVIEWER_ID,
@@ -774,6 +779,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     );
     let pullRequestWatchService: PullRequestWatchPort | undefined;
     let pullRequestCiService: PullRequestCiPort | undefined;
+    let pullRequestGuideService: PullRequestGuideService | undefined;
     // Areas built after this one add tools to a Code turn here, as they do to
     // a Chat thread, so the runtime never holds the services behind them.
     const codeToolContributors: Array<
@@ -2400,6 +2406,41 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               : pullRequestWatchService.unwatch(input),
         },
         // Bound like the watch: the switch service is built after this runtime.
+        // Bound like the CI port: the guide service is built after this runtime.
+        pullRequestGuide: {
+          read: async (input) => {
+            const read = await pullRequestGuideService?.readForThread(
+              input.windowId,
+              input.threadId,
+              input.signal,
+            );
+            if (read === undefined) return { status: "refused", reason: "unavailable" };
+            return read.status === "read"
+              ? { status: "read", number: read.target.number, view: read.view }
+              : read;
+          },
+          write: async (input) => {
+            const service = pullRequestGuideService;
+            if (service === undefined) return { status: "refused", reason: "unavailable" };
+            const started = await service.writeForThread(
+              input.windowId,
+              input.threadId,
+              input.confirm === undefined
+                ? undefined
+                : (target) => input.confirm?.({ number: target.number }) ?? Promise.resolve(false),
+            );
+            if (started.status !== "started") return started;
+            const done = await started.done;
+            return done.status === "recorded"
+              ? {
+                  status: "written",
+                  number: started.target.number,
+                  headSha: started.headSha,
+                  stops: done.guide.stops.length,
+                }
+              : done;
+          },
+        },
         pullRequestCi: {
           logs: async (input) =>
             pullRequestCiService === undefined
@@ -3674,10 +3715,87 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         pullRequestReviewService.dispose();
       }),
     );
-    const pullRequestReviewRoutes = createPullRequestReviewRouteHandler({
+    const reviewRoutes = createPullRequestReviewRouteHandler({
       service: pullRequestReviewService,
       windowAuthorityStore: deps.windowAuthorityStore,
     });
+    // Review guides run on the reviewer's host runtime: the same diff capture,
+    // read-only turn, spend reservation and usage record, on the guide model.
+    const guideService = new PullRequestGuideService({
+      journal: persistence.journal,
+      authority: {
+        authorizePullRequest: (windowId, target) =>
+          projectPullRequestService.authorizePullRequest(windowId, target),
+        threadPullRequest: (windowId, threadId) =>
+          pullRequestSwitchService.resolveThreadPullRequest(windowId, threadId),
+      },
+      readThread: (threadId) => persistence.readCodeThread(threadId),
+      guideRoute: (projectId) => pullRequestReviewService.guideRoute(projectId),
+      runtime: pullRequestReviewHost.runtime,
+      writer: createBundledPullRequestGuideWriter(),
+      uuid: randomUUID,
+    });
+    pullRequestGuideService = guideService;
+    yield* Effect.addFinalizer(() => Effect.sync(() => guideService.dispose()));
+    const viewedForge = (() => {
+      if (options.ghExecutable === undefined) return undefined;
+      try {
+        return new GhPullRequestViewedPort({
+          command: createGhCommandPort({ ghPath: options.ghExecutable }),
+        });
+      } catch {
+        return undefined;
+      }
+    })();
+    const guideRoutes = createPullRequestGuideRouteHandler({
+      service: guideService,
+      viewed: {
+        read: async (windowId, target, signal) => {
+          const authority = await projectPullRequestService.authorizePullRequest(windowId, target);
+          if (authority.status === "not-authorized") return { status: "refused" };
+          if (authority.status !== "authorized" || viewedForge === undefined) {
+            return { status: "unavailable" };
+          }
+          const read = await viewedForge.read(
+            {
+              owner: String(target.repositoryOwner),
+              name: String(target.repositoryName),
+              number: target.number,
+            },
+            signal,
+          );
+          if (read.status !== "read") return { status: "unavailable" };
+          try {
+            return { status: "read", view: decodePullRequestViewedView({ files: read.files }) };
+          } catch {
+            return { status: "unavailable" };
+          }
+        },
+        write: async (windowId, input, signal) => {
+          const authority = await projectPullRequestService.authorizePullRequest(
+            windowId,
+            input.target,
+          );
+          if (authority.status === "not-authorized") return { status: "refused" };
+          if (authority.status !== "authorized" || viewedForge === undefined) {
+            return { status: "unavailable" };
+          }
+          return viewedForge.write(
+            {
+              owner: String(input.target.repositoryOwner),
+              name: String(input.target.repositoryName),
+              number: input.target.number,
+              path: input.path,
+              viewed: input.viewed,
+            },
+            signal,
+          );
+        },
+      },
+      windowAuthorityStore: deps.windowAuthorityStore,
+    });
+    const pullRequestReviewRoutes = async (request: Request) =>
+      (await reviewRoutes(request)) ?? (await guideRoutes(request));
     return {
       androidToolchainRoutes,
       appleToolchainRoutes,

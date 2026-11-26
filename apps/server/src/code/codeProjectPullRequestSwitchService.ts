@@ -721,6 +721,14 @@ export class CodeProjectPullRequestSwitchService
     }
   }
 
+  /**
+   * The thread's one linked pull request, for another host service that acts
+   * on it on the thread's behalf, such as a review guide.
+   */
+  resolveThreadPullRequest(windowId: WindowId, threadId: CodeThreadId) {
+    return this.#threadPullRequest(windowId, threadId);
+  }
+
   /** The thread's one linked pull request, resolved and authorized by the host. */
   async #threadPullRequest(
     windowId: WindowId,

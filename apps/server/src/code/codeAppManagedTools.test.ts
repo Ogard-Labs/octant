@@ -5005,6 +5005,89 @@ describe("reading and rerunning the CI of the thread's own pull request as an ag
   });
 });
 
+describe("review guides of the thread's own pull request as an agent tool", () => {
+  function guideTools(
+    threadOverrides: Partial<CodeThread> = {},
+    answer: PullRequestCiConfirmation = "approved",
+  ) {
+    const record = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["octant_pull_request"] },
+    }));
+    const read = vi.fn(async () => ({
+      status: "read" as const,
+      number: 42,
+      view: { stale: true, running: false, modelPicked: true },
+    }));
+    const write = vi.fn(
+      async (input: {
+        readonly confirm?: (pullRequest: { readonly number: number }) => Promise<boolean>;
+      }) => {
+        if (input.confirm !== undefined && !(await input.confirm({ number: 42 }))) {
+          return { status: "not-confirmed" as const };
+        }
+        return { status: "written" as const, number: 42, headSha: "h2", stops: 3 };
+      },
+    );
+    const ask = vi.fn(async () => answer);
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(threadOverrides),
+      readThread: () => thread(threadOverrides),
+      uuid: uuidFactory(),
+      recordExternalContentIngestion: record,
+      executeOperation: vi.fn(),
+      terminal: { read: async () => ({}) as never },
+      pullRequestApproval: { request: vi.fn() },
+      pullRequestGuide: { read, write },
+      pullRequestGuideApproval: { request: ask },
+    });
+    const run = (input: Record<string, unknown>) =>
+      tools.execute({ name: CODE_PULL_REQUEST_TOOL_NAME, inputJson: JSON.stringify(input) });
+    return { run, record, read, write, ask };
+  }
+
+  it("the agent's guide-write asks below Full access and is refused in Plan", async () => {
+    const gated = guideTools({ executionPolicy: "approval-gated" });
+    expect(await gated.run({ operation: "guide-write" })).toMatchObject({
+      result: { status: "written", number: 42, stops: 3 },
+      isError: false,
+    });
+    expect(gated.ask).toHaveBeenCalledWith({ number: 42 }, undefined);
+
+    const declined = guideTools({ executionPolicy: "approval-gated" }, "denied");
+    expect(await declined.run({ operation: "guide-write" })).toMatchObject({
+      result: { error: "pull-request-guide-write-denied" },
+      isError: true,
+    });
+
+    const full = guideTools({ executionPolicy: "full-access" });
+    expect(await full.run({ operation: "guide-write" })).toMatchObject({ isError: false });
+    expect(full.ask).not.toHaveBeenCalled();
+
+    const planned = guideTools({ executionPolicy: "plan" });
+    expect(await planned.run({ operation: "guide-write" })).toMatchObject({
+      result: { error: "plan-mode-read-only" },
+      isError: true,
+    });
+    expect(planned.write).not.toHaveBeenCalled();
+    expect(planned.ask).not.toHaveBeenCalled();
+  });
+
+  it("reads a guide without asking, even in Plan, and marks the thread as having read outside content", async () => {
+    const planned = guideTools({ executionPolicy: "plan" });
+    expect(await planned.run({ operation: "guide" })).toMatchObject({
+      result: { status: "read", number: 42 },
+      isError: false,
+    });
+    expect(planned.ask).not.toHaveBeenCalled();
+    expect(planned.record).toHaveBeenCalled();
+    expect(await planned.run({ operation: "guide", headSha: "h2" })).toMatchObject({
+      isError: true,
+    });
+  });
+});
+
 function thread(overrides: Partial<CodeThread> = {}): CodeThread {
   return {
     id: threadId,

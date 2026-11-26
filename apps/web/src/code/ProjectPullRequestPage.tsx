@@ -19,7 +19,7 @@ import {
   RefreshCw,
   TriangleAlert,
 } from "../ui/icons";
-import { useState, type ReactNode, type RefObject } from "react";
+import { lazy, Suspense, useState, type ReactNode, type RefObject } from "react";
 import { PullRequestStatePill } from "./PullRequestStatePill";
 import { Markdown } from "../markdown/Markdown";
 import { relativeTimeLabel } from "../lib/relativeTime";
@@ -53,6 +53,10 @@ import {
   safeGithubUrl,
 } from "./ProjectPullRequestSupport";
 import "./project-pull-request-review.css";
+
+// The Guide tab and the Viewed checkboxes load with their client on first use.
+const PullRequestGuideTab = lazy(() => import("./PullRequestGuideTab"));
+const PullRequestViewedFiles = lazy(() => import("./PullRequestViewedFiles"));
 import "./pull-request-page.css";
 
 /** The merge flow the pane owns, handed to the page so both draw one confirmation. */
@@ -79,7 +83,7 @@ export interface ProjectPullRequestPageProps extends ProjectPullRequestReviewPan
   readonly stackSection: ReactNode;
 }
 
-type Tab = "summary" | "changes" | "timeline";
+type Tab = "summary" | "changes" | "timeline" | "guide";
 
 const MERGE_METHODS: ReadonlyArray<{
   readonly value: CodeProjectPullRequestMergeMethod;
@@ -151,6 +155,9 @@ function CheckIcon(props: { readonly state: CheckState }) {
 export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
   const { detail, merge } = props;
   const [tab, setTab] = useState<Tab>("summary");
+  const [requestedFile, setRequestedFile] = useState<{ readonly path: string }>();
+  const guideClient = props.pullRequestReviewClient;
+  const guideTarget = props.pullRequestTarget;
   const [allChecks, setAllChecks] = useState(false);
   const [copied, setCopied] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -226,7 +233,14 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
       <OctantTabs
         className="pr-detail__tabs"
         onValueChange={(value) => {
-          if (value === "summary" || value === "changes" || value === "timeline") setTab(value);
+          if (
+            value === "summary" ||
+            value === "changes" ||
+            value === "timeline" ||
+            value === "guide"
+          ) {
+            setTab(value);
+          }
         }}
         value={tab}
       >
@@ -241,6 +255,9 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
               </span>
             </OctantTabsTab>
             <OctantTabsTab value="timeline">Timeline</OctantTabsTab>
+            {guideClient === undefined || guideTarget === undefined ? null : (
+              <OctantTabsTab value="guide">Guide</OctantTabsTab>
+            )}
           </OctantTabsList>
           <div className="pr-detail__tools">
             {githubUrl === undefined ? null : (
@@ -656,18 +673,16 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                   <p className="pr-detail__quiet" role="status">
                     No changed files observed.
                   </p>
+                ) : guideClient === undefined || guideTarget === undefined ? (
+                  <ChangedFiles files={detail.files} />
                 ) : (
-                  <ul className="pr-detail__rows">
-                    {detail.files.map((file) => (
-                      <li key={file.path}>
-                        <span className="pr-detail__name">{file.path}</span>
-                        <span className="pr-detail__delta">
-                          <span data-tone="added">+{file.additions}</span>
-                          <span data-tone="removed">−{file.deletions}</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  <Suspense fallback={<ChangedFiles files={detail.files} />}>
+                    <PullRequestViewedFiles
+                      client={guideClient}
+                      files={detail.files}
+                      target={guideTarget}
+                    />
+                  </Suspense>
                 )}
               </Block>
               <Block label="Diff" stale={stale("diff") ? "diff" : undefined}>
@@ -677,12 +692,35 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                   emptyClassName="pr-detail__quiet"
                   linkedThreads={props.linkedThreads}
                   noticeClassName="pr-detail__quiet"
+                  {...(requestedFile === undefined ? {} : { requestedFile })}
                   {...(props.onSendLineNotes === undefined
                     ? {}
                     : { onSendLineNotes: props.onSendLineNotes })}
                 />
               </Block>
             </OctantTabsPanel>
+
+            {guideClient === undefined || guideTarget === undefined ? null : (
+              <OctantTabsPanel className="pr-detail__panel" value="guide">
+                <Suspense
+                  fallback={
+                    <p className="pr-detail__quiet" role="status">
+                      Reading the guide…
+                    </p>
+                  }
+                >
+                  <PullRequestGuideTab
+                    client={guideClient}
+                    headSha={detail.headSha}
+                    onOpenAnchor={(anchor) => {
+                      setRequestedFile({ path: String(anchor.path) });
+                      setTab("changes");
+                    }}
+                    target={guideTarget}
+                  />
+                </Suspense>
+              </OctantTabsPanel>
+            )}
 
             {/* Kept mounted while hidden: it holds the comment and review drafts,
                 and leaving the tab unmounted them and lost what the person typed. */}
@@ -738,6 +776,22 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
         </div>
       </OctantTabs>
     </section>
+  );
+}
+
+function ChangedFiles(props: { readonly files: CodeProjectPullRequestDetailObserved["files"] }) {
+  return (
+    <ul className="pr-detail__rows">
+      {props.files.map((file) => (
+        <li key={file.path}>
+          <span className="pr-detail__name">{file.path}</span>
+          <span className="pr-detail__delta">
+            <span data-tone="added">+{file.additions}</span>
+            <span data-tone="removed">−{file.deletions}</span>
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -49,6 +49,12 @@ export interface PullRequestReviewClient {
     command: PullRequestReviewPullRequestSettingsCommand,
     signal?: AbortSignal,
   ): Promise<PullRequestReviewPullRequestView>;
+  /**
+   * Where this client posts. The Guide tab builds its own client from it
+   * (`createPullRequestGuideClient`) inside its lazily loaded module, so the
+   * renderer's first paint carries neither that client nor its schemas.
+   */
+  readonly transport: PullRequestReviewClientOptions;
 }
 
 export function createPullRequestReviewClient(
@@ -157,5 +163,6 @@ export function createPullRequestReviewClient(
       );
       return decodeHostAnswer(PullRequestReviewPullRequestView)(body);
     },
+    transport: { ...options, fetch },
   };
 }

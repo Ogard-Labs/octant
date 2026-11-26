@@ -156,7 +156,9 @@ export function classifyProductAction(request: Request): string | undefined {
       method === "POST" &&
       (path === "/api/code/pull-request-reviews/project/query" ||
         path === "/api/code/pull-request-reviews/thread/query" ||
-        path === "/api/code/pull-request-reviews/pr/query")
+        path === "/api/code/pull-request-reviews/pr/query" ||
+        // A paired phone reads guides; writing one and Viewed stay with a local window.
+        path === "/api/code/pull-request-guides/query")
     ) {
       return "project.overview.read";
     }

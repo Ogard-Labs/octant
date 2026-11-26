@@ -197,6 +197,7 @@ import {
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { PullRequestWatchPort } from "./pullRequestWatchPort";
 import type { PullRequestCiPort, PullRequestCiRerunPlanSummary } from "./pullRequestCiPort";
+import type { PullRequestGuidePort } from "./pullRequestGuidePort";
 import type { ProjectForgeChoices } from "./standingMergeAllowance";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import type {
@@ -539,6 +540,8 @@ export interface CodeOperationRuntimeOptions {
   readonly pullRequestWatch?: PullRequestWatchPort;
   /** CI logs and reruns of a thread's own pull request; absent, the tool refuses both. */
   readonly pullRequestCi?: PullRequestCiPort;
+  /** Review guides of a thread's own pull request; absent, the tool refuses guide and guide-write. */
+  readonly pullRequestGuide?: PullRequestGuidePort;
   readonly reviewFiles: ReviewFindingFilePort;
   readonly evidence: CodeOperationEvidencePort;
   /** The images Code threads have staged for their next turn. */
@@ -6519,6 +6522,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       const browserProfiles = this.#options.browserProfiles;
       const pullRequestWatch = this.#options.pullRequestWatch;
       const pullRequestCi = this.#options.pullRequestCi;
+      const pullRequestGuide = this.#options.pullRequestGuide;
       sets.push(
         this.#options.computerUseTools?.({
           windowId: active.windowId,
@@ -6610,6 +6614,35 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
           pullRequestCiApproval: {
             request: (plan, signal) => this.#askCiRerunApproval(active, plan, signal),
+          },
+          ...(pullRequestGuide === undefined
+            ? {}
+            : {
+                pullRequestGuide: {
+                  read: (signal) =>
+                    pullRequestGuide.read({
+                      windowId: active.windowId,
+                      threadId: active.thread.id,
+                      signal: signal ?? active.abort.signal,
+                    }),
+                  write: (input, signal) =>
+                    pullRequestGuide.write({
+                      ...input,
+                      windowId: active.windowId,
+                      threadId: active.thread.id,
+                      signal: signal ?? active.abort.signal,
+                    }),
+                },
+              }),
+          pullRequestGuideApproval: {
+            // The run is billed on the person's guide model, so the ask says so.
+            request: (pullRequest, signal) =>
+              this.#askToolApproval(
+                active,
+                `Write a review guide for pull request #${pullRequest.number}? It runs on this Project's guide model and is billed.`,
+                undefined,
+                signal,
+              ),
           },
           terminalApproval: {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),
