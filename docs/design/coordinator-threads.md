@@ -756,5 +756,6 @@ On the inference host, launch the server with:
 
 ```sh
 llama-server --model Qwen3-4B-Q4_K_M.gguf --alias qwen3-4b-q4 \
-  --host 127.0.0.1 --port 19373 --jinja --reasoning-budget 0
+  --host 127.0.0.1 --port 19373 --jinja --ctx-size 4096 --parallel 1 \
+  --chat-template-kwargs '{"enable_thinking":false}' --reasoning-budget 0
 ```
