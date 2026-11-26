@@ -28,6 +28,11 @@ required. Stop the server with Ctrl-C.
 - Some actions are placeholders. A successful preview interaction is not
   evidence of a native integration, host capability, or security check.
 
+The preview has no automated tests. Its browser checks (each device and
+posture, split view, folding, counts, and the keyboard) were run by hand in
+Chromium and are not committed. Recheck the affected flows by hand after a
+change.
+
 To review is an unread finished turn. In review is a pull request's review
 status. Settled means out of the active list, not approved or Done, and whether
 finished threads settle on their own is each computer's setting.

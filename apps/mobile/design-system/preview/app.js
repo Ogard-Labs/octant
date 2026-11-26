@@ -774,7 +774,7 @@ const INBOX_KIND = {
 function inboxRowHTML(t) {
   const n = INBOX_KIND[inboxKind(t)];
   return `
-    <div class="nrow" data-kind="${inboxKind(t)}" data-open="thread/${t.id}">
+    <div class="nrow" data-kind="${inboxKind(t)}" data-open="thread/${t.id}" role="button" tabindex="0" aria-label="${esc(n.title)}: ${esc(t.title)}">
       <div class="kindic" style="background:color-mix(in srgb, ${n.tint} 16%, transparent);color:${n.tint}">${I(n.icon)}</div>
       <div class="main">
         <div class="k1">${esc(n.title)}</div>
@@ -803,7 +803,7 @@ function inboxScreen() {
   const notifs = INBOX.notifs
     .map(
       (n) => `
-    <div class="notif-row${n.unavail ? " unavail" : ""}"${n.open ? ` data-open="${n.open}"` : ""}>
+    <div class="notif-row${n.unavail ? " unavail" : ""}"${n.open ? ` data-open="${n.open}" role="button" tabindex="0" aria-label="${esc(n.title)}: ${esc(n.sub)}"` : ""}>
       <div class="kindic" style="background:color-mix(in srgb, ${n.tint} 14%, transparent);color:${n.tint}">${I(n.icon)}</div>
       <div class="main">
         <div class="n1">${esc(n.title)}</div>
@@ -858,7 +858,7 @@ function prsScreen() {
           const repoShort = r.name.split("/")[1];
           const clickable = p.n === 2864 ? `data-pr="2864"` : `data-dead="PR #${p.n}"`;
           return `
-        <div class="prrow row" ${clickable} style="cursor:pointer">
+        <div class="prrow row" ${clickable} role="button" tabindex="0" aria-label="${esc(p.title)}, #${p.n}" style="cursor:pointer">
           <div class="glyph ${gcls}">${I(glyph)}</div>
           <div class="main">
             <div class="p1">${esc(p.title)}</div>
@@ -893,7 +893,7 @@ function prsScreen() {
 function botsScreen() {
   const rows = BOTS.map(
     (b) => `
-    <div class="row trow botrow" data-bot="${b.id}" style="cursor:pointer">
+    <div class="row trow botrow" data-bot="${b.id}" role="button" tabindex="0" aria-label="${esc(b.name)}, ${esc(b.role)}" style="cursor:pointer">
       <div class="bot-avatar" style="width:40px;height:40px;background:linear-gradient(135deg,${b.g1},${b.g2})">${I(b.glyph)}</div>
       <div class="main">
         <div class="t1">${esc(b.name)}${b.lead ? `<span class="leadtag">Lead</span>` : ""}</div>
@@ -1520,6 +1520,15 @@ function pairScreen() {
 
 /* ============================== device pages (Lock / Home Screen / Android notif) ============================== */
 
+/* The expanded island names the first thread waiting on the user, and says
+   nothing when no thread is waiting. */
+function islandNeeds() {
+  const first = threadsIn("needs")[0];
+  if (!first) return "";
+  const label = showNames ? first.title : `a thread on ${compName(first.computer)}`;
+  return `<div class="isl-needs">Needs you: ${esc(label)}</div>`;
+}
+
 function lockScreen() {
   const { active, needs } = awareCounts();
   const rows = aware().slice(0, 5).map(awareRow).join("");
@@ -1535,7 +1544,7 @@ function lockScreen() {
           return `<div class="isl-row"><span class="isl-t">${esc(nm.length > 26 ? nm.slice(0, 26) + "…" : nm)}</span><span class="isl-s" style="color:${PHASE_COLOR[a.phase]}">${a.status}</span></div>`;
         })
         .join("")}
-      <div class="isl-needs">Needs you: ${showNames ? esc(threadById("pairing").title) : "a thread on Studio Mac"}</div>
+      ${islandNeeds()}
     </div>`;
   return `
   <section class="screen device" data-route="lock">
@@ -1856,6 +1865,7 @@ function newSheetHTML() {
     <div class="form-sep"></div>
     <button class="formrow" data-menu="sheetmodel"><span class="flabel">Model</span><span class="fval">Opus · High ${I("chevron-down")}</span></button>
   </div>
+  <div class="new-attach">${attachChipsHTML("__new")}</div>
   <textarea class="promptarea" placeholder="What should we work on?" rows="3"></textarea>
   <button class="big-btn" id="sheet-start">Start</button>`;
 }
@@ -1935,7 +1945,44 @@ function buildScreen(routeStr) {
   const html = ["thread", "bot", "computer", "list"].includes(name) ? builder(arg) : builder();
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
-  return tmp.firstElementChild;
+  const el = tmp.firstElementChild;
+  if (name === "thread") renderConversation(el, routeStr);
+  return el;
+}
+
+/* A thread's transcript is fixture markup plus what the user did to it here:
+   replies they sent and how many fixture entries a rewind kept. Screens rebuild
+   from this, so a reply survives switching tabs and shows in every pane. The
+   question and live status are part of the thread, not entries, and stay. */
+const conversations = new Map();
+const PERMANENT_ENTRIES = ".t-ask, .t-live";
+function conversationOf(route) {
+  let c = conversations.get(route);
+  if (!c) {
+    c = { keptFixtures: null, sent: [] };
+    conversations.set(route, c);
+  }
+  return c;
+}
+const conversationEntries = (transcript) =>
+  [...transcript.children].filter((e) => !e.matches(PERMANENT_ENTRIES));
+function sentMessageEl(text) {
+  const div = document.createElement("div");
+  div.className = "msg-user";
+  div.dataset.sent = "";
+  div.textContent = text;
+  return div;
+}
+function renderConversation(screenEl, route) {
+  const transcript = screenEl.querySelector(".transcript");
+  const c = conversations.get(route);
+  if (!transcript || !c) return;
+  if (c.keptFixtures !== null)
+    conversationEntries(transcript)
+      .slice(c.keptFixtures)
+      .forEach((e) => e.remove());
+  const anchor = transcript.querySelector(".t-live");
+  c.sent.forEach((text) => transcript.insertBefore(sentMessageEl(text), anchor));
 }
 
 /* ============================== thread state ============================== */
@@ -2100,10 +2147,20 @@ function bindSheetContent(sheet, kind) {
         b.classList.add("on");
       }),
     );
+    // items shared into New chat wait here until the chat starts or they are removed
+    sheet.querySelector(".new-attach").addEventListener("click", (e) => {
+      const un = e.target.closest("[data-unattach]");
+      if (!un) return;
+      e.stopPropagation();
+      getDrafts("__new").splice(+un.dataset.unattach, 1);
+      sheet.querySelector(".new-attach").innerHTML = attachChipsHTML("__new");
+    });
     $("#sheet-start", sheet).addEventListener("click", () => {
       const prompt = sheet.querySelector(".promptarea").value.trim();
+      const started = prompt || getDrafts("__new").length > 0;
+      if (started) getDrafts("__new").length = 0;
       closeSheet();
-      if (prompt) setTimeout(() => toast("Thread started"), 320);
+      if (started) setTimeout(() => toast("Thread started"), 320);
     });
   } else if (kind === "send") {
     $$("[data-dest]", sheet).forEach((el) =>
@@ -2324,20 +2381,38 @@ function doRewind() {
   }
   const transcript = t.closest(".transcript");
   if (!transcript) return;
-  if (t.classList.contains("msg-user")) {
+  const route = screenOf(t).route;
+  const entries = conversationEntries(transcript);
+  const at = entries.indexOf(t);
+  if (at < 0) {
+    toast("Nothing to rewind");
+    return;
+  }
+  // rewinding to a message of yours removes it too and returns it to the composer
+  const isUser = t.classList.contains("msg-user");
+  const keep = isUser ? at : at + 1;
+  if (isUser) {
     const input = t.closest(".screen").querySelector(".msg-input");
     if (input) {
       input.value = t.textContent.trim();
       input.dispatchEvent(new Event("input", { bubbles: true }));
     }
-    t.remove();
   }
-  let el = transcript.lastElementChild;
-  while (el && el !== t) {
-    const prev = el.previousElementSibling;
-    el.remove();
-    el = prev;
-  }
+  const c = conversationOf(route);
+  const fixtures = entries.filter((e) => !e.matches("[data-sent]")).length;
+  if (keep <= fixtures) {
+    c.keptFixtures = keep;
+    c.sent = [];
+  } else c.sent = c.sent.slice(0, keep - fixtures);
+  allScreens()
+    .filter((o) => o.route === route)
+    .forEach((o) => {
+      const tr = o.el.querySelector(".transcript");
+      if (tr)
+        conversationEntries(tr)
+          .slice(keep)
+          .forEach((e) => e.remove());
+    });
   toast("Rewound");
 }
 
@@ -2947,7 +3022,8 @@ phone.addEventListener("mousedown", (e) => {
   if (e.target.closest(".composer button")) e.preventDefault();
 });
 phone.addEventListener("keydown", (e) => {
-  const row = e.target.closest?.(".trow");
+  // rows that open something act like buttons from the keyboard
+  const row = e.target.closest?.('.row[role="button"], [data-open][role="button"]');
   if (row && e.target === row && (e.key === "Enter" || e.key === " ")) {
     e.preventDefault();
     row.click();
@@ -3170,12 +3246,14 @@ phone.addEventListener("click", (e) => {
     const input = s.el.querySelector(".msg-input");
     const text = input.value.trim();
     if (text) {
-      input.value = "";
+      addUserMessage(s.route, text);
+      for (const o of allScreens().filter((o) => o.route === s.route)) {
+        o.el.querySelector(".msg-input").value = "";
+        syncSend(o.el);
+      }
       textDrafts.delete(s.route);
       getDrafts(s.route).length = 0;
       refreshComposerChips(s.route);
-      syncSend(s.el);
-      addUserMessage(s.el, text);
       // a message starts a turn, and brings a settled or snoozed thread back
       const t = threadById(parseRoute(s.route).arg);
       Object.assign(t, { settled: false, snoozed: false, elapsed: "now" });
@@ -3282,13 +3360,16 @@ function refreshAwareness() {
   if (deviceRoute) showDevicePage(deviceRoute);
 }
 
-function addUserMessage(screen, text) {
-  const div = document.createElement("div");
-  div.className = "msg-user";
-  div.textContent = text;
-  screen.querySelector(".transcript").insertBefore(div, screen.querySelector(".t-live"));
-  const sc = screen.querySelector(".scroll");
-  sc.scrollTop = sc.scrollHeight;
+function addUserMessage(route, text) {
+  conversationOf(route).sent.push(text);
+  allScreens()
+    .filter((o) => o.route === route)
+    .forEach((o) => {
+      const transcript = o.el.querySelector(".transcript");
+      transcript.insertBefore(sentMessageEl(text), transcript.querySelector(".t-live"));
+      const sc = o.el.querySelector(".scroll");
+      sc.scrollTop = sc.scrollHeight;
+    });
 }
 
 /* ---------- input listeners (delegated) ---------- */
@@ -3420,7 +3501,8 @@ syncDeviceUI();
     posture = POSTURES[deviceMode][0][0];
   phone.dataset.posture = POSTURES[deviceMode] ? posture : "";
   syncDeviceUI();
-  setTheme(localStorage.getItem("octant-mock-theme") || "dark");
+  // restore the choice, not what it resolved to, so System keeps following the OS
+  setThemePref(themePref);
   const desired = parseRoute(location.hash).route;
   pushScreen(panes[0], "home", { instant: true });
   if (isDevicePage(desired)) showDevicePage(desired);

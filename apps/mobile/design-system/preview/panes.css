@@ -362,7 +362,8 @@
 .phone.spanfull .screen::after {
   display: none;
 }
-.phone.spanfull .screen > .scroll {
+/* a screen with a composer keeps its keyboard-aware clearance */
+.phone.spanfull .screen:not(.dock) > .scroll {
   padding-bottom: 96px;
 }
 
@@ -481,6 +482,9 @@
 }
 .tile:focus-visible,
 .trow:focus-visible,
+.nrow:focus-visible,
+.notif-row:focus-visible,
+.prrow:focus-visible,
 .comp-row:focus-visible,
 .split-btn:focus-visible {
   outline: 2px solid var(--accent);

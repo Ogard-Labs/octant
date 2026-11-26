@@ -394,12 +394,16 @@ function syncKeyboard() {
 
 function syncHash() {
   const r = deviceRoute || topScreen()?.route;
-  if (r && parseRoute(location.hash).route !== r) history.replaceState(null, "", "#/" + r);
+  if (r && parseRoute(location.hash).route !== r) history.replaceState(history.state, "", "#/" + r);
 }
 
-/* the browser's Back works as the system Back */
+/* The browser's Back works as the system Back. Each entry remembers the route
+   of the one below it, so an in-app Back to that route can step back onto it
+   instead of rewriting this entry into a duplicate the browser's Back would
+   then have to pass through twice. */
 function recordHash(r) {
-  if (parseRoute(location.hash).route !== r) history.pushState(null, "", "#/" + r);
+  const prev = parseRoute(location.hash).route;
+  if (prev !== r) history.pushState({ prev }, "", "#/" + r);
 }
 
 function focusPane(p) {
@@ -569,6 +573,7 @@ function go(hash) {
 }
 
 function goBack(p = focusedPane()) {
+  const below = history.state?.prev;
   layout.focus = p.id;
   const other = otherPane(p);
   if (p.stack.length > 1) popTo(p, p.stack.length - 2);
@@ -577,7 +582,8 @@ function goBack(p = focusedPane()) {
     relayout(() => {
       layout.focus = other.id;
     });
-  syncHash();
+  if (below !== undefined && below === (deviceRoute || topScreen()?.route)) history.back();
+  else syncHash();
 }
 
 function closePane(p) {
@@ -622,7 +628,9 @@ function adaptOnUnfold() {
   const other = otherPane(p);
   if (!isWide() || layout.full || p.linked || p.stack.length < 2) return;
   if (!isTab(p.stack[0].route) || !isConversation(topOf(p).route)) return;
-  if (isOpen(other) && !other.linked) return;
+  // a pane that is already open keeps its own stack; only an empty one takes
+  // what the list led to
+  if (isOpen(other)) return;
   clearPane(other);
   other.stack = p.stack.splice(1);
   other.stack.forEach((s) => other.el.appendChild(s.el));
