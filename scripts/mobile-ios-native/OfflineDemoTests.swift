@@ -36,13 +36,72 @@ final class OfflineDemoTests: XCTestCase {
         }
         tap(demo)
         XCTAssertTrue(element("mobile-mock-banner").waitForExistence(timeout: 15))
-        XCTAssertTrue(element("mobile-inbox-home").exists)
+        // The place mounts after the banner on a slow runner.
+        XCTAssertTrue(element("mobile-inbox-home").waitForExistence(timeout: 15))
+    }
+
+    /// Every place in the system's bar, photographed and left on Home again.
+    @MainActor
+    private func visitPlaces() {
+        for (tab, screen) in [
+            ("Threads", "mobile-threads"),
+            ("Inbox", "mobile-inbox"),
+            ("Home", "mobile-inbox-home"),
+        ] {
+            // By the name VoiceOver says: the system bar's items carry no identifier.
+            tap(app.tabBars.buttons[tab])
+            XCTAssertTrue(element(screen).waitForExistence(timeout: 15))
+            let evidence = XCTAttachment(screenshot: app.screenshot())
+            evidence.name = "Place \(screen)"
+            evidence.lifetime = .keepAlways
+            add(evidence)
+            // Rows pass under the place's bar, which has to keep its name readable.
+            app.swipeUp()
+            let scrolled = XCTAttachment(screenshot: app.screenshot())
+            scrolled.name = "Place \(screen) scrolled"
+            scrolled.lifetime = .keepAlways
+            add(scrolled)
+            app.swipeDown()
+        }
+    }
+
+    /// The filter's and a row's own menus, photographed open.
+    @MainActor
+    private func openMenus() {
+        tap(app.tabBars.buttons["Threads"])
+        let filter = element("mobile-threads-filter-host")
+        tap(filter)
+        let host = app.buttons["Studio Mac"].firstMatch
+        let opened = host.waitForExistence(timeout: 15)
+        let evidence = XCTAttachment(screenshot: app.screenshot())
+        evidence.name = "Filter menu"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        XCTAssertTrue(opened)
+        tap(host)
+        let row = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "mobile-home-thread-row-code")
+        ).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        row.press(forDuration: 1.2)
+        let settle = app.buttons["Settle"].firstMatch
+        let offered = settle.waitForExistence(timeout: 15)
+        let menu = XCTAttachment(screenshot: app.screenshot())
+        menu.name = "Row menu"
+        menu.lifetime = .keepAlways
+        add(menu)
+        XCTAssertTrue(offered)
+        // Outside the menu and the lifted row, which closes it and changes nothing.
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).tap()
+        XCTAssertTrue(settle.waitForNonExistence(timeout: 15))
+        tap(app.tabBars.buttons["Home"])
     }
 
     @MainActor
     private func createReply(_ prompt: String) {
-        // The home starts a thread from the compose button in its toolbar.
-        tap(element("mobile-home-compose"))
+        // New beside the bar starts a thread from every place.
+        // In the system bar where it has a place for New, else a button over the list.
+        tap(app.buttons["New thread"].firstMatch)
         let input = element("mobile-home-composer-input")
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 15))
@@ -56,7 +115,8 @@ final class OfflineDemoTests: XCTestCase {
         XCTAssertTrue(project.exists)
         XCTAssertTrue(host.exists)
         XCTAssertEqual(project.label, "New conversation")
-        XCTAssertEqual(host.label, "Studio Mac")
+        // The computer is a menu here, which says what it chooses before the choice.
+        XCTAssertTrue(host.label.hasSuffix("Studio Mac"), host.label)
         XCTAssertGreaterThan(project.frame.width, 0)
         XCTAssertGreaterThan(host.frame.width, 0)
         XCTAssertTrue(context.frame.contains(project.frame))
@@ -91,7 +151,7 @@ final class OfflineDemoTests: XCTestCase {
         add(composer)
         tap(element("mobile-home-composer-submit"))
         XCTAssertTrue(element("mobile-thread-screen").waitForExistence(timeout: 15))
-        let reply = app.staticTexts.matching(
+        let reply = app.descendants(matching: .any).matching(
             NSPredicate(format: "label CONTAINS %@", "Mock reply to: " + prompt)
         ).firstMatch
         XCTAssertTrue(reply.waitForExistence(timeout: 15))
@@ -129,12 +189,23 @@ final class OfflineDemoTests: XCTestCase {
         replied.name = "Native sample reply"
         replied.lifetime = .keepAlways
         add(replied)
+        // Answering stays in view too: the thread's composer rides on the keyboard.
+        let followUp = element("mobile-composer-input")
+        tap(followUp)
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 15))
+        XCTAssertTrue(followUp.isHittable)
+        XCTAssertLessThanOrEqual(followUp.frame.maxY, keyboard.frame.minY)
+        let answering = XCTAttachment(screenshot: app.screenshot())
+        answering.name = "Thread composer above the system keyboard"
+        answering.lifetime = .keepAlways
+        add(answering)
     }
 
     @MainActor
     func testColdDemoReplyForegroundAndReset() {
         app.launch()
         enterDemo()
+        visitPlaces()
         createReply("Native iOS sample reply")
         XCUIDevice.shared.press(.home)
         app.activate()
@@ -142,7 +213,7 @@ final class OfflineDemoTests: XCTestCase {
         XCTAssertTrue(element("mobile-mock-banner").exists)
         tap(element("mobile-demo-leave"))
         enterDemo()
-        XCTAssertFalse(app.staticTexts.matching(
+        XCTAssertFalse(app.descendants(matching: .any).matching(
             NSPredicate(format: "label CONTAINS %@", "Native iOS sample reply")
         ).firstMatch.exists)
         app.terminate()
@@ -152,12 +223,62 @@ final class OfflineDemoTests: XCTestCase {
     }
 
     @MainActor
+    func testDarkPlacesAndMenus() {
+        app.launch()
+        enterDemo()
+        visitPlaces()
+        openMenus()
+        createReply("Native iOS dark reply")
+        app.terminate()
+    }
+
+    @MainActor
     func testLargeTextEntryAndReply() {
         app.launch()
         enterDemo()
+        visitPlaces()
         createReply("Native iOS large text reply")
         tap(element("mobile-demo-leave"))
         XCTAssertTrue(element("mobile-entry-demo").waitForExistence(timeout: 15))
         app.terminate()
+    }
+
+    /// Drives the app through steps a person writes, for looking at a screen by
+    /// hand on another Mac. The acceptance run gives none, and skips it.
+    @MainActor
+    func testDriveByHand() throws {
+        let steps = ProcessInfo.processInfo.environment["OCTANT_DRIVE_STEPS"] ?? ""
+        try XCTSkipIf(steps.isEmpty, "No steps were given.")
+        app.launch()
+        for step in steps.components(separatedBy: ";") {
+            let parts = step.split(separator: ":", maxSplits: 1).map(String.init)
+            let target = parts.count > 1 ? parts[1] : ""
+            // By identifier, else by the words VoiceOver says.
+            let named = element(target)
+            let control = named.exists ? named : app.descendants(matching: .any).matching(
+                NSPredicate(format: "label BEGINSWITH %@", target)
+            ).firstMatch
+            switch parts.first ?? "" {
+            case "demo": enterDemo()
+            case "tap": _ = control.waitForExistence(timeout: 10); control.tap()
+            case "tab": tap(app.tabBars.buttons[target])
+            case "press": _ = control.waitForExistence(timeout: 10); control.press(forDuration: 1.2)
+            case "left": control.swipeLeft()
+            case "right": control.swipeRight()
+            case "up": app.swipeUp()
+            case "down": app.swipeDown()
+            case "type": app.typeText(target)
+            case "wait": Thread.sleep(forTimeInterval: Double(target) ?? 1)
+            case "rotate":
+                XCUIDevice.shared.orientation =
+                    target == "left" ? .landscapeLeft : target == "right" ? .landscapeRight : .portrait
+            case "shot":
+                let picture = XCTAttachment(screenshot: app.screenshot())
+                picture.name = target
+                picture.lifetime = .keepAlways
+                add(picture)
+            default: XCTFail("Unknown step \(step)")
+            }
+        }
     }
 }

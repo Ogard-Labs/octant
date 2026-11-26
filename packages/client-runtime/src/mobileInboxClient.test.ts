@@ -182,6 +182,12 @@ describe("mobileInboxClient", () => {
       status: "active",
       freshness: later,
     });
+    // What the list draws each thread's provider mark from.
+    expect(rows.map((row) => row.providerInstanceId)).toEqual([
+      String(workThread.providerInstanceId),
+      codeThread.providerInstanceId,
+      String(chatThread.providerInstanceId),
+    ]);
   });
 
   it("says a thread is working or needs input only when the host's runtime report says so", () => {
@@ -267,7 +273,45 @@ describe("mobileInboxClient", () => {
     expect(rows).toHaveLength(3);
     expect(rows[0]?.mode).toBe("work");
     expect(rows.find((row) => row.mode === "code")).toMatchObject({ reviewState: "approved" });
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(5);
+    // This computer answers no Chat run states, and still lists its Chats.
+    expect(rows.find((row) => row.mode === "chat")?.lastSequence).toBeUndefined();
+  });
+
+  it("gives a Chat and a Code row the position and run state its computer reports", async () => {
+    const answers: Readonly<Record<string, unknown>> = {
+      "/api/chat/bootstrap": { settings: chatSettings, threads: [chatThread] },
+      "/api/chat/navigation": {
+        threads: [
+          {
+            id: chatThread.id,
+            title: chatThread.title,
+            providerInstanceId: chatThread.providerInstanceId,
+            updatedAt: chatThread.updatedAt,
+            lastSequence: 31,
+            followUpOpen: false,
+            executing: true,
+          },
+        ],
+      },
+      "/api/work/threads/bootstrap": { threads: [] },
+      "/api/code/bootstrap": {
+        settings: codeSettings,
+        threads: [codeThread],
+        checkouts: [codeCheckout],
+        activity: [{ threadId: codeThread.id, lastSequence: 44 }],
+      },
+      "/api/code/board": codeBoard,
+    };
+    const rows = await listMobileInbox({
+      hostId,
+      authenticatedFetch: async ({ path }) => Response.json(answers[path]),
+    });
+    expect(rows.find((row) => row.mode === "chat")).toMatchObject({
+      lastSequence: 31,
+      live: "working",
+    });
+    expect(rows.find((row) => row.mode === "code")?.lastSequence).toBe(44);
   });
 
   it("surfaces an unavailable authoritative Code Board instead of discarding it", async () => {
@@ -621,6 +665,33 @@ describe("mobileInboxClient", () => {
     expect(transport.authenticatedFetch).not.toHaveBeenCalled();
   });
 
+  it("changes a Chat thread's option values before the follow-up when the person chose them", async () => {
+    const bodies: Array<{ kind?: string; modelOptionValues?: Record<string, string> }> = [];
+    const fetch = vi.fn(async ({ body }: { body?: string }) => {
+      const payload = JSON.parse(body ?? "{}") as { kind?: string };
+      bodies.push(payload);
+      if (payload.kind === "change-chat-provider") {
+        return Response.json({ kind: "thread-updated", thread: { ...chatThread, version: 2 } });
+      }
+      return new Response(null, { status: 200 });
+    });
+    const transport: MobileRemoteTransport = {
+      hostId,
+      authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+    };
+    await sendMobileChatTurn({
+      transport,
+      threadId: chatThread.id,
+      expectedVersion: 1,
+      prompt: "Go on",
+      providerInstanceId: chatThread.providerInstanceId,
+      modelId: chatThread.modelId,
+      modelOptionValues: { effort: "high" },
+    });
+    expect(bodies.map((body) => body.kind)).toEqual(["change-chat-provider", "send-chat-turn"]);
+    expect(bodies[0]?.modelOptionValues).toEqual({ effort: "high" });
+  });
+
   it("creates a host Chat thread and starts the first turn", async () => {
     const created = {
       kind: "thread-created",
@@ -719,11 +790,13 @@ describe("mobileInboxClient", () => {
             kind?: string;
             modelId?: string;
             expectedVersion?: number;
+            modelOptionValues?: Record<string, string>;
           };
           kinds.push(payload.kind ?? "");
           if (payload.kind === "create-chat-thread") return Response.json(created);
           if (payload.kind === "change-chat-provider") {
             expect(payload.modelId).toBe("model-b");
+            expect(payload.modelOptionValues).toEqual({ effort: "high" });
             expect(payload.expectedVersion).toBe(1);
             return Response.json(updated);
           }
@@ -748,6 +821,7 @@ describe("mobileInboxClient", () => {
       prompt: "Model pick",
       providerInstanceId: "10000000-0000-4000-8000-000000000001",
       modelId: "model-b",
+      modelOptionValues: { effort: "high" },
     });
     expect(kinds).toEqual(["create-chat-thread", "change-chat-provider", "send-chat-turn"]);
 
@@ -757,6 +831,7 @@ describe("mobileInboxClient", () => {
       expectedVersion: 1,
       providerInstanceId: "10000000-0000-4000-8000-000000000001",
       modelId: "model-b",
+      modelOptionValues: { effort: "high" },
     });
     expect(changed.modelId).toBe("model-b");
   });

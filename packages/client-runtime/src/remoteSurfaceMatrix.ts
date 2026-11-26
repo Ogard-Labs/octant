@@ -45,19 +45,34 @@ export async function readRemoteSessionStanding(transport: {
     readonly path: string;
   }) => Promise<Response>;
 }): Promise<RemoteSessionStanding> {
+  return (await askRemoteSessionStanding(transport)).standing;
+}
+
+/**
+ * The same, with whether the host answered at all. A host that could not be
+ * reached is restricted like any other, and has said nothing of the session.
+ */
+export async function askRemoteSessionStanding(
+  transport: Parameters<typeof readRemoteSessionStanding>[0],
+): Promise<{ readonly answered: boolean; readonly standing: RemoteSessionStanding }> {
+  let answered = false;
   try {
     const response = await transport.authenticatedFetch({
       method: "GET",
       path: "/api/remote/auth/device",
     });
-    if (!response.ok) return RESTRICTED_REMOTE_SESSION;
+    answered = response.status < 500;
+    if (!response.ok) return { answered, standing: RESTRICTED_REMOTE_SESSION };
     const device = decodeHostAnswer(RemoteOwnDeviceMetadataV1)(await response.json());
     return {
-      actsAsHostPerson: device.actsAsHostPerson === true,
-      ...(device.accessLevel === undefined ? {} : { accessLevel: device.accessLevel }),
+      answered,
+      standing: {
+        actsAsHostPerson: device.actsAsHostPerson === true,
+        ...(device.accessLevel === undefined ? {} : { accessLevel: device.accessLevel }),
+      },
     };
   } catch {
-    return RESTRICTED_REMOTE_SESSION;
+    return { answered, standing: RESTRICTED_REMOTE_SESSION };
   }
 }
 

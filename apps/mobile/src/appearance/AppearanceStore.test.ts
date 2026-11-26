@@ -22,8 +22,8 @@ function memoryStorage() {
 }
 
 describe("AppearanceStore", () => {
-  it("starts a fresh install on Soft glow with the effect off", () => {
-    expect(DEFAULT_APPEARANCE.picture).toBe("soft-glow");
+  it("starts a fresh install on the plain page with the effect off", () => {
+    expect(DEFAULT_APPEARANCE.picture).toBe("plain");
     expect(DEFAULT_APPEARANCE.effect).toEqual({ kind: "none", cell: 4, levels: 4 });
   });
 
@@ -103,7 +103,7 @@ describe("AppearanceStore", () => {
     const store = createAppearanceStore(memoryStorage());
     const dark = await store.setColorSchemePreference("dark");
     expect(dark.colorSchemePreference).toBe("dark");
-    expect(dark.picture).toBe("soft-glow");
+    expect(dark.picture).toBe("plain");
 
     const withImage = await store.saveCustomImage("data:image/png;base64,abc");
     expect(withImage.colorSchemePreference).toBe("dark");

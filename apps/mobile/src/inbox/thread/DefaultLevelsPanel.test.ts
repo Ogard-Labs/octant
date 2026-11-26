@@ -7,13 +7,27 @@ import { ThemeProvider } from "../../../design-system/theme";
 import { createInMemoryMobileHostRegistryStorage } from "../../hosts/HostRegistry";
 import { createFullAccessWarningStore } from "../../hosts/fullAccessWarningStore";
 import { DefaultLevelsPanel, type DefaultLevelsPanelProps } from "./DefaultLevelsPanel";
-vi.mock("react-native", () => vi.importActual("react-native-web"));
+interface ShownAlert {
+  readonly title: string;
+  readonly message: string;
+  readonly buttons: ReadonlyArray<{ readonly text: string; readonly onPress?: () => void }>;
+}
+// The browser build shows no system alert, so the test answers it as a person would.
+const alerts = vi.hoisted(() => ({ shown: [] as ShownAlert[] }));
+vi.mock("react-native", async () => ({
+  ...(await vi.importActual<Record<string, unknown>>("react-native-web")),
+  Alert: {
+    alert: (title: string, message: string, buttons: ShownAlert["buttons"]) =>
+      void alerts.shown.push({ title, message, buttons }),
+  },
+}));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const roots: Root[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) act(() => root.unmount());
   document.body.replaceChildren();
+  alerts.shown.length = 0;
 });
 
 const projectId = "10000000-0000-4000-8000-000000000001";
@@ -100,6 +114,16 @@ async function press(button: HTMLElement | undefined) {
   await act(async () => button.click());
   await act(async () => {});
 }
+const alertText = () => {
+  const shown = alerts.shown.at(-1);
+  return shown === undefined ? "" : `${shown.title} ${shown.message}`;
+};
+async function answer(text: string) {
+  const button = alerts.shown.pop()?.buttons.find((entry) => entry.text === text);
+  if (button === undefined) throw new Error(`Missing alert button ${text}`);
+  await act(async () => button.onPress?.());
+  await act(async () => {});
+}
 async function open() {
   await press(
     [...document.querySelectorAll<HTMLElement>("[role=button]")].find(
@@ -118,9 +142,9 @@ describe("Project and default modes on a phone the host's own person paired", ()
     expect(document.body.textContent).toContain("New threads on this host: Auto");
     await press(within("mobile-project-level", "Full access")[0]);
     expect(sent).toEqual([]);
-    expect(document.body.textContent).toContain("with no sandbox");
-    expect(document.body.textContent).not.toMatch(/unlock/i);
-    await press(within("mobile-project-level", "Use Full access")[0]);
+    expect(alertText()).toContain("with no sandbox");
+    expect(alertText()).not.toMatch(/unlock/i);
+    await answer("Use Full access");
 
     expect(sent).toEqual([
       {
@@ -141,7 +165,7 @@ describe("Project and default modes on a phone the host's own person paired", ()
     const readsBefore = read.length;
 
     await press(within("mobile-default-level", "Full access")[0]);
-    await press(within("mobile-default-level", "Use Full access")[0]);
+    await answer("Use Full access");
 
     expect(sent).toEqual([
       {

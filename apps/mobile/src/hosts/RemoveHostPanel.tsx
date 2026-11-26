@@ -1,13 +1,8 @@
-import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useMemo } from "react";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { MOBILE_COPY } from "../copy";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
-import {
-  stepRemoveHostFlow,
-  type RemoveHostFlowEvent,
-  type RemoveHostFlowState,
-} from "./removeHostFlow";
 
 export interface RemoveHostPanelProps {
   readonly hostLabel: string;
@@ -18,13 +13,14 @@ export interface RemoveHostPanelProps {
 
 export function RemoveHostPanel(props: RemoveHostPanelProps) {
   const { colors } = useTheme();
-  const [state, setState] = useState<RemoveHostFlowState>("idle");
-
-  const send = (event: RemoveHostFlowEvent) => {
-    const step = stepRemoveHostFlow(state, event);
-    setState(step.state);
-    if (step.remove) props.onRemove();
-  };
+  // Remove asks once, in the system's alert, before it deletes anything,
+  // because it never reaches the computer: the computer keeps listing this
+  // phone until it is revoked there.
+  const ask = () =>
+    Alert.alert(props.hostLabel, MOBILE_COPY.removeHostConfirm, [
+      { text: MOBILE_COPY.removeHostCancel, style: "cancel" },
+      { text: MOBILE_COPY.removeHostConfirmAction, style: "destructive", onPress: props.onRemove },
+    ]);
 
   const styles = useMemo(
     () =>
@@ -40,10 +36,6 @@ export function RemoveHostPanel(props: RemoveHostPanelProps) {
           ...mobileTypography.body,
           color: colors.textSecondary,
         },
-        actions: {
-          flexDirection: "row",
-          gap: mobileSpacing.sm,
-        },
         button: {
           flex: 1,
           paddingVertical: mobileSpacing.md,
@@ -51,16 +43,10 @@ export function RemoveHostPanel(props: RemoveHostPanelProps) {
           alignItems: "center",
           backgroundColor: colors.surface,
         },
-        dangerButton: {
-          backgroundColor: colors.danger,
-        },
         buttonLabel: {
           ...mobileTypography.body,
           color: colors.textPrimary,
           fontWeight: "500",
-        },
-        dangerLabel: {
-          color: colors.sendLabel,
         },
       }),
     [colors],
@@ -68,46 +54,16 @@ export function RemoveHostPanel(props: RemoveHostPanelProps) {
 
   return (
     <View style={styles.panel} testID={`mobile-host-remove-${props.testIdSuffix}`}>
-      {state === "confirming" ? (
-        <>
-          <Text style={styles.help}>{MOBILE_COPY.removeHostConfirm}</Text>
-          <View style={styles.actions}>
-            <Pressable
-              accessibilityLabel={MOBILE_COPY.removeHostCancel}
-              accessibilityRole="button"
-              onPress={() => send("cancel")}
-              style={styles.button}
-              testID={`mobile-host-remove-cancel-${props.testIdSuffix}`}
-            >
-              <Text style={styles.buttonLabel}>{MOBILE_COPY.removeHostCancel}</Text>
-            </Pressable>
-            <Pressable
-              accessibilityLabel={`${MOBILE_COPY.removeHostConfirmAction} ${props.hostLabel}`}
-              accessibilityRole="button"
-              onPress={() => send("confirm")}
-              style={[styles.button, styles.dangerButton]}
-              testID={`mobile-host-remove-confirm-${props.testIdSuffix}`}
-            >
-              <Text style={[styles.buttonLabel, styles.dangerLabel]}>
-                {MOBILE_COPY.removeHostConfirmAction}
-              </Text>
-            </Pressable>
-          </View>
-        </>
-      ) : (
-        <>
-          <Text style={styles.help}>{MOBILE_COPY.removeHostHint}</Text>
-          <Pressable
-            accessibilityLabel={`${MOBILE_COPY.removeHostAction} ${props.hostLabel}`}
-            accessibilityRole="button"
-            onPress={() => send("ask")}
-            style={styles.button}
-            testID={`mobile-host-remove-ask-${props.testIdSuffix}`}
-          >
-            <Text style={styles.buttonLabel}>{MOBILE_COPY.removeHostAction}</Text>
-          </Pressable>
-        </>
-      )}
+      <Text style={styles.help}>{MOBILE_COPY.removeHostHint}</Text>
+      <Pressable
+        accessibilityLabel={`${MOBILE_COPY.removeHostAction} ${props.hostLabel}`}
+        accessibilityRole="button"
+        onPress={ask}
+        style={styles.button}
+        testID={`mobile-host-remove-ask-${props.testIdSuffix}`}
+      >
+        <Text style={styles.buttonLabel}>{MOBILE_COPY.removeHostAction}</Text>
+      </Pressable>
     </View>
   );
 }

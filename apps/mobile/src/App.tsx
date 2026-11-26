@@ -1,5 +1,6 @@
 import { createInMemoryExpoSecureStringStorage } from "@octant/client-runtime";
 import { createAppearanceStore } from "./appearance/AppearanceStore";
+import { GestureRoot } from "./navigation/GestureRoot";
 import { MobileEntryGate } from "./demo/MobileEntryGate";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -14,14 +15,12 @@ import {
 import Constants from "expo-constants";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import type { MobileInboxRow } from "@octant/client-runtime";
-import { ScreenCanvas, colorsForScheme, resolveThemeScheme, useTheme } from "../design-system";
-import { AppearanceProvider, useAppearance } from "./appearance/AppearanceContext";
-import type { MobileRouteId } from "./copy";
+import { colorsForScheme, resolveThemeScheme, useTheme } from "../design-system";
+import { AppearanceProvider } from "./appearance/AppearanceContext";
 import { resolveMobileMockScenario, type MobileMockScenario } from "./dev/mobileMockScenarioId";
 import { MobileDeepLinkCapture } from "./navigation/mobileDeepLinkCapture";
 import type { MobileComputersDeepLinkTarget } from "./notifications/deepLinks";
 import { RootNavigator } from "./navigation/RootNavigator";
-import { createInitialNavigationState, selectMobileRoute } from "./navigation/navigationState";
 import { AppVaultGate } from "./security/AppVaultGate";
 import { mobileScreenshotPrivacy } from "./security/deviceProtection";
 import { createExpoBiometricAuthenticator } from "./security/expoBiometricAuthenticator";
@@ -35,9 +34,7 @@ function AppShell(props: {
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
   readonly pendingComputersLink?: MobileComputersDeepLinkTarget | undefined;
 }) {
-  const appearance = useAppearance();
   const { colors, scheme } = useTheme();
-  const [navigation, setNavigation] = useState(createInitialNavigationState);
 
   const styles = useMemo(
     () =>
@@ -48,7 +45,10 @@ function AppShell(props: {
         },
         mockBanner: {
           alignSelf: "center",
-          marginTop: 6,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 2,
           marginBottom: 2,
           borderRadius: 999,
           borderWidth: StyleSheet.hairlineWidth,
@@ -57,7 +57,7 @@ function AppShell(props: {
           paddingHorizontal: 12,
           paddingVertical: 5,
         },
-        demoExit: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12 },
+        demoExit: { color: colors.accent, fontWeight: "600" },
         mockBannerText: {
           color: colors.textSecondary,
           fontSize: 12,
@@ -67,41 +67,38 @@ function AppShell(props: {
     [colors],
   );
 
-  const onSelectRoute = (route: MobileRouteId) => {
-    setNavigation((current) => selectMobileRoute(current, route));
-  };
-
   return (
-    <SafeAreaView edges={["top", "right", "bottom", "left"]} style={styles.safeArea}>
-      <StatusBar barStyle={scheme === "dark" ? "light-content" : "dark-content"} />
-      <ScreenCanvas
-        effect={appearance.preferences.effect}
-        picture={appearance.preferences.picture}
-        customImageUri={appearance.preferences.customImageUri}
-      >
+    <GestureRoot>
+      <View style={styles.safeArea}>
+        <StatusBar barStyle={scheme === "dark" ? "light-content" : "dark-content"} />
         {props.mockScenario !== undefined ? (
-          <View accessibilityRole="text" style={styles.mockBanner} testID="mobile-mock-banner">
-            <Text style={styles.mockBannerText}>
-              {props.onLeaveDemo === undefined
-                ? `Mock data · ${props.mockScenario.label}`
-                : "Offline demo · sample data"}
-            </Text>
-            {props.onLeaveDemo === undefined ? null : (
-              <Pressable
-                accessibilityRole="button"
-                style={styles.demoExit}
-                onPress={props.onLeaveDemo}
-                testID="mobile-demo-leave"
-              >
-                <Text style={styles.mockBannerText}>Leave demo</Text>
-              </Pressable>
-            )}
-          </View>
+          <SafeAreaView edges={["top"]}>
+            <View accessibilityRole="text" style={styles.mockBanner} testID="mobile-mock-banner">
+              <Text maxFontSizeMultiplier={1.3} style={styles.mockBannerText}>
+                {props.onLeaveDemo === undefined
+                  ? `Mock data · ${props.mockScenario.label}`
+                  : "Offline demo · sample data"}
+              </Text>
+              {props.onLeaveDemo === undefined ? null : (
+                <Pressable
+                  accessibilityRole="button"
+                  hitSlop={{ top: 10, bottom: 10, left: 8, right: 16 }}
+                  onPress={props.onLeaveDemo}
+                  testID="mobile-demo-leave"
+                >
+                  <Text
+                    maxFontSizeMultiplier={1.3}
+                    style={[styles.mockBannerText, styles.demoExit]}
+                  >
+                    Leave demo
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          </SafeAreaView>
         ) : null}
         <RootNavigator
-          activeRoute={navigation.activeRoute}
           onDeepLinkConsumed={props.onDeepLinkConsumed}
-          onSelectRoute={onSelectRoute}
           {...(props.pendingDeepLinkRow === undefined
             ? {}
             : { pendingDeepLinkRow: props.pendingDeepLinkRow })}
@@ -109,8 +106,8 @@ function AppShell(props: {
             ? {}
             : { pendingComputersLink: props.pendingComputersLink })}
         />
-      </ScreenCanvas>
-    </SafeAreaView>
+      </View>
+    </GestureRoot>
   );
 }
 

@@ -6,7 +6,7 @@ import {
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
 import { CANVAS_HTML_IMPORT_MAX_BYTES, type CanvasHtmlImportResult } from "@octant/contracts";
-import { SegmentedControl } from "../ui/NativeChrome";
+import { SegmentedControl } from "../ui/SegmentedControl";
 import { useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import { BottomSheet } from "../ui/BottomSheet";
@@ -108,7 +108,7 @@ export function CanvasHtmlImportSheet(props: CanvasHtmlImportSheetProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
-      sheetStyle={styles.sheet}
+      size="full"
       testID="mobile-canvas-import"
       title={MOBILE_COPY.canvasImportTitle}
       visible={props.visible}
@@ -239,7 +239,6 @@ export function CanvasHtmlImportSheet(props: CanvasHtmlImportSheetProps) {
 }
 
 const styles = StyleSheet.create({
-  sheet: { maxHeight: "90%", minHeight: "60%" },
   body: { paddingHorizontal: mobileSpacing.md, gap: mobileSpacing.sm },
   row: { flexDirection: "row", alignItems: "center", gap: mobileSpacing.sm },
   grow: { flex: 1 },

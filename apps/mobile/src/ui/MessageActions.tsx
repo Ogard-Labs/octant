@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import type { MobileIconName } from "./symbols";
+import { Icon } from "./Icon";
+import { messageTime } from "./turnTime";
 import { space, typography, useTheme } from "../../design-system";
 
 export interface MessageActionItem {
   readonly id: string;
   readonly label: string;
-  readonly icon: keyof typeof Ionicons.glyphMap;
+  readonly icon: MobileIconName;
   readonly onPress: () => void | Promise<void>;
 }
 
@@ -16,9 +18,16 @@ export interface MessageActionItem {
  */
 export function MessageActions(props: {
   readonly actions: ReadonlyArray<MessageActionItem>;
+  /** When the message was sent or the reply finished. */
+  readonly at?: string | undefined;
+  /** A person's message is at the trailing edge, with its time first. */
+  readonly trailing?: boolean;
   readonly testID?: string;
 }) {
   const { colors } = useTheme();
+  // The glyphs stand for words, so they follow the text size as words would.
+  const { fontScale } = useWindowDimensions();
+  const iconSize = Math.round(16 * Math.min(Math.max(fontScale, 1), 2));
   const [activeId, setActiveId] = useState<string | undefined>();
   const styles = useMemo(
     () =>
@@ -26,12 +35,12 @@ export function MessageActions(props: {
         row: {
           flexDirection: "row",
           alignItems: "center",
-          gap: space.md,
+          gap: space.lg,
           marginTop: 2,
           marginBottom: space.sm,
         },
-        // Plain glyph and word in the muted ink, as a system toolbar draws them;
-        // the slop keeps a 44pt target without boxing each one.
+        // Plain glyphs in the muted ink, each with its name spoken; the slop
+        // keeps a 44pt target without boxing each one.
         chip: {
           minHeight: 28,
           flexDirection: "row",
@@ -43,6 +52,11 @@ export function MessageActions(props: {
           fontSize: typography.meta.fontSize,
           fontWeight: "500",
         },
+        time: {
+          color: colors.textTertiary,
+          fontSize: typography.meta.fontSize,
+          fontVariant: ["tabular-nums"],
+        },
         labelActive: {
           color: colors.accent,
         },
@@ -50,10 +64,18 @@ export function MessageActions(props: {
     [colors],
   );
 
-  if (props.actions.length === 0) return null;
+  const time = props.at === undefined ? "" : messageTime(props.at, new Date());
+  if (props.actions.length === 0 && time === "") return null;
+  const clock =
+    time === "" ? null : (
+      <Text key="time" style={styles.time}>
+        {time}
+      </Text>
+    );
 
   return (
     <View style={styles.row} testID={props.testID ?? "mobile-message-actions"}>
+      {props.trailing === true ? clock : null}
       {props.actions.map((action) => {
         const active = activeId === action.id;
         return (
@@ -68,21 +90,22 @@ export function MessageActions(props: {
                 setTimeout(() => setActiveId(undefined), 1200);
               })();
             }}
-            hitSlop={8}
+            hitSlop={12}
             style={({ pressed }) => [styles.chip, pressed ? { opacity: 0.5 } : null]}
             testID={`mobile-message-action-${action.id}`}
           >
-            <Ionicons
+            <Icon
               color={active ? colors.accent : colors.textTertiary}
               name={active && action.id === "copy" ? "checkmark" : action.icon}
-              size={14}
+              size={iconSize}
             />
-            <Text style={[styles.label, active ? styles.labelActive : null]}>
-              {active && action.id === "copy" ? "Copied" : action.label}
-            </Text>
+            {active && action.id === "copy" ? (
+              <Text style={[styles.label, styles.labelActive]}>Copied</Text>
+            ) : null}
           </Pressable>
         );
       })}
+      {props.trailing === true ? null : clock}
     </View>
   );
 }

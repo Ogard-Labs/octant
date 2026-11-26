@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
+import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 
 export type ToolCallStatus = "running" | "done" | "failed";
 
@@ -148,7 +149,7 @@ function CallRow(props: {
         style={{ transform: [{ scale: 0.6 }] }}
       />
     ) : (
-      <Ionicons
+      <Icon
         color={call.status === "failed" ? colors.danger : colors.success}
         name={call.status === "failed" ? "close" : "checkmark"}
         size={12}
@@ -173,7 +174,7 @@ function CallRow(props: {
           <Text style={[styles.state, { color: tone }]}>{statusLabel(call.status)}</Text>
         )}
         {collapsible ? (
-          <Ionicons
+          <Icon
             color={colors.textTertiary}
             name={open ? "chevron-down" : "chevron-forward"}
             size={14}
@@ -181,7 +182,9 @@ function CallRow(props: {
           />
         ) : null}
       </Pressable>
-      {showSummary ? <Text style={styles.summary}>{call.summary}</Text> : null}
+      {showSummary ? (
+        <Text style={styles.summary}>{formatScreenshotSafeLabel(call.summary, 600)}</Text>
+      ) : null}
     </RailRow>
   );
 }
@@ -210,7 +213,7 @@ export function ToolActivity(props: ToolActivityProps) {
           first
           last
           look={look}
-          mark={<Ionicons color={colors.textSecondary} name="construct-outline" size={11} />}
+          mark={<Icon color={colors.textSecondary} name="construct-outline" size={11} />}
         >
           <Pressable
             accessibilityRole="button"
@@ -227,7 +230,7 @@ export function ToolActivity(props: ToolActivityProps) {
                 {MOBILE_COPY.toolCallsFailed(failed)}
               </Text>
             ) : null}
-            <Ionicons
+            <Icon
               color={colors.textTertiary}
               name="chevron-forward"
               size={14}
@@ -248,7 +251,7 @@ export function ToolActivity(props: ToolActivityProps) {
           first
           last={false}
           look={look}
-          mark={<Ionicons color={colors.textSecondary} name="ellipsis-horizontal" size={11} />}
+          mark={<Icon color={colors.textSecondary} name="ellipsis-horizontal" size={11} />}
         >
           <Pressable
             accessibilityRole="button"

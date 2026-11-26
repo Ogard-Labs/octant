@@ -11,6 +11,7 @@ import {
   decodeMobileModelOptionId,
   encodeMobileModelOptionId,
   fetchMobileModelOptions,
+  keepDeclaredModelOptionValues,
   normalizeMobileModelOptions,
   normalizeMobileProviderDirectory,
 } from "./mobileProviderClient";
@@ -40,7 +41,23 @@ const capabilities = {
   citations: "supported",
 } as const;
 
-function model(id: string, displayName: string) {
+const effortOption = {
+  id: "effort",
+  displayName: "Reasoning effort",
+  kind: "selection" as const,
+  values: ["low", "high"] as [string, ...string[]],
+};
+const fastOption = {
+  id: "fast",
+  displayName: "Fast mode",
+  kind: "boolean" as const,
+};
+
+function model(
+  id: string,
+  displayName: string,
+  options: ReadonlyArray<typeof effortOption | typeof fastOption> = [],
+) {
   return {
     id: decodeProviderModelId(id),
     displayName,
@@ -48,7 +65,7 @@ function model(id: string, displayName: string) {
     verification: "verified" as const,
     reasoning: "supported" as const,
     inputModalities: ["text" as const],
-    options: [],
+    options,
   };
 }
 
@@ -96,7 +113,10 @@ function snapshot() {
         instanceId: instanceA,
         readiness: "ready",
         processState: "running",
-        models: [model("model-a", "Model A"), model("model-b", "Model B")],
+        models: [
+          model("model-a", "Model A"),
+          model("model-b", "Model B", [effortOption, fastOption]),
+        ],
         capabilities,
         observedAt: now,
       },
@@ -142,10 +162,49 @@ describe("mobile provider catalog", () => {
         detail: "Alpha",
         driverKind: "openai-compatible",
         attachmentModalities: ["text"],
+        settings: [effortOption, fastOption],
       },
     ]);
     expect(JSON.stringify(options)).not.toContain("baseUrl");
     expect(JSON.stringify(options)).not.toContain("authentication");
+  });
+
+  it("carries the account's own slash commands on each of its models, and none when it lists none", () => {
+    const commands = [
+      { name: "review", description: "Review the change", argumentHint: "<scope>" },
+    ];
+    const base = snapshot();
+    const withCommands = ProviderRegistrySnapshot.make({
+      ...base,
+      observedStates: base.observedStates.map((observed) =>
+        observed.instanceId === instanceA ? { ...observed, commands } : observed,
+      ),
+    });
+    expect(normalizeMobileModelOptions(withCommands).map((option) => option.commands)).toEqual([
+      commands,
+      commands,
+    ]);
+    const empty = ProviderRegistrySnapshot.make({
+      ...base,
+      observedStates: base.observedStates.map((observed) => ({ ...observed, commands: [] })),
+    });
+    expect(normalizeMobileModelOptions(empty).every((option) => !("commands" in option))).toBe(
+      true,
+    );
+  });
+
+  it("keeps only the option values a model declares", () => {
+    const settings = [effortOption, fastOption];
+    expect(
+      keepDeclaredModelOptionValues(settings, {
+        effort: "high",
+        fast: "true",
+        speed: "high",
+      }),
+    ).toEqual({ effort: "high" });
+    expect(keepDeclaredModelOptionValues(settings, { effort: "extreme" })).toEqual({});
+    expect(keepDeclaredModelOptionValues(undefined, { effort: "high" })).toEqual({});
+    expect(keepDeclaredModelOptionValues(settings, undefined)).toEqual({});
   });
 
   it("retains disabled and unready accounts in the display directory for historical handoffs", () => {

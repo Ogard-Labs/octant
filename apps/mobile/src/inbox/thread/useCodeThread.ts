@@ -103,7 +103,7 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     if (!enabled || transport === undefined || identity === undefined || threadId === undefined) {
       return;
     }
-    await runMutation({
+    return runMutation({
       guard,
       identity,
       gate,
@@ -182,5 +182,6 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     threadModel,
     pendingAttachments: attachments.pending,
     attach: attachments.attach,
+    attachmentsSent: attachments.sent,
   };
 }

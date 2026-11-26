@@ -1,6 +1,7 @@
-import { useMemo, type ComponentProps } from "react";
+import { useMemo, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
+import type { MobileIconName } from "./symbols";
 import type { MobileAttachmentSource } from "@octant/client-runtime";
 import { MOBILE_COPY } from "../copy";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
@@ -16,10 +17,7 @@ export interface AttachSourceSheetProps {
 }
 
 const SOURCE_PRESENTATION: Readonly<
-  Record<
-    MobileAttachmentSource,
-    { readonly label: string; readonly icon: ComponentProps<typeof Ionicons>["name"] }
-  >
+  Record<MobileAttachmentSource, { readonly label: string; readonly icon: MobileIconName }>
 > = {
   camera: { label: MOBILE_COPY.attachFromCamera, icon: "camera-outline" },
   library: { label: MOBILE_COPY.attachFromLibrary, icon: "image-outline" },
@@ -28,6 +26,8 @@ const SOURCE_PRESENTATION: Readonly<
 
 export function AttachSourceSheet(props: AttachSourceSheetProps) {
   const { colors } = useTheme();
+  // The camera or picker opens once this sheet has gone.
+  const chosen = useRef<MobileAttachmentSource | undefined>(undefined);
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -67,6 +67,12 @@ export function AttachSourceSheet(props: AttachSourceSheetProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
+      onGone={() => {
+        const source = chosen.current;
+        chosen.current = undefined;
+        if (source !== undefined) props.onSelect(source);
+      }}
+      size="fitted"
       testID="mobile-attach-sheet"
       title={MOBILE_COPY.attachSheetTitle}
       visible={props.visible}
@@ -78,12 +84,15 @@ export function AttachSourceSheet(props: AttachSourceSheetProps) {
           <Pressable
             accessibilityRole="button"
             key={source}
-            onPress={() => props.onSelect(source)}
+            onPress={() => {
+              chosen.current = source;
+              props.onClose();
+            }}
             style={styles.row}
             testID={`mobile-attach-${source}`}
           >
             <View style={styles.icon}>
-              <Ionicons color={colors.textPrimary} name={presentation.icon} size={18} />
+              <Icon color={colors.textPrimary} name={presentation.icon} size={18} />
             </View>
             <Text style={styles.label}>{presentation.label}</Text>
           </Pressable>

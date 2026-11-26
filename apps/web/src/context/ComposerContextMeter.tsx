@@ -1,9 +1,6 @@
 import type { ServiceLimitBucket } from "@octant/contracts/context";
 import type { CodeProviderLimit } from "@octant/contracts/code-operations";
-import {
-  providerLimitWindowLabel,
-  providerLimitWindowName,
-} from "../providers/providerLimitWindow";
+import { providerLimitWindowLabel, providerLimitWindowName } from "@octant/client-runtime";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import type { ProviderUsageReporting } from "@octant/contracts";
 import { ChevronDown, ChevronRight } from "../ui/icons";

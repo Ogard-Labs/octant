@@ -1,6 +1,6 @@
-import { useMemo, useRef } from "react";
+import { Fragment, useMemo, type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../ui/Icon";
 import {
   chatAttemptStatusLabel,
   mobileChatMessages,
@@ -27,6 +27,13 @@ import {
   type MobileTranscriptHandoffEntry,
 } from "../../ui/transcriptHandoffPresentation";
 import type { MessageActionItem } from "../../ui/MessageActions";
+import {
+  codeTurnActivity,
+  isLiveWorkTurn,
+  workTurnActivity,
+  type TurnActivity,
+} from "./turnActivity";
+import { TurnActivityView, TurnFilesView } from "./TurnActivityView";
 import { ThreadWorkShelf } from "../../ui/ThreadWorkShelf";
 import { placeAttachments } from "./attachmentPlacement";
 import type { useChatThread } from "./useChatThread";
@@ -37,6 +44,8 @@ export interface ThreadTranscriptProps {
   readonly workTurns: ReadonlyArray<WorkTurnState> | undefined;
   readonly codeConversation: MobileCodeConversation | undefined;
   readonly chat: ChatThread;
+  /** Opens a Code thread's changes; absent where they cannot be read. */
+  readonly onOpenReview?: (() => void) | undefined;
   readonly allowProductMutations: boolean;
   /** Fork from here and Rewind to here for one message; empty where none can run. */
   readonly turnActionsFor: (
@@ -49,12 +58,19 @@ export interface ThreadTranscriptProps {
   /** Full provider directory (including disabled/unready accounts) for historical handoff labels. */
   readonly providerDirectory?: ReadonlyArray<MobileProviderDirectoryEntry>;
   /**
-   * A turn to bring into view, from a message search hit: the transcript
-   * reports where that turn sits so the screen can scroll to it. The id is the
+   * A turn to bring into view, from a message search hit: its row is marked
+   * so the screen can scroll to it. The id is the
    * one each mode keys its turns by: a Chat or Work turn id, or the operation
    * of a Code provider turn.
    */
-  readonly focus?: { readonly turnId: string; readonly onFound: (y: number) => void };
+  readonly focus?: { readonly turnId: string };
+}
+
+export interface TranscriptRow {
+  readonly key: string;
+  /** The turn a message search named. */
+  readonly focused: boolean;
+  readonly node: ReactElement;
 }
 
 /**
@@ -86,12 +102,29 @@ function SteeredMessages(props: {
   ));
 }
 
-export function ThreadTranscript(props: ThreadTranscriptProps) {
+function TurnFiles(props: {
+  readonly activity: TurnActivity;
+  readonly onReview?: (() => void) | undefined;
+  readonly testID: string;
+}) {
+  return props.activity.files === undefined ? null : (
+    <TurnFilesView files={props.activity.files} onReview={props.onReview} testID={props.testID} />
+  );
+}
+
+/**
+ * The transcript as rows, one per turn or message, so a list can draw only
+ * those in view.
+ */
+export function useThreadTranscriptRows(
+  props: ThreadTranscriptProps,
+): ReadonlyArray<TranscriptRow> {
   const { colors } = useTheme();
   const styles = useMemo(
     () =>
       StyleSheet.create({
         transcript: { gap: mobileSpacing.sm, paddingTop: mobileSpacing.sm },
+        chatHead: { gap: mobileSpacing.sm },
         emptyChat: {
           flexGrow: 1,
           justifyContent: "center",
@@ -146,6 +179,14 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
   const codeTurns = codeConversation?.turns;
   const view = chat.view;
   const messages = useMemo(() => (view === undefined ? [] : mobileChatMessages(view)), [view]);
+  // A Chat's message holds no time; the turn it opened does.
+  const sentAt = useMemo(
+    () =>
+      new Map(
+        (view?.turns ?? []).map((turn) => [String(turn.userMessageRef.contentId), turn.createdAt]),
+      ),
+    [view],
+  );
   const chatAnnotations = useMemo<MobileChatTranscriptAnnotations>(() => {
     if (view === undefined) {
       return { beforeContentId: new Map(), afterContentId: new Map(), trailing: [] };
@@ -212,7 +253,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
           style={styles.chip}
           testID={`mobile-attachment-${String(attachment.id)}`}
         >
-          <Ionicons
+          <Icon
             color={colors.textTertiary}
             name={attachment.mediaType.startsWith("image/") ? "image-outline" : "document-outline"}
             size={13}
@@ -231,332 +272,322 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
       : view.turns
           .find((turn) => String(turn.id) === props.focus?.turnId)
           ?.userMessageRef.contentId.toString();
-  const sectionY = useRef<number | undefined>(undefined);
-  const messageY = useRef<number | undefined>(undefined);
-  const reported = useRef(false);
-  const reportFocus = () => {
-    if (reported.current || sectionY.current === undefined || messageY.current === undefined)
-      return;
-    reported.current = true;
-    props.focus?.onFound(sectionY.current + messageY.current);
-  };
-  const onSectionLayout = (event: { nativeEvent: { layout: { y: number } } }) => {
-    sectionY.current = event.nativeEvent.layout.y;
-    reportFocus();
-  };
-  // Work and Code render one View per turn, so the focused turn's View reports
-  // where it sits, as the focused Chat message does.
-  const focusTurnLayout = (turnId: string) =>
-    turnId === props.focus?.turnId
-      ? {
-          onLayout: (event: { nativeEvent: { layout: { y: number } } }) => {
-            messageY.current = event.nativeEvent.layout.y;
-            reportFocus();
-          },
-          testID: "mobile-thread-focused-turn",
-        }
-      : {};
+  // A search hit names a turn; its row is marked so the list can bring it into view.
+  const focusMark = (focused: boolean, testID: string) => (focused ? { testID } : {});
+  const rows: TranscriptRow[] = [];
+  const row = (key: string, node: ReactElement, focused = false) =>
+    rows.push({ key, focused, node });
 
-  return (
-    <>
-      {workTurns !== undefined ? (
-        <View onLayout={onSectionLayout} style={styles.transcript} testID="mobile-work-transcript">
-          {workTurns.length === 0 ? (
-            <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
-          ) : (
-            workTurns.map((turn, index) => {
-              const handoff = workHandoffs.get(String(turn.turnId));
-              return (
-                <View
-                  key={String(turn.turnId)}
-                  style={styles.transcript}
-                  {...focusTurnLayout(String(turn.turnId))}
-                >
-                  {handoff === undefined ? null : (
-                    <TranscriptHandoffDivider
-                      entry={handoff}
-                      testID={`mobile-work-handoff-${String(turn.turnId)}`}
-                    />
-                  )}
-                  <MessageBubble
-                    replyDetail={props.replyDetail}
-                    body={turn.prompt}
-                    role="user"
-                    showActions={false}
-                    testID={`mobile-work-prompt-${String(turn.turnId)}`}
-                    turnActions={props.turnActionsFor(
-                      mobileWorkTurnTargets(workTurns, index, "user"),
-                    )}
-                  />
-                  {turn.response !== undefined && turn.response.length > 0 ? (
-                    <MessageBubble
-                      replyDetail={props.replyDetail}
-                      body={turn.response}
-                      role="assistant"
-                      testID={`mobile-work-reply-${String(turn.turnId)}`}
-                      turnActions={props.turnActionsFor(
-                        turn.status === "completed"
-                          ? mobileWorkTurnTargets(workTurns, index, "assistant")
-                          : undefined,
-                      )}
-                    />
-                  ) : turn.failure !== undefined ? (
-                    <Text style={styles.warningText}>{turn.failure.message}</Text>
-                  ) : turn.status === "accepted" ||
-                    turn.status === "running" ||
-                    turn.status === "waiting" ? (
-                    <Text style={styles.metaText}>{MOBILE_COPY.turnRunning}</Text>
-                  ) : null}
-                  <SteeredMessages
-                    replyDetail={props.replyDetail}
-                    steered={turn.steeredMessages}
-                    testID={`mobile-work-steered-${String(turn.turnId)}`}
-                  />
-                  {threadRoutineReceipts(turn.toolSteps).map((routine) => (
-                    <RoutineReceiptCard
-                      key={routine.routineId}
-                      routine={routine}
-                      testID={`mobile-work-routine-${routine.routineId}`}
-                    />
-                  ))}
-                </View>
-              );
-            })
-          )}
-        </View>
-      ) : null}
-      {codeTurns !== undefined ? (
-        <View onLayout={onSectionLayout} style={styles.transcript} testID="mobile-code-transcript">
-          {codeConversation?.hasEarlier === true ? (
-            <Text style={styles.metaText}>{MOBILE_COPY.codeEarlierTurns}</Text>
-          ) : null}
-          {codeTurns.length === 0 ? (
-            <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
-          ) : (
-            codeTurns.map((turn, turnIndex) => {
-              const handoff = codeHandoffs.get(turn.operationId);
-              return (
-                <View
-                  key={turn.operationId}
-                  style={styles.transcript}
-                  {...focusTurnLayout(String(turn.operationId))}
-                >
-                  {handoff === undefined ? null : (
-                    <TranscriptHandoffDivider
-                      entry={handoff}
-                      testID={`mobile-code-handoff-${turn.operationId}`}
-                    />
-                  )}
-                  {turn.prompt.length === 0 ? null : (
-                    <MessageBubble
-                      replyDetail={props.replyDetail}
-                      body={turn.prompt}
-                      role="user"
-                      showActions={false}
-                      testID={`mobile-code-prompt-${turn.operationId}`}
-                      turnActions={props.turnActionsFor(
-                        mobileCodeTurnTargets(codeTurns, turnIndex, "user"),
-                      )}
-                    />
-                  )}
-                  {turn.assistant.map((part, index) => (
-                    <MessageBubble
-                      replyDetail={props.replyDetail}
-                      body={part}
-                      key={`${turn.operationId}-${index}`}
-                      role="assistant"
-                      testID={`mobile-code-reply-${turn.operationId}-${index}`}
-                      {...(index === turn.assistant.length - 1
-                        ? {
-                            turnActions: props.turnActionsFor(
-                              mobileCodeTurnTargets(codeTurns, turnIndex, "assistant"),
-                            ),
-                          }
-                        : {})}
-                    />
-                  ))}
-                  <SteeredMessages
-                    replyDetail={props.replyDetail}
-                    steered={turn.steeredMessages}
-                    testID={`mobile-code-steered-${turn.operationId}`}
-                  />
-                  {turn.status === "waiting" ? (
-                    <Text style={styles.metaText}>
-                      {turn.usageLimit === undefined
-                        ? MOBILE_COPY.turnRunning
-                        : MOBILE_COPY.turnWaitingOnUsageLimit}
-                    </Text>
-                  ) : turn.status === "failed" || turn.status === "interrupted" ? (
-                    <Text style={styles.warningText}>{chatAttemptStatusLabel(turn.status)}</Text>
-                  ) : null}
-                  {turn.routines.map((routine) => (
-                    <RoutineReceiptCard
-                      key={routine.routineId}
-                      routine={routine}
-                      testID={`mobile-code-routine-${routine.routineId}`}
-                    />
-                  ))}
-                </View>
-              );
-            })
-          )}
-        </View>
-      ) : null}
-      {view !== undefined ? (
+  if (workTurns !== undefined) {
+    if (workTurns.length === 0)
+      row("work-empty", <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>);
+    workTurns.forEach((turn, index) => {
+      const handoff = workHandoffs.get(String(turn.turnId));
+      row(
+        `work:${String(turn.turnId)}`,
         <View
-          onLayout={onSectionLayout}
           style={styles.transcript}
-          testID="mobile-thread-transcript"
+          {...focusMark(String(turn.turnId) === props.focus?.turnId, "mobile-thread-focused-turn")}
         >
-          {chat.pendingPrompt !== undefined ? (
-            <Text style={styles.metaText} testID="mobile-chat-pending">
-              Sending… {chat.pendingPrompt}
-            </Text>
-          ) : null}
-          {chat.pendingFailure !== undefined ? (
-            <Text style={styles.warningText} testID="mobile-chat-failure">
-              {chat.pendingFailure}
-            </Text>
-          ) : null}
-          {chat.activeAttempt !== undefined ? (
-            <AttemptStatus
-              outcome={chat.activeAttempt.outcome}
-              testID="mobile-thread-attempt-status"
+          {handoff === undefined ? null : (
+            <TranscriptHandoffDivider
+              entry={handoff}
+              testID={`mobile-work-handoff-${String(turn.turnId)}`}
             />
-          ) : chat.retryableAttempt !== undefined ? (
-            <AttemptStatus
-              outcome={chat.retryableAttempt.outcome}
-              testID="mobile-thread-attempt-status"
+          )}
+          <MessageBubble
+            at={turn.acceptedAt}
+            replyDetail={props.replyDetail}
+            body={turn.prompt}
+            role="user"
+            showActions={false}
+            testID={`mobile-work-prompt-${String(turn.turnId)}`}
+            turnActions={props.turnActionsFor(mobileWorkTurnTargets(workTurns, index, "user"))}
+          />
+          <TurnActivityView
+            activity={workTurnActivity(turn)}
+            live={isLiveWorkTurn(turn)}
+            replyDetail={props.replyDetail}
+            testID={`mobile-work-activity-${String(turn.turnId)}`}
+          />
+          {turn.response !== undefined && turn.response.length > 0 ? (
+            <MessageBubble
+              {...(turn.status === "completed" ? { at: turn.updatedAt } : {})}
+              replyDetail={props.replyDetail}
+              body={turn.response}
+              role="assistant"
+              testID={`mobile-work-reply-${String(turn.turnId)}`}
+              turnActions={props.turnActionsFor(
+                turn.status === "completed"
+                  ? mobileWorkTurnTargets(workTurns, index, "assistant")
+                  : undefined,
+              )}
             />
+          ) : turn.failure !== undefined ? (
+            <Text style={styles.warningText}>{turn.failure.message}</Text>
           ) : null}
-          {view.thread.handoffWarning !== undefined ? (
-            <Text style={styles.warningText} testID="mobile-thread-handoff-warning">
-              {MOBILE_COPY.handoffWarning}
-            </Text>
+          <SteeredMessages
+            replyDetail={props.replyDetail}
+            steered={turn.steeredMessages}
+            testID={`mobile-work-steered-${String(turn.turnId)}`}
+          />
+          <TurnFiles
+            activity={workTurnActivity(turn)}
+            testID={`mobile-work-files-${String(turn.turnId)}`}
+          />
+          {threadRoutineReceipts(turn.toolSteps).map((routine) => (
+            <RoutineReceiptCard
+              key={routine.routineId}
+              routine={routine}
+              testID={`mobile-work-routine-${routine.routineId}`}
+            />
+          ))}
+        </View>,
+        String(turn.turnId) === props.focus?.turnId,
+      );
+    });
+  }
+  if (codeTurns !== undefined) {
+    if (codeConversation?.hasEarlier === true)
+      row("code-earlier", <Text style={styles.metaText}>{MOBILE_COPY.codeEarlierTurns}</Text>);
+    if (codeTurns.length === 0)
+      row("code-empty", <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>);
+    codeTurns.forEach((turn, turnIndex) => {
+      const handoff = codeHandoffs.get(turn.operationId);
+      row(
+        `code:${turn.operationId}`,
+        <View
+          style={styles.transcript}
+          {...focusMark(
+            String(turn.operationId) === props.focus?.turnId,
+            "mobile-thread-focused-turn",
+          )}
+        >
+          {handoff === undefined ? null : (
+            <TranscriptHandoffDivider
+              entry={handoff}
+              testID={`mobile-code-handoff-${turn.operationId}`}
+            />
+          )}
+          {turn.prompt.length === 0 ? null : (
+            <MessageBubble
+              at={turn.startedAt}
+              replyDetail={props.replyDetail}
+              body={turn.prompt}
+              role="user"
+              showActions={false}
+              testID={`mobile-code-prompt-${turn.operationId}`}
+              turnActions={props.turnActionsFor(
+                mobileCodeTurnTargets(codeTurns, turnIndex, "user"),
+              )}
+            />
+          )}
+          <TurnActivityView
+            activity={codeTurnActivity(turn)}
+            live={turn.status === "waiting"}
+            replyDetail={props.replyDetail}
+            testID={`mobile-code-activity-${turn.operationId}`}
+          />
+          {turn.assistant.map((part, index) => (
+            <MessageBubble
+              replyDetail={props.replyDetail}
+              body={part}
+              key={`${turn.operationId}-${index}`}
+              role="assistant"
+              testID={`mobile-code-reply-${turn.operationId}-${index}`}
+              {...(index === turn.assistant.length - 1
+                ? {
+                    ...(turn.status === "completed" ? { at: turn.updatedAt } : {}),
+                    turnActions: props.turnActionsFor(
+                      mobileCodeTurnTargets(codeTurns, turnIndex, "assistant"),
+                    ),
+                  }
+                : {})}
+            />
+          ))}
+          <SteeredMessages
+            replyDetail={props.replyDetail}
+            steered={turn.steeredMessages}
+            testID={`mobile-code-steered-${turn.operationId}`}
+          />
+          {turn.status === "waiting" && turn.usageLimit !== undefined ? (
+            <Text style={styles.metaText}>{MOBILE_COPY.turnWaitingOnUsageLimit}</Text>
+          ) : turn.status === "failed" || turn.status === "interrupted" ? (
+            <Text style={styles.warningText}>{chatAttemptStatusLabel(turn.status)}</Text>
           ) : null}
-          <ThreadWorkShelf
-            items={view.workItems}
-            {...(view.followUp === undefined ? {} : { followUp: view.followUp })}
-            {...(props.allowProductMutations
+          <TurnFiles
+            activity={codeTurnActivity(turn)}
+            onReview={props.onOpenReview}
+            testID={`mobile-code-files-${turn.operationId}`}
+          />
+          {turn.routines.map((routine) => (
+            <RoutineReceiptCard
+              key={routine.routineId}
+              routine={routine}
+              testID={`mobile-code-routine-${routine.routineId}`}
+            />
+          ))}
+        </View>,
+        String(turn.operationId) === props.focus?.turnId,
+      );
+    });
+  }
+  if (view !== undefined) {
+    row(
+      "chat-head",
+      <View style={styles.chatHead}>
+        {chat.pendingPrompt !== undefined ? (
+          <Text style={styles.metaText} testID="mobile-chat-pending">
+            Sending… {chat.pendingPrompt}
+          </Text>
+        ) : null}
+        {chat.pendingFailure !== undefined ? (
+          <Text style={styles.warningText} testID="mobile-chat-failure">
+            {chat.pendingFailure}
+          </Text>
+        ) : null}
+        {chat.activeAttempt !== undefined ? (
+          <AttemptStatus
+            outcome={chat.activeAttempt.outcome}
+            testID="mobile-thread-attempt-status"
+          />
+        ) : chat.retryableAttempt !== undefined ? (
+          <AttemptStatus
+            outcome={chat.retryableAttempt.outcome}
+            testID="mobile-thread-attempt-status"
+          />
+        ) : null}
+        {view.thread.handoffWarning !== undefined ? (
+          <Text style={styles.warningText} testID="mobile-thread-handoff-warning">
+            {MOBILE_COPY.handoffWarning}
+          </Text>
+        ) : null}
+        <ThreadWorkShelf
+          items={view.workItems}
+          {...(view.followUp === undefined ? {} : { followUp: view.followUp })}
+          {...(props.allowProductMutations
+            ? {
+                onCompleteItem: chat.completeWorkItem,
+                onCancelItem: chat.cancelWorkItem,
+                onCompleteFollowUp: chat.completeFollowUp,
+              }
+            : {})}
+        />
+        {looseAttachments.length > 0 || view.citations.length > 0 ? (
+          <View style={styles.metaBlock} testID="mobile-thread-meta">
+            {looseAttachments.length > 0 ? attachmentChips(looseAttachments, false) : null}
+            {view.citations.map((citation) => (
+              <Text key={String(citation.citationId)} style={styles.metaText}>
+                {MOBILE_COPY.citationLabel}: {citation.sourceTitle}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+      </View>,
+    );
+    if (messages.length === 0)
+      row(
+        "chat-empty",
+        <View style={styles.emptyChat} testID="mobile-thread-empty">
+          <Text style={styles.emptyTitle}>{MOBILE_COPY.threadStart}</Text>
+          <Text style={styles.emptyBody}>{MOBILE_COPY.threadStartHelp}</Text>
+        </View>,
+      );
+    messages.forEach(({ content, targets }, index) => {
+      const isLastAssistant =
+        index ===
+        messages.reduce(
+          (last, entry, i) =>
+            entry.content.role.toLowerCase() !== "user" &&
+            entry.content.role.toLowerCase() !== "human"
+              ? i
+              : last,
+          -1,
+        );
+      const retryable = chat.retryableAttempt;
+      const showRetry =
+        isLastAssistant &&
+        retryable !== undefined &&
+        chat.activeAttempt === undefined &&
+        props.allowProductMutations;
+      const sentWith = attachmentsByMessage.get(String(content.contentId)) ?? [];
+      const annotationsBefore =
+        chatAnnotations.beforeContentId.get(String(content.contentId)) ?? [];
+      const annotationsAfter = chatAnnotations.afterContentId.get(String(content.contentId)) ?? [];
+      row(
+        `chat:${String(content.contentId)}`,
+        <View
+          {...focusMark(
+            String(content.contentId) === focusContentId,
+            "mobile-thread-focused-message",
+          )}
+          style={styles.messageWithAttachments}
+        >
+          {annotationsBefore.map((annotation, itemIndex) =>
+            annotation.kind === "handoff" ? (
+              <TranscriptHandoffDivider
+                entry={annotation.entry}
+                key={`before-${String(content.contentId)}-${String(itemIndex)}`}
+                testID={`mobile-chat-handoff-${String(content.contentId)}`}
+              />
+            ) : (
+              <Text
+                key={`described-before-${String(content.contentId)}-${String(itemIndex)}`}
+                style={styles.metaText}
+                testID={`mobile-chat-described-images-${String(content.contentId)}-${String(itemIndex)}`}
+              >
+                {annotation.text}
+              </Text>
+            ),
+          )}
+          <MessageBubble
+            at={sentAt.get(String(content.contentId))}
+            replyDetail={props.replyDetail}
+            body={content.body}
+            role={content.role}
+            showActions={isLastAssistant}
+            testID={`mobile-message-${content.contentId}`}
+            turnActions={props.turnActionsFor(targets)}
+            {...(content.parts === undefined ? {} : { parts: content.parts })}
+            {...(showRetry
               ? {
-                  onCompleteItem: chat.completeWorkItem,
-                  onCancelItem: chat.cancelWorkItem,
-                  onCompleteFollowUp: chat.completeFollowUp,
+                  extraActions: [
+                    {
+                      id: "retry",
+                      label: `Retry ${chatAttemptStatusLabel(retryable.outcome).toLowerCase()}`,
+                      icon: "refresh-outline" as const,
+                      onPress: () => void chat.retry(),
+                    },
+                  ],
                 }
               : {})}
           />
-          {looseAttachments.length > 0 || view.citations.length > 0 ? (
-            <View style={styles.metaBlock} testID="mobile-thread-meta">
-              {looseAttachments.length > 0 ? attachmentChips(looseAttachments, false) : null}
-              {view.citations.map((citation) => (
-                <Text key={String(citation.citationId)} style={styles.metaText}>
-                  {MOBILE_COPY.citationLabel}: {citation.sourceTitle}
-                </Text>
-              ))}
-            </View>
-          ) : null}
-          {messages.length === 0 ? (
-            <View style={styles.emptyChat} testID="mobile-thread-empty">
-              <Text style={styles.emptyTitle}>{MOBILE_COPY.threadStart}</Text>
-              <Text style={styles.emptyBody}>{MOBILE_COPY.threadStartHelp}</Text>
-            </View>
-          ) : (
-            messages.map(({ content, targets }, index) => {
-              const isLastAssistant =
-                index ===
-                messages.reduce(
-                  (last, entry, i) =>
-                    entry.content.role.toLowerCase() !== "user" &&
-                    entry.content.role.toLowerCase() !== "human"
-                      ? i
-                      : last,
-                  -1,
-                );
-              const retryable = chat.retryableAttempt;
-              const showRetry =
-                isLastAssistant &&
-                retryable !== undefined &&
-                chat.activeAttempt === undefined &&
-                props.allowProductMutations;
-              const sentWith = attachmentsByMessage.get(String(content.contentId)) ?? [];
-              const annotationsBefore =
-                chatAnnotations.beforeContentId.get(String(content.contentId)) ?? [];
-              const annotationsAfter =
-                chatAnnotations.afterContentId.get(String(content.contentId)) ?? [];
-              return (
-                <View
-                  key={content.contentId}
-                  {...(String(content.contentId) === focusContentId
-                    ? {
-                        onLayout: (event: { nativeEvent: { layout: { y: number } } }) => {
-                          messageY.current = event.nativeEvent.layout.y;
-                          reportFocus();
-                        },
-                        testID: "mobile-thread-focused-message",
-                      }
-                    : {})}
-                  style={styles.messageWithAttachments}
-                >
-                  {annotationsBefore.map((annotation, itemIndex) =>
-                    annotation.kind === "handoff" ? (
-                      <TranscriptHandoffDivider
-                        entry={annotation.entry}
-                        key={`before-${String(content.contentId)}-${String(itemIndex)}`}
-                        testID={`mobile-chat-handoff-${String(content.contentId)}`}
-                      />
-                    ) : (
-                      <Text
-                        key={`described-before-${String(content.contentId)}-${String(itemIndex)}`}
-                        style={styles.metaText}
-                        testID={`mobile-chat-described-images-${String(content.contentId)}-${String(itemIndex)}`}
-                      >
-                        {annotation.text}
-                      </Text>
-                    ),
-                  )}
-                  <MessageBubble
-                    replyDetail={props.replyDetail}
-                    body={content.body}
-                    role={content.role}
-                    showActions={isLastAssistant}
-                    testID={`mobile-message-${content.contentId}`}
-                    turnActions={props.turnActionsFor(targets)}
-                    {...(content.parts === undefined ? {} : { parts: content.parts })}
-                    {...(showRetry
-                      ? {
-                          extraActions: [
-                            {
-                              id: "retry",
-                              label: `Retry ${chatAttemptStatusLabel(retryable.outcome).toLowerCase()}`,
-                              icon: "refresh-outline" as const,
-                              onPress: () => void chat.retry(),
-                            },
-                          ],
-                        }
-                      : {})}
-                  />
-                  {sentWith.length > 0 ? attachmentChips(sentWith, true) : null}
-                  {annotationsAfter.map((annotation, itemIndex) =>
-                    annotation.kind === "handoff" ? (
-                      <TranscriptHandoffDivider
-                        entry={annotation.entry}
-                        key={`after-${String(content.contentId)}-${String(itemIndex)}`}
-                        testID={`mobile-chat-handoff-after-${String(content.contentId)}-${String(itemIndex)}`}
-                      />
-                    ) : (
-                      <Text
-                        key={`described-after-${String(content.contentId)}-${String(itemIndex)}`}
-                        style={styles.metaText}
-                        testID={`mobile-chat-described-images-after-${String(content.contentId)}-${String(itemIndex)}`}
-                      >
-                        {annotation.text}
-                      </Text>
-                    ),
-                  )}
-                </View>
-              );
-            })
+          {sentWith.length > 0 ? attachmentChips(sentWith, true) : null}
+          {annotationsAfter.map((annotation, itemIndex) =>
+            annotation.kind === "handoff" ? (
+              <TranscriptHandoffDivider
+                entry={annotation.entry}
+                key={`after-${String(content.contentId)}-${String(itemIndex)}`}
+                testID={`mobile-chat-handoff-after-${String(content.contentId)}-${String(itemIndex)}`}
+              />
+            ) : (
+              <Text
+                key={`described-after-${String(content.contentId)}-${String(itemIndex)}`}
+                style={styles.metaText}
+                testID={`mobile-chat-described-images-after-${String(content.contentId)}-${String(itemIndex)}`}
+              >
+                {annotation.text}
+              </Text>
+            ),
           )}
+        </View>,
+        String(content.contentId) === focusContentId,
+      );
+    });
+    if (chatAnnotations.trailing.length > 0)
+      row(
+        "chat-trailing",
+        <View style={styles.transcript}>
           {chatAnnotations.trailing.map((annotation, itemIndex) =>
             annotation.kind === "handoff" ? (
               <TranscriptHandoffDivider
@@ -574,8 +605,19 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
               </Text>
             ),
           )}
-        </View>
-      ) : null}
+        </View>,
+      );
+  }
+  return rows;
+}
+
+/** The transcript drawn whole, where it is short or no list holds it. */
+export function ThreadTranscript(props: ThreadTranscriptProps) {
+  return (
+    <>
+      {useThreadTranscriptRows(props).map((entry) => (
+        <Fragment key={entry.key}>{entry.node}</Fragment>
+      ))}
     </>
   );
 }

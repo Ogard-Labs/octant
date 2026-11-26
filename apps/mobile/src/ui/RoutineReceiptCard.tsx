@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import type { ThreadRoutineReceipt } from "@octant/contracts";
 import { routineScheduleLabel } from "@octant/domain";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { radii, space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 
@@ -45,7 +45,7 @@ export function RoutineReceiptCard(props: {
       style={styles.card}
       testID={props.testID ?? "mobile-routine-receipt"}
     >
-      <Ionicons color={colors.textSecondary} name="calendar-outline" size={18} />
+      <Icon color={colors.textSecondary} name="calendar-outline" size={18} />
       <View style={styles.text}>
         <Text style={styles.label}>{MOBILE_COPY.routineReceiptLabel}</Text>
         <Text numberOfLines={1} style={styles.title}>

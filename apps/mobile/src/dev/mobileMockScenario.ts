@@ -488,14 +488,8 @@ function providerSnapshot() {
       decodeProviderInstance({
         id: PROVIDER_ID,
         displayName: "OpenAI",
-        driverKind: "openai-compatible",
-        configuration: {
-          kind: "openai-compatible-http",
-          baseUrl: "https://provider.octant.invalid/v1/",
-          authentication: "none",
-          protocol: "responses",
-          manualModelIds: [],
-        },
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "/mock/codex" },
         enabled: true,
         environmentPolicy: "inherit-host",
         version: 1,
@@ -791,6 +785,7 @@ function createMockTransport(input: {
   // The phone's own Project terminal: one shell at a time, which echoes
   // what it is sent the way a prompt would.
   let terminalOutput = "";
+  let terminalLine = "";
   let terminalId: string | undefined;
   const codeEvidence = new Map<
     string,
@@ -813,7 +808,21 @@ function createMockTransport(input: {
   // text in the preview as it finds Chat and Code text.
   if (workThreads.some((thread) => String(thread.id) === WORK_THREAD_ID)) {
     const prompt = "List what the travel launch still needs.";
-    const response = "Visa letters, the venue deposit, and the press kit are still open.";
+    const response = [
+      "Visa letters, the venue deposit, and the press kit are still open.",
+      "",
+      "| Item | Owner | Due |",
+      "| --- | --- | --- |",
+      "| Visa letters | Ada | **Friday** |",
+      "| Venue deposit | Grace | 14 August |",
+      "| Press kit | Lin | *not set* |",
+      "",
+      "1. Send the visa letters first.",
+      "2. The deposit needs `finance@` to approve it.",
+      "   - The quote is in [the venue's offer](https://example.com/offer).",
+      "",
+      "> The press kit can wait for the venue.",
+    ].join("\n");
     workTurns.set(WORK_THREAD_ID, [
       {
         requestId: "84000000-0000-4000-8000-000000000001",
@@ -836,6 +845,17 @@ function createMockTransport(input: {
           { role: "user", text: prompt },
           { role: "assistant", text: response },
         ],
+        toolSteps: [
+          {
+            toolCallId: "read",
+            toolName: "Read",
+            state: "completed",
+            summary: "launch/checklist.md",
+          },
+          { toolCallId: "search", toolName: "Search", state: "completed", summary: "3 open items" },
+        ],
+        reasoningMs: 12_400,
+        wroteFiles: { paths: ["launch/checklist.md", "launch/owners.md"], truncated: false },
         capabilities: {
           workspace: "project-backed",
           confinement: "project-root-confined",
@@ -849,6 +869,76 @@ function createMockTransport(input: {
         acceptedAt: EARLIER,
         updatedAt: NOW,
       },
+      // The turn the list says is running: its plan, its calls and its helpers.
+      {
+        requestId: "84000000-0000-4000-8000-000000000003",
+        threadId: WORK_THREAD_ID,
+        turnId: "84000000-0000-4000-8000-000000000004",
+        projectId: PROJECT_ID,
+        authority: {
+          hostId: input.hostId,
+          projectId: PROJECT_ID,
+          bindingRevisionId: BINDING_ID,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: PROVIDER_ID,
+          modelId: MODEL_ID,
+        },
+        status: "running",
+        prompt: "Draft the visa letters and chase the deposit.",
+        transcript: [{ role: "user", text: "Draft the visa letters and chase the deposit." }],
+        toolSteps: [
+          {
+            toolCallId: "draft",
+            toolName: "Write",
+            state: "completed",
+            summary: "launch/visa-letters.md",
+          },
+          {
+            toolCallId: "mail",
+            toolName: "Search",
+            state: "running",
+            summary: "The venue's last message",
+          },
+        ],
+        tasks: [
+          { taskId: "1", state: "completed", summary: "Draft the visa letters" },
+          {
+            taskId: "2",
+            state: "running",
+            summary: "Chase the venue deposit",
+            runningSummary: "Reading the venue's last message",
+          },
+          { taskId: "3", state: "pending", summary: "Update the checklist" },
+        ],
+        childObservations: {
+          children: ["Compare visa rules", "Find the deposit terms"].map((task, index) => ({
+            providerInstanceId: PROVIDER_ID,
+            sessionId: "82000000-0000-4000-8000-000000000002",
+            childAgentId: `helper-${String(index + 1)}`,
+            task,
+            lifecycleStatus: "running" as const,
+            latestSummary: "Reading",
+            firstObservedAt: EARLIER,
+            updatedAt: NOW,
+            historyStatus: "partial" as const,
+            history: [],
+          })),
+          truncated: false,
+        },
+        capabilities: {
+          workspace: "project-backed",
+          confinement: "project-root-confined",
+          shell: "denied",
+          git: "denied",
+          worktree: "denied",
+          pullRequest: "denied",
+          code: "denied",
+        },
+        version: 1,
+        acceptedAt: new Date(Date.now() - 44_000).toISOString(),
+        updatedAt: new Date(Date.now() - 4_000).toISOString(),
+      },
     ]);
   }
   // The review thread's newest turn reports its context window, so the Context
@@ -857,7 +947,17 @@ function createMockTransport(input: {
   // search finds, so that hit opens an earlier page with Jump to latest.
   if (codeThreads.some((thread) => String(thread.id) === CODE_THREAD_ID)) {
     const prompt = "Bring the desktop's side panes to the phone, read-only.";
-    const reply = "Added Environment, Review, Context & usage and Agents as one sheet.";
+    // A fenced block, so the sample shows a reply's code in its syntax colours.
+    const reply = [
+      "Added Environment, Review, Context & usage and Agents as one sheet.",
+      "",
+      "```tsx",
+      "// The sheet opens on the first pane the thread's mode offers.",
+      "const [pane, setPane] = useState<MobileThreadPaneId>(",
+      '  panes[0]?.id ?? "context",',
+      ");",
+      "```",
+    ].join("\n");
     const promptId = "83000000-0000-4000-8000-000000000001";
     const replyId = "83000000-0000-4000-8000-000000000002";
     const encoder = new TextEncoder();
@@ -1138,8 +1238,23 @@ function createMockTransport(input: {
             "\u001b[1;32mmock@octant\u001b[0m:\u001b[34m~/launch\u001b[0m$ ";
         }
         if (command.kind === "write" && command.data !== undefined) {
-          const line = command.data.replace(/\r$/, "");
-          terminalOutput += `${line}\r\n${line === "" ? "" : `ran ${line}\r\n`}$ `;
+          // Echoes typing as a shell does, runs the line on Return, and
+          // answers Backspace and Control-C, since the terminal sends keys.
+          for (const key of command.data) {
+            if (key === "\r") {
+              terminalOutput += `\r\n${terminalLine === "" ? "" : `ran ${terminalLine}\r\n`}$ `;
+              terminalLine = "";
+            } else if (key === "\u007f") {
+              if (terminalLine.length > 0) terminalOutput += "\b \b";
+              terminalLine = terminalLine.slice(0, -1);
+            } else if (key === "\u0003") {
+              terminalOutput += "^C\r\n$ ";
+              terminalLine = "";
+            } else if (key >= " ") {
+              terminalOutput += key;
+              terminalLine += key;
+            }
+          }
         }
         const ended = command.kind === "stop" || terminalId !== command.terminalId;
         const terminal = {

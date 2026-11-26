@@ -33,9 +33,23 @@ describe("arranging a mode's threads on the phone", () => {
       ["Pinned", ["pinned-and-asks"]],
       ["Needs input", ["asks"]],
       ["Ready for review", ["review"]],
-      ["Working", ["running"]],
       ["Idle", ["idle"]],
+      ["Working", ["running"]],
     ]);
+  });
+
+  it("keeps running threads at the foot of Status and Activity, and in place under their Project", () => {
+    const rows = [
+      row("running", { live: "working", projectId: "p-1" }),
+      row("pinned-running", { live: "working", pinned: true }),
+      row("quiet", { projectId: "p-1" }),
+    ];
+    const labels = (arrangement: "status" | "activity" | "projects") =>
+      names(arrangeMobileThreads({ arrangement, projectName: () => "Octant", rows, now }));
+    expect(labels("status").at(-1)).toEqual(["Working", ["running"]]);
+    expect(labels("activity").at(-1)).toEqual(["Working", ["running"]]);
+    expect(labels("status")[0]).toEqual(["Pinned", ["pinned-running"]]);
+    expect(labels("projects")).toContainEqual(["Octant", ["quiet", "running"]]);
   });
 
   it("groups by Project with chats that have no folder last, newest Project first", () => {

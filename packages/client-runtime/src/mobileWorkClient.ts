@@ -3,6 +3,7 @@ import {
   decodeBindingRevisionId,
   decodeStartWorkThreadTurnCommand,
   LOCAL_HOST_ID,
+  type ProviderModelOptionValues,
   type StartWorkThreadTurnCommand,
   type WorkThread,
   WorkThreadTranscript,
@@ -222,6 +223,7 @@ export async function createMobileWorkThread(input: {
   readonly bindingRevisionId: string;
   readonly workingDirectory?: string;
   readonly threadId?: string;
+  readonly modelOptionValues?: ProviderModelOptionValues;
 }): Promise<MobileInboxRow> {
   const thread = await createWorkThreadOnHost(input);
   return workRow(input.transport.hostId, thread);
@@ -236,6 +238,7 @@ async function createWorkThreadOnHost(input: {
   readonly bindingRevisionId: string;
   readonly workingDirectory?: string;
   readonly threadId?: string;
+  readonly modelOptionValues?: ProviderModelOptionValues;
 }): Promise<WorkThread> {
   const title = input.title.trim();
   if (title.length === 0) {
@@ -252,6 +255,9 @@ async function createWorkThreadOnHost(input: {
       title,
       providerInstanceId: input.providerInstanceId,
       modelId: input.modelId,
+      ...(input.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: input.modelOptionValues }),
       // Commands execute on the host; "local" is the host's own HostId.
       hostId: LOCAL_HOST_ID,
       bindingRevisionId: input.bindingRevisionId,
@@ -298,6 +304,7 @@ export async function createMobileWorkFromPrompt(input: {
   readonly modelId: string;
   readonly bindingRevisionId: string;
   readonly workingDirectory?: string;
+  readonly modelOptionValues?: ProviderModelOptionValues;
   /**
    * Told as soon as the host has made the thread, before its first turn: a
    * turn that then fails to start still leaves a thread the caller can name.
@@ -316,6 +323,9 @@ export async function createMobileWorkFromPrompt(input: {
     modelId: input.modelId,
     bindingRevisionId: input.bindingRevisionId,
     ...(input.workingDirectory === undefined ? {} : { workingDirectory: input.workingDirectory }),
+    ...(input.modelOptionValues === undefined
+      ? {}
+      : { modelOptionValues: input.modelOptionValues }),
   });
   const row = workRow(input.transport.hostId, thread);
   input.onCreated?.(row);

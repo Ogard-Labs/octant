@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import { radii, space, useTheme } from "../../design-system";
 import { unlockAppVault, type AppVaultUnlockResult, type DeviceAuthenticator } from "./AppVault";
 import {
@@ -170,7 +170,7 @@ export function AppVaultGate(props: {
   return (
     <View style={styles.shell} testID="mobile-vault-locked">
       <View style={styles.intro}>
-        <Ionicons color={colors.accent} name="lock-closed" size={44} />
+        <Icon color={colors.accent} name="lock-closed" size={44} />
         <Text accessibilityRole="header" style={styles.title}>
           Unlock Octant
         </Text>

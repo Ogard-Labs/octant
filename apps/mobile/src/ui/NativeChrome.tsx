@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { radii, space, typography, useTheme } from "../../design-system";
 import type { MobileIconName } from "./IconButton";
 
@@ -10,135 +10,6 @@ import type { MobileIconName } from "./IconButton";
  * drawing page-like headings and free-floating text, which read as a web page
  * inside an app frame.
  */
-
-// The web build has no status bar of its own, so the bars keep its room.
-const WEB_STATUS_ROOM = process.env.EXPO_OS === "web" ? 44 : 0;
-
-export interface NavBarProps {
-  readonly title: string;
-  readonly subtitle?: string | undefined;
-  readonly onBack?: (() => void) | undefined;
-  /** The word beside the back chevron: the screen the person came from. */
-  readonly backLabel?: string;
-  readonly trailing?: ReactNode;
-  readonly backTestID?: string;
-}
-
-/** A pushed screen's bar: back on the leading edge, the title centred. */
-export function NavBar(props: NavBarProps) {
-  const { colors } = useTheme();
-  const styles = useMemo(
-    () =>
-      StyleSheet.create({
-        bar: {
-          minHeight: 44,
-          marginTop: WEB_STATUS_ROOM,
-          flexDirection: "row",
-          alignItems: "center",
-          paddingHorizontal: space.xs,
-        },
-        side: { flex: 1, flexDirection: "row", alignItems: "center" },
-        sideEnd: { justifyContent: "flex-end", paddingRight: space.xs, gap: space.xs },
-        back: {
-          minHeight: 44,
-          flexDirection: "row",
-          alignItems: "center",
-          paddingRight: space.sm,
-        },
-        backLabel: { color: colors.accent, fontSize: 17, marginLeft: -2 },
-        // Without a back label the sides hold one 44pt control each, so the
-        // title takes the rest: at 2.4 a thread title was cut at about 212pt
-        // with room to spare on both sides.
-        center: { flex: props.backLabel === undefined ? 5 : 2.4, alignItems: "center" },
-        title: {
-          color: colors.textPrimary,
-          fontSize: typography.pageTitle.fontSize,
-          fontWeight: typography.pageTitle.fontWeight,
-          letterSpacing: typography.pageTitle.letterSpacing,
-        },
-        subtitle: { color: colors.textTertiary, fontSize: typography.meta.fontSize, marginTop: 1 },
-      }),
-    [colors, props.backLabel],
-  );
-
-  return (
-    <View style={styles.bar}>
-      <View style={styles.side}>
-        {props.onBack === undefined ? null : (
-          <Pressable
-            accessibilityLabel={
-              props.backLabel === undefined ? "Back" : `Back to ${props.backLabel}`
-            }
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={props.onBack}
-            style={({ pressed }) => [styles.back, pressed ? { opacity: 0.5 } : null]}
-            testID={props.backTestID}
-          >
-            <Ionicons color={colors.accent} name="chevron-back" size={27} />
-            {props.backLabel === undefined ? null : (
-              <Text numberOfLines={1} style={styles.backLabel}>
-                {props.backLabel}
-              </Text>
-            )}
-          </Pressable>
-        )}
-      </View>
-      <View style={styles.center}>
-        <Text accessibilityRole="header" numberOfLines={1} style={styles.title}>
-          {props.title}
-        </Text>
-        {props.subtitle === undefined ? null : (
-          <Text numberOfLines={1} style={styles.subtitle}>
-            {props.subtitle}
-          </Text>
-        )}
-      </View>
-      <View style={[styles.side, styles.sideEnd]}>{props.trailing}</View>
-    </View>
-  );
-}
-
-export interface LargeTitleProps {
-  readonly title: string;
-  readonly trailing?: ReactNode;
-}
-
-/** A tab's root: a toolbar row for its actions, then the large title. */
-export function LargeTitle(props: LargeTitleProps) {
-  const { colors } = useTheme();
-  const styles = useMemo(
-    () =>
-      StyleSheet.create({
-        toolbar: {
-          minHeight: 44,
-          marginTop: WEB_STATUS_ROOM,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          gap: space.sm,
-          paddingHorizontal: space.md,
-        },
-        title: {
-          color: colors.textPrimary,
-          fontSize: 32,
-          fontWeight: "700",
-          letterSpacing: -0.8,
-          paddingHorizontal: space.md,
-          marginBottom: space.sm,
-        },
-      }),
-    [colors],
-  );
-  return (
-    <View>
-      <View style={styles.toolbar}>{props.trailing}</View>
-      <Text accessibilityRole="header" style={styles.title}>
-        {props.title}
-      </Text>
-    </View>
-  );
-}
 
 /** A plain-glyph toolbar button in the accent, as system toolbars draw them. */
 export function ToolbarButton(props: {
@@ -163,7 +34,7 @@ export function ToolbarButton(props: {
       ]}
       testID={props.testID}
     >
-      <Ionicons color={colors.accent} name={props.icon} size={23} />
+      <Icon color={colors.accent} name={props.icon} size={23} />
     </Pressable>
   );
 }
@@ -321,11 +192,11 @@ export function ListRow(props: ListRowProps) {
     <>
       {props.icon === undefined ? null : hasBadge ? (
         <View style={[styles.badge, { backgroundColor: props.iconTone }]}>
-          <Ionicons color={colors.primaryForeground} name={props.icon} size={17} />
+          <Icon color={colors.primaryForeground} name={props.icon} size={17} />
         </View>
       ) : (
         <View style={styles.bareIcon}>
-          <Ionicons color={colors.textSecondary} name={props.icon} size={20} />
+          <Icon color={colors.textSecondary} name={props.icon} size={20} />
         </View>
       )}
       <View style={[styles.main, props.last === true ? null : styles.separator]}>
@@ -362,9 +233,9 @@ export function ListRow(props: ListRowProps) {
           </Text>
         )}
         {props.accessory === "check" ? (
-          <Ionicons color={colors.accent} name="checkmark" size={20} />
+          <Icon color={colors.accent} name="checkmark" size={20} />
         ) : props.accessory === "none" || props.onPress === undefined ? null : (
-          <Ionicons color={colors.textTertiary} name="chevron-forward" size={17} />
+          <Icon color={colors.textTertiary} name="chevron-forward" size={17} />
         )}
       </View>
     </>
@@ -430,80 +301,6 @@ const noteStyles = StyleSheet.create({
   note: { marginLeft: space.md, paddingRight: space.md, paddingVertical: 12 },
   text: { fontSize: typography.detail.fontSize + 1, lineHeight: 20 },
 });
-
-export interface SegmentedControlProps<Id extends string> {
-  readonly options: ReadonlyArray<{ readonly id: Id; readonly label: string }>;
-  readonly selected: Id;
-  readonly onSelect: (id: Id) => void;
-  readonly testID?: string;
-  readonly optionTestID?: (id: Id) => string;
-}
-
-/** The system segmented control: one track, the chosen segment raised. */
-export function SegmentedControl<Id extends string>(props: SegmentedControlProps<Id>) {
-  const { colors, scheme, surfaceStyle } = useTheme();
-  const glass = surfaceStyle === "glass";
-  const styles = useMemo(
-    () =>
-      StyleSheet.create({
-        track: {
-          flexDirection: "row",
-          padding: 2,
-          borderRadius: 9,
-          backgroundColor: glass ? colors.glassFillThin : colors.control,
-        },
-        segment: {
-          flex: 1,
-          height: 30,
-          alignItems: "center",
-          justifyContent: "center",
-          paddingHorizontal: space.sm,
-          borderRadius: 7,
-        },
-        // In dark the raised fill matched the track, so the thumb takes the
-        // strong border grey there, as the system's dark thumb is lighter.
-        selected: {
-          backgroundColor: glass
-            ? colors.glassThumb
-            : scheme === "dark"
-              ? colors.hairlineStrong
-              : colors.surfaceElevatedSolid,
-          shadowColor: colors.shadow,
-          shadowOpacity: 0.12,
-          shadowRadius: 3,
-          shadowOffset: { width: 0, height: 1 },
-          elevation: 1,
-        },
-        label: { fontSize: typography.detail.fontSize, color: colors.textPrimary },
-      }),
-    [colors, glass, scheme],
-  );
-  return (
-    <View accessibilityRole="tablist" style={styles.track} testID={props.testID}>
-      {props.options.map((option) => {
-        const selected = option.id === props.selected;
-        return (
-          <Pressable
-            accessibilityRole="tab"
-            accessibilityState={{ selected }}
-            hitSlop={{ top: 7, bottom: 7 }}
-            key={option.id}
-            onPress={() => props.onSelect(option.id)}
-            style={[styles.segment, selected ? styles.selected : null]}
-            testID={props.optionTestID?.(option.id)}
-          >
-            <Text
-              numberOfLines={1}
-              style={[styles.label, { fontWeight: selected ? "600" : "400" }]}
-            >
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
 
 const styles = StyleSheet.create({
   toolbarButton: {

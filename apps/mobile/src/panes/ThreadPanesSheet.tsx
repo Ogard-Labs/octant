@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { LegendList } from "@legendapp/list/react-native";
 import {
   loadMobileCodeBoardCard,
   loadMobileCodeEnvironment,
@@ -22,13 +30,19 @@ import { radii, space, typography, useTheme, withAlpha } from "../../design-syst
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { BottomSheet } from "../ui/BottomSheet";
 import type { MobileIconName } from "../ui/IconButton";
-import { ListNote, ListRow, ListSection, SegmentedControl } from "../ui/NativeChrome";
+import { ListNote, ListRow, ListSection } from "../ui/NativeChrome";
+import { SegmentedControl } from "../ui/SegmentedControl";
+import { diffSides, grammarForPath, type CodeToken } from "../ui/codeHighlight";
+import { HighlightedCode } from "../ui/HighlightedCode";
+import { useCodeHighlight } from "../ui/useCodeHighlight";
 import {
   contextMeterPresentation,
   diffstatText,
   folderName,
   listMobileThreadPanes,
   localServerRow,
+  numberedDiffLines,
+  type NumberedDiffLine,
   subagentSummary,
   workingTreeTotals,
   type MobileThreadPaneId,
@@ -36,6 +50,8 @@ import {
 
 export interface ThreadPanesSheetProps {
   readonly visible: boolean;
+  /** The pane it opens on; the last one shown otherwise. */
+  readonly initialPane?: MobileThreadPaneId | undefined;
   readonly onClose: () => void;
   readonly transport: MobileRemoteTransport;
   readonly mode: MobileInboxMode;
@@ -78,6 +94,10 @@ const TOOL_ROWS: Readonly<
 export function ThreadPanesSheet(props: ThreadPanesSheetProps) {
   const panes = useMemo(() => listMobileThreadPanes(props.mode), [props.mode]);
   const [pane, setPane] = useState<MobileThreadPaneId>(panes[0]?.id ?? "context");
+  const { initialPane, visible } = props;
+  useEffect(() => {
+    if (visible && initialPane !== undefined) setPane(initialPane);
+  }, [initialPane, visible]);
   const active = panes.some((entry) => entry.id === pane) ? pane : (panes[0]?.id ?? "context");
   const scope =
     props.codeThread === undefined
@@ -91,7 +111,7 @@ export function ThreadPanesSheet(props: ThreadPanesSheetProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
-      sheetStyle={styles.sheet}
+      size="full"
       testID="mobile-thread-panes"
       title={
         props.views.length > 0 || props.tools.length > 0
@@ -145,7 +165,11 @@ export function ThreadPanesSheet(props: ThreadPanesSheetProps) {
           testID="mobile-thread-pane-switcher"
         />
       </View>
-      {props.visible ? (
+      {props.visible && active === "review" && scope !== undefined ? (
+        // The Review pane brings its own scrolling: its open diff is a
+        // virtualized list, which a vertical ScrollView around it would defeat.
+        <ReviewPane scope={scope} transport={props.transport} />
+      ) : props.visible ? (
         <ScrollView contentContainerStyle={styles.content} style={styles.scroll}>
           {active === "environment" ? (
             scope === undefined ? (
@@ -159,11 +183,7 @@ export function ThreadPanesSheet(props: ThreadPanesSheetProps) {
               />
             )
           ) : active === "review" ? (
-            scope === undefined ? (
-              <Loading />
-            ) : (
-              <ReviewPane scope={scope} transport={props.transport} />
-            )
+            <Loading />
           ) : active === "context" ? (
             <ContextPane mode={props.mode} threadId={props.threadId} transport={props.transport} />
           ) : (
@@ -184,11 +204,11 @@ const PANE_TITLES: Readonly<Record<MobileThreadPaneId, string>> = {
 };
 
 const styles = StyleSheet.create({
-  sheet: { maxHeight: "90%", minHeight: "60%" },
   views: { paddingBottom: space.sm },
   switcher: { paddingHorizontal: space.md, paddingBottom: space.md },
   scroll: { flexGrow: 0 },
   content: { paddingBottom: space.lg },
+  fill: { flex: 1 },
 });
 
 interface PaneScope {
@@ -387,12 +407,18 @@ function ReviewPane(props: {
     `history:${key}`,
   );
   const [open, setOpen] = useState<string | undefined>();
-  if (changes === undefined) return <Loading />;
+  if (changes === undefined) {
+    return (
+      <ScrollView contentContainerStyle={styles.content} style={styles.scroll}>
+        <Loading />
+      </ScrollView>
+    );
+  }
   const files = changes.status === "ready" ? changes.value.files : [];
   const opened = files.find((file) => file.path === open);
   if (opened !== undefined) {
     return (
-      <View testID="mobile-pane-review-file">
+      <View style={styles.fill} testID="mobile-pane-review-file">
         <ListSection>
           <ListRow
             accessibilityLabel="Back to all changes"
@@ -410,76 +436,94 @@ function ReviewPane(props: {
   }
   const totals = workingTreeTotals(files);
   return (
-    <View testID="mobile-pane-review">
-      <ListSection
-        footer={
-          changes.status === "ready" && changes.value.truncated
-            ? "The diff was cut at the phone's limit; later files may be missing."
-            : undefined
-        }
-        title={
-          files.length === 0
-            ? "Uncommitted changes"
-            : `Uncommitted changes · ${diffstatText(totals.additions, totals.deletions)}`
-        }
-      >
-        {changes.status !== "ready" ? (
-          <ReadNote read={changes} />
-        ) : files.length === 0 ? (
-          <ListNote last text="No uncommitted changes." tone={colors.textSecondary} />
-        ) : (
-          files.map((file, index) => (
-            <ListRow
-              detail={
-                file.binary ? "Binary file" : file.withoutDiff === true ? "New file" : undefined
-              }
-              key={file.path}
-              label={file.path}
-              last={index === files.length - 1}
-              onPress={
-                file.binary || file.withoutDiff === true ? undefined : () => setOpen(file.path)
-              }
-              testID={`mobile-pane-review-file-${index}`}
-              value={
-                file.binary || file.withoutDiff === true
-                  ? undefined
-                  : diffstatText(file.additions, file.deletions)
-              }
-            />
-          ))
-        )}
-      </ListSection>
-      <ListSection title="History">
-        {history === undefined ? (
-          <ListRow label="Reading history" />
-        ) : history.status !== "ready" ? (
-          <ReadNote read={history} />
-        ) : history.value.commits.length === 0 ? (
-          <ListNote last text="No commits on this branch yet." tone={colors.textSecondary} />
-        ) : (
-          history.value.commits
-            .slice(0, 20)
-            .map((commit, index, shown) => (
+    <ScrollView contentContainerStyle={styles.content} style={styles.scroll}>
+      <View testID="mobile-pane-review">
+        <ListSection
+          footer={
+            changes.status === "ready" && changes.value.truncated
+              ? "The diff was cut at the phone's limit; later files may be missing."
+              : undefined
+          }
+          title={
+            files.length === 0
+              ? "Uncommitted changes"
+              : `Uncommitted changes · ${diffstatText(totals.additions, totals.deletions)}`
+          }
+        >
+          {changes.status !== "ready" ? (
+            <ReadNote read={changes} />
+          ) : files.length === 0 ? (
+            <ListNote last text="No uncommitted changes." tone={colors.textSecondary} />
+          ) : (
+            files.map((file, index) => (
               <ListRow
-                detail={`${commit.oid.slice(0, 7)} · ${formatScreenshotSafeLabel(commit.author, 40)} · ${commit.authoredAt.slice(0, 10)}`}
-                key={commit.oid}
-                label={formatScreenshotSafeLabel(commit.subject)}
-                last={index === shown.length - 1}
+                detail={
+                  file.binary ? "Binary file" : file.withoutDiff === true ? "New file" : undefined
+                }
+                key={file.path}
+                label={file.path}
+                last={index === files.length - 1}
+                onPress={
+                  file.binary || file.withoutDiff === true ? undefined : () => setOpen(file.path)
+                }
+                testID={`mobile-pane-review-file-${index}`}
+                value={
+                  file.binary || file.withoutDiff === true
+                    ? undefined
+                    : diffstatText(file.additions, file.deletions)
+                }
               />
             ))
-        )}
-      </ListSection>
-    </View>
+          )}
+        </ListSection>
+        <ListSection title="History">
+          {history === undefined ? (
+            <ListRow label="Reading history" />
+          ) : history.status !== "ready" ? (
+            <ReadNote read={history} />
+          ) : history.value.commits.length === 0 ? (
+            <ListNote last text="No commits on this branch yet." tone={colors.textSecondary} />
+          ) : (
+            history.value.commits
+              .slice(0, 20)
+              .map((commit, index, shown) => (
+                <ListRow
+                  detail={`${commit.oid.slice(0, 7)} · ${formatScreenshotSafeLabel(commit.author, 40)} · ${commit.authoredAt.slice(0, 10)}`}
+                  key={commit.oid}
+                  label={formatScreenshotSafeLabel(commit.subject)}
+                  last={index === shown.length - 1}
+                />
+              ))
+          )}
+        </ListSection>
+      </View>
+    </ScrollView>
   );
 }
 
-/** One file's unified diff in mono, added and removed lines in the diff inks. */
+/**
+ * One file's unified diff in mono, added and removed lines in the diff inks.
+ * A virtualized list so a large change stays smooth; long lines wrap rather
+ * than scroll sideways, and each row carries its old and new line numbers.
+ */
 function UnifiedDiff(props: { readonly file: MobileDiffFile }) {
   const { colors } = useTheme();
+  // Line heights and the gutter follow the system text size, as the digits do,
+  // so a number never wraps and a line never clips at the largest size.
+  const { fontScale } = useWindowDimensions();
+  const lines = useMemo(() => numberedDiffLines(props.file.lines), [props.file.lines]);
+  const sides = useMemo(() => diffSides(lines), [lines]);
+  const grammar = grammarForPath(props.file.path);
+  const oldColours = useCodeHighlight(sides.oldCode, grammar);
+  const newColours = useCodeHighlight(sides.newCode, grammar);
+  const digits = String(
+    lines.reduce((most, line) => Math.max(most, line.oldNumber ?? 0, line.newNumber ?? 0), 0),
+  ).length;
   const diffStyles = useMemo(
     () =>
       StyleSheet.create({
         frame: {
+          flex: 1,
           marginHorizontal: space.md,
           borderRadius: radii.md,
           overflow: "hidden",
@@ -494,45 +538,147 @@ function UnifiedDiff(props: { readonly file: MobileDiffFile }) {
           paddingHorizontal: space.sm,
           paddingVertical: space.xs,
         },
+        row: { flexDirection: "row" },
+        gutter: {
+          // Two columns of mono digits about 0.62 of the font size wide, with their padding.
+          width: Math.ceil(2 * (digits * 11 * 0.62 * fontScale + space.xs) + space.xs),
+          flexDirection: "row",
+          paddingLeft: space.xs,
+        },
+        number: {
+          flex: 1,
+          textAlign: "right",
+          fontFamily: typography.mono.fontFamily,
+          fontSize: 11,
+          lineHeight: Math.ceil(18 * fontScale),
+          paddingRight: space.xs,
+          color: colors.textTertiary,
+        },
         line: {
+          flex: 1,
           fontFamily: typography.mono.fontFamily,
           fontSize: 12,
-          lineHeight: 18,
-          paddingHorizontal: space.sm,
+          lineHeight: Math.ceil(18 * fontScale),
+          paddingRight: space.sm,
           color: colors.textPrimary,
         },
-        added: { backgroundColor: withAlpha(colors.success, 0.14), color: colors.success },
-        removed: { backgroundColor: withAlpha(colors.danger, 0.14), color: colors.danger },
-        hunk: { color: colors.textTertiary, backgroundColor: colors.control },
+        added: { backgroundColor: withAlpha(colors.success, 0.14) },
+        addedText: { color: colors.success },
+        removed: { backgroundColor: withAlpha(colors.danger, 0.14) },
+        removedText: { color: colors.danger },
+        hunk: { backgroundColor: colors.control },
+        hunkText: { color: colors.textTertiary },
       }),
-    [colors],
+    [colors, digits, fontScale],
   );
   return (
     <View style={diffStyles.frame} testID="mobile-pane-review-diff">
-      <Text style={diffStyles.path}>
-        {props.file.path} {diffstatText(props.file.additions, props.file.deletions)}
-      </Text>
-      <ScrollView horizontal>
-        <View>
-          {props.file.lines.map((line, index) => (
-            <Text
-              key={index}
-              style={[
-                diffStyles.line,
-                line.kind === "added"
-                  ? diffStyles.added
-                  : line.kind === "removed"
-                    ? diffStyles.removed
-                    : line.kind === "hunk"
-                      ? diffStyles.hunk
-                      : null,
-              ]}
-            >
-              {line.text}
-            </Text>
-          ))}
-        </View>
-      </ScrollView>
+      <LegendList
+        // Rows hold no state, so recycling them while scrolling is safe.
+        recycleItems
+        // Web hands this style to the DOM as written, so no shorthand padding.
+        contentContainerStyle={{ paddingBottom: space.sm }}
+        data={lines}
+        estimatedItemSize={Math.ceil(18 * fontScale)}
+        // The colours arrive after the first draw; rows on screen draw again then.
+        extraData={[oldColours, newColours]}
+        keyExtractor={(_line, index) => String(index)}
+        ListHeaderComponent={
+          <Text style={diffStyles.path}>
+            {props.file.path} {diffstatText(props.file.additions, props.file.deletions)}
+          </Text>
+        }
+        renderItem={({ item, index }) => {
+          const at = sides.rowLines[index];
+          const runs =
+            at === null || at === undefined
+              ? undefined
+              : (at.side === "old" ? oldColours : newColours)?.[at.line];
+          return <DiffRow line={item} runs={runs} styles={diffStyles} />;
+        }}
+      />
+    </View>
+  );
+}
+
+interface DiffRowStyles {
+  readonly row: object;
+  readonly gutter: object;
+  readonly number: object;
+  readonly line: object;
+  readonly added: object;
+  readonly addedText: object;
+  readonly removed: object;
+  readonly removedText: object;
+  readonly hunk: object;
+  readonly hunkText: object;
+}
+
+const DIFF_KIND_WORDS = {
+  added: "Added line",
+  removed: "Removed line",
+  context: "Line",
+  hunk: "Section",
+} as const;
+
+/**
+ * What a screen reader says for a line: its kind in words, then its number and
+ * text, without the diff's own + or - mark, which the kind already says.
+ */
+function diffRowLabel(line: NumberedDiffLine): string {
+  const number = line.newNumber ?? line.oldNumber;
+  const head = DIFF_KIND_WORDS[line.kind];
+  const text = line.kind === "hunk" ? line.text : line.text.slice(1);
+  return number === undefined ? `${head}: ${text}` : `${head} ${number}: ${text}`;
+}
+
+function DiffRow(props: {
+  readonly line: NumberedDiffLine;
+  /** The line's syntax colours, without its mark; absent while plain. */
+  readonly runs: ReadonlyArray<CodeToken> | undefined;
+  readonly styles: DiffRowStyles;
+}) {
+  const { line, runs, styles: diff } = props;
+  const fill =
+    line.kind === "added"
+      ? diff.added
+      : line.kind === "removed"
+        ? diff.removed
+        : line.kind === "hunk"
+          ? diff.hunk
+          : null;
+  const ink =
+    line.kind === "added"
+      ? diff.addedText
+      : line.kind === "removed"
+        ? diff.removedText
+        : line.kind === "hunk"
+          ? diff.hunkText
+          : null;
+  return (
+    <View accessibilityLabel={diffRowLabel(line)} accessible style={[diff.row, fill]}>
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={diff.gutter}
+      >
+        <Text numberOfLines={1} style={diff.number}>
+          {line.oldNumber ?? ""}
+        </Text>
+        <Text numberOfLines={1} style={diff.number}>
+          {line.newNumber ?? ""}
+        </Text>
+      </View>
+      {runs === undefined || line.kind === "hunk" ? (
+        <Text style={[diff.line, ink]}>{line.text}</Text>
+      ) : (
+        // The mark keeps the diff ink; the code takes its syntax colours, and
+        // the row's fill still says added or removed.
+        <Text style={diff.line}>
+          <Text style={ink}>{line.text.slice(0, 1)}</Text>
+          <HighlightedCode code={line.text.slice(1)} lines={[runs]} style={null} />
+        </Text>
+      )}
     </View>
   );
 }

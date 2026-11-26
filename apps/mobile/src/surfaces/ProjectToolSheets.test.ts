@@ -14,9 +14,29 @@ vi.mock("expo-document-picker", () => ({}));
 vi.mock("expo-file-system", () => ({ File: class {}, Paths: { cache: { uri: "cache:" } } }));
 vi.mock("expo-image-picker", () => ({}));
 vi.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
+// The virtualized list draws only what a measured window holds, and jsdom
+// measures nothing; every row is drawn instead.
+vi.mock("@legendapp/list/react-native", async () => {
+  const { createElement: element, Fragment } = await import("react");
+  return {
+    LegendList: (props: {
+      data: ReadonlyArray<unknown>;
+      keyExtractor: (item: unknown, index: number) => string;
+      renderItem: (info: { item: unknown; index: number }) => ReactElement;
+    }) =>
+      props.data.map((item, index) =>
+        element(
+          Fragment,
+          { key: props.keyExtractor(item, index) },
+          props.renderItem({ item, index }),
+        ),
+      ),
+  };
+});
 vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
   ...(await import("../../design-system/tokens")),
+  ...(await import("../../design-system/tone")),
   ...(await import("../../design-system/GlassChip")),
   ...(await import("../../design-system/GlassSurface")),
 }));
@@ -88,7 +108,7 @@ async function type(id: string, value: string) {
 }
 
 describe("the phone's Project terminal", () => {
-  it("starts the device's shell, shows its output as plain text, runs a line, and stops it on close", async () => {
+  it("starts the device's shell, draws its screen, sends typing and keys, and stops it on close", async () => {
     let terminalId = "";
     const { transport, calls } = host((_path, body) => {
       terminalId = String(body.terminalId);
@@ -122,16 +142,17 @@ describe("the phone's Project terminal", () => {
       path: "/api/code/project-terminals",
       body: { kind: "start", projectId, columns: 60, rows: 30 },
     });
-    expect(byTestId("mobile-project-terminal-output").textContent).toBe("ready\n$ ");
+    // The colour escape is drawn, not printed.
+    expect(byTestId("mobile-terminal-rows").textContent).toContain("ready$");
 
-    await type("mobile-project-terminal-line", "ls");
-    await press("mobile-project-terminal-run");
-    expect(calls.find((call) => call.body.kind === "write")?.body).toEqual({
-      kind: "write",
-      projectId,
-      terminalId,
-      data: "ls\r",
-    });
+    await type("mobile-terminal-input", "ls");
+    await press("mobile-terminal-key-up");
+    await press("mobile-project-terminal-interrupt");
+    expect(calls.filter((call) => call.body.kind === "write").map((call) => call.body)).toEqual([
+      { kind: "write", projectId, terminalId, data: "ls" },
+      { kind: "write", projectId, terminalId, data: "\u001b[A" },
+      { kind: "write", projectId, terminalId, data: "\u0003" },
+    ]);
 
     await act(async () => {
       root.render(

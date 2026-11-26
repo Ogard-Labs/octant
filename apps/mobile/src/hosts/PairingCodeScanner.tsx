@@ -70,6 +70,7 @@ export function PairingCodeScanner(props: PairingCodeScannerProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
+      size="full"
       testID="mobile-pairing-scanner"
       title={MOBILE_COPY.pairScanTitle}
       visible={props.visible}
