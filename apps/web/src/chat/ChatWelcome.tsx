@@ -287,6 +287,14 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             input={
               <ComposerInput
                 typedScope={typedScope}
+                onPasteAsFile={
+                  !ready || props.creating === true
+                    ? undefined
+                    : (file: File) => {
+                        setAttachmentNotice(undefined);
+                        setStagedFiles((current) => [...current, file]);
+                      }
+                }
                 renderModelChip={atMenu.renderModelChip}
                 aria-activedescendant={
                   atMenu.active !== undefined

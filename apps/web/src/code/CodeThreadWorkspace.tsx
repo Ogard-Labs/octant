@@ -3255,6 +3255,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         : undefined,
                     )
               }
+              {...(props.attachmentClient === undefined || readOnly
+                ? {}
+                : { onPasteAsFile: (file: File) => void attachFiles([file]) })}
               inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-activedescendant={

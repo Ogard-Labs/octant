@@ -24,6 +24,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
+import { MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS } from "@octant/contracts/thread-message-queue";
 import { lazyOr } from "../lib/lazyOr";
 import {
   composerQuoteText,
@@ -136,6 +137,12 @@ export interface ComposerInputProps extends ForwardedAttributes {
    * or other context beside the prompt passes none.
    */
   readonly recall?: ReadonlyArray<string> | undefined;
+  /**
+   * Takes a paste too large for the prompt as a text file instead: 32 KiB or
+   * more, or enough to push the prompt past what a message may hold. ⌘⇧V
+   * (Ctrl+Shift+V) pastes it inline anyway. Without it every paste is text.
+   */
+  readonly onPasteAsFile?: ((file: File) => void) | undefined;
 }
 
 const TAG_NAME = "octant-composer-input";
@@ -145,6 +152,10 @@ const FILLER_ATTRIBUTE = "data-composer-filler";
 /** Keystrokes closer together than this undo as one step, as a text field's do. */
 const TYPING_COALESCE_MS = 800;
 const MAX_HISTORY = 200;
+/** A paste this large reads better as a file than as a wall of text in the prompt. */
+const PASTE_AS_FILE_BYTES = 32 * 1024;
+/** How soon after ⌘⇧V its paste arrives, if the browser sends one at all. */
+const PLAIN_PASTE_WINDOW_MS = 500;
 
 type Chip =
   | {
@@ -463,6 +474,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       inlineChips,
       typedScope,
       recall,
+      onPasteAsFile,
       ...attributes
     } = props;
     const ownScope = `composer:${useId()}`;
@@ -634,6 +646,26 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       index: -1,
       text: "",
     });
+
+    const plainPasteRef = useRef(0);
+    const pastedFilesRef = useRef(0);
+
+    const pasteText = (root: HTMLElement, text: string, asked: "plain" | "any" = "any") => {
+      const plain = asked === "plain" || Date.now() < plainPasteRef.current;
+      plainPasteRef.current = 0;
+      const { start, end } = currentSelection(root);
+      const tooLarge =
+        new TextEncoder().encode(text).length >= PASTE_AS_FILE_BYTES ||
+        modelRef.current.length - (end - start) + text.length >
+          MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS;
+      if (!plain && tooLarge && onPasteAsFile !== undefined) {
+        pastedFilesRef.current += 1;
+        const name = `pasted-text-${String(pastedFilesRef.current)}.txt`;
+        onPasteAsFile(new File([text], name, { type: "text/plain" }));
+        return;
+      }
+      replaceSelection(root, text);
+    };
 
     const recallStep = (root: HTMLElement, direction: "older" | "newer"): boolean => {
       const sent = recall ?? [];
@@ -947,6 +979,27 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           replaceSelection(root, "\n");
           return;
         }
+        if (
+          (event.metaKey || event.ctrlKey) &&
+          event.shiftKey &&
+          !event.altKey &&
+          event.key.toLowerCase() === "v"
+        ) {
+          // Some shells never turn ⌘⇧V into a paste, so the clipboard is read
+          // here when no paste follows the key.
+          plainPasteRef.current = Date.now() + PLAIN_PASTE_WINDOW_MS;
+          window.setTimeout(() => {
+            if (plainPasteRef.current === 0) return;
+            void navigator.clipboard
+              ?.readText()
+              .then((text) => {
+                if (plainPasteRef.current === 0 || text === "") return;
+                pasteText(root, text.replace(/\r\n?/g, "\n"), "plain");
+              })
+              .catch(() => undefined);
+          }, 50);
+          return;
+        }
         const plainArrow = !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey;
         if (
           plainArrow &&
@@ -980,7 +1033,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const text = event.clipboardData.getData("text/plain");
         // A paste with no text (an image the caller did not take) changes nothing.
         if (text === "") return;
-        replaceSelection(root, text.replace(/\r\n?/g, "\n"));
+        pasteText(root, text.replace(/\r\n?/g, "\n"));
       },
       onCopy: (event: ClipboardEvent<ComposerInputElement>) => {
         const root = rootRef.current;

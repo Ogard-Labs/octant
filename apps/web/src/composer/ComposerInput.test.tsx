@@ -51,6 +51,21 @@ function Recalling(props: { readonly recall: ReadonlyArray<string> }) {
   );
 }
 
+function Attaching(props: { readonly onPasteAsFile?: (file: File) => void }) {
+  const [value, setValue] = useState("Draft ");
+  return (
+    <>
+      <label htmlFor="attaching">Message</label>
+      <ComposerInput
+        id="attaching"
+        onChange={(event) => setValue(event.currentTarget.value)}
+        onPasteAsFile={props.onPasteAsFile}
+        value={value}
+      />
+    </>
+  );
+}
+
 function Controlled(props: { readonly value: string; readonly typedScope?: string }) {
   const [value, setValue] = useState(props.value);
   const [seen, setSeen] = useState(props.value);
@@ -375,5 +390,42 @@ describe("ComposerInput", () => {
     await userEvent.type(input, "draft");
     await userEvent.keyboard("{ArrowUp}");
     expect(input).toHaveValue("draft");
+  });
+
+  it("a 40 KiB paste attaches as a text file and leaves the draft unchanged", async () => {
+    const onPasteAsFile = vi.fn();
+    const large = "x".repeat(40 * 1024);
+    render(<Attaching onPasteAsFile={onPasteAsFile} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    fireEvent.paste(input, { clipboardData: { getData: () => large } });
+    expect(input).toHaveValue("Draft ");
+    const file: File = onPasteAsFile.mock.calls[0]?.[0];
+    expect(file.name).toBe("pasted-text-1.txt");
+    expect(file.type).toBe("text/plain");
+    expect(await file.text()).toBe(large);
+  });
+
+  it("⌘⇧V keeps a large paste inline", () => {
+    const onPasteAsFile = vi.fn();
+    const large = "y".repeat(40 * 1024);
+    render(<Attaching onPasteAsFile={onPasteAsFile} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    input.setSelectionRange(6, 6);
+    fireEvent.keyDown(input, { key: "v", code: "KeyV", metaKey: true, shiftKey: true });
+    fireEvent.paste(input, { clipboardData: { getData: () => large } });
+    expect(onPasteAsFile).not.toHaveBeenCalled();
+    expect(input).toHaveValue(`Draft ${large}`);
+  });
+
+  it("keeps a large paste inline in a composer that takes no files", () => {
+    const large = "z".repeat(40 * 1024);
+    render(<Attaching />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    input.setSelectionRange(6, 6);
+    fireEvent.paste(input, { clipboardData: { getData: () => large } });
+    expect(input).toHaveValue(`Draft ${large}`);
   });
 });

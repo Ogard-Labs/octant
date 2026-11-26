@@ -635,6 +635,9 @@ export function ChatComposer(props: ChatComposerProps) {
     <ComposerInput
       typedScope={props.typedScope}
       recall={props.recall}
+      onPasteAsFile={
+        props.attachmentBusy === true || props.readOnly === true ? undefined : props.onFileSelected
+      }
       inlineChips={mention.inlineChips}
       renderModelChip={atMenu.renderModelChip}
       aria-activedescendant={
