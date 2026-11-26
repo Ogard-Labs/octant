@@ -8290,12 +8290,16 @@ function LaunchedShell(
               ? "The coordinator was created with the default bounds"
               : "The thread was created, but it could not become a coordinator"
           }: ${codeController.lastExecuteError.current?.message ?? "the host refused the change."}`;
-          await controller.openCodeThread(
-            created.thread.id,
-            created.thread.title,
-            undefined,
-            created.thread.projectId,
-          );
+          // A start the composer stays on leaves the thread closed; its row
+          // under the composer offers Open.
+          if (stay === undefined) {
+            await controller.openCodeThread(
+              created.thread.id,
+              created.thread.title,
+              undefined,
+              created.thread.projectId,
+            );
+          }
           codeThreadControllers.restoreDraft(
             created.thread.id,
             input.prompt,

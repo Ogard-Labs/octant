@@ -105,9 +105,16 @@ export function useMobileMessageQueue(input: {
           ...(typedByPerson ? { typedByPerson: true as const } : {}),
         }),
       ),
-    edit: (messageId: string, prompt: string) =>
+    edit: (messageId: string, prompt: string, typedByPerson: boolean) =>
       change((transport, scope, expectedVersion) =>
-        editMobileQueuedMessage({ transport, scope, expectedVersion, messageId, prompt }),
+        editMobileQueuedMessage({
+          transport,
+          scope,
+          expectedVersion,
+          messageId,
+          prompt,
+          ...(typedByPerson ? { typedByPerson: true as const } : {}),
+        }),
       ),
     remove: (messageId: string) =>
       change((transport, scope, expectedVersion) =>

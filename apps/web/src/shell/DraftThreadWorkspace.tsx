@@ -243,6 +243,11 @@ export interface DraftThreadWorkspaceProps {
     input: CodeComposerSubmitInput,
     projectId?: ProjectId,
   ) => boolean | void | Promise<boolean | void>;
+  /**
+   * `onCreateCodeThread` honours a start that stays on the draft and one that
+   * names its model, so the Code composer may offer ⌘↩ and several models.
+   */
+  readonly codeStartsInBackground?: boolean;
   readonly codeExecute?: (
     command: CodeCommand,
     signal?: AbortSignal,
@@ -1019,6 +1024,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     const composer = (
       <CodeComposerAdapter
         suggestions={CODE_SUGGESTIONS}
+        {...(props.onCreateCodeThread !== undefined && props.codeStartsInBackground === true
+          ? { startsInBackground: true }
+          : {})}
         homeStart={homeStartNode}
         {...(coordinatorSettings === undefined ? {} : { afterComposer: coordinatorSettings })}
         {...(promptRequest === undefined ? {} : { promptRequest })}

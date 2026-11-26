@@ -251,6 +251,12 @@ export interface CodeComposerAdapterProps {
   /** Optional multi-model pool control slot rendered in the composer bar. */
   readonly poolControl?: ReactNode;
   /**
+   * The create path honours `stay` and `providerSelection`: it can start a
+   * thread without opening it, on the model a start names. Only then does
+   * this composer offer ⌘↩ (start and stay) and Shift-click for several models.
+   */
+  readonly startsInBackground?: boolean;
+  /**
    * The selected Code Project's remembered habit for how new threads start. It only
    * preselects the Workspace control: choosing differently here overrides one thread
    * and never rewrites the Project setting.
@@ -524,11 +530,19 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique
   // `octant/<short-id>` default once from a stable short id.
-  const [shortId] = useState(() =>
+  const newShortId = () =>
     typeof crypto !== "undefined" && crypto.randomUUID !== undefined
       ? crypto.randomUUID().slice(0, 8)
-      : "new",
-  );
+      : "new";
+  // A start the composer stays on takes this id's name, so the next draft
+  // gets a fresh one.
+  const [shortId, setShortId] = useState(newShortId);
+  // Branches handed to starts this composer stayed on that the host may not
+  // list yet: the next draft's name must not reuse one.
+  const [branchesInFlight, setBranchesInFlight] = useState<ReadonlyArray<string>>([]);
+  // Starts this composer stays on run one after another, so one start's
+  // refusal is never read as another's.
+  const stayStarts = useRef<Promise<void>>(Promise.resolve());
   // Unknown until the host says. Neither caller supplies a branch for a
   // Project-bound composer, so seeding a literal here meant the tray asserted
   // `development` for every repository, including the ones on `main`.
@@ -869,8 +883,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       ...(branchNames !== undefined && branchNames.forProject === projectId
         ? branchNames.names
         : []),
+      ...branchesInFlight,
     ],
-    [worktreeRefs, branchNames, projectId],
+    [worktreeRefs, branchNames, projectId, branchesInFlight],
   );
   // Words from the prompt are used only once every taken name is known: with a
   // name list that is missing or cut short the id name is the one that fails closed.
@@ -1041,8 +1056,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       String(each.providerInstanceId) !== String(primaryModel.providerInstanceId) ||
       String(each.modelId) !== String(primaryModel.modelId),
   );
-  // A reviewed proposal is one exact thread, so it starts on one model.
-  const fanOutOffered = props.fixedPrompt === undefined;
+  const startsInBackground = props.startsInBackground === true;
+  // A reviewed proposal is one exact thread, so it starts on one model; and
+  // without a chosen model there is no first thread to add others beside.
+  const fanOutOffered =
+    startsInBackground && props.fixedPrompt === undefined && primaryModel !== undefined;
   const fanningOut = fanOutOffered && extraModels.length > 0;
   const modelLabel = (selection: ModelPickerSelection | undefined): string => {
     const found = findPickerModel(providerGroups, selection)?.model.displayName;
@@ -1065,7 +1083,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       );
       setSendNotice(undefined);
       const staged = images.filesForSend();
-      const stays = how === "stay" || fanningOut;
+      const stays = startsInBackground && (how === "stay" || fanningOut);
       const sentPrompt = trimmed;
       const input = (
         threadMentionIds: ReadonlyArray<MentionableThreadId>,
@@ -1121,8 +1139,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         : [primaryModel];
       setPrompt("");
       images.clearAfterAccepted();
-      setStartResults([]);
-      void threadMentions.resolveForSend().then(async (threadMentionIds) => {
+      setShortId(newShortId());
+      const run = async () => {
+        const threadMentionIds = await threadMentions.resolveForSend();
         const base = input(threadMentionIds);
         const startOne = async (
           selection: ModelPickerSelection | undefined,
@@ -1147,15 +1166,31 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               : { status: "started" })
           );
         };
-        const results = await startEachModel(models, worktreeBranch, startOne);
-        setStartResults(results);
+        const results = await startEachModel(
+          models,
+          worktreeBranch,
+          takenNames,
+          (selection, branch) => {
+            setBranchesInFlight((current) => [...current, branch]);
+            return startOne(selection, branch);
+          },
+        );
+        setStartResults((current) => [...current, ...results]);
         loadBranchNames();
-        // Nothing started: the prompt comes back, unless the person already
-        // began the next one.
-        if (results.every((result) => result.outcome.status === "refused")) {
+        // Nothing was even created: the prompt and its files come back, unless
+        // the person already began the next prompt. A thread that exists keeps
+        // its prompt in its own draft instead, and its row offers Open.
+        if (
+          results.every(
+            (result) =>
+              result.outcome.status === "refused" && result.outcome.threadId === undefined,
+          )
+        ) {
           setPrompt((current) => (current === "" ? sentPrompt : current));
+          if (staged.length > 0) images.restore(staged);
         }
-      });
+      };
+      stayStarts.current = stayStarts.current.then(run, run).catch(() => undefined);
     },
     [
       extensionDraft,
@@ -1179,6 +1214,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       fanningOut,
       primaryModel,
       extraModels,
+      startsInBackground,
+      takenNames,
       props,
     ],
   );
@@ -1225,7 +1262,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       // ⌘↩ (Ctrl+↩) starts the thread and leaves a fresh draft here.
-      submit(event.metaKey || event.ctrlKey ? "stay" : "open");
+      submit(startsInBackground && (event.metaKey || event.ctrlKey) ? "stay" : "open");
     }
     if (event.key === "Escape") {
       event.preventDefault();

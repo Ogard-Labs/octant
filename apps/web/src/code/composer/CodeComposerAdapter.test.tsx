@@ -119,27 +119,95 @@ describe("CodeComposerAdapter", () => {
 
   it("⌘↩ on a start composer creates the thread and leaves a fresh draft", async () => {
     const user = userEvent.setup();
-    const onCreateThread = vi.fn(
-      (input: { readonly stay?: { readonly report: (outcome: never) => void } }) => {
-        input.stay?.report({ status: "started", threadId: "thread-1" } as never);
-        return true;
-      },
+    const onCreateThread = vi.fn((input: CodeComposerSubmitInput) => {
+      input.stay?.report({ status: "started", threadId: "thread-1" });
+      return true;
+    });
+    render(
+      <CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} startsInBackground />,
     );
-    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
+    await user.click(whereChip());
+    await user.click(screen.getByRole("radio", { name: /New worktree/ }));
+    await user.keyboard("{Escape}");
     const prompt = screen.getByRole("textbox", { name: "First message" });
     await user.type(prompt, "Fix the login bug");
     await user.keyboard("{Meta>}{Enter}{/Meta}");
 
     await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
-    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
-      prompt: "Fix the login bug",
-      stay: expect.anything(),
-    });
-    expect(onCreateThread.mock.calls[0]?.[0]).not.toHaveProperty("presentation");
+    const first = onCreateThread.mock.calls[0]?.[0];
+    expect(first).toMatchObject({ prompt: "Fix the login bug", stay: expect.anything() });
+    expect(first).not.toHaveProperty("presentation");
     expect(prompt).toHaveValue("");
-    // The fresh draft keeps its Project and base branch.
-    expect(screen.getAllByText("My Repo").length).toBeGreaterThan(0);
     expect(await screen.findByText(/started\./)).toBeInTheDocument();
+
+    // The fresh draft keeps its Project, workspace and base branch, and a
+    // second start right away gets a branch of its own.
+    expect(whereChip()).toHaveTextContent("New worktree");
+    expect(screen.getAllByText("My Repo").length).toBeGreaterThan(0);
+    await user.type(prompt, "Fix the logout bug");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(2));
+    const second = onCreateThread.mock.calls[1]?.[0];
+    expect(second).toMatchObject({
+      workspace: "managed-worktree",
+      deliveryTarget: { proposedBaseBranch: "development" },
+    });
+    expect(first?.deliveryTarget.proposedBaseBranch).toBe("development");
+    expect(second?.deliveryTarget.branchIntent).not.toBe(first?.deliveryTarget.branchIntent);
+    // Both starts are listed, not just the last.
+    expect(await screen.findAllByText(/started\./)).toHaveLength(2);
+  });
+
+  it("offers neither ⌘↩ start-and-stay nor several models where the create path cannot carry them", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn((_input: CodeComposerSubmitInput) => true);
+    const group = twoModelGroup();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        providerGroups={[group]}
+        selectedProviderInstanceId={group.instance.id}
+        selectedModelId={decodeProviderModelId("model-one")}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.keyboard("{Shift>}");
+    await user.click(screen.getByRole("option", { name: "Model Two" }));
+    await user.keyboard("{/Shift}{Escape}");
+    expect(screen.queryByText(/Starts 2 threads/)).toBeNull();
+
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix it");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0]).not.toHaveProperty("stay");
+  });
+
+  it("brings the prompt and its files back when no start created anything", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn((input: CodeComposerSubmitInput) => {
+      input.stay?.report({ status: "refused", reason: "The provider is not signed in." });
+      return false;
+    });
+    render(
+      <CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} startsInBackground />,
+    );
+    const prompt = screen.getByRole("textbox", { name: "First message" });
+    prompt.focus();
+    fireEvent.paste(prompt, {
+      clipboardData: {
+        getData: (type: string) => (type === "text/plain" ? "z".repeat(40 * 1024) : ""),
+        files: [],
+        items: [],
+        types: ["text/plain"],
+      },
+    });
+    await screen.findByText("pasted-text-1.txt");
+    await user.type(prompt, "Fix the login bug");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(await screen.findByText(/The provider is not signed in\./)).toBeInTheDocument();
+    await waitFor(() => expect(prompt).toHaveValue("Fix the login bug"));
+    expect(screen.getByText("pasted-text-1.txt")).toBeInTheDocument();
   });
 
   it("two selected models start two threads in two new worktrees", async () => {
@@ -153,6 +221,7 @@ describe("CodeComposerAdapter", () => {
         selectedProviderInstanceId={group.instance.id}
         selectedModelId={decodeProviderModelId("model-one")}
         onCreateThread={onCreateThread}
+        startsInBackground
       />,
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));

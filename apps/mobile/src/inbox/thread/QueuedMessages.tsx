@@ -1,8 +1,13 @@
+import { noteTypedComposerText, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import type { ThreadMessageQueueItem } from "@octant/contracts";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { radii, space, typography, useTheme } from "../../../design-system";
 import { queuedMessageRows } from "./queuedMessageRows";
+
+function editScope(messageId: string): string {
+  return `queue-edit:${messageId}`;
+}
 
 /**
  * The messages waiting for this thread's next turn, just above the composer.
@@ -12,7 +17,7 @@ export function QueuedMessages(props: {
   readonly items: ReadonlyArray<ThreadMessageQueueItem>;
   readonly error: string | undefined;
   readonly changing: boolean;
-  readonly onEdit: (messageId: string, prompt: string) => Promise<boolean>;
+  readonly onEdit: (messageId: string, prompt: string, typedByPerson: boolean) => Promise<boolean>;
   readonly onRemove: (messageId: string) => Promise<boolean>;
 }) {
   const { colors } = useTheme();
@@ -65,16 +70,26 @@ export function QueuedMessages(props: {
               accessibilityLabel="Queued message"
               autoFocus
               multiline
-              onChangeText={(text) => setEditing({ messageId: row.messageId, text })}
+              onChangeText={(text) => {
+                // The person's own typing in the edit field, as the desktop queue notes it.
+                noteTypedComposerText(editScope(row.messageId), text);
+                setEditing({ messageId: row.messageId, text });
+              }}
               style={styles.input}
               value={editing.text}
             />
             {action(
               "Save",
               () =>
-                void props.onEdit(row.messageId, editing.text).then((saved) => {
-                  if (saved) setEditing(undefined);
-                }),
+                void props
+                  .onEdit(
+                    row.messageId,
+                    editing.text,
+                    typedClaimFor(editScope(row.messageId), editing.text).typedByPerson === true,
+                  )
+                  .then((saved) => {
+                    if (saved) setEditing(undefined);
+                  }),
               props.changing || editing.text.trim() === "",
               "mobile-thread-queue-save",
             )}

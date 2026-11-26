@@ -1,4 +1,4 @@
-import type { ModelPickerSelection } from "@octant/domain";
+import { branchNameTaken, type ModelPickerSelection } from "@octant/domain";
 
 /**
  * One prompt started on several models, each in a thread and a new worktree of
@@ -49,6 +49,7 @@ export function fanOutBranch(
   base: string,
   selection: ModelPickerSelection | undefined,
   index: number,
+  taken: ReadonlyArray<string>,
 ): string {
   if (index === 0) return base;
   const slug = String(selection?.modelId ?? "")
@@ -57,7 +58,13 @@ export function fanOutBranch(
     .replace(/^-+|-+$/g, "")
     .slice(0, 32)
     .replace(/-+$/, "");
-  return `${base}-${slug === "" ? String(index + 1) : slug}`;
+  const name = `${base}-${slug === "" ? String(index + 1) : slug}`;
+  // Numbered as a derived name is, past every taken one.
+  for (let attempt = 1; attempt < 100; attempt += 1) {
+    const candidate = attempt === 1 ? name : `${name}-${String(attempt)}`;
+    if (!branchNameTaken(candidate, taken)) return candidate;
+  }
+  return `${name}-${String(index + 1)}`;
 }
 
 /**
@@ -67,16 +74,20 @@ export function fanOutBranch(
 export async function startEachModel(
   models: ReadonlyArray<ModelPickerSelection | undefined>,
   baseBranch: string,
+  taken: ReadonlyArray<string>,
   start: (
     selection: ModelPickerSelection | undefined,
     branch: string,
   ) => Promise<CodeDraftStartOutcome>,
 ): Promise<ReadonlyArray<CodeFanOutResult>> {
   const results: Array<CodeFanOutResult> = [];
+  const used: Array<string> = [];
   for (const [index, selection] of models.entries()) {
+    const branch = fanOutBranch(baseBranch, selection, index, [...taken, ...used]);
+    used.push(branch);
     let outcome: CodeDraftStartOutcome;
     try {
-      outcome = await start(selection, fanOutBranch(baseBranch, selection, index));
+      outcome = await start(selection, branch);
     } catch (error) {
       outcome = {
         status: "refused",

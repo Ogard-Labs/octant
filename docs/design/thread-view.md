@@ -824,10 +824,17 @@ title is made from them.
 On the Code start composer, ⌘↩ (Ctrl+↩) starts the thread and stays: the
 thread is created and its first turn started in the background, the window does
 not open it, and the composer is the next draft at once, keeping its Project,
-workspace and base branch (maintainer decision, 2026-11-26). What the start
-reached is listed under the composer with **Open** once the window lists the
-thread, and a start that began nothing puts the prompt back. The Chat and Work
-start composers do not start and stay yet; their ⌘↩ sends as Enter does.
+workspace and base branch, with a fresh branch name (maintainer decision,
+2026-11-26). Starts the composer stays on run one after another, and each
+adds its outcome to the list under the composer, with **Open** once the window
+lists the thread; a start that created nothing puts the prompt and its files
+back, while a thread that exists keeps its prompt in its own draft. A refused
+coordinator start does not open the thread either. Only the window's own Code
+start screen offers this (and several models, below), because only its create
+path can start a thread without opening it, on a named model; the paired
+to-do draft does not. The Chat and Work start composers do not start and stay
+yet: their create path opens the new thread and resets the draft as part of
+creating it, so ⌘↩ there sends as Enter does.
 
 Shift-click in the Code start composer's model picker adds a model beside the
 chosen one, up to four in all, and Shift-click again takes it out (maintainer
@@ -836,7 +843,8 @@ start and on which models, with **Use one model** to go back, and Send reads
 **Start N threads**. Each model gets an ordinary create of its own, in a new
 worktree whatever the Project's habit, one after another; the first worktree
 keeps the branch the composer showed and each later one adds its model's
-name. The host admits each one as it would any other, and the composer stays
+name, numbered past any taken name or one this start already used. Several
+models need a chosen model to start beside. The host admits each one as it would any other, and the composer stays
 on the draft and lists each model's outcome: a refused model shows its reason
 and leaves the threads that started running. A reviewed planner proposal is one
 exact thread and starts on one model.

@@ -74,6 +74,7 @@ import { useThreadTurnActions } from "./thread/useThreadTurnActions";
 import { useWorkThread } from "./thread/useWorkThread";
 import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import { QueuedMessages } from "./thread/QueuedMessages";
+import { followUpRoute } from "./thread/followUpRoute";
 import { useMobileMessageQueue } from "./thread/useMobileMessageQueue";
 import {
   MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS,
@@ -900,7 +901,9 @@ export function ThreadScreen(props: ThreadScreenProps) {
               ? followUpComposerCopy?.footerHint
               : latestTurnAtUsageLimit
                 ? MOBILE_COPY.turnWaitingOnUsageLimit
-                : MOBILE_COPY.queueWhileTurnRuns)
+                : pendingAttachments.length > 0
+                  ? MOBILE_COPY.queueKeepsAttachments
+                  : MOBILE_COPY.queueWhileTurnRuns)
           }
           modelLabel={
             selected.mode === "work" && work.thread !== undefined
@@ -908,7 +911,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
               : MOBILE_COPY.modelHostOnly
           }
           onChangeText={setPrompt}
-          onSubmit={followUpTurnLive ? queueFollowUp : sendFollowUp}
+          {...(() => {
+            const route = followUpRoute({
+              mode: selected.mode,
+              turnLive: followUpTurnLive,
+              queueing: queue.changing,
+            });
+            return route === "wait"
+              ? {}
+              : { onSubmit: route === "queue" ? queueFollowUp : sendFollowUp };
+          })()}
           {...(workTurnLive || codeTurnLive ? {} : attachProps)}
           placeholder={followUpComposerCopy?.placeholder ?? MOBILE_COPY.composerFollowUp}
           testID="mobile-thread-composer"
