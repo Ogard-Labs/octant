@@ -1,4 +1,3 @@
-import { decodeCoordinatorStartInput } from "@octant/contracts";
 import { MAX_AGENT_MESSAGE_RECIPIENTS } from "@octant/domain";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -40,6 +39,19 @@ const sendSchema = Schema.Struct({
   message: Schema.String.pipe(Schema.filter((message) => message.trim().length > 0)),
 }).annotations(strict);
 const operationSchema = Schema.Struct({ operation: Schema.String });
+type StartDecoder = (value: unknown) => unknown;
+const startAssignment = Schema.decodeUnknownSync(
+  Schema.Struct({ title: Schema.String, prompt: Schema.String }),
+);
+
+async function checkoutStartDecoder(cwd: string): Promise<StartDecoder> {
+  const path = Bun.resolveSync("@octant/contracts", resolve(cwd, "apps/server"));
+  const contracts: Record<string, unknown> = await import(path);
+  const decode = contracts.decodeCoordinatorStartInput;
+  if (typeof decode !== "function")
+    throw new Error(`Missing coordinator start contract in ${cwd}.`);
+  return (value) => decode(value);
+}
 
 const inputSchema = Schema.Struct({
   messages: Schema.NonEmptyArray(
@@ -105,19 +117,21 @@ async function capture(checkout: string, instructions: string) {
     revision,
     digest: createHash("sha256").update(serialized).digest("hex"),
     inputs: decodeInputs(JSON.parse(serialized)),
+    decodeStart: await checkoutStartDecoder(cwd),
   };
 }
 
 export function decision(
   call: Schema.Schema.Type<typeof callSchema>,
   toolName: string | undefined,
+  decodeStart: StartDecoder,
 ): Action {
   if (call.function.name !== toolName) return { operation: `unknown tool: ${call.function.name}` };
   try {
     const raw: unknown = JSON.parse(call.function.arguments);
     const { operation } = Schema.decodeUnknownSync(operationSchema)(raw);
     if (operation === "start") {
-      const { title, prompt } = decodeCoordinatorStartInput(raw);
+      const { title, prompt } = startAssignment(decodeStart(raw));
       return { operation, title, prompt };
     }
     if (operation === "send") return Schema.decodeUnknownSync(sendSchema)(raw);
@@ -132,6 +146,7 @@ export async function sample(
   model: string,
   fixture: EvaluationCase,
   input: Inputs[keyof Inputs],
+  decodeStart: StartDecoder,
 ): Promise<Sample> {
   const actions: Action[] = [];
   const messages: unknown[] = [...input.messages];
@@ -151,7 +166,7 @@ export async function sample(
         await response.json(),
       ).choices;
       const calls = message.tool_calls ?? [];
-      const returned = calls.map((call) => decision(call, toolName));
+      const returned = calls.map((call) => decision(call, toolName, decodeStart));
       if (finish_reason === "stop" && calls.length === 0) {
         return {
           status: "completed",
@@ -250,8 +265,12 @@ async function main() {
     const before: Sample[] = [];
     const after: Sample[] = [];
     for (let index = 0; index < Number(count); index += 1) {
-      before.push(await sample(endpoint, model, fixture, baseline.inputs[name]));
-      after.push(await sample(endpoint, model, fixture, candidate.inputs[name]));
+      before.push(
+        await sample(endpoint, model, fixture, baseline.inputs[name], baseline.decodeStart),
+      );
+      after.push(
+        await sample(endpoint, model, fixture, candidate.inputs[name], candidate.decodeStart),
+      );
     }
     results.push({ name, expected: fixture.expected, ...compareSamples(before, after) });
   }

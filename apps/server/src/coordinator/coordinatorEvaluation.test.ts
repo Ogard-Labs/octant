@@ -1,3 +1,4 @@
+import { decodeCoordinatorStartInput } from "@octant/contracts";
 import { decodeInputs, decision, sample } from "./coordinatorEvaluationCli";
 import { expect, it, vi } from "vitest";
 import { assembleCase } from "./coordinatorEvaluationInput.test-support";
@@ -79,7 +80,10 @@ it("reports the changes in pass rate and retains the actions for each revision",
 });
 
 it("refuses delegation arguments containing fields from other operations", () => {
-  const attempt = (raw: object) =>
+  const attempt = (
+    raw: object,
+    decodeStart: (value: unknown) => unknown = decodeCoordinatorStartInput,
+  ) =>
     decision(
       {
         id: "call-1",
@@ -87,6 +91,7 @@ it("refuses delegation arguments containing fields from other operations", () =>
         function: { name: "threads", arguments: JSON.stringify(raw) },
       },
       "threads",
+      decodeStart,
     );
   expect(
     attempt({ operation: "start", title: "CSV parser", prompt: "Fix parsing", message: "extra" }),
@@ -97,6 +102,18 @@ it("refuses delegation arguments containing fields from other operations", () =>
       recipients: [cases.revise.workers[0].reference],
       message: "Revision",
       title: "extra",
+    }),
+  ).toEqual({ operation: "invalid arguments" });
+  const withRoles = {
+    operation: "start",
+    title: "CSV parser",
+    prompt: "Fix parsing",
+    risk: "high",
+  };
+  expect(attempt(withRoles)).toMatchObject({ operation: "start" });
+  expect(
+    attempt(withRoles, () => {
+      throw new Error("This checkout does not accept risk.");
     }),
   ).toEqual({ operation: "invalid arguments" });
 });
@@ -147,7 +164,13 @@ it("returns production help and per-recipient send receipts to the model", async
     );
   vi.stubGlobal("fetch", fetchModel);
   try {
-    const result = await sample(new URL("http://127.0.0.1"), "fixture", cases.revise, input);
+    const result = await sample(
+      new URL("http://127.0.0.1"),
+      "fixture",
+      cases.revise,
+      input,
+      decodeCoordinatorStartInput,
+    );
     expect(result).toMatchObject({ status: "completed", pass: true });
     const body = fetchModel.mock.calls[2]?.[1]?.body;
     expect(typeof body).toBe("string");

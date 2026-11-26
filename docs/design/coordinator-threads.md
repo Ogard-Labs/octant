@@ -714,8 +714,9 @@ to the worker already assigned. Each checkout assembles its own roster,
 orchestration block, and registered threads tool through the production
 coordinator service, instruction store, and tool registration. This exercises
 the coordinator inputs through an OpenAI-compatible adapter. The runner
-uses each checkout’s help response and simulates replies to list, start, and
-send inside the fixture, including per-recipient send receipts.
+uses each checkout’s help response and validates worker starts with that checkout’s
+contracts. It simulates list, start, and send replies, including per-recipient
+send receipts.
 
 Prepare two clean, separate Git checkouts and run `bun install --frozen-lockfile`
 in each. Copy `coordinatorEvaluation.ts` and `coordinatorEvaluationInput.test-support.ts` from
