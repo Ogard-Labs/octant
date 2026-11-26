@@ -130,7 +130,7 @@ Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Security and aut
 
 Everything a person cares about stays on the host. Octant makes only a short, switchable list of host-initiated calls.
 
-- No Octant account, relay or telemetry is required; there is no Octant relay (maintainer decision, 2026-11-14). The person's own hub may act as their relay through its [public entrance](#hub-public-entrance), which takes inbound requests through a front the person controls and adds no outbound call (maintainer decision, 2026-11-26; designed, not built).
+- No Octant account, relay or telemetry is required; there is no Octant relay (maintainer decision, 2026-11-14). The person's own hub may act as their relay through its [public entrance](#hub-public-entrance), which takes inbound requests through a front the person controls and adds no outbound call (maintainer decision, 2026-11-26; partly built: the hub and host side of the device relay, run only on loopback; the apps are not wired yet).
 - The outside calls (signed update checks, managed device-tool update checks, marketplace fetches the person starts, public Canvas link calls, a hub's push delivery) each have an off switch. Optional [thread titles](model-endpoints.md#thread-titles) go only to the endpoint the person selects.
 - Traffic among a person's own devices is not a third-party call, and is always authenticated and encrypted.
 - A new outside call, credential exposure or cloud dependency needs an explicit request and a documented boundary in the owner.
