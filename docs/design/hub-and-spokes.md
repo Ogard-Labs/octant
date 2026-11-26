@@ -3037,6 +3037,10 @@ person's work without any service Octant runs (maintainer decision,
 
 #### Visitor links
 
+Built for a hub and its spokes, for Code and Chat threads, from `octant hub
+visitor` (slice 25); a Work thread, the window's Share menu and Request
+card, and the standby's copy (slice 26) are not built yet.
+
 - **Sharing.** In a thread's Share menu on the spoke that owns it, **Share
   with visitor** makes a read-only or comment-only link with an expiry, and
   **Stop sharing** revokes it. The spoke signs the link's grant with its host
@@ -3044,7 +3048,13 @@ person's work without any service Octant runs (maintainer decision,
   against the roster's key for that spoke, and the spoke checks revocation
   and expiry on every fetch, so a revoked link stops at once on the hub and
   every standby. The link's secret travels only in the URL fragment, which a
-  browser never sends, so neither the front nor the hub's logs see it.
+  browser never sends, so neither the front nor the hub's logs see it. The
+  hub keeps a grant only when its signer is the roster's key for the spoke
+  it names, and holds no thread id. The viewer makes a P-256 key the browser
+  cannot export, keeps it in that origin's storage, and signs every request
+  with it (`octant-visitor-proof`: time, nonce, signature over method and
+  path, 60 seconds of skew, each nonce once); the spoke binds the link to the
+  first key that opens it with the secret and refuses every other key.
 - **What a visitor sees.** A projection the spoke builds and redacts: the
   messages and the titles and states of steps, live. Never tool inputs or
   outputs, diffs, files, attachments, Canvases, paths, or approval contents;
@@ -3053,10 +3063,19 @@ person's work without any service Octant runs (maintainer decision,
   messages that fit in 384 KiB are shown, so the answer crosses the private
   link whole. The page is a small
   viewer the hub serves, separate from the web app, that runs no script from
-  the thread.
+  the thread: it writes every message as text. Built: the thread's title,
+  its state (working, idle, or the owner deciding), and its messages (Code's
+  prompts and replies, Chat's messages and replies) with paths and
+  secret-shaped values replaced; the stream asks the spoke again every two
+  seconds and ends when the spoke refuses. Not built yet: step titles and
+  states.
 - **Comments.** On a comment-only link, a visitor's message lands on the
   spoke as a **Request** in the thread with **Send** and **Dismiss**. Only
   the person's Send delivers it, framed as outside content from the visitor.
+  Built: Send journals the thread's outside-content taint first and then
+  hands the person the framed comment to send as their next message there;
+  posting it into the thread from the server is not built yet. At most 20
+  comments wait per link, 4,000 characters each, 10 a minute.
   A visitor never answers an approval, changes the model or mode, or acts on
   the thread. Until the thread's Request is built in the window,
   `octant hub visitor send` marks the thread as carrying outside content and
@@ -4583,8 +4602,13 @@ limits, and the device relay's channel design.
     browser binding on the hub, reusing the token and rate-limit patterns of
     `apps/share` and leaving it unchanged. Acceptance: a revoked link stops
     on the next fetch on the hub and the standby; a comment-only visitor
-    cannot answer an approval. **Linux container: yes**, with a rendered
-    check; a phone outside the tailnet is a maintainer gate.
+    cannot answer an approval. Built for Code and Chat threads from the
+    CLI and loopback administration, with server tests and a rendered check
+    of the viewer at 1280 and 390 pixels in light and dark; not built: Work
+    threads, the window's Share menu and Request card (the renderer has no
+    room left for them outside a lazy chunk), step titles in the projection,
+    and Send posting into the thread itself. **Linux container: yes**, with
+    a rendered check; a phone outside the tailnet is a maintainer gate.
 26. **Failover of the public entrance.** Sealed copies on standbys, the
     standby's own Serve the public entrance choice, the queue in the
     hand-back, and spoke-side dedupe in a split network. Acceptance: a
