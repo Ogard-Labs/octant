@@ -2385,12 +2385,14 @@ function rewindSheetHTML() {
 
 function doRewind() {
   const t = msgTargetEl;
-  if (t && routeStale(screenOf(t).route)) {
-    toast("This thread is read-only while its computer is offline");
+  // The thread may have left the screen while its sheet stayed open (browser
+  // Back), so this is asked before anything is read from its screen.
+  if (!t || !t.isConnected || !screenOf(t)) {
+    toast("Nothing to rewind");
     return;
   }
-  if (!t || !t.isConnected) {
-    toast("Nothing to rewind");
+  if (routeStale(screenOf(t).route)) {
+    toast("This thread is read-only while its computer is offline");
     return;
   }
   const transcript = t.closest(".transcript");
