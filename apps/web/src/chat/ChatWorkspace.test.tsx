@@ -2565,13 +2565,13 @@ describe("ChatWorkspace", () => {
     });
 
     const reloadSource = vi.fn((_target: string) => true).mockReturnValueOnce(false);
-    function Harness() {
+    function Harness({ empty = false }: { readonly empty?: boolean }) {
       const [draft, setDraft] = useState("Fix this one");
       const [detached, setDetached] = useState(true);
       return (
         <ChatWorkspace
           controller={controllerFixture({
-            activeView: { ...view, turns: view.turns.slice(1) },
+            activeView: { ...view, turns: empty ? [] : view.turns.slice(1) },
             jumpToLatest: () => setDetached(false),
             revealTurn: async (target) => {
               if (!reloadSource(String(target))) return false;
@@ -2608,7 +2608,7 @@ describe("ChatWorkspace", () => {
       );
     }
 
-    render(<Harness />);
+    const app = render(<Harness />);
     const [first, second] = screen.getAllByRole("button", { name: "Show result" });
     expect(first).toBeDefined();
     expect(second).toBeDefined();
@@ -2638,6 +2638,33 @@ describe("ChatWorkspace", () => {
     source.focus();
     await user.keyboard("{Enter}");
     expect(await screen.findByText("The source delivery is unavailable.")).toBeInTheDocument();
+    await addQuoteFromTranscript(user, "Older result without metadata");
+    const otherQuote = await screen.findByRole("button", {
+      name: /Quote from a subagent result: Older result/,
+    });
+    await user.click(otherQuote);
+    await user.click(screen.getByRole("button", { name: "Show source" }));
+    await waitFor(() =>
+      expect(screen.queryByText("The source delivery is unavailable.")).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("region", { name: "Conversation" }))
+          .getByText("Older result without metadata")
+          .closest(".child-result__text"),
+      ).toHaveFocus(),
+    );
+    await user.click(otherQuote);
+    await user.click(screen.getByRole("button", { name: "Remove quote" }));
+
+    app.rerender(<Harness empty />);
+    expect(screen.getByRole("heading", { name: "Start the conversation" })).toBeVisible();
+    reloadSource.mockReturnValueOnce(false);
+    await user.click(
+      screen.getByRole("button", { name: /Quote from the research subagent .*Third finding/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "Show source" }));
+    expect(await screen.findByText("The source delivery is unavailable.")).toBeVisible();
     await user.click(
       screen.getByRole("button", { name: /Quote from the research subagent .*Third finding/ }),
     );
@@ -2653,12 +2680,6 @@ describe("ChatWorkspace", () => {
     );
     expect(screen.getByRole("button", { name: "Show less" })).toBeVisible();
 
-    await addQuoteFromTranscript(user, "Older result without metadata");
-    await user.click(
-      await screen.findByRole("button", { name: /Quote from a subagent result: Older result/ }),
-    );
-    expect(screen.getByRole("button", { name: "Show source" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "Remove quote" }));
     expect(sendTurn).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Send message" }));

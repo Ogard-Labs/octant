@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 interface ResultQuoteTarget {
   readonly row: string;
@@ -40,6 +40,41 @@ export function ResultQuoteScope(props: {
 
 export function useResultQuoteScope() {
   return useContext(ResultQuoteContext);
+}
+
+/** A source lookup can also start after a rewind removed every visible row. */
+export function ResultSourceNotice(props: {
+  readonly missing: boolean;
+  readonly loadRow?: ((row: string) => boolean | Promise<boolean>) | undefined;
+}) {
+  const scope = useResultQuoteScope();
+  const target = scope?.target;
+  const finish = scope?.revealed;
+  const [unavailable, setUnavailable] = useState(false);
+  const { missing, loadRow } = props;
+  useEffect(() => {
+    if (target === undefined) return;
+    setUnavailable(false);
+    if (!missing) return;
+    let current = true;
+    const failed = () => {
+      if (!current) return;
+      finish?.();
+      setUnavailable(true);
+    };
+    void Promise.resolve(loadRow?.(target.row)).then((available) => {
+      if (!available) failed();
+    }, failed);
+    return () => {
+      current = false;
+    };
+  }, [target, missing, loadRow, finish]);
+
+  return unavailable ? (
+    <p className="oct-meta" role="status">
+      The source delivery is unavailable.
+    </p>
+  ) : null;
 }
 
 // The plain-text quote carries an opaque reference. Keep transcript

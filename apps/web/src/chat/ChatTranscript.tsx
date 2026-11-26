@@ -1,6 +1,7 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
+import { ResultSourceNotice } from "../transcript/ResultQuoteScope";
 import { ConversationInputs } from "../continuity/ConversationInputs";
 import { QuestionnaireSummary } from "../transcript/QuestionnaireCard";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -441,6 +442,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           {props.readOnly === true ? null : (
             <p>Ask a question, draft something, or explore an idea.</p>
           )}
+          <ResultSourceNotice
+            key={String(props.view.thread.id)}
+            missing
+            loadRow={props.transcriptWindow?.loadResultRow}
+          />
         </div>
         {trail}
       </section>

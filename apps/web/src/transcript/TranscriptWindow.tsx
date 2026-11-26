@@ -1,10 +1,9 @@
-import { useResultQuoteScope } from "./ResultQuoteScope";
+import { ResultSourceNotice, useResultQuoteScope } from "./ResultQuoteScope";
 import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { ContextSubjectRef } from "@octant/contracts/context";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import {
   useContext,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -113,7 +112,6 @@ const FOLLOW_THRESHOLD_PX = 72;
 
 const DEFAULT_ESTIMATE_SIZE = 96;
 const DEFAULT_OVERSCAN = 8;
-const SOURCE_UNAVAILABLE = "The source delivery is unavailable.";
 /** Visiting many threads must not retain every snapshot for the session. */
 const MAX_SCROLL_MEMORY = 16;
 
@@ -236,24 +234,6 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const revealKey =
     missingResultRow === undefined ? (resultRevealKey ?? props.revealKey) : props.revealKey;
   const revealIndex = revealKey === undefined ? -1 : (keyIndex.get(revealKey) ?? -1);
-  const loadResultRow = props.loadResultRow;
-  const finishResultReveal = resultQuote?.revealed;
-  useEffect(() => {
-    if (missingResultRow === undefined) return;
-    let current = true;
-    const unavailable = () => {
-      if (!current) return;
-      finishResultReveal?.();
-      setLiveMessage(SOURCE_UNAVAILABLE);
-    };
-    void Promise.resolve(loadResultRow?.(missingResultRow)).then((available) => {
-      if (!available) unavailable();
-    }, unavailable);
-    return () => {
-      current = false;
-    };
-  }, [missingResultRow, loadResultRow, finishResultReveal]);
-
   const pinnedFromKeys = new Set<number>();
   if (props.pinnedKeys !== undefined) {
     for (const key of props.pinnedKeys) {
@@ -903,11 +883,11 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
             </OctantButton>
           </div>
         ) : null}
-        <div
-          aria-live="polite"
-          className={liveMessage === SOURCE_UNAVAILABLE ? "oct-meta" : "sr-only"}
-          data-transcript-live=""
-        >
+        <ResultSourceNotice
+          missing={missingResultRow !== undefined}
+          loadRow={props.loadResultRow}
+        />
+        <div aria-live="polite" className="sr-only" data-transcript-live="">
           {liveMessage}
         </div>
       </div>
