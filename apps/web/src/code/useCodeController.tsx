@@ -803,13 +803,13 @@ export function useCodeController(options: CodeControllerOptions) {
   // can still bind the old checkout's point to the new one; only the host can
   // close that.
   const [restorePoint, setRestorePoint] = useState<{
-    readonly threadId: string;
-    readonly checkoutId: string | undefined;
+    readonly threadId: CodeThreadId | undefined;
+    readonly checkoutId: CodeThreadView["checkout"]["id"] | undefined;
     readonly checkpoint: CodeCheckpoint;
   }>();
   // The checkout of the thread view last installed for the open thread; none
   // until the first is installed, and a point read before then binds to it.
-  const installedCheckout = useRef<string | undefined>(undefined);
+  const installedCheckout = useRef<CodeThreadView["checkout"]["id"] | undefined>(undefined);
   /**
    * Carry what a restore just replaced, so the offer appears without waiting
    * for the thread to be reopened. The host has already recorded it; this only
@@ -826,12 +826,12 @@ export function useCodeController(options: CodeControllerOptions) {
       if (
         ranOn !== undefined &&
         (String(ranOn.threadId) !== String(activeThreadId.current) ||
-          String(ranOn.checkoutId) !== installedCheckout.current)
+          String(ranOn.checkoutId) !== String(installedCheckout.current))
       )
         return;
       setRestorePoint(
         checkpoint && {
-          threadId: String(activeThreadId.current),
+          threadId: activeThreadId.current,
           checkoutId: installedCheckout.current,
           checkpoint,
         },
@@ -1249,12 +1249,12 @@ export function useCodeController(options: CodeControllerOptions) {
           ? view
           : (refreshActiveThreadView(view, bootstrapRef.current) ?? view);
       setActiveView(resolvedView);
-      const checkoutId = String(resolvedView.checkout.id);
+      const checkoutId = resolvedView.checkout.id;
       installedCheckout.current = checkoutId;
       setRestorePoint((point) =>
         point?.checkoutId === undefined
           ? point && { ...point, checkoutId }
-          : point.checkoutId === checkoutId
+          : String(point.checkoutId) === String(checkoutId)
             ? point
             : undefined,
       );
@@ -4251,10 +4251,12 @@ export function useCodeController(options: CodeControllerOptions) {
   // checkout the point is bound to: a rebind reaches the thread record before
   // the thread is read again and its new checkout installed.
   const restoreUndo =
-    restorePoint !== undefined &&
-    restorePoint.threadId === String(activeView?.thread.id) &&
-    restorePoint.checkoutId === String(activeView?.checkout.id) &&
-    restorePoint.checkoutId === String(activeView?.thread.checkoutId)
+    restorePoint?.threadId !== undefined &&
+    restorePoint.checkoutId !== undefined &&
+    activeView !== undefined &&
+    String(restorePoint.threadId) === String(activeView.thread.id) &&
+    String(restorePoint.checkoutId) === String(activeView.checkout.id) &&
+    String(restorePoint.checkoutId) === String(activeView.thread.checkoutId)
       ? restorePoint.checkpoint
       : undefined;
   // One identity while nothing in it moved, so the surfaces that take the
