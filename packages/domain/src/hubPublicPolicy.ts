@@ -106,6 +106,11 @@ export function decideWebhookDelivery(input: {
   readonly signatureMatches: boolean;
   /** Absent for a scheme that signs no timestamp. */
   readonly timestampMs?: number;
+  /**
+   * When the delivery reached the public entrance. The hub passes its clock;
+   * a spoke judging a delivery the hub held passes the hub's receipt time, so
+   * a hold of up to a day does not make a signature taken on time stale.
+   */
   readonly nowMs: number;
   readonly dedupeKeys: ReadonlyArray<string>;
   readonly claimed: (key: string) => boolean;
