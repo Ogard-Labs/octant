@@ -93,9 +93,10 @@ export class AgentRunLiveConversationStore {
   }
 
   /**
-   * A tool step the child took. A step's finish replaces its start, so a long
-   * run's steps cost one entry each against the conversation's bound; a
-   * reader that already holds the start folds the finish into it by call id.
+   * A tool step the child took: its start and its finish are each an entry,
+   * and a reader folds the finish into the start by call id. The start keeps
+   * its place, so a step reads where it began both live and in a later
+   * snapshot, even when a reply arrived while it ran.
    */
   appendTool(
     runId: AgentRunId,
@@ -106,16 +107,6 @@ export class AgentRunLiveConversationStore {
     if (this.#closed) return;
     const state = this.#state(runId);
     if (state === undefined || state.status !== "live") return;
-    if (tool.state !== "started") {
-      const started = state.entries.findIndex(
-        (entry) =>
-          entry.tool?.toolCallId === tool.toolCallId &&
-          entry.tool.state === "started" &&
-          entry.generation === generation,
-      );
-      const [removed] = started === -1 ? [] : state.entries.splice(started, 1);
-      if (removed !== undefined) state.bytes -= entryBytes(removed);
-    }
     const entry: AgentRunConversationEntry = {
       sequence: state.nextSequence++,
       kind: "tool",

@@ -5026,6 +5026,14 @@ function LaunchedShell(
     }
     openSubagentInDock(runId);
   }
+  /** A subagent tab's Review changes, for the thread whose pane is in front. */
+  function reviewSubagentChanges(request: AgentResultReviewRequest) {
+    if (dockThreadKey === undefined || dockThreadId === undefined) return;
+    if (String(request.packet.parentThreadId) !== String(dockThreadId)) return;
+    setSelectedProjectPullRequest(undefined);
+    openDockTab("review");
+    setRequestedAgentReview({ threadKey: dockThreadKey, request });
+  }
   function openSubagentInDock(runId?: string) {
     if (dockThreadKey === undefined) return;
     setAddAgentInvokedByThread((current) => {
@@ -6365,6 +6373,7 @@ function LaunchedShell(
       openSidebarList,
       openSkillsSettings,
       openSubagent,
+      reviewSubagentChanges,
       openSubagentRequest,
       openSurface: controller.openSurface,
       openThreadBoard,

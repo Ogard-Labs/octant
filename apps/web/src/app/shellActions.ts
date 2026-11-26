@@ -230,6 +230,7 @@ export type ShellActions = {
   readonly openSidebarList: (view: "activity" | "completed") => void;
   readonly openSkillsSettings: () => void;
   readonly openSubagent: NonNullable<WorkspaceViewProps["onOpenSubagent"]>;
+  readonly reviewSubagentChanges: NonNullable<WorkspaceViewProps["onReviewSubagentChanges"]>;
   readonly openSubagentRequest: (request: ChildPendingRequest) => void;
   readonly openSurface: ShellController["openSurface"];
   readonly openThreadBoard: () => void;

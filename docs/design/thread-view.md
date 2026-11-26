@@ -692,8 +692,9 @@ on request rather than presented as unsupported navigation links.
 
 ### A subagent as a thread
 
-A subagent Octant started opens as a thread of its own, in the pane the person
-is working in (maintainer decision, 2026-11-26). Its header reads "Subagent
+A subagent Octant started opens as a thread of its own, in a pane beside the
+thread that started it; the next subagent of that thread opens in the same pane
+(maintainer decision, 2026-11-26). Its header reads "Subagent
 of" and then the parent thread's title, which leads back to that thread. Under
 it are the task as the title, and the state mark and word, the role, the
 model and the age. The transcript reads like any thread:
@@ -710,9 +711,10 @@ model and the age. The transcript reads like any thread:
 All of it is live while it runs. A subagent's tool steps are kept in its
 conversation, one bounded entry each: the runtime's name for the tool, its
 state and one line (what it was asked, or what it reported), never the call's
-input or output. A step's finish takes its start's place, so a long run's
-steps fit the conversation's bound. Past that bound the oldest entries go, and
-the tab says so.
+input or output. A step's start and finish are each kept, and the finish is
+folded into the start, so a step reads where it began, live and after a
+reload alike. Past the conversation's bound the oldest entries go, and the tab
+says so.
 
 The normal composer sits under the transcript and uses only the run's existing
 commands and authority:

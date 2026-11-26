@@ -6,7 +6,7 @@ const runId = decodeAgentRunId("11111111-1111-4111-8111-111111111111");
 const occurredAt = "2026-08-23T00:00:00.000Z" as never;
 
 describe("AgentRunLiveConversationStore", () => {
-  it("keeps a subagent's tool steps, a finished step taking its start's place", () => {
+  it("keeps a subagent's tool steps where they started, with their finish after", () => {
     const store = new AgentRunLiveConversationStore();
     store.begin(runId);
     store.appendTool(
@@ -16,11 +16,6 @@ describe("AgentRunLiveConversationStore", () => {
       1,
     );
     store.appendText(runId, "Running the tests.", occurredAt);
-    expect(store.read({ runId })?.entries.map((entry) => entry.kind)).toEqual([
-      "tool",
-      "assistant",
-    ]);
-
     store.appendTool(
       runId,
       { toolCallId: "call-1", toolName: "Bash", state: "failed", summary: "2 tests failed" },
@@ -28,12 +23,8 @@ describe("AgentRunLiveConversationStore", () => {
       1,
     );
     const entries = store.read({ runId })?.entries ?? [];
-    expect(entries.map((entry) => entry.kind)).toEqual(["assistant", "tool"]);
-    expect(entries.at(-1)).toMatchObject({
-      kind: "tool",
-      text: "2 tests failed",
-      tool: { toolCallId: "call-1", toolName: "Bash", state: "failed" },
-    });
+    expect(entries.map((entry) => entry.kind)).toEqual(["tool", "assistant", "tool"]);
+    expect(entries.map((entry) => entry.tool?.state)).toEqual(["started", undefined, "failed"]);
     // A reader holding the start meets the finish after its cursor.
     expect(
       store.read({ runId, afterSequence: 2 })?.entries.map((entry) => entry.tool?.state),

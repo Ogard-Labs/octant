@@ -1870,7 +1870,31 @@ function createWorkspaceMutation(
         parentThreadId: intent.tab.parentThreadId,
         runId: intent.tab.runId,
       };
-      const existing = findVisibleSurfacePane(layout, surface);
+      // The host lets a window read a run only while a pane shows its parent
+      // thread, so the subagent opens beside the parent, never over it. A pane
+      // already showing one of that thread's subagents takes the next one.
+      const existing =
+        findVisibleSurfacePane(layout, surface) ??
+        findAgentRunPane(layout, String(intent.tab.parentThreadId));
+      const parent = findThreadPane(layout, String(intent.tab.parentThreadId));
+      if (existing === undefined && parent !== undefined) {
+        return {
+          operation: {
+            kind: "split-pane",
+            mode,
+            targetPaneId: parent.paneId,
+            surface,
+            splitNodeId: newLayoutNodeId(),
+            newPaneNodeId: newLayoutNodeId(),
+            newPaneId: newPaneId(),
+            orientation: "horizontal",
+            placement: "after",
+            ratio: 0.5 as SplitRatio,
+          },
+          message: `${intent.tab.title} opened beside its thread.`,
+          activatedSurfaceId: surface.id,
+        };
+      }
       return {
         operation: {
           kind: "open-surface",
@@ -1880,7 +1904,7 @@ function createWorkspaceMutation(
         },
         message:
           existing === undefined ? `${intent.tab.title} opened.` : `${intent.tab.title} selected.`,
-        activatedSurfaceId: existing?.surface.id ?? surface.id,
+        activatedSurfaceId: surface.id,
       };
     }
     case "open-side-chat": {
@@ -2259,6 +2283,38 @@ function findDraftPane(
     return matches ? layout : undefined;
   }
   return findDraftPane(layout.first, projectId) ?? findDraftPane(layout.second, projectId);
+}
+
+/** A pane showing one of this thread's subagents. */
+function findAgentRunPane(
+  layout: WorkspaceLayoutNode,
+  parentThreadId: string,
+): WorkspacePane | undefined {
+  if (layout.kind === "pane") {
+    return layout.surface.kind === "agent-run" &&
+      String(layout.surface.parentThreadId) === parentThreadId
+      ? layout
+      : undefined;
+  }
+  return (
+    findAgentRunPane(layout.first, parentThreadId) ??
+    findAgentRunPane(layout.second, parentThreadId)
+  );
+}
+
+/** A pane showing the thread itself, in Chat, Work or Code. */
+function findThreadPane(layout: WorkspaceLayoutNode, threadId: string): WorkspacePane | undefined {
+  if (layout.kind === "pane") {
+    const surface = layout.surface;
+    const shown =
+      surface.kind === "chat-thread" || surface.kind === "work-thread"
+        ? String(surface.threadId)
+        : surface.kind === "code-overview"
+          ? String(surface.threadId)
+          : undefined;
+    return shown === threadId ? layout : undefined;
+  }
+  return findThreadPane(layout.first, threadId) ?? findThreadPane(layout.second, threadId);
 }
 
 function findSideChatPane(

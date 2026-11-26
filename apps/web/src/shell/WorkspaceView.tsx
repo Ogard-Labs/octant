@@ -148,6 +148,7 @@ import type { AutomationClient, UsageDashboardClient } from "@octant/client-runt
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
+import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 
 // A subagent's tab draws a whole transcript; it loads with the first one opened.
@@ -312,6 +313,8 @@ export interface WorkspaceViewProps {
   readonly nativeHarnessClient?: NativeHarnessClient;
   /** Opens the Agents tool; with a run id, on that subagent's page. */
   readonly onOpenSubagent?: (runId?: string) => void;
+  /** Opens a subagent result's captured comparison in Review, from its own tab. */
+  readonly onReviewSubagentChanges?: (request: AgentResultReviewRequest) => void;
   /**
    * The window's pending-request reader, for a coordinator's composer to list
    * its workers' requests. Absent in a window that cannot read them (remote).
@@ -4135,6 +4138,9 @@ function SubagentTab(props: {
         title={tab.title}
         {...(parentTitle === undefined ? {} : { parentTitle })}
         {...(canOpenParent ? { onOpenParent: openParent } : {})}
+        {...(tab.mode !== "code" || view.onReviewSubagentChanges === undefined
+          ? {}
+          : { onReviewChanges: view.onReviewSubagentChanges })}
       />
     </Suspense>
   );

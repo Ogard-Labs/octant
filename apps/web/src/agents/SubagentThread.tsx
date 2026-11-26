@@ -14,6 +14,7 @@ import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
+import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import { AgentRunResults } from "./AgentRunResults";
 import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
 import { SubagentStatusIcon, subagentRoleWord, subagentStatusWord } from "./subagentStatus";
@@ -48,6 +49,8 @@ export function SubagentThread(props: {
   /** The parent thread's title, for the header's link back. */
   readonly parentTitle?: string | undefined;
   readonly onOpenParent?: (() => void) | undefined;
+  /** Opens a result's captured comparison in Review (Code). */
+  readonly onReviewChanges?: ((request: AgentResultReviewRequest) => void) | undefined;
 }) {
   const [read, setRead] = useState<AgentRunParentSummaryResponse>();
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -199,6 +202,11 @@ export function SubagentThread(props: {
 
   const disabledReason =
     canSteer || canResume ? undefined : "This subagent cannot take a message now.";
+  // A command carries at most this much; the draft stays so it can be shortened.
+  const tooLong =
+    message.length > MAX_MESSAGE_CHARACTERS
+      ? `This message is ${String(message.length - MAX_MESSAGE_CHARACTERS)} characters over the ${String(MAX_MESSAGE_CHARACTERS)} a subagent takes. Shorten it to send.`
+      : undefined;
   const actions: ThreadComposerActions = canSteer
     ? {
         kind: "send-or-stop",
@@ -206,7 +214,8 @@ export function SubagentThread(props: {
         sending: true,
         send: {
           ariaLabel: "Send steering note",
-          disabled: sending || message.length === 0,
+          disabled: sending || message.length === 0 || tooLong !== undefined,
+          disabledReason: tooLong,
           onSend: () => void send(),
         },
         stop: {
@@ -222,8 +231,12 @@ export function SubagentThread(props: {
         kind: "send",
         send: {
           ariaLabel: canResume ? "Continue this subagent" : "Send",
-          disabled: sending || message.length === 0 || disabledReason !== undefined,
-          disabledReason,
+          disabled:
+            sending ||
+            message.length === 0 ||
+            disabledReason !== undefined ||
+            tooLong !== undefined,
+          disabledReason: disabledReason ?? tooLong,
           onSend: () => void send(),
         },
       };
@@ -291,6 +304,9 @@ export function SubagentThread(props: {
               <AgentRunResults
                 packets={row.resultPackets}
                 truncated={row.resultsTruncated === true}
+                {...(props.onReviewChanges === undefined
+                  ? {}
+                  : { onReviewChanges: props.onReviewChanges })}
               />
             </li>
           )}
@@ -309,6 +325,11 @@ export function SubagentThread(props: {
           <OctantAlert role="alert" tone="danger">
             {errorMessage}
           </OctantAlert>
+        )}
+        {tooLong === undefined ? null : (
+          <p className="subagent-thread__note" role="status">
+            {tooLong}
+          </p>
         )}
         {notice === undefined ? null : (
           <p className="subagent-thread__note" role="status">
