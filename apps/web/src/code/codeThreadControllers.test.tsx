@@ -610,6 +610,74 @@ describe("CodeThreadControllerSlots", () => {
       expect(wholeReads()).toBe(before);
     });
 
+    it.each(["incomplete", "waiting"])(
+      "shows the approval a turn stopped on before the list said the thread was working (%s)",
+      async (status) => {
+        const approvalId = "70000000-0000-4000-8000-000000000030";
+        const { api, held } = host([providerTurn(asked, "completed")], (operationId, signal) =>
+          operationId === next
+            ? (async function* () {
+                yield {
+                  threadId: threadA,
+                  operationId: next,
+                  cursor: 1,
+                  occurredAt: now,
+                  event: {
+                    kind: "approval-requested",
+                    approvalId,
+                    action: "provider-tool",
+                    summary: "Allow browser access?",
+                  },
+                };
+                if (status === "waiting") {
+                  yield {
+                    threadId: threadA,
+                    operationId: next,
+                    cursor: 2,
+                    occurredAt: now,
+                    event: { kind: "operation-state", state: "waiting" },
+                  };
+                  return;
+                }
+                yield* idleStream(signal);
+              })()
+            : undefined,
+        );
+        const settled = (sequence: number, parked = false): CodeBootstrap => ({
+          ...bootstrap(),
+          activity: [{ threadId: threadA, lastSequence: sequence }] as never,
+          ...(parked
+            ? {
+                runtime: [
+                  {
+                    threadId: threadA,
+                    executing: false,
+                    awaitingInput: true,
+                    awaitingKind: "approval",
+                  },
+                ] as never,
+              }
+            : {}),
+        });
+        const { registry, rerender } = open(api, settled(2));
+        await waitFor(() => expect(registry.get(threadA)?.conversationHistory).toBe("loaded"));
+        expect(registry.get(threadA)?.turnStatus).toBe("idle");
+
+        // The turn started elsewhere and asked for approval at once: the list
+        // never said the thread was working, only that its activity moved and
+        // it waits on the person.
+        held.turnsOfA = [providerTurn(asked, "completed"), providerTurn(next, status)];
+        rerender(settled(9, true));
+
+        await waitFor(() =>
+          expect(registry.get(threadA)?.providerRequests).toEqual([
+            expect.objectContaining({ kind: "approval", approvalId }),
+          ]),
+        );
+        expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({ operationId: next });
+      },
+    );
+
     it("looks again on its own when its look at a settled thread failed", async () => {
       const { api, conversationWindow, held } = host([providerTurn(asked, "completed")]);
       const settled = (sequence: number): CodeBootstrap => ({
