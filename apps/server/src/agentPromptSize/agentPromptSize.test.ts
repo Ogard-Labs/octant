@@ -77,8 +77,9 @@ describe("agent prompt size", () => {
     expect(schemaOf("code", "octant_linear")).toContain('"set-state"');
     // A Code thread on its Project's shared checkout may ask to move off it.
     expect(schemaOf("code", "octant_threads")).toContain('"move-to-worktree"');
-    // A ready video model is described in the tool.
-    expect(schemaOf("work", "octant_create_video")).toContain("gemini-omni-1.2-flash");
+    // The widest single shipped profile is described: Runway with both presets.
+    expect(schemaOf("work", "octant_create_video")).toContain("model gen4.5:");
+    expect(schemaOf("work", "octant_create_video")).toContain("model gen4_turbo:");
     // A Zen space's assistant is a Chat thread carrying its own tool too.
     expect(schemaOf("chat", "octant_zen")).not.toBe(undefined);
   });

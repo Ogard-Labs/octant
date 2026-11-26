@@ -79,6 +79,7 @@ import { WORK_ARTIFACT_INSTRUCTIONS } from "../work/workTurnContext";
 import { STATUS_UPKEEP_INSTRUCTION } from "../work/workTurnService";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { GEMINI_OMNI_FLASH } from "../video/geminiVideoAdapter";
+import { RUNWAY_GEN4_TURBO, RUNWAY_GEN45 } from "../video/runwayVideoAdapter";
 import { describeReadyModels } from "../video/videoAgentTools";
 import { ZEN_ASSISTANT_TOOL_DEFINITION } from "../zen/zenAssistantTools";
 
@@ -160,6 +161,27 @@ export interface AgentPromptDifference {
 const refused = async () => ({ status: "refused" as const, reason: "measured only" });
 const refusedWith = async () => ({ status: "refused" as const, error: "measured only" });
 
+const bytes = (text: string): number => Buffer.byteLength(text, "utf8");
+
+/**
+ * The longest description one ready profile gives, from each driver's shipped
+ * model set; fal lists the person's own endpoints, and how many profiles a
+ * person adds is theirs.
+ */
+const WIDEST_VIDEO_PROFILE = [[GEMINI_OMNI_FLASH], [RUNWAY_GEN45, RUNWAY_GEN4_TURBO]]
+  .map((models) =>
+    describeReadyModels([
+      {
+        instance: {
+          id: ProviderInstanceId.make("00000000-0000-4000-8000-000000000000"),
+          displayName: "Video",
+        },
+        models,
+      },
+    ]),
+  )
+  .reduce((widest, next) => (bytes(next) > bytes(widest) ? next : widest));
+
 /** A port that answers yes to every capability, so each media tool gives its widest definition. */
 function widestMediaPort(mode: OctantMode): MediaToolHostPort {
   const isAvailable = () => true;
@@ -185,18 +207,7 @@ function widestMediaPort(mode: OctantMode): MediaToolHostPort {
     },
     videoGeneration: {
       isAvailable,
-      // One ready profile with a shipped model, so the formatter's own text
-      // is counted; how many profiles a person adds is theirs.
-      describeModels: () =>
-        describeReadyModels([
-          {
-            instance: {
-              id: ProviderInstanceId.make("00000000-0000-4000-8000-000000000000"),
-              displayName: "Video",
-            },
-            models: [GEMINI_OMNI_FLASH],
-          },
-        ]),
+      describeModels: () => WIDEST_VIDEO_PROFILE,
       generate: refusedWith,
       ...(mode === "chat" ? {} : { save: refusedWith }),
     },
@@ -218,8 +229,6 @@ function canvasTool(mode: OctantMode, scope: "thread" | "run"): ProviderToolDefi
     inputSchema: canvasDefinitionSchema,
   };
 }
-
-const bytes = (text: string): number => Buffer.byteLength(text, "utf8");
 
 const isHarnessToolName = Schema.is(NativeHarnessToolName);
 

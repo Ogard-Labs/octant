@@ -57,7 +57,8 @@ tools from plugins or MCP servers the person added are not listed.
   Where a turn carries one of several forms (a tool's write-enabled
   definition, the artifact or Canvas delivery rule, a Windows shell paragraph,
   an endpoint's tool encoding), the larger is counted. Video generation counts
-  one ready profile; the profiles a person adds are theirs. The lists are kept
+  the widest single profile of shipped models (Runway with both presets);
+  fal endpoints a person lists, and how many profiles they add, are theirs. The lists are kept
   by hand, so a change that offers a tool in another context updates its list
   too.
 
