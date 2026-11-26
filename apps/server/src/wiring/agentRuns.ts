@@ -1177,6 +1177,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         agentRunLiveConversations.appendChildActivity(run.id, event, run.generation ?? 1),
       onTextDelta: ({ runId, text, occurredAt }) =>
         agentRunLiveConversations.appendText(runId, text, occurredAt),
+      onToolActivity: ({ run, tool, occurredAt }) =>
+        agentRunLiveConversations.appendTool(run.id, tool, occurredAt, run.generation ?? 1),
       onSessionSettled: ({ runId, outcome }) => {
         if (outcome.kind === "completed") {
           agentRunLiveConversations.complete(runId);

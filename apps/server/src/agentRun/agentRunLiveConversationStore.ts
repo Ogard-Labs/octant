@@ -3,6 +3,7 @@ import {
   MAX_AGENT_RUN_CONVERSATION_ENTRIES,
   MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS,
   type AgentRunConversationEntry,
+  type AgentRunConversationTool,
   type ProviderChildActivityEvent,
   type AgentRunConversationReadStatus,
   type AgentRunId,
@@ -89,6 +90,44 @@ export class AgentRunLiveConversationStore {
 
   appendStatus(runId: AgentRunId, text: string, occurredAt: UtcTimestamp): void {
     this.#append(runId, text, occurredAt, "status");
+  }
+
+  /**
+   * A tool step the child took. A step's finish replaces its start, so a long
+   * run's steps cost one entry each against the conversation's bound; a
+   * reader that already holds the start folds the finish into it by call id.
+   */
+  appendTool(
+    runId: AgentRunId,
+    tool: AgentRunConversationTool,
+    occurredAt: UtcTimestamp,
+    generation: number,
+  ): void {
+    if (this.#closed) return;
+    const state = this.#state(runId);
+    if (state === undefined || state.status !== "live") return;
+    if (tool.state !== "started") {
+      const started = state.entries.findIndex(
+        (entry) =>
+          entry.tool?.toolCallId === tool.toolCallId &&
+          entry.tool.state === "started" &&
+          entry.generation === generation,
+      );
+      const [removed] = started === -1 ? [] : state.entries.splice(started, 1);
+      if (removed !== undefined) state.bytes -= entryBytes(removed);
+    }
+    const entry: AgentRunConversationEntry = {
+      sequence: state.nextSequence++,
+      kind: "tool",
+      text: tool.summary ?? tool.toolName,
+      occurredAt,
+      generation,
+      tool,
+    };
+    state.entries.push(entry);
+    state.bytes += entryBytes(entry);
+    this.#trim(state);
+    this.#publish(runId);
   }
 
   appendChildActivity(

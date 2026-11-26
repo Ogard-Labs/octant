@@ -934,6 +934,37 @@ describe("createAgentRunSessionRuntime", () => {
     expect(settledOutcomes).toHaveLength(1);
   });
 
+  it("reports each tool step a managed child takes, its finish named by its start", async () => {
+    const provider = fakeProvider();
+    const steps: unknown[] = [];
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, { onToolActivity: ({ tool }) => steps.push(tool) }),
+    );
+    const outcome = settled(runtime.start(agentRun()));
+    await provider.emit({
+      kind: "tool-start",
+      sessionId,
+      toolCallId: "call-1",
+      toolName: "Bash",
+      argument: "bun run test\nsecond line",
+    });
+    await provider.emit({
+      kind: "tool-failure",
+      sessionId,
+      toolCallId: "call-1",
+      message: "2 failed",
+    });
+    // A finish whose start was never seen has no name to show.
+    await provider.emit({ kind: "tool-success", sessionId, toolCallId: "call-9", summary: "done" });
+    await provider.emit({ kind: "text-delta", sessionId, text: "Two tests fail." });
+    await provider.emit({ kind: "completed", sessionId });
+    await expect(outcome).resolves.toMatchObject({ kind: "completed" });
+    expect(steps).toEqual([
+      { toolCallId: "call-1", toolName: "Bash", state: "started", summary: "bun run test" },
+      { toolCallId: "call-1", toolName: "Bash", state: "failed", summary: "2 failed" },
+    ]);
+  });
+
   it("ignores malformed provider events and keeps a throwing observer from failing the run", async () => {
     const provider = fakeProvider();
     const deltas: string[] = [];

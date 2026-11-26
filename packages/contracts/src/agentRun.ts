@@ -935,14 +935,40 @@ export const AgentRunConversationReadStatus = Schema.Literal(
 );
 export type AgentRunConversationReadStatus = typeof AgentRunConversationReadStatus.Type;
 
+/** The longest summary a subagent's tool step keeps: one line, never the call's input or output. */
+export const MAX_AGENT_RUN_CONVERSATION_TOOL_SUMMARY_CHARACTERS = 512;
+
+/**
+ * One tool step a managed subagent took, as its runtime reported it: the
+ * call's id and the runtime's own name for the tool, how it stands, and one
+ * bounded line (what it was asked to do, or what it reported back). It is the
+ * same fact a thread's activity row shows, kept so a subagent's tab can show
+ * everything it did. It never carries the call's input or output.
+ */
+export const AgentRunConversationTool = Schema.Struct({
+  toolCallId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  toolName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  state: Schema.Literal("started", "completed", "failed"),
+  summary: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(
+      Schema.maxLength(MAX_AGENT_RUN_CONVERSATION_TOOL_SUMMARY_CHARACTERS),
+    ),
+  ),
+}).annotations(strict);
+export type AgentRunConversationTool = typeof AgentRunConversationTool.Type;
+
 export const AgentRunConversationEntry = Schema.Struct({
   childActivity: Schema.optional(ProviderChildActivityEvent),
+  /** Present exactly on a `tool` entry. */
+  tool: Schema.optional(AgentRunConversationTool),
   generation: Schema.optional(Schema.Int.pipe(Schema.positive())),
   sequence: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
-  kind: Schema.Literal("assistant", "status"),
+  kind: Schema.Literal("assistant", "status", "tool"),
   text: Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS)),
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+})
+  .pipe(Schema.filter((entry) => (entry.kind === "tool") === (entry.tool !== undefined)))
+  .annotations(strict);
 export type AgentRunConversationEntry = typeof AgentRunConversationEntry.Type;
 
 const AgentRunConversationFields = {
