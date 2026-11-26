@@ -23,6 +23,8 @@ import {
   type MobileAttachmentSource,
   type MobileInboxRow,
   type RemoteSessionStanding,
+  stopMobileLiveTasks,
+  stopMobileSubagent,
 } from "@octant/client-runtime";
 import { ScreenHeader } from "../navigation/ScreenHeader";
 import { BottomSheet } from "../ui/BottomSheet";
@@ -58,6 +60,8 @@ import { useWhileHere } from "../ui/useWhileHere";
 import { KeyboardRoom } from "../ui/KeyboardRoom";
 import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
+import { SubagentsPill, SubagentsSheet } from "../agents/SubagentsSheet";
+import { useThreadSubagents } from "../agents/useThreadSubagents";
 import type { MobileThreadPaneId } from "../panes/threadPanesPresentation";
 import { ThreadPanesSheet, type ThreadTool } from "../panes/ThreadPanesSheet";
 import { listMobileThreadTools } from "../panes/threadPanesPresentation";
@@ -80,6 +84,7 @@ import { useMobileThreads } from "./MobileThreadsContext";
 import { useOutbox } from "../outbox/OutboxContext";
 import { WaitingMessages } from "../outbox/WaitingMessages";
 import { QueuedMessages } from "./thread/QueuedMessages";
+import { threadPullRequestStatus } from "./threadRowState";
 import { isLiveWorkTurn, turnSubagents } from "./thread/turnActivity";
 import { useTurnControl } from "./thread/useTurnControl";
 import { useChatThread } from "./thread/useChatThread";
@@ -497,6 +502,13 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const mayQueue = queues || (isUnanswered && turnControl.queue !== undefined);
   const subagents = runningWorkTurn === undefined ? [] : turnSubagents(runningWorkTurn);
   const subagentsWorking = subagents.filter((agent) => agent.working).length;
+  const threadAgents = useThreadSubagents({
+    transport,
+    threadId: selected?.threadId,
+    mode: selected?.mode,
+    turnLive,
+  });
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const threadHint = mode === "code" || mode === "work" ? mobileThreadHint(mode) : undefined;
   const sendFollowUp = () => void sendNow(() => (mode === "work" ? work : code).sendFollowUp());
   const runningChatTurn = chat.view?.turns.at(-1);
@@ -814,6 +826,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
                       },
                     ]
                   : []),
+                ...(selected.mode === "code" && selected.pullRequests !== undefined
+                  ? [
+                      {
+                        label: `${MOBILE_COPY.threadPullRequest}: ${threadPullRequestStatus(selected.pullRequests)}`,
+                        icon: "git-pull-request-outline" as const,
+                        onPress: () => setDetailsOpen(true),
+                        testID: "mobile-thread-pull-request-open",
+                      },
+                    ]
+                  : []),
                 ...(selected.mode === "code"
                   ? [
                       {
@@ -832,7 +854,15 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 },
               ]
         }
-        subtitle={[project, hostLabel].filter((part) => part !== undefined).join(" · ")}
+        subtitle={[
+          project,
+          hostLabel,
+          selected.pullRequests === undefined
+            ? undefined
+            : threadPullRequestStatus(selected.pullRequests),
+        ]
+          .filter((part) => part !== undefined)
+          .join(" · ")}
         title={title}
       />
 
@@ -1114,6 +1144,44 @@ export function ThreadScreen(props: ThreadScreenProps) {
         />
       )}
       {resumeOffer === undefined ? null : <ResumeBar busy={resumeBusy} offer={resumeOffer} />}
+      <SubagentsPill
+        liveTasks={threadAgents.liveTasks}
+        onPress={() => setAgentsOpen(true)}
+        subagents={threadAgents.subagents}
+      />
+      <SubagentsSheet
+        liveTasks={threadAgents.liveTasks}
+        onClose={() => setAgentsOpen(false)}
+        providerDirectory={models.providerDirectory}
+        subagents={threadAgents.subagents}
+        visible={agentsOpen}
+        {...(mayAct && transport !== undefined
+          ? {
+              onStop: async (subagent) => {
+                const stop = await stopMobileSubagent({
+                  transport,
+                  threadId: selected.threadId,
+                  subagent,
+                });
+                threadAgents.refresh();
+                return stop.status === "refused" ? stop.message : undefined;
+              },
+              ...(selected.mode === "chat"
+                ? {}
+                : {
+                    onStopLiveTasks: async () => {
+                      const stop = await stopMobileLiveTasks({
+                        transport,
+                        mode: selected.mode === "code" ? "code" : "work",
+                        threadId: selected.threadId,
+                      });
+                      threadAgents.refresh();
+                      return stop.status === "refused" ? stop.message : undefined;
+                    },
+                  }),
+            }
+          : {})}
+      />
       {selected.mode === "chat" ? (
         <>
           <FloatingComposer

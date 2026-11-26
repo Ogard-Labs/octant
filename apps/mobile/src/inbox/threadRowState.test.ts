@@ -1,6 +1,12 @@
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { describe, expect, it } from "vitest";
-import { compactAge, projectMonogram, pullRequestChip, threadRowState } from "./threadRowState";
+import {
+  compactAge,
+  projectMonogram,
+  pullRequestChip,
+  threadRowState,
+  threadPullRequestStatus,
+} from "./threadRowState";
 
 const now = new Date("2026-11-25T12:00:00.000Z");
 const row = (fields: Partial<MobileInboxRow> = {}): MobileInboxRow => ({
@@ -89,5 +95,22 @@ describe("a row's small marks", () => {
   it("shows one pull request's number, and only a count of several", () => {
     expect(pullRequestChip({ number: 2864, count: 1, state: "open" })).toBe("2864");
     expect(pullRequestChip({ number: 2864, count: 3, state: "open" })).toBe("+3");
+  });
+});
+
+describe("a thread's pull request on its bar", () => {
+  it("names what blocks it first, then whether it is ready, and how many more the thread has", () => {
+    const open = { number: 812, count: 1, state: "open" } as const;
+    expect(threadPullRequestStatus({ ...open, checks: "failing", readyToMerge: false })).toBe(
+      "#812 checks failing",
+    );
+    expect(
+      threadPullRequestStatus({ ...open, checks: "passing", mergeability: "conflicting" }),
+    ).toBe("#812 has conflicts");
+    expect(
+      threadPullRequestStatus({ ...open, checks: "passing", readyToMerge: true, count: 3 }),
+    ).toBe("#812 ready to merge +2");
+    expect(threadPullRequestStatus({ ...open, state: "merged" })).toBe("#812 merged");
+    expect(threadPullRequestStatus(open)).toBe("#812 open");
   });
 });

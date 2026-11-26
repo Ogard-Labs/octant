@@ -21,28 +21,35 @@ type AndroidIcons = Readonly<
 >;
 
 /**
- * Material bars take an image; the glyphs come from the icon font the app
- * ships. The bar tints each one, so `glyph` gives only its shape a colour.
+ * Material bars take an image, as does an iOS bar item with no system symbol;
+ * the glyphs come from the icon font the app ships. The bar tints each one,
+ * so `glyph` gives only its shape a colour.
  */
 function useAndroidIcons(glyph: string): AndroidIcons {
   const [icons, setIcons] = useState<AndroidIcons>({});
   useEffect(() => {
-    if (Platform.OS !== "android") return;
     let cancelled = false;
     void Promise.all(
-      shippedMobilePlaces().map(async (place) => {
-        const [plain, selected] = await Promise.all([
-          Ionicons.getImageSource(place.icon, 24, glyph),
-          Ionicons.getImageSource(place.selectedIcon, 24, glyph),
-        ]);
-        return plain === null || selected === null
-          ? undefined
-          : ([place.id, [plain, selected]] as const);
-      }),
-    ).then((entries) => {
-      if (cancelled) return;
-      setIcons(Object.fromEntries(entries.filter((entry) => entry !== undefined)));
-    });
+      shippedMobilePlaces()
+        .flatMap((place) =>
+          Platform.OS === "android" || place.symbol === undefined ? [place] : [],
+        )
+        .map(async (place) => {
+          const [plain, selected] = await Promise.all([
+            Ionicons.getImageSource(place.icon, 24, glyph),
+            Ionicons.getImageSource(place.selectedIcon, 24, glyph),
+          ]);
+          return plain === null || selected === null
+            ? undefined
+            : ([place.id, [plain, selected]] as const);
+        }),
+    )
+      .then((entries) => {
+        if (cancelled) return;
+        setIcons(Object.fromEntries(entries.filter((entry) => entry !== undefined)));
+      })
+      // A glyph that cannot be drawn leaves its item to its label.
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -107,10 +114,22 @@ export function PlaceTabs(props: PlaceTabsProps) {
                     }),
                 standardAppearance: { tabBarItemLabelVisibilityMode: "unlabeled" },
               }}
-              ios={{
-                icon: { type: "sfSymbol", name: place.symbol },
-                selectedIcon: { type: "sfSymbol", name: place.selectedSymbol },
-              }}
+              ios={
+                place.symbol !== undefined
+                  ? {
+                      icon: { type: "sfSymbol", name: place.symbol },
+                      selectedIcon: {
+                        type: "sfSymbol",
+                        name: place.selectedSymbol ?? place.symbol,
+                      },
+                    }
+                  : icons === undefined
+                    ? {}
+                    : {
+                        icon: { type: "templateSource", templateSource: icons[0] },
+                        selectedIcon: { type: "templateSource", templateSource: icons[1] },
+                      }
+              }
               key={place.id}
               screenKey={place.id}
               tabBarItemAccessibilityLabel={place.label}

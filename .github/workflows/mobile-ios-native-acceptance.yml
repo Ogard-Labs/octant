@@ -15,6 +15,14 @@ on:
         description: Keep the built Simulator app and test runner with the evidence, to look at it on another Mac
         type: boolean
         default: false
+      drive_steps:
+        description: Instead of the scenarios, drive the offline demo through these steps (see testDriveByHand) and keep its screenshots
+        type: string
+        default: ""
+      drive_devices:
+        description: Where to drive it, iphone, ipad or iphone,ipad
+        type: string
+        default: iphone
 
 permissions:
   contents: read
@@ -54,6 +62,8 @@ jobs:
       - name: Build and exercise the Release app without accounts or store signing
         env:
           OCTANT_KEEP_SIMULATOR_APP: ${{ inputs.keep_app && '1' || '' }}
+          OCTANT_DRIVE_STEPS: ${{ inputs.drive_steps }}
+          OCTANT_DRIVE_DEVICES: ${{ inputs.drive_devices || 'iphone' }}
         run: python3 scripts/mobile-ios-native/run.py
       - uses: actions/upload-artifact@v4
         if: always()

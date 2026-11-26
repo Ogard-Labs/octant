@@ -69,6 +69,11 @@ export interface MobileRowPullRequests {
   readonly number: number;
   readonly count: number;
   readonly state: ThreadBoardPullRequestSummary["state"];
+  /** The first one's checks, mergeability and merge state; absent when only the delivery link is known. */
+  readonly checks?: ThreadBoardPullRequestSummary["checks"];
+  readonly mergeability?: ThreadBoardPullRequestSummary["mergeability"];
+  readonly readyToMerge?: boolean;
+  readonly merging?: ThreadBoardPullRequestSummary["merging"];
 }
 
 export interface MobileInboxRow {
@@ -439,6 +444,10 @@ function cardPullRequests(card: CodeBoardView["cards"][number]): MobileRowPullRe
       number: first.identity.number,
       count: card.pullRequestSummaries.items.length + card.pullRequestSummaries.hiddenCount,
       state: first.state,
+      checks: first.checks,
+      mergeability: first.mergeability,
+      readyToMerge: first.readyToMerge,
+      ...(first.merging === undefined ? {} : { merging: first.merging }),
     };
   }
   return card.linkedPullRequest.kind === "linked"

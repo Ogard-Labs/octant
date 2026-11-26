@@ -45,6 +45,8 @@ import { usePhoneNotificationRotation } from "../notifications/usePhoneNotificat
 import { useMobileSession } from "../session/MobileSessionContext";
 import { TodosScreen } from "../todos/TodosScreen";
 import { UsageScreen } from "../usage/UsageScreen";
+import { PullRequestDetailScreen } from "../pulls/PullRequestDetailScreen";
+import { PullRequestsScreen } from "../pulls/PullRequestsScreen";
 import { hasLiquidGlass } from "../ui/systemVersion";
 import {
   mobileTodoDraftAfterHostChange,
@@ -148,6 +150,21 @@ function InboxRoute({ navigation }: ScreenProps<"inboxRoot">) {
   );
 }
 
+function PullRequestsRoute({ navigation }: ScreenProps<"prsRoot">) {
+  return (
+    <PullRequestsScreen onOpen={(pullRequest) => navigation.push("pullRequest", pullRequest)} />
+  );
+}
+
+function PullRequestRoute({ navigation, route }: ScreenProps<"pullRequest">) {
+  return (
+    <PullRequestDetailScreen
+      onOpenThread={(row) => navigation.push("thread", { row })}
+      pullRequest={route.params}
+    />
+  );
+}
+
 function CountedRoute({ navigation, route }: ScreenProps<"counted">) {
   return (
     <CountedThreadsScreen
@@ -222,7 +239,7 @@ const ROOT_EDGES: ReadonlyArray<Edge> = ["left", "right"];
 const PUSHED_EDGES: ReadonlyArray<Edge> =
   Platform.OS === "android" ? ["left", "right"] : ["left", "right", "bottom"];
 
-function PlaceStack(props: { readonly place: "home" | "threads" | "inbox" }) {
+function PlaceStack(props: { readonly place: "home" | "threads" | "prs" | "inbox" }) {
   const appearance = useAppearance();
   const { colors } = useTheme();
   return (
@@ -254,10 +271,13 @@ function PlaceStack(props: { readonly place: "home" | "threads" | "inbox" }) {
         <Stack.Screen component={HomeRoute} name="homeRoot" options={PLACE_OPTIONS} />
       ) : props.place === "threads" ? (
         <Stack.Screen component={ThreadsRoute} name="threadsRoot" options={PLACE_OPTIONS} />
+      ) : props.place === "prs" ? (
+        <Stack.Screen component={PullRequestsRoute} name="prsRoot" options={PLACE_OPTIONS} />
       ) : (
         <Stack.Screen component={InboxRoute} name="inboxRoot" options={PLACE_OPTIONS} />
       )}
       <Stack.Screen component={CountedRoute} name="counted" />
+      <Stack.Screen component={PullRequestRoute} name="pullRequest" />
       <Stack.Screen component={ThreadRoute} name="thread" />
       <Stack.Screen component={SettingsRoute} name="settings" options={ROOT_OPTIONS} />
       <Stack.Screen component={PairRoute} name="pair" />
@@ -273,10 +293,12 @@ const ROOT_OPTIONS = { headerLargeTitleEnabled: true } as const;
 const PLACE_OPTIONS = hasLiquidGlass() ? {} : ROOT_OPTIONS;
 const HomeStack = () => <PlaceStack place="home" />;
 const ThreadsStack = () => <PlaceStack place="threads" />;
+const PullRequestsStack = () => <PlaceStack place="prs" />;
 const InboxStack = () => <PlaceStack place="inbox" />;
 const STACKS: Readonly<Partial<Record<MobilePlaceId, () => JSX.Element>>> = {
   home: HomeStack,
   threads: ThreadsStack,
+  prs: PullRequestsStack,
   inbox: InboxStack,
 };
 

@@ -71,3 +71,32 @@ export function projectMonogram(name: string): string {
 export function pullRequestChip(pullRequests: MobileRowPullRequests): string {
   return pullRequests.count === 1 ? String(pullRequests.number) : `+${pullRequests.count}`;
 }
+
+/**
+ * The thread's pull request in a few words for its bar: "#12 checks failing",
+ * "#12 ready to merge", "#12 merged". What blocks it leads; a thread with
+ * more than one names how many more.
+ */
+export function threadPullRequestStatus(pullRequests: MobileRowPullRequests): string {
+  const number = `#${pullRequests.number}`;
+  const more = pullRequests.count > 1 ? ` +${pullRequests.count - 1}` : "";
+  const words =
+    pullRequests.state === "merged"
+      ? "merged"
+      : pullRequests.state === "closed"
+        ? "closed"
+        : pullRequests.state === "draft"
+          ? "draft"
+          : pullRequests.checks === "failing"
+            ? "checks failing"
+            : pullRequests.mergeability === "conflicting"
+              ? "has conflicts"
+              : pullRequests.merging !== undefined
+                ? "merging"
+                : pullRequests.readyToMerge === true
+                  ? "ready to merge"
+                  : pullRequests.checks === "pending"
+                    ? "checks running"
+                    : "open";
+  return `${number} ${words}${more}`;
+}

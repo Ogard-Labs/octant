@@ -259,7 +259,15 @@ final class OfflineDemoTests: XCTestCase {
                 NSPredicate(format: "label BEGINSWITH %@", target)
             ).firstMatch
             switch parts.first ?? "" {
-            case "demo": enterDemo()
+            case "demo":
+                // A cold iPad Simulator can drop the first tap on the entry
+                // screen, so a drive by hand asks again before giving up.
+                let demo = element("mobile-entry-demo")
+                for _ in 0..<3 where !element("mobile-mock-banner").exists {
+                    if demo.waitForExistence(timeout: 30) && demo.isHittable { demo.tap() }
+                    _ = element("mobile-mock-banner").waitForExistence(timeout: 30)
+                }
+                XCTAssertTrue(element("mobile-inbox-home").waitForExistence(timeout: 30))
             case "tap": _ = control.waitForExistence(timeout: 10); control.tap()
             case "tab": tap(app.tabBars.buttons[target])
             case "press": _ = control.waitForExistence(timeout: 10); control.press(forDuration: 1.2)

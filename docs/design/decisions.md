@@ -3806,10 +3806,12 @@ The host is authoritative for mode, Project, thread, provider, approval and Done
 - A new phone capability is a new input or output on an existing route class, admitted by the fail-closed remote route classifier.
 - On a host whose own person paired it, the phone sets modes and levels (Full access included) with no owner unlock, and offers Always allow in this Project (maintainer decision, 2026-11-12). A restricted session sees neither.
 - Sensors are touched only on an explicit, visible act. The app receives no over-the-air code updates.
-
 - Words are the one thing that may wait on the phone (maintainer decision, 2026-11-25): a plain follow-up to an existing thread, written while its computer cannot be reached, sealed on the phone and sent once through the thread's own queue by an unlocked, foreground session. No approval, answer, stop, merge, setting, row action, file or new thread waits. The thread list outlives a restart, sealed and bound to the pairing ([Mobile maturity](mobile-maturity.md)).
 - A running turn can be stopped from the phone, naming the turn the person saw; a message written meanwhile goes to the thread's queue on the computer, where a waiting one can be edited, sent now or removed (maintainer request, 2026-11-25).
-  Not built yet:
+- A device the host's own person paired at Full reads each subagent of a thread whose Project is active on the computer and can stop one. A restricted device cannot. Steering a subagent stays on the computer. The thread shows them as a counted pill over the composer that opens Agents (maintainer request, 2026-11-26).
+- The phone's Pull requests place lists every paired computer's tracked pull requests with checks, review and merge state, and merges under the thread panel's rules. The person's Full device turns Babysit on or off for a linked thread there (maintainer request, 2026-11-26).
+
+Not built yet:
 
 - Phone screens for the rest of what the host accepts from such a device (packages, providers and keys, paired devices, host controls): not designed for the phone yet.
 

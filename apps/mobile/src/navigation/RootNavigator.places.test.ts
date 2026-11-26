@@ -69,6 +69,7 @@ vi.mock("../hosts/HostsScreen", () => ({
   HostsScreen: (props: { readonly notice?: string }) =>
     createElement("div", { "data-testid": "settings" }, props.notice),
 }));
+vi.mock("../hosts/expoOwnerUnlockPorts", () => ({ createExpoPhoneUnlockKey: () => undefined }));
 vi.mock("../todos/TodosScreen", () => ({ TodosScreen: () => null }));
 vi.mock("../inbox/ThreadRowActionsSheet", () => ({ ThreadRowActionsSheet: () => null }));
 vi.mock("../inbox/CodeDeliveryTargetSheet", () => ({ CodeDeliveryTargetSheet: () => null }));
@@ -202,12 +203,12 @@ afterEach(() => {
 });
 
 describe("the phone's navigation", () => {
-  it("shows Home, Threads and Inbox in the bar, while Bots and PRs stay hidden until their work lands", async () => {
+  it("shows Home, Threads, Pull requests and Inbox in the bar, while Bots stays hidden until its work lands", async () => {
     await render();
     const tabs = [...container.querySelectorAll('[role="tab"]')].map((tab) =>
       tab.getAttribute("aria-label"),
     );
-    expect(tabs).toEqual(["Home", "Threads", "Inbox"]);
+    expect(tabs).toEqual(["Home", "Threads", "Pull requests", "Inbox"]);
   });
 
   it("lists Chat, Work and Code threads from every computer in Threads, and narrows to Code", async () => {
