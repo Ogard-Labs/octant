@@ -61,6 +61,8 @@ const rows: Array<ScenarioRow> = [];
 const startedPids = new Map<number, string>();
 const cleanups: Array<() => Promise<void>> = [];
 const stables: Array<StableHarness> = [];
+/** Every harness's log, printed when a scenario fails. */
+const logs: Array<{ readonly name: string; readonly log: EventLog }> = [];
 
 function track(pid: number | undefined, purpose: string): void {
   if (pid !== undefined) startedPids.set(pid, purpose);
@@ -235,21 +237,52 @@ interface HarnessEvent {
 /** One process's `HARNESS` lines, waited on by predicate. */
 class EventLog {
   readonly #events: Array<HarnessEvent> = [];
+  readonly #arrived: Array<number> = [];
+  readonly #output: Array<string> = [];
   readonly #waiters = new Set<() => void>();
+  readonly #started = Date.now();
 
   attach(stream: NodeJS.ReadableStream, echo: string): void {
     createInterface({ input: stream }).on("line", (line) => {
       if (!line.startsWith("HARNESS ")) {
         if (process.env.OCTANT_NIGHTLY_SMOKE_VERBOSE === "1") console.error(`${echo}: ${line}`);
+        this.output(line);
         return;
       }
       try {
-        this.#events.push(JSON.parse(line.slice("HARNESS ".length)) as HarnessEvent);
+        this.note(JSON.parse(line.slice("HARNESS ".length)) as HarnessEvent);
       } catch {
         return;
       }
-      for (const waiter of this.#waiters) waiter();
     });
+  }
+
+  output(line: string): void {
+    this.#output.push(`+${Date.now() - this.#started}ms ${line.slice(0, 400)}`);
+    if (this.#output.length > 40) this.#output.shift();
+  }
+
+  note(event: HarnessEvent): void {
+    this.#events.push(event);
+    this.#arrived.push(Date.now());
+    for (const waiter of this.#waiters) waiter();
+  }
+
+  /**
+   * The last events and other output, timed from the process start. A failed
+   * scenario prints this: the failure happens in about one CI run in a
+   * hundred and does not reproduce on demand, so the run itself must say
+   * which request was refused, and why.
+   */
+  describe(): string {
+    const from = Math.max(0, this.#events.length - 60);
+    const events = this.#events
+      .slice(from)
+      .map(
+        (event, index) =>
+          `+${(this.#arrived[from + index] ?? this.#started) - this.#started}ms ${JSON.stringify(event).slice(0, 400)}`,
+      );
+    return [...events, "-- other output --", ...this.#output].join("\n");
   }
 
   mark(): number {
@@ -306,6 +339,7 @@ async function startStable(input: {
   });
   track(child.pid, `${input.name} synthetic Stable (Electron)`);
   const events = new EventLog();
+  logs.push({ name: input.name, log: events });
   if (child.stdout !== null) events.attach(child.stdout, input.name);
   if (child.stderr !== null) events.attach(child.stderr, input.name);
   const harness: StableHarness = {
@@ -323,7 +357,10 @@ async function startStable(input: {
     0,
     90_000,
   );
-  if (ready.event !== "ready") throw new Error(`${input.name} did not start.`);
+  if (ready.event !== "ready")
+    throw new Error(
+      `${input.name} did not start${typeof ready.message === "string" ? `: ${ready.message}` : "."}`,
+    );
   return harness;
 }
 
@@ -359,22 +396,35 @@ async function launchNightly(input: {
   const inherited: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env))
     if (value !== undefined && !name.startsWith("OCTANT_")) inherited[name] = value;
-  const app = await _electron.launch({
-    executablePath: input.binary,
-    args: [input.main],
-    env: {
-      ...inherited,
-      OCTANT_HARNESS_SOCKET: input.stable.socket,
-      OCTANT_HARNESS_WORK: input.work,
-      OCTANT_HARNESS_PICK_FOLDER: input.pickFolder,
-      OCTANT_HARNESS_MENU_PICK: "Third",
-      OCTANT_HARNESS_OWNER_PID: String(process.pid),
-    },
-    timeout: 60_000,
-  });
+  // Registered before launch: a Nightly that fails to start leaves only the
+  // launch error, whose process output the summary row would cut short.
+  const events = new EventLog();
+  logs.push({ name: `nightly for ${input.stable.socket}`, log: events });
+  let app: ElectronApplication;
+  try {
+    app = await _electron.launch({
+      executablePath: input.binary,
+      args: [input.main],
+      env: {
+        ...inherited,
+        OCTANT_HARNESS_SOCKET: input.stable.socket,
+        OCTANT_HARNESS_WORK: input.work,
+        OCTANT_HARNESS_PICK_FOLDER: input.pickFolder,
+        OCTANT_HARNESS_MENU_PICK: "Third",
+        OCTANT_HARNESS_OWNER_PID: String(process.pid),
+      },
+      timeout: 60_000,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    for (const line of message.split("\n")) events.output(line);
+    throw error;
+  }
   const pid = app.process().pid;
   track(pid, "Nightly harness (Electron)");
-  const events = new EventLog();
+  // Whether Nightly quit (recovery gave up or never began) or kept running
+  // while its windows were refused is the first question about a failure.
+  app.process().once("exit", (code, signal) => events.note({ event: "exited", code, signal }));
   const stdout = app.process().stdout;
   const stderr = app.process().stderr;
   if (stdout !== null) events.attach(stdout, "nightly");
@@ -531,6 +581,11 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function printLogs(failed: string): void {
+  for (const { name, log } of logs)
+    console.error(`--- ${name} after "${failed}" failed ---\n${log.describe()}`);
+}
+
 async function scenario(name: string, run: () => Promise<string | void>): Promise<boolean> {
   const started = performance.now();
   try {
@@ -549,6 +604,7 @@ async function scenario(name: string, run: () => Promise<string | void>): Promis
       ms: Math.round(performance.now() - started),
       detail: error instanceof Error ? error.message : String(error),
     });
+    printLogs(name);
     return false;
   }
 }
@@ -1241,6 +1297,8 @@ try {
     status: "fail",
     detail: error instanceof Error ? error.message : String(error),
   });
+  // A harness that fails to start never reaches a scenario.
+  printLogs("harness");
 } finally {
   await finish();
 }

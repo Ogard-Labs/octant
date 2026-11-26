@@ -1,7 +1,7 @@
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ShellSettings } from "@octant/contracts/shell";
 import type { SpeechLocalEngineStatus, VoiceSettings } from "@octant/contracts";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { SpeechCapabilityProvider } from "../voice/SpeechCapabilityContext";
@@ -501,7 +501,9 @@ describe("Apple Speech in Voice settings", () => {
     const before = status.mock.calls.length;
     localEngine.mockResolvedValue({ status: "ready", language: "fr-FR" as never });
     expect(await screen.findByText(/no recording leaves it/, {}, { timeout: 3_000 })).toBeVisible();
-    expect(status.mock.calls.length).toBeGreaterThan(before);
+    // The composers' provider asks the host again from an effect that runs
+    // after the ready text is drawn, so a busy runner can see the text first.
+    await waitFor(() => expect(status.mock.calls.length).toBeGreaterThan(before));
   });
 
   it("says a download failed and offers it again", async () => {
