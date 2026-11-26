@@ -425,8 +425,10 @@ export function ThreadScreen(props: ThreadScreenProps) {
   });
   const queueFollowUp = () => {
     const typed = typedClaimFor(typedScope, prompt).typedByPerson === true;
-    void queue.enqueue(prompt, typed).then((queued) => {
-      if (queued) setPrompt("");
+    const submitted = prompt;
+    void queue.enqueue(submitted, typed).then((queued) => {
+      // Words typed while the message joined the queue stay in the draft.
+      if (queued) setPrompt((draft) => (draft === submitted ? "" : draft));
     });
   };
   const appendToDraft = useCallback(

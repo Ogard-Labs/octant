@@ -8,7 +8,7 @@ import {
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
 import type { ThreadMessageQueueSnapshot } from "@octant/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 
 const QUEUE_REFRESH_MS = 2000;
@@ -24,7 +24,18 @@ export function useMobileMessageQueue(input: {
   readonly active: boolean;
   readonly allowChanges: boolean;
 }) {
-  const { transport, scope, active, allowChanges } = input;
+  const { transport, active, allowChanges } = input;
+  // The screen builds a new scope object on every render; keying on its parts
+  // keeps the reader stable, so a fresh snapshot does not restart polling.
+  const scopeMode = input.scope?.mode;
+  const scopeThreadId = input.scope?.threadId;
+  const scope = useMemo<MobileQueueScope | undefined>(
+    () =>
+      scopeMode === undefined || scopeThreadId === undefined
+        ? undefined
+        : { mode: scopeMode, threadId: scopeThreadId },
+    [scopeMode, scopeThreadId],
+  );
   const [snapshot, setSnapshot] = useState<ThreadMessageQueueSnapshot | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [changing, setChanging] = useState(false);
@@ -48,6 +59,12 @@ export function useMobileMessageQueue(input: {
       // next change says why if it fails too.
     }
   }, [transport, scope]);
+
+  // A thread opened with a paused or held queue and no running turn still
+  // shows what waits, so it can be edited or removed from the phone.
+  useEffect(() => {
+    void read();
+  }, [read]);
 
   const waiting = (snapshot?.items.length ?? 0) > 0;
   useEffect(() => {
