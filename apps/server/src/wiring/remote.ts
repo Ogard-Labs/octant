@@ -1587,9 +1587,16 @@ export function wireRemote(deps: RemoteDependencies) {
   const reconcilePublicEntrance = () => {
     // Open relays end with the entrance, the hub role, or the relay switch,
     // not only new ones; the upgraded sockets are no longer the listener's.
-    if (!publicEntrance.status().listening) hubRelay.closeAll();
-    else hubRelay.sweep();
-    void publicEntrance.reconcile().catch(() => undefined);
+    // All of it runs inside the look's promise: once the host stopped, the
+    // entrance answers closed without reading the database, which a test
+    // host has already shut (a synchronous status read here threw there).
+    void publicEntrance
+      .reconcile()
+      .then((open) => {
+        if (!open) hubRelay.closeAll();
+        hubRelay.sweep();
+      })
+      .catch(() => undefined);
   };
   setInterval(reconcilePublicEntrance, PUBLIC_ENTRANCE_LOOK_MS).unref();
   setTimeout(reconcilePublicEntrance, 0).unref();

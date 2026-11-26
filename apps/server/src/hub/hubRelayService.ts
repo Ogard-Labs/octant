@@ -120,16 +120,18 @@ export class HubRelayService {
    * not only the next one.
    */
   sweep(): void {
-    if (!this.#load().enabled || !this.#options.serving()) {
-      this.closeAll();
-      return;
-    }
+    // A host the roster dropped is forgotten even while the relay is off, so
+    // turning it back on never finds its keys.
     const listed = this.#options.members?.();
     if (listed !== undefined) {
       const members = new Set(listed);
       const held = this.#load();
       const kept = held.hosts.filter((host) => members.has(String(host.memberId)));
       if (kept.length !== held.hosts.length) this.#save({ ...held, hosts: kept });
+    }
+    if (!this.#load().enabled || !this.#options.serving()) {
+      this.closeAll();
+      return;
     }
     for (const open of this.#open.values()) {
       if (

@@ -182,20 +182,27 @@ async function answer(
   // wakes a write waiting on drain and cancels the response, so neither the
   // reader nor what the route holds for it is left waiting.
   let gone = false;
-  const closed = new Promise<void>((done) =>
-    outgoing.once("close", () => {
-      gone = true;
-      done();
-    }),
-  );
-  void closed.then(() => reader.cancel().catch(() => undefined));
+  outgoing.once("close", () => {
+    gone = true;
+    void reader.cancel().catch(() => undefined);
+  });
+  // One wait per full buffer, and both of its listeners leave with it, so a
+  // long stream gathers no callbacks.
+  const drainedOrGone = () =>
+    new Promise<void>((done) => {
+      const finish = () => {
+        outgoing.off("drain", finish);
+        outgoing.off("close", finish);
+        done();
+      };
+      outgoing.on("drain", finish);
+      outgoing.on("close", finish);
+    });
   try {
     while (!gone) {
       const next = await reader.read();
       if (next.done) break;
-      if (!outgoing.write(next.value)) {
-        await Promise.race([new Promise((done) => outgoing.once("drain", done)), closed]);
-      }
+      if (!outgoing.write(next.value) && !gone) await drainedOrGone();
     }
   } finally {
     if (gone) await reader.cancel().catch(() => undefined);
