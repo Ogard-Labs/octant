@@ -791,15 +791,29 @@ export function useCodeController(options: CodeControllerOptions) {
   // lives here rather than in the surface that ran the restore because that
   // surface is unmounted the moment the user opens another tab, and the only
   // copy of the state the restore overwrote would go with it.
-  const [restoreUndo, setRestoreUndo] = useState<CodeCheckpoint>();
+  //
+  // It is bound to the checkout the open thread was on when it was read or
+  // made, and offered only while the thread is still on that checkout: a
+  // thread rebound to another checkout keeps its transcript through a read
+  // that fails, and the old checkout's way back, sent to the new one, would
+  // overwrite files nobody asked about. The host's page does not say which
+  // checkout its restore point belongs to, so the binding is the renderer's.
+  const [restorePoint, setRestorePoint] = useState<{
+    readonly checkoutId: string | undefined;
+    readonly checkpoint: CodeCheckpoint;
+  }>();
+  // The checkout of the thread view last installed for the open thread; none
+  // until the first is installed, and a point read before then binds to it.
+  const installedCheckout = useRef<string | undefined>(undefined);
   /**
    * Carry what a restore just replaced, so the offer appears without waiting
    * for the thread to be reopened. The host has already recorded it; this only
    * keeps the renderer level with the journal it will read back next time.
    */
   const noteRestoreUndo = useCallback((checkpoint: CodeCheckpoint | undefined) => {
-    setRestoreUndo(checkpoint);
+    setRestorePoint(checkpoint && { checkoutId: installedCheckout.current, checkpoint });
   }, []);
+  const setRestoreUndo = noteRestoreUndo;
   const [keptUsage] = useState(() => new Map<string, CodeTurnUsage>(kept?.usageByOperation));
   const usageByOperation = useRef(keptUsage);
   // The host's fold of every own turn older than the oldest loaded one.
@@ -1209,6 +1223,15 @@ export function useCodeController(options: CodeControllerOptions) {
           ? view
           : (refreshActiveThreadView(view, bootstrapRef.current) ?? view);
       setActiveView(resolvedView);
+      const checkoutId = String(resolvedView.checkout.id);
+      installedCheckout.current = checkoutId;
+      setRestorePoint((point) =>
+        point?.checkoutId === undefined
+          ? point && { ...point, checkoutId }
+          : point.checkoutId === checkoutId
+            ? point
+            : undefined,
+      );
       setBootstrap((current) =>
         current === undefined
           ? current
@@ -2446,6 +2469,7 @@ export function useCodeController(options: CodeControllerOptions) {
     // files nobody asked about. Reading the open thread again keeps its own
     // until a read replaces it, so a read that fails leaves Undo restore.
     setRestoreUndo(undefined);
+    installedCheckout.current = undefined;
     setTurnUsageLimit(undefined);
     setLatestProviderTurnOperationId(undefined);
     if (firstTurnFailure !== undefined) {
@@ -4195,6 +4219,15 @@ export function useCodeController(options: CodeControllerOptions) {
       void activateThread(options.activeThreadId);
     }
   }, [activateThread, loadBootstrap, options.activeThreadId]);
+  // Offered only while both the view's checkout and the thread record name the
+  // checkout the point is bound to: a rebind reaches the thread record before
+  // the thread is read again and its new checkout installed.
+  const restoreUndo =
+    restorePoint !== undefined &&
+    restorePoint.checkoutId === String(activeView?.checkout.id) &&
+    restorePoint.checkoutId === String(activeView?.thread.checkoutId)
+      ? restorePoint.checkpoint
+      : undefined;
   // One identity while nothing in it moved, so the surfaces that take the
   // controller whole can bail out of a render that changed none of it.
   const returnedDraftFacts: {

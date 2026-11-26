@@ -2938,6 +2938,49 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("offers no restore point on a checkout the open thread moved to, though reading it again fails", async () => {
+    const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) };
+    const replacement = "40000000-0000-4000-8000-000000000002";
+    const client = fakeClient({
+      conversation: vi.fn(async () => ({
+        version: 3 as const,
+        threadId: ids.thread,
+        turns: [],
+        nextCursor: 0,
+        hasMore: false,
+        restoreUndo: checkpoint,
+      })) as never,
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.restoreUndo).toEqual(checkpoint));
+
+    // The person moves the open thread onto the Project's checkout, and the
+    // read of its history that follows fails.
+    const rebound = {
+      ...view(2),
+      checkout: { ...checkout(), id: replacement as never },
+      thread: { ...thread(2), checkoutId: replacement as never },
+    };
+    vi.mocked(client.thread).mockImplementation(async () => rebound);
+    vi.mocked(client.execute).mockResolvedValueOnce({
+      kind: "thread-checkout-rebind",
+      threadId: ids.thread,
+      outcome: { status: "rebound", thread: rebound.thread, checkout: rebound.checkout },
+    } as never);
+    vi.mocked(client.conversation).mockRejectedValueOnce(new Error("offline"));
+    await act(async () => {
+      await result.current.rebindThreadCheckout(ids.thread);
+    });
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+    );
+    await waitFor(() => expect(result.current.activeView?.checkout.id).toBe(replacement));
+    expect(result.current.restoreUndo).toBeUndefined();
+    unmount();
+  });
+
   it("keeps the thread's usage and restore point when a later page of reading it again fails on a host read whole", async () => {
     const [older, newer] = turnsOf("own", 2);
     const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) };
