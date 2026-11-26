@@ -1,4 +1,9 @@
-import type { NativeHarnessSlot, NativeHarnessSlotCandidate } from "@octant/contracts";
+import {
+  decodeProviderUsageLimitsSnapshot,
+  type NativeHarnessSlot,
+  type NativeHarnessSlotCandidate,
+  type ProviderUsageLimitsEntry,
+} from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
   chooseWorkerModel,
@@ -785,5 +790,68 @@ describe("usageLimitFromReading", () => {
       ),
     ).toBeUndefined();
     expect(usageLimitFromReading(undefined, now)).toBeUndefined();
+  });
+
+  it("does not turn one exhausted family window in a model-scoped reading into an account-wide limit", () => {
+    const decodeEntry = (
+      quota: "unknown" | "exhausted",
+      rateLimitWindows: ReadonlyArray<Record<string, unknown>>,
+    ): ProviderUsageLimitsEntry => {
+      const snapshot = decodeProviderUsageLimitsSnapshot({
+        version: 1,
+        refreshedAt: "2026-11-15T12:00:00.000Z",
+        entries: [
+          {
+            providerInstanceId: "00000000-0000-4000-8000-0000000000bb",
+            source: "provider-runtime",
+            observedAt: "2026-11-15T12:00:00.000Z",
+            status: "available",
+            limits: {
+              providerInstanceId: "00000000-0000-4000-8000-0000000000bb",
+              scope: "model",
+              requests: { status: "unavailable" },
+              tokens: { status: "unavailable" },
+              concurrency: { status: "unavailable" },
+              retry: { status: "inactive" },
+              quota,
+              source: "runtime-reported",
+              confidence: "high",
+              updatedAt: "2026-11-15T12:00:00.000Z",
+              rateLimitWindows,
+            },
+          },
+        ],
+      });
+      return snapshot.entries[0]!;
+    };
+
+    const modelScoped = decodeEntry("unknown", [
+      {
+        window: "gemini:five_hour",
+        status: "allowed",
+        utilization: 0.2,
+        resetsAt: "2026-11-15T14:00:00.000Z",
+        observedAt: "2026-11-15T12:00:00.000Z",
+      },
+      {
+        window: "claude_gpt:five_hour",
+        status: "exhausted",
+        utilization: 1,
+        resetsAt: "2026-11-15T14:00:00.000Z",
+        observedAt: "2026-11-15T12:00:00.000Z",
+      },
+    ]);
+    expect(usageLimitFromReading(modelScoped, now)).toBeUndefined();
+
+    const modelScopedExplicitExhausted = decodeEntry("exhausted", [
+      {
+        window: "claude_gpt:five_hour",
+        status: "exhausted",
+        utilization: 1,
+        resetsAt: "2026-11-15T14:00:00.000Z",
+        observedAt: "2026-11-15T12:00:00.000Z",
+      },
+    ]);
+    expect(usageLimitFromReading(modelScopedExplicitExhausted, now)).toEqual({});
   });
 });

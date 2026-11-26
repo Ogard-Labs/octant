@@ -16,6 +16,9 @@ import type { ProviderRuntimeTurnReport } from "./providerRuntimeUsageLimitsStor
  *   (Devin and OpenCode Go from the sign-in the CLI saved; Mistral Vibe
  *   from the API key Settings holds). No figures means that credential is
  *   missing.
+ * - `status-line`: Octant passively reads the local quota snapshot captured by
+ *   the CLI's documented `statusLine` hook when interactive `agy` runs (Google
+ *   Antigravity personal sign-in). Never wraps headless `agy -p`.
  * - `response-headers`: the HTTP endpoint attaches quota headers to the
  *   responses Octant already requests.
  * - `runtime-does-not-report`: the protocol has no limits channel; the
@@ -25,6 +28,7 @@ import type { ProviderRuntimeTurnReport } from "./providerRuntimeUsageLimitsStor
 export type ProviderLimitsReporting =
   | "usage-windows"
   | "account-endpoint"
+  | "status-line"
   | "response-headers"
   | "runtime-does-not-report"
   | "local-runtime";
@@ -32,13 +36,14 @@ export type ProviderLimitsReporting =
 export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimitsReporting {
   // The ACP protocol has no limits channel. Devin and Mistral Vibe differ
   // because Octant reads their plan windows from an account endpoint. Google
-  // Antigravity's own `/usage` is reached only through its headless mode,
-  // which Google does not support wrapping inside another application on
-  // consumer plans, so Octant does not read it.
+  // Antigravity's own `/usage` headless mode (`agy -p`) is not supported for
+  // wrapping inside third-party apps on consumer plans, so Octant never runs
+  // `agy -p`; instead it can passively read the CLI's documented `statusLine`
+  // hook when the person opts in and runs interactive `agy`.
   if (isAcpAgentKind(kind)) {
-    return kind === "devin" || kind === "mistral-vibe"
-      ? "account-endpoint"
-      : "runtime-does-not-report";
+    if (kind === "devin" || kind === "mistral-vibe") return "account-endpoint";
+    if (kind === "antigravity") return "status-line";
+    return "runtime-does-not-report";
   }
   switch (kind) {
     case "claude":
@@ -86,6 +91,7 @@ export function unavailableLimitsReason(
     case "usage-windows":
       return "unsupported";
     case "account-endpoint":
+    case "status-line":
       return "not-ready";
     case "response-headers":
       return lastCompletedTurn === "silent" ? "endpoint-silent" : "unsupported";

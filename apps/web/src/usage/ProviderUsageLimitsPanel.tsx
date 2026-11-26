@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "../ui/icons";
-import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
+import type {
+  ProviderLimitsCaptureStatus,
+  ProviderUsageLimitsClient,
+} from "@octant/client-runtime/provider-usage-limits-client";
 import type {
   ProviderInstance,
   ProviderServiceLimits,
@@ -16,6 +19,22 @@ import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { driverLabel } from "../providers/providerSettingsPresentation";
 import "../styles/usage.css";
 
+const CAPTURE_POLL_INTERVAL_MS = 2_000;
+const CAPTURE_POLL_DURATION_MS = 60_000;
+
+function entryReadingTimestampMs(entry: ProviderUsageLimitsEntry | undefined): number | undefined {
+  if (entry === undefined) return undefined;
+  const iso =
+    entry.status === "available"
+      ? entry.limits.updatedAt
+      : entry.status === "failed"
+        ? (entry.lastSuccessfulAt ?? entry.observedAt)
+        : undefined;
+  if (iso === undefined) return undefined;
+  const parsed = Date.parse(iso);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export function ProviderUsageLimitsPanel(props: {
   readonly client: ProviderUsageLimitsClient;
   readonly instances: ReadonlyArray<ProviderInstance>;
@@ -28,15 +47,36 @@ export function ProviderUsageLimitsPanel(props: {
     readonly busy: boolean;
   }>();
   const sequence = useRef(0);
+  const pollTimer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const current = reading?.client === props.client ? reading : undefined;
   const snapshot = current?.snapshot;
   const message = current?.message;
   const busy = current?.busy ?? true;
   const [now, setNow] = useState(Date.now);
+  const [captures, setCaptures] = useState<Readonly<Record<string, ProviderLimitsCaptureStatus>>>(
+    {},
+  );
+  const [captureBusyId, setCaptureBusyId] = useState<string>();
+  const [captureNotices, setCaptureNotices] = useState<Readonly<Record<string, string>>>({});
   const names = useMemo(
     () => new Map(props.instances.map((instance) => [String(instance.id), instance])),
     [props.instances],
   );
+  const stopCapturePoll = useCallback(() => {
+    if (pollTimer.current !== undefined) {
+      clearInterval(pollTimer.current);
+      pollTimer.current = undefined;
+    }
+  }, []);
+  const loadCaptures = useCallback(async () => {
+    if (props.client.listLimitsCaptures === undefined) return;
+    try {
+      const next = await props.client.listLimitsCaptures();
+      setCaptures(next);
+    } catch {
+      // Optional capability; ignore if unavailable.
+    }
+  }, [props.client]);
   const load = useCallback(
     async (refresh: boolean): Promise<void> => {
       const request = ++sequence.current;
@@ -52,6 +92,7 @@ export function ProviderUsageLimitsPanel(props: {
         if (request !== sequence.current) return;
         setNow(Date.now());
         setReading({ client: props.client, snapshot: next, busy: false });
+        void loadCaptures();
       } catch {
         if (request !== sequence.current) return;
         setReading((previous) => ({
@@ -66,14 +107,153 @@ export function ProviderUsageLimitsPanel(props: {
         }));
       }
     },
-    [props.client],
+    [loadCaptures, props.client],
+  );
+  const startCapturePoll = useCallback(
+    (instanceId: string, watermarkMs: number) => {
+      stopCapturePoll();
+      const deadline = Date.now() + CAPTURE_POLL_DURATION_MS;
+      pollTimer.current = setInterval(() => {
+        if (Date.now() >= deadline) {
+          stopCapturePoll();
+          setCaptureNotices((prev) => ({
+            ...prev,
+            [instanceId]: "No new reading arrived yet. Press Refresh after the CLI updates.",
+          }));
+          return;
+        }
+        const request = ++sequence.current;
+        void props.client
+          .list()
+          .then((next) => {
+            if (request !== sequence.current) return;
+            setNow(Date.now());
+            setReading({ client: props.client, snapshot: next, busy: false });
+            void loadCaptures();
+            const updatedEntry = next.entries.find(
+              (entry) => String(entry.providerInstanceId) === instanceId,
+            );
+            const updatedMs = entryReadingTimestampMs(updatedEntry);
+            if (
+              updatedEntry?.status === "available" &&
+              updatedMs !== undefined &&
+              updatedMs >= watermarkMs
+            ) {
+              stopCapturePoll();
+              setCaptureNotices((prev) => ({
+                ...prev,
+                [instanceId]: "Updated limits received.",
+              }));
+            }
+          })
+          .catch(() => undefined);
+      }, CAPTURE_POLL_INTERVAL_MS);
+    },
+    [loadCaptures, props.client, stopCapturePoll],
+  );
+  const handleConnectCapture = useCallback(
+    async (instanceId: string) => {
+      if (props.client.connectLimitsCapture === undefined) return;
+      stopCapturePoll();
+      setCaptureBusyId(instanceId);
+      setCaptureNotices((prev) => {
+        const { [instanceId]: _removed, ...rest } = prev;
+        return rest;
+      });
+      try {
+        const status = await props.client.connectLimitsCapture(instanceId);
+        setCaptures((prev) => ({ ...prev, [instanceId]: status }));
+        setCaptureNotices((prev) => ({ ...prev, [instanceId]: status.connectedHint }));
+        await load(true);
+      } catch (error) {
+        setCaptureNotices((prev) => ({
+          ...prev,
+          [instanceId]:
+            error instanceof Error ? error.message : "Could not connect local limits capture.",
+        }));
+      } finally {
+        setCaptureBusyId(undefined);
+      }
+    },
+    [load, props.client, stopCapturePoll],
+  );
+  const handleDisconnectCapture = useCallback(
+    async (instanceId: string) => {
+      if (props.client.disconnectLimitsCapture === undefined) return;
+      stopCapturePoll();
+      setCaptureBusyId(instanceId);
+      setCaptureNotices((prev) => {
+        const { [instanceId]: _removed, ...rest } = prev;
+        return rest;
+      });
+      try {
+        const result = await props.client.disconnectLimitsCapture(instanceId);
+        setCaptures((prev) => ({ ...prev, [instanceId]: result.status }));
+        setCaptureNotices((prev) => ({
+          ...prev,
+          [instanceId]: result.restored
+            ? "Status line disconnected and previous settings restored."
+            : "Status line disconnected.",
+        }));
+        await load(true);
+      } catch (error) {
+        setCaptureNotices((prev) => ({
+          ...prev,
+          [instanceId]:
+            error instanceof Error ? error.message : "Could not disconnect local limits capture.",
+        }));
+      } finally {
+        setCaptureBusyId(undefined);
+      }
+    },
+    [load, props.client, stopCapturePoll],
+  );
+  const handleTriggerCaptureRefresh = useCallback(
+    async (instanceId: string, entry: ProviderUsageLimitsEntry) => {
+      if (props.client.triggerLimitsCaptureRefresh === undefined) return;
+      setCaptureBusyId(instanceId);
+      setCaptureNotices((prev) => {
+        const { [instanceId]: _removed, ...rest } = prev;
+        return rest;
+      });
+      try {
+        const launchMs = Date.now();
+        const baselineMs = entryReadingTimestampMs(entry);
+        const watermarkMs =
+          baselineMs === undefined ? launchMs : Math.max(launchMs, baselineMs + 1);
+        const result = await props.client.triggerLimitsCaptureRefresh(instanceId);
+        if (result.launched) {
+          setCaptureNotices((prev) => ({
+            ...prev,
+            [instanceId]: "Opened interactive terminal. Waiting for fresh limits…",
+          }));
+          startCapturePoll(instanceId, watermarkMs);
+        } else {
+          setCaptureNotices((prev) => ({
+            ...prev,
+            [instanceId]:
+              result.message ?? "Run the provider CLI interactively in a terminal to refresh.",
+          }));
+        }
+      } catch (error) {
+        setCaptureNotices((prev) => ({
+          ...prev,
+          [instanceId]:
+            error instanceof Error ? error.message : "Could not launch interactive refresh.",
+        }));
+      } finally {
+        setCaptureBusyId(undefined);
+      }
+    },
+    [props.client, startCapturePoll],
   );
   useEffect(() => {
     void load(false);
     return () => {
       sequence.current += 1;
+      stopCapturePoll();
     };
-  }, [load]);
+  }, [load, stopCapturePoll]);
   useEffect(() => {
     const resets =
       snapshot?.entries
@@ -103,9 +283,15 @@ export function ProviderUsageLimitsPanel(props: {
   }, [snapshot, now]);
 
   const visible = snapshot?.entries.filter((entry) => names.has(String(entry.providerInstanceId)));
+  const captureFor = (entry: ProviderUsageLimitsEntry): ProviderLimitsCaptureStatus | undefined =>
+    captures[String(entry.providerInstanceId)];
   // Providers that cannot report limits collapse into one closing row instead
   // of a wall of identical cards; the runtime's reason still names each.
-  const unavailable = visible?.filter((entry) => entry.status === "unavailable") ?? [];
+  const unavailable =
+    visible?.filter(
+      (entry): entry is Extract<ProviderUsageLimitsEntry, { status: "unavailable" }> =>
+        entry.status === "unavailable" && captureFor(entry) === undefined,
+    ) ?? [];
   const body = (
     <>
       {message === undefined ? null : (
@@ -126,13 +312,18 @@ export function ProviderUsageLimitsPanel(props: {
       {visible === undefined || visible.length === 0 ? null : (
         <ul className="surface-list provider-limits__list">
           {visible.map((entry) => {
-            if (entry.status === "unavailable") return null;
-            const instance = names.get(String(entry.providerInstanceId));
+            const instanceId = String(entry.providerInstanceId);
+            const capture = captureFor(entry);
+            if (entry.status === "unavailable" && capture === undefined) return null;
+            const instance = names.get(instanceId);
+            const scopeDetail =
+              capture?.planTier !== undefined
+                ? `${capture.planTier} · ${limitScope(entry)}`
+                : limitScope(entry);
+            const captureBusy = captureBusyId === instanceId;
+            const captureNotice = captureNotices[instanceId];
             return (
-              <li
-                className="surface-row provider-limits__row"
-                key={String(entry.providerInstanceId)}
-              >
+              <li className="surface-row provider-limits__row" key={instanceId}>
                 <div className="surface-row__copy">
                   <span className="provider-limits__identity">
                     {instance === undefined ? null : (
@@ -144,16 +335,74 @@ export function ProviderUsageLimitsPanel(props: {
                     )}
                     <span className="oct-row-label">{instance?.displayName ?? "Provider"}</span>
                   </span>
-                  <span className="oct-row-detail">{limitScope(entry)}</span>
+                  <span className="oct-row-detail">
+                    {entry.status === "unavailable" && capture !== undefined
+                      ? capture.summary
+                      : scopeDetail}
+                  </span>
                 </div>
                 <div className="surface-row__control">
-                  <EntryDetails
-                    entry={entry}
-                    now={now}
-                    runtime={
-                      instance === undefined ? "This runtime" : driverLabel(instance.driverKind)
-                    }
-                  />
+                  <div className="provider-limits__details">
+                    {entry.status === "unavailable" && capture !== undefined ? (
+                      <p className="provider-limits__state">
+                        {capture.connected ? capture.connectedHint : capture.disconnectedHint}
+                      </p>
+                    ) : (
+                      <EntryDetails
+                        entry={entry}
+                        now={now}
+                        runtime={
+                          instance === undefined ? "This runtime" : driverLabel(instance.driverKind)
+                        }
+                      />
+                    )}
+                    {capture === undefined ? null : (
+                      <div className="provider-limits__actions">
+                        {capture.connected ? (
+                          <>
+                            {capture.refreshActionLabel === undefined ||
+                            props.client.triggerLimitsCaptureRefresh === undefined ? null : (
+                              <OctantButton
+                                disabled={captureBusy}
+                                onClick={() => void handleTriggerCaptureRefresh(instanceId, entry)}
+                                size="sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                {capture.refreshActionLabel}
+                              </OctantButton>
+                            )}
+                            {props.client.disconnectLimitsCapture === undefined ? null : (
+                              <OctantButton
+                                disabled={captureBusy}
+                                onClick={() => void handleDisconnectCapture(instanceId)}
+                                size="sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                Disconnect
+                              </OctantButton>
+                            )}
+                          </>
+                        ) : props.client.connectLimitsCapture === undefined ? null : (
+                          <OctantButton
+                            disabled={captureBusy}
+                            onClick={() => void handleConnectCapture(instanceId)}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            {capture.connectLabel}
+                          </OctantButton>
+                        )}
+                      </div>
+                    )}
+                    {captureNotice === undefined ? null : (
+                      <p className="provider-limits__updated" role="status">
+                        {captureNotice}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </li>
             );
@@ -284,6 +533,11 @@ const WINDOW_LABELS: Readonly<Record<string, string>> = {
 
 const DURATION_UNITS: Readonly<Record<string, string>> = { m: "minute", h: "hour", d: "day" };
 
+const SCOPE_LABELS: Readonly<Record<string, string>> = {
+  gemini: "Gemini",
+  claude_gpt: "Claude & GPT",
+};
+
 /**
  * Codex names its windows by slot and length (`primary_5h`, `secondary_7d`);
  * the length is what a reader recognizes, so it leads the label.
@@ -293,9 +547,9 @@ function windowLabel(window: string): string {
   if (separator >= 0) {
     const scope = window.slice(0, separator);
     const label = windowLabel(window.slice(separator + 1));
-    return scope === "account" || scope === "codex"
-      ? label
-      : `${scope.replaceAll("_", " ")} · ${label}`;
+    if (scope === "account" || scope === "codex") return label;
+    const scopeLabel = SCOPE_LABELS[scope] ?? scope.replaceAll("_", " ");
+    return `${scopeLabel} · ${label}`;
   }
   const known = WINDOW_LABELS[window];
   if (known !== undefined) return known;

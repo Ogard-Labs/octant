@@ -183,6 +183,7 @@ import {
   refreshReviewedModelManifest,
   ReviewedModelManifest,
 } from "../providers/reviewedModelManifest";
+import { AntigravityStatusLineBridge } from "../providers/antigravityStatusLineUsage";
 import { ProviderUsageLimitsService } from "../providers/providerUsageLimitsService";
 import { unavailableLimitsReason } from "../providers/providerLimitsReporting";
 import { createProviderUsageLimitsRouteHandler } from "../providers/providerUsageLimitsRoutes";
@@ -319,6 +320,7 @@ export interface ConfiguredProviderDriverOptions {
   readonly codexProcess: CodexProcessPort;
   readonly acpProcess?: AcpProcessPort;
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
+  readonly antigravityStatusLineBridge?: AntigravityStatusLineBridge;
   readonly hasPendingAcpInstallScripts?: (
     instance: Extract<ProviderInstance, { readonly driverKind: "acp-agent" }>,
   ) => Promise<boolean>;
@@ -525,6 +527,9 @@ export function makeConfiguredProviderDriver(
       permissionPersistence: options.permissionPersistence,
       ...(options.acpProcess === undefined ? {} : { acpProcess: options.acpProcess }),
       ...(options.acpHome === undefined ? {} : { acpHome: options.acpHome }),
+      ...(options.antigravityStatusLineBridge === undefined
+        ? {}
+        : { antigravityStatusLineBridge: options.antigravityStatusLineBridge }),
       ...(options.hasPendingAcpInstallScripts === undefined
         ? {}
         : { hasPendingAcpInstallScripts: options.hasPendingAcpInstallScripts }),
@@ -2439,6 +2444,9 @@ export function wireProviders(deps: ProvidersDependencies) {
       }
       return openAdmittedSqlite(admission);
     };
+    const antigravityStatusLineBridge = new AntigravityStatusLineBridge({
+      dataDirectory: join(providerDataDirectory, "providers"),
+    });
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
       octantVersion: version,
       toolEffects: deps.toolEffectLedger,
@@ -2454,6 +2462,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       codexProcess,
       acpProcess,
       acpHome,
+      antigravityStatusLineBridge,
       hasPendingAcpInstallScripts,
       piProcess,
       piHome,
@@ -2656,9 +2665,14 @@ export function wireProviders(deps: ProvidersDependencies) {
       join(providerDataDirectory, "providers", "usage-readings.json"),
     );
     const restoredUsageReadings = yield* Effect.promise(() => providerUsageReadingStore.load());
+    let stopAntigravityStatusLineWatch: (() => void) | undefined;
     const providerUsageLimitsService = new ProviderUsageLimitsService({
       restoredEntries: restoredUsageReadings,
       persistEntries: (entries) => providerUsageReadingStore.save(entries),
+      onStop: () => {
+        stopAntigravityStatusLineWatch?.();
+        stopAntigravityStatusLineWatch = undefined;
+      },
       // Image profiles are jobs against a generation endpoint, not runtimes
       // with an account to meter; listing them would promise a report that
       // has no channel to arrive on.
@@ -2738,10 +2752,46 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
     });
     providerUsageLimitsServiceRef = providerUsageLimitsService;
+    stopAntigravityStatusLineWatch = antigravityStatusLineBridge.watchReading(() => {
+      void providerUsageLimitsService.refresh().catch(() => undefined);
+    });
     providerUsageLimitsService.start();
     void providerUsageLimitsService.refresh().catch(() => undefined);
     const providerUsageLimitsRoutes = createProviderUsageLimitsRouteHandler({
       service: providerUsageLimitsService,
+      limitsCapture: {
+        list: () => {
+          const captures: Record<
+            string,
+            ReturnType<
+              NonNullable<NonNullable<ProviderDriver["contextFacts"]>["limitsCapture"]>["status"]
+            >
+          > = {};
+          for (const instance of persistence.readProviderInstances()) {
+            if (!instance.enabled) continue;
+            try {
+              const driver = makeConfiguredProviderDriver(instance, configuredDriverOptions);
+              const capture = driver.contextFacts?.limitsCapture;
+              if (capture !== undefined) {
+                captures[String(instance.id)] = capture.status();
+              }
+            } catch {
+              continue;
+            }
+          }
+          return captures;
+        },
+        resolve: (instanceId) => {
+          const instance = persistence.readProviderInstance(instanceId);
+          if (instance === undefined || !instance.enabled) return undefined;
+          try {
+            return makeConfiguredProviderDriver(instance, configuredDriverOptions).contextFacts
+              ?.limitsCapture;
+          } catch {
+            return undefined;
+          }
+        },
+      },
       windowAuthorityStore,
     });
     // Image generation runs through a provider instance and its credentials.

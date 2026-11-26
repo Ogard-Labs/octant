@@ -123,6 +123,31 @@ describe("the account chosen for an automatic call", () => {
     );
   });
 
+  it("does not block the whole account when a model-scoped reading reports one exhausted family", () => {
+    expect(
+      check({
+        limits: withLimits({
+          scope: "model",
+          quota: "unknown",
+          rateLimitWindows: [
+            {
+              window: "gemini:five_hour",
+              status: "allowed",
+              utilization: 0.2,
+              resetsAt: "2026-11-01T12:00:00.000Z",
+            },
+            {
+              window: "claude_gpt:five_hour",
+              status: "exhausted",
+              utilization: 1,
+              resetsAt: "2026-11-01T12:00:00.000Z",
+            },
+          ],
+        }),
+      }),
+    ).toBeUndefined();
+  });
+
   it("counts an emptied request or token bucket until its reset", () => {
     const empty = (resetsAt: string) => ({
       status: "available",

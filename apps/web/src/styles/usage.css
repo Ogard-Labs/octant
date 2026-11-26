@@ -479,6 +479,13 @@ html[data-octant-increased-contrast="true"] .usage-dashboard__error {
   color: var(--oct-muted);
 }
 
+.provider-limits__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-1);
+}
+
 .provider-limits--compact {
   width: 100%;
   min-width: 0;
