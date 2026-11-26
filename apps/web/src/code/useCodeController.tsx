@@ -1280,11 +1280,11 @@ export function useCodeController(options: CodeControllerOptions) {
       const turns: CodeConversationTurn[] = [];
       const messages: CodeConversationMessage[] = [];
       let pageLimits: ReadonlyArray<CodeProviderLimit> = [];
-      let pageRestoreUndo: CodeCheckpoint | undefined;
-      usageByOperation.current = new Map();
+      const usage: typeof usageByOperation.current = new Map();
       earlierUsage.current = undefined;
-      // A transcript already shown is replaced only once every page is read: a
-      // later page that fails must not leave it cut short.
+      // A transcript already shown, and the usage and restore point that go
+      // with it, are replaced only once every page is read: a later page that
+      // fails must not leave them cut short.
       const shown = conversationThreadKey.current === String(threadId);
       for (;;) {
         const page = await client.conversation(threadId, cursor, 50, signal);
@@ -1304,21 +1304,19 @@ export function useCodeController(options: CodeControllerOptions) {
         messages.push(...projected.messages);
         for (const turn of page.turns) {
           if (turn.usage !== undefined) {
-            usageByOperation.current.set(String(turn.operationId), turn.usage);
+            usage.set(String(turn.operationId), turn.usage);
           }
         }
         if (page.limits !== undefined) pageLimits = page.limits;
-        pageRestoreUndo = page.restoreUndo;
         nextCursor = page.nextCursor;
-        setThreadUsage((current) =>
-          retainThreadUsage(current, {
-            ...totalTurnUsage(usageByOperation.current),
-            limits: pageLimits,
-          }),
-        );
-        setRestoreUndo(pageRestoreUndo);
-        if (!shown || !page.hasMore)
+        if (!shown || !page.hasMore) {
+          usageByOperation.current = usage;
+          setThreadUsage((current) =>
+            retainThreadUsage(current, { ...totalTurnUsage(usage), limits: pageLimits }),
+          );
+          setRestoreUndo(page.restoreUndo);
           showConversation(threadId, [...inheritedConversation.current, ...messages]);
+        }
         if (projected.activity.size > 0) {
           takeReadActivity(projected.activity);
         }
@@ -2013,13 +2011,25 @@ export function useCodeController(options: CodeControllerOptions) {
         if (conversationOperationId !== undefined) {
           startConversationOperationStream(conversationOperationId);
         }
-        // A read of the thread that succeeds takes down the warning of one that failed.
-        const historyRead = () =>
+        // Until a read succeeds there is nothing shown to compare the newest
+        // turn with, so a look reads the thread.
+        let unread = openingReadFailed;
+        // A read of the thread that succeeds settles its history, whichever
+        // path started it: the warning a failed read put up comes down with
+        // the state it stood for. A read an older activation finishes
+        // settles nothing here.
+        const historyRead = () => {
+          if (!isActive(request, threadGeneration, mounted)) return;
+          // It may be the first read of the thread to succeed.
+          if (unread) void readFirstInheritedPage();
+          unread = false;
+          setConversationHistory("loaded");
           setTurnError((current) =>
             current === HISTORY_UNAVAILABLE_MESSAGE || current === HISTORY_UNREFRESHED_MESSAGE
               ? undefined
               : current,
           );
+        };
         let conversationPoll: Promise<void> | undefined;
         const startConversationPoll = () => {
           if (conversationPoll !== undefined) return;
@@ -2107,9 +2117,6 @@ export function useCodeController(options: CodeControllerOptions) {
         // A first read that failed covered nothing, so its activity is still
         // to be looked at.
         let triedActivity = openingReadFailed ? -1 : activityAtOpen;
-        // Until a read succeeds there is nothing shown to compare the newest
-        // turn with, so a look reads the thread.
-        let unread = openingReadFailed;
         let following = false;
         let retryPending = false;
         const followTurn = async () => {
@@ -2118,10 +2125,6 @@ export function useCodeController(options: CodeControllerOptions) {
           if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
             return true;
           conversationCursor = hydrated.nextCursor ?? conversationCursor;
-          // It may be the first read of the thread to succeed.
-          if (unread) void readFirstInheritedPage();
-          unread = false;
-          setConversationHistory("loaded");
           historyRead();
           if (hydrated.incomplete) startConversationPoll();
           if (hydrated.activeOperationId !== undefined) {
