@@ -5,6 +5,7 @@
 // of the spokes that ticked both Public and Standby, so it can serve the
 // moment it stands in, and hands the hub back what it still queues.
 
+import type { HubWebhookService } from "./hubWebhookService";
 import {
   type AuditActingPrincipal,
   type HubMembershipChangedPayload,
@@ -120,7 +121,10 @@ export function publicCopyTargets(
 
 /** The roster a serving host reads members from: the hub's own, or the one a standby holds. */
 export function servingRosterMembers(state: HubState): ReadonlyArray<RosterMember> {
-  return state.hub?.roster?.roster.members ?? state.link?.roster.roster.members ?? [];
+  // A host that was once a hub keeps its old roster on disk; only a hub role
+  // that is on makes it the one to read.
+  const own = state.hub?.enabled === true ? state.hub.roster?.roster.members : undefined;
+  return own ?? state.link?.roster.roster.members ?? [];
 }
 
 export type ServeWhileStandingInOutcome =
@@ -166,9 +170,11 @@ export function standbyPublicUrls(
 }
 
 /**
- * Hands the hub every delivery this standby still queues, one request each, and
- * reports which the hub took. A delivery the hub refuses as one it already
- * holds counts as taken: the spoke's claims are the final dedupe either way.
+ * Hands the hub every delivery this standby still queues, one request each,
+ * and reports what the hub took, what it can never take, and whether the hub
+ * refuses hand-back altogether. Only a delivery the hub queued, or already
+ * holds, is taken: the spoke's claims are the final dedupe either way. A hub
+ * whose queue is full leaves the rest for the next attempt.
  */
 export async function handBackWebhookQueue(input: {
   readonly link: HubLinkState;
@@ -178,9 +184,13 @@ export async function handBackWebhookQueue(input: {
   readonly now: () => number;
 }): Promise<{
   readonly taken: ReadonlyArray<HubWebhookHandback>;
-  readonly complete: boolean;
+  /** Deliveries the hub can never take: their endpoint is gone, or the entry is unreadable. */
+  readonly dropped: ReadonlyArray<HubWebhookHandback>;
+  /** `refused`: the hub no longer takes hand-back from this host at all. */
+  readonly outcome: "complete" | "incomplete" | "refused";
 }> {
   const taken: HubWebhookHandback[] = [];
+  const dropped: HubWebhookHandback[] = [];
   for (const queued of input.queue) {
     const answer = await sendHubLinkRequest({
       transport: input.transport,
@@ -197,10 +207,46 @@ export async function handBackWebhookQueue(input: {
       headers: { [HUB_PEER_KEY_HEADER]: input.identity.signing.hostPublicKey },
       now: input.now(),
     });
-    if (answer.status === "unreachable" || !answer.response.ok) {
-      return { taken, complete: false };
+    if (answer.status === "unreachable") return { taken, dropped, outcome: "incomplete" };
+    if (answer.response.status === 403) return { taken, dropped, outcome: "refused" };
+    if (answer.response.status === 400) {
+      dropped.push(queued);
+      continue;
     }
-    taken.push(queued);
+    if (!answer.response.ok) return { taken, dropped, outcome: "incomplete" };
+    const status = await answer.response
+      .json()
+      .then((body: unknown) =>
+        typeof body === "object" && body !== null && "status" in body ? body.status : undefined,
+      )
+      .catch(() => undefined);
+    if (status === "queued" || status === "duplicate") taken.push(queued);
+    else if (status === "unknown-endpoint") dropped.push(queued);
+    else return { taken, dropped, outcome: "incomplete" };
   }
-  return { taken, complete: true };
+  return { taken, dropped, outcome: "complete" };
+}
+
+/**
+ * One hand-back attempt for the webhook queue, true when the stand-in may go
+ * on to hand back its membership. A hub that refuses hand-back (it no longer
+ * names this host a standby, or runs without webhooks) cannot take what is
+ * left, and holding on would keep this host standing in forever, so what it
+ * cannot take is dropped on the record.
+ */
+export async function handBackPublicQueue(input: {
+  readonly webhooks: Pick<HubWebhookService, "handbackQueue" | "handedBack" | "dropHandback">;
+  readonly link: HubLinkState;
+  readonly identity: HubHostIdentity;
+  readonly transport: HubTransport;
+  readonly now: () => number;
+}): Promise<boolean> {
+  const queue = input.webhooks.handbackQueue();
+  if (queue.length === 0) return true;
+  const result = await handBackWebhookQueue({ ...input, queue });
+  input.webhooks.handedBack(result.taken);
+  input.webhooks.dropHandback(
+    result.outcome === "refused" ? input.webhooks.handbackQueue() : result.dropped,
+  );
+  return result.outcome !== "incomplete";
 }

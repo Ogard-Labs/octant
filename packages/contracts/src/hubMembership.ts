@@ -71,6 +71,7 @@ export const HubMembershipChange = Schema.Literal(
   "webhook-endpoints-received",
   "webhook-deliveries-expired",
   "webhook-deliveries-handed-back",
+  "webhook-deliveries-dropped",
   "visitor-switch-changed",
   "visitor-link-shared",
   "visitor-link-stopped",

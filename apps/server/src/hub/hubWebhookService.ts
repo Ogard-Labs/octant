@@ -181,15 +181,17 @@ export class HubWebhookService {
     const held = new Set(forEndpoint.flatMap((entry) => entry.keys));
     if (queued.keys.some((key) => held.has(key))) return { status: "duplicate" };
     const heldBytes = forEndpoint.reduce((total, entry) => total + entry.bytes, 0);
+    // Counted from the body itself, not from what the standby says it weighs.
+    const bytes = Buffer.from(queued.envelope.body, "base64").length;
     if (
       forEndpoint.length >= WEBHOOK_QUEUE_MAX_DELIVERIES ||
-      heldBytes + queued.bytes > WEBHOOK_QUEUE_MAX_BYTES
+      heldBytes + bytes > WEBHOOK_QUEUE_MAX_BYTES
     ) {
       return { status: "queue-full" };
     }
     this.#options.state.save({
       ...state,
-      webhookHub: { ...hub, queue: [...hub.queue, { ...queued, keys: [...queued.keys] }] },
+      webhookHub: { ...hub, queue: [...hub.queue, { ...queued, bytes, keys: [...queued.keys] }] },
     });
     this.#options.record({
       change: "webhook-deliveries-handed-back",
@@ -213,6 +215,17 @@ export class HubWebhookService {
   /** Drops what the hub took back; it is the hub's to deliver now. */
   handedBack(taken: ReadonlyArray<HubWebhookHandback>): void {
     for (const queued of taken) this.#remove(queued);
+  }
+
+  /** Drops deliveries the returning hub can never take, and journals how many. */
+  dropHandback(dropped: ReadonlyArray<HubWebhookHandback>): void {
+    if (dropped.length === 0) return;
+    for (const queued of dropped) this.#remove(queued);
+    this.#options.record({
+      change: "webhook-deliveries-dropped",
+      actingPrincipal: { kind: "hub", memberId: decodeMemberId(this.#options.hubMemberId()) },
+      webhookCount: dropped.length,
+    });
   }
 
   status(): HubWebhookStatus {
@@ -244,8 +257,12 @@ export class HubWebhookService {
     if (body.status === "too-large") return answer(413, { error: "too-large" });
     if (body.status === "aborted") return answer(400, { error: "invalid" });
     // The body read awaited; the endpoint, its queue and this host's role are
-    // judged as they are now, and nothing below awaits before the save.
-    if (!this.#options.serving()) return NOT_FOUND;
+    // judged as they are now, and nothing below awaits before the save. A
+    // standby that began handing back meanwhile has already taken its queue's
+    // snapshot, so it answers 503 and the sender retries at the hub.
+    if (!this.#options.serving()) {
+      return answer(503, { error: "unavailable" }, { "retry-after": "60" });
+    }
     const hub = this.#options.state.load().webhookHub;
     const endpoint = hub?.endpoints.find((entry) => String(entry.endpointId) === endpointId);
     if (hub === undefined || endpoint === undefined) return NOT_FOUND;

@@ -232,7 +232,7 @@ import { HubVisitorService } from "../hub/hubVisitorService";
 import { SpokeVisitorService } from "../hub/spokeVisitorService";
 import { askVisitorSpoke, spokeVisitorHubPort } from "../hub/visitorLinks";
 import {
-  handBackWebhookQueue,
+  handBackPublicQueue,
   servesPublicEntrance,
   servingRosterMembers,
   setServeWhileStandingIn,
@@ -1094,7 +1094,7 @@ export function wireRemote(deps: RemoteDependencies) {
   // A member that cannot reach the hub for the failover time tries the standbys,
   // and a named standby that sees no hub starts standing in. Off for a host that
   // is not a hub member: the look does nothing without a link.
-  let handBackPublicQueue: (link: HubLinkState) => Promise<boolean> = async () => true;
+  let handBackPublic: (link: HubLinkState) => Promise<boolean> = async () => true;
   const failoverService = new FailoverService({
     state: hubStateStore,
     identity: resolveHubIdentity,
@@ -1106,7 +1106,7 @@ export function wireRemote(deps: RemoteDependencies) {
     now: Date.now,
     noteHubWakeGeneration: (generation) => spokeWakeService.noteHubWakeGeneration(generation),
     // Bound below, once the webhook receipt exists; a step-down before then has nothing queued.
-    handBackPublic: (link) => handBackPublicQueue(link),
+    handBackPublic: (link) => handBackPublic(link),
   });
   setInterval(() => void failoverService.tick().catch(() => undefined), FAILOVER_LOOK_MS).unref();
   // The wake service is off until the person turns it on in the hub's window; its
@@ -1481,19 +1481,14 @@ export function wireRemote(deps: RemoteDependencies) {
       }),
   });
   publicEntranceSlot.bind(publicEntrance);
-  handBackPublicQueue = async (link) => {
-    const queue = hubWebhooks.handbackQueue();
-    if (queue.length === 0) return true;
-    const result = await handBackWebhookQueue({
+  handBackPublic = (link) =>
+    handBackPublicQueue({
+      webhooks: hubWebhooks,
       link,
       identity: resolveHubIdentity(),
       transport: hubTransport,
-      queue,
       now: Date.now,
     });
-    hubWebhooks.handedBack(result.taken);
-    return result.complete;
-  };
   // The role and the pause are read on every request; this catches a hub role
   // turned off or a join that ended, and closes the listener itself.
   const reconcilePublicEntrance = () => void publicEntrance.reconcile().catch(() => undefined);

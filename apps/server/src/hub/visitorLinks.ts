@@ -43,13 +43,27 @@ export function spokeVisitorHubPort(
         ? undefined
         : { memberId: String(link.hubMemberId) };
     },
+    recipients: () =>
+      publicCopyTargets(deps.state.load().link, deps.standbyGranted())
+        .map((target) => target.memberId)
+        .join(","),
     sendGrants: async (update: HubVisitorGrantsUpdate) => {
       const link = deps.state.load().link;
       const targets = publicCopyTargets(link, deps.standbyGranted());
       if (link === undefined || targets.length === 0) return false;
       const identity = deps.identity();
       let complete = true;
-      for (const target of targets) {
+      // A standby that no longer takes copies (Standby unticked, or out of the
+      // order) gets an empty list, so it holds nothing the person withdrew.
+      const current = new Set(targets.map((target) => target.memberId));
+      const withdrawn = publicCopyTargets(link, true).filter(
+        (target) => !current.has(target.memberId),
+      );
+      const sends = [
+        ...targets.map((target) => ({ target, body: update })),
+        ...withdrawn.map((target) => ({ target, body: { grants: [] } })),
+      ];
+      for (const { target, body } of sends) {
         const answer = await sendHubLinkRequest({
           transport: deps.transport,
           target: { origin: target.origin, pin: listenerPinFromDigest(target.pin) },
@@ -58,7 +72,7 @@ export function spokeVisitorHubPort(
           recipientMemberId: target.memberId,
           method: "POST",
           path: HUB_LINK_ROUTES.publicVisitorGrants,
-          body: JSON.stringify(update),
+          body: JSON.stringify(body),
           headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
           now: deps.now(),
         });

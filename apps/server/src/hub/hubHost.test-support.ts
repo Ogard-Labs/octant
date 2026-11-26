@@ -54,7 +54,7 @@ import { sendWebhookDelivery, spokeWebhookHubPort } from "./webhookLinks";
 import { HubVisitorService } from "./hubVisitorService";
 import { SpokeVisitorService, type VisitorThreadSource } from "./spokeVisitorService";
 import { askVisitorSpoke, spokeVisitorHubPort } from "./visitorLinks";
-import { handBackWebhookQueue, servesPublicEntrance, servingRosterMembers } from "./publicStandIn";
+import { handBackPublicQueue, servesPublicEntrance, servingRosterMembers } from "./publicStandIn";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
 import { TestCredentialBroker, TestPostureHost, TestThreadWakeHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
@@ -514,19 +514,8 @@ export async function startHubTestHost(input: {
     ...(input.failoverAfterMs === undefined
       ? {}
       : { failoverAfterMs: () => input.failoverAfterMs }),
-    handBackPublic: async (link) => {
-      const queue = webhooks.handbackQueue();
-      if (queue.length === 0) return true;
-      const result = await handBackWebhookQueue({
-        link,
-        identity,
-        transport,
-        queue,
-        now: Date.now,
-      });
-      webhooks.handedBack(result.taken);
-      return result.complete;
-    },
+    handBackPublic: (link) =>
+      handBackPublicQueue({ webhooks, link, identity, transport, now: Date.now }),
   });
   const wakeNow = input.wakeClock ?? Date.now;
   const magicPackets: Uint8Array[] = [];

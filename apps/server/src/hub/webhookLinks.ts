@@ -38,7 +38,9 @@ export function spokeWebhookHubPort(
   const targets = () => publicCopyTargets(deps.state.load().link, deps.standbyGranted());
   const toMember = async (memberId: string, path: string, body: unknown) => {
     const link = deps.state.load().link;
-    const target = targets().find((entry) => entry.memberId === memberId);
+    // Any named standby is reachable, so one the person withdrew can be sent
+    // an empty list; the service sends endpoints only to `targets`.
+    const target = publicCopyTargets(link, true).find((entry) => entry.memberId === memberId);
     if (link === undefined || target === undefined) return undefined;
     const identity = deps.identity();
     const answer = await sendHubLinkRequest({
@@ -57,6 +59,7 @@ export function spokeWebhookHubPort(
   };
   return {
     targets: () => targets().map(({ memberId, fingerprint }) => ({ memberId, fingerprint })),
+    named: () => publicCopyTargets(deps.state.load().link, true).map((entry) => entry.memberId),
     sealingKey: async (memberId): Promise<HubSealingKey | undefined> => {
       const response = await toMember(memberId, HUB_LINK_ROUTES.publicSealingKey, {});
       try {

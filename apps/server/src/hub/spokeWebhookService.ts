@@ -72,6 +72,8 @@ export interface SpokeWebhookHubPort {
     readonly memberId: string;
     readonly fingerprint: string;
   }>;
+  /** Every member that could hold copies (the hub and each named standby), ticked or not. */
+  readonly named?: () => ReadonlyArray<string>;
   readonly sealingKey: (memberId: string) => Promise<HubSealingKey | undefined>;
   readonly sendEndpoints: (memberId: string, update: HubWebhookEndpointsUpdate) => Promise<boolean>;
 }
@@ -140,6 +142,7 @@ export class SpokeWebhookService {
   #publishing: Promise<boolean> = Promise.resolve(true);
   /** Counts endpoint changes; a send clears `unpublished` only if none came while it was out. */
   #revision = 0;
+  #publishedRecipients: string | undefined;
 
   constructor(options: SpokeWebhookServiceOptions) {
     this.#options = options;
@@ -270,34 +273,45 @@ export class SpokeWebhookService {
     }
     const spokeMemberId = this.#options.state.load().link?.selfMemberId;
     if (endpoints.length > 0 && spokeMemberId === undefined) return false;
-    const update: HubWebhookEndpointsUpdate = {
+    // Each recipient gets only the copy sealed to its own key.
+    const updateFor = (key: HubSealingKey | undefined): HubWebhookEndpointsUpdate => ({
       endpoints:
-        spokeMemberId === undefined
+        spokeMemberId === undefined || key === undefined
           ? []
           : endpoints.map((endpoint) => ({
               endpointId: endpoint.endpointId,
               spokeMemberId,
               scheme: endpoint.scheme,
-              sealedSecrets: [...keys.values()].map((key) =>
+              sealedSecrets: [
                 sealWebhookSecret({
                   secret: endpoint.secret,
                   endpointId: String(endpoint.endpointId),
                   recipientMemberId: decodeMemberId(String(key.memberId)),
                   recipientPublicKey: key.sealingPublicKey,
                 }),
-              ),
+              ],
             })),
-    };
+    });
     const granted = this.#options.publicGranted();
+    const recipients = targets.map((target) => target.memberId);
     let complete = endpoints.length === 0 || keys.size === targets.length;
     for (const target of targets) {
       if (endpoints.length > 0 && !keys.has(target.memberId)) continue;
-      if (!(await hub.sendEndpoints(target.memberId, update))) complete = false;
+      if (!(await hub.sendEndpoints(target.memberId, updateFor(keys.get(target.memberId))))) {
+        complete = false;
+      }
+    }
+    // A standby the person withdrew (Standby unticked, or out of the order)
+    // is sent an empty list, so it keeps no sealed secret it was not meant to.
+    for (const memberId of hub.named?.() ?? []) {
+      if (recipients.includes(memberId)) continue;
+      if (!(await hub.sendEndpoints(memberId, { endpoints: [] }))) complete = false;
     }
     // An endpoint made or removed while this list was out is not in it; the
     // flag stays, and the next look sends the newer list.
     if (complete && revision === this.#revision) {
       this.#publishedGranted = granted;
+      this.#publishedRecipients = recipients.join(",");
       const { unpublished: _unpublished, ...rest } = this.#load();
       this.#save(rest);
     } else if (!complete) {
@@ -309,7 +323,13 @@ export class SpokeWebhookService {
   /** Sends the list again when the hub has not taken it, or when the Public item changed since. */
   async look(): Promise<void> {
     const granted = this.#options.publicGranted();
-    if (this.#load().unpublished !== true && granted === this.#publishedGranted) return;
+    const recipients = (this.#options.hub?.targets() ?? []).map((target) => target.memberId);
+    if (
+      this.#load().unpublished !== true &&
+      granted === this.#publishedGranted &&
+      recipients.join(",") === this.#publishedRecipients
+    )
+      return;
     await this.publish();
   }
 
