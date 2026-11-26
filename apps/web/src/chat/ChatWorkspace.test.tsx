@@ -2659,12 +2659,19 @@ describe("ChatWorkspace", () => {
 
     app.rerender(<Harness empty />);
     expect(screen.getByRole("heading", { name: "Start the conversation" })).toBeVisible();
+    const liveRegions = Array.from(
+      screen
+        .getByRole("region", { name: "Conversation" })
+        .querySelectorAll('[aria-live="polite"], [role="status"]'),
+    );
     reloadSource.mockReturnValueOnce(false);
     await user.click(
       screen.getByRole("button", { name: /Quote from the research subagent .*Third finding/ }),
     );
     await user.click(screen.getByRole("button", { name: "Show source" }));
-    expect(await screen.findByText("The source delivery is unavailable.")).toBeVisible();
+    const unavailable = await screen.findByText("The source delivery is unavailable.");
+    expect(unavailable).toBeVisible();
+    expect(liveRegions).toContain(unavailable);
     await user.click(
       screen.getByRole("button", { name: /Quote from the research subagent .*Third finding/ }),
     );

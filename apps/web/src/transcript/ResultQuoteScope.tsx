@@ -70,11 +70,11 @@ export function ResultSourceNotice(props: {
     };
   }, [target, missing, loadRow, finish]);
 
-  return unavailable ? (
-    <p className="oct-meta" role="status">
-      The source delivery is unavailable.
-    </p>
-  ) : null;
+  return (
+    <div aria-live="polite" aria-atomic="true" className={unavailable ? "oct-meta" : "sr-only"}>
+      {unavailable ? "The source delivery is unavailable." : null}
+    </div>
+  );
 }
 
 // The plain-text quote carries an opaque reference. Keep transcript
