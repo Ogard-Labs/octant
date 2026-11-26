@@ -5617,13 +5617,18 @@ decision, 2026-11-26): the host settings **Resume at reset by default** and
 committed appends for a journaled usage-limit stop and, when a setting is on,
 runs the mode's ordinary `schedule-*-usage-resume` or
 `snooze-*-thread-at-usage-reset` command as the host, the resume record carrying
-`origin: "default"` and journaled as the `system` actor. It arms each stop at
-most once, so a default the person cancels stays cancelled, and only a stop
-that names a reset still ahead on a turn a person sent: the Chat, Work and Code
-routes record a turn when its sender is the person at a window or a device they
-paired (never an outside agent's grant or a device only the hub introduced),
-in the running host's memory, so a turn a routine, wake-up, agent, delivery or
-queued message started, or one sent before a restart, is never covered. The
+`origin: "default"` and journaled as the `system` actor; a command that lost a
+version race to another write on the thread is tried once more. It arms each
+stopped turn (in Chat, each attempt) at most once, whatever reset it is
+journaled with later, so a default the person cancels stays cancelled, and
+only a stop that names a reset still ahead on a turn a person sent: the Chat,
+Work and Code routes record a turn when its sender is the person at a window
+or a device they paired (never an outside agent's grant or a device only the
+hub introduced), in the running host's memory, so a turn a routine, wake-up,
+agent, delivery or queued message started, or one sent before a restart, is
+never covered. A Chat retry continues the same turn, so Chat records the
+attempt the person's send or retry admitted: the scheduler's own retry is not
+one, and a default resume that stops again never arms another. The
 resume is never armed on a provider account whose sign-in refuses the host's
 continuations. Nothing else changes: the resume fires through the same
 scheduler, inspection and ordinary turn admission as a person's opt-in.

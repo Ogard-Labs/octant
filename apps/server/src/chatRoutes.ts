@@ -52,7 +52,7 @@ export interface ChatRouteDependencies {
    * paired; never an outside agent's grant or a device only the hub
    * introduced), which alone the usage-limit defaults may arm for.
    */
-  readonly notePersonSentTurn?: (turnId: string) => void;
+  readonly notePersonSentTurn?: (turnId: string, attemptId: string) => void;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly maxAttachmentBodySize?: number;
@@ -432,9 +432,6 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           );
         }
         const personSent = boundPrincipalIsThePerson(request);
-        if (command.kind === "retry-chat-turn" && personSent) {
-          dependencies.notePersonSentTurn?.(String(command.turnId));
-        }
         return jsonResponse(
           await dependencies.service.execute(command, {
             windowId: authenticatedWindowId,
@@ -443,7 +440,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
             // other device session is refused a secret answer by the service.
             initiator: boundPrincipalIsRestricted(request) ? "agent" : "user",
             ...(boundPrincipalIsAgent(request) ? { fromOutsideAgent: true } : {}),
-            ...(command.kind === "send-chat-turn" &&
+            ...((command.kind === "send-chat-turn" || command.kind === "retry-chat-turn") &&
             personSent &&
             dependencies.notePersonSentTurn !== undefined
               ? { onPersonTurnAdmitted: dependencies.notePersonSentTurn }

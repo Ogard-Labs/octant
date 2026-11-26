@@ -1,3 +1,5 @@
+import { UsageLimitDefaults } from "../usage/usageLimitDefaults";
+import { usageLimitDefaultCommands } from "../usage/usageLimitDefaultCommands";
 import {
   CodeNavigation,
   CodeNavigationRuntime,
@@ -7906,6 +7908,55 @@ describe("scheduling a Code thread's usage-limit resume", () => {
         expectedVersion: 1,
         events: [
           expect.objectContaining({ eventName: "usage-resume.scheduled@1" }),
+          expect.objectContaining({ eventName: "code.thread-updated@1" }),
+        ],
+      }),
+    );
+  });
+
+  it("arms the default resume at reset as the host, through the ordinary command", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      events: [waitingLimitEnvelope()],
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+    const defaults = new UsageLimitDefaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: false }),
+      personSent: () => true,
+      providerInstanceOf: () => "provider",
+      refusesHostContinuations: () => false,
+      clock: () => new Date(Date.parse(resetsAt) - 60 * 60_000),
+      ...usageLimitDefaultCommands({
+        hostScope: ROUTINE_HOST_SCOPE_ID,
+        readVersion: () => 1,
+        chat: { execute: async () => undefined },
+        work: { execute: async () => undefined },
+        code: {
+          execute: (windowId, input, signal, context) =>
+            fixture.service.execute(windowId, input, signal, context),
+        },
+      }),
+    });
+
+    const armed = await defaults.arm({
+      mode: "code",
+      threadId: String(ids.thread),
+      turnId: operationId,
+      usageLimit: { kind: "exhausted", resetsAt: resetsAt as never },
+    });
+
+    expect(armed).toEqual({ resumed: true, snoozed: false });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({
+            eventName: "usage-resume.scheduled@1",
+            actor: expect.objectContaining({ kind: "system" }),
+            payload: {
+              resume: expect.objectContaining({ turnId: operationId, origin: "default" }),
+            },
+          }),
           expect.objectContaining({ eventName: "code.thread-updated@1" }),
         ],
       }),

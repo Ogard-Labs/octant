@@ -717,11 +717,13 @@ export interface ChatServiceExecutionContext {
    */
   readonly usageResumeOrigin?: "default";
   /**
-   * Set only by the person's own route: told the id of the turn a send just
-   * admitted, before its run starts, so the usage-limit defaults know a person
-   * sent it. The send's answer comes only after the run, too late for a stop.
+   * Set only by the person's own route: told the turn and attempt a send or a
+   * retry just admitted, before its run starts, so the usage-limit defaults
+   * know a person started that attempt. The answer comes only after the run,
+   * too late for a stop. The host's own retries never carry it, so a default
+   * resume that stops again cannot arm another.
    */
-  readonly onPersonTurnAdmitted?: (turnId: string) => void;
+  readonly onPersonTurnAdmitted?: (turnId: string, attemptId: string) => void;
   /**
    * Called once a sent turn is journaled and before it runs, for a caller
    * that must answer as soon as the message is in rather than when the
@@ -3439,7 +3441,7 @@ export class ChatService {
         releaseDrain();
         throw error;
       }
-      executionContext?.onPersonTurnAdmitted?.(String(turn.id));
+      executionContext?.onPersonTurnAdmitted?.(String(turn.id), String(turn.attempts[0]?.id));
       // After the turn, before its run: a turn with no mark is not the
       // person's words, so a failed or missing mark is the safe side.
       if (executionContext?.typedByPerson === true) {
@@ -4661,6 +4663,7 @@ export class ChatService {
           },
         },
       );
+      executionContext?.onPersonTurnAdmitted?.(String(command.turnId), String(nextAttempt.id));
       return {
         thread: updatedThread,
         turn: updatedTurn,

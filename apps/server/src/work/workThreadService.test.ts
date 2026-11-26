@@ -1,3 +1,5 @@
+import { UsageLimitDefaults } from "../usage/usageLimitDefaults";
+import { usageLimitDefaultCommands } from "../usage/usageLimitDefaultCommands";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -3537,6 +3539,56 @@ describe("scheduling a Work thread's usage-limit resume", () => {
           expect.objectContaining({ eventName: "usage-resume.scheduled@1" }),
           expect.objectContaining({ eventName: "work.thread-updated@1" }),
         ],
+      }),
+    );
+  });
+
+  it("arms the default resume at reset and the default snooze as the host, through the ordinary commands", async () => {
+    const turn = usageLimitTurn({ kind: "exhausted", resetsAt: "2099-07-19T13:00:00.000Z" });
+    const fixture = serviceFixture({ threads: [thread()], turns: [turn] });
+    const defaults = new UsageLimitDefaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: true }),
+      personSent: () => true,
+      providerInstanceOf: () => String(ids.provider),
+      refusesHostContinuations: () => false,
+      clock: () => new Date(now),
+      ...usageLimitDefaultCommands({
+        hostScope: ROUTINE_HOST_SCOPE_ID,
+        readVersion: (_aggregateType, threadId) =>
+          fixture.projection.read(threadId as never)?.version ?? 0,
+        chat: { execute: async () => undefined },
+        work: {
+          execute: (windowId, input, context) => fixture.service.execute(windowId, input, context),
+        },
+        code: { execute: async () => undefined },
+      }),
+    });
+
+    const armed = await defaults.arm({
+      mode: "work",
+      threadId: String(ids.thread),
+      turnId: String(turn.turnId),
+      usageLimit: { kind: "exhausted", resetsAt: "2099-07-19T13:00:00.000Z" as never },
+    });
+
+    expect(armed).toEqual({ resumed: true, snoozed: true });
+    const armedThread = fixture.projection.read(ids.thread);
+    expect(armedThread?.usageResume).toMatchObject({
+      status: "scheduled",
+      record: { turnId: String(turn.turnId), origin: "default" },
+    });
+    expect(armedThread?.snooze).toMatchObject({
+      until: "2099-07-19T13:00:00.000Z",
+      origin: "usage-limit",
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: expect.arrayContaining([
+          expect.objectContaining({
+            eventName: "usage-resume.scheduled@1",
+            actor: expect.objectContaining({ kind: "system" }),
+          }),
+        ]),
       }),
     );
   });

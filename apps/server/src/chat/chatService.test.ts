@@ -6755,44 +6755,62 @@ describe("ChatService", () => {
     expect(view.thread.usageResume?.record.resetsAt).toBe("2026-07-19T13:00:00.000Z");
   });
 
+  async function defaultArmingFixture() {
+    const { service, persistence } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "limited",
+      usageLimitResetsAt: "2099-07-19T13:00:00.000Z",
+    });
+    const people = new PersonSentTurns();
+    const armed: string[] = [];
+    const defaults = new UsageLimitDefaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: false }),
+      personSent: (mode, key) => people.sent(mode, key),
+      providerInstanceOf: (_mode, threadId) =>
+        String(persistence.readChatThread(threadId as never)?.providerInstanceId),
+      refusesHostContinuations: () => false,
+      clock: () => new Date(),
+      scheduleResume: async (stop) => {
+        armed.push(String(stop.attemptId));
+        await service.execute(
+          {
+            kind: "schedule-chat-usage-resume",
+            threadId: stop.threadId,
+            expectedVersion: service.read(stop.threadId as never).thread.version,
+            turnId: stop.turnId,
+            attemptId: stop.attemptId,
+          },
+          { usageResumeOrigin: "default" },
+        );
+      },
+      snoozeAtReset: async () => undefined,
+    });
+    const unsubscribe = persistence.journal.subscribeCommitted((append) =>
+      defaults.onCommittedAppend(append),
+    );
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    const person = {
+      onPersonTurnAdmitted: (turnId: string, attemptId: string) =>
+        people.note("chat", `${turnId}:${attemptId}`),
+    };
+    const parked = (attempts: number) =>
+      until(
+        () =>
+          service.read(created.thread.id).turns[0]?.attempts.length === attempts &&
+          service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+        { timeoutMs: 10_000 },
+      );
+    return { service, created, person, armed, parked, unsubscribe };
+  }
+
   it("arms the default resume at reset only for a stop on a turn the person sent", async () => {
     const run = async (personSends: boolean) => {
-      const { service, persistence } = openFixture({
-        nativeConversation: true,
-        turnOutcome: "limited",
-        usageLimitResetsAt: "2099-07-19T13:00:00.000Z",
-      });
-      const people = new PersonSentTurns();
-      const defaults = new UsageLimitDefaults({
-        settings: () => ({ resumeAtReset: true, snoozeUntilReset: false }),
-        personSent: (mode, turnId) => people.sent(mode, turnId),
-        providerInstanceOf: (_mode, threadId) =>
-          String(persistence.readChatThread(threadId as never)?.providerInstanceId),
-        refusesHostContinuations: () => false,
-        clock: () => new Date(),
-        scheduleResume: async (stop) => {
-          await service.execute(
-            {
-              kind: "schedule-chat-usage-resume",
-              threadId: stop.threadId,
-              expectedVersion: service.read(stop.threadId as never).thread.version,
-              turnId: stop.turnId,
-              attemptId: stop.attemptId,
-            },
-            { usageResumeOrigin: "default" },
-          );
-        },
-        snoozeAtReset: async () => undefined,
-      });
-      const unsubscribe = persistence.journal.subscribeCommitted((append) =>
-        defaults.onCommittedAppend(append),
-      );
-      const created = await service.execute({
-        kind: "create-chat-thread",
-        hostId: "local",
-        title: "Limited turn",
-      });
-      if (created.kind !== "thread-created") throw new Error("Expected thread.");
+      const { service, created, person, parked, unsubscribe } = await defaultArmingFixture();
       await service.execute(
         {
           kind: "send-chat-turn",
@@ -6800,12 +6818,9 @@ describe("ChatService", () => {
           expectedVersion: created.thread.version,
           prompt: "Spend it",
         },
-        personSends ? { onPersonTurnAdmitted: (turnId) => people.note("chat", turnId) } : {},
+        personSends ? person : {},
       );
-      await until(
-        () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
-        { timeoutMs: 10_000 },
-      );
+      await parked(1);
       if (personSends) {
         await until(() => service.read(created.thread.id).thread.usageResume !== undefined, {
           timeoutMs: 10_000,
@@ -6822,6 +6837,40 @@ describe("ChatService", () => {
     expect(armed?.record.origin).toBe("default");
     // A turn the host sent (a routine, a wake-up, a delivery) is never covered.
     expect(await run(false)).toBeUndefined();
+  });
+
+  it("a host retry that hits the limit again does not arm the default", async () => {
+    const { service, created, person, armed, parked, unsubscribe } = await defaultArmingFixture();
+    await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Spend it",
+      },
+      person,
+    );
+    await parked(1);
+    await until(() => armed.length === 1, { timeoutMs: 10_000 });
+    const first = service.read(created.thread.id);
+    const turn = first.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) throw new Error("Expected the stop.");
+    // The scheduler's own retry at the reset, which carries no person.
+    await service.execute(
+      {
+        kind: "retry-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: first.thread.version,
+        turnId: turn.id,
+        attemptId: attempt.id,
+      },
+      { limitRecovery: true },
+    );
+    await parked(2);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    unsubscribe();
+    expect(armed).toEqual([String(attempt.id)]);
   });
 
   it("withdraws the scheduled resume when the person cancels it", async () => {

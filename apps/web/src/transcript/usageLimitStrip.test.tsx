@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderUsageLimit, UsageResumeThreadState, UtcTimestamp } from "@octant/contracts";
 import { usageLimitStripNotice, usageLimitStripText } from "./usageLimitStrip";
 
@@ -83,6 +83,38 @@ describe("the usage-limit strip", () => {
       expect(screen.getByRole("button", { name: "Resume now" })).toBeDefined();
       view.unmount();
     }
+  });
+
+  describe("while it sits parked", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("stops offering Resume at reset and Snooze once the reset passes", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+      renderStrip(
+        usageLimitStripNotice({
+          limit: {
+            kind: "exhausted",
+            resetsAt: new Date(NOW + 90_000).toISOString() as UtcTimestamp,
+          },
+          provider: "Codex",
+          ...handlers(),
+        }),
+      );
+      expect(screen.getByRole("button", { name: "Resume at reset" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Snooze until reset" })).toBeDefined();
+
+      act(() => {
+        vi.advanceTimersByTime(91_000);
+      });
+
+      expect(screen.queryByRole("button", { name: "Resume at reset" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Snooze until reset" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Resume now" })).toBeDefined();
+      expect(screen.getByText(/· now$/)).toBeDefined();
+    });
   });
 
   it("a billing stop shows no reset and no resume", () => {

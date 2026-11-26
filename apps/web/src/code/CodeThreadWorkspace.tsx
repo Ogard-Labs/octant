@@ -181,6 +181,7 @@ import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { PendingRequests } from "../transcript/PendingRequests";
 import { providerInstanceLabel, providerModelLabel } from "../providers/providerModelLabel";
 import { usageLimitStripNotice } from "../transcript/usageLimitStrip";
+import { resumeStoppedPromptNow, stoppedPromptOf } from "./resumeStoppedPrompt";
 import {
   TranscriptHandoff,
   resolveTranscriptHandoff,
@@ -1153,14 +1154,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // Resume now sends the stopped turn's own prompt again as the person's next
   // turn, the continuation the host would send at the reset, through the
   // ordinary turn admission.
-  const stoppedPrompt =
-    providerTurnOperationId === undefined
-      ? undefined
-      : props.controller.conversation.find(
-          (message) =>
-            message.role === "user" &&
-            String(message.operationId) === String(providerTurnOperationId),
-        )?.text;
+  const stoppedPrompt = stoppedPromptOf(
+    props.controller.conversation,
+    providerTurnOperationId === undefined ? undefined : String(providerTurnOperationId),
+  );
   const usageLimitNotice =
     props.controller.turnStatus !== "waiting" || props.controller.turnUsageLimit === undefined
       ? undefined
@@ -1175,15 +1172,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ...(readOnly
             ? {}
             : {
-                ...(stoppedPrompt === undefined || stoppedPrompt.trim().length === 0
+                ...(stoppedPrompt === undefined
                   ? {}
                   : {
                       onResumeNow: () =>
-                        void props.controller.sendFollowUp(
+                        void resumeStoppedPromptNow(
+                          props.controller,
                           stoppedPrompt,
-                          [],
-                          [],
-                          [],
                           thread.executionPolicy,
                         ),
                     }),

@@ -10,15 +10,17 @@
  * A default applies only to a stop that:
  * - names a reset that is still ahead (a billing stop never does);
  * - belongs to a turn a person sent from a window on this computer or a
- *   device they paired, in this host process (`PersonSentTurns`); a turn a
- *   routine, a wake-up, an agent, a delivery or a queued message started is
- *   never covered, and neither is one whose sender the host no longer knows
- *   after a restart;
+ *   device they paired, in this host process (`PersonSentTurns`); for Chat,
+ *   whose retries reuse the turn, to the attempt the person started, so a
+ *   default resume that stops again never arms another; a turn a routine, a
+ *   wake-up, an agent, a delivery or a queued message started is never
+ *   covered, and neither is one whose sender the host no longer knows after a
+ *   restart;
  * - is on a provider account that does not refuse the host's continuations
  *   (the resume only; a snooze starts nothing).
  *
- * Each stop is armed at most once, so a default the person cancels stays
- * cancelled.
+ * Each stopped turn (Chat: attempt) is armed at most once, whatever reset it
+ * is journaled with later, so a default the person cancels stays cancelled.
  */
 import {
   decodeChatAttemptUpdated,
@@ -75,7 +77,8 @@ export interface UsageLimitDefaultsOptions {
     readonly resumeAtReset: boolean;
     readonly snoozeUntilReset: boolean;
   };
-  readonly personSent: (mode: UsageLimitDefaultsMode, turnId: string) => boolean;
+  /** Whether a person started the stopped turn; see `personSentKey`. */
+  readonly personSent: (mode: UsageLimitDefaultsMode, key: string) => boolean;
   /** The provider account the thread runs on now, if the thread is still there. */
   readonly providerInstanceOf: (
     mode: UsageLimitDefaultsMode,
@@ -87,6 +90,11 @@ export interface UsageLimitDefaultsOptions {
   /** The mode's ordinary commands, run as the host. Each throws when the mode refuses. */
   readonly scheduleResume: (stop: UsageLimitStop) => Promise<void>;
   readonly snoozeAtReset: (stop: UsageLimitStop) => Promise<void>;
+  /**
+   * Whether a refusal only says the thread moved on between the stop and the
+   * command (a stale version). Such a command is tried once more.
+   */
+  readonly isStale?: (error: unknown) => boolean;
   /** Queues the arming after the committing append returns. */
   readonly defer?: (run: () => void) => void;
   readonly onError?: (message: string, error: unknown) => void;
@@ -140,8 +148,17 @@ export function usageLimitStopOf(event: EventEnvelope): UsageLimitStop | undefin
   }
 }
 
+/**
+ * What `PersonSentTurns` records for a stop: the turn, and for Chat the
+ * attempt too, since a Chat retry continues the same turn.
+ */
+export const personSentKey = (stop: UsageLimitStop): string =>
+  stop.attemptId === undefined ? stop.turnId : `${stop.turnId}:${stop.attemptId}`;
+
+// The reset is left out on purpose: the same stopped turn journaled again with
+// another reset must not arm a default the person already cancelled.
 const stopKey = (stop: UsageLimitStop) =>
-  `${stop.mode}:${stop.threadId}:${stop.turnId}:${stop.attemptId ?? ""}:${stop.usageLimit.resetsAt ?? ""}`;
+  `${stop.mode}:${stop.threadId}:${stop.turnId}:${stop.attemptId ?? ""}`;
 
 /** How many armed stops are remembered so a replayed or repeated stop never re-arms. */
 const REMEMBERED_STOPS = 2_048;
@@ -188,29 +205,45 @@ export class UsageLimitDefaults {
     let resumed = false;
     let snoozed = false;
     if (settings.resumeAtReset && this.#mayResume(stop)) {
-      try {
-        await this.#options.scheduleResume(stop);
-        resumed = true;
-      } catch (error) {
-        this.#options.onError?.("The default resume at reset was refused.", error);
-      }
+      resumed = await this.#run(
+        () => this.#options.scheduleResume(stop),
+        "The default resume at reset was refused.",
+      );
     }
     if (settings.snoozeUntilReset) {
-      try {
-        await this.#options.snoozeAtReset(stop);
-        snoozed = true;
-      } catch (error) {
-        this.#options.onError?.("The default snooze until reset was refused.", error);
-      }
+      snoozed = await this.#run(
+        () => this.#options.snoozeAtReset(stop),
+        "The default snooze until reset was refused.",
+      );
     }
     return { resumed, snoozed };
+  }
+
+  /**
+   * Runs one mode command, once more if the first lost a version race with
+   * another write to the thread (the stop's own projection update, a title):
+   * the stop is remembered before the command, so a lost race would
+   * otherwise drop the default for good.
+   */
+  async #run(command: () => Promise<void>, refusal: string): Promise<boolean> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await command();
+        return true;
+      } catch (error) {
+        if (attempt === 0 && this.#options.isStale?.(error) === true) continue;
+        this.#options.onError?.(refusal, error);
+        return false;
+      }
+    }
+    return false;
   }
 
   #qualifies(stop: UsageLimitStop): boolean {
     const limit = stop.usageLimit;
     if (limit.kind === "billing" || limit.resetsAt === undefined) return false;
     if (Date.parse(limit.resetsAt) <= this.#options.clock().getTime()) return false;
-    return this.#options.personSent(stop.mode, stop.turnId);
+    return this.#options.personSent(stop.mode, personSentKey(stop));
   }
 
   #mayResume(stop: UsageLimitStop): boolean {

@@ -1,14 +1,12 @@
 import { UsageLimitDefaults, type PersonSentTurns } from "../usage/usageLimitDefaults";
+import { usageLimitDefaultCommands } from "../usage/usageLimitDefaultCommands";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import { randomUUID } from "node:crypto";
 import {
   decodeChatSubmissionId,
   decodeChatThreadId,
   decodeCodeThreadId,
-  decodeAggregateVersion,
-  decodeCodeOperationId,
   decodeContextSubjectRef,
-  decodeEventActor,
   decodeProviderInstanceId,
   personalSignInRefusals,
   decodeProviderSessionId,
@@ -283,7 +281,6 @@ export function wireContinuation(deps: ContinuationDependencies) {
     // The person's usage-limit defaults: arm the resume or the snooze on a
     // stop the person's own send hit, through each mode's ordinary command,
     // as the host. The resume then fires through the scheduler above.
-    const hostActor = decodeEventActor({ kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID });
     const usageLimitDefaults = new UsageLimitDefaults({
       settings: () => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
@@ -292,7 +289,13 @@ export function wireContinuation(deps: ContinuationDependencies) {
           snoozeUntilReset: settings.usageLimitSnoozeUntilResetByDefault,
         };
       },
-      personSent: (mode, turnId) => deps.personSentTurns.sent(mode, turnId),
+      personSent: (mode, key) => deps.personSentTurns.sent(mode, key),
+      isStale: (error) =>
+        typeof error === "object" &&
+        error !== null &&
+        "failure" in error &&
+        (error as { readonly failure?: { readonly category?: unknown } }).failure?.category ===
+          "stale",
       providerInstanceOf: (mode, threadId) => {
         const providerInstanceId =
           mode === "chat"
@@ -307,80 +310,20 @@ export function wireContinuation(deps: ContinuationDependencies) {
           persistence.readProviderInstance(decodeProviderInstanceId(providerInstanceId)),
         )?.refusesUnattendedRuns !== undefined,
       clock: () => new Date(),
-      scheduleResume: async (stop) => {
-        const expectedVersion = readAggregateVersion(
-          persistence.connection,
-          `${stop.mode}-thread`,
-          stop.threadId,
-        );
-        if (stop.mode === "chat") {
-          await chatService.execute(
-            {
-              kind: "schedule-chat-usage-resume",
-              threadId: stop.threadId,
-              expectedVersion,
-              turnId: stop.turnId,
-              attemptId: stop.attemptId,
-            },
-            { usageResumeOrigin: "default", actor: hostActor },
-          );
-        } else if (stop.mode === "work") {
-          await deps.workThreadService.execute(
-            ROUTINE_HOST_SCOPE_ID,
-            {
-              kind: "schedule-work-usage-resume",
-              threadId: stop.threadId,
-              expectedVersion,
-              turnId: stop.turnId,
-            },
-            { usageResumeOrigin: "default", actor: hostActor },
-          );
-        } else {
-          await deps.codeService.execute(
-            ROUTINE_HOST_SCOPE_ID,
-            {
-              kind: "schedule-code-usage-resume",
-              threadId: decodeCodeThreadId(stop.threadId),
-              expectedVersion: decodeAggregateVersion(expectedVersion),
-              operationId: decodeCodeOperationId(stop.turnId),
-            },
-            undefined,
-            { usageResumeOrigin: "default", actor: hostActor },
-          );
-        }
-      },
-      snoozeAtReset: async (stop) => {
-        const expectedVersion = decodeAggregateVersion(
-          readAggregateVersion(persistence.connection, `${stop.mode}-thread`, stop.threadId),
-        );
-        if (stop.mode === "chat") {
-          await chatService.execute(
-            {
-              kind: "snooze-chat-thread-at-usage-reset",
-              threadId: stop.threadId,
-              expectedVersion,
-            },
-            { actor: hostActor },
-          );
-        } else if (stop.mode === "work") {
-          await deps.workThreadService.execute(
-            ROUTINE_HOST_SCOPE_ID,
-            { kind: "snooze-work-thread-at-usage-reset", threadId: stop.threadId, expectedVersion },
-            { actor: hostActor },
-          );
-        } else {
-          await deps.codeService.execute(
-            ROUTINE_HOST_SCOPE_ID,
-            {
-              kind: "snooze-code-thread-at-usage-reset",
-              threadId: decodeCodeThreadId(stop.threadId),
-              expectedVersion,
-            },
-            undefined,
-            { actor: hostActor },
-          );
-        }
-      },
+      ...usageLimitDefaultCommands({
+        hostScope: ROUTINE_HOST_SCOPE_ID,
+        readVersion: (aggregateType, threadId) =>
+          readAggregateVersion(persistence.connection, aggregateType, threadId),
+        chat: { execute: (input, context) => chatService.execute(input, context) },
+        work: {
+          execute: (windowId, input, context) =>
+            deps.workThreadService.execute(windowId, input, context),
+        },
+        code: {
+          execute: (windowId, input, signal, context) =>
+            deps.codeService.execute(windowId, input, signal, context),
+        },
+      }),
       onError: (message, error) => console.error(`[usage-limit defaults] ${message}`, error),
     });
     const unsubscribeUsageLimitDefaults = persistence.journal.subscribeCommitted((append) =>

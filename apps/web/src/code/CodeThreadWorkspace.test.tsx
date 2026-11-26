@@ -1549,7 +1549,35 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Resume now" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("Fix the build", [], [], [], expect.anything());
+    const call = sendFollowUp.mock.calls[0] as ReadonlyArray<unknown> | undefined;
+    expect(call?.[0]).toBe("Fix the build");
+    // Sent from outside the composer, so the person's draft is left alone.
+    expect(call?.[13]).toMatchObject({ onAccepted: expect.any(Function) });
+  });
+
+  it("withholds Resume now when the stopped prompt could not be read", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnUsageLimit: { kind: "temporary" },
+          latestProviderTurnOperationId: "op-1",
+          conversation: [
+            {
+              id: "m1",
+              role: "user",
+              text: "Conversation prompt evidence is unavailable.",
+              promptUnavailable: true,
+              operationId: "op-1",
+            },
+          ],
+          sendFollowUp: vi.fn(async () => true),
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+    expect(document.querySelector(".usage-limit-strip")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume now" })).toBeNull();
   });
 
   it("keeps the retry control off an ordinary turn error", () => {

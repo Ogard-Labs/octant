@@ -1080,7 +1080,8 @@ export function wireChat(deps: ChatDependencies) {
     });
     const chatRoutes = createChatRouteHandler({
       service: chatService,
-      notePersonSentTurn: (turnId) => deps.personSentTurns.note("chat", turnId),
+      notePersonSentTurn: (turnId, attemptId) =>
+        deps.personSentTurns.note("chat", `${turnId}:${attemptId}`),
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       maxAttachmentBodySize: MAX_CHAT_ATTACHMENT_BYTES,

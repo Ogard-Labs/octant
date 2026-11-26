@@ -119,6 +119,34 @@ export function usageLimitStripText(input: {
   return parts.join(" · ");
 }
 
+/**
+ * The time a strip part reads. A part given a fixed `now` (tests) keeps it;
+ * otherwise it moves every 30 seconds and once more the moment the reset
+ * arrives, so a countdown and the offers that need a reset still ahead never
+ * outlive it while the strip sits parked above the composer.
+ */
+function useStripNow(fixed: number | undefined, resetsAt: string | undefined): number {
+  const [tick, setTick] = useState(() => Date.now());
+  const counting = fixed === undefined && resetsAt !== undefined;
+  useEffect(() => {
+    if (!counting || resetsAt === undefined) return;
+    const timer = setInterval(() => setTick(Date.now()), 30_000);
+    const untilReset = new Date(resetsAt).getTime() - Date.now();
+    const atReset =
+      untilReset > 0 && untilReset < 2_147_483_647
+        ? setTimeout(() => setTick(Date.now()), untilReset + 1)
+        : undefined;
+    return () => {
+      clearInterval(timer);
+      if (atReset !== undefined) clearTimeout(atReset);
+    };
+  }, [counting, resetsAt]);
+  return fixed ?? tick;
+}
+
+const clockedReset = (limit: ProviderUsageLimit): string | undefined =>
+  limit.kind === "billing" ? undefined : limit.resetsAt;
+
 /** The line itself, kept moving while it sits above the composer. */
 function UsageLimitStripLine(props: {
   readonly limit: ProviderUsageLimit;
@@ -126,34 +154,32 @@ function UsageLimitStripLine(props: {
   readonly usageResume?: UsageResumeThreadState | undefined;
   readonly now?: number | undefined;
 }) {
-  const [tick, setTick] = useState(() => Date.now());
-  const counting = props.now === undefined && props.limit.kind !== "billing";
-  useEffect(() => {
-    if (!counting) return;
-    const timer = setInterval(() => setTick(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, [counting]);
+  const now = useStripNow(props.now, clockedReset(props.limit));
   return (
     <span className="usage-limit-strip">
       {usageLimitStripText({
         limit: props.limit,
         provider: props.provider,
         usageResume: props.usageResume,
-        now: props.now ?? tick,
+        now,
       })}
     </span>
   );
 }
 
-export function usageLimitStripNotice(input: UsageLimitStripInput): ComposerNoticeItem {
-  const now = input.now ?? Date.now();
+/**
+ * The strip's ways on, decided against the moving clock: Resume at reset and
+ * Snooze leave the moment the reset passes, since the host would refuse both.
+ */
+function UsageLimitStripActions(props: { readonly input: UsageLimitStripInput }) {
+  const input = props.input;
+  const now = useStripNow(input.now, clockedReset(input.limit));
   const resume = input.usageResume;
-  const billing = input.limit.kind === "billing";
   const ahead = resetIsAhead(input.limit, now);
   const scheduled = resume?.status === "scheduled";
   const dispatched = resume?.status === "dispatched";
   const actions = [
-    !billing && !dispatched && input.onResumeNow !== undefined ? (
+    !dispatched && input.onResumeNow !== undefined ? (
       <OctantButton key="now" onClick={input.onResumeNow} size="sm" type="button">
         Resume now
       </OctantButton>
@@ -173,6 +199,19 @@ export function usageLimitStripNotice(input: UsageLimitStripInput): ComposerNoti
       </OctantButton>
     ) : null,
   ].filter((action) => action !== null);
+  return actions.length === 0 ? null : (
+    <span className="usage-limit-strip__actions">{actions}</span>
+  );
+}
+
+export function usageLimitStripNotice(input: UsageLimitStripInput): ComposerNoticeItem {
+  // A billing stop offers nothing at all, so its card carries no action area.
+  const offersAnything =
+    input.limit.kind !== "billing" &&
+    (input.onResumeNow !== undefined ||
+      input.onScheduleResume !== undefined ||
+      input.onCancelResume !== undefined ||
+      input.onSnoozeAtReset !== undefined);
   return {
     key: "usage-limit",
     tone: "warning",
@@ -181,12 +220,10 @@ export function usageLimitStripNotice(input: UsageLimitStripInput): ComposerNoti
       <UsageLimitStripLine
         limit={input.limit}
         provider={input.provider}
-        usageResume={resume}
+        usageResume={input.usageResume}
         now={input.now}
       />
     ),
-    ...(actions.length === 0
-      ? {}
-      : { action: <span className="usage-limit-strip__actions">{actions}</span> }),
+    ...(offersAnything ? { action: <UsageLimitStripActions input={input} /> } : {}),
   };
 }

@@ -31,7 +31,7 @@ function defaults(
   const snoozeAtReset = vi.fn(async () => undefined);
   const service = new UsageLimitDefaults({
     settings: () => ({ resumeAtReset: true, snoozeUntilReset: true }),
-    personSent: (mode, turnId) => people.sent(mode, turnId),
+    personSent: (mode, key) => people.sent(mode, key),
     providerInstanceOf: () => "provider-1",
     refusesHostContinuations: () => false,
     clock: () => NOW,
@@ -104,6 +104,78 @@ describe("usage-limit defaults", () => {
     // The person cancels; the stop is journaled again (another projection
     // update of the same waiting turn).
     await service.arm(limited);
+    expect(scheduleResume).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-arm a cancelled default when the same turn is journaled again with another reset", async () => {
+    const { service, scheduleResume } = defaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: false }),
+    });
+    await service.arm(stop({ kind: "exhausted", resetsAt: AHEAD }));
+    await service.arm(
+      stop({ kind: "exhausted", resetsAt: "2026-07-19T14:00:00.000Z" as UtcTimestamp }),
+    );
+    expect(scheduleResume).toHaveBeenCalledTimes(1);
+  });
+
+  it("tries the command once more when it lost a version race, and no more", async () => {
+    const stale = Object.assign(new Error("Thread changed."), {
+      failure: { category: "stale" },
+    });
+    const onError = vi.fn();
+    const scheduleResume = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(stale)
+      .mockResolvedValueOnce(undefined);
+    const { service } = defaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: false }),
+      scheduleResume,
+      isStale: (error) => error === stale,
+      onError,
+    });
+    expect(await service.arm(stop({ kind: "exhausted", resetsAt: AHEAD }))).toEqual({
+      resumed: true,
+      snoozed: false,
+    });
+    expect(scheduleResume).toHaveBeenCalledTimes(2);
+
+    const alwaysStale = vi.fn<() => Promise<void>>().mockRejectedValue(stale);
+    const second = defaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: false }),
+      scheduleResume: alwaysStale,
+      isStale: (error) => error === stale,
+      onError,
+    });
+    expect(await second.service.arm(stop({ kind: "exhausted", resetsAt: AHEAD }))).toEqual({
+      resumed: false,
+      snoozed: false,
+    });
+    expect(alwaysStale).toHaveBeenCalledTimes(2);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it("covers only the Chat attempt the person started, not a later retry of the same turn", async () => {
+    const people = new PersonSentTurns();
+    people.note("chat", `${TURN}:attempt-1`);
+    const scheduleResume = vi.fn(async () => undefined);
+    const service = new UsageLimitDefaults({
+      settings: () => ({ resumeAtReset: true, snoozeUntilReset: false }),
+      personSent: (mode, key) => people.sent(mode, key),
+      providerInstanceOf: () => "provider-1",
+      refusesHostContinuations: () => false,
+      clock: () => NOW,
+      scheduleResume,
+      snoozeAtReset: async () => undefined,
+    });
+    const chatStop = (attemptId: string): UsageLimitStop => ({
+      mode: "chat",
+      threadId: THREAD,
+      turnId: TURN,
+      attemptId,
+      usageLimit: { kind: "exhausted", resetsAt: AHEAD },
+    });
+    await service.arm(chatStop("attempt-1"));
+    await service.arm(chatStop("attempt-2"));
     expect(scheduleResume).toHaveBeenCalledTimes(1);
   });
 
