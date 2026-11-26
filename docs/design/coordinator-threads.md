@@ -44,7 +44,7 @@ read-only gate is a maintainer live check.
   the host's own person paired. A new thread's creation command may not carry
   the role, lineage, switches, bounds, done-when condition, or workers' level.
 - **Several per Project.** A Code Project may have as many coordinators at
-  once as Settings › Permissions › Coordinators per Project allows (default 4,
+  once as Settings › Limits › Coordinators per Project allows (default 4,
   1 to 32), for separate lines of work (one for the backlog, one for a
   dependency audit). Each coordinator has its own workers. The host reads the
   setting when a person makes a coordinator or designates a planner; lowering

@@ -394,3 +394,84 @@ it("discloses a signed-in screenshot and its recipient before approving a video"
     rootNode.remove();
   }
 });
+
+const waitingThreadId = "00000000-0000-4000-8000-000000000020";
+const waitingOffer = {
+  kind: "narrate",
+  threadKind: "work-thread",
+  scopeId: waitingThreadId,
+  offerId: "00000000-0000-4000-8000-000000000023",
+  requestedAt: "2026-10-15T06:00:00.000Z",
+  excerpt: "Welcome to the release walkthrough",
+  characters: 34,
+  relativePath: "narration/intro.mp3",
+  voice: "alloy",
+  endpointName: "Studio",
+  modelId: "tts-1",
+  format: "mp3",
+};
+
+async function renderOffers(
+  offers: ReadonlyArray<unknown>,
+  check: (node: HTMLElement, answers: ReadonlyArray<string>) => Promise<void> | void,
+) {
+  const answers: string[] = [];
+  const authenticatedFetch: MobileRemoteTransport["authenticatedFetch"] = async (request) => {
+    if (request.method === "GET") return Response.json({ offers });
+    answers.push(String(request.body));
+    return Response.json({ kind: "offer-answered" });
+  };
+  const node = document.createElement("div");
+  document.body.append(node);
+  const root = createRoot(node);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          children: createElement(ServiceOfferCard, {
+            transport: { hostId: "studio", authenticatedFetch },
+            authenticator: {
+              hasDeviceCredential: async () => true,
+              authenticate: async () => "confirmed" as const,
+            },
+            threadId: waitingThreadId,
+            threadKind: "work-thread",
+            inProject: true,
+          }),
+        }),
+      ),
+    );
+    await check(node, answers);
+  } finally {
+    act(() => root.unmount());
+    node.remove();
+  }
+}
+
+it.each([
+  ["a field this build does not know", { ...waitingOffer, sendsTo: "somewhere-new" }],
+  ["a kind this build does not know", { ...waitingOffer, kind: "hologram" }],
+  ["a payload out of range", { ...waitingOffer, characters: -1 }],
+])("shows no card and takes no answer on the phone for an offer with %s", async (_, offer) => {
+  await renderOffers([offer], (node, answers) => {
+    expect(node.textContent).toBe("");
+    expect(node.querySelector('[data-testid="mobile-service-offer"]')).toBeNull();
+    expect(answers).toEqual([]);
+  });
+});
+
+it("shows and answers the next waiting offer when the phone refuses the first", async () => {
+  const next = { ...waitingOffer, offerId: "00000000-0000-4000-8000-000000000024" };
+  await renderOffers(
+    [{ ...waitingOffer, sendsTo: "somewhere-new" }, { ...waitingOffer, kind: "hologram" }, next],
+    async (node, answers) => {
+      expect(node.textContent).toContain("Narrate this text to an audio file?");
+      const decline = node.querySelector<HTMLElement>('[aria-label="Don\'t narrate"]');
+      await act(async () => decline?.click());
+      expect(answers.map((answer) => JSON.parse(answer))).toEqual([
+        { offerId: next.offerId, decision: "cancel" },
+      ]);
+    },
+  );
+});

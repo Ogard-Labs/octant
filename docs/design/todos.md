@@ -23,7 +23,7 @@ built for this host's and paired computers' Projects and Chat: the draft with it
 Link again, the thread state on a row, and Tick off. Every window on the list
 host follows changes as they happen: each change publishes the host's `todos`
 change topic, and a window reads the list again on it (and every 30 seconds
-while visible, for a feed that is reconnecting). Settings › To-dos › Keep the
+while visible, for a feed that is reconnecting). Settings › Data & storage › Keep the
 list on is built: this host, or a computer this window is paired with, saved
 on this host and refused once this host keeps a to-do. A window reaches a list
 on another computer through its own pairing with it, shows the last list
@@ -111,7 +111,7 @@ Every person has one **list host**.
   once as a system choice, so losing membership or the hub becoming unreachable
   never silently switches back to a new local list. Moving a populated list is
   separate work; an existing list stays visible on its current host.
-- **Choosing.** Settings › To-dos › Keep the list on names the list host: this
+- **Choosing.** Settings › Data & storage › Keep the list on names the list host: this
   host, the hub, or a computer this host is paired with. In the first version
   the choice can change only while this host's own list is empty; moving a
   list from one host to another is later work. The choice is journaled on this

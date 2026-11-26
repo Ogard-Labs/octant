@@ -1,6 +1,6 @@
 # Application ground
 
-The picture or drawn field behind the start screens, or behind every page, and how text is kept readable over it. It is chosen in Settings › Appearance › Background. The material rules it sits under are in [DESIGN.md: Depth and material](../../DESIGN.md#depth-and-material).
+The picture or drawn field behind the start screens, or behind every page, and how text is kept readable over it. It is chosen in Settings › Background. The material rules it sits under are in [DESIGN.md: Depth and material](../../DESIGN.md#depth-and-material).
 
 ## The ground
 
@@ -91,7 +91,7 @@ and fades in over 1.2 seconds once it has drawn. Reduced motion, or Motion Still
 holds one frame. A click on a start screen sends the same pushing, accent-lit ring
 through it at twenty-four frames a second for under two seconds. The effect
 (Pixelate or Dither), cell size, shade count and scope are set as for any print,
-and Settings › Appearance › Background lists the ASCII field and the Pixel ground
+and Settings › Background lists the ASCII field and the Pixel ground
 side by side, the latter with its scene; choosing it from another ground opens Ridges at four shades. Flowing is a drawn ground of large, soft, edgeless
 colour that drifts like ink in water, and only when a person picks it. Four
 stops are taken from the theme's accent in OKLCH — a near-black deep tone, a
@@ -111,8 +111,8 @@ shows on a fresh install: a canvas of small monospace letters and digits in the
 theme's primary ink, at most 15% opaque, that shows only inside slowly drifting
 patches and leaves the rest empty. Three patterns (round blotches, long
 horizontal currents, rings) take turns every twenty seconds and cross-fade over
-the last four. A person can set what the field draws (Settings › Appearance ›
-Background › Customize, shown while the ASCII field is the ground): its pattern (all in turn, as before, or blotches, currents or rings held alone, with no cross-fade; saved on pick), its characters (one to 64, one
+the last four. A person can set what the field draws (Settings › Background ›
+Customize, shown while the ASCII field is the ground): its pattern (all in turn, as before, or blotches, currents or rings held alone, with no cross-fade; saved on pick), its characters (one to 64, one
 code point per cell; whitespace and repeats are dropped, and controls, bidi and
 format characters, combining marks and emoji are refused, so a refused text keeps the last good set),
 its density (it moves both patch edges by 0.004 per point from the default 50: 100 shows more,
@@ -172,7 +172,7 @@ the Environment rows (maintainer requests 2026-11-15 and 2026-11-16). The veil i
 pane kind and the destination layers, never a colour per screen; a page drawn
 over the panes clears their veil so the two never stack. Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›
-Appearance › Background. The phone shares the same pictures and print effect under
+Background. The phone shares the same pictures and print effect under
 Appearance › Background.
 When the ground runs behind everything, a start screen's reading column
 carries a soft wash of the page colour that fades out before the edges (under

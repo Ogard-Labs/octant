@@ -331,49 +331,55 @@ export function HostResourceSettings({
             value={effectiveKeepAwakePolicy(settings?.resourcePolicy)}
           />
         </SettingRow>
+        {/* The readings are this row's own description, and the row sits in
+            the card: under the card they read as loose lines beside a row
+            with no card of its own. */}
+        <SettingRow
+          label="Load readings"
+          description={
+            <span
+              aria-busy={loading || undefined}
+              className="host-resources__readings"
+              role="status"
+            >
+              {loading ? (
+                "Reading the host's load…"
+              ) : snapshot === undefined ? (
+                "Current load readings are unavailable."
+              ) : (
+                <>
+                  <span>
+                    {snapshot.cores} cores · {Math.round(snapshot.totalMemoryBytes / 2 ** 30)} GiB
+                    RAM · {snapshot.cpuPercent}% CPU ·{" "}
+                    {snapshot.availableMemoryBytes === undefined
+                      ? `Memory pressure: ${snapshot.memoryPressure ?? "unknown"}`
+                      : `${Math.round(snapshot.availableMemoryBytes / 2 ** 30)} GiB available`}
+                  </span>
+                  <span>
+                    Last reading: up to {snapshot.commands} command groups, {snapshot.workers} total
+                    test workers and {snapshot.agents} helper agents. {snapshot.activeCommands}{" "}
+                    commands running; {snapshot.queuedCommands} waiting.
+                  </span>
+                  <span>{REASONS[snapshot.reason]}</span>
+                </>
+              )}
+            </span>
+          }
+          scope="host"
+          settingId="resource-refresh"
+          focused={focusedSetting === "resource-refresh"}
+        >
+          <OctantButton variant="secondary" onClick={() => void refresh()}>
+            Refresh load
+          </OctantButton>
+        </SettingRow>
       </fieldset>
       {subscribeKeepAwake === undefined ? null : (
-        <p className="setgroup-note host-resources__keep-awake-status" role="status">
+        <p className="settings-section-line host-resources__keep-awake-status" role="status">
           {keepAwakeStatusLine(keepAwakeStatus)}
         </p>
       )}
-      {loading ? (
-        <p aria-busy="true" className="host-resources__readings" role="status">
-          Reading the host's load…
-        </p>
-      ) : snapshot === undefined ? (
-        <p className="host-resources__readings" role="status">
-          Current load readings are unavailable.
-        </p>
-      ) : (
-        <div className="host-resources__readings" role="status">
-          <p>
-            {snapshot.cores} cores · {Math.round(snapshot.totalMemoryBytes / 2 ** 30)} GiB RAM ·{" "}
-            {snapshot.cpuPercent}% CPU ·{" "}
-            {snapshot.availableMemoryBytes === undefined
-              ? `Memory pressure: ${snapshot.memoryPressure ?? "unknown"}`
-              : `${Math.round(snapshot.availableMemoryBytes / 2 ** 30)} GiB available`}
-          </p>
-          <p>
-            Last reading: up to {snapshot.commands} command groups, {snapshot.workers} total test
-            workers and {snapshot.agents} helper agents. {snapshot.activeCommands} commands running;{" "}
-            {snapshot.queuedCommands} waiting.
-          </p>
-          <p>{REASONS[snapshot.reason]}</p>
-        </div>
-      )}
-      <SettingRow
-        label="Load readings"
-        description="Refresh to see the host's current capacity."
-        scope="host"
-        settingId="resource-refresh"
-        focused={focusedSetting === "resource-refresh"}
-      >
-        <OctantButton variant="secondary" onClick={() => void refresh()}>
-          Refresh load
-        </OctantButton>
-      </SettingRow>
-      <p className="setgroup-note">
+      <p className="settings-section-line">
         Claude and Codex inherit conservative test-worker defaults at launch. Native CLI delegation,
         arbitrary child processes and tools launched outside Octant are not hard-limited by these
         controls. Test-worker settings only apply to supported runners that preserve the launch

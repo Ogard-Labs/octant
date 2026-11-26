@@ -677,6 +677,14 @@ export function findUnregisteredRouteModules(
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
+    "/api/image/offers",
+    "The image-only offer list, kept for clients built before /api/offers; this repository's clients read /api/offers. Remove once those clients are no longer served.",
+  ],
+  [
+    "/api/image/offers/decide",
+    "The image-only offer answer, kept for clients built before /api/offers/decide; this repository's clients answer there. Remove once /api/image/offers goes.",
+  ],
+  [
     "/api/code/language/documents",
     "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",
   ],

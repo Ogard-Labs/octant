@@ -39,6 +39,12 @@ export type OctantCommandAction =
 export interface OctantCommand {
   readonly id: string;
   readonly title: string;
+  /**
+   * Titles this command went by before, matched exactly as its title is. A
+   * Settings page that took another in is still found by the old page's
+   * command, typed whole ("Settings: GitHub") or by its name alone.
+   */
+  readonly formerTitles?: ReadonlyArray<string>;
   readonly group: OctantCommandGroup;
   /** Words shown beside the title. State is always spelled out, never coloured. */
   readonly detail?: string;
@@ -114,11 +120,18 @@ export function filterOctantCommands(
     .map((entry) => entry.command);
 }
 
+function scoreTitle(title: string, needle: string): number | undefined {
+  const lowered = title.toLowerCase();
+  if (lowered.startsWith(needle)) return 0;
+  if (lowered.split(/\s+/).some((word) => word.startsWith(needle))) return 1;
+  return lowered.includes(needle) ? 2 : undefined;
+}
+
 function scoreCommand(command: OctantCommand, needle: string): number | undefined {
-  const title = command.title.toLowerCase();
-  if (title.startsWith(needle)) return 0;
-  if (title.split(/\s+/).some((word) => word.startsWith(needle))) return 1;
-  if (title.includes(needle)) return 2;
+  const titleRanks = [command.title, ...(command.formerTitles ?? [])].flatMap(
+    (title) => scoreTitle(title, needle) ?? [],
+  );
+  if (titleRanks.length > 0) return Math.min(...titleRanks);
   const haystack = [command.detail ?? "", command.group, ...(command.keywords ?? [])]
     .join(" ")
     .toLowerCase();

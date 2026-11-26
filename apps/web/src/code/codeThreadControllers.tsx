@@ -9,6 +9,7 @@ import { useThreadActivityRevision } from "../polling/ThreadActivityRevisions";
 import {
   useCodeController,
   type CodeController,
+  type CodeKeptThread,
   type CodeReadCursorStore,
 } from "./useCodeController";
 
@@ -45,6 +46,13 @@ function sameCodeProviderRequestsByThreadId(
  */
 export interface CodeThreadControllers {
   readonly get: (threadId: CodeThreadId) => CodeController | undefined;
+  /**
+   * What a surface bound to this thread may draw now: its running controller,
+   * or what a thread the window left recently showed last. A left thread runs
+   * nothing and receives nothing, so `get` does not answer one; its surface
+   * draws it only until the thread's own slot has mounted again.
+   */
+  readonly shown: (threadId: CodeThreadId) => CodeController | undefined;
   readonly holdAccessNotice: (threadId: CodeThreadId, text: string) => void;
   /** Wakes the listener when any open thread's controller moves. */
   readonly subscribe: (listener: () => void) => () => void;
@@ -75,12 +83,56 @@ export interface CodeThreadControllerRegistry extends CodeThreadControllers {
     typedByPerson?: boolean,
   ) => void;
   readonly publish: (threadId: CodeThreadId, controller: CodeController) => void;
+  /** What a recently left thread showed, for its next controller to start from. */
+  readonly kept: (threadId: CodeThreadId) => CodeKeptThread | undefined;
+  /** Lets go of what left threads showed unless the window still lists them on this host. */
+  readonly keepOnly: (
+    client: CodeClient,
+    threadIds: ReadonlyArray<CodeThreadId> | undefined,
+  ) => void;
   readonly refreshConversation: (threadId: CodeThreadId) => void;
   readonly release: (threadId: CodeThreadId) => void;
 }
 
+/** How many recently left threads keep what they showed, so a long session stays bounded. */
+const MAX_KEPT_CODE_THREADS = 8;
+
 export function createCodeThreadControllers(): CodeThreadControllerRegistry {
   const byThread = new Map<string, CodeController>();
+  // Oldest left first.
+  const keptByThread = new Map<
+    string,
+    { readonly thread: CodeKeptThread; readonly drawn: CodeController }
+  >();
+  const keep = (key: string, controller: CodeController) => {
+    const thread = controller.keepThread?.();
+    keptByThread.delete(key);
+    if (thread === undefined) return;
+    keptByThread.set(key, {
+      thread,
+      // Drawn, never acted on: what is shown is not the thread's current state
+      // until its slot has read it, and no request it held can be answered.
+      drawn: {
+        ...controller,
+        activeView: thread.view,
+        conversation: thread.conversation,
+        conversationHistory: "loading",
+        accessNotice: undefined,
+        firstPromptInFlight: undefined,
+        providerAnswerRefusal: undefined,
+        providerRequests: [],
+        status: "loading",
+        turnError: undefined,
+        turnErrorCategory: undefined,
+        turnUsageLimit: undefined,
+        turnActivity: thread.turnActivity,
+        turnStatus: "idle",
+      },
+    });
+    for (const oldest of [...keptByThread.keys()].slice(0, -MAX_KEPT_CODE_THREADS)) {
+      keptByThread.delete(oldest);
+    }
+  };
   const refreshWhenPublished = new Set<string>();
   const firstPromptWhenPublished = new Map<string, string>();
   const accessNoticeWhenPublished = new Map<string, string>();
@@ -117,6 +169,15 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       }
     },
     get: (threadId) => byThread.get(String(threadId)),
+    shown: (threadId) =>
+      byThread.get(String(threadId)) ?? keptByThread.get(String(threadId))?.drawn,
+    kept: (threadId) => keptByThread.get(String(threadId))?.thread,
+    keepOnly: (client, threadIds) => {
+      const listed = threadIds === undefined ? undefined : new Set(threadIds.map(String));
+      for (const [key, { thread }] of keptByThread) {
+        if (thread.client !== client || listed?.has(key) === false) keptByThread.delete(key);
+      }
+    },
     holdAccessNotice: (threadId, text) => {
       const key = String(threadId);
       const controller = byThread.get(key);
@@ -128,6 +189,7 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
     },
     publish: (threadId, controller) => {
       const key = String(threadId);
+      keptByThread.delete(key);
       if (byThread.get(key) !== controller) {
         byThread.set(key, controller);
         announce(key);
@@ -166,7 +228,10 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       firstPromptWhenPublished.delete(key);
       draftWhenPublished.delete(key);
       // The origin tab is released on switch; keep its notice for when it returns.
-      if (!byThread.delete(key)) return;
+      const running = byThread.get(key);
+      if (running === undefined) return;
+      byThread.delete(key);
+      keep(key, running);
       announce(key);
     },
     subscribe: (listener) => {
@@ -193,7 +258,7 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
 
 /**
  * Reads one thread's controller, and re-renders the caller when that thread's
- * state moves. A caller never sees another thread's controller: an unopened
+ * state moves. A thread the window left recently reads as what it last showed. A caller never sees another thread's controller: an unopened
  * thread reads as absent, which surfaces render as their own loading state
  * rather than borrowing whatever thread happens to be in front.
  */
@@ -210,7 +275,7 @@ export function useCodeThreadController(
   );
   const read = useCallback(
     () =>
-      controllers === undefined || threadId === undefined ? undefined : controllers.get(threadId),
+      controllers === undefined || threadId === undefined ? undefined : controllers.shown(threadId),
     [controllers, threadId],
   );
   return useSyncExternalStore(subscribe, read, read);
@@ -273,13 +338,23 @@ export interface CodeThreadControllerSlotsProps {
  * Rendered once, near the top of the shell, and draws nothing. Its position in
  * the tree is deliberate: a controller has to outlive the panes that read it,
  * because closing a diff tab must not tear down the turn that thread is
- * running.
+ * running. A pane shows one thread, so choosing another lets the outgoing
+ * thread's controller go; the registry keeps what it showed, and the thread's
+ * next controller starts from that and reads the journal again.
  */
 export function CodeThreadControllerSlots(props: CodeThreadControllerSlotsProps) {
   const navigation = useMemo(
     () => ({ bootstrap: props.navigationBootstrap }),
     [props.navigationBootstrap],
   );
+  const { client, registry } = props;
+  const listed = props.navigationBootstrap?.threads;
+  useEffect(() => {
+    registry.keepOnly(
+      client,
+      listed?.map((thread) => thread.id),
+    );
+  }, [client, listed, registry]);
   // Read once here, not in each slot: a slot re-renders, and publishes, on
   // every other activity the context carries.
   const messageQueueRevision = useThreadActivityRevision("threadMessageQueue");
@@ -317,6 +392,7 @@ const CodeThreadControllerSlot = memo(function CodeThreadControllerSlot(props: {
 }) {
   const controller = useCodeController({
     activeThreadId: props.threadId,
+    kept: props.registry.kept(props.threadId),
     navigation: props.navigation,
     client: props.client,
     // The thread list is the shell's to re-read. A poll per open thread would

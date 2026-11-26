@@ -489,7 +489,7 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   typography: {
     ui: {
       // The platform face (SF Pro on a Mac): it is what makes Octant read as
-      // a native app. Geist stays bundled as a choice in Appearance.
+      // a native app. Geist stays bundled as a choice on Settings › Text.
       family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       size: 14,
       weight: 400,

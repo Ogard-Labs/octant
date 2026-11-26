@@ -66,6 +66,11 @@ export interface HostSettingsSectionProps {
   readonly client: HostControlClient;
   readonly automationNotifications?: AutomationNotificationSettingsProps["client"];
   readonly hostFederationLifecycle?: HostFederationLifecycle;
+  /**
+   * Computer resources, which open the Host page: the limits and the pause a
+   * person changes, ahead of the facts about the service they only read.
+   */
+  readonly resources?: ReactNode;
   /** Layout resets and diagnostics export, which close the Host page. */
   readonly maintenance?: ReactNode;
   readonly focusedSetting?: string | undefined;
@@ -129,6 +134,7 @@ export function HostSettingsSection({
   automationNotifications,
   hostFederationLifecycle,
   maintenance,
+  resources,
   focusedSetting,
 }: HostSettingsSectionProps) {
   const [statusState, setStatusState] = useState<StatusState>({ kind: "loading" });
@@ -193,6 +199,7 @@ export function HostSettingsSection({
   if (statusState.kind === "loading") {
     return (
       <section aria-label="Host" className="host-settings" id="settings-host">
+        <Fragment key="resources">{resources}</Fragment>
         <SettingsState kind="loading">Loading host status…</SettingsState>
         {/* A status read that never settles is itself a sign of a host in
             trouble, when reset and diagnostics are most wanted. */}
@@ -204,6 +211,7 @@ export function HostSettingsSection({
   if (statusState.kind === "error") {
     return (
       <section aria-label="Host" className="host-settings" id="settings-host">
+        <Fragment key="resources">{resources}</Fragment>
         <SettingsState kind="error">{statusState.message}</SettingsState>
         <OctantButton
           onClick={() => {
@@ -235,6 +243,10 @@ export function HostSettingsSection({
           <SettingsState kind="error">{refreshMessage}</SettingsState>
         )}
       </div>
+      {/* Keyed, like the maintenance controls below, so a limit being typed is
+          not remounted when the host's status arrives. After the feedback slot,
+          which is placed as the page's first child. */}
+      <Fragment key="resources">{resources}</Fragment>
       <SettingsSection
         actions={
           <OctantButton

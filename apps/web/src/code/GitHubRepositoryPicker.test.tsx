@@ -285,7 +285,7 @@ describe("GitHubRepositoryPicker", () => {
     render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={vi.fn()} />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Open Settings → GitHub, remove the insecure credential, then set up GitHub again.",
+      "Open Settings → Integrations, remove the insecure GitHub credential, then set up GitHub again.",
     );
   });
 

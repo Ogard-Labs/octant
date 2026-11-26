@@ -1,22 +1,23 @@
-import type {
-  ServiceOffer,
-  ServiceOfferDecision,
-  VideoClipOptions,
-  VideoGenerateOffer,
+import {
+  decodeVideoGenerateOffer,
+  decodeVideoSaveOffer,
+  type VideoClipOptions,
+  type VideoGenerateOffer,
+  type VideoSaveOffer,
 } from "@octant/contracts";
-import { describeVideoOffer, videoOfferChoices } from "@octant/client-runtime/service-offer-client";
+import {
+  describeVideoOffer,
+  videoOfferChoices,
+} from "@octant/client-runtime/service-offer-choices";
 import { useId, useState } from "react";
 import { Video as VideoIcon, X } from "../ui/icons";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { strictOfferCard, type OfferCardProps } from "../offers/strictOfferCard";
 
-interface VideoOfferCardProps {
-  readonly offer: ServiceOffer;
-  readonly keptIn: "project" | "thread";
-  readonly busy: boolean;
-  readonly decide: (answer: ServiceOfferDecision) => void;
-}
+export const VideoGenerateOfferCard = strictOfferCard(decodeVideoGenerateOffer, GenerateCard);
+export const VideoSaveOfferCard = strictOfferCard(decodeVideoSaveOffer, SaveCard);
 
 const ROLE_LABELS: Record<VideoGenerateOffer["images"][number]["role"], string> = {
   "first-frame": "First frame",
@@ -24,12 +25,11 @@ const ROLE_LABELS: Record<VideoGenerateOffer["images"][number]["role"], string> 
   reference: "Reference",
 };
 
-export function VideoGenerateOfferCard(props: VideoOfferCardProps) {
+function GenerateCard(props: OfferCardProps<VideoGenerateOffer>) {
   const { offer: pending, busy } = props;
   const [chosen, setChosen] = useState<VideoClipOptions>();
   const [remember, setRemember] = useState(false);
   const rememberId = useId();
-  if (pending.kind !== "video-generate") return null;
   const options = chosen ?? pending.options;
   const choices = videoOfferChoices(pending);
   const described = describeVideoOffer(pending, options);
@@ -164,8 +164,7 @@ export function VideoGenerateOfferCard(props: VideoOfferCardProps) {
   );
 }
 
-export function VideoSaveOfferCard({ offer: pending, busy, decide: answer }: VideoOfferCardProps) {
-  if (pending.kind !== "video-save") return null;
+function SaveCard({ offer: pending, busy, decide: answer }: OfferCardProps<VideoSaveOffer>) {
   const decide = (decision: "video-save" | "cancel") =>
     answer({ offerId: pending.offerId, decision });
   return (

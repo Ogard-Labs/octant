@@ -98,7 +98,7 @@ describe("ChatSettingsView", () => {
     );
   });
 
-  it("carries the stored SearXNG address unchanged, since Settings › Web search now edits it", async () => {
+  it("carries the stored SearXNG address unchanged, since web search on Settings › Integrations now edits it", async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn<(command: UpdateChatSettingsCommand) => boolean>(() => true);
     render(

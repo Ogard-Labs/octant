@@ -861,6 +861,18 @@ presentation references share the endpoint/window/context boundary, retain at
 most 64 entries and 128 KiB, and write no document text, native process identity,
 approval or authority. They never take focus or perform a host operation during
 restore. Composer drafts retain their existing durable storage. Editor drafts use the local recovery store described under [File editing](#file-editing); approval requests keep their explicit controls.
+
+A window keeps in memory what the eight Code threads that left its panes last
+showed, so coming back to one draws its conversation in the first frame, never
+an empty transcript or the previous thread's text. Leaving a thread still stops
+its controller: what is kept is its transcript and figures, with no stream,
+poll or read behind it, no pending approval or question, and no turn status. It
+marks nothing as read. Opening the thread again reads it from the journal, and
+until that read lands nothing treats what is drawn as the thread's current
+state. A thread the host no longer lists, or a change of host, lets it go. The
+first open of a thread in a window still loads, and so does every open on a host
+that cannot read a thread's newest turns alone.
+
 Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the
 shell reads the title from the navigation rows instead, and a rename made in
@@ -2506,7 +2518,7 @@ project), the Linear tab and the Code Linear issue browser default to that
 binding while letting the person switch back to the whole Linear workspace;
 picking a Linear issue on Start automatically selects the uniquely matching
 bound Octant Project. Project-to-Linear bindings are edited on the host from
-Settings › Linear (Projects matrix, alongside connected user, workspace,
+Settings › Integrations (Linear projects matrix, alongside connected user, workspace,
 linked-project count, and personal API key controls with a direct creation
 link) and from each Project's Overview page.
 Selecting a row attaches only `{ id }`. At creation the server reauthorizes
