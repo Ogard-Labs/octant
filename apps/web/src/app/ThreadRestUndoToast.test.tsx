@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { isApplePlatform } from "../platform";
 import {
   takesThreadRestUndoChord,
   ThreadRestUndoToast,
@@ -15,7 +16,7 @@ function renderToast() {
     <>
       <textarea aria-label="Message" />
       <ThreadRestUndoToast
-        notice={{ title: "Settled", detail: "Plan", undo }}
+        notice={{ sequence: 1, title: "Settled", detail: "Plan", undo }}
         onDismiss={onDismiss}
       />
     </>,
@@ -97,5 +98,15 @@ describe("the sidebar Undo notice", () => {
     const { undo } = renderToast();
     fireEvent.keyDown(document.body, { key: "z", metaKey: true, ctrlKey: true });
     expect(undo).not.toHaveBeenCalled();
+  });
+
+  it("runs Undo on a plain Mod+Z outside text while it shows", () => {
+    const { undo } = renderToast();
+    const apple = isApplePlatform();
+    fireEvent.keyDown(
+      document.body,
+      apple ? { key: "z", metaKey: true } : { key: "z", ctrlKey: true },
+    );
+    expect(undo).toHaveBeenCalledTimes(1);
   });
 });

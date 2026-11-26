@@ -3,13 +3,17 @@ import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import { DEFAULT_SIDEBAR_ROW_PROPERTIES, type SidebarRowProperties } from "@octant/contracts/shell";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import {
   SidebarThreadDragContext,
+  useWorkspaceSurfaceDrag,
+  type SidebarThreadDragRow,
   type SidebarThreadDragTargets,
 } from "../shell/useWorkspaceTabDrag";
+import { runSidebarRowDrop, sidebarRowDropDestination } from "./sidebarRowDrop";
+import type { ThreadRowActions } from "./ThreadRowMenu";
 import { ProjectSidebarSection } from "./ProjectSidebarSection";
 
 // Status is the default arrangement, so tests that read the Project tree choose it first.
@@ -1004,7 +1008,7 @@ describe("ProjectSidebarSection activity view", () => {
     );
   }
 
-  it("pins a Code thread dropped on Pinned and unpins one dragged out", () => {
+  it("starts a drag from the Pinned group as leaving Pinned, and offers a Pinned slot when nothing is pinned", () => {
     window.localStorage.clear();
     const drag = sidebarDrag();
     try {
@@ -1075,7 +1079,7 @@ describe("ProjectSidebarSection activity view", () => {
     }
   });
 
-  it("settles a thread dropped on the Settled shelf and un-settles one dragged out", () => {
+  it("offers a Settled slot while a row is dragged, and starts a settled row's drag from its shelf", () => {
     window.localStorage.clear();
     const drag = sidebarDrag({
       draggingRow: { rowId: "thread-open", threadId: "thread-open", title: "Open work" },
@@ -1121,6 +1125,168 @@ describe("ProjectSidebarSection activity view", () => {
         expect.objectContaining({ shelf: "completed" }),
       );
     } finally {
+      window.localStorage.clear();
+    }
+  });
+
+  function DropHarness(props: {
+    readonly handlers: Pick<
+      ThreadRowActions,
+      "onPinThread" | "onCompleteThread" | "onReopenThread" | "onWakeThread"
+    >;
+    readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
+  }) {
+    const rows = useRef(new Map<string, SidebarThreadDragRow>());
+    const drag = useWorkspaceSurfaceDrag({
+      resolveSidebarDrop: (point, source) => {
+        const row = rows.current.get(source.dragKey);
+        return row === undefined ? null : sidebarRowDropDestination({ point, row, canPin: true });
+      },
+      onDrop: (source, destination) => {
+        const row = rows.current.get(source.dragKey);
+        if (row !== undefined && destination.kind === "sidebar") {
+          runSidebarRowDrop(destination.action, row.rowId, props.handlers);
+        }
+      },
+    });
+    const targets: SidebarThreadDragTargets = {
+      beginThreadDrag: (event, row) => {
+        rows.current.set(`thread:${row.rowId}`, row);
+        drag.onPointerDown(event, {
+          dragKey: `thread:${row.rowId}`,
+          surface: {} as never,
+          title: row.title,
+        });
+      },
+      onPointerMove: drag.onPointerMove,
+      onPointerUp: drag.onPointerUp,
+      onPointerCancel: drag.onPointerCancel,
+      consumeThreadClickSuppression: drag.consumeSuppressedClick,
+      draggingRow:
+        drag.active === null ? null : (rows.current.get(drag.active.source.dragKey) ?? null),
+      offerFiles: vi.fn(),
+    };
+    return (
+      <SidebarThreadDragContext.Provider value={targets}>
+        <ProjectSidebarSection
+          activityMode="code"
+          archivedProjects={[]}
+          availabilityByProject={new Map()}
+          now={new Date("2026-08-14T15:00:00.000Z")}
+          onArchive={vi.fn()}
+          onMove={vi.fn()}
+          onProjectOpen={vi.fn()}
+          onReorder={vi.fn()}
+          onRestore={vi.fn()}
+          onSelectThread={vi.fn()}
+          projects={[chatProjectA]}
+          threadActions={{ ...props.handlers }}
+          threads={props.threads}
+        />
+      </SidebarThreadDragContext.Provider>
+    );
+  }
+
+  // jsdom lays nothing out, so each drop zone is given a box: Pinned at the
+  // top, Settled at the foot, the list around both.
+  function layOutDropZones() {
+    return vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const zone = this.dataset.sidebarRowDrop;
+        const box = (top: number, height: number) => new DOMRect(0, top, 280, height);
+        if (zone === "pinned") return box(0, 100);
+        if (zone === "completed") return box(700, 100);
+        if (zone === "list") return box(0, 800);
+        return box(0, 0);
+      });
+  }
+
+  function dragRowTo(row: HTMLElement, y: number) {
+    fireEvent.pointerDown(row, { button: 0, pointerId: 1, clientX: 20, clientY: 300 });
+    fireEvent.pointerMove(row, { pointerId: 1, clientX: 20, clientY: y });
+    fireEvent.pointerUp(row, { pointerId: 1, clientX: 20, clientY: y });
+  }
+
+  it("pins a Code thread dropped on Pinned and unpins one dragged out", () => {
+    window.localStorage.clear();
+    const layout = layOutDropZones();
+    const handlers = {
+      onPinThread: vi.fn(),
+      onCompleteThread: vi.fn(),
+      onReopenThread: vi.fn(),
+      onWakeThread: vi.fn(),
+    };
+    try {
+      render(
+        <DropHarness
+          handlers={handlers}
+          threads={[
+            {
+              projectId: String(chatProjectA.id),
+              threadId: "thread-pinned",
+              title: "Pinned plan",
+              pinned: true,
+              updatedAt: "2026-08-14T14:00:00.000Z",
+            },
+            {
+              projectId: String(chatProjectA.id),
+              threadId: "thread-loose",
+              title: "Loose ends",
+              updatedAt: "2026-08-14T13:00:00.000Z",
+            },
+          ]}
+        />,
+      );
+      dragRowTo(screen.getByRole("button", { name: /Loose ends/ }), 50);
+      expect(handlers.onPinThread).toHaveBeenLastCalledWith("thread-loose", true);
+      dragRowTo(screen.getByRole("button", { name: /Pinned plan/ }), 400);
+      expect(handlers.onPinThread).toHaveBeenLastCalledWith("thread-pinned", false);
+    } finally {
+      layout.mockRestore();
+      window.localStorage.clear();
+    }
+  });
+
+  it("settles a thread dropped on the Settled shelf and un-settles one dragged out", () => {
+    window.localStorage.clear();
+    const layout = layOutDropZones();
+    const handlers = {
+      onPinThread: vi.fn(),
+      onCompleteThread: vi.fn(),
+      onReopenThread: vi.fn(),
+      onWakeThread: vi.fn(),
+    };
+    try {
+      render(
+        <DropHarness
+          handlers={handlers}
+          threads={[
+            {
+              projectId: String(chatProjectA.id),
+              threadId: "thread-open",
+              title: "Open work",
+              updatedAt: "2026-08-14T13:00:00.000Z",
+            },
+            {
+              projectId: String(chatProjectA.id),
+              threadId: "thread-done",
+              title: "Finished work",
+              completedAt: "2026-08-14T14:00:00.000Z",
+              shelf: "completed",
+              updatedAt: "2026-08-14T14:00:00.000Z",
+            },
+          ]}
+        />,
+      );
+      dragRowTo(screen.getByRole("button", { name: /Open work/ }), 750);
+      expect(handlers.onCompleteThread).toHaveBeenCalledWith("thread-open");
+      const shelf = document.querySelector('[data-shelf="completed"]') as HTMLElement;
+      fireEvent.click(within(shelf).getByText("Settled"));
+      dragRowTo(screen.getByRole("button", { name: /Finished work/ }), 400);
+      expect(handlers.onReopenThread).toHaveBeenCalledWith("thread-done");
+    } finally {
+      layout.mockRestore();
       window.localStorage.clear();
     }
   });

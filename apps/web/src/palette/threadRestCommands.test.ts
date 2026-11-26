@@ -23,7 +23,7 @@ function shellActions() {
     reopenCodeThread: vi.fn(async () => ({ status: "ok" as const })),
     snoozeCodeThread: vi.fn(async () => ({ status: "ok" as const })),
     wakeCodeThread: vi.fn(async () => ({ status: "ok" as const })),
-    pinCodeThread: vi.fn(async () => true),
+    setCodeThreadPin: vi.fn(async () => ({ status: "ok" as const })),
     markCodeThreadDone: vi.fn(async () => ({ status: "ok" as const })),
     tryWorkRestCommand: vi.fn(async () => ({ status: "ok" as const })),
     setThreadExportNotice: vi.fn(),
@@ -157,7 +157,7 @@ describe("the commands for the thread in front", () => {
     run(frontCommands("code", { completedAt: SNOOZE.at }, shell), "Un-settle");
 
     expect(shell.completeCodeThread).toHaveBeenCalledWith(CODE_ID);
-    expect(shell.pinCodeThread.mock.calls).toEqual([
+    expect(shell.setCodeThreadPin.mock.calls).toEqual([
       [CODE_ID, true],
       [CODE_ID, false],
     ]);

@@ -24,21 +24,27 @@ export type ThreadRestChange =
 /** The row a change was made from, read before the change is sent. */
 export type ThreadRestRow = Pick<
   ChatThreadNavigationItem,
-  "title" | "markedDone" | "completedAt" | "snooze"
+  "title" | "markedDone" | "workDone" | "completedAt" | "snooze"
 >;
 
 /** A five-second offer to take back the change the host just accepted. */
 export interface ThreadRestUndoNotice {
+  /**
+   * When the change was asked for, in the order the person made them. Replies
+   * can arrive out of that order, so a notice older than one already shown is
+   * dropped rather than replacing the newer change's Undo.
+   */
+  readonly sequence: number;
   readonly title: string;
   readonly detail: string;
   readonly undo: () => void;
 }
 
+let lastRestChange = 0;
+
 type RestOutcome =
   | { readonly status: "ok" }
-  | { readonly status: "refused"; readonly message: string }
-  /** The controller already said what went wrong, or there is nothing to say. */
-  | { readonly status: "failed" };
+  | { readonly status: "refused"; readonly message: string };
 
 const DONE_TITLES: Readonly<Record<ThreadRestChange["kind"], string>> = {
   pin: "Pinned",
@@ -70,7 +76,9 @@ export function inverseThreadRestChange(
     case "mark-done":
       return { kind: "reopen" };
     case "reopen":
-      return before?.markedDone === true ? { kind: "mark-done" } : { kind: "settle" };
+      return before?.markedDone === true || before?.workDone === true
+        ? { kind: "mark-done" }
+        : { kind: "settle" };
     case "snooze":
       return { kind: "wake" };
     case "wake": {
@@ -105,7 +113,7 @@ export function threadRestRowActions(
     | "reopenCodeThread"
     | "snoozeCodeThread"
     | "wakeCodeThread"
-    | "pinCodeThread"
+    | "setCodeThreadPin"
     | "markCodeThreadDone"
     | "tryWorkRestCommand"
     | "setThreadExportNotice"
@@ -118,9 +126,7 @@ export function threadRestRowActions(
     switch (change.kind) {
       case "pin":
       case "unpin":
-        return (await actions.pinCodeThread(id, change.kind === "pin"))
-          ? { status: "ok" }
-          : { status: "failed" };
+        return actions.setCodeThreadPin(id, change.kind === "pin");
       case "settle":
         return actions.completeCodeThread(id);
       case "mark-done":
@@ -144,31 +150,57 @@ export function threadRestRowActions(
         return actions.snoozeChatThread(id, change.until);
       case "wake":
         return actions.wakeChatThread(id);
-      default:
-        return { status: "failed" };
+      case "pin":
+      case "unpin":
+      case "mark-done":
+        return { status: "refused", message: "A Chat thread has no pin or Done mark." };
     }
   };
   // Work has no controller of its own for thread metadata: a rest command
   // goes straight to the client with the version the sidebar last saw.
-  const sendWork = (threadId: string, change: ThreadRestChange): Promise<RestOutcome> => {
+  // Each change names its own command; Work has no list pin, so a pin is
+  // refused here rather than sent as some other command.
+  const sendWork = async (threadId: string, change: ThreadRestChange): Promise<RestOutcome> => {
     const workThreadId = decodeWorkThreadId(threadId);
-    return actions.tryWorkRestCommand(threadId, (expectedVersion) => {
-      switch (change.kind) {
-        case "settle":
-          return { kind: "complete-work-thread", threadId: workThreadId, expectedVersion };
-        case "snooze":
-          return {
-            kind: "snooze-work-thread",
-            threadId: workThreadId,
-            expectedVersion,
-            until: decodeUtcTimestamp(change.until),
-          };
-        case "wake":
-          return { kind: "wake-work-thread", threadId: workThreadId, expectedVersion };
-        default:
-          return { kind: "reopen-work-thread", threadId: workThreadId, expectedVersion };
-      }
-    });
+    switch (change.kind) {
+      case "pin":
+      case "unpin":
+        return { status: "refused", message: "A Work thread cannot be pinned." };
+      case "settle":
+        return actions.tryWorkRestCommand(threadId, (expectedVersion) => ({
+          kind: "complete-work-thread",
+          threadId: workThreadId,
+          expectedVersion,
+        }));
+      case "reopen":
+        return actions.tryWorkRestCommand(threadId, (expectedVersion) => ({
+          kind: "reopen-work-thread",
+          threadId: workThreadId,
+          expectedVersion,
+        }));
+      // Marks Done again the way the Done banner does, naming the thread as
+      // its delivery target; the host checks that against its own record.
+      case "mark-done":
+        return actions.tryWorkRestCommand(threadId, (expectedVersion, thread) => ({
+          kind: "confirm-work-thread-completion",
+          threadId: workThreadId,
+          expectedVersion,
+          deliveryTarget: thread.title,
+        }));
+      case "snooze":
+        return actions.tryWorkRestCommand(threadId, (expectedVersion) => ({
+          kind: "snooze-work-thread",
+          threadId: workThreadId,
+          expectedVersion,
+          until: decodeUtcTimestamp(change.until),
+        }));
+      case "wake":
+        return actions.tryWorkRestCommand(threadId, (expectedVersion) => ({
+          kind: "wake-work-thread",
+          threadId: workThreadId,
+          expectedVersion,
+        }));
+    }
   };
   const senders: Record<
     OctantMode,
@@ -180,10 +212,13 @@ export function threadRestRowActions(
   };
   const run = (mode: OctantMode, threadId: string, change: ThreadRestChange): void => {
     const before = actions.threadRestRow(mode, threadId);
+    lastRestChange += 1;
+    const sequence = lastRestChange;
     void senders[mode](threadId, change).then((outcome) => {
       noteRefusal(outcome);
       if (outcome.status !== "ok") return;
       actions.offerThreadRestUndo({
+        sequence,
         title: DONE_TITLES[change.kind],
         detail: before?.title ?? "The thread",
         undo: () => {

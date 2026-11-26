@@ -243,6 +243,7 @@ export type ShellActions = {
   readonly persistBottomPanelPresentation: ThreadUtilityPresentation["persistBottomPanelPresentation"];
   readonly pinChatThreadInPane: (threadId: string) => void;
   readonly pinCodeThread: CodeController["pinThread"];
+  readonly setCodeThreadPin: CodeController["setThreadPin"];
   readonly pinCodeThreadInPane: (threadId: string) => void;
   readonly pinWorkThreadInPane: (threadId: string) => void;
   readonly previewSplitResize: ShellController["previewSplitResize"];
@@ -414,7 +415,7 @@ export type ShellActions = {
   readonly threadRestRow: (mode: OctantMode, threadId: string) => ThreadRestRow | undefined;
   readonly tryWorkRestCommand: (
     threadId: string,
-    command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
+    command: (expectedVersion: WorkThread["version"], thread: WorkThread) => WorkThreadCommand,
   ) => Promise<ReviewActionOutcome>;
   readonly updateSettings: ShellController["updateSettings"];
   readonly viewAllChatProjectThreads: NonNullable<

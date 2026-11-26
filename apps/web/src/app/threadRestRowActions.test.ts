@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ShellActions } from "./shellActions";
 import {
   inverseThreadRestChange,
   threadRestRowActions,
@@ -28,15 +29,24 @@ function shellActions() {
     ),
     snoozeCodeThread: vi.fn(async () => ({ status: "ok" as const })),
     wakeCodeThread: vi.fn(async () => ({ status: "ok" as const })),
-    pinCodeThread: vi.fn(async () => true),
+    setCodeThreadPin: vi.fn(
+      async (): Promise<
+        { readonly status: "ok" } | { readonly status: "refused"; readonly message: string }
+      > => ({ status: "ok" }),
+    ),
     markCodeThreadDone: vi.fn(async () => ({ status: "ok" as const })),
-    tryWorkRestCommand: vi.fn(async () => ({ status: "ok" as const })),
+    tryWorkRestCommand: vi.fn<ShellActions["tryWorkRestCommand"]>(async () => ({ status: "ok" })),
     setThreadExportNotice: vi.fn(),
     offerThreadRestUndo: vi.fn((notice: ThreadRestUndoNotice) => {
       offered.push(notice);
     }),
     threadRestRow: vi.fn(
-      (): { title: string; snooze?: { until: string; at: string }; markedDone?: boolean } => ({
+      (): {
+        title: string;
+        snooze?: { until: string; at: string };
+        markedDone?: boolean;
+        workDone?: boolean;
+      } => ({
         title: "Controller foundation",
       }),
     ),
@@ -81,7 +91,7 @@ describe("Undo after a sidebar state change", () => {
     await vi.waitFor(() => expect(shell.offered).toHaveLength(2));
     for (const notice of shell.offered) notice.undo();
     await vi.waitFor(() => expect(shell.tryWorkRestCommand).toHaveBeenCalledTimes(2));
-    expect(shell.pinCodeThread.mock.calls).toEqual([
+    expect(shell.setCodeThreadPin.mock.calls).toEqual([
       [CODE_ID, true],
       [CODE_ID, false],
     ]);
@@ -113,5 +123,57 @@ describe("Undo after a sidebar state change", () => {
     expect(inverseThreadRestChange({ kind: "mark-done" }, undefined, now)).toEqual({
       kind: "reopen",
     });
+  });
+
+  it("shows the host's sentence when a pin is refused, and offers no Undo", async () => {
+    const shell = shellActions();
+    shell.setCodeThreadPin.mockResolvedValueOnce({
+      status: "refused",
+      message: "This thread changed in another window.",
+    });
+    threadRestRowActions(shell).code.onPinThread?.(CODE_ID, true);
+    await vi.waitFor(() =>
+      expect(shell.setThreadExportNotice).toHaveBeenCalledWith(
+        "This thread changed in another window.",
+      ),
+    );
+    expect(shell.offerThreadRestUndo).not.toHaveBeenCalled();
+  });
+
+  it("marks a reopened Work thread Done again on Undo", async () => {
+    const shell = shellActions();
+    shell.threadRestRow.mockReturnValue({ title: "Quarterly report", workDone: true });
+    threadRestRowActions(shell).work.onReopenThread?.(WORK_ID);
+    await vi.waitFor(() => expect(shell.offered).toHaveLength(1));
+    shell.offered[0]?.undo();
+    await vi.waitFor(() => expect(shell.tryWorkRestCommand).toHaveBeenCalledTimes(2));
+    const undo = shell.tryWorkRestCommand.mock.calls[1]?.[1];
+    expect(undo?.(7 as never, { title: "Quarterly report" } as never)).toEqual({
+      kind: "confirm-work-thread-completion",
+      threadId: WORK_ID,
+      expectedVersion: 7,
+      deliveryTarget: "Quarterly report",
+    });
+  });
+
+  it("numbers each change when it is made, whatever order the host answers in", async () => {
+    const shell = shellActions();
+    let answerFirst: (value: { readonly status: "ok" }) => void = () => {};
+    shell.completeCodeThread.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answerFirst = resolve;
+      }),
+    );
+    const actions = threadRestRowActions(shell);
+    actions.code.onCompleteThread?.(CODE_ID);
+    actions.code.onPinThread?.(CODE_ID, true);
+    await vi.waitFor(() => expect(shell.offered).toHaveLength(1));
+    answerFirst({ status: "ok" });
+    await vi.waitFor(() => expect(shell.offered).toHaveLength(2));
+    const [pinned, settled] = shell.offered;
+    expect(pinned?.title).toBe("Pinned");
+    expect(settled?.title).toBe("Settled");
+    // The settle was asked for first, so its later reply carries the older number.
+    expect(settled!.sequence).toBeLessThan(pinned!.sequence);
   });
 });

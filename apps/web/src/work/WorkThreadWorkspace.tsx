@@ -2609,8 +2609,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   });
   // A picture marked up in this thread's Browser arrives here as a file and
   // meets the same checks as one dropped on the composer.
+  // Offers wait until this thread is read, so its model's image check applies.
   useThreadImageOffers(
-    threadImageOfferKey("work", String(props.threadId)),
+    thread === undefined || String(thread.id) !== String(props.threadId)
+      ? undefined
+      : threadImageOfferKey("work", String(props.threadId)),
     (file, arrival): ThreadImageVerdict => {
       let reason: string | undefined;
       // A file dropped on the sidebar row arrives here too; only a picture

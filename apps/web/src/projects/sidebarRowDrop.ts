@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore, type DragEvent } from "react";
+import type { ThreadRowActions } from "./ThreadRowMenu";
 
 /**
  * Where a sidebar thread row can land inside the sidebar itself: the Pinned
@@ -72,6 +73,49 @@ export function resolveSidebarRowDropZone(
       point.y <= rect.top + rect.height,
   );
   return (under.find((entry) => entry.zone !== "list") ?? under[0])?.zone ?? null;
+}
+
+/** Where a row dragged over the sidebar lands, or null when the drop asks nothing. */
+export function sidebarRowDropDestination(input: {
+  readonly point: { readonly x: number; readonly y: number };
+  readonly row: SidebarRowDropState;
+  readonly canPin: boolean;
+  readonly zones?: ReturnType<typeof measureSidebarRowDropZones>;
+}): {
+  readonly kind: "sidebar";
+  readonly zone: SidebarRowDropZone;
+  readonly action: SidebarRowDropAction;
+} | null {
+  const zone = resolveSidebarRowDropZone(input.point, input.zones ?? measureSidebarRowDropZones());
+  if (zone === null) return null;
+  const action = sidebarRowDropAction({ row: input.row, zone, canPin: input.canPin });
+  return action === null ? null : { kind: "sidebar", zone, action };
+}
+
+/**
+ * Carries out a drop through the row menu's own handlers, so the host decides,
+ * a refusal shows its sentence, and an accepted change offers Undo.
+ */
+export function runSidebarRowDrop(
+  action: SidebarRowDropAction,
+  rowId: string,
+  actions: Pick<
+    ThreadRowActions,
+    "onPinThread" | "onCompleteThread" | "onReopenThread" | "onWakeThread"
+  >,
+): void {
+  switch (action) {
+    case "pin":
+      return actions.onPinThread?.(rowId, true);
+    case "unpin":
+      return actions.onPinThread?.(rowId, false);
+    case "settle":
+      return actions.onCompleteThread?.(rowId);
+    case "reopen":
+      return actions.onReopenThread?.(rowId);
+    case "wake":
+      return actions.onWakeThread?.(rowId);
+  }
 }
 
 export function measureSidebarRowDropZones(

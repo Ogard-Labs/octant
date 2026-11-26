@@ -998,9 +998,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   // A picture marked up in this thread's Browser, or a file dropped on the
   // thread's sidebar row, arrives here and meets the same checks as one
-  // dropped on the composer.
+  // dropped on the composer. Offers wait until the thread is read: before
+  // that its model is unknown, and a picture would skip the image check.
   useThreadImageOffers(
-    threadImageOfferKey("code", String(props.threadId)),
+    view === undefined ? undefined : threadImageOfferKey("code", String(props.threadId)),
     async (file, arrival): Promise<ThreadImageVerdict> => {
       let reason: string | undefined;
       if (props.attachmentClient === undefined) {

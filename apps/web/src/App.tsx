@@ -528,11 +528,7 @@ import {
 } from "./shell/dockEnvironmentStrip";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
-import {
-  measureSidebarRowDropZones,
-  resolveSidebarRowDropZone,
-  sidebarRowDropAction,
-} from "./projects/sidebarRowDrop";
+import { runSidebarRowDrop, sidebarRowDropDestination } from "./projects/sidebarRowDrop";
 import { offerFilesToThread, THREAD_FILE_OFFERS_FULL } from "./composer/threadImageOffers";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
 import {
@@ -1785,12 +1781,8 @@ function LaunchedShell(
     resolveSidebarDrop: (point, source) => {
       const row = sidebarDragRows.current.get(source.dragKey);
       if (row === undefined) return null;
-      const zone = resolveSidebarRowDropZone(point, measureSidebarRowDropZones());
-      if (zone === null) return null;
       const mode = sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current);
-      const action = sidebarRowDropAction({ row, zone, canPin: mode === "code" });
-      // Over the sidebar a row never falls through to the panes behind it.
-      return action === null ? null : { kind: "sidebar", zone, action };
+      return sidebarRowDropDestination({ point, row, canPin: mode === "code" });
     },
     onDrop: (source, destination) => {
       const row = sidebarDragRows.current.get(source.dragKey);
@@ -1800,13 +1792,7 @@ function LaunchedShell(
         // The same handlers as the row menu, so the host decides, a refusal
         // shows its sentence, and an accepted change offers Undo.
         const mode = sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current);
-        const rest = threadRestRowActions(actions)[mode];
-        const id = row.rowId;
-        if (destination.action === "pin") rest.onPinThread?.(id, true);
-        else if (destination.action === "unpin") rest.onPinThread?.(id, false);
-        else if (destination.action === "settle") rest.onCompleteThread?.(id);
-        else if (destination.action === "reopen") rest.onReopenThread?.(id);
-        else rest.onWakeThread?.(id);
+        runSidebarRowDrop(destination.action, row.rowId, threadRestRowActions(actions)[mode]);
         return;
       }
       if (destination.kind === "composer") {
@@ -2143,10 +2129,10 @@ function LaunchedShell(
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
   // One Undo at a time: a newer sidebar change replaces the notice and its
   // five seconds start again.
-  const [threadRestUndo, setThreadRestUndo] = useState<{
-    readonly notice: ThreadRestUndoNotice;
-    readonly sequence: number;
-  }>();
+  const [threadRestUndo, setThreadRestUndo] = useState<ThreadRestUndoNotice>();
+  // The newest change ever offered Undo: a slower reply to an older change
+  // arriving after it must not take its place.
+  const newestThreadRestUndo = useRef(0);
   // The running coordinator whose limits a person is changing, from its row
   // menu or its pane's header menu.
   const [coordinatorBoundsThreadId, setCoordinatorBoundsThreadId] = useState<CodeThreadId>();
@@ -6290,8 +6276,11 @@ function LaunchedShell(
       moveProject: projectController.move,
       noteCanvasReferences,
       noteHandedOffDocument,
-      offerThreadRestUndo: (notice) =>
-        setThreadRestUndo((current) => ({ notice, sequence: (current?.sequence ?? 0) + 1 })),
+      offerThreadRestUndo: (notice) => {
+        if (notice.sequence < newestThreadRestUndo.current) return;
+        newestThreadRestUndo.current = notice.sequence;
+        setThreadRestUndo(notice);
+      },
       onComputerUseSessionChange,
       openAgentsCenter,
       openArchive,
@@ -6353,6 +6342,7 @@ function LaunchedShell(
       persistBottomPanelPresentation,
       pinChatThreadInPane,
       pinCodeThread: codeController.pinThread,
+      setCodeThreadPin: codeController.setThreadPin,
       pinCodeThreadInPane,
       pinWorkThreadInPane,
       previewSplitResize: controller.previewSplitResize,
@@ -7107,7 +7097,7 @@ function LaunchedShell(
   // the host's answer is folded back into the navigation list.
   async function tryWorkRestCommand(
     threadId: string,
-    command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
+    command: (expectedVersion: WorkThread["version"], thread: WorkThread) => WorkThreadCommand,
   ): Promise<ReviewActionOutcome> {
     const thread = workNavigation.bootstrap?.threads.find(
       (candidate) => String(candidate.id) === threadId,
@@ -7116,8 +7106,11 @@ function LaunchedShell(
       return { status: "refused", message: "This thread is no longer in the list." };
     }
     try {
-      const result = await workThreadClient.execute(command(thread.version));
-      if ("kind" in result && result.kind === "thread-updated") {
+      const result = await workThreadClient.execute(command(thread.version, thread));
+      if (
+        "kind" in result &&
+        (result.kind === "thread-updated" || result.kind === "thread-completion-confirmed")
+      ) {
         workNavigation.applyThread(result.thread);
       }
       return { status: "ok" };
@@ -10312,7 +10305,7 @@ function LaunchedShell(
         {threadRestUndo === undefined ? null : (
           <ThreadRestUndoToast
             key={threadRestUndo.sequence}
-            notice={threadRestUndo.notice}
+            notice={threadRestUndo}
             onDismiss={() => setThreadRestUndo(undefined)}
           />
         )}
