@@ -24,6 +24,22 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
+import { lazyOr } from "../lib/lazyOr";
+import {
+  composerQuoteText,
+  findComposerQuotes,
+  quotePreview,
+  separateComposerQuotes,
+  type ComposerQuotePlace,
+} from "./composerQuote";
+import type { ComposerQuoteChipProps } from "./ComposerQuoteChip";
+
+const LazyQuoteChip = lazyOr<ComposerQuoteChipProps>(
+  async () => (await import("./ComposerQuoteChip")).ComposerQuoteChip,
+  ({ quote }) => (
+    <span className="composer-chip__label">{`Quote · ${quotePreview(quote.text)}`}</span>
+  ),
+);
 
 /**
  * The composer prompt as its callers see it: the element, plus the text-field
@@ -132,6 +148,14 @@ type Chip =
       readonly id: string;
       readonly match: SubagentModelTagMatch;
     }
+  | {
+      readonly kind: "quote";
+      readonly start: number;
+      readonly end: number;
+      readonly text: string;
+      readonly id: string;
+      readonly quote: ComposerQuotePlace;
+    }
   | ({ readonly kind: "inline" } & ComposerInlineChipPlace);
 
 type Segment =
@@ -140,11 +164,37 @@ type Segment =
 
 type FindInlineChips = ComposerInlineChips["find"] | undefined;
 
-/** Every chip in the prompt, in order; a tag inside a caller's chip is that chip's text. */
+function overlaps(
+  range: { readonly start: number; readonly end: number },
+  chips: ReadonlyArray<Chip>,
+): boolean {
+  return chips.some((chip) => range.start < chip.end && chip.start < range.end);
+}
+
+/**
+ * Every chip in the prompt, in order. A quote's words are the quote's own, so
+ * a tag inside a quote is quoted text, and a tag inside a caller's chip is that
+ * chip's text.
+ */
 function chipsOf(value: string, findInline: FindInlineChips): ReadonlyArray<Chip> {
-  const inline = (findInline?.(value) ?? []).map((place): Chip => ({ ...place, kind: "inline" }));
+  const quotes = findComposerQuotes(value).map(
+    (quote, index): Chip => ({
+      kind: "quote",
+      start: quote.start,
+      end: quote.end,
+      text: quote.chipText,
+      id: `quote:${String(index)}`,
+      quote,
+    }),
+  );
+  const inline = [
+    ...quotes,
+    ...(findInline?.(value) ?? [])
+      .filter((place) => !overlaps(place, quotes))
+      .map((place): Chip => ({ ...place, kind: "inline" })),
+  ];
   const models = findSubagentModelTags(value)
-    .filter((match) => !inline.some((chip) => match.start < chip.end && chip.start < match.end))
+    .filter((match) => !overlaps(match, inline))
     .map(
       (match): Chip => ({
         kind: "model",
@@ -454,9 +504,13 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     const report = (root: ComposerInputElement, typed = true) => {
       // Only the person's own edits come through here: typing, paste, cut, undo,
       // and dictation. A value a caller writes does not, and undoing back to one
-      // is not typing it.
-      if (typed) noteTypedComposerText(scopeRef.current, modelRef.current);
-      else composerTextReplaced(scopeRef.current, modelRef.current);
+      // is not typing it. A quote's words are not the person's, so a draft that
+      // carries one is never counted as typed, whatever is typed around it.
+      if (typed && findComposerQuotes(modelRef.current).length === 0) {
+        noteTypedComposerText(scopeRef.current, modelRef.current);
+      } else {
+        composerTextReplaced(scopeRef.current, modelRef.current);
+      }
       flushSync(() => onChangeRef.current?.({ target: root, currentTarget: root }));
     };
 
@@ -528,9 +582,10 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       historyRef.current = { entries, index: entries.length - 1, at: now, typing };
     };
 
-    const emit = (next: string, caret: number, options: { readonly typing: boolean }) => {
+    const emit = (typed: string, typedCaret: number, options: { readonly typing: boolean }) => {
       const root = rootRef.current;
       if (root === null) return;
+      const { value: next, caret } = separateComposerQuotes(typed, typedCaret);
       modelRef.current = next;
       pendingRef.current = { start: caret, end: caret };
       lastSelectionRef.current = { start: caret, end: caret };
@@ -546,6 +601,23 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       emit(`${current.slice(0, start)}${text}${current.slice(end)}`, start + text.length, {
         typing: false,
       });
+    };
+
+    // A change made from a chip of the prompt's own (a quote's note, or the
+    // quote taken out): one undo step, and not the person's typing.
+    const replaceRange = (start: number, end: number, text: string) => {
+      const root = rootRef.current;
+      if (root === null) return;
+      const current = modelRef.current;
+      const next = `${current.slice(0, start)}${text}${current.slice(end)}`;
+      const caret = start + text.length;
+      modelRef.current = next;
+      pendingRef.current = { start: caret, end: caret };
+      lastSelectionRef.current = { start: caret, end: caret };
+      remember({ value: next, caret, typed: false }, false);
+      reportedRef.current = next;
+      report(root, false);
+      tick();
     };
 
     const restore = (root: ComposerInputElement, direction: -1 | 1) => {
@@ -913,9 +985,26 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
             return { start, end: start + chip.text.length };
           };
           const drawn =
-            chip.kind === "model"
-              ? renderModelChip?.(chip.match, locate)
-              : inlineChips?.render(chip.id, locate);
+            chip.kind === "model" ? (
+              renderModelChip?.(chip.match, locate)
+            ) : chip.kind === "quote" ? (
+              <LazyQuoteChip
+                editable={editable}
+                onChange={(next) => {
+                  const { start, end } = locate();
+                  replaceRange(start, end, composerQuoteText(next));
+                }}
+                onRemove={() => {
+                  const { start, end } = locate();
+                  // The line the quote stood on goes with it.
+                  const lineAfter = modelRef.current[end] === "\n" ? 1 : 0;
+                  replaceRange(start, end + lineAfter, "");
+                }}
+                quote={chip.quote}
+              />
+            ) : (
+              inlineChips?.render(chip.id, locate)
+            );
           return createPortal(
             drawn ?? <span className="composer-chip__label">{chip.text}</span>,
             node,

@@ -2,6 +2,11 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  appendComposerQuote,
+  findComposerQuotes,
+  REPLY_QUOTE_SOURCE,
+} from "../composer/composerQuote";
+import {
   SelectionThreadScope,
   SelectionThreadStarterContext,
   SelectionThreadSurface,
@@ -64,5 +69,26 @@ describe("SelectionThreadSurface", () => {
     );
     selectAll();
     expect(screen.queryByRole("button", { name: "New thread from selection" })).toBeNull();
+  });
+
+  it("a Work reply selection adds a quote chip to this thread's composer", () => {
+    const addToChat = vi.fn();
+    render(
+      <SelectionThreadScope mode="work" onAddToChat={addToChat} projectId={projectId}>
+        <SelectionThreadSurface>
+          <p>The plan is to split the module.</p>
+        </SelectionThreadSurface>
+      </SelectionThreadScope>,
+    );
+    selectAll();
+    fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+
+    expect(addToChat).toHaveBeenCalledWith({
+      source: REPLY_QUOTE_SOURCE,
+      text: "The plan is to split the module.",
+      comment: "",
+    });
+    const draft = appendComposerQuote("", addToChat.mock.calls[0]?.[0]);
+    expect(findComposerQuotes(draft)).toHaveLength(1);
   });
 });

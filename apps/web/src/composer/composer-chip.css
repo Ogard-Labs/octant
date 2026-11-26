@@ -1,4 +1,4 @@
-/* A chip in the prompt's text: a subagent model, or a mentioned thread. It is a
+/* A chip in the prompt's text: a subagent model, a mentioned thread, or a quote. It is a
    single unit for the caret and for deletion. Loaded by each chip's own chunk,
    so the initial load carries none of it. */
 .composer-chip {
@@ -34,4 +34,35 @@
 }
 .composer-chip__meta {
   color: var(--oct-meta);
+}
+
+/* A quote's card: the whole quote, read-only, and the person's note on it. */
+.composer-quote-card {
+  display: grid;
+  width: min(28rem, calc(100vw - 2 * var(--oct-space-4)));
+  gap: var(--oct-space-2);
+}
+.composer-quote-card__source {
+  margin: 0;
+  color: var(--oct-meta);
+  overflow-wrap: anywhere;
+}
+.composer-quote-card__text {
+  max-height: 12rem;
+  margin: 0;
+  padding: var(--oct-space-2);
+  overflow: auto;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface-warm);
+  font-family: var(--oct-font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.composer-quote-card__label {
+  font-weight: 600;
+}
+.composer-quote-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
 }

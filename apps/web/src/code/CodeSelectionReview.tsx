@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState } from "react";
+import { composerQuoteText, fileQuoteSource } from "../composer/composerQuote";
 import type { MonacoTextSelection } from "./MonacoEditorAdapter";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -7,13 +8,18 @@ const Diff = lazy(() =>
   import("./MonacoDiffAdapter").then((module) => ({ default: module.MonacoDiffAdapter })),
 );
 
+/**
+ * The selection as a quote chip naming its file and lines, then the request
+ * for one replacement block, which the review below compares before anything
+ * reaches the draft.
+ */
 export function selectionPrompt(path: string, selection: MonacoTextSelection): string {
-  const longest = [...selection.text.matchAll(/`+/g)].reduce(
-    (size, match) => Math.max(size, match[0].length),
-    2,
-  );
-  const fence = "`".repeat(longest + 1);
-  return `Suggest a replacement for the selected text in ${JSON.stringify(path)}, lines ${selection.range.startLineNumber}–${selection.range.endLineNumber}. Reply with the replacement in one fenced code block. Do not edit files; I will review the proposal in the editor.\n\n${fence}\n${selection.text}\n${fence}`;
+  const quote = composerQuoteText({
+    source: fileQuoteSource(path, selection.range.startLineNumber, selection.range.endLineNumber),
+    text: selection.text,
+    comment: "",
+  });
+  return `${quote}\nSuggest a replacement for the quoted selection. Reply with the replacement in one fenced code block. Do not edit files; I will review the proposal in the editor.`;
 }
 
 export function singleCodeProposal(response: string): string | undefined {

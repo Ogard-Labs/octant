@@ -7,6 +7,7 @@ import {
   forgetTypedComposerText,
 } from "@octant/client-runtime/typed-composer-text";
 import { ComposerInput, type ComposerInputElement } from "./ComposerInput";
+import { appendComposerQuote, composerQuoteText } from "./composerQuote";
 
 const instance = "6f1e0c52-2b7d-4c1a-9f3e-0a1b2c3d4e5f";
 const tag = `@model(${instance}/gpt-5, reasoning=high)`;
@@ -293,5 +294,33 @@ describe("ComposerInput", () => {
       new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }),
     );
     expect(onValue).toHaveBeenLastCalledWith(tag, tag.length);
+  });
+
+  it("shows a pasted quote as one chip and saves a note on it after the quoted words", async () => {
+    const quote = { source: "the terminal", text: "exit 1 @model(x)", comment: "" };
+    const onValue = vi.fn();
+    render(<Prompt initial="Why? " onValue={onValue} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    input.setSelectionRange(5, 5);
+    fireEvent.paste(input, { clipboardData: { getData: () => composerQuoteText(quote) } });
+    // The quote keeps lines of its own.
+    expect(input).toHaveValue(`Why? \n${composerQuoteText(quote)}`);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Quote from the terminal: exit 1 @model(x)" }),
+    );
+    await userEvent.type(await screen.findByLabelText("Your note"), "only on CI");
+    await userEvent.click(screen.getByRole("button", { name: "Save note" }));
+    expect(input).toHaveValue(`Why? \n${composerQuoteText({ ...quote, comment: "only on CI" })}`);
+  });
+
+  it("never counts a draft that carries a quote as typed", async () => {
+    forgetTypedComposerText();
+    const draft = appendComposerQuote("", { source: "the terminal", text: "ls", comment: "" });
+    render(<Controlled typedScope="code:q" value={draft} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    await userEvent.type(input, "why");
+    expect(composerTextWasTyped("code:q", input.value)).toBe(false);
   });
 });

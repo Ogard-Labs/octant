@@ -210,6 +210,7 @@ import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
+import { appendComposerQuote, type ComposerQuote } from "../composer/composerQuote";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
 import {
@@ -2152,7 +2153,21 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             </div>
           </div>
         ) : (
-          <SelectionThreadScope mode="code" projectId={view?.thread.projectId}>
+          <SelectionThreadScope
+            mode="code"
+            {...(readOnly
+              ? {}
+              : {
+                  onAddToChat: (quote: ComposerQuote) => {
+                    const next = appendComposerQuote(draft, quote);
+                    draftRevisionRef.current += 1;
+                    setDraft(next);
+                    props.controller.setPendingDraft?.(next, next.length);
+                    queueMicrotask(() => textareaRef.current?.focus());
+                  },
+                })}
+            projectId={view?.thread.projectId}
+          >
             <TranscriptWindow
               trail={
                 <>

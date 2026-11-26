@@ -204,6 +204,7 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
+import { appendComposerQuote, type ComposerQuote } from "../composer/composerQuote";
 import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
@@ -2913,7 +2914,19 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           ) : null}
         </OctantDialogPresence>
 
-        <SelectionThreadScope mode="work" projectId={thread?.projectId ?? projectId}>
+        <SelectionThreadScope
+          mode="work"
+          {...(readOnly
+            ? {}
+            : {
+                onAddToChat: (quote: ComposerQuote) => {
+                  const next = appendComposerQuote(composerDraft.text, quote);
+                  composerDraft.setDraft(next, next.length);
+                  queueMicrotask(() => textareaRef.current?.focus());
+                },
+              })}
+          projectId={thread?.projectId ?? projectId}
+        >
           <TranscriptWindow
             ariaLabel="Work transcript"
             className="work-thread-workspace__conversation transcript-scroll"

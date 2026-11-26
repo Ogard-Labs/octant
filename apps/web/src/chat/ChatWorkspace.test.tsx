@@ -1,4 +1,5 @@
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
+import { appendComposerQuote, REPLY_QUOTE_SOURCE } from "../composer/composerQuote";
 import { decodeChatAttachment } from "@octant/contracts/chat";
 import type { ThreadMessageQueueResult } from "@octant/contracts";
 import {
@@ -2258,50 +2259,19 @@ describe("ChatWorkspace", () => {
     expect(sendTurn).toHaveBeenLastCalledWith("Ship this plan", [lateAttachmentId], [], [], [], []);
   });
 
-  it("claims exactly the quoted chips after a quote is added during a send", async () => {
+  it("adds a reply selection to the draft as a quote chip", async () => {
     const user = userEvent.setup();
-    let resolveSend!: (sent: boolean) => void;
-    const sendTurn = vi.fn(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveSend = resolve;
-        }),
-    );
-    const controller = controllerFixture({
-      activeView: viewWithQuotableReplies(),
-      sendTurn,
-    });
+    const controller = controllerFixture({ activeView: viewWithQuotableReplies() });
     render(<ChatWorkspace controller={controller} providerSnapshot={providerSnapshot()} />);
 
     await addQuoteFromTranscript(user, "First quote excerpt.");
-    await screen.findByText("Quote · First quote excerpt.");
 
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
-
-    await addQuoteFromTranscript(user, "Second quote excerpt.");
-    await screen.findByText("Quote · Second quote excerpt.");
-
-    resolveSend(true);
-    await waitFor(() =>
-      expect(screen.queryByText("Quote · First quote excerpt.")).not.toBeInTheDocument(),
-    );
-    expect(screen.getByText("Quote · Second quote excerpt.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(sendTurn).toHaveBeenCalledTimes(2));
-    expect(sendTurn).toHaveBeenLastCalledWith(
-      expect.stringContaining("Second quote excerpt."),
-      [],
-      [],
-      [],
-      [],
-      [],
-    );
-    const lastMessage = String(
-      (sendTurn.mock.calls.at(-1) as ReadonlyArray<unknown> | undefined)?.[0] ?? "",
-    );
-    expect(lastMessage).not.toContain("First quote excerpt.");
+    const draft = appendComposerQuote("Ship this plan", {
+      source: REPLY_QUOTE_SOURCE,
+      text: "First quote excerpt.",
+      comment: "",
+    });
+    expect(controller.setPendingDraft).toHaveBeenLastCalledWith(draft, draft.length);
   });
 
   it("keeps an attachment visible when authoritative discard fails", async () => {

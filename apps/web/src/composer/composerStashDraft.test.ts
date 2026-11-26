@@ -5,6 +5,7 @@ import {
   type ComposerStashLocation,
   type ComposerStashTarget,
 } from "./composerStashDraft";
+import { appendComposerQuote, REPLY_QUOTE_SOURCE } from "./composerQuote";
 import { planComposerStashRecovery, planComposerStashRestore } from "./composerStashRestore";
 
 const chat: ComposerStashLocation = {
@@ -158,7 +159,7 @@ describe("restoring a saved composer draft", () => {
     expect(restore.draft.files[0]?.name).toBe("notes.md");
   });
 
-  it("restores quotes with their source and appends without replacing the live prompt", () => {
+  it("writes a quote stashed before quotes lived in the text into the prompt as a chip", () => {
     const quote = {
       kind: "quote" as const,
       value: { id: "quote", turnId: "turn", text: "Exact excerpt" },
@@ -169,6 +170,11 @@ describe("restoring a saved composer draft", () => {
       caret: 5,
       context: [quote],
     };
+    const chip = appendComposerQuote("", {
+      source: REPLY_QUOTE_SOURCE,
+      text: "Exact excerpt",
+      comment: "",
+    });
     expect(
       planComposerStashRestore(
         chat,
@@ -178,7 +184,12 @@ describe("restoring a saved composer draft", () => {
       ),
     ).toEqual({
       kind: "ready",
-      draft: { ...saved, text: "New text\n\nSaved follow-up", caret: 15 },
+      draft: {
+        ...saved,
+        context: [],
+        text: `${chip}New text\n\nSaved follow-up`,
+        caret: chip.length + 15,
+      },
     });
   });
 
