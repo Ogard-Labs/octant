@@ -8113,7 +8113,16 @@ ls-remote` against the thread's remote and the GitHub reads they already
   too. Any read of the conversation while this window's own send streams a
   turn, such as the one a rename from another window brings, keeps that turn's
   rows and tool steps as shown, because the send's stream writes the reply
-  row it created and a second stream of the turn is refused. The steered messages are held apart from the transcript and only ever grow, so the read
+  row it created and a second stream of the turn is refused. Reading an open
+  thread again in place (a rename, a retry) keeps the transcript an earlier
+  read of it loaded when that read fails, and says the history could not be
+  refreshed, so a reply this window's send streams keeps its row; a first read
+  that fails for a thread kept from an earlier visit clears it and where Load
+  earlier had got to, so the next read starts the thread as a first open
+  does, and for a fork reads its first inherited page too. A stream commits
+  all the reasoning it has shown since the turn's start, not the chunks since
+  its last commit, so a read that already holds a chunk the stream has not
+  shown yet does not show it twice. The steered messages are held apart from the transcript and only ever grow, so the read
   cannot roll back the reply, tool steps or tasks the stream is writing, and
   a slower read of the conversation cannot take a shown message away. Reading
   on every `code-navigation` notice was rejected because most of those say

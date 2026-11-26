@@ -25,7 +25,11 @@ import {
   noteTypedComposerText,
   threadDraftScope,
 } from "@octant/client-runtime/typed-composer-text";
-import { createCodeReadCursorStore, useCodeController } from "./useCodeController";
+import {
+  createCodeReadCursorStore,
+  useCodeController,
+  type CodeKeptThread,
+} from "./useCodeController";
 import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { sendLineNotesAsFollowUp } from "../dockModules/ReviewModule";
 import { resumeStoppedPromptNow } from "./resumeStoppedPrompt";
@@ -2836,6 +2840,357 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("shows a fork's source history once when reading the fork again fails on a host read whole", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000010";
+    const parentId = "10000000-0000-4000-8000-000000000099" as CodeThreadId;
+    const forkConversation = vi.fn(async (threadId: unknown) => ({
+      version: 3 as const,
+      threadId,
+      turns: [],
+      nextCursor: 0,
+      hasMore: false,
+    }));
+    const client = fakeClient({
+      thread: vi.fn(async (threadId) =>
+        threadId === parentId
+          ? { ...view(1), thread: { ...view(1).thread, id: parentId } }
+          : {
+              ...view(1),
+              thread: {
+                ...view(1).thread,
+                forkedFrom: { threadId: parentId, throughOperationId: operationId },
+              },
+            },
+      ),
+      conversation: vi.fn(async (threadId) =>
+        threadId === parentId
+          ? {
+              version: 3,
+              threadId: parentId,
+              turns: [
+                {
+                  ...conversationTurn(operationId, "60000000-0000-4000-8000-000000000010"),
+                  assistant: [
+                    {
+                      contentId: "60000000-0000-4000-8000-000000000011",
+                      digest: "b".repeat(64),
+                      byteLength: 12,
+                    },
+                  ],
+                },
+              ],
+              nextCursor: 1,
+              hasMore: false,
+            }
+          : forkConversation(threadId),
+      ) as never,
+      operationContents: vi.fn(async (request) => ({
+        threadId: request.threadId,
+        items: request.items.map((item: object) => ({ ...item, text: "source text" })),
+      })) as never,
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.conversation).toHaveLength(2));
+
+    forkConversation.mockRejectedValueOnce(new Error("offline"));
+    act(() => {
+      result.current.refreshConversation();
+    });
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+    );
+    await act(async () => undefined);
+    expect(result.current.conversation).toHaveLength(2);
+    unmount();
+  });
+
+  it("takes the refresh warning down when a later change to the thread reads its history", async () => {
+    const first = deferred<void>();
+    const second = deferred<void>();
+    async function* changes(signal: AbortSignal) {
+      await first.promise;
+      yield {
+        threadId: ids.thread,
+        sequence: 2,
+        event: { kind: "thread-updated", thread: thread(2) },
+      } as never;
+      await second.promise;
+      yield {
+        threadId: ids.thread,
+        sequence: 3,
+        event: { kind: "thread-updated", thread: thread(3) },
+      } as never;
+      yield* idleStream(signal);
+    }
+    const client = fakeClient({
+      subscribe: vi.fn((_id, _cursor, signal) => changes(signal)),
+      thread: vi.fn(async () => view(1)),
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+
+    vi.mocked(client.thread).mockImplementation(async () => view(2));
+    vi.mocked(client.conversation).mockRejectedValueOnce(new Error("offline"));
+    first.resolve();
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+    );
+    vi.mocked(client.thread).mockImplementation(async () => view(3));
+    second.resolve();
+    await waitFor(() => expect(client.conversation).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(result.current.turnError).toBeUndefined());
+    unmount();
+  });
+
+  it("shows the history as loaded when a change to the thread reads it after the first read failed", async () => {
+    const change = deferred<void>();
+    async function* changes(signal: AbortSignal) {
+      await change.promise;
+      yield {
+        threadId: ids.thread,
+        sequence: 2,
+        event: { kind: "thread-updated", thread: thread(2) },
+      } as never;
+      yield* idleStream(signal);
+    }
+    const client = fakeClient({
+      subscribe: vi.fn((_id, _cursor, signal) => changes(signal)),
+    } as never);
+    vi.mocked(client.conversation).mockRejectedValueOnce(new Error("offline"));
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.conversationHistory).toBe("unavailable"));
+    expect(result.current.turnError).toBe("Conversation history could not be loaded.");
+
+    vi.mocked(client.thread).mockImplementation(async () => view(2));
+    change.resolve();
+    await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+    expect(result.current.turnError).toBeUndefined();
+    unmount();
+  });
+
+  it("offers no restore point on a checkout the open thread moved to, though reading it again fails", async () => {
+    const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) };
+    const replacement = "40000000-0000-4000-8000-000000000002";
+    const client = fakeClient({
+      conversation: vi.fn(async () => ({
+        version: 3 as const,
+        threadId: ids.thread,
+        turns: [],
+        nextCursor: 0,
+        hasMore: false,
+        restoreUndo: checkpoint,
+      })) as never,
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.restoreUndo).toEqual(checkpoint));
+
+    // The person moves the open thread onto the Project's checkout, and the
+    // read of its history that follows fails.
+    const rebound = {
+      ...view(2),
+      checkout: { ...checkout(), id: replacement as never },
+      thread: { ...thread(2), checkoutId: replacement as never },
+    };
+    vi.mocked(client.thread).mockImplementation(async () => rebound);
+    vi.mocked(client.execute).mockResolvedValueOnce({
+      kind: "thread-checkout-rebind",
+      threadId: ids.thread,
+      outcome: { status: "rebound", thread: rebound.thread, checkout: rebound.checkout },
+    } as never);
+    vi.mocked(client.conversation).mockRejectedValueOnce(new Error("offline"));
+    await act(async () => {
+      await result.current.rebindThreadCheckout(ids.thread);
+    });
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+    );
+    await waitFor(() => expect(result.current.activeView?.checkout.id).toBe(replacement));
+    expect(result.current.restoreUndo).toBeUndefined();
+    unmount();
+  });
+
+  it("offers a restore's way back only on the thread and checkout the restore ran on", async () => {
+    const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) };
+    const replacement = "40000000-0000-4000-8000-000000000002";
+    const client = fakeClient();
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.checkout.id).toBe(ids.checkout));
+
+    // The thread moves to another checkout while a restore sent to the old
+    // one is still running; its result arrives after the new view is in.
+    const rebound = {
+      ...view(2),
+      checkout: { ...checkout(), id: replacement as never },
+      thread: { ...thread(2), checkoutId: replacement as never },
+    };
+    vi.mocked(client.thread).mockImplementation(async () => rebound);
+    vi.mocked(client.bootstrap).mockImplementation(async () => ({
+      ...bootstrap(2),
+      checkouts: [rebound.checkout],
+      threads: [rebound.thread],
+    }));
+    vi.mocked(client.execute).mockResolvedValueOnce({
+      kind: "thread-checkout-rebind",
+      threadId: ids.thread,
+      outcome: { status: "rebound", thread: rebound.thread, checkout: rebound.checkout },
+    } as never);
+    await act(async () => {
+      await result.current.rebindThreadCheckout(ids.thread);
+    });
+    await waitFor(() => expect(result.current.activeView?.checkout.id).toBe(replacement));
+
+    act(() => {
+      result.current.noteRestoreUndo(checkpoint, {
+        threadId: ids.thread,
+        checkoutId: ids.checkout as never,
+      });
+    });
+    expect(result.current.restoreUndo).toBeUndefined();
+    act(() => {
+      result.current.noteRestoreUndo(checkpoint, {
+        threadId: ids.thread,
+        checkoutId: replacement as never,
+      });
+    });
+    expect(result.current.restoreUndo).toEqual(checkpoint);
+    // A late result for the old checkout, or for another thread, is not
+    // offered here, and does not take this checkout's own way back either.
+    const elsewhere = { worktree: "e".repeat(40), index: "f".repeat(40) };
+    act(() => {
+      result.current.noteRestoreUndo(elsewhere, {
+        threadId: ids.thread,
+        checkoutId: ids.checkout as never,
+      });
+    });
+    act(() => {
+      result.current.noteRestoreUndo(elsewhere, {
+        threadId: "10000000-0000-4000-8000-000000000002" as CodeThreadId,
+        checkoutId: replacement as never,
+      });
+    });
+    expect(result.current.restoreUndo).toEqual(checkpoint);
+    unmount();
+  });
+
+  it("keeps the thread's usage and restore point when a later page of reading it again fails on a host read whole", async () => {
+    const [older, newer] = turnsOf("own", 2);
+    const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) };
+    const page = (cursor: number) => ({
+      version: 3 as const,
+      threadId: ids.thread,
+      turns: [cursor === 0 ? older : newer],
+      nextCursor: cursor + 1,
+      hasMore: cursor === 0,
+      restoreUndo: checkpoint,
+    });
+    const client = fakeClient({
+      conversation: vi.fn(async (_threadId, cursor: number) => page(cursor)) as never,
+      operationContents: vi.fn(async (request) => ({
+        threadId: request.threadId,
+        items: request.items.map((item: object) => ({ ...item, text: "text" })),
+      })) as never,
+    } as never);
+    const { result, rerender, unmount } = renderHook(
+      ({ threadId }: { threadId: CodeThreadId }) =>
+        useCodeController({ activeThreadId: threadId, client, reconnectDelayMs: 60_000 }),
+      { initialProps: { threadId: ids.thread } },
+    );
+    await waitFor(() => expect(result.current.threadUsage.outputTokens).toBe(21));
+    expect(result.current.restoreUndo).toEqual(checkpoint);
+
+    vi.mocked(client.conversation)
+      .mockImplementationOnce(async () => page(0) as never)
+      .mockRejectedValueOnce(new Error("offline"));
+    act(() => {
+      result.current.refreshConversation();
+    });
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+    );
+    expect(result.current.threadUsage.outputTokens).toBe(21);
+    expect(result.current.restoreUndo).toEqual(checkpoint);
+
+    // A restore point is never offered on another thread's checkout.
+    vi.mocked(client.conversation).mockImplementation(() => new Promise(() => undefined));
+    rerender({ threadId: "10000000-0000-4000-8000-000000000002" as CodeThreadId });
+    expect(result.current.restoreUndo).toBeUndefined();
+    unmount();
+  });
+
+  it("keeps a fork's whole transcript when a later page of reading it again fails on a host read whole", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000010";
+    const parentId = "10000000-0000-4000-8000-000000000099" as CodeThreadId;
+    const ownPage = (cursor: number) => ({
+      version: 3 as const,
+      threadId: ids.thread,
+      turns: [
+        conversationTurn(
+          `70000000-0000-4000-8000-00000000002${String(cursor)}`,
+          `60000000-0000-4000-8000-00000000002${String(cursor)}`,
+        ),
+      ],
+      nextCursor: cursor + 1,
+      hasMore: cursor === 0,
+    });
+    const forkConversation = vi.fn(async (_threadId: unknown, cursor: number) => ownPage(cursor));
+    const client = fakeClient({
+      thread: vi.fn(async (threadId) =>
+        threadId === parentId
+          ? { ...view(1), thread: { ...view(1).thread, id: parentId } }
+          : {
+              ...view(1),
+              thread: {
+                ...view(1).thread,
+                forkedFrom: { threadId: parentId, throughOperationId: operationId },
+              },
+            },
+      ),
+      conversation: vi.fn(async (threadId, cursor) =>
+        threadId === parentId
+          ? {
+              version: 3,
+              threadId: parentId,
+              turns: [conversationTurn(operationId, "60000000-0000-4000-8000-000000000010")],
+              nextCursor: 1,
+              hasMore: false,
+            }
+          : forkConversation(threadId, cursor),
+      ) as never,
+      operationContents: vi.fn(async (request) => ({
+        threadId: request.threadId,
+        items: request.items.map((item: object) => ({ ...item, text: "text" })),
+      })) as never,
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.conversation).toHaveLength(6));
+    const shown = result.current.conversation.map((message) => message.id);
+
+    forkConversation
+      .mockImplementationOnce(async (_threadId, cursor) => ownPage(cursor))
+      .mockRejectedValueOnce(new Error("offline"));
+    act(() => {
+      result.current.refreshConversation();
+    });
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+    );
+    await act(async () => undefined);
+    expect(result.current.conversation.map((message) => message.id)).toEqual(shown);
+    unmount();
+  });
+
   it("keeps a fork readable when its source history is unavailable", async () => {
     const promptId = "60000000-0000-4000-8000-000000000010";
     const replyId = "60000000-0000-4000-8000-000000000011";
@@ -3625,6 +3980,174 @@ describe("useCodeController", () => {
         .mocked(client.subscribeOperation)
         .mock.calls.filter(([, operationId]) => String(operationId) === sentTurns[0]);
       expect(streamsOfSent).toHaveLength(1);
+      unmount();
+    });
+
+    it("shows the reasoning of a turn this window sent once when a reload reads it before the stream shows it", async () => {
+      const { client, emit, host } = runningThread();
+      host.threads[String(ids.thread)]?.turns.splice(0, 1);
+      const reasoningId = "60000000-0000-4000-8000-000000000077";
+      const reasoning = evidenceText(reasoningId);
+      let renamed = () => {};
+      const rename = new Promise<void>((resolve) => {
+        renamed = resolve;
+      });
+      async function* threadEvents(signal: AbortSignal) {
+        await rename;
+        yield {
+          threadId: ids.thread,
+          sequence: 2,
+          event: { kind: "thread-updated", thread: thread(2) },
+        } as never;
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      }
+      const sentTurns: string[] = [];
+      const sent = fakeClient({
+        ...client,
+        subscribe: vi.fn((_threadId, _cursor, signal) => threadEvents(signal)) as never,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => {
+          sentTurns.push(String(command.operationId));
+          host.threads[String(ids.thread)]?.turns.push({
+            ...conversationTurn(command.operationId, "60000000-0000-4000-8000-000000000002"),
+            status: "incomplete",
+          } as never);
+          return {
+            kind: "provider-turn-state",
+            operationId: command.operationId,
+            state: "running",
+          };
+        }) as never,
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client: sent,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      const sentTurn = sentTurns[0] ?? "";
+      // The host saves the turn's first reasoning, and another window renames
+      // the thread, before this window's stream shows that reasoning.
+      const stored = host.threads[String(ids.thread)]?.turns;
+      stored?.splice(-1, 1, {
+        ...stored.at(-1),
+        steps: [
+          {
+            kind: "reasoning",
+            content: { contentId: reasoningId, digest: "c".repeat(64), byteLength: 15 },
+          },
+        ],
+      } as never);
+      vi.mocked(client.operationContent).mockImplementation(
+        async () => new TextEncoder().encode(reasoning) as never,
+      );
+      act(() => {
+        emit(1, {
+          kind: "provider-content",
+          channel: "reasoning",
+          content: { contentId: reasoningId, digest: "c".repeat(64), byteLength: 15 },
+        });
+        renamed();
+      });
+      await waitFor(() =>
+        expect(result.current.turnActivity.get(sentTurn)?.reasoning).toBe(reasoning),
+      );
+      // Past the stream's next commit of what it holds.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+      expect(result.current.turnActivity.get(sentTurn)?.reasoning).toBe(reasoning);
+      unmount();
+    });
+
+    it("keeps the transcript and the reply of a turn this window sent streaming when a reload of the thread fails", async () => {
+      const { client, host, say } = runningThread();
+      const stored = host.threads[String(ids.thread)]?.turns;
+      stored?.splice(0, 1, { ...stored[0], status: "completed" } as never);
+      const sentTurns: string[] = [];
+      const sent = fakeClient({
+        ...client,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => {
+          sentTurns.push(String(command.operationId));
+          return {
+            kind: "provider-turn-state",
+            operationId: command.operationId,
+            state: "running",
+          };
+        }) as never,
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client: sent,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      act(() => say(1, "part-1"));
+      await waitFor(() =>
+        expect(result.current.conversation.at(-1)).toMatchObject({ text: "First half" }),
+      );
+      const shown = result.current.conversation.length;
+
+      vi.mocked(host.client.conversationWindow).mockRejectedValueOnce(new Error("offline"));
+      act(() => {
+        result.current.refreshConversation();
+      });
+      await waitFor(() => expect(result.current.turnError).toBeDefined());
+      expect(result.current.conversation).toHaveLength(shown);
+      expect(result.current.conversation[0]).toMatchObject({ operationId });
+      expect(result.current.conversationHistory).toBe("loaded");
+      expect(result.current.turnError).toBe("Conversation history could not be refreshed.");
+
+      act(() => say(2, "part-2"));
+      await waitFor(() =>
+        expect(result.current.conversation.at(-1)).toMatchObject({
+          operationId: sentTurns[0],
+          text: "First half, second half",
+        }),
+      );
+      unmount();
+    });
+
+    it("keeps the transcript when a reload fails while an earlier reload of the thread still reads", async () => {
+      const { client, host } = runningThread();
+      const stored = host.threads[String(ids.thread)]?.turns;
+      stored?.splice(0, 1, { ...stored[0], status: "completed" } as never);
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+      const shown = result.current.conversation;
+
+      vi.mocked(host.client.conversationWindow)
+        .mockImplementationOnce(() => new Promise(() => undefined))
+        .mockRejectedValueOnce(new Error("offline"));
+      act(() => {
+        result.current.refreshConversation();
+      });
+      expect(result.current.conversationHistory).toBe("loading");
+      act(() => {
+        result.current.refreshConversation();
+      });
+
+      await waitFor(() =>
+        expect(result.current.turnError).toBe("Conversation history could not be refreshed."),
+      );
+      expect(result.current.conversation).toEqual(shown);
+      expect(result.current.conversationHistory).toBe("loaded");
       unmount();
     });
 
@@ -4908,6 +5431,122 @@ describe("useCodeController conversation window", () => {
     expect(result.current.conversation.some((message) => message.text === "source prompt 30")).toBe(
       false,
     );
+    unmount();
+  });
+
+  it.each(["a new fork", "a fork the window comes back to"])(
+    "shows the inherited turns of %s once it reads again after its first read failed",
+    async (opening) => {
+      const sourceId = "10000000-0000-4000-8000-000000000077" as CodeThreadId;
+      const source = turnsOf("source", 50);
+      const forkPoint = source[29];
+      if (forkPoint === undefined) throw new Error("fixture");
+      const host = windowedHost({
+        [ids.thread]: {
+          turns: turnsOf("fork", 3),
+          forkedFrom: { threadId: sourceId, throughOperationId: forkPoint.operationId },
+        },
+        [sourceId]: { turns: source },
+      });
+      const client = fakeClient(host.client);
+      let kept: CodeKeptThread | undefined;
+      if (opening === "a fork the window comes back to") {
+        const first = renderHook(() =>
+          useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+        );
+        await waitFor(() => expect(first.result.current.conversation).toHaveLength(46));
+        act(() => first.result.current.loadEarlierConversation());
+        await waitFor(() => expect(first.result.current.earlierConversation).toBe("none-left"));
+        kept = first.result.current.keepThread();
+        first.unmount();
+        expect(kept).toBeDefined();
+      }
+      vi.mocked(host.client.conversationWindow).mockRejectedValueOnce(new Error("offline"));
+
+      const { result, rerender, unmount } = renderHook(
+        ({ navigationBootstrap }) =>
+          useCodeController({
+            activeThreadId: ids.thread,
+            client,
+            ...(kept === undefined ? {} : { kept }),
+            navigation: { bootstrap: navigationBootstrap },
+            reconnectDelayMs: 60_000,
+          }),
+        { initialProps: { navigationBootstrap: bootstrap(1) } },
+      );
+      await waitFor(() => expect(result.current.conversationHistory).toBe("unavailable"));
+      // The list's activity for the fork moves, and the fork is read again.
+      rerender({ navigationBootstrap: bootstrap(1, 4) });
+
+      // The fork's own three turns, and the source's page that ends at the fork point.
+      await waitFor(() => expect(result.current.conversation).toHaveLength(46));
+      expect(result.current.conversationHistory).toBe("loaded");
+      expect(result.current.conversation[0]).toMatchObject({
+        text: "source prompt 10",
+        sourceThreadId: sourceId,
+      });
+      act(() => result.current.loadEarlierConversation());
+      await waitFor(() => expect(result.current.conversation).toHaveLength(66));
+      expect(result.current.conversation[0]).toMatchObject({ text: "source prompt 0" });
+      unmount();
+    },
+  );
+
+  it("shows a new fork's inherited turns when a rename reads it after its first read failed", async () => {
+    const sourceId = "10000000-0000-4000-8000-000000000077" as CodeThreadId;
+    const source = turnsOf("source", 50);
+    const forkPoint = source[29];
+    if (forkPoint === undefined) throw new Error("fixture");
+    const host = windowedHost({
+      [ids.thread]: {
+        turns: turnsOf("fork", 3),
+        forkedFrom: { threadId: sourceId, throughOperationId: forkPoint.operationId },
+      },
+      [sourceId]: { turns: source },
+    });
+    const renamed = deferred<void>();
+    let lastSequence = 1;
+    const readThread = host.client.thread;
+    const client = fakeClient({
+      ...host.client,
+      thread: vi.fn(async (threadId: CodeThreadId, signal?: AbortSignal) => ({
+        ...(await readThread(threadId, signal)),
+        lastSequence: lastSequence as never,
+      })),
+      subscribe: vi.fn((_id, _cursor, signal) =>
+        (async function* () {
+          await renamed.promise;
+          yield {
+            threadId: ids.thread,
+            sequence: 2,
+            event: { kind: "thread-updated", thread: thread(2) },
+          } as never;
+          yield* idleStream(signal);
+        })(),
+      ) as never,
+    });
+    vi.mocked(host.client.conversationWindow).mockRejectedValueOnce(new Error("offline"));
+    // A new fork has run no turn, so the list reports no activity for it.
+    const navigation = { bootstrap: bootstrap(1) };
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigation,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.conversationHistory).toBe("unavailable"));
+
+    // Another window renames the fork, and reading it for that succeeds.
+    lastSequence = 2;
+    renamed.resolve();
+    await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+    await waitFor(() => expect(result.current.conversation).toHaveLength(46));
+    expect(result.current.conversation[0]).toMatchObject({
+      text: "source prompt 10",
+      sourceThreadId: sourceId,
+    });
     unmount();
   });
 

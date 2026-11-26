@@ -1707,18 +1707,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         // A conflict is the host refusing before Git runs, so the point a past
         // restore left behind is still the way back. Other failures include a
         // restore that threw part way, which may have moved files.
-        if (result.failure.category === "conflict") setRestoreUndo(previousUndo);
+        if (result.failure.category === "conflict") setRestoreUndo(previousUndo, command);
       } else if (result.kind === "git-mutation-state" && result.state === "completed") {
         setRestoreMessage(completedMessage);
         // Keeping what the host replaced is what makes the overwrite reversible;
         // dropping it here would strand the only copy of the previous state.
-        if (result.undo !== undefined) setRestoreUndo(result.undo);
+        if (result.undo !== undefined) setRestoreUndo(result.undo, command);
       } else if (result.kind === "git-mutation-state" && result.undo !== undefined) {
         // A failed restore reports the state it replaced, which means it may
         // have moved files before it stopped. Saying "untouched" here would be
         // a guess, and it would bury the only way back.
         setRestoreMessage(`The restore ${result.state}. Some files may already have changed.`);
-        setRestoreUndo(result.undo);
+        setRestoreUndo(result.undo, command);
       } else if (result.kind === "git-mutation-state")
         setRestoreMessage(`The restore was ${result.state}. The checkout is untouched.`);
       else setRestoreMessage("The restore did not report a result.");
@@ -1899,7 +1899,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         return;
       }
       setRewind(undefined);
-      if (result.undo !== undefined) setRestoreUndo(result.undo);
+      // Bound to the thread and checkout the rewind ran on, which the view may
+      // have left by the time its result arrives.
+      if (result.undo !== undefined) setRestoreUndo(result.undo, command);
       setRestoreMessage(
         result.scope === "files"
           ? "Files were put back to before that message."

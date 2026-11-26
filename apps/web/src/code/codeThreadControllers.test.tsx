@@ -610,6 +610,156 @@ describe("CodeThreadControllerSlots", () => {
       expect(wholeReads()).toBe(before);
     });
 
+    it.each(["incomplete", "waiting"])(
+      "shows the approval a turn stopped on before the list said the thread was working (%s)",
+      async (status) => {
+        const approvalId = "70000000-0000-4000-8000-000000000030";
+        const { api, held } = host([providerTurn(asked, "completed")], (operationId, signal) =>
+          operationId === next
+            ? (async function* () {
+                yield {
+                  threadId: threadA,
+                  operationId: next,
+                  cursor: 1,
+                  occurredAt: now,
+                  event: {
+                    kind: "approval-requested",
+                    approvalId,
+                    action: "provider-tool",
+                    summary: "Allow browser access?",
+                  },
+                };
+                if (status === "waiting") {
+                  yield {
+                    threadId: threadA,
+                    operationId: next,
+                    cursor: 2,
+                    occurredAt: now,
+                    event: { kind: "operation-state", state: "waiting" },
+                  };
+                  return;
+                }
+                yield* idleStream(signal);
+              })()
+            : undefined,
+        );
+        const settled = (sequence: number, parked = false): CodeBootstrap => ({
+          ...bootstrap(),
+          activity: [{ threadId: threadA, lastSequence: sequence }] as never,
+          ...(parked
+            ? {
+                runtime: [
+                  {
+                    threadId: threadA,
+                    executing: false,
+                    awaitingInput: true,
+                    awaitingKind: "approval",
+                  },
+                ] as never,
+              }
+            : {}),
+        });
+        const { registry, rerender } = open(api, settled(2));
+        await waitFor(() => expect(registry.get(threadA)?.conversationHistory).toBe("loaded"));
+        expect(registry.get(threadA)?.turnStatus).toBe("idle");
+
+        // The turn started elsewhere and asked for approval at once: the list
+        // never said the thread was working, only that its activity moved and
+        // it waits on the person.
+        held.turnsOfA = [providerTurn(asked, "completed"), providerTurn(next, status)];
+        rerender(settled(9, true));
+
+        await waitFor(() =>
+          expect(registry.get(threadA)?.providerRequests).toEqual([
+            expect.objectContaining({ kind: "approval", approvalId }),
+          ]),
+        );
+        expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({ operationId: next });
+      },
+    );
+
+    it("shows the approval of a waiting turn that a change to the thread read after the first reads failed", async () => {
+      const approvalId = "70000000-0000-4000-8000-000000000031";
+      const { api, conversationWindow } = host(
+        [providerTurn(asked, "completed"), providerTurn(next, "waiting")],
+        (operationId) =>
+          operationId === next
+            ? (async function* () {
+                yield {
+                  threadId: threadA,
+                  operationId: next,
+                  cursor: 1,
+                  occurredAt: now,
+                  event: {
+                    kind: "approval-requested",
+                    approvalId,
+                    action: "provider-tool",
+                    summary: "Allow browser access?",
+                  },
+                };
+                yield {
+                  threadId: threadA,
+                  operationId: next,
+                  cursor: 2,
+                  occurredAt: now,
+                  event: { kind: "operation-state", state: "waiting" },
+                };
+              })()
+            : undefined,
+      );
+      let changed = () => {};
+      const change = new Promise<void>((resolve) => {
+        changed = resolve;
+      });
+      const readThread = api.thread;
+      let lastSequence = 1;
+      Object.assign(api, {
+        subscribe: vi.fn((_threadId: unknown, _cursor: unknown, signal: AbortSignal) =>
+          (async function* () {
+            await change;
+            yield {
+              threadId: threadA,
+              sequence: 2,
+              event: { kind: "thread-updated", thread: thread(threadA, checkoutA, "Renamed") },
+            };
+            yield* idleStream(signal);
+          })(),
+        ),
+        thread: vi.fn(async (threadId: CodeThreadId, signal?: AbortSignal) => ({
+          ...(await readThread(threadId, signal)),
+          lastSequence,
+        })),
+      });
+      // The read that opens the thread fails, and so does the read the
+      // thread's activity starts at once.
+      conversationWindow
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockRejectedValueOnce(new Error("offline"));
+      const { registry } = open(api, {
+        ...bootstrap(),
+        activity: [{ threadId: threadA, lastSequence: 4 }] as never,
+        runtime: [
+          { threadId: threadA, executing: false, awaitingInput: true, awaitingKind: "approval" },
+        ] as never,
+      });
+      await waitFor(() => expect(conversationWindow).toHaveBeenCalledTimes(2));
+      expect(registry.get(threadA)?.conversationHistory).toBe("unavailable");
+
+      // Another window renames the thread; reading it for that change loads
+      // the waiting turn before the failed look is tried again.
+      lastSequence = 2;
+      changed();
+      await waitFor(() => expect(registry.get(threadA)?.conversationHistory).toBe("loaded"));
+
+      await waitFor(
+        () =>
+          expect(registry.get(threadA)?.providerRequests).toEqual([
+            expect.objectContaining({ kind: "approval", approvalId }),
+          ]),
+        { timeout: 8_000 },
+      );
+    }, 12_000);
+
     it("looks again on its own when its look at a settled thread failed", async () => {
       const { api, conversationWindow, held } = host([providerTurn(asked, "completed")]);
       const settled = (sequence: number): CodeBootstrap => ({
@@ -997,6 +1147,46 @@ describe("switching between Code threads the window has loaded", () => {
     frames.length = 0;
     return { frames, host, readCursorStore, registry, replies, show };
   }
+
+  it("draws the transcript under the refresh warning, and takes the warning down once a read succeeds", async () => {
+    const host = conversingHost(new Map([[String(threadA), "Reply from the first thread"]]));
+    const conversationWindow = host.client.conversationWindow;
+    if (conversationWindow === undefined) throw new Error("A windowed host reads windows.");
+    const registry = createCodeThreadControllers();
+    const props = {
+      client: host.client,
+      readCursorStore: createCodeReadCursorStore(),
+      registry,
+      threadId: threadA,
+    };
+    const view = render(<ThreadWindow {...props} navigationBootstrap={bootstrap()} />);
+    await screen.findByText("Reply from the first thread");
+
+    vi.mocked(conversationWindow).mockRejectedValueOnce(new Error("The host did not answer."));
+    act(() => {
+      registry.get(threadA)?.refreshConversation();
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Conversation history could not be refreshed.",
+    );
+    expect(screen.getByText("Reply from the first thread")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+
+    // The thread's activity moves, and the read it starts succeeds.
+    view.rerender(
+      <ThreadWindow
+        {...props}
+        navigationBootstrap={{
+          ...bootstrap(),
+          activity: [{ threadId: threadA, lastSequence: 5 }] as never,
+        }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Conversation history could not be refreshed.")).toBeNull(),
+    );
+    expect(screen.getByText("Reply from the first thread")).toBeInTheDocument();
+  });
 
   it("still reads again a thread it drew from what it kept when that first read fails", async () => {
     const opened = await openBoth();

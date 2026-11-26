@@ -1402,6 +1402,37 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByLabelText("Follow-up message")).toBeEnabled();
   });
 
+  it("keeps the transcript and a streaming reply under the notice when reading the thread again fails", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "a:user", role: "user", text: "Earlier prompt" },
+            { id: "a:assistant", role: "assistant", text: "Earlier reply" },
+            { id: "b:user", role: "user", text: "Add the index" },
+            { id: "b:assistant", role: "assistant", text: "First half", status: "incomplete" },
+          ] as never,
+          conversationHistory: "loaded",
+          turnStatus: "running",
+          turnError: "Conversation history could not be refreshed.",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    for (const text of ["Earlier prompt", "Earlier reply", "Add the index", "First half"]) {
+      expect(screen.getByText(text)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("Send a prompt to begin")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Conversation history could not be refreshed.",
+    );
+    // The view reads the thread again on its own; Retry is for a history
+    // that never loaded.
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
   it("keeps a failed turn's reason out of the callout once the transcript carries it", () => {
     render(
       <CodeThreadWorkspace
@@ -2090,8 +2121,12 @@ describe("CodeThreadWorkspace", () => {
     await waitFor(() =>
       expect(screen.getByRole("textbox", { name: /message/i })).toHaveValue("rewrite the parser"),
     );
-    // The way back from the file restore is kept where Undo restore reads it.
-    expect(noteRestoreUndo).toHaveBeenCalledWith(checkpoint);
+    // The way back from the file restore is kept where Undo restore reads it,
+    // bound to the thread and checkout the rewind ran on.
+    expect(noteRestoreUndo).toHaveBeenCalledWith(
+      checkpoint,
+      expect.objectContaining({ threadId, checkoutId: "20000000-0000-4000-8000-000000000002" }),
+    );
   });
 
   it("rewinds only the conversation without asking for an approval", async () => {
@@ -2216,8 +2251,13 @@ describe("CodeThreadWorkspace", () => {
     ];
     // The undo point belongs to the controller, which outlives this surface;
     // opening another tab unmounts the surface exactly like this.
+    const noted = vi.fn();
     function Harness(props: { readonly open: boolean }) {
-      const [restoreUndo, noteRestoreUndo] = useState<unknown>();
+      const [restoreUndo, setRestoreUndo] = useState<unknown>();
+      const noteRestoreUndo = (point: unknown, ranOn?: unknown) => {
+        noted(point, ranOn);
+        setRestoreUndo(point);
+      };
       if (!props.open) return <p>Another tab</p>;
       return (
         <CodeThreadWorkspace
@@ -2235,8 +2275,13 @@ describe("CodeThreadWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Restore files" }));
     await waitFor(() => expect(screen.getByText("Files restored to this point.")).toBeVisible());
     // The host returned what it replaced, so the destructive overwrite is
-    // reachable rather than stranded.
+    // reachable rather than stranded, bound to the thread and checkout the
+    // restore ran on.
     expect(await screen.findByRole("button", { name: "Undo restore" })).toBeVisible();
+    expect(noted).toHaveBeenLastCalledWith(
+      undo,
+      expect.objectContaining({ threadId, checkoutId: "20000000-0000-4000-8000-000000000002" }),
+    );
 
     rerender(<Harness open={false} />);
     expect(screen.queryByRole("button", { name: "Undo restore" })).toBeNull();
