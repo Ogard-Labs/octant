@@ -4619,7 +4619,12 @@ CI or reviewers should be woken, not left polling; maintainer request,
   content. `ci-rerun` first plans on the current head: every run must have
   that head's SHA, have finished, and have fewer than three reruns (GitHub's
   own run attempt counts them, so the cap survives a restart and counts
-  reruns started elsewhere; it applies to the check's workflow run). Below
+  reruns started elsewhere). The cap is read per workflow run, a deliberate
+  narrow reading of "three per check per head" (maintainer decision,
+  2026-11-26): every rerun of any check in a run raises that run's attempt,
+  so a run holding several checks can reach the cap before each check has
+  had three reruns of its own. Counting per job would need a journal event
+  or a read of every attempt's jobs, and the stricter cap fails closed. Below
   Full access the person is then asked with the pull request, head and
   checks named; Full access does not ask. After the answer the forge reads
   the pull request and every planned run again and refuses a superseded
