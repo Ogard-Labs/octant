@@ -210,6 +210,7 @@ import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
 import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import { messageTiming, useTurnSendPreference } from "../messageQueue/turnSendPreference";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
@@ -417,6 +418,7 @@ export interface CodeThreadWorkspaceProps {
  */
 export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const readOnly = props.readOnly === true;
+  const turnSendPreference = useTurnSendPreference();
   const worktreeLaunch = useContext(WorktreeLaunchContext)?.launches.get(props.threadId);
   const continuation = useContinuationInputPolicy("code", String(props.threadId), props.serverUrl);
   const view =
@@ -1496,7 +1498,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       };
     },
   };
-  async function submitFollowUp(toolCatalogHandoff = false) {
+  // ⌘↩ (Ctrl+↩) sends this one message the opposite way to this client's
+  // choice for messages sent while a turn runs.
+  async function submitFollowUp(toolCatalogHandoff = false, opposite = false) {
     if (props.controller.draftReviewFindingReferencesInvalid) {
       setSendNotice(
         "A saved review reference is unreadable. Clear this draft and prepare the findings again from Review before sending.",
@@ -1564,6 +1568,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           },
           () => attachments.releaseQueueClaim(captured),
           { text: draft, revision: draftRevision },
+          // The choice is for messages sent while a turn runs; one queued on
+          // an idle thread behind a paused or held queue keeps its default.
+          busy ? messageTiming(turnSendPreference, opposite) : undefined,
         );
       } catch {
         attachments.releaseQueueClaim(captured);
@@ -1647,7 +1654,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (pathMentions.handleKeyDown(event)) return;
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    void submitFollowUp();
+    void submitFollowUp(false, event.metaKey || event.ctrlKey);
   }
 
   /**
@@ -3523,7 +3530,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               cellClassName: "composer-actions",
               sending: busy,
               send: {
-                ariaLabel: queueFollowUp ? "Queue message" : "Send follow-up",
+                ariaLabel: !queueFollowUp
+                  ? "Send follow-up"
+                  : !busy
+                    ? "Queue message"
+                    : turnSendPreference === "queue"
+                      ? "Queue for the next turn"
+                      : "Send into the running turn",
                 disabled: !canSend,
                 onSend: () => void submitFollowUp(),
               },

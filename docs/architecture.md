@@ -8053,8 +8053,15 @@ ls-remote` against the thread's remote and the GitHub reads they already
   draft and attachment ownership without clearing newer edits. Queue metadata,
   ordering and delivery identities are journaled. Prompt bodies, selected
   context and trusted attachment metadata stay in purgeable private storage.
-  Versioned edit, reorder and removal commands detect concurrent clients;
-  stable submission identities prevent an acknowledgement retry from adding
+  Versioned edit, reorder, removal and send-now commands detect concurrent
+  clients. An enqueue may say `timing: "next-turn"`; the item then carries
+  `waitsForNextTurn` in the journaled `thread.message-queue-changed@1` state
+  (an optional field, so earlier journals replay unchanged) and is never
+  offered to a running turn until `send-now` clears it and moves it ahead;
+  a later message without it may still steer past it. A host that predates
+  the field refuses it as an invalid command, and the client sends that
+  enqueue once more without it, as an older client would.
+  Stable submission identities prevent an acknowledgement retry from adding
   another message.
   Code dispatch records a distinct operation identity for each attempt before
   admission begins. A durable pre-launch refusal keeps the queued message and

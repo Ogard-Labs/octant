@@ -134,6 +134,11 @@ export const ThreadMessageQueueItem = Schema.Struct({
    * leaves the queue or waits again. Host memory only; never journaled.
    */
   steering: Schema.optional(Schema.Literal(true)),
+  /**
+   * The person chose Queue for this message: it is never offered to the turn
+   * that is running and waits for the next one, until they choose Send now.
+   */
+  waitsForNextTurn: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type ThreadMessageQueueItem = typeof ThreadMessageQueueItem.Type;
 export const ThreadMessageQueueSnapshot = Schema.Struct({
@@ -155,6 +160,8 @@ export const ThreadMessageQueueCommand = Schema.Union(
     ...command,
     messageId: ThreadQueueMessageId,
     payload: ThreadMessageQueuePayload,
+    /** Absent: steer where the running turn's runtime steers. */
+    timing: Schema.optional(Schema.Literal("next-turn")),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("edit"),
@@ -172,6 +179,12 @@ export const ThreadMessageQueueCommand = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("remove"),
+    ...command,
+    messageId: ThreadQueueMessageId,
+  }).annotations(strict),
+  /** Moves a waiting message to the front and lets it steer the running turn. */
+  Schema.Struct({
+    kind: Schema.Literal("send-now"),
     ...command,
     messageId: ThreadQueueMessageId,
   }).annotations(strict),

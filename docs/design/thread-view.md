@@ -1079,8 +1079,10 @@ completion, or authority from the subagent group.
 
 ## Message queue and Stop
 
-While a turn runs, its composer keeps a **Queue message**
-action and shows a
+While a turn runs, its composer keeps a send action that says what it will do
+(**Queue message** in Chat; in Work and Code **Send into the running turn** or
+**Queue for the next turn**, by this client's **While a turn runs** setting)
+and shows a
 **Stop turn** control beside it; that control stays disabled until the host has
 admitted the turn. Accepted messages appear in the queue count. The idle action
 sends normally when there are no pending messages or queue holds.
@@ -1093,8 +1095,31 @@ host's current version; conflicting edits refresh the list and preserve the
 person's unsent text. A failed enqueue leaves the draft and attachments in the
 composer. Reopening a thread reads the accepted queue from the host without
 resending it. Queue controls remain keyboard accessible and wrap at narrow
-widths. There is no separate steering control: steering goes through the
-queue's own send.
+widths. Steering goes through the queue's own send.
+
+Settings › General › Composer › **While a turn runs** chooses, for this client
+only, what a Work or Code message sent during a turn does: **Steer** (the
+default) offers it to the running turn where its runtime steers, **Queue**
+keeps it for the next turn (maintainer decision D1, 2026-11-26). ⌘↩ (Ctrl+↩)
+does the other for one message. The host never learns the setting; each
+message it holds says only whether it waits ("Waits for the next turn" in the
+queue). A message sent to steer while an earlier one waits goes into the
+running turn ahead of it; the waiting ones keep their order for the next turn.
+Each waiting Work or Code message has **Send now**, which moves it to the
+front of the messages that can still move, but never ahead of one already on
+its way or offered to the running turn, and lets it steer the running turn
+under the same checks as any message; a message its runtime refused before is
+asked again. A host from before Send now rejects the command, and the client
+shows that as a refusal asking to update the computer's Octant, never as a
+lost request that blocks the composer. On a paused or held queue the host refuses Send now with the
+pause or hold reason, so the person resumes first; Chat, which never steers,
+does not offer it. A host from before this choice refuses the unknown field,
+and the client then sends the message once more without it, so it may steer,
+and says so. The send button names Steer or Queue only while a turn runs; with
+no turn running and messages still queued, or the queue paused or held, it
+reads **Queue message**, and the message is queued without the setting, so it
+may steer the first turn after Resume. A browser that blocks storage reads the
+setting as Steer, and a choice made there lasts for the window only.
 
 In Work and Code a message sent while the turn runs is steered into that
 turn where its runtime steers (maintainer decision, 2026-11-21;
@@ -1122,8 +1147,12 @@ On the paired phone, a Work or Code thread's composer stays editable while a
 turn runs; what the person sends then joins the host's queue and waits for
 that turn to end, since the host never steers a paired device's message. The
 queue shows above the phone's composer, and each message the host still holds
-unsent can be edited or removed there. Send now, and a choice between Steer
-and Queue, wait on the queue-control design on the issue that owns them.
+unsent can be edited, removed or sent now there. A paired device's message
+still never steers, so on the phone Send now moves it to the front for the
+next turn, and the phone has no Steer or Queue choice. A device paired by
+someone other than the host's own person may move only its own message: Send
+now there leaves everyone else's messages in their order and puts it just
+behind the last one already on its way or offered to the running turn.
 
 ## Scheduled wake-ups
 

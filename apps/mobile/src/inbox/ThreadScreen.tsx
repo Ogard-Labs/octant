@@ -865,6 +865,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           items={queue.items}
           onEdit={queue.edit}
           onRemove={queue.remove}
+          onSendNow={queue.sendNow}
         />
       )}
       {selected.mode === "chat" ? (

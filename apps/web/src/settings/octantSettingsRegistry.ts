@@ -43,6 +43,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "next message suggestion tab autocomplete complete predict composer placeholder",
         },
         {
+          id: settingId("while-turn-runs"),
+          label: "While a turn runs",
+          scope: "app",
+          keywords: "steer queue send message during turn running cmd enter composer",
+        },
+        {
           id: settingId("next-message-suggestions-chat"),
           label: "Suggest my next message in Chat",
           scope: "app",

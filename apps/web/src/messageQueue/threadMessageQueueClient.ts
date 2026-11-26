@@ -53,18 +53,44 @@ export function createThreadMessageQueueClient(options: {
       return snapshot;
     },
     execute: async (command) => {
-      const result = decodeHostAnswer(ThreadMessageQueueResult)(
-        await sendWithTypedClaim(
-          command,
-          (sent) =>
+      const refusedAsInvalid = (error: unknown) =>
+        error instanceof QueueRequestRefused && error.status === 400;
+      const send = (sent: ThreadMessageQueueCommand) =>
+        sendWithTypedClaim(
+          sent,
+          (body) =>
             json("/api/thread-message-queue/commands", {
               method: "POST",
               headers: { ...headers, "content-type": "application/json" },
-              body: JSON.stringify(sent),
+              body: JSON.stringify(body),
             }),
-          (error) => error instanceof QueueRequestRefused && error.status === 400,
-        ),
-      );
+          refusedAsInvalid,
+        );
+      let answer: unknown;
+      try {
+        answer = await send(command);
+      } catch (error) {
+        // A host that predates Send now rejects the command before it does
+        // anything, so this is a refusal the composer can show, not a lost
+        // request it must hold its receipt for and check again.
+        if (command.kind === "send-now" && refusedAsInvalid(error)) {
+          return {
+            status: "refused",
+            requestId: command.requestId,
+            reason: "invalid-payload",
+            message:
+              "This computer's Octant does not offer Send now yet. Update it to use Send now.",
+          };
+        }
+        // A host that predates keeping a message for the next turn refuses
+        // the unknown field before it does anything; the message goes once
+        // more without it, as an older client sends it, and so may steer.
+        if (command.kind !== "enqueue" || command.timing === undefined || !refusedAsInvalid(error))
+          throw error;
+        const { timing: _timing, ...steering } = command;
+        answer = await send(steering);
+      }
+      const result = decodeHostAnswer(ThreadMessageQueueResult)(answer);
       if (
         result.requestId !== command.requestId ||
         (result.status !== "refused" &&
