@@ -1533,6 +1533,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       listMcpServerConnections({
         ...(only === undefined ? {} : { only }),
         snapshot: () => extensionLifecycleService.snapshot(),
+        addedInSettings: (sourceRef) => userAddedMcpServers.owns(sourceRef),
         observations: () => agentPluginMcpSessionManager.connectionObservations(),
         // Asked as a reader: a local window's status read polls a pending
         // sign-in and may finish it, which a listing must never do.

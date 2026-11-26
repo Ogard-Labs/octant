@@ -26,6 +26,13 @@ export interface McpServerConnectionSources {
    * its last known view and is never polled, so reading cannot finish one.
    */
   readonly signInStatus: (extensionId: string, componentId: string) => Promise<McpServerSignInView>;
+  /**
+   * Whether the host wrote the package with this source reference for a
+   * server the person added in Settings. The lifecycle snapshot carries no
+   * such mark, so a catalog connector read from it alone never counted as
+   * one that signs in and a signed-out one showed Ready.
+   */
+  readonly addedInSettings: (sourceRef: string) => boolean;
   readonly readConfiguration: (
     packageState: ExtensionPackageState,
     componentId: string,
@@ -170,8 +177,12 @@ export function transportOf(
 }
 
 /** Whether the package is a catalog connector whose entry signs in. */
-function catalogSignIn(packageState: ExtensionPackageState): boolean {
-  if (packageState.addedInSettings !== true) return false;
+function catalogSignIn(
+  packageState: ExtensionPackageState,
+  addedInSettings: McpServerConnectionSources["addedInSettings"],
+): boolean {
+  if (!("sourceRef" in packageState.source) || !addedInSettings(packageState.source.sourceRef))
+    return false;
   const slug = packageState.slug ?? "";
   if (!slug.startsWith(CONNECTOR_PACKAGE_PREFIX)) return false;
   return connectorById(slug.slice(CONNECTOR_PACKAGE_PREFIX.length))?.auth.kind === "sign-in";
@@ -213,7 +224,7 @@ export async function listMcpServerConnections(
         ...describeMcpServerConnection({
           component,
           signIn,
-          signInRequired: catalogSignIn(packageState),
+          signInRequired: catalogSignIn(packageState, sources.addedInSettings),
           ...(observation === undefined ? {} : { observation }),
         }),
       });
