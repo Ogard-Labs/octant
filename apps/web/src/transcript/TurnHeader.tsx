@@ -5,19 +5,10 @@ import {
   formatDateTime,
   type TimestampFormatPreference,
 } from "../theme/timestampFormat";
-import {
-  Ban,
-  Circle,
-  CircleAlert,
-  CircleX,
-  Clock3,
-  Copy,
-  GitBranch,
-  LoaderCircle,
-  RotateCcw,
-} from "../ui/icons";
+import { Ban, Circle, CircleAlert, CircleX, Clock3, Copy, GitBranch, RotateCcw } from "../ui/icons";
 
 import { OctantIconButton } from "../ui/base/OctantButton";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 import { copyText } from "./TurnActionMenu";
 
 /**
@@ -79,7 +70,8 @@ function outcomeIcon(outcome: TurnHeaderOutcome) {
       return Circle;
     case "streaming":
     case "running":
-      return LoaderCircle;
+      // The header draws the spinner itself; see TurnHeader.
+      return undefined;
     case "waiting":
       return Clock3;
     case "interrupted":
@@ -124,7 +116,11 @@ export function TurnHeader(props: TurnHeaderProps) {
               ? { "aria-live": "polite" as const, role: "status" }
               : {})}
           >
-            {Icon === undefined ? null : <Icon aria-hidden="true" size={12} />}
+            {props.outcome === "streaming" || props.outcome === "running" ? (
+              <OctantSpinner size={12} />
+            ) : Icon === undefined ? null : (
+              <Icon aria-hidden="true" size={12} />
+            )}
             <span>{props.label ?? OUTCOME_LABELS[props.outcome]}</span>
           </span>
         )}
@@ -176,7 +172,7 @@ function LiveTurnStatus(props: { readonly startedAt: string; readonly step: stri
   return (
     <div className="turn-header" data-outcome="running">
       <span className="turn-header__status turn-header__status--live">
-        <LoaderCircle aria-hidden="true" size={12} />
+        <OctantSpinner size={12} />
         <span>Working</span>
         {seconds === undefined ? null : (
           <>

@@ -4,7 +4,12 @@ import {
   type MobileCodeConversation,
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
-import { loadCodeConversationPage } from "./codeConversationPage";
+import {
+  rereadsCodeThread,
+  loadCodeConversationPage,
+  looksForTurnStartedElsewhere,
+  refreshesForNewestTurn,
+} from "./codeConversationPage";
 
 vi.mock("@octant/client-runtime", async () => {
   const actual =
@@ -67,5 +72,58 @@ describe("the Code page the phone shows", () => {
     expect(
       (await loadCodeConversationPage(transport, "thread", "hit", undefined)).anchoredAt,
     ).toBeUndefined();
+  });
+});
+
+describe("whether the phone keeps re-reading a Code thread", () => {
+  it("re-reads while a turn runs or waits, so a message sent into it shows, and stops once it settles", () => {
+    expect(rereadsCodeThread([{ status: "completed" }, { status: "incomplete" }])).toBe(true);
+    expect(rereadsCodeThread([{ status: "waiting" }])).toBe(true);
+    expect(rereadsCodeThread([{ status: "completed" }, { status: "failed" }])).toBe(false);
+    expect(rereadsCodeThread([])).toBe(false);
+  });
+
+  it("does not take an earlier turn left incomplete for one that runs", () => {
+    expect(rereadsCodeThread([{ status: "incomplete" }, { status: "completed" }])).toBe(false);
+  });
+});
+
+describe("whether the phone looks for a turn started elsewhere", () => {
+  it("looks while it shows the newest turns settled, and not while it re-reads a running turn", () => {
+    expect(looksForTurnStartedElsewhere(page(["a"], { hasEarlier: false, hasLater: false }))).toBe(
+      true,
+    );
+    const running = page(["a"], { hasEarlier: false, hasLater: false });
+    expect(
+      looksForTurnStartedElsewhere({
+        ...running,
+        turns: running.turns.map((turn) => ({ ...turn, status: "incomplete" })),
+      }),
+    ).toBe(false);
+    expect(looksForTurnStartedElsewhere(undefined)).toBe(false);
+  });
+
+  it("leaves an anchored search page in place", () => {
+    expect(
+      looksForTurnStartedElsewhere(page(["older", "hit"], { hasEarlier: true, hasLater: true })),
+    ).toBe(false);
+  });
+});
+
+describe("whether the phone's look at the newest turn refreshes the page", () => {
+  const shown = page(["a"], { hasEarlier: false, hasLater: false });
+
+  it("refreshes for a turn it does not show, even one that already finished", () => {
+    expect(refreshesForNewestTurn(shown, { operationId: "b", status: "completed" })).toBe(true);
+    expect(refreshesForNewestTurn(shown, { operationId: "b", status: "incomplete" })).toBe(true);
+  });
+
+  it("refreshes for the shown turn only once it runs or waits again", () => {
+    expect(refreshesForNewestTurn(shown, { operationId: "a", status: "completed" })).toBe(false);
+    expect(refreshesForNewestTurn(shown, { operationId: "a", status: "waiting" })).toBe(true);
+  });
+
+  it("does not refresh when the host answered nothing to compare", () => {
+    expect(refreshesForNewestTurn(shown, undefined)).toBe(false);
   });
 });

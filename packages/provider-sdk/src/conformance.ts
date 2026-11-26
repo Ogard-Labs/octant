@@ -9,6 +9,7 @@ import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import type {
   ProviderAcquireInput,
   ProviderApprovalAnswer,
+  ProviderConnection,
   ProviderDriver,
   ProviderProbeInput,
   ProviderSessionHandle,
@@ -462,6 +463,95 @@ export async function runProviderConformance(
 
   assertConformance(fixture.isReleased(), "connection scope was not finalized");
   return { ...evidence, released: true };
+}
+
+/** One approval a runtime waits on, opened fresh for each answer the kit gives. */
+export interface ProviderPendingApprovalFixture {
+  readonly connection: Pick<ProviderConnection, "answerApproval">;
+  readonly sessionId: ProviderApprovalAnswer["sessionId"];
+  readonly requestId: string;
+  /** Whether the same action, asked again in this session, would now run unasked. */
+  readonly remembered: () => boolean | Promise<boolean>;
+  readonly close: () => Promise<void>;
+}
+
+export interface ProviderApprovalAnswerConformanceFixture {
+  /**
+   * Opens a session below Full access with one approval pending, on a driver
+   * whose host default persistence is `hostDefault`.
+   */
+  readonly pending: (
+    hostDefault: NonNullable<ProviderApprovalAnswer["persistence"]>,
+  ) => Promise<ProviderPendingApprovalFixture>;
+  /** Whether this runtime can remember the pending action for its session and no wider. */
+  readonly remembersForSession: boolean;
+}
+
+export interface ProviderApprovalAnswerConformanceEvidence {
+  readonly sessionAnswerRemembered: boolean;
+  readonly onceNeverRemembered: boolean;
+  readonly denialNeverRemembered: boolean;
+  readonly projectDefaultNeverRemembered: boolean;
+}
+
+/**
+ * Holds a driver to the persistence an answer carries. The thread's setting
+ * decides in place of the host's default, only `current-session` remembers,
+ * a one-call answer is remembered under no setting, and a denial remembers
+ * nothing.
+ */
+export async function runApprovalAnswerConformance(
+  fixture: ProviderApprovalAnswerConformanceFixture,
+): Promise<ProviderApprovalAnswerConformanceEvidence> {
+  const answered = async (
+    hostDefault: NonNullable<ProviderApprovalAnswer["persistence"]>,
+    answer: Pick<ProviderApprovalAnswer, "approved" | "scope" | "persistence">,
+  ): Promise<boolean> => {
+    const pending = await fixture.pending(hostDefault);
+    try {
+      await Effect.runPromise(
+        pending.connection.answerApproval({
+          sessionId: pending.sessionId,
+          requestId: pending.requestId,
+          ...answer,
+        }),
+      );
+      return await pending.remembered();
+    } finally {
+      await pending.close();
+    }
+  };
+  const session = { approved: true, persistence: "current-session" } as const;
+  for (const hostDefault of ["project-default", "current-session"] as const) {
+    assertConformance(
+      (await answered(hostDefault, session)) === fixture.remembersForSession,
+      fixture.remembersForSession
+        ? `an answer kept for the session was not remembered under a ${hostDefault} host default`
+        : `an answer was remembered that this runtime cannot keep to its session, under a ${hostDefault} host default`,
+    );
+    assertConformance(
+      !(await answered(hostDefault, { ...session, scope: "once" })),
+      `a one-call answer was remembered under a ${hostDefault} host default`,
+    );
+    assertConformance(
+      !(await answered(hostDefault, { ...session, approved: false })),
+      `a denial was remembered as an approval under a ${hostDefault} host default`,
+    );
+    assertConformance(
+      !(await answered(hostDefault, { approved: true, persistence: "project-default" })),
+      `an answer on a thread that keeps none for the session was remembered under a ${hostDefault} host default`,
+    );
+  }
+  assertConformance(
+    !(await answered("current-session", { approved: true, scope: "once" })),
+    "a one-call answer naming no persistence was remembered",
+  );
+  return {
+    sessionAnswerRemembered: fixture.remembersForSession,
+    onceNeverRemembered: true,
+    denialNeverRemembered: true,
+    projectDefaultNeverRemembered: true,
+  };
 }
 
 export interface ProviderSessionCompactionConformanceFixture {

@@ -55,7 +55,15 @@ export type VideoAdapterStart =
     };
 
 export type VideoAdapterPoll =
-  | { readonly status: "running" }
+  | {
+      readonly status: "running";
+      /**
+       * What the provider has already billed for a clip that is finished but
+       * not collected yet. The job settles at the last of these if its time
+       * runs out first.
+       */
+      readonly usage?: VideoAdapterUsage;
+    }
   | {
       readonly status: "completed";
       readonly video: VideoAdapterClip;

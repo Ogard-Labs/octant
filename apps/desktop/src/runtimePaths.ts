@@ -24,6 +24,7 @@ export const WINDOWS_CREDENTIAL_HELPER_FILENAME = "octant-credential-helper.exe"
 export const KEYCHAIN_HELPER_FILENAME = "octant-keychain-helper" as const;
 export const WINDOWS_HOST_OWNER_FILENAME = "octant-windows-host-owner.node" as const;
 export const DEVICE_HELPER_FILENAME = "octant-device-helper" as const;
+export const SPEECH_HELPER_FILENAME = "octant-speech-helper" as const;
 export const CUA_DRIVER_FILENAME = "cua-driver" as const;
 /**
  * The folder under the app's resources holding the terminal's `octant`
@@ -47,6 +48,7 @@ export function resolveDesktopNativeHelperPath(
     | typeof WINDOWS_HOST_OWNER_FILENAME
     | typeof WINDOWS_CREDENTIAL_HELPER_FILENAME
     | typeof DEVICE_HELPER_FILENAME
+    | typeof SPEECH_HELPER_FILENAME
     | typeof CUA_DRIVER_FILENAME,
 ): string {
   return options.packaged

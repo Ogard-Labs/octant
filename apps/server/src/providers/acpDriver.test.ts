@@ -5,6 +5,7 @@ import {
   type ProviderFailure,
   type ProviderModelId,
   type ProviderNativeSetup,
+  type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type ProviderToolDefinition,
 } from "@octant/contracts";
@@ -14,7 +15,8 @@ import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, Exit, Fiber, Scope, Stream } from "effect";
+import { runApprovalAnswerConformance } from "@octant/provider-sdk/conformance";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpDriver";
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
@@ -2624,6 +2626,38 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     );
   });
 
+  it("keeps an approval for the session when the thread does, whatever the host default", async () => {
+    await expect(
+      runApprovalAnswerConformance({
+        remembersForSession: true,
+        pending: async (hostDefault) => {
+          const { driver, client } = fixture(profile, {
+            permissionPersistence: () => hostDefault,
+          });
+          const scope = await Effect.runPromise(Scope.make());
+          const connection = await Effect.runPromise(
+            driver
+              .acquire({ instanceId, projectRoot, mode: "code" })
+              .pipe(Effect.provideService(Scope.Scope, scope)),
+          );
+          await Effect.runPromise(
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+          );
+          client.request(permissionRequest("permission-always", "tool-1", allowAlwaysOptions));
+          await Effect.runPromise(Effect.sleep("1 millis"));
+          return {
+            connection,
+            sessionId,
+            requestId: "request-1",
+            remembered: () =>
+              JSON.stringify(client.respondPermission.mock.lastCall).includes("allow_always"),
+            close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
+          };
+        },
+      }),
+    ).resolves.toMatchObject({ sessionAnswerRemembered: true });
+  });
+
   it.skipIf(profile.refuses?.("code", "plan") !== undefined)(
     "absorbs transport failure and keeps sequence contiguous for auto-rejected Plan side effects",
     async () => {
@@ -4032,6 +4066,43 @@ it("never takes up a retained session opened under another reviewer or another o
   }
 });
 
+it("never takes up a retained session that may remember approvals once the thread keeps none", async () => {
+  const { driver, starts } = fixture(vibe, { runtimeVersion: "2.25.0" });
+  const sessionStarts = () => starts.filter((start) => start.purpose !== "probe").length;
+  let cursor: ProviderResumeCursor | undefined;
+  const turn = (permissionPersistence: "current-session" | "project-default") =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            mode: "code",
+            projectRoot,
+            permissionPersistence,
+          });
+          const handle =
+            cursor === undefined
+              ? yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" })
+              : yield* connection.resume({
+                  sessionId,
+                  resumeCursor: cursor,
+                  executionPolicy: "approval-gated",
+                });
+          cursor = handle.resumeCursor;
+          const events = yield* connection.subscribe;
+          const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          yield* Fiber.join(terminal);
+          yield* connection.stop(sessionId);
+          return sessionStarts();
+        }),
+      ),
+    );
+  const first = await turn("current-session");
+  expect(await turn("current-session")).toBe(first);
+  expect(await turn("project-default")).toBe(first + 1);
+});
+
 it("adding Computer use on a resumed task can send the next message", async () => {
   const { driver, client } = fixture(vibe, {
     mcpHttp: true,
@@ -5140,6 +5211,18 @@ describe("Google Antigravity's allow-always offer without allow-once", () => {
     expect(offered.some((event) => event.kind === "user-input-request")).toBe(false);
   });
 
+  it("chooses allow-always on a thread that keeps approvals for the session under a Project-wide host default", async () => {
+    const { client } = await run("approval-gated", "project-default", (connection) =>
+      connection.answerApproval({
+        sessionId,
+        requestId: "request-1",
+        approved: true,
+        persistence: "current-session",
+      }),
+    );
+    expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "always");
+  });
+
   it("chooses allow-always when the person keeps approvals for the session", async () => {
     const { client, offered } = await run("approval-gated", "current-session", (connection) =>
       connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
@@ -5200,12 +5283,12 @@ describe("Google Antigravity's allow-always offer without allow-once", () => {
       {
         category: "unsupported",
         message:
-          "Google Antigravity only offers Always allow here. Approve it for this session, or deny it.",
+          "Google Antigravity only offers Always allow here. Approve it where approvals are kept for the session, at the computer or a Full device, or deny it.",
       },
       {
         category: "unsupported",
         message:
-          "Google Antigravity only offers Always allow here. Approve it for this session, or deny it.",
+          "Google Antigravity only offers Always allow here. Approve it where approvals are kept for the session, at the computer or a Full device, or deny it.",
       },
     ]);
   });

@@ -328,6 +328,10 @@ which the person sets, like any turn.
     delivery uncertain, and the start settles at the estimate. A confirmed
     completion with invalid output still settles to reported usage or to the
     estimate when no usage was reported.
+  - A clip Gemini finished but the host could not download in the job time
+    settles at the usage Gemini last reported with it, and at the estimate when
+    it reported none. The host keeps that usage only while it runs: a job
+    resumed after a restart settles at what the provider reports again.
   - A cancelled job settles at the reported usage, or at the estimate when
     none is reported, because a provider may bill a job it had already
     started. Stop releases the reservation after a confirmed rejection
@@ -410,6 +414,7 @@ which the person sets, like any turn.
   The phone reads authenticated byte ranges into a disposable app-cache file and
   opens it in the native Expo Video player without autoplay. Closing the clip,
   leaving or deleting its thread, or losing host access discards the cached copy.
+  If the system ends the app first, the next launch discards it.
   A temporary list failure or reconnection leaves the already-downloaded clip playing.
   **Save video** copies the file into a folder the person chooses on the phone.
   A saved copy remains in that folder when the temporary player file is removed.
@@ -426,13 +431,22 @@ reading its reply. If the start times out, the slot opens for another job.
 The failed start settles at the estimate when the provider may have received
 it. A start the host knows it never sent bills nothing.
 
+A job that runs out of time settles first and frees its slot at once. The host
+then asks the provider to stop it, for at most 15 seconds, and removes the
+provider's copy only after the provider answers or those seconds pass.
+
 If a provider rejects authentication on a status check for an accepted clip,
 the host keeps polling within the job time. It settles at the estimate if it
 still cannot confirm the outcome at the deadline.
 
 Shutdown stops handing out slots and leaves waiting jobs in the journal.
 If a clip write finishes after shutdown starts, the host discards that file
-and leaves the running job for recovery.
+and leaves the running job for recovery. If the discard fails, the next start
+removes every clip file the journal does not record from that running job's
+thread, and retries with the owed copy removals if one cannot be removed.
+Threads without a running job are not searched.
+A full disk that stops the host recording a finished removal is logged as a
+full disk, and the removal stays owed.
 At startup the host reconciles every video job the journal left unfinished:
 
 - A job that was **queued**, so nothing was sent, is marked failed as
@@ -570,9 +584,10 @@ Gemini Omni Flash, for example, declares 3–15 s (up to 10 s with both frames);
 16:9 and 9:16; audio `always`; up to six reference images; a per-token price;
 and `cancel: "running"`, `removal: delete`, with a resume window of 55 days.
 xAI would declare `cancel: "none"`, which puts the Stop line on the card.
-A model priced `per-clip` is offered only at the combinations of duration,
-resolution and audio it has a rate for, so the card never multiplies a flat
-fee by seconds. A rate that omits `audio` applies to both audio choices, and
+A model that publishes a price is offered only at the combinations of duration,
+resolution and audio it has a rate for, whichever way it is priced. The card
+never shows a missing rate as an unpublished price, and never multiplies a flat
+`per-clip` fee by seconds. A rate that omits `audio` applies to both audio choices, and
 a rate that names the chosen audio wins over it. The default is a whole
 combination that has a rate, never each field chosen on its own. Candidates are
 ranked by these rules, in order:
@@ -584,7 +599,8 @@ ranked by these rules, in order:
 
 The card and
 a call that skips the card use the same lookup. A call whose combination has
-no rate is refused before anything is reserved or sent.
+no rate is refused before anything is reserved or sent, and before the card
+can keep "Don't ask again".
 
 Bundled drivers state prices from the provider's own published pages, checked
 when the driver is built or updated. An aggregator driver (fal) reads each
@@ -626,7 +642,11 @@ export type VideoAdapterStart =
     };
 
 export type VideoAdapterPoll =
-  | { readonly status: "running" }
+  | {
+      readonly status: "running";
+      /** Already billed for a finished clip that is not collected yet. */
+      readonly usage?: VideoAdapterUsage;
+    }
   | {
       readonly status: "completed";
       readonly video: { readonly bytes: Uint8Array; readonly mediaType: "video/mp4" };
@@ -718,6 +738,7 @@ The driver owns only the wire and its declared facts.
 A conformance harness checks every driver against fake transports:
 
 - the request shape for each declared option;
+- that reading models from the provider ends when the host cancels it;
 - that a request outside the declared capabilities is refused before sending;
 - polling to each terminal state;
 - `cancel` and `forget` where declared;

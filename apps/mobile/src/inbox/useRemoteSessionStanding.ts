@@ -14,7 +14,8 @@ const STANDING_REFRESH_INTERVAL_MS = 10_000;
  * What the host says this phone's session is, asked per host. Until it
  * answers, and whenever it does not, the session is shown as restricted.
  * Refresh while the app is in front and when it returns to the foreground.
- * The host can change a device's access without replacing its connection.
+ * The host can change a device's access without replacing its connection, so a
+ * refresh that meets a read still running is owed once that read settles.
  */
 export function useRemoteSessionStanding(
   transport: SessionStandingTransport | undefined,
@@ -31,6 +32,8 @@ export function useRemoteSessionStanding(
   const { value: read } = usePolledResource(load, {
     intervalMs: STANDING_REFRESH_INTERVAL_MS,
     enabled: !offlineDemo && transport !== undefined,
+    // A read that began before the phone slept can answer with the old level.
+    trailingRead: true,
   });
   // The offline demo has no host to ask. For live sessions, access from the
   // previous computer cannot apply while the new one is still answering.

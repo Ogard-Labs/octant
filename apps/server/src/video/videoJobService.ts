@@ -58,7 +58,7 @@ import type { ImageAdapterReference } from "@octant/provider-sdk/image-generatio
 import type { ImageHttpFetch } from "../image/imageHttp";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
-import { ConcurrencyConflict } from "../persistence/journalErrors";
+import { ConcurrencyConflict, persistenceFailureMessage } from "../persistence/journalErrors";
 import { redactHostSecrets } from "../process/secretRedaction";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import type { SpendCeilingService } from "../spendCeilingService";
@@ -244,7 +244,11 @@ function sanitizedFailure(failure: ProviderFailure): ProviderFailure {
 function reportVideoRemovalFailure(error: unknown): void {
   console.error(
     "Could not finish a video provider copy removal. The host will retry.",
-    error instanceof Error ? redactHostSecrets(error.message) : "Unknown failure.",
+    // A journal write failure carries its reason in a field, not its message.
+    persistenceFailureMessage(
+      error,
+      error instanceof Error ? redactHostSecrets(error.message) : "Unknown failure.",
+    ),
   );
 }
 
@@ -674,7 +678,8 @@ export class VideoJobService {
   async recover(): Promise<void> {
     // Reads each profile's models in the background so the first turn can offer the tool.
     this.readyProfilesNow();
-    await this.#options.clips.recover();
+    await this.#options.clips.recover(this.#recordedClipsOfRunningScopes());
+    await this.#reclaimStrayClips();
     if (this.#closing.signal.aborted) return;
     for (const job of this.#options.projection.listUnfinished()) {
       if (job.status === "queued") {
@@ -714,8 +719,38 @@ export class VideoJobService {
     }
   }
 
-  /** Tries again to remove each provider copy the host still owes. */
+  /**
+   * The clips the journal records in each thread whose job was running when
+   * the host stopped. Only such a job can have written a clip it never
+   * recorded, because a shutdown's own removal of that file can fail.
+   */
+  #recordedClipsOfRunningScopes(): ReadonlyMap<string, ReadonlySet<string>> {
+    const recorded = new Map<string, ReadonlySet<string>>();
+    for (const { scopeId, status } of this.#options.projection.listUnfinished()) {
+      if (status !== "running" || recorded.has(String(scopeId))) continue;
+      const clipIds = this.listByScope(scopeId).flatMap((job) =>
+        job.clip === undefined ? [] : [String(job.clip.clipId)],
+      );
+      recorded.set(String(scopeId), new Set(clipIds));
+    }
+    return recorded;
+  }
+
+  async #reclaimStrayClips(): Promise<void> {
+    const reclaimed = await this.#options.clips.reclaimStrays();
+    if (reclaimed.status === "reclaimed") return;
+    console.error(
+      "Could not remove an unrecorded video clip. The host will retry.",
+      reclaimed.error instanceof Error
+        ? redactHostSecrets(reclaimed.error.message)
+        : "Unknown failure.",
+    );
+  }
+
+  /** Tries again to remove each provider copy, and each stray clip file, the host still owes. */
   async retryOwedRemovals(): Promise<void> {
+    if (this.#closing.signal.aborted) return;
+    await this.#reclaimStrayClips();
     if (this.#closing.signal.aborted) return;
     for (const job of this.#options.projection.listOwedRemovals()) {
       await this.#forget(job);
@@ -923,7 +958,7 @@ export class VideoJobService {
         ? adapter?.cancelRunningWithoutDiscovery === true
         : model.job.cancel === "running";
     if (adapter !== undefined && (deadlineSignal.aborted || this.#now() >= deadline)) {
-      await this.#finishExpired(job, adapter, canCancel);
+      this.#finishExpired(job, adapter, canCancel);
       return;
     }
     const windowMs = (model?.job.resumeWindowHours ?? 0) * 3_600_000;
@@ -981,6 +1016,7 @@ export class VideoJobService {
     const deadline = Date.parse(job.startedAt ?? job.createdAt) + VIDEO_JOB_TIMEOUT_MS;
     let interval = FIRST_POLL_MS;
     let cancelAsked = false;
+    let reported: VideoAdapterUsage | undefined;
     while (!this.#closing.signal.aborted) {
       if (running.stopRequested && !cancelAsked) {
         cancelAsked = true;
@@ -997,6 +1033,7 @@ export class VideoJobService {
           // Shutdown aborted the cancel: the job stays running for the next
           // host to resume, never concluded from an answer the abort produced.
           if (this.#closing.signal.aborted) return;
+          if (answer.status === "running") reported = answer.usage ?? reported;
           // A failed answer is a failure of the cancel REQUEST, not proof
           // about the job: it falls through to an immediate poll, and only a
           // terminal answer from there — or the deadline — concludes the job.
@@ -1018,7 +1055,7 @@ export class VideoJobService {
         }
       }
       if (this.#now() >= deadline) {
-        await this.#finishExpired(job, adapter, canCancel);
+        this.#finishExpired(job, adapter, canCancel, reported);
         return;
       }
       // Once cancel is asked, Stop's signal stays aborted. Keep polling for
@@ -1031,6 +1068,7 @@ export class VideoJobService {
       // Shutdown leaves the job running for recovery. A poll interrupted by
       // Stop leaves the provider outcome unknown and must reach cancel first.
       if (this.#closing.signal.aborted) return;
+      if (poll.status === "running") reported = poll.usage ?? reported;
       if (
         poll.status === "failed" &&
         poll.billed !== true &&
@@ -1061,22 +1099,48 @@ export class VideoJobService {
     }
   }
 
-  async #finishExpired(job: VideoJob, adapter: VideoGenerationAdapter, canCancel: boolean) {
+  #finishExpired(
+    job: VideoJob,
+    adapter: VideoGenerationAdapter,
+    canCancel: boolean,
+    reported?: VideoAdapterUsage,
+  ): void {
     this.#finish(this.#current(job), "failed", {
       failure: videoFailure(
         "unavailable",
         "Octant could not confirm the clip's result within 30 minutes.",
       ),
-      settledCostUsdMicros: estimateOrZero(job),
+      settledCostUsdMicros: this.#settled(job, reported),
       billed: true,
+      ...(reported === undefined ? {} : { usage: reported }),
     });
+    const { remoteId } = job;
+    if (!canCancel || remoteId === undefined) return;
+    // Not awaited: the job has settled, so its slot goes to the next clip
+    // while the provider is asked to stop. `#forget` waits for this instead.
+    const key = String(job.id);
+    this.#expiryCancels.set(
+      key,
+      this.#cancelExpired(adapter, remoteId).finally(() => this.#expiryCancels.delete(key)),
+    );
+  }
+
+  /** Ends when the provider answers, or at the cleanup bound even if the driver ignores it. */
+  async #cancelExpired(adapter: VideoGenerationAdapter, remoteId: string): Promise<void> {
     // A cancel can download an already finished clip. Bound that cleanup
     // separately after settling the job at its original deadline.
-    if (canCancel && job.remoteId !== undefined) {
-      await adapter.cancel(
-        job.remoteId,
-        AbortSignal.any([this.#closing.signal, AbortSignal.timeout(VIDEO_TIMEOUT_CLEANUP_MS)]),
-      );
+    const bound = AbortSignal.any([
+      this.#closing.signal,
+      AbortSignal.timeout(VIDEO_TIMEOUT_CLEANUP_MS),
+    ]);
+    const reached = new Promise<void>((resolve) => {
+      if (bound.aborted) resolve();
+      else bound.addEventListener("abort", () => resolve(), { once: true });
+    });
+    try {
+      await Promise.race([adapter.cancel(remoteId, bound), reached]);
+    } catch {
+      // The job is already settled; the copy's removal is what is still owed.
     }
   }
 
@@ -1209,8 +1273,13 @@ export class VideoJobService {
    * `finally`: a rejected delete leaves the copy owed for the next sweep.
    */
   readonly #removing = new Set<string>();
+  /** Provider stops still pending for expired jobs, each bounded by `VIDEO_TIMEOUT_CLEANUP_MS`. */
+  readonly #expiryCancels = new Map<string, Promise<void>>();
 
   async #forget(candidate: VideoJob): Promise<void> {
+    // Removing a copy the provider is still stopping would race that stop.
+    const stopping = this.#expiryCancels.get(String(candidate.id));
+    if (stopping !== undefined) await stopping;
     if (this.#closing.signal.aborted) return;
     const job = this.#current(candidate);
     if (job.providerCopy !== "held" || job.remoteId === undefined) return;

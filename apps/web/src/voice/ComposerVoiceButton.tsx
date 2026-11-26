@@ -1,11 +1,12 @@
 import { SpeechClientFailure } from "@octant/client-runtime/speech-client";
-import { LoaderCircle, Mic, Square } from "../ui/icons";
+import { Mic, Square } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { useComposerNoticeSink } from "../composer/ComposerNotice";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useSpeechCapability } from "./SpeechCapabilityContext";
 import { useDictationShortcut } from "./useDictationShortcut";
 import { formatRecordingDuration, MAX_VOICE_RECORDING_MS, useVoiceRecorder } from "./voiceRecorder";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 export interface ComposerVoiceButtonProps {
   /** Receives the transcript; the caller appends it to its draft. Nothing is sent. */
@@ -148,7 +149,7 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
         variant={recording ? "destructive" : "ghost"}
       >
         {busy ? (
-          <LoaderCircle aria-hidden="true" className="composer-voice__spin" size={16} />
+          <OctantSpinner />
         ) : recording ? (
           <Square aria-hidden="true" fill="currentColor" size={12} />
         ) : (

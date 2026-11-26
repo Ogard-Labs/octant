@@ -105,6 +105,40 @@ stays as the record. Under Strict, a 6-call loop stops the turn, journals
 thread ready to accept the next message straight away. `turnLoopNoticeSentence`
 and `turnStallNoticeSentence` in `@octant/domain` are the shared wordings.
 
+## Server sign-in
+
+When an MCP server the thread's next turn would get needs a sign-in, the thread
+shows a notice beside its waiting requests, in Chat, Work and Code alike:
+"{server} needs sign-in", one sentence, the sign-in control Settings uses, and
+Dismiss. The person finishes there, with no visit to Settings; on a device the
+host's own person paired, the control shows the address field once the host says
+the attempt can be finished that way.
+
+- Which servers count is the host's answer, never the window's
+  ([Architecture: extensions and skills](../architecture.md#extensions-and-skills)):
+  one pinned to the thread's Project, one selected with `@` in the composer, or one
+  a queued message carries. In Chat the latest turn's selections count too, since
+  Retry and Regenerate send them again (a rewound turn does not count), and in Work
+  those of a turn waiting on a scheduled resume. A queued message counts until it
+  starts running. An `@` name the composer refuses counts when the thread could
+  use that server: one failed connection makes the composer refuse it, and signing
+  in selects it again. A server the person has switched off, not trusted, or not chosen for
+  this thread is never named, whatever state it is in.
+- A read-only thread, and a device that may not sign in, show nothing and ask
+  nothing.
+- The notice goes when the server is signed in (here, in Settings or on another
+  device), when it is switched off, unpinned or taken out of the composer. A
+  sign-in finished here says "Signed in to {server}" for a moment first. A read
+  that could not reach the host keeps it, so a half-pasted address is not lost.
+- Dismiss hides it in this thread until the window closes, or until the thread
+  stops waiting on that sign-in (the server is signed in, or no longer chosen) and
+  then waits on it again. Dismissing changes nothing on the host; Settings › Skills
+  & Extensions still lists the server.
+- A server whose app registration is missing is named too, and Client setup opens
+  from the notice. Registering an app is not a sign-in: a client secret is chosen
+  from a linked secret store in Settings on the host, and the form says so.
+- It is announced politely, not as an alert, because it waits on no running work.
+
 ## Reply actions
 
 A finished reply (completed, failed, interrupted or cancelled) ends with one
@@ -973,9 +1007,15 @@ steered state, since its read lists only messages still waiting. While the
 runtime has not yet taken it, that one message shows "Sending into the
 running turn" and cannot be edited, removed or
 moved; the rest of the queue stays usable. A transcript read afresh shows it
-at once, and so does an open desktop Work transcript, which reads the running
-turn again without losing the reply streamed so far; an open desktop Code
-transcript shows it when the turn settles or is read again. A message the runtime does not take stays in the queue for
+at once, and so does an open desktop transcript, without losing the reply
+streamed so far: a Work transcript reads the running turn again, and a Code
+transcript takes in the message alone when it leaves the queue. An open Code
+view that loaded the thread settled picks up a turn started elsewhere once the
+thread list's activity for the thread moves, a turn that already finished
+included, and then shows the turn and its messages the same way. A paired
+browser shows it on its next read of the running turn; the phone on its next
+read too, and a phone showing the thread settled looks for a turn it does not
+show every ten seconds. A message the runtime does not take stays in the queue for
 the next turn.
 
 ## Scheduled wake-ups

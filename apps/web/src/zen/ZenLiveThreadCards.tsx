@@ -18,6 +18,7 @@ const ChatWorkspace = lazy(() =>
 );
 import { useChatController, type ChatReadCursorStore } from "../chat/useChatController";
 import { useCodeController, type CodeReadCursorStore } from "../code/useCodeController";
+import { useThreadActivityRevision } from "../polling/ThreadActivityRevisions";
 import type { ProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 const WorkThreadWorkspace = lazy(() =>
@@ -289,6 +290,7 @@ function ZenCodeCardSurface(props: {
     activeThreadId: props.threadId,
     client: props.codeClient,
     navigationRefreshMs: 0,
+    messageQueueRevision: useThreadActivityRevision("threadMessageQueue"),
     ...(props.readCursorStore === undefined ? {} : { readCursorStore: props.readCursorStore }),
   });
   const providerController = props.providerController;

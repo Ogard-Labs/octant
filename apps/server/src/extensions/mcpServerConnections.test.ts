@@ -135,6 +135,21 @@ describe("the server connection listing", () => {
     expect(listing.servers[1]).toMatchObject({ state: "needs-sign-in", reason: "Not signed in." });
   });
 
+  it.each([
+    ["status-unavailable", "Sign-in status is unavailable."],
+    ["cancel-pending", "Sign-in cancellation is not confirmed."],
+  ] as const)(
+    "keeps asking for an attempt left %s, so its control stays in reach",
+    async (kind, message) => {
+      const { listing } = await list({
+        components: [server("remote")],
+        slug: "by-hand",
+        signIn: { remote: { kind, message } },
+      });
+      expect(listing.servers[0]).toMatchObject({ state: "needs-sign-in", reason: message });
+    },
+  );
+
   it("reports what the last connection attempt saw: connected, connecting, or failed with its reason", async () => {
     const { listing } = await list({
       components: [server("remote"), server("local"), server("third")],

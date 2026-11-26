@@ -6246,7 +6246,8 @@ function makeConnection(
             if (answer.approved) {
               let persistence: PermissionPersistence = "project-default";
               try {
-                persistence = options.permissionPersistence?.() ?? "current-session";
+                persistence =
+                  answer.persistence ?? options.permissionPersistence?.() ?? "current-session";
               } catch {
                 // An unreadable setting cannot broaden a one-shot answer into reuse.
               }

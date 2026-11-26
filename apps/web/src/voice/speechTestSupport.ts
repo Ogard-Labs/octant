@@ -74,6 +74,8 @@ export function fakeSpeechClient(
     },
     transcribe: transcribe as unknown as SpeechClient["transcribe"],
     synthesize: synthesize as unknown as SpeechClient["synthesize"],
+    localEngine: async () => ({ status: "unsupported", reason: "Not a Mac." }),
+    downloadLocalModel: async () => ({ status: "unsupported", reason: "Not a Mac." }),
   };
   return { client, transcribe, synthesize };
 }

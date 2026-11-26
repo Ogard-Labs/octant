@@ -2032,6 +2032,37 @@ describe("server connection status in Settings", () => {
     expect(await local?.json()).toEqual({ kind: "reconnecting" });
     expect(connections.reconnect).toHaveBeenCalledWith(extensionId, "mcp-docs");
   });
+
+  it("tells only a window or a person-paired device which server a thread needs signed in", async () => {
+    const forThread = vi.fn(async () => ({ servers: [] }));
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerConnections: { list: vi.fn(), reconnect: vi.fn(), forThread } as never,
+      now: () => now,
+    });
+    const path = "/api/extensions/connections";
+    const ask = {
+      kind: "thread-sign-in",
+      mode: "code",
+      threadId: "72000000-0000-4000-8000-00000000000b",
+      selections: [],
+      references: [],
+    };
+    for (const refused of [
+      pairedDeviceRequest(path, ask, "hub-roster"),
+      pairedDeviceRequest(path, ask),
+      request(path, ask, { "x-octant-window-capability": "wrong" }),
+    ])
+      expect((await handler(refused))?.status).toBe(401);
+    expect((await handler(request(path, { ...ask, callbackUrl: "http://x" })))?.status).toBe(400);
+    expect(forThread).not.toHaveBeenCalled();
+
+    expect((await handler(request(path, ask)))?.status).toBe(200);
+    expect((await handler(pairedDeviceRequest(path, ask, "host-person")))?.status).toBe(200);
+    expect(forThread).toHaveBeenCalledTimes(2);
+    expect(forThread).toHaveBeenCalledWith(ask);
+  });
 });
 
 describe("plugins pinned to a Project", () => {

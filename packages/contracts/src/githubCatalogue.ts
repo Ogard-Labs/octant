@@ -105,10 +105,19 @@ export const GithubRepositoryRow = Schema.Struct({
 }).annotations(strict);
 export type GithubRepositoryRow = typeof GithubRepositoryRow.Type;
 
+/**
+ * Why GitHub says an issue was closed. Absent on an open issue, on a closed one
+ * GitHub gives no reason for, on a reason this build does not know, and from an
+ * older host, so a reader shows plain Closed.
+ */
+export const GithubIssueClosedReason = Schema.Literal("completed", "not-planned", "duplicate");
+export type GithubIssueClosedReason = typeof GithubIssueClosedReason.Type;
+
 export const GithubIssueRow = Schema.Struct({
   number: Schema.Int.pipe(Schema.positive()),
   title: safeText(256),
   state: Schema.Literal("open", "closed"),
+  stateReason: Schema.optional(GithubIssueClosedReason),
   author: safeText(128),
   updatedAt: isoTimestamp,
   url: githubUrl,
@@ -127,6 +136,7 @@ export const GithubIssueDetail = Schema.Struct({
   number: Schema.Int.pipe(Schema.positive()),
   title: safeText(256),
   state: Schema.Literal("open", "closed"),
+  stateReason: Schema.optional(GithubIssueClosedReason),
   author: safeText(128),
   createdAt: isoTimestamp,
   updatedAt: isoTimestamp,
@@ -160,6 +170,8 @@ export const GithubSearchRow = Schema.Struct({
   number: Schema.Int.pipe(Schema.positive()),
   title: safeText(256),
   state: Schema.Literal("open", "draft", "merged", "closed"),
+  /** Only on a closed issue; a pull request has none. */
+  stateReason: Schema.optional(GithubIssueClosedReason),
   author: safeText(128),
   updatedAt: isoTimestamp,
   url: githubUrl,
@@ -218,6 +230,10 @@ export type GithubProjectPage = typeof GithubProjectPage.Type;
 
 export const GithubIssueStateFilter = Schema.Literal("open", "closed", "all");
 export type GithubIssueStateFilter = typeof GithubIssueStateFilter.Type;
+
+/** The closed reasons a read can be narrowed to; GitHub's search names both. */
+export const GithubIssueClosedReasonFilter = Schema.Literal("completed", "not-planned");
+export type GithubIssueClosedReasonFilter = typeof GithubIssueClosedReasonFilter.Type;
 
 export const GithubAssignedWorkCategory = Schema.Literal("issue", "pull-request", "review-request");
 export type GithubAssignedWorkCategory = typeof GithubAssignedWorkCategory.Type;
@@ -288,7 +304,13 @@ export const GithubCatalogueReadRequest = Schema.Union(
     search: Schema.optional(safeText(160)),
     /** Narrows the read to issues nobody has been assigned. */
     assignee: Schema.optional(Schema.Literal("none")),
-  }).annotations(strict),
+    /** Narrows a read of closed issues to one reason; refused with any other state. */
+    closedReason: Schema.optional(GithubIssueClosedReasonFilter),
+  })
+    .annotations(strict)
+    .pipe(
+      Schema.filter((request) => request.closedReason === undefined || request.state === "closed"),
+    ),
   Schema.Struct({
     kind: Schema.Literal("issue"),
     owner: GithubRepositoryOwner,

@@ -5770,6 +5770,62 @@ describe("WorkTurnService", () => {
       ).toMatchObject({ reason: "rewind", messages: 2 });
     });
 
+    const steeredInto = (turnKey: typeof ids.request, messageId: string, body: string) =>
+      ({
+        kind: "thread-message-steered",
+        mode: "work",
+        threadId: String(ids.thread),
+        turnKey: String(turnKey),
+        messageId,
+        body,
+        steeredAt: "2026-08-11T12:00:05.000Z" as UtcTimestamp,
+      }) as ThreadMessageSteered;
+
+    it("rebuilds a message steered into an earlier turn after that turn's prompt, under its own source, and drops a removed turn's", async () => {
+      const { fixture, run } = await twoTurns(false);
+      const unsteered = fixture.service.sessionCompactionConversation(ids.thread);
+      for (const record of [
+        steeredInto(ids.request, "12121212-1212-4212-8212-121212121212", "Skip the appendix."),
+        steeredInto(ids.request, "13131313-1313-4313-8313-131313131313", "Cite sources."),
+        // The same record read again adds nothing.
+        steeredInto(ids.request, "12121212-1212-4212-8212-121212121212", "Skip the appendix."),
+        steeredInto(secondRequest, "14141414-1414-4414-8414-141414141414", "Add a chart."),
+      ])
+        fixture.service.showSteeredMessage(record);
+
+      const conversation = fixture.service.sessionCompactionConversation(ids.thread);
+      expect(conversation.map((message) => [message.role, message.content])).toEqual([
+        ["user", "Summarize the brief"],
+        ["user", "Skip the appendix."],
+        ["user", "Cite sources."],
+        ["assistant", "Reply number 1"],
+        ["user", "Make it longer"],
+        ["user", "Add a chart."],
+        ["assistant", "Reply number 2"],
+      ]);
+      expect(conversation[1]).toMatchObject({
+        source: {
+          kind: "message",
+          referenceId: `${ids.request}:steered:12121212-1212-4212-8212-121212121212`,
+        },
+        exchangeKey: conversation[0]?.exchangeKey,
+      });
+      // Every other message keeps the source saved summaries already name.
+      expect(
+        conversation.filter((message) => !message.source.referenceId.includes("steered")),
+      ).toEqual(unsteered);
+
+      await fixture.service.rewindThread(ids.window, rewindFrom(secondRequest));
+      await fixture.service.startFirstTurn(ids.window, thirdCommand());
+      await fixture.waitForIdle(thirdRequest);
+      const context = run.mock.calls[2]?.[0].context?.map((block) => block.text) ?? [];
+      const at = (text: string) => context.findIndex((block) => block.includes(text));
+      expect(at("Skip the appendix.")).toBeGreaterThan(at("Summarize the brief"));
+      expect(at("Cite sources.")).toBeGreaterThan(at("Skip the appendix."));
+      expect(at("Reply number 1")).toBeGreaterThan(at("Cite sources."));
+      expect(at("Add a chart.")).toBe(-1);
+    });
+
     it("tells every open view of the thread to read the transcript again", async () => {
       const { fixture } = await twoTurns(true);
       const { liveCursor } = await fixture.service.transcript(ids.window, ids.thread);

@@ -225,6 +225,7 @@ import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
+import { McpSignInNotice } from "../transcript/McpSignInNotice";
 import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { SideTaskInline, sideTasksAfterTurn, useThreadSideTasks } from "../followUps/SideTaskCards";
 import {
@@ -3354,6 +3355,24 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           </div>
         )}
 
+        <McpSignInNotice
+          className="thread-column"
+          client={readOnly ? undefined : props.extensionClient}
+          mode="work"
+          onResolveReference={extensionDraft.resolveReference}
+          receipts={extensionDraft.receipts}
+          queued={messageQueue.snapshot?.items}
+          // A resume scheduled at a usage limit sends its turn's selections again.
+          selections={
+            (thread?.usageResume?.status === "scheduled"
+              ? turns.find(
+                  (turn) => String(turn.turnId) === String(thread.usageResume?.record.turnId),
+                )?.extensionSelections
+              : undefined) ?? []
+          }
+          threadId={String(props.threadId)}
+          turnActive={turnRunning}
+        />
         <ExtensionToolApprovalPrompt
           className="thread-column"
           client={readOnly ? undefined : props.extensionClient}

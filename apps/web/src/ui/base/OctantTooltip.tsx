@@ -6,6 +6,7 @@ import {
   TooltipPositioner,
   TooltipTrigger,
 } from "../shadcn/tooltip";
+import { OctantKbd } from "./OctantKbd";
 
 export interface OctantTooltipProps {
   readonly children: ReactElement;
@@ -126,9 +127,9 @@ export function OctantTooltip(props: OctantTooltipProps) {
           >
             {props.label}
             {props.shortcut === undefined ? null : (
-              <kbd aria-hidden="true" className="octant-tooltip__key">
+              <OctantKbd className="octant-tooltip__key" decorative>
                 {props.shortcut}
-              </kbd>
+              </OctantKbd>
             )}
           </TooltipPopup>
         </TooltipPositioner>

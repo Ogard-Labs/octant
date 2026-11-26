@@ -1,4 +1,5 @@
-import { AlertTriangle, CircleCheck, Loader, PauseCircle } from "../ui/icons";
+import { AlertTriangle, CircleCheck, PauseCircle } from "../ui/icons";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 import {
   isActiveAgentHierarchyStatus,
   type AgentHierarchyInputEntry,
@@ -68,23 +69,9 @@ export function subagentElapsedLabel(since: string, now: number): string {
 
 export function SubagentStatusIcon(props: { readonly lifecycleStatus: string }) {
   const phase = subagentPhase(props.lifecycleStatus);
-  const Icon =
-    phase === "working"
-      ? Loader
-      : phase === "waiting"
-        ? PauseCircle
-        : phase === "done"
-          ? CircleCheck
-          : AlertTriangle;
-  return (
-    <Icon
-      aria-hidden="true"
-      className={
-        phase === "working"
-          ? "subagent-status-icon subagent-status-icon--working"
-          : "subagent-status-icon"
-      }
-      size={14}
-    />
-  );
+  if (phase === "working") {
+    return <OctantSpinner className="subagent-status-icon" size={14} />;
+  }
+  const Icon = phase === "waiting" ? PauseCircle : phase === "done" ? CircleCheck : AlertTriangle;
+  return <Icon aria-hidden="true" className="subagent-status-icon" size={14} />;
 }

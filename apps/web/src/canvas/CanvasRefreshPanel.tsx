@@ -11,11 +11,12 @@ import type {
   CanvasRefreshSkillOption,
 } from "@octant/contracts/canvas-refresh";
 import type { CanvasSkillContribution } from "@octant/contracts/canvas-skill";
-import { Ban, Check, LoaderCircle, RefreshCw, TriangleAlert } from "../ui/icons";
+import { Ban, Check, RefreshCw, TriangleAlert } from "../ui/icons";
 import { useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { CanvasSkillProvenance } from "./CanvasSkillProvenance";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 /**
  * Canvas refresh control (C2) and its skill provenance.
@@ -239,11 +240,7 @@ export function CanvasRefreshPanel(props: CanvasRefreshPanelProps) {
             void refresh();
           }}
         >
-          {running ? (
-            <LoaderCircle aria-hidden="true" className="canvas-refresh__spinner" size={14} />
-          ) : (
-            <RefreshCw aria-hidden="true" size={14} />
-          )}
+          {running ? <OctantSpinner size={14} /> : <RefreshCw aria-hidden="true" size={14} />}
           <span>Refresh canvas</span>
         </OctantButton>
         {running && props.onCancel !== undefined ? (

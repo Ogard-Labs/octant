@@ -224,6 +224,7 @@ export const ACCESS_LEVEL_RENDERERS: ReadonlyArray<{
           bridge={sessionBridge("read-only")}
           onRevoked={() => undefined}
           onSignedOut={() => undefined}
+          standing={{ actsAsHostPerson: false, accessLevel: "read-only" }}
         />
       </div>
     ),
@@ -236,6 +237,7 @@ export const ACCESS_LEVEL_RENDERERS: ReadonlyArray<{
           bridge={sessionBridge("full")}
           onRevoked={() => undefined}
           onSignedOut={() => undefined}
+          standing={{ actsAsHostPerson: true, accessLevel: "full" }}
         />
       </div>
     ),

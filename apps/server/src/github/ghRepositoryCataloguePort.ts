@@ -1,3 +1,4 @@
+import type { GithubIssueClosedReason, GithubIssueClosedReasonFilter } from "@octant/contracts";
 import { spawn } from "node:child_process";
 import { constants, accessSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -8,6 +9,8 @@ const READ_TIMEOUT_MS = 20_000;
 /** Upstream REST fetches allowed while assembling one bounded page. */
 const MAX_UPSTREAM_FETCHES = 10;
 const UPSTREAM_PAGE_SIZE = 100;
+/** GitHub search serves its first 1,000 results and answers 422 past them. */
+const SEARCH_LAST_PAGE = 1000 / UPSTREAM_PAGE_SIZE;
 const ISSUE_BODY_MAX_BYTES = 8 * 1024;
 const COMMENT_BODY_MAX_BYTES = 2 * 1024;
 const MAX_ISSUE_COMMENTS = 10;
@@ -51,6 +54,7 @@ export interface GhIssueObservationRow {
   readonly number: number;
   readonly title: string;
   readonly state: "open" | "closed";
+  readonly stateReason?: GithubIssueClosedReason;
   readonly author: string;
   readonly updatedAt: string;
   readonly url: string;
@@ -67,6 +71,7 @@ export interface GhIssueDetailObservation {
   readonly number: number;
   readonly title: string;
   readonly state: "open" | "closed";
+  readonly stateReason?: GithubIssueClosedReason;
   readonly author: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -85,6 +90,7 @@ export interface GhSearchObservationRow {
   readonly number: number;
   readonly title: string;
   readonly state: "open" | "draft" | "merged" | "closed";
+  readonly stateReason?: GithubIssueClosedReason;
   readonly author: string;
   readonly updatedAt: string;
   readonly url: string;
@@ -233,13 +239,17 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       readonly state: "open" | "closed" | "all";
       readonly search?: string | undefined;
       readonly assignee?: "none" | undefined;
+      readonly closedReason?: GithubIssueClosedReasonFilter | undefined;
     },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhIssueObservationRow>>> {
     const repository = validatedRepositoryPath(request.owner, request.name);
     if (repository === undefined) return { kind: "unavailable" };
     const search = (request.search ?? "").trim();
-    if (search !== "") {
+    // The repository's issue list cannot filter by closed reason, so a reason
+    // reads through issue search even with nothing typed.
+    const { closedReason } = request;
+    if (search !== "" || closedReason !== undefined) {
       const query = composeIssueSearchQuery({
         owner: request.owner,
         name: request.name,
@@ -247,13 +257,14 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
         search,
         unassigned: request.assignee === "none",
         scope: "issue-titles",
+        closedReason,
       });
       if (query === undefined) return ok([], false);
       return this.#paginateRest({
         kind: "issues",
         discriminator: `${repository}|${request.state}|${search}${
           request.assignee === "none" ? "|unassigned" : ""
-        }`,
+        }${closedReason === undefined ? "" : `|reason=${closedReason}`}`,
         pageSize: request.pageSize,
         cursor: request.cursor,
         pathFor: (page) =>
@@ -262,6 +273,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
         decodeItem: decodeIssueItem,
         matches: () => true,
         extractItems: extractSearchIssueItems,
+        lastPage: SEARCH_LAST_PAGE,
         signal,
       });
     }
@@ -322,6 +334,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       decodeItem: decodeSearchItem,
       matches: () => true,
       extractItems: extractSearchIssueItems,
+      lastPage: SEARCH_LAST_PAGE,
       signal,
     });
   }
@@ -557,6 +570,8 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
     readonly decodeItem: (item: unknown) => Row | "skip" | undefined;
     readonly matches: (row: Row) => boolean;
     readonly extractItems?: (stdout: string) => readonly unknown[] | undefined;
+    /** The last upstream page GitHub will serve, where it has one. */
+    readonly lastPage?: number;
     readonly signal: AbortSignal;
   }): Promise<GhCatalogueResult<GhCataloguePageObservation<Row>>> {
     let page = 1;
@@ -604,7 +619,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       const taking = matched.slice(offset, offset + options.pageSize - rows.length);
       rows.push(...taking);
       const consumedInPage = offset + taking.length;
-      const upstreamExhausted = items.length < UPSTREAM_PAGE_SIZE;
+      const upstreamExhausted = items.length < UPSTREAM_PAGE_SIZE || page === options.lastPage;
       if (rows.length >= options.pageSize) {
         if (consumedInPage < matched.length) {
           return ok(rows, true, cursorAt(page, consumedInPage));
@@ -796,7 +811,22 @@ function decodeIssueItem(item: unknown): GhIssueObservationRow | "skip" | undefi
   const shared = decodeSharedItemFacts(item);
   if (shared === undefined) return undefined;
   if (item.state !== "open" && item.state !== "closed") return undefined;
-  return { ...shared, state: item.state };
+  return { ...shared, ...decodeIssueState(item.state, item.state_reason) };
+}
+
+/**
+ * GitHub also sends a reason on a reopened issue, and may add reasons later;
+ * only a closed issue's known reason is reported.
+ */
+function decodeIssueState(
+  state: "open" | "closed",
+  reason: unknown,
+): { readonly state: "open" | "closed"; readonly stateReason?: GithubIssueClosedReason } {
+  if (state === "closed") {
+    if (reason === "completed" || reason === "duplicate") return { state, stateReason: reason };
+    if (reason === "not_planned") return { state, stateReason: "not-planned" };
+  }
+  return { state };
 }
 
 function decodeIssueDetail(
@@ -820,7 +850,7 @@ function decodeIssueDetail(
   const body = boundUtf8(item.body, ISSUE_BODY_MAX_BYTES);
   return {
     ...shared,
-    state: item.state,
+    ...decodeIssueState(item.state, item.state_reason),
     createdAt: item.created_at,
     labels: decodeLabels(item.labels),
     body: body.text,
@@ -839,7 +869,7 @@ function decodeSearchItem(item: unknown): GhSearchObservationRow | "skip" | unde
   if (shared === undefined) return undefined;
   if (item.state !== "open" && item.state !== "closed") return undefined;
   if (!isRecord(item.pull_request)) {
-    return { kind: "issue", ...shared, state: item.state };
+    return { kind: "issue", ...shared, ...decodeIssueState(item.state, item.state_reason) };
   }
   // A search hit carries the pull request's merge time under `pull_request`,
   // not at the top level as the pulls endpoint does.
@@ -911,6 +941,8 @@ function composeIssueSearchQuery(input: {
    * matches titles and bodies of issues and pull requests alike.
    */
   readonly scope: "issue-titles" | "issues-and-pull-requests";
+  /** The server's own qualifier, so it is never among the terms cut for length. */
+  readonly closedReason?: GithubIssueClosedReasonFilter | undefined;
 }): string | undefined {
   const authors: string[] = [];
   const numbers: string[] = [];
@@ -931,13 +963,24 @@ function composeIssueSearchQuery(input: {
     const cleaned = token.replaceAll(/["\\]/g, "");
     if (cleaned.length > 0) titleParts.push(cleaned);
   }
-  if (authors.length === 0 && numbers.length === 0 && titleParts.length === 0) {
+  const hasTerms = authors.length > 0 || numbers.length > 0 || titleParts.length > 0;
+  // A closed reason alone is a read. Typed terms that were all dropped are not:
+  // answering with every issue of that reason would ignore what was asked.
+  if (!hasTerms && (input.closedReason === undefined || input.search.trim() !== "")) {
     return undefined;
   }
   const prefix = [`repo:${input.owner}/${input.name}`];
   if (input.scope === "issue-titles") prefix.push("type:issue");
   if (input.state === "open") prefix.push("is:open");
   if (input.state === "closed") prefix.push("is:closed");
+  // Choosing a reason must not cut a title that fits without one, and GitHub
+  // leaves qualifiers out of its own query limit.
+  let limit = MAX_SEARCH_QUERY_CHARS;
+  if (input.closedReason !== undefined) {
+    const reason = input.closedReason === "completed" ? "reason:completed" : 'reason:"not planned"';
+    prefix.push(reason);
+    limit += reason.length + 1;
+  }
   // Search has its own vocabulary for the REST `assignee=none` filter, so a
   // narrowed read stays narrowed when the caller also passes a search term.
   if (input.unassigned) prefix.push("no:assignee");
@@ -954,11 +997,11 @@ function composeIssueSearchQuery(input: {
   let addedUserTerm = false;
   for (const term of userTerms) {
     const candidate = `${parts.join(" ")} ${term}`;
-    if (candidate.length > MAX_SEARCH_QUERY_CHARS) break;
+    if (candidate.length > limit) break;
     parts.push(term);
     addedUserTerm = true;
   }
-  if (!addedUserTerm) return undefined;
+  if (hasTerms && !addedUserTerm) return undefined;
   return parts.join(" ");
 }
 

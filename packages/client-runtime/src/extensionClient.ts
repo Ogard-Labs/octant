@@ -13,6 +13,7 @@ import type {
   ExtensionToolGrantList,
   ExtensionToolGrantRequest,
   McpServerConnectionListing,
+  McpServerConnectionRequest,
   McpServerReconnectResult,
   McpServerSignInRelayRequest,
   McpServerSignInRelayResult,
@@ -80,6 +81,14 @@ export interface ExtensionClient {
   relayMcpServerSignIn?(request: McpServerSignInRelayRequest): Promise<McpServerSignInRelayResult>;
   /** How each installed MCP server is connecting, from what the host retained. */
   mcpServerConnections(): Promise<McpServerConnectionListing>;
+  /**
+   * The servers a thread's next turn would get and cannot use until someone
+   * signs in. Asked only by a client that may sign in; the host refuses others.
+   */
+  mcpServersAwaitingSignIn?(
+    thread: Omit<Extract<McpServerConnectionRequest, { readonly kind: "thread-sign-in" }>, "kind">,
+    signal?: AbortSignal,
+  ): Promise<McpServerConnectionListing>;
   /** Drops a server's connection and failure so the next task connects fresh; a local window only. */
   reconnectMcpServer(target: {
     readonly extensionId: string;
@@ -300,6 +309,20 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify({ kind: "list" }),
+        },
+        decodeHostAnswer(McpServerConnectionListing),
+      );
+    },
+    async mcpServersAwaitingSignIn(thread, signal) {
+      const { McpServerConnectionListing } = await loadExtensionRpc();
+      return request(
+        fetch,
+        new URL("/api/extensions/connections", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ kind: "thread-sign-in", ...thread }),
+          ...(signal === undefined ? {} : { signal }),
         },
         decodeHostAnswer(McpServerConnectionListing),
       );

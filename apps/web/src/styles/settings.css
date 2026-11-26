@@ -460,13 +460,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 .settings-view__search-shortcut {
   position: absolute;
   right: var(--oct-space-2);
-  padding: 0 var(--oct-space-1);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-sm);
-  color: var(--octant-text-muted);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  line-height: 1.5;
   pointer-events: none;
 }
 

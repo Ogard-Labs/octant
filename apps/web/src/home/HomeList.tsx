@@ -29,6 +29,7 @@ import {
   type CachedHomeListRow,
 } from "./homeListCache";
 import "./home-list.css";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 /** How long the list waits for a slow source before it shows what it has. */
 export const HOME_LIST_PATIENCE_MS = 5000;
@@ -362,7 +363,7 @@ function HomeListSectionView(props: { readonly view: SectionView; readonly menu:
       <header className="home-list__head">
         <h2 className="home-list__title">{title}</h2>
         <span aria-hidden="true" className="home-list__busy">
-          {busy ? <span className="spinner spinner-sm" /> : null}
+          {busy ? <OctantSpinner size={14} /> : null}
         </span>
         <span className="home-list__count">{count}</span>
         <span className="home-list__menu">{props.menu}</span>

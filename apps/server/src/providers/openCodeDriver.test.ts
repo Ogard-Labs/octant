@@ -12,12 +12,14 @@ import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Exit, Fiber, Stream } from "effect";
+import { Effect, Exit, Fiber, Scope, Stream } from "effect";
+import { runApprovalAnswerConformance } from "@octant/provider-sdk/conformance";
 import { describe, expect, it, vi } from "vitest";
 import {
   adaptOpenCodeEvent,
   agentPermissionRules,
   sessionPermissionRules,
+  OPENCODE_REMEMBERED_APPROVAL_NOTE,
   openCodeBlockedToolNames,
   permissionEffect,
   makeOpenCodeDriver,
@@ -1704,6 +1706,98 @@ describe("OpenCode driver", () => {
     );
     expect(fixture.calls).toContain("permission.reply:once");
     expect(fixture.calls).not.toContain("permission.reply:always");
+  });
+
+  it("answers an approval once on a thread that keeps answers for the session, whose grant OpenCode would hold wider", async () => {
+    const nativeSetup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: false,
+    } as const;
+    await expect(
+      runApprovalAnswerConformance({
+        remembersForSession: false,
+        pending: async (hostDefault) => {
+          const fixture = driverFixture({
+            permissionPersistence: hostDefault,
+            events: [permissionEvent("provider-session", "one")],
+          });
+          const scope = await Effect.runPromise(Scope.make());
+          const connection = await Effect.runPromise(
+            fixture.driver
+              .acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" })
+              .pipe(Effect.provideService(Scope.Scope, scope)),
+          );
+          await Effect.runPromise(
+            connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              nativeSetup,
+            }),
+          );
+          await Effect.runPromise(
+            connection.send({ sessionId, prompt: "edit", attachments: [], tools: [] }),
+          );
+          await Effect.runPromise(Effect.sleep("20 millis"));
+          return {
+            connection,
+            sessionId,
+            requestId: "one",
+            remembered: () => fixture.calls.includes("permission.reply:always"),
+            close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
+          };
+        },
+      }),
+    ).resolves.toMatchObject({ sessionAnswerRemembered: false });
+  });
+
+  it("does not say an approval saves a grant on a thread that keeps answers for the session", async () => {
+    const fixture = driverFixture({
+      permissionPersistence: "project-default",
+      events: [permissionEvent("provider-session", "perm-1")],
+    });
+    const approvals: string[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* fixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "code",
+            permissionPersistence: "current-session",
+          });
+          const stream = yield* connection.subscribe;
+          yield* Effect.fork(
+            Stream.runForEach(stream, (event) =>
+              Effect.sync(() => {
+                if (event.kind === "approval-request") approvals.push(event.description);
+              }),
+            ),
+          );
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            nativeSetup: {
+              subagents: true,
+              webTools: true,
+              skills: true,
+              toolServers: true,
+              hooks: true,
+              projectCode: false,
+            },
+          });
+          yield* connection.send({ sessionId, prompt: "edit", attachments: [], tools: [] });
+          yield* Effect.sleep("20 millis");
+        }),
+      ),
+    );
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]).not.toContain(OPENCODE_REMEMBERED_APPROVAL_NOTE);
   });
 
   it("answers a remembered approval once where OpenCode does not run as itself, and a denial with reject", async () => {
@@ -5149,7 +5243,7 @@ function launchDriver(
     readonly sessionDelete?: "refused";
     readonly events?: ReadonlyArray<OpenCodeEvent>;
     readonly launchScratch?: "unreported";
-    readonly permissionPersistence?: "project-default";
+    readonly permissionPersistence?: "current-session" | "project-default";
     readonly eventsOnReply?: ReadonlyArray<Event> | ((requestId: string) => ReadonlyArray<Event>);
     readonly readOwnSetup?: () => OpenCodeOwnSetup;
     readonly commands?: FixtureCommands;

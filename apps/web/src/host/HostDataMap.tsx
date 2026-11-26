@@ -14,6 +14,7 @@ const CATEGORY_LABELS: Readonly<Record<HostDataMapOutboundCategory["category"], 
   "provider-calls": "Provider calls",
   "update-checks": "Update checks",
   "marketplace-fetches": "Marketplace fetches",
+  "speech-model-downloads": "Speech model",
 };
 
 const PROJECT_TYPE_LABELS: Readonly<Record<HostDataMapProject["type"], string>> = {

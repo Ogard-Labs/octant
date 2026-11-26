@@ -2186,6 +2186,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       attachmentsFolder,
       sandboxPolicy,
       serverPlacement,
+      permissionPersistence: threadPersistence,
     }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
@@ -2256,7 +2257,12 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           threadMode,
           `${executionPolicy}${ownSubagents ? "+own-subagents" : ""}${
             keepsOwnMemory(executionPolicy, strict) ? "+own-memory" : ""
-          }${ownTelemetry ? "+own-telemetry" : ""}${strict ? "" : "+not-strict"}`,
+          }${ownTelemetry ? "+own-telemetry" : ""}${strict ? "" : "+not-strict"}${
+            // A command accepted for the session stays accepted in the process
+            // that holds its thread, so a thread whose approvals now hold for
+            // one call each never resumes there.
+            threadPersistence === "project-default" ? "+one-call-approvals" : ""
+          }`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
           // A Strict process launched with other host variables let through
           // is not reused for this list.
@@ -4516,7 +4522,7 @@ function makeConnection(
                     pending.outsideProject === true ||
                     (state.sandbox.kind === "native" && state.strict !== false)
                     ? "project-default"
-                    : permissionPersistence(options),
+                    : (input.persistence ?? permissionPersistence(options)),
                 ),
               }),
             ).pipe(

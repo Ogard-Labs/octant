@@ -564,6 +564,171 @@ describe("GitHubIssueBrowser", () => {
     expect(stylesheet).not.toMatch(/box-shadow:\s*inset 0 0 0 2px/);
   });
 
+  describe("closed issues", () => {
+    const closedRows = [
+      issueRow(1, { title: "Shipped", state: "closed", stateReason: "completed" }),
+      issueRow(2, { title: "Declined", state: "closed", stateReason: "not-planned" }),
+      issueRow(3, { title: "Seen before", state: "closed", stateReason: "duplicate" }),
+      issueRow(4, { title: "No reason given", state: "closed" }),
+    ];
+
+    function closedClient(rows: ReadonlyArray<GithubIssueRow> = closedRows) {
+      const readCatalogue = vi.fn(
+        async (request: GithubCatalogueReadRequest): Promise<GithubCatalogueReadResponse> => {
+          if (request.kind === "recent-repositories") return recents;
+          if (request.kind === "repositories") return repositories;
+          if (request.kind === "issues") {
+            return {
+              kind: "issues",
+              page: {
+                rows: [...rows],
+                sort: "updated-desc",
+                hasNextPage: request.cursor === undefined,
+                ...(request.cursor === undefined ? { endCursor: "next" } : {}),
+                freshness: { status: "fresh" },
+              },
+            };
+          }
+          if (request.kind === "issue") {
+            const row = rows.find((candidate) => candidate.number === request.number);
+            return {
+              kind: "issue",
+              issue: issueDetail(request.number, {
+                state: row?.state ?? "open",
+                ...(row?.stateReason === undefined ? {} : { stateReason: row.stateReason }),
+              }),
+              freshness: { status: "fresh" },
+            };
+          }
+          throw new Error(`unexpected ${request.kind}`);
+        },
+      );
+      return { readCatalogue, client: makeClient(readCatalogue) };
+    }
+
+    function lastIssuesRead(readCatalogue: ReturnType<typeof closedClient>["readCatalogue"]) {
+      return readCatalogue.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.kind === "issues")
+        .at(-1);
+    }
+
+    it("says in words why each closed issue was closed, and plain Closed when GitHub does not", async () => {
+      const { client } = closedClient();
+      render(<GitHubIssueBrowser client={client} />);
+      await selectFirstRepository();
+
+      for (const [title, words] of [
+        ["Shipped", "Closed as completed"],
+        ["Declined", "Closed as not planned"],
+        ["Seen before", "Closed as duplicate"],
+        ["No reason given", "Closed"],
+      ] as const) {
+        const row = await screen.findByRole("button", { name: new RegExp(title) });
+        expect(within(row).getByRole("img", { name: words })).toBeInTheDocument();
+        fireEvent.click(row);
+        const article = await screen.findByRole("article", {
+          name: `Issue #${closedRows.find((issue) => issue.title === title)?.number}`,
+        });
+        expect(within(article).getByText(words, { exact: true })).toBeVisible();
+      }
+
+      const glyph = (title: string) =>
+        within(screen.getByRole("button", { name: new RegExp(title) })).getByRole("img").innerHTML;
+      expect(glyph("Declined")).not.toBe(glyph("Shipped"));
+      expect(glyph("Seen before")).toBe(glyph("Declined"));
+      expect(glyph("No reason given")).toBe(glyph("Shipped"));
+    });
+
+    it("offers closed reasons only under Closed, reads the chosen one, and forgets it on leaving", async () => {
+      const user = userEvent.setup();
+      const { client, readCatalogue } = closedClient();
+      render(<GitHubIssueBrowser client={client} />);
+      await selectFirstRepository();
+      await screen.findByRole("button", { name: /Shipped/ });
+      expect(screen.queryByRole("group", { name: "Closed reason" })).toBeNull();
+
+      const states = screen.getByRole("group", { name: "Issue state" });
+      await user.click(within(states).getByRole("button", { name: "Closed" }));
+      const reasons = screen.getByRole("group", { name: "Closed reason" });
+      expect(
+        within(reasons)
+          .getAllByRole("button")
+          .map((chip) => chip.textContent),
+      ).toEqual(["All closed", "Completed", "Not planned"]);
+      expect(within(reasons).getByRole("button", { name: "All closed" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await waitFor(() => expect(lastIssuesRead(readCatalogue)).toMatchObject({ state: "closed" }));
+      expect(lastIssuesRead(readCatalogue)).not.toHaveProperty("closedReason");
+
+      await user.click(within(reasons).getByRole("button", { name: "Not planned" }));
+      await waitFor(() =>
+        expect(lastIssuesRead(readCatalogue)).toMatchObject({
+          state: "closed",
+          closedReason: "not-planned",
+        }),
+      );
+      await user.click(await screen.findByRole("button", { name: "Load more issues" }));
+      await waitFor(() =>
+        expect(lastIssuesRead(readCatalogue)).toMatchObject({
+          cursor: "next",
+          closedReason: "not-planned",
+        }),
+      );
+
+      await user.click(within(states).getByRole("button", { name: "All" }));
+      expect(screen.queryByRole("group", { name: "Closed reason" })).toBeNull();
+      await waitFor(() => expect(lastIssuesRead(readCatalogue)).toMatchObject({ state: "all" }));
+      expect(lastIssuesRead(readCatalogue)).not.toHaveProperty("closedReason");
+
+      await user.click(within(states).getByRole("button", { name: "Closed" }));
+      expect(
+        within(screen.getByRole("group", { name: "Closed reason" })).getByRole("button", {
+          name: "All closed",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("narrows every repository to the chosen reason when listing all of them", async () => {
+      const user = userEvent.setup();
+      const readCatalogue = vi.fn(
+        async (request: GithubCatalogueReadRequest): Promise<GithubCatalogueReadResponse> => {
+          if (request.kind === "recent-repositories") {
+            return { kind: "recent-repositories", rows: [repositoryRow(1), repositoryRow(2)] };
+          }
+          if (request.kind === "issues") {
+            return {
+              kind: "issues",
+              page: {
+                rows: [],
+                sort: "updated-desc",
+                hasNextPage: false,
+                freshness: { status: "fresh" },
+              },
+            };
+          }
+          throw new Error(`unexpected ${request.kind}`);
+        },
+      );
+      render(<GitHubIssueBrowser client={makeClient(readCatalogue)} storage={memoryStorage()} />);
+      await screen.findByText("No issues match.");
+
+      await user.click(screen.getByRole("button", { name: "Closed" }));
+      await user.click(screen.getByRole("button", { name: "Completed" }));
+
+      await waitFor(() => {
+        for (const name of ["repo-1", "repo-2"]) {
+          expect(readCatalogue).toHaveBeenCalledWith(
+            expect.objectContaining({ name, state: "closed", closedReason: "completed" }),
+          );
+        }
+      });
+      expect(await screen.findByText("No issues match.")).toBeVisible();
+    });
+  });
+
   describe("the shared list", () => {
     function acrossClient() {
       return makeClient(async (request: GithubCatalogueReadRequest) => {

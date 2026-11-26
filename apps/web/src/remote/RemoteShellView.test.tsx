@@ -752,6 +752,30 @@ describe("RemoteShellView", () => {
     }
   });
 
+  it("shows a level changed on the computer in the open device panel", async () => {
+    let level: "read-only" | "full" = "read-only";
+    const { bridge } = await readyBridge([], false, false, false, false, () => level);
+    try {
+      render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+      const panel = await screen.findByRole("region", { name: "This browser device" });
+      expect(await within(panel).findByText("Read only")).toBeInTheDocument();
+      expect(within(panel).getByText(/can read this computer but not change it/i)).toBeVisible();
+
+      level = "full";
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(await within(panel).findByText("Full")).toBeInTheDocument();
+      expect(within(panel).queryByText("Read only")).not.toBeInTheDocument();
+      expect(within(panel).queryByText(/not change it/i)).not.toBeInTheDocument();
+
+      level = "read-only";
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(await within(panel).findByText("Read only")).toBeInTheDocument();
+      expect(within(panel).getByText(/can read this computer but not change it/i)).toBeVisible();
+    } finally {
+      bridge.disconnect();
+    }
+  });
+
   it("opens a paired Chat Canvas and copies its public link without owner controls or window authority", async () => {
     const user = userEvent.setup();
     const seen: ProductRequest[] = [];

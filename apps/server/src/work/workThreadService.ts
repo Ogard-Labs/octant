@@ -36,6 +36,7 @@ import {
   type WorkStatusDatedItem,
   type WorkTurnState,
   type WorkTurnAccepted,
+  type ThreadMessageSteered,
   type WorkTurnUpdated,
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
@@ -53,6 +54,7 @@ import {
 } from "@octant/contracts";
 import type { FinishedReportSettleOutcome } from "../finishedReceipts/finishedReportSettle";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
+import { journalThreadMessageSteered } from "../messageQueue/threadMessageSteeredRecord";
 import {
   clipTranscriptSearchSnippet,
   normalizeSearchText,
@@ -224,6 +226,8 @@ export interface WorkThreadServiceDependencies {
     readonly listForThread: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
     /** Takes a fork's carried turns once they are journaled; absent, a fork is refused. */
     readonly apply?: (event: WorkTurnAccepted | WorkTurnUpdated) => void;
+    /** Takes what the person sent into a carried turn while it ran. */
+    readonly applySteeredMessage?: (record: ThreadMessageSteered) => void;
   };
   /** Whether a thread is marked as having taken in outside content now. */
   readonly isMarked?: (threadId: WorkThreadId) => boolean;
@@ -754,9 +758,11 @@ export class WorkThreadService {
       for (const thread of threads) {
         const lifecycle = thread.lifecycle === "archived" ? "archived" : "active";
         for (const turn of this.#turnProjection.listForThread(thread.id)) {
-          const body = [turn.prompt, turn.response ?? ""].find((text) =>
-            text.toLowerCase().includes(needle),
-          );
+          const body = [
+            turn.prompt,
+            ...(turn.steeredMessages ?? []).map((message) => message.body),
+            turn.response ?? "",
+          ].find((text) => text.toLowerCase().includes(needle));
           if (body === undefined) continue;
           if (hits.length === MAX_CHAT_TRANSCRIPT_SEARCH_HITS) {
             return { query: trimmed, hits, truncated: true };
@@ -2545,7 +2551,7 @@ export class WorkThreadService {
         ...(turn.failure === undefined ? {} : { failure: turn.failure }),
         updatedAt: turn.updatedAt,
       };
-      return { accepted, updated };
+      return { accepted, updated, steeredMessages: turn.steeredMessages ?? [] };
     });
     // The fork carries the source's conversation, so what the source read is
     // in the fork's context from its first turn. A source a person cleared
@@ -2557,6 +2563,7 @@ export class WorkThreadService {
             contentReference: `work-fork-${String(source.id)}-${String(command.throughRequestId)}`,
           }
         : undefined;
+    let steered: ReadonlyArray<ThreadMessageSteered> = [];
     const journalFork = () => {
       this.#append(
         fork.id,
@@ -2569,6 +2576,21 @@ export class WorkThreadService {
         this.#appendTurn(copy.accepted.requestId, 0, "work.turn-accepted@1", copy.accepted);
         this.#appendTurn(copy.accepted.requestId, 1, "work.turn-updated@1", copy.updated);
       }
+      // Journaled beside its turn, not in it, so each is copied as a record of
+      // the fork's own turn; without them the fork forgets what the person
+      // said while a carried turn ran.
+      steered = copies.flatMap((copy) =>
+        copy.steeredMessages.map((message) =>
+          journalThreadMessageSteered(this.#persistence.journal, {
+            mode: "work",
+            threadId: String(fork.id),
+            turnKey: String(copy.accepted.requestId),
+            ...message,
+            uuid: this.#uuid,
+            actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          }),
+        ),
+      );
     };
     if (mark === undefined) this.#inUnit(journalFork);
     else {
@@ -2588,6 +2610,7 @@ export class WorkThreadService {
       turnProjection.apply?.(copy.accepted);
       turnProjection.apply?.(copy.updated);
     }
+    for (const record of steered) turnProjection.applySteeredMessage?.(record);
     return { kind: "thread-created", thread: fork };
   }
 

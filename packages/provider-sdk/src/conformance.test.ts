@@ -13,8 +13,10 @@ import type {
 import { Effect, Queue, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  runApprovalAnswerConformance,
   runProviderConformance,
   runSessionCompactionConformance,
+  type ProviderApprovalAnswer,
   type ProviderConformanceFixture,
   type ProviderConnection,
   type ProviderSessionCompaction,
@@ -669,4 +671,95 @@ describe("session compaction conformance", () => {
       ),
     ).rejects.toThrow(/without a requested context-compacted event/);
   }, 10_000);
+});
+
+describe("runApprovalAnswerConformance", () => {
+  type Persistence = NonNullable<ProviderApprovalAnswer["persistence"]>;
+  const pendingOn =
+    (remembers: (answer: ProviderApprovalAnswer, hostDefault: Persistence) => boolean) =>
+    async (hostDefault: Persistence) => {
+      let remembered = false;
+      return {
+        connection: {
+          answerApproval: (answer: ProviderApprovalAnswer) =>
+            Effect.sync(() => {
+              remembered = remembers(answer, hostDefault);
+            }),
+        },
+        sessionId,
+        requestId: "approval-1",
+        remembered: () => remembered,
+        close: async () => undefined,
+      };
+    };
+
+  it("accepts a driver that keeps the thread's answer in place of the host's default", async () => {
+    await expect(
+      runApprovalAnswerConformance({
+        remembersForSession: true,
+        pending: pendingOn(
+          (answer, hostDefault) =>
+            answer.approved &&
+            answer.scope !== "once" &&
+            (answer.persistence ?? hostDefault) === "current-session",
+        ),
+      }),
+    ).resolves.toEqual({
+      sessionAnswerRemembered: true,
+      onceNeverRemembered: true,
+      denialNeverRemembered: true,
+      projectDefaultNeverRemembered: true,
+    });
+  });
+
+  it("accepts a driver that cannot remember for a session and keeps asking", async () => {
+    await expect(
+      runApprovalAnswerConformance({
+        remembersForSession: false,
+        pending: pendingOn(() => false),
+      }),
+    ).resolves.toMatchObject({ sessionAnswerRemembered: false });
+  });
+
+  it.each([
+    [
+      "reads the host's default in place of the thread's answer",
+      (answer: ProviderApprovalAnswer, hostDefault: Persistence) =>
+        answer.approved && answer.scope !== "once" && hostDefault === "current-session",
+      "was not remembered under a project-default host default",
+    ],
+    [
+      "remembers a one-call answer because the thread keeps answers for the session",
+      (answer: ProviderApprovalAnswer) =>
+        answer.approved && answer.persistence === "current-session",
+      "a one-call answer was remembered",
+    ],
+    [
+      "remembers a denial",
+      (answer: ProviderApprovalAnswer) =>
+        answer.scope !== "once" && answer.persistence === "current-session",
+      "a denial was remembered",
+    ],
+    [
+      "remembers an answer on a thread that keeps none for the session",
+      (answer: ProviderApprovalAnswer) =>
+        answer.approved && answer.scope !== "once" && answer.persistence !== undefined,
+      "keeps none for the session was remembered",
+    ],
+  ])("refuses a driver that %s", async (_name, remembers, message) => {
+    await expect(
+      runApprovalAnswerConformance({ remembersForSession: true, pending: pendingOn(remembers) }),
+    ).rejects.toThrow(message);
+  });
+
+  it("refuses a driver that remembers more than its session can hold", async () => {
+    await expect(
+      runApprovalAnswerConformance({
+        remembersForSession: false,
+        pending: pendingOn(
+          (answer, hostDefault) => answer.approved && hostDefault === "project-default",
+        ),
+      }),
+    ).rejects.toThrow("cannot keep to its session");
+  });
 });

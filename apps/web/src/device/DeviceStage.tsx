@@ -2,6 +2,7 @@ import { useId, useRef, useState, type ReactNode } from "react";
 import type { DeviceInputIntent, EnqueueDeviceInput } from "./deviceInput";
 import type { DevicePlatform, DeviceScreenSource } from "./deviceModel";
 import { StillScreen, StreamedScreen } from "./DeviceScreen";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 /**
  * The device itself: an original silhouette (body, hairline edge, side keys)
@@ -117,5 +118,5 @@ export function DeviceStage(props: {
 }
 
 export function DeviceSpinner() {
-  return <span aria-hidden="true" className="device-spinner" />;
+  return <OctantSpinner size={14} />;
 }

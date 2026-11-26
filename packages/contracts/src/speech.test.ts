@@ -40,6 +40,13 @@ describe("VoiceSettings", () => {
     expect(settings.dictionary).toBeUndefined();
   });
 
+  it("keeps the endpoint beside an on-device engine, and knows no other engine", () => {
+    expect(decodeVoiceSettings({ transcriptionEngine: "apple-speech" })).toEqual({
+      transcriptionEngine: "apple-speech",
+    });
+    expect(() => decodeVoiceSettings({ transcriptionEngine: "server" })).toThrow();
+  });
+
   it("keeps a language tag and a bounded dictionary of trimmed terms", () => {
     const settings = decodeVoiceSettings({
       transcription: endpoint,

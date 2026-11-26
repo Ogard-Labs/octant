@@ -20,6 +20,7 @@ import {
   renderProviderContextSections,
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
+import { runApprovalAnswerConformance } from "@octant/provider-sdk/conformance";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   codexAppServerArgs,
@@ -3657,6 +3658,103 @@ describe("Codex execution authority and approvals", () => {
       await acquired.close();
     },
   );
+
+  it.each([
+    ["command", commandApproval],
+    ["file change", fileApproval],
+  ] as const)(
+    "keeps a %s approval for the session when the thread does, whatever the host default",
+    async (_name, makeRequest) => {
+      await expect(
+        runApprovalAnswerConformance({
+          remembersForSession: true,
+          pending: async (hostDefault) => {
+            const f = fixture();
+            const acquired = await acquireConnection(
+              makeCodexDriver(f.options({ permissionPersistence: () => hostDefault })),
+            );
+            await startSession(acquired.connection);
+            await Effect.runPromise(
+              acquired.connection.send({ sessionId, prompt: "ask", attachments: [], tools: [] }),
+            );
+            const event = takeEvents(acquired.connection, 1);
+            f.emit(makeRequest());
+            await event;
+            return {
+              connection: acquired.connection,
+              sessionId,
+              requestId: "request-1",
+              remembered: () =>
+                JSON.stringify(f.calls.at(-1)?.input).includes('"decision":"acceptForSession"'),
+              close: acquired.close,
+            };
+          },
+        }),
+      ).resolves.toMatchObject({ sessionAnswerRemembered: true });
+    },
+  );
+
+  // Under Strict such an escalation stays one command; see "answers an
+  // approval ... in Codex's own sandbox" and the Windows Strict tests.
+  it("keeps an escalation from Codex's own sandbox for the session outside Strict when the thread keeps answers, as Codex itself does", async () => {
+    await expect(
+      runApprovalAnswerConformance({
+        remembersForSession: true,
+        pending: async (hostDefault) => {
+          const f = fixture();
+          const acquired = await acquireConnection(
+            makeCodexDriver(f.options({ permissionPersistence: () => hostDefault })),
+            "code",
+          );
+          await Effect.runPromise(
+            acquired.connection.start({
+              sessionId,
+              modelId: "gpt-5.4" as never,
+              executionPolicy: "approval-gated",
+              strict: false,
+            }),
+          );
+          await Effect.runPromise(
+            acquired.connection.send({ sessionId, prompt: "ask", attachments: [], tools: [] }),
+          );
+          const event = takeEvents(acquired.connection, 1);
+          f.emit(commandApproval());
+          await event;
+          return {
+            connection: acquired.connection,
+            sessionId,
+            requestId: "request-1",
+            remembered: () =>
+              JSON.stringify(f.calls.at(-1)?.input).includes('"decision":"acceptForSession"'),
+            close: acquired.close,
+          };
+        },
+      }),
+    ).resolves.toMatchObject({ sessionAnswerRemembered: true });
+  });
+
+  it("never gives a thread that keeps no answers the idle process that remembers the session's", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    const f = fixture();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry, idleLeaseMs: 60_000 }));
+    const turn = async (permissionPersistence: "current-session" | "project-default") => {
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        driver
+          .acquire({ instanceId, projectRoot, mode: "code", permissionPersistence })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      await startSession(connection);
+      await Effect.runPromise(connection.stop(sessionId));
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      return f.startCount();
+    };
+    expect(await turn("current-session")).toBe(1);
+    // The next turn of the same setting reuses the idle process.
+    expect(await turn("current-session")).toBe(1);
+    expect(await turn("project-default")).toBe(2);
+    await registry.closeAll();
+  });
 
   describe("Codex's own sandbox under Octant's permissions profile", () => {
     const extra = "/tmp/octant-codex-extra";

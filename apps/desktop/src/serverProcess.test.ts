@@ -542,6 +542,25 @@ describe("serverSpawnSpec", () => {
     expect(env.OCTANT_PACKAGED_RUNTIME).toBe("1");
   });
 
+  it("names the speech helper it was given and never one it inherited", () => {
+    const options = {
+      browserBrokerToken: "browser-token",
+      browserBrokerUrl: "http://127.0.0.1:42000/",
+      desktopBridgeSecret: "desktop-secret",
+      root: "/repo",
+      port: 13_773,
+      instanceId: "managed-instance",
+      packaged: false,
+      execPath: "/Applications/Octant.app/Contents/MacOS/Octant",
+      env: { OCTANT_SPEECH_HELPER_PATH: "/tmp/inherited" },
+    };
+    expect(serverSpawnSpec(options).env.OCTANT_SPEECH_HELPER_PATH).toBeUndefined();
+    expect(
+      serverSpawnSpec({ ...options, speechHelperPath: "/app/native/octant-speech-helper" }).env
+        .OCTANT_SPEECH_HELPER_PATH,
+    ).toBe("/app/native/octant-speech-helper");
+  });
+
   it("keeps the bootstrap secret only in the child environment", () => {
     const parentEnv: NodeJS.ProcessEnv = {};
     const spec = serverSpawnSpec({

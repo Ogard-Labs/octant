@@ -56,6 +56,19 @@ describe("video offer answers", () => {
     expect(prepared).toEqual({ reason: "Gemini Omni Flash does not offer 4k." });
   });
 
+  it("refuses options the model has no rate for before Don't ask again can be kept", () => {
+    const remember = vi.fn(async () => undefined);
+    const pending = offer();
+    const prepared = videoOfferDecisionRules({ kept: { remember } })["video-generate"](
+      pending,
+      answer(pending, { ...pending.options, resolution: "1080p" }, true),
+    );
+    expect(prepared).toEqual({
+      reason: "Gemini Omni Flash has no price for 10 s at 1080p with audio.",
+    });
+    expect(remember).not.toHaveBeenCalled();
+  });
+
   it("keeps the profile and model only when the card could offer Don't ask again", async () => {
     const remember = vi.fn(async () => undefined);
     const rules = videoOfferDecisionRules({ kept: { remember } });

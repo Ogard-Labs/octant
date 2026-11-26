@@ -4,9 +4,10 @@ import {
   safeCanvasActionDenialReason,
   type CanvasActionAvailability,
 } from "@octant/domain/canvas-action-availability-policy";
-import { Ban, Check, Eye, LoaderCircle, LockKeyhole, Pencil, ShieldAlert } from "../ui/icons";
+import { Ban, Check, Eye, LockKeyhole, Pencil, ShieldAlert } from "../ui/icons";
 import { useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 /**
  * Accessible renderer for declarative Canvas typed actions (D3).
@@ -225,7 +226,7 @@ function ActionEffectIcon(props: {
   readonly running: boolean;
 }) {
   if (props.running) {
-    return <LoaderCircle aria-hidden="true" className="canvas-action__spinner" size={14} />;
+    return <OctantSpinner size={14} />;
   }
   if (props.availability.state === "unauthorized") {
     return <LockKeyhole aria-hidden="true" size={14} />;

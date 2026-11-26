@@ -3,11 +3,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   loadMobileCodeConversation,
   loadMobileCodeThread,
+  readMobileCodeNewestTurn,
   sendMobileCodeTurn,
   type MobileCodeConversation,
 } from "@octant/client-runtime";
 import type { CodeThread } from "@octant/contracts";
-import { loadCodeConversationPage } from "./codeConversationPage";
+import {
+  loadCodeConversationPage,
+  looksForTurnStartedElsewhere,
+  refreshesForNewestTurn,
+  rereadsCodeThread,
+} from "./codeConversationPage";
 import { runLoad, runMutation, sendThenReload } from "./runMutation";
 import type { RefreshOptions, ThreadHookInput } from "./threadTypes";
 import { useThreadAttachments } from "./useThreadAttachments";
@@ -129,6 +135,30 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     });
   };
 
+  // Read by the light look below without restarting its timer on every page.
+  const shown = useRef(conversation);
+  shown.current = conversation;
+  /**
+   * One light look at the newest turn; a turn the shown page does not have,
+   * even one that already finished, brings one refresh, after which a running
+   * turn's page re-reads itself.
+   */
+  const noticeTurnStartedElsewhere = useCallback(async () => {
+    if (!enabled || transport === undefined || identity === undefined || threadId === undefined) {
+      return;
+    }
+    const newest = await readMobileCodeNewestTurn(transport, threadId).catch(() => undefined);
+    const page = shown.current;
+    if (
+      page !== undefined &&
+      refreshesForNewestTurn(page, newest) &&
+      guard.isSelected(identity) &&
+      anchor.current === undefined
+    ) {
+      await refresh({ quiet: true });
+    }
+  }, [enabled, guard, identity, refresh, threadId, transport]);
+
   const jumpToLatest = useCallback(async () => {
     anchor.current = undefined;
     pendingFocus.current = undefined;
@@ -143,6 +173,9 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     conversation,
     turns,
     live: (turns ?? []).some((turn) => turn.status === "waiting"),
+    rereads: rereadsCodeThread(turns ?? []),
+    looksForNewTurn: looksForTurnStartedElsewhere(conversation),
+    noticeTurnStartedElsewhere,
     refresh,
     jumpToLatest,
     sendFollowUp,

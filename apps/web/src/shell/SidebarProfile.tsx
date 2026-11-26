@@ -20,6 +20,7 @@ import {
 import type { ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { OctantKbd } from "../ui/base/OctantKbd";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { RAIL_USAGE_LIMIT, useAccountUsage } from "../usage/accountUsage";
 import { openGuidedTour } from "../tour/guidedTourState";
@@ -260,9 +261,9 @@ function ProfileAction(props: {
       <Icon aria-hidden={true} className="icon" size={16} />
       <span>{props.label}</span>
       {props.shortcut === undefined ? null : (
-        <kbd aria-hidden="true" className="sidebar-item__key">
+        <OctantKbd className="sidebar-item__key" decorative form="bare">
           {props.shortcut}
-        </kbd>
+        </OctantKbd>
       )}
     </OctantMenuItem>
   );

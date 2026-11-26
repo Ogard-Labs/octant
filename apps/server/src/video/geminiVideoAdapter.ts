@@ -115,18 +115,32 @@ function imagePart(reference: { readonly bytes: Uint8Array; readonly mediaType: 
   };
 }
 
+/** A count Google states that the usage ledger can hold: a whole number, at least 0. */
+function tokenCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * The usage Google reported, or undefined when any count it gave is not one
+ * the ledger can record: a settlement must not fail on it, and an earlier
+ * report or the estimate stands instead.
+ */
 function usageOf(payload: unknown): VideoAdapterUsage | undefined {
   const usage = jsonField(payload, "usage");
   if (usage === undefined) return undefined;
-  const output = jsonField(usage, "total_output_tokens");
-  const thought = jsonField(usage, "total_thought_tokens");
-  const input = jsonField(usage, "total_input_tokens");
-  const outputTokens =
-    (typeof output === "number" ? output : 0) + (typeof thought === "number" ? thought : 0);
-  return {
-    ...(typeof output === "number" || typeof thought === "number" ? { outputTokens } : {}),
-    ...(typeof input === "number" ? { inputTokens: input } : {}),
+  const fields = ["total_output_tokens", "total_thought_tokens", "total_input_tokens"] as const;
+  const stated = fields.map((field) => jsonField(usage, field));
+  const counts = stated.map((value) => (typeof value === "number" ? tokenCount(value) : undefined));
+  if (stated.some((value, at) => typeof value === "number" && counts[at] === undefined))
+    return undefined;
+  const [output, thought, input] = counts;
+  const outputTokens = (output ?? 0) + (thought ?? 0);
+  if (!Number.isSafeInteger(outputTokens)) return undefined;
+  const reported = {
+    ...(output !== undefined || thought !== undefined ? { outputTokens } : {}),
+    ...(input !== undefined ? { inputTokens: input } : {}),
   };
+  return Object.keys(reported).length === 0 ? undefined : reported;
 }
 
 /** The clip in the interaction's model output: inline base64, or a Files API download URI. */
@@ -287,8 +301,10 @@ async function readInteraction(
           const downloaded = await downloadFile(ports, video.uri, signal);
           // Google finished and billed the clip; a failed download is tried
           // again on the next poll, and a job that never gets it settles at
-          // its estimate when its time runs out, never as an unbilled failure.
-          if (downloaded.status !== "downloaded") return { status: "running" };
+          // this usage when its time runs out, never as an unbilled failure.
+          if (downloaded.status !== "downloaded") {
+            return usage === undefined ? { status: "running" } : { status: "running", usage };
+          }
           return {
             status: "completed",
             video: { bytes: downloaded.bytes, mediaType: "video/mp4" },

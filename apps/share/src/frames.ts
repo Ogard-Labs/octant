@@ -226,6 +226,37 @@ function plain(status: number, text: string, policy: string): Response {
   });
 }
 
+/** One image a design's frame shows, answered without reading the share's other images. */
+function frameImage(
+  request: Request,
+  ctx: ServiceContext,
+  id: string,
+  blockId: string,
+  sha256: string,
+  token: string,
+): Response {
+  const refused = staticFramePolicy(ctx.publicOrigin);
+  const key = ctx.store.frameKey();
+  const now = ctx.store.now();
+  const answer = ctx.store.withImages(id, (share) => {
+    if (!frameImageTokenIsValid(key, id, share.revision, blockId, now, token)) {
+      return plain(403, "This image address is not valid or has expired.", refused);
+    }
+    // Only the images this design names, by the share's own references.
+    const image = share.images.find((each) => each.sha256 === sha256 && each.designs.has(blockId));
+    if (image === undefined) return undefined;
+    return carriedImageResponse(request, image, {
+      ...FRAME_HEADERS,
+      "content-security-policy": refused,
+      // A sandboxed frame's origin is opaque, so its own images are a
+      // cross-origin load; the token in the address is the authority.
+      "access-control-allow-origin": "*",
+      "cross-origin-resource-policy": "cross-origin",
+    });
+  });
+  return answer ?? plain(404, "Not found", refused);
+}
+
 /**
  * The user-content origin: `GET /f/<id>/<blockId>?t=<frame token>`, a
  * design's frame page, and `GET /f/<id>/<blockId>/images/<sha256>?t=<image
@@ -246,10 +277,12 @@ export function handleFrame(request: Request, ctx: ServiceContext, client: strin
   } catch {
     return plain(404, "Not found", refused);
   }
-  if (sha256 !== undefined && !ctx.limiter.allow("image", client)) {
-    return plain(429, "Too many requests", refused);
-  }
   const token = url.searchParams.get("t") ?? "";
+  if (sha256 !== undefined) {
+    return ctx.limiter.allow("image", client)
+      ? frameImage(request, ctx, id, blockId, sha256, token)
+      : plain(429, "Too many requests", refused);
+  }
   const lookup = ctx.store.lookup(id);
   if (lookup.status !== "active") return plain(404, "Not found", refused);
   const { share } = lookup;
@@ -263,21 +296,6 @@ export function handleFrame(request: Request, ctx: ServiceContext, client: strin
     block?.kind === "design" ? (block.assets ?? []).map((asset) => String(asset.imageRef)) : [],
   );
   const images = (share.document.images ?? []).filter((image) => named.has(String(image.imageRef)));
-  if (sha256 !== undefined) {
-    if (!frameImageTokenIsValid(key, id, share.revision, blockId, now, token)) {
-      return plain(403, "This image address is not valid or has expired.", refused);
-    }
-    const image = images.find((each) => each.sha256 === sha256);
-    if (image?.data === undefined) return plain(404, "Not found", refused);
-    return carriedImageResponse(request, image, {
-      ...FRAME_HEADERS,
-      "content-security-policy": refused,
-      // A sandboxed frame's origin is opaque, so its own images are a
-      // cross-origin load; the token in the address is the authority.
-      "access-control-allow-origin": "*",
-      "cross-origin-resource-policy": "cross-origin",
-    });
-  }
   const mode: FrameMode | undefined = readFrameToken(key, id, share.revision, blockId, now, token);
   if (mode === undefined)
     return plain(403, "This frame address is not valid or has expired.", refused);

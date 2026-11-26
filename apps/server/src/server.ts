@@ -31,11 +31,12 @@ import {
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
-import { resolveSpeechEndpoint } from "@octant/domain";
+import { resolveSpeechEndpoint, resolveTranscriptionEndpoint } from "@octant/domain";
 import {
   makeOpenAiCompatibleSpeechAdapter,
   transcriptionPreferencesOf,
 } from "./speech/speechAdapter";
+import { createAppleSpeechEngine } from "./speech/appleSpeechEngine";
 import type { NarrationForTurn } from "./speech/narrationTool";
 import type { TranscriptionForTurn } from "./speech/transcriptionTool";
 import { CredentialRequests } from "./credentials/credentialRequests";
@@ -704,8 +705,8 @@ export function startOctantServer(
         uuid: randomUUID,
         recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
         endpoint: () =>
-          resolveSpeechEndpoint(
-            persistence.readShellSettings()?.settings.voice.transcription,
+          resolveTranscriptionEndpoint(
+            persistence.readShellSettings()?.settings.voice ?? {},
             persistence.readProviderInstances(),
           ),
         preferences: () =>
@@ -1621,6 +1622,10 @@ export function startOctantServer(
       workTurnProjection,
       workTurnService,
     });
+    const localSpeechEngine = createAppleSpeechEngine(
+      options.speechHelperPath === undefined ? {} : { helperPath: options.speechHelperPath },
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(() => localSpeechEngine.dispose()));
     const {
       imageRoutes,
       videoRoutes,
@@ -1635,6 +1640,7 @@ export function startOctantServer(
       workResearchRoutes,
     } = wireWorkFiles({
       isAuthenticatedPairedDeviceSessionCurrent,
+      localSpeechEngine,
       speechGates,
       credentialResolver,
       imageGenerationOffers,

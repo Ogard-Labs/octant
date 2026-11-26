@@ -211,15 +211,16 @@ rule. Each hit carries the thread, its title, `active` or `archived` (a waiting
 or interrupted Code thread reads `active`), its Project, and the turn holding
 the match: `turnId` for Chat and Work, the provider turn's `operationId` for
 Code. Work and Code answer one hit per turn, the prompt's match before the
-reply's.
+reply's. What the person sent into a turn while it ran is searched with that
+turn's prompt.
 
 Work turns are searched in the rebuildable in-memory turn projection, so a turn
 a rewind removed has left its thread's order and is not found. Code text lives
 in the evidence store, one row per streamed burst, so the
-`code-transcript-search` projection keeps each turn's prompt and its reply's
-message parts joined, in order and up to the parts the conversation shows; a
+`code-transcript-search` projection keeps each turn's prompt, with the messages
+sent into the turn while it ran, and its reply's message parts joined, in order and up to the parts the conversation shows; a
 match across a burst boundary is found. It is a derived projection rebuilt from
-the operation journal, marks the turns a conversation rewind removed so they
+the operation journal and the steered-message records, marks the turns a conversation rewind removed so they
 are not matched, and its rows are swept by a thread purge.
 
 ## Search across modes
@@ -259,7 +260,8 @@ each tool step's name and summary, the files a Work turn wrote, and a Code
 terminal's output, its newest 64 pieces of at most 32 KB each, a redraw
 replacing what it showed. A Chat attachment's file name joins its
 turn's prompt (its bytes live outside the journal and are not read), and a
-purged attachment leaves it. A Canvas is one `canvas` document filed under the
+purged attachment leaves it. What the person sent into a Work or Code turn
+while it ran joins that turn's prompt too. A Canvas is one `canvas` document filed under the
 thread its provenance names: its title and the text, titles, labels and cells
 of its blocks, read by field name (never an id, URL or colour); each version
 replaces the words, and a Canvas hit names its `canvasId` and `canvasTitle`
@@ -303,7 +305,11 @@ under Terminal output paths.
 
 The issue browser's catalogue reads stay on the existing `githubCatalogue`
 union over `/api/github/catalogue/reads`: `kind: "issues"` includes optional
-server-composed search, and `kind: "issue"` returns a bounded detail.
+server-composed search, and `kind: "issue"` returns a bounded detail. A closed
+issue's row and detail carry GitHub's closed reason when it gives a known one.
+An `issues` read of closed issues may name `closedReason` (`completed` or
+`not-planned`), which the host refuses with any other state
+([Workspace](workspace.md#pull-requests-and-issues) owns what a person sees).
 
 Create from an issue frames redacted issue text through
 `apps/server/src/context/externalContentFraming.ts` and appends

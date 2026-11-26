@@ -31,12 +31,21 @@ export interface PolledResource<T> {
  * A phone in a pocket does not need a refresh, so the timer idles when the app
  * is not active and reads once when it returns. A failed read keeps the last
  * value so a flaky connection does not blank what the person is deciding on.
+ *
+ * A timer tick or a wake that meets a read still running is dropped: the next
+ * tick is soon, and following every slow read with another would keep a slow
+ * host busy. `trailingRead` owes one read instead, started when the running
+ * one settles, for a resource whose late answer matters more than that.
  */
 export function usePolledResource<T>(
   load: () => Promise<T>,
-  options: { readonly intervalMs: number; readonly enabled?: boolean },
+  options: {
+    readonly intervalMs: number;
+    readonly enabled?: boolean;
+    readonly trailingRead?: boolean;
+  },
 ): PolledResource<T> {
-  const { intervalMs, enabled = true } = options;
+  const { intervalMs, enabled = true, trailingRead = false } = options;
   const [state, setState] = useState<{ readonly value: T | undefined; readonly error: unknown }>({
     value: undefined,
     error: undefined,
@@ -50,15 +59,27 @@ export function usePolledResource<T>(
     setState({ value: undefined, error: undefined });
     if (!enabled) return;
     const guard = createPollGuard();
+    let readAgain = false;
     const run = async (force: boolean) => {
       const ticket = guard.start({ force });
-      if (ticket === undefined) return;
+      if (ticket === undefined) {
+        readAgain = trailingRead;
+        return;
+      }
+      // Every wake and tick so far is answered by this read.
+      readAgain = false;
+      let landed: boolean;
       try {
         const value = await load();
-        if (guard.finish(ticket)) setState({ value, error: undefined });
+        landed = guard.finish(ticket);
+        if (landed) setState({ value, error: undefined });
       } catch (error) {
-        if (guard.finish(ticket)) setState((previous) => ({ value: previous.value, error }));
+        landed = guard.finish(ticket);
+        if (landed) setState((previous) => ({ value: previous.value, error }));
       }
+      // A superseded or disposed read owes nothing, and in the background the
+      // wake that follows reads anyway.
+      if (landed && readAgain && nativeAppActivity.isActive()) void run(false);
     };
     runner.current = run;
     void run(false);
@@ -66,7 +87,7 @@ export function usePolledResource<T>(
       guard.dispose();
       runner.current = undefined;
     };
-  }, [load, enabled]);
+  }, [load, enabled, trailingRead]);
 
   useEffect(() => {
     if (!enabled) return;

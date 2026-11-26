@@ -2039,6 +2039,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
       extraFolders = [],
       attachmentsFolder,
       sandboxPolicy,
+      permissionPersistence: threadPersistence,
     }) =>
       instanceId !== options.instanceId
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))
@@ -2066,6 +2067,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               makeCorrelation,
               retained,
               readOnlyFolders,
+              threadPersistence !== undefined,
             );
           }),
   };
@@ -2175,6 +2177,8 @@ function makeConnection(
   retained: OpenCodeRetainedSessions,
   /** The thread's attachments folder, read at every level and written at none. */
   readOnlyFolders: ReadonlyArray<string> = [],
+  /** The host answers on the thread's own setting, under which no approval saves a grant. */
+  threadDecidesPersistence = false,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const platform = options.platform ?? process.platform;
@@ -2396,10 +2400,9 @@ function makeConnection(
       projectRoot,
       extraFolders,
       readOnlyFolders,
-      remembersInOpenCode: opencodeRemembersApproval(
-        state,
-        options.permissionPersistence?.() ?? "current-session",
-      ),
+      remembersInOpenCode:
+        !threadDecidesPersistence &&
+        opencodeRemembersApproval(state, options.permissionPersistence?.() ?? "current-session"),
       reply: (requestId: string, reply: "once" | "reject") => {
         const active = client;
         const source = replySource ?? state.sourceId;
@@ -3828,9 +3831,14 @@ function makeConnection(
                       // the person let OpenCode run as itself, and its files
                       // stay admitted while this native process runs.
                       // A Plan answer approves that one call.
+                      // An answer that names its thread's own setting is
+                      // `once`: an `always` covers a pattern wider than the
+                      // approved call, and beyond the session too, so it
+                      // could only remember more than the answer allows.
                       const wantsAlways =
                         input.approved &&
                         input.scope !== "once" &&
+                        input.persistence === undefined &&
                         state.executionPolicy !== "plan" &&
                         opencodeRemembersApproval(
                           state,

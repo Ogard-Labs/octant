@@ -1,9 +1,12 @@
 import {
   decodeSpeechFailureResponse,
+  decodeSpeechLocalEngineStatus,
   decodeSpeechStatusResponse,
   decodeSpeechSynthesisRequest,
   decodeSpeechTranscript,
   decodeSpeechTranscriptionLanguage,
+  SPEECH_LOCAL_MAX_PCM_BYTES,
+  SPEECH_LOCAL_WAV_HEADER_BYTES,
   SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES,
   type ProviderFailure,
   type ProviderInstance,
@@ -11,13 +14,17 @@ import {
   type SpeechEndpointRef,
   type SpeechFailureResponse,
   type SpeechSynthesisEndpointRef,
+  type SpeechTranscriptionLanguage,
   type VoiceSettings,
 } from "@octant/contracts";
 import {
   admitRemoteTranscription,
+  LOCAL_SPEECH_PAIRED_REASON,
+  localSpeechProblem,
   pairedDeviceSpeechStatusOf,
   REMOTE_TRANSCRIPTION_MAX_AUDIO_BYTES,
   resolveSpeechEndpoint,
+  resolveTranscriptionEndpoint,
   speechStatusOf,
   VOICE_SYNTHESIS_TARGET,
   VOICE_TRANSCRIPTION_TARGET,
@@ -29,12 +36,13 @@ import type { ClientPrincipal } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import { createAppleSpeechEngine, type AppleSpeechEngine } from "./appleSpeechEngine";
 import {
   makeOpenAiCompatibleSpeechAdapter,
   transcriptionPreferencesOf,
   type SpeechAdapter,
 } from "./speechAdapter";
-import { sniffSpeechAudioMediaType } from "./speechAudio";
+import { readLocalSpeechPcm, sniffSpeechAudioMediaType } from "./speechAudio";
 import type { SpeechGates } from "./speechGates";
 
 const METHODS = "GET, POST, OPTIONS";
@@ -42,9 +50,11 @@ const HEADERS = "content-type, x-octant-window-capability";
 const STATUS_PATH = "/api/speech/status";
 const TRANSCRIPTIONS_PATH = "/api/speech/transcriptions";
 const SYNTHESIS_PATH = "/api/speech/synthesis";
+const LOCAL_ENGINE_PATH = "/api/speech/local-engine";
 // Multipart framing around a maximal clip: boundaries, part headers, model
 // and language fields. Anything beyond this is refused before it is buffered.
 const TRANSCRIPTION_BODY_LIMIT = SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES + 65_536;
+const LOCAL_CLIP_LIMIT = SPEECH_LOCAL_MAX_PCM_BYTES + SPEECH_LOCAL_WAV_HEADER_BYTES;
 const PAIRED_TRANSCRIPTION_BODY_LIMIT = REMOTE_TRANSCRIPTION_MAX_AUDIO_BYTES + 65_536;
 const SYNTHESIS_BODY_LIMIT = 65_536;
 
@@ -55,6 +65,8 @@ export interface SpeechRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
+  /** Speech to text on this computer; absent where the host was started without it. */
+  readonly localEngine?: AppleSpeechEngine;
   /** Test seam: replace the adapter the route would build for a ready endpoint. */
   readonly makeAdapter?: (
     resolution: SpeechEndpointResolution & { status: "ready" },
@@ -78,10 +90,15 @@ export interface SpeechRouteDependencies {
  * paired devices together leave one host slot for the computer's own windows,
  * so phones cannot crowd out local dictation or run up the owner's endpoint;
  * a device is told read-aloud is unavailable and refused it if it asks anyway.
+ *
+ * With the on-device engine chosen in Voice settings, dictation in this
+ * computer's own windows runs there and no endpoint is called for anyone: a
+ * paired device is refused, and an engine that cannot answer fails the request.
  */
 export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) {
   const now = dependencies.now ?? Date.now;
   const { gates } = dependencies;
+  const localEngine = dependencies.localEngine ?? createAppleSpeechEngine();
   // Admission times per paired device inside the budget window, and the
   // devices with a clip being transcribed now. Nothing here outlives the
   // process: a restart is the owner's act and starts every budget afresh.
@@ -132,14 +149,43 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
       principal.kind === "remote-device" ? String(principal.deviceId) : undefined;
 
     if (url.pathname === STATUS_PATH && request.method === "GET") {
-      const statusOf = pairedDeviceId === undefined ? speechStatusOf : pairedDeviceSpeechStatusOf;
-      return json(
-        decodeSpeechStatusResponse(
-          statusOf(dependencies.readVoiceSettings(), dependencies.listInstances()),
-        ),
-        200,
-        origin,
-      );
+      const settings = dependencies.readVoiceSettings();
+      const status =
+        pairedDeviceId !== undefined
+          ? pairedDeviceSpeechStatusOf(settings, dependencies.listInstances())
+          : speechStatusOf(
+              settings,
+              dependencies.listInstances(),
+              settings.transcriptionEngine === undefined
+                ? undefined
+                : await localEngine.status(settings.language),
+            );
+      return json(decodeSpeechStatusResponse(status), 200, origin);
+    }
+
+    if (url.pathname === LOCAL_ENGINE_PATH) {
+      if (pairedDeviceId !== undefined) {
+        return refuse(LOCAL_SPEECH_PAIRED_REASON, "unsupported", 403, origin);
+      }
+      let language: SpeechTranscriptionLanguage | undefined;
+      const named = url.searchParams.get("language");
+      if (named !== null) {
+        try {
+          language = decodeSpeechTranscriptionLanguage(named);
+        } catch {
+          return refuse("The language is not a language tag.", "invalid", 400, origin);
+        }
+      }
+      if (request.method === "GET") {
+        return json(decodeSpeechLocalEngineStatus(await localEngine.status(language)), 200, origin);
+      }
+      if (request.method === "POST") {
+        return json(
+          decodeSpeechLocalEngineStatus(await localEngine.download(language)),
+          202,
+          origin,
+        );
+      }
     }
 
     if (url.pathname === TRANSCRIPTIONS_PATH && request.method === "POST") {
@@ -166,12 +212,22 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
     origin: string | null,
     pairedDeviceId: string | undefined,
   ): Promise<Response> {
-    const resolution = resolve(dependencies.readVoiceSettings().transcription);
-    if (resolution.status !== "ready") {
+    const settings = dependencies.readVoiceSettings();
+    const local = settings.transcriptionEngine !== undefined;
+    if (local && pairedDeviceId !== undefined) {
+      return refuseTranscription(LOCAL_SPEECH_PAIRED_REASON, origin);
+    }
+    const resolution = resolveTranscriptionEndpoint(settings, dependencies.listInstances());
+    if (!local && resolution.status !== "ready") {
       return refuseEndpoint(resolution, VOICE_TRANSCRIPTION_TARGET, origin);
     }
-    const bounds =
-      pairedDeviceId === undefined
+    const bounds = local
+      ? {
+          body: LOCAL_CLIP_LIMIT + 65_536,
+          audio: LOCAL_CLIP_LIMIT,
+          message: "The recording is longer than two minutes.",
+        }
+      : pairedDeviceId === undefined
         ? {
             body: TRANSCRIPTION_BODY_LIMIT,
             audio: SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES,
@@ -236,11 +292,7 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
         return refuse(bounds.message, "invalid", 413, origin);
       }
       const audio = new Uint8Array(await audioPart.arrayBuffer());
-      const mediaType = sniffSpeechAudioMediaType(audio);
-      if (mediaType === undefined) {
-        return refuse("The recording is not a supported audio format.", "invalid", 400, origin);
-      }
-      let language: string | undefined;
+      let language: SpeechTranscriptionLanguage | undefined;
       const languagePart = form.get("language");
       if (typeof languagePart === "string" && languagePart.length > 0) {
         try {
@@ -249,13 +301,18 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
           return refuse("The language hint is not a language tag.", "invalid", 400, origin);
         }
       }
-      const result = await adapterFor(resolution).transcribe({
-        audio,
-        mediaType,
-        modelId: resolution.modelId,
-        ...(language === undefined ? {} : { language }),
-        signal: request.signal,
-      });
+      const result = await (resolution.status === "ready"
+        ? transcribeAtEndpoint(resolution, audio, language, request.signal)
+        : transcribeLocally(settings, audio, language, request.signal));
+      if (result === undefined) {
+        return refuse("The recording is not a supported audio format.", "invalid", 400, origin);
+      }
+      if (result.status === "unavailable") {
+        return refuseTranscription(
+          localSpeechProblem(result.engine) ?? "Apple Speech did not answer on this Mac.",
+          origin,
+        );
+      }
       if (result.status === "failed") {
         return providerFailure(result.providerFailure, origin);
       }
@@ -273,6 +330,43 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
       release();
       if (pairedDeviceId !== undefined) pairedClipsInFlight.delete(pairedDeviceId);
     }
+  }
+
+  /** `undefined` when the bytes are no audio the endpoint takes. */
+  async function transcribeAtEndpoint(
+    resolution: SpeechEndpointResolution & { status: "ready" },
+    audio: Uint8Array,
+    language: SpeechTranscriptionLanguage | undefined,
+    signal: AbortSignal,
+  ) {
+    const mediaType = sniffSpeechAudioMediaType(audio);
+    if (mediaType === undefined) return undefined;
+    return adapterFor(resolution).transcribe({
+      audio,
+      mediaType,
+      modelId: resolution.modelId,
+      ...(language === undefined ? {} : { language }),
+      signal,
+    });
+  }
+
+  /** `undefined` when the bytes are not a clip in the shape the engine takes. */
+  async function transcribeLocally(
+    settings: VoiceSettings,
+    audio: Uint8Array,
+    named: SpeechTranscriptionLanguage | undefined,
+    signal: AbortSignal,
+  ) {
+    const pcm = readLocalSpeechPcm(audio);
+    if (pcm === undefined) return undefined;
+    const preferences = transcriptionPreferencesOf(settings);
+    const language = named ?? preferences.language;
+    return localEngine.transcribe({
+      pcm,
+      ...(language === undefined ? {} : { language }),
+      ...(preferences.dictionary === undefined ? {} : { dictionary: preferences.dictionary }),
+      signal,
+    });
   }
 
   async function synthesize(request: Request, origin: string | null): Promise<Response> {
@@ -331,6 +425,18 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
   ): SpeechEndpointResolution {
     return resolveSpeechEndpoint(ref, dependencies.listInstances());
   }
+}
+
+function refuseTranscription(reason: string, origin: string | null): Response {
+  return json(
+    decodeSpeechFailureResponse({
+      error: reason,
+      category: "unavailable",
+      settingsTarget: VOICE_TRANSCRIPTION_TARGET,
+    } satisfies SpeechFailureResponse),
+    412,
+    origin,
+  );
 }
 
 function refuseEndpoint(

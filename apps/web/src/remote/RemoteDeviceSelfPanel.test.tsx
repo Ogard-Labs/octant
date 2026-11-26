@@ -6,6 +6,8 @@ import {
   createInMemoryDeviceKeyStore,
   createRemoteSessionBridge,
   PLATFORM_LISTENER_TRUST,
+  RESTRICTED_REMOTE_SESSION,
+  type RemoteSessionStanding,
 } from "@octant/client-runtime";
 import {
   createFakeRemoteServer,
@@ -73,25 +75,50 @@ async function readyBridge(config: Parameters<typeof createFakeRemoteServer>[0] 
   return { bridge, server };
 }
 
-function renderPanel(bridge: Awaited<ReturnType<typeof readyBridge>>["bridge"]) {
+function renderPanel(
+  bridge: Awaited<ReturnType<typeof readyBridge>>["bridge"],
+  standing: RemoteSessionStanding = { actsAsHostPerson: true },
+) {
   return render(
-    <RemoteDeviceSelfPanel bridge={bridge} onRevoked={vi.fn()} onSignedOut={vi.fn()} />,
+    <RemoteDeviceSelfPanel
+      bridge={bridge}
+      onRevoked={vi.fn()}
+      onSignedOut={vi.fn()}
+      standing={standing}
+    />,
   );
 }
 
 describe("RemoteDeviceSelfPanel access level", () => {
   it("shows this browser's own access level and why some controls are missing", async () => {
-    const { bridge } = await readyBridge({ actsAsHostPerson: false, accessLevel: "read-only" });
-    renderPanel(bridge);
+    const { bridge } = await readyBridge({ actsAsHostPerson: false, accessLevel: "full" });
+    renderPanel(bridge, { actsAsHostPerson: false, accessLevel: "read-only" });
+    // The session's standing is newer than the panel's own read of the device.
     expect(await screen.findByText("Read only")).toBeInTheDocument();
+    expect(screen.queryByText("Full")).not.toBeInTheDocument();
     expect(screen.getByText(/can read this computer but not change it/i)).toBeInTheDocument();
   });
 
   it("says nothing more for a browser at Full", async () => {
     const { bridge } = await readyBridge({ actsAsHostPerson: true, accessLevel: "full" });
-    renderPanel(bridge);
+    renderPanel(bridge, { actsAsHostPerson: true, accessLevel: "full" });
     expect(await screen.findByText("Full")).toBeInTheDocument();
     expect(screen.queryByText(/not change it|approve and steer/i)).not.toBeInTheDocument();
+  });
+
+  it("names no level while the host has not confirmed one", async () => {
+    const { bridge } = await readyBridge({ actsAsHostPerson: true, accessLevel: "full" });
+    renderPanel(bridge, RESTRICTED_REMOTE_SESSION);
+    expect(await screen.findByText("Not confirmed")).toBeInTheDocument();
+    expect(screen.queryByText(/^(Full|Read only)$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/not change it/i)).not.toBeInTheDocument();
+  });
+
+  it("shows no level for a device the host gives none", async () => {
+    const { bridge } = await readyBridge({ actsAsHostPerson: false });
+    renderPanel(bridge, { actsAsHostPerson: false });
+    expect(await screen.findByText("Last seen")).toBeInTheDocument();
+    expect(screen.queryByText("Access")).not.toBeInTheDocument();
   });
 });
 

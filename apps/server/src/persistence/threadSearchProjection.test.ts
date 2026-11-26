@@ -272,6 +272,57 @@ describe("search across modes", () => {
     }
   });
 
+  it("finds what the person sent into a running Work or Code turn, until a rewind removes the turn, and rebuilds to the same index", () => {
+    const store = openStore();
+    try {
+      store.thread(ids.thread, "Migration", now);
+      store.turn(ids.thread, operation(1), "Add the index", ["Added it."]);
+      store.steered("code", ids.thread, operation(1), 1, "Skip the backfill please");
+      // Two identical corrections are two messages, not one read again.
+      store.steered("code", ids.thread, operation(1), 2, "Skip the backfill please");
+      store.workThread(ids.workThread, "Report", later);
+      store.workTurn(ids.workThread, ids.workRequest, ids.workTurn, "Draft it", {
+        response: "Drafted.",
+        wroteFiles: [],
+      });
+      store.steered("work", ids.workThread, ids.workRequest, 3, "Leave out the appendix");
+      // A record naming a turn the index never saw is filed nowhere.
+      store.steered("code", ids.thread, operation(9), 4, "Orphaned appendix note");
+      const visible: ReadonlyArray<ThreadSearchVisibleThread> = [
+        code(ids.thread),
+        { mode: "work", threadId: ids.workThread, updatedAt: later },
+      ];
+      const found = (query: string) =>
+        searchThreads(store.connection, query, visible, 50).matches.map((match) => [
+          match.mode,
+          match.field,
+          match.anchorId,
+        ]);
+
+      expect(found("backfill")).toEqual([["code", "prompt", operation(1)]]);
+      expect(found("appendix")).toEqual([["work", "prompt", ids.workTurn]]);
+      const rows = () =>
+        store.connection
+          .prepare("SELECT doc_key, body FROM thread_search_document ORDER BY doc_key")
+          .all();
+      const before = rows();
+      const projection = store.registries.projections.get("thread-search");
+      if (projection === undefined) throw new Error("Thread search must be registered");
+      rebuildProjection({
+        connection: store.connection,
+        journal: store.journal,
+        projection,
+        clock: () => now,
+      });
+      expect(rows()).toEqual(before);
+
+      store.rewind(ids.thread, operation(2), operation(1), "conversation");
+      expect(found("backfill")).toEqual([]);
+    } finally {
+      store.connection.close();
+    }
+  });
+
   it("drops turns a rewind removed and rebuilds to the same index", () => {
     const store = openStore();
     try {
@@ -500,6 +551,25 @@ function openStore() {
         content: evidence.put(output),
         replace,
       });
+    },
+    steered(mode: "work" | "code", threadId: string, turnKey: string, index: number, body: string) {
+      append(
+        {
+          aggregateType: "thread-message-steering",
+          aggregateId: `86000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`,
+        },
+        0,
+        "thread.message-steered@1",
+        {
+          kind: "thread-message-steered",
+          mode,
+          threadId,
+          turnKey,
+          messageId: `86000000-0000-4000-8000-0000000002${String(index).padStart(2, "0")}`,
+          body,
+          steeredAt: now,
+        },
+      );
     },
     workThread(threadId: string, title: string, updatedAt: string) {
       append({ aggregateType: "work-thread", aggregateId: threadId }, 0, "work.thread-created@1", {

@@ -20,6 +20,7 @@ import {
   type SidebarNavigationDescriptorId,
   type SidebarNavigationInput,
 } from "./navigationModel";
+import { OctantKbd } from "../ui/base/OctantKbd";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface SidebarNavigationProps {
@@ -151,9 +152,9 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
           <SquarePen aria-hidden="true" className="icon" size={16} />
           <span className="sidebar-label">{props.newThread.label}</span>
           {props.newThread.shortcut === undefined ? null : (
-            <kbd aria-hidden="true" className="sidebar-item__key">
+            <OctantKbd className="sidebar-item__key" decorative form="bare">
               {props.newThread.shortcut}
-            </kbd>
+            </OctantKbd>
           )}
         </OctantButton>
       )}

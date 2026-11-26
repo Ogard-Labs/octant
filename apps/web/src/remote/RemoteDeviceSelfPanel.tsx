@@ -1,10 +1,11 @@
-import type { RemoteSessionBridge } from "@octant/client-runtime";
+import type { RemoteSessionBridge, RemoteSessionStanding } from "@octant/client-runtime";
 import {
   fetchRemoteOwnDeviceMetadata,
   isRemoteDeviceSelfServiceFailure,
   remoteRevokeSelf,
   remoteRotateDeviceKey,
   remoteSignOut,
+  RESTRICTED_REMOTE_SESSION,
 } from "@octant/client-runtime";
 import {
   DEVICE_ACCESS_LEVEL_LABELS,
@@ -21,6 +22,12 @@ import { useRemoteSession } from "./useRemoteSession";
 
 export interface RemoteDeviceSelfPanelProps {
   readonly bridge: RemoteSessionBridge;
+  /**
+   * The session's standing as the shell last read it. A level can change while
+   * the panel stays open, so the level shown is this one and never the panel's
+   * own read of the device.
+   */
+  readonly standing: RemoteSessionStanding;
   readonly onSignedOut: () => void;
   readonly onRevoked: (warning?: string) => void;
 }
@@ -64,6 +71,10 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
   const [status, setStatus] = useState("");
   const [statusAssertive, setStatusAssertive] = useState(false);
   const ready = state.kind === "ready";
+  const { accessLevel } = props.standing;
+  // The restricted standing is what the shell assumes while the host has not
+  // answered, so its level is not one the host gave this device.
+  const confirmed = props.standing !== RESTRICTED_REMOTE_SESSION;
 
   useEffect(() => {
     alive.current = true;
@@ -150,16 +161,16 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
             <dt>Session idle</dt>
             <dd>{formatTimestamp(metadata.sessionIdleExpiresAt, timestampFormat)}</dd>
           </div>
-          {metadata.accessLevel === undefined ? null : (
+          {accessLevel === undefined ? null : (
             <div className="remote-shell__device-fact">
               <dt>Access</dt>
-              <dd>{DEVICE_ACCESS_LEVEL_LABELS[metadata.accessLevel]}</dd>
+              <dd>{confirmed ? DEVICE_ACCESS_LEVEL_LABELS[accessLevel] : "Not confirmed"}</dd>
             </div>
           )}
         </dl>
       )}
-      {metadata?.accessLevel === undefined || metadata.accessLevel === "full" ? null : (
-        <p className="remote-shell__local-only">{NARROWED_LEVEL_COPY[metadata.accessLevel]}</p>
+      {!confirmed || accessLevel === undefined || accessLevel === "full" ? null : (
+        <p className="remote-shell__local-only">{NARROWED_LEVEL_COPY[accessLevel]}</p>
       )}
       <div className="remote-shell__device-actions">
         <OctantButton

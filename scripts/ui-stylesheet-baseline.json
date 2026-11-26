@@ -5,8 +5,7 @@
     "apps/web/src/styles/octant.css": 5
   },
   "motion-literal": {
-    "apps/web/src/styles.css": 1,
-    "apps/web/src/styles/octant.css": 4
+    "apps/web/src/styles/octant.css": 3
   },
   "important": {
     "apps/web/src/styles/code-overview.css": 1,
