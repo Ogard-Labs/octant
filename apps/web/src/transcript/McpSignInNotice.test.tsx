@@ -210,7 +210,8 @@ describe("signing in to a server from the thread", () => {
     state.signedIn = true;
     rerender(notice(client, { receipts: [refused], onResolveReference, turnActive: true }));
     await waitFor(() => expect(screen.queryByText("Linear needs sign-in")).toBeNull());
-    expect(onResolveReference).toHaveBeenCalledExactlyOnceWith("@linear");
+    // The card clears before the name is selected again, so wait for that too.
+    await waitFor(() => expect(onResolveReference).toHaveBeenCalledExactlyOnceWith("@linear"));
   });
 
   it("selects again only the names of the server that stopped waiting on a sign-in", async () => {
@@ -245,7 +246,8 @@ describe("signing in to a server from the thread", () => {
     rerender(notice(client, { receipts, onResolveReference, turnActive: true }));
     await waitFor(() => expect(screen.queryByText("Linear needs sign-in")).toBeNull());
     expect(screen.getByText("Docs needs sign-in")).toBeVisible();
-    expect(onResolveReference).toHaveBeenCalledExactlyOnceWith("@linear");
+    // The card clears before the name is selected again, so wait for that too.
+    await waitFor(() => expect(onResolveReference).toHaveBeenCalledExactlyOnceWith("@linear"));
   });
 
   it("offers Check sign-in when the control's first read fails", async () => {

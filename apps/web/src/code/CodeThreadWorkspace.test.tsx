@@ -1620,8 +1620,8 @@ describe("CodeThreadWorkspace", () => {
     await waitFor(() => expect(document.querySelector(".usage-limit-strip")).not.toBeNull());
     expect(screen.getAllByTestId("usage-limit-record")).toHaveLength(1);
     expect(document.querySelectorAll(".usage-limit-strip")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Resume at reset" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Snooze until reset" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Resume at reset" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Snooze until reset" })).toBeVisible();
   });
 
   it("sends the stopped turn's prompt again from the strip's Resume now", async () => {
