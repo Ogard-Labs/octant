@@ -30,6 +30,7 @@ import {
   readChatThreadView,
   readChatThreadWindow,
   CHAT_THREAD_WINDOW_BYTES,
+  CHAT_TURN_ORDER_SQL,
   readChatNavigation,
   readPendingChatPurges,
   readThreadFollowUp,
@@ -2051,7 +2052,7 @@ describe("ChatProjection", () => {
     function limitedRead(connection: SqliteConnection) {
       const prepare = vi.spyOn(connection, "prepare");
       const limited = readChatNavigation(connection)[0]?.limited;
-      const foldedTurnOrder = prepare.mock.calls.some(([sql]) => sql.includes("AS supersedes"));
+      const foldedTurnOrder = prepare.mock.calls.some(([sql]) => sql === CHAT_TURN_ORDER_SQL);
       prepare.mockRestore();
       return { limited, foldedTurnOrder };
     }

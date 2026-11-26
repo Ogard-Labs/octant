@@ -1778,19 +1778,24 @@ export function readActiveChatTurnIds(
   return readTurnIds(connection, threadId).active;
 }
 
-function readTurnIds(
-  connection: SqliteConnection,
-  threadId: string,
-): { readonly journaled: ReadonlyArray<string>; readonly active: ReadonlyArray<string> } {
-  const order = connection
-    .prepare(`
+/**
+ * The fold over a thread's whole turn history. It is named so a reader that
+ * must not pay for it (the navigation's limit read) can be held to that by
+ * identity, not by how the SQL happens to be spelled.
+ */
+export const CHAT_TURN_ORDER_SQL = `
       SELECT turn_id, json_extract(turn_json, '$.supersedes') AS supersedes,
         json_type(turn_json, '$.rewound') IS NOT NULL AS rewound
       FROM chat_turn_projection
       WHERE thread_id = ?
       ORDER BY sequence ASC
-    `)
-    .all(threadId) as ReadonlyArray<{
+    `;
+
+function readTurnIds(
+  connection: SqliteConnection,
+  threadId: string,
+): { readonly journaled: ReadonlyArray<string>; readonly active: ReadonlyArray<string> } {
+  const order = connection.prepare(CHAT_TURN_ORDER_SQL).all(threadId) as ReadonlyArray<{
     readonly turn_id: string;
     readonly supersedes: string | null;
     readonly rewound: number;

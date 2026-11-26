@@ -155,6 +155,7 @@ import {
   searchChatThreads,
   searchChatTranscript,
   readChatNavigation,
+  CHAT_TURN_ORDER_SQL,
 } from "../persistence/chatProjection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
@@ -6802,7 +6803,7 @@ describe("ChatService", () => {
     expect(service.navigation().threads[0]).not.toHaveProperty("limited");
     // The retried attempt stays in history as waiting, and must not cost
     // every later navigation read a fold over the thread's turns.
-    expect(prepare.mock.calls.some(([sql]) => sql.includes("AS supersedes"))).toBe(false);
+    expect(prepare.mock.calls.some(([sql]) => sql === CHAT_TURN_ORDER_SQL)).toBe(false);
     prepare.mockRestore();
   });
 
