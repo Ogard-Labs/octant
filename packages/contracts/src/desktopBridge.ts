@@ -387,14 +387,20 @@ export interface PrivateListenerPublicStatus {
   readonly errorCode?: PrivateListenerControlFailureCode;
 }
 
-export interface PrivateListenerEnableRequest {
+/**
+ * Both PEMs serve the person's own certificate as pasted; neither asks the
+ * host for the certificate it makes itself, which apps pin through a pairing
+ * code. One without the other is refused.
+ */
+export type PrivateListenerEnableRequest = {
   readonly hostname: string;
   readonly port: number;
   readonly origin: string;
-  readonly certificatePem: string;
-  readonly privateKeyPem: string;
   readonly localConfirmation: true;
-}
+} & (
+  | { readonly certificatePem: string; readonly privateKeyPem: string }
+  | { readonly certificatePem?: undefined; readonly privateKeyPem?: undefined }
+);
 
 export type RemoteDeviceSourceClass = "loopback" | "lan-private" | "tailscale" | "unknown";
 export type RemotePairingTicketSourceClass = Exclude<RemoteDeviceSourceClass, "unknown">;

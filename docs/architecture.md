@@ -20642,8 +20642,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
   - **Which apps pin.** The desktop app and the phone app pair with another
     computer from its app pairing code and pin it (below). The phone app's
     web build has no native module that can check a pin, so it refuses a
-    code before sending anything. Settings still asks for a certificate and
-    key, and `octant listener`'s usage line still names them.
+    code before sending anything. Settings → Remote access starts the
+    listener form on **Certificate: Made by this computer**, which sends no
+    PEMs, and offers **My own certificate** for pasting a certificate and
+    key. Moving a listener that serves a pasted certificate starts on **My
+    own certificate** instead, because a self-made replacement would cut off
+    every browser paired with it. This is how a build without the full `octant` command turns on a
+    listener the phone app can pair with.
   - **No browser link.** A browser decides whether to trust the listener
     before any Octant page loads and cannot check a certificate the host made
     itself, so Settings offers no browser pairing link for a self-made

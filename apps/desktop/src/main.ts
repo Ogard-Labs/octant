@@ -869,10 +869,6 @@ function validatePrivateListenerEnableRequest(value: unknown): PrivateListenerEn
     (value as { port: number }).port < 1 ||
     (value as { port: number }).port > 65_535 ||
     typeof (value as { origin?: unknown }).origin !== "string" ||
-    typeof (value as { certificatePem?: unknown }).certificatePem !== "string" ||
-    (value as { certificatePem: string }).certificatePem.length === 0 ||
-    typeof (value as { privateKeyPem?: unknown }).privateKeyPem !== "string" ||
-    (value as { privateKeyPem: string }).privateKeyPem.length === 0 ||
     (value as { localConfirmation?: unknown }).localConfirmation !== true
   ) {
     throw new Error("Octant rejected an invalid private listener enable request.");
@@ -881,16 +877,29 @@ function validatePrivateListenerEnableRequest(value: unknown): PrivateListenerEn
     readonly hostname: string;
     readonly port: number;
     readonly origin: string;
-    readonly certificatePem: string;
-    readonly privateKeyPem: string;
+    readonly certificatePem?: unknown;
+    readonly privateKeyPem?: unknown;
   };
-  return {
+  const endpoint = {
     hostname: request.hostname,
     port: request.port,
     origin: request.origin,
+    localConfirmation: true,
+  };
+  // Neither PEM asks the host for the certificate it makes itself.
+  if (request.certificatePem === undefined && request.privateKeyPem === undefined) return endpoint;
+  if (
+    typeof request.certificatePem !== "string" ||
+    request.certificatePem.length === 0 ||
+    typeof request.privateKeyPem !== "string" ||
+    request.privateKeyPem.length === 0
+  ) {
+    throw new Error("Octant rejected an invalid private listener enable request.");
+  }
+  return {
+    ...endpoint,
     certificatePem: request.certificatePem,
     privateKeyPem: request.privateKeyPem,
-    localConfirmation: true,
   };
 }
 

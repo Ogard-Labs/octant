@@ -1594,14 +1594,10 @@ export function createHostBridge(
             validatePrivateListenerEnableRequest(request);
             try {
               return decodePrivateListenerStatus(
-                await ipc.invoke(IPC_CHANNELS.privateListenerEnable, {
-                  hostname: request.hostname,
-                  port: request.port,
-                  origin: request.origin,
-                  certificatePem: request.certificatePem,
-                  privateKeyPem: request.privateKeyPem,
-                  localConfirmation: true,
-                }),
+                await ipc.invoke(
+                  IPC_CHANNELS.privateListenerEnable,
+                  listenerEnablePayload(request),
+                ),
               );
             } catch {
               throw new Error("Octant could not enable the private listener.");
@@ -1611,14 +1607,10 @@ export function createHostBridge(
             validatePrivateListenerEnableRequest(request);
             try {
               return decodePrivateListenerStatus(
-                await ipc.invoke(IPC_CHANNELS.privateListenerRestart, {
-                  hostname: request.hostname,
-                  port: request.port,
-                  origin: request.origin,
-                  certificatePem: request.certificatePem,
-                  privateKeyPem: request.privateKeyPem,
-                  localConfirmation: true,
-                }),
+                await ipc.invoke(
+                  IPC_CHANNELS.privateListenerRestart,
+                  listenerEnablePayload(request),
+                ),
               );
             } catch {
               throw new Error("Octant could not restart the private listener.");
@@ -3192,27 +3184,49 @@ function decodeBrowserSurfaceTabState(value: unknown): BrowserSurfaceTabState {
   return Object.freeze({ tabId: value.tabId, url: value.url, title: value.title });
 }
 
+/**
+ * A request with neither PEM asks the host for the certificate it makes
+ * itself; a PEM given as undefined counts as absent, as the contract allows.
+ */
 function validatePrivateListenerEnableRequest(value: PrivateListenerEnableRequest): void {
+  const selfMade =
+    isRecord(value) && value.certificatePem === undefined && value.privateKeyPem === undefined;
+  const keys = selfMade
+    ? ["hostname", "localConfirmation", "origin", "port"]
+    : ["certificatePem", "hostname", "localConfirmation", "origin", "port", "privateKeyPem"];
+  const given = isRecord(value)
+    ? Object.keys(value).filter((key) => (value as Record<string, unknown>)[key] !== undefined)
+    : [];
   if (
     !isRecord(value) ||
-    Object.keys(value).sort().join("\0") !==
-      ["certificatePem", "hostname", "localConfirmation", "origin", "port", "privateKeyPem"]
-        .sort()
-        .join("\0") ||
+    given.sort().join("\0") !== keys.sort().join("\0") ||
     typeof value.hostname !== "string" ||
     value.hostname.trim().length === 0 ||
     !Number.isSafeInteger(value.port) ||
     value.port < 1 ||
     value.port > 65_535 ||
     typeof value.origin !== "string" ||
-    typeof value.certificatePem !== "string" ||
-    value.certificatePem.length === 0 ||
-    typeof value.privateKeyPem !== "string" ||
-    value.privateKeyPem.length === 0 ||
+    (!selfMade &&
+      (typeof value.certificatePem !== "string" ||
+        value.certificatePem.length === 0 ||
+        typeof value.privateKeyPem !== "string" ||
+        value.privateKeyPem.length === 0)) ||
     value.localConfirmation !== true
   ) {
     throw new TypeError("Invalid private listener enable request.");
   }
+}
+
+function listenerEnablePayload(request: PrivateListenerEnableRequest): Record<string, unknown> {
+  return {
+    hostname: request.hostname,
+    port: request.port,
+    origin: request.origin,
+    ...(request.certificatePem === undefined
+      ? {}
+      : { certificatePem: request.certificatePem, privateKeyPem: request.privateKeyPem }),
+    localConfirmation: true,
+  };
 }
 
 function decodePrivateListenerStatus(value: unknown): PrivateListenerPublicStatus {

@@ -60,14 +60,20 @@ export class PrivateListenerControlFailure extends Error {
   }
 }
 
-export interface PrivateListenerEnableRequest {
+/**
+ * The certificate and key the person pasted, or neither, which asks the host
+ * for the certificate it makes itself. One without the other is refused.
+ */
+export type PrivateListenerCertificateChoice =
+  | { readonly certificatePem: string; readonly privateKeyPem: string }
+  | { readonly certificatePem?: undefined; readonly privateKeyPem?: undefined };
+
+export type PrivateListenerEnableRequest = {
   readonly hostname: string;
   readonly port: number;
   readonly origin: string;
-  readonly certificatePem: string;
-  readonly privateKeyPem: string;
   readonly localConfirmation: boolean;
-}
+} & PrivateListenerCertificateChoice;
 
 export interface PrivateListenerPublicStatus {
   readonly enabled: boolean;
@@ -95,15 +101,23 @@ export interface PrivateListenerRuntimeStartResult {
   readonly tlsPin: string | null;
 }
 
-export interface PrivateListenerRuntimeStartInput {
+export type PrivateListenerRuntimeStartInput = {
   readonly hostname: string;
   readonly port: number;
   readonly origin: string;
-  readonly certificatePem: string;
-  readonly privateKeyPem: string;
-  readonly certificateFingerprint: string;
   readonly exposureClass: PrivateListenerExposureClass;
-}
+} & (
+  | {
+      readonly certificatePem: string;
+      readonly privateKeyPem: string;
+      readonly certificateFingerprint: string;
+    }
+  | {
+      readonly certificatePem?: undefined;
+      readonly privateKeyPem?: undefined;
+      readonly certificateFingerprint?: undefined;
+    }
+);
 
 export interface PrivateListenerRuntimePort {
   readonly start: (
@@ -179,34 +193,41 @@ export function createPrivateListenerControlService(
     validateEnableRequest(request);
     const exposureClass = requirePrivateExposureClass(request.hostname);
     validateExactOrigin(request.hostname, request.port, request.origin);
-    if (
-      typeof request.certificatePem !== "string" ||
-      request.certificatePem.trim().length === 0 ||
-      typeof request.privateKeyPem !== "string" ||
-      request.privateKeyPem.trim().length === 0
-    ) {
-      throw new PrivateListenerControlFailure("invalid-tls");
-    }
-
-    let fingerprint: string;
-    try {
-      fingerprint = fingerprintFromPem(request.certificatePem);
-    } catch (error) {
-      throw toControlFailure(error, "invalid-tls");
-    }
-    if (!/^[a-f0-9]{64}$/.test(fingerprint)) {
-      throw new PrivateListenerControlFailure("invalid-tls");
-    }
-
-    const input: PrivateListenerRuntimeStartInput = {
+    const endpoint = {
       hostname: request.hostname,
       port: request.port,
       origin: request.origin,
-      certificatePem: request.certificatePem,
-      privateKeyPem: request.privateKeyPem,
-      certificateFingerprint: fingerprint,
       exposureClass,
     };
+    let input: PrivateListenerRuntimeStartInput;
+    if (request.certificatePem === undefined && request.privateKeyPem === undefined) {
+      // The host makes its own certificate and reports its fingerprint.
+      input = endpoint;
+    } else {
+      if (
+        typeof request.certificatePem !== "string" ||
+        request.certificatePem.trim().length === 0 ||
+        typeof request.privateKeyPem !== "string" ||
+        request.privateKeyPem.trim().length === 0
+      ) {
+        throw new PrivateListenerControlFailure("invalid-tls");
+      }
+      let fingerprint: string;
+      try {
+        fingerprint = fingerprintFromPem(request.certificatePem);
+      } catch (error) {
+        throw toControlFailure(error, "invalid-tls");
+      }
+      if (!/^[a-f0-9]{64}$/.test(fingerprint)) {
+        throw new PrivateListenerControlFailure("invalid-tls");
+      }
+      input = {
+        ...endpoint,
+        certificatePem: request.certificatePem,
+        privateKeyPem: request.privateKeyPem,
+        certificateFingerprint: fingerprint,
+      };
+    }
     try {
       // Restart applies a new config to the running listener. When the runtime
       // lacks a dedicated restart, fall back to stop-then-start so the
@@ -442,13 +463,15 @@ export function createPrivateListenerHostRuntime(
   };
 }
 
+/** Without PEMs the server serves the certificate it makes itself. */
 function enableBody(input: PrivateListenerRuntimeStartInput): Record<string, unknown> {
   return {
     hostname: input.hostname,
     port: input.port,
     origin: input.origin,
-    certificatePem: input.certificatePem,
-    privateKeyPem: input.privateKeyPem,
+    ...(input.certificatePem === undefined
+      ? {}
+      : { certificatePem: input.certificatePem, privateKeyPem: input.privateKeyPem }),
   };
 }
 
