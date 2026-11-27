@@ -192,8 +192,11 @@ export function decideVisitorLink(input: {
 // since a fixed list of roots let `/workspace/...` and `/data/...` through.
 // Web addresses are left alone, including any path inside one: a login link's
 // `?next=/docs/start` names a page on that site, not a folder on the person's
-// computer. A `file:` URL is a path and goes.
-const WEB_URL = /(?<![\w.+-])(?!file:)[a-z][a-z0-9+.-]*:\/\/[^\s"'`<>]*/gi;
+// computer. A `file:` URL is a path and goes. The address ends at a bracket,
+// comma or semicolon, so a path right after it, as in a Markdown link
+// `[https://example.com](/home/...)`, is still redacted; a web address that
+// really holds one of those loses only its tail to the path check.
+const WEB_URL = /(?<![\w.+-])(?!file:)[a-z][a-z0-9+.-]*:\/\/[^\s"'`<>()[\],;]*/gi;
 const FILE_URL = /(^|[\s("'`=:,;])file:\/\/[^\s"'`)<>,;]*/gi;
 const UNIX_PATH = /(^|[\s("'`=:,;])(?:~|\/[\w.@+-]+)\/[^\s"'`)<>,;]*/g;
 const WINDOWS_PATH = /(^|[\s("'`=:,;])[A-Za-z]:[\\/][^\s"'`)<>,;]*/g;

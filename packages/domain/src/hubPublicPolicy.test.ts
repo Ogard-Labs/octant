@@ -274,4 +274,13 @@ describe("what a visitor reads", () => {
       "See https://example.com/a?next=/docs then [path] too",
     );
   });
+
+  it("still redacts a path that only sits next to a web address", () => {
+    expect(redactForVisitor("[https://example.com](/home/alice/private/notes.md)")).toBe(
+      "[https://example.com]([path])",
+    );
+    expect(redactForVisitor("https://example.com,/home/alice/notes.md")).toBe(
+      "https://example.com,[path]",
+    );
+  });
 });
