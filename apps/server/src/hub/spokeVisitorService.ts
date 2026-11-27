@@ -439,14 +439,18 @@ export class SpokeVisitorService {
  */
 function projectionOf(thread: Extract<VisitorThreadRead, { status: "found" }>): VisitorProjection {
   const title = redactForVisitor(thread.title).slice(0, 256);
-  let room = VISITOR_PROJECTION_MAX_BYTES - Buffer.byteLength(JSON.stringify({ title }));
+  // The empty projection's own JSON (title, state and the `[]` around the
+  // messages) counts, and every message after the first adds its comma.
+  let room =
+    VISITOR_PROJECTION_MAX_BYTES -
+    Buffer.byteLength(JSON.stringify({ title, state: thread.state, messages: [] }));
   const kept: VisitorProjection["messages"][number][] = [];
   for (const message of thread.messages.slice(-MAX_MESSAGES).toReversed()) {
     const shown = {
       role: message.role,
       text: redactForVisitor(message.text).slice(0, MAX_MESSAGE_CHARACTERS),
     };
-    room -= Buffer.byteLength(JSON.stringify(shown)) + 1;
+    room -= Buffer.byteLength(JSON.stringify(shown)) + (kept.length > 0 ? 1 : 0);
     if (room < 0) break;
     kept.push(shown);
   }
