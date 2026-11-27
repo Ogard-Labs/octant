@@ -1,14 +1,16 @@
-import { readResultQuoteSource, useResultQuoteScope } from "../transcript/ResultQuoteScope";
+import { useResultQuoteScope } from "../transcript/ResultQuoteScope";
 import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { NotebookPen, Quote } from "../ui/icons";
 import { quotePreview, type ComposerQuote } from "./composerQuote";
+import type { ResultQuoteSource } from "./resultQuoteDraft";
 import "./composer-chip.css";
 
 export interface ComposerQuoteChipProps {
   readonly quote: ComposerQuote;
+  readonly result?: ResultQuoteSource | undefined;
   readonly editable: boolean;
   readonly onChange: (next: ComposerQuote) => void;
   readonly onRemove: () => void;
@@ -19,10 +21,9 @@ export interface ComposerQuoteChipProps {
  * writes or changes their note on it, or takes the quote out.
  */
 export function ComposerQuoteChip(props: ComposerQuoteChipProps) {
-  const { quote } = props;
-  const result = readResultQuoteSource(quote.source);
+  const { quote, result } = props;
   const scope = useResultQuoteScope();
-  const source = result?.label ?? quote.source;
+  const source = quote.source;
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState(quote.comment);
   const noteId = useId();

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
-interface ResultQuoteTarget {
+export interface ResultQuoteTarget {
   readonly row: string;
   readonly block: string;
 }
@@ -75,26 +75,4 @@ export function ResultSourceNotice(props: {
       {unavailable ? "The source delivery is unavailable." : null}
     </div>
   );
-}
-
-// The plain-text quote carries an opaque reference. Keep transcript
-// identifiers in this window, where the composer already tracks trusted chips.
-const sources = new Map<
-  string,
-  ResultQuoteTarget & { readonly label: string; readonly threadId: string }
->();
-
-export function resultQuoteSource(label: string, threadId: string, target: ResultQuoteTarget) {
-  const attribution = label.replace(/\s+/g, " ").slice(0, 140).trim();
-  const source = `${attribution} · result reference ${globalThis.crypto.randomUUID()}`;
-  sources.set(source, { ...target, label: attribution, threadId });
-  if (sources.size > 512) {
-    const oldest = sources.keys().next().value;
-    if (oldest !== undefined) sources.delete(oldest);
-  }
-  return source;
-}
-
-export function readResultQuoteSource(source: string) {
-  return sources.get(source);
 }

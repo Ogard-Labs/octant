@@ -1,3 +1,4 @@
+import type { ResultQuoteSource } from "../composer/resultQuoteDraft";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
@@ -118,7 +119,7 @@ export interface ChatTranscriptProps {
   readonly onQuoteSelection?: (input: {
     readonly turnId: ChatTurnId;
     readonly text: string;
-    readonly source?: string;
+    readonly source?: ResultQuoteSource;
   }) => void;
   /** True while a turn is running, so rewinding and forking stay unavailable. */
   readonly busy?: boolean;

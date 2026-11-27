@@ -1,3 +1,4 @@
+import { threadDraftScope } from "@octant/client-runtime/typed-composer-text";
 import { cleanedUpWorktreeSentence } from "@octant/domain";
 import { appendComposerQuote, TERMINAL_QUOTE_SOURCE } from "../composer/composerQuote";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
@@ -1313,12 +1314,20 @@ function GitObservationLoading() {
  * quote's fence keeps what the user is asking about separate from what they
  * are asking. The quote owns the fence rules (see `composerQuoteText`).
  */
-export function appendTerminalSelection(draft: string, selection: string): string {
-  return appendComposerQuote(draft, {
-    source: TERMINAL_QUOTE_SOURCE,
-    text: selection,
-    comment: "",
-  });
+export function appendTerminalSelection(
+  draft: string,
+  selection: string,
+  threadId?: string,
+): string {
+  return appendComposerQuote(
+    draft,
+    {
+      source: TERMINAL_QUOTE_SOURCE,
+      text: selection,
+      comment: "",
+    },
+    threadId === undefined ? undefined : { threadId: threadDraftScope("code", threadId) },
+  );
 }
 
 /** What to tell the reader when the host declines to move the thread. */
@@ -1610,7 +1619,11 @@ function TerminalWorkspaceSurface(
           : {})}
         onAddSelectionToChat={(selection) =>
           props.controller.setPendingDraft(
-            appendTerminalSelection(props.controller.pendingDraft, selection),
+            appendTerminalSelection(
+              props.controller.pendingDraft,
+              selection,
+              String(props.scope.threadId),
+            ),
           )
         }
         {...(props.onOpenModeMenu === undefined ? {} : { onOpenModeMenu: props.onOpenModeMenu })}

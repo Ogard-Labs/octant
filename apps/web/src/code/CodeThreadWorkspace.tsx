@@ -215,7 +215,12 @@ import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
-import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import {
+  LEGACY_RESULT_REFERENCE_MARK,
+  loadComposerQuoteTools,
+  promptWithReadableResultSources,
+  REPLY_QUOTE_SOURCE,
+} from "../composer/composerQuoteMark";
 import { messageTiming, useTurnSendPreference } from "../messageQueue/turnSendPreference";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
@@ -1530,6 +1535,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (!canSend || queuePreparingRef.current) return;
     const retireStashRecovery = stashSubmission.current?.();
     const draftRevision = props.controller.draftRevision ?? draftRevisionRef.current;
+    const outgoing = draft.includes(LEGACY_RESULT_REFERENCE_MARK)
+      ? await promptWithReadableResultSources(draft)
+      : draft;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
@@ -1553,7 +1561,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ...(continuation.policy === "text-only"
               ? { contextInputPolicy: continuation.policy }
               : {}),
-            prompt: draft,
+            prompt: outgoing,
             attachmentIds: captured.map((entry) => entry.reference.attachmentId),
             threadMentionIds,
             ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
@@ -1598,7 +1606,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const threadMentionIds = await threadMentions.resolveForSend();
     const fileMentionPaths = pathMentions.selectedPaths;
     const sendArguments: Parameters<typeof props.controller.sendFollowUp> = [
-      trimmed,
+      outgoing.trim(),
       threadMentionIds,
       attachments.peekForSend(),
       fileMentionPaths,
@@ -2215,14 +2223,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             {...(readOnly
               ? {}
               : {
-                  onAddToChat: (text: string, source = REPLY_QUOTE_SOURCE) => {
+                  onAddToChat: (text, source) => {
                     void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
                       // The prompt as it stands once the quote code has loaded.
-                      const next = appendComposerQuote(textareaRef.current?.value ?? draft, {
-                        source,
-                        text,
-                        comment: "",
-                      });
+                      const next = appendComposerQuote(
+                        textareaRef.current?.value ?? draft,
+                        {
+                          source: source?.label ?? REPLY_QUOTE_SOURCE,
+                          text,
+                          comment: "",
+                        },
+                        { threadId: typedScope, result: source },
+                      );
                       draftRevisionRef.current += 1;
                       setDraft(next);
                       props.controller.setPendingDraft?.(next, next.length);

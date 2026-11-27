@@ -83,7 +83,12 @@ import { ThreadReplyDetailMenu } from "../transcript/ThreadReplyDetail";
 import { ThreadTranscriptScope } from "../transcript/ThreadTranscriptScope";
 import { ChatPendingQuestions, ChatTranscript, type ChatTranscriptProps } from "./ChatTranscript";
 import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
-import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import {
+  LEGACY_RESULT_REFERENCE_MARK,
+  loadComposerQuoteTools,
+  promptWithReadableResultSources,
+  REPLY_QUOTE_SOURCE,
+} from "../composer/composerQuoteMark";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
@@ -1346,7 +1351,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     const sendingThreadId = String(view.thread.id);
     const threadMentionIds = await threadMentions.resolveForSend();
     if (activeThreadIdRef.current !== sendingThreadId) return false;
-    const outgoing = draft.trim();
+    const outgoing = (
+      draft.includes(LEGACY_RESULT_REFERENCE_MARK)
+        ? await promptWithReadableResultSources(draft)
+        : draft
+    ).trim();
     const attachmentIds = claimedAttachments.map((attachment) => attachment.id);
     if (outgoing.trim().length === 0 && attachmentIds.length === 0) return false;
     const context: ChatSendContext = {
@@ -1848,14 +1857,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {...(readOnly
                 ? {}
                 : ({
-                    onQuoteSelection: ({ text, source = REPLY_QUOTE_SOURCE }) => {
+                    onQuoteSelection: ({ text, source }) => {
                       void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
                         // The draft as it stands once the quote code has loaded.
-                        const next = appendComposerQuote(latestDraftRef.current, {
-                          source,
-                          text,
-                          comment: "",
-                        });
+                        const next = appendComposerQuote(
+                          latestDraftRef.current,
+                          {
+                            source: source?.label ?? REPLY_QUOTE_SOURCE,
+                            text,
+                            comment: "",
+                          },
+                          { threadId: typedScope, result: source },
+                        );
                         draftEditRevisionRef.current += 1;
                         props.controller.setPendingDraft(next, next.length);
                       });
@@ -2291,7 +2304,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     ...(continuation.policy === "text-only"
                       ? { contextInputPolicy: continuation.policy }
                       : {}),
-                    prompt: draft.trim(),
+                    prompt: (draft.includes(LEGACY_RESULT_REFERENCE_MARK)
+                      ? await promptWithReadableResultSources(draft)
+                      : draft
+                    ).trim(),
                     attachmentIds: context.attachmentIds,
                     previewSelections: context.previewSelections,
                     canvasSelections: context.canvasSelections,

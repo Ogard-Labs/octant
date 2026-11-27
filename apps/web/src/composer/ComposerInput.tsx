@@ -25,12 +25,19 @@ import {
 } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS } from "@octant/contracts/thread-message-queue";
+import {
+  rememberResultQuotePlaces,
+  replaceResultQuoteRange,
+  resultQuotePlaces,
+  type ResultQuotePlace,
+} from "./resultQuoteDraft";
 import { lazyOr } from "../lib/lazyOr";
 import type { ComposerQuotePlace } from "./composerQuote";
 import {
   COMPOSER_QUOTE_CLIPBOARD_TYPE,
   loadComposerQuoteTools,
   loadedComposerQuoteTools,
+  LEGACY_RESULT_REFERENCE_MARK,
   QUOTE_HEADER_TAIL,
 } from "./composerQuoteMark";
 import type { ComposerQuoteChipProps } from "./ComposerQuoteChip";
@@ -178,6 +185,7 @@ type Chip =
       readonly text: string;
       readonly id: string;
       readonly quote: ComposerQuotePlace;
+      readonly result?: ResultQuotePlace | undefined;
     }
   | ({ readonly kind: "inline" } & ComposerInlineChipPlace);
 
@@ -199,17 +207,30 @@ function overlaps(
  * a tag inside a quote is quoted text, and a tag inside a caller's chip is that
  * chip's text.
  */
-function chipsOf(value: string, findInline: FindInlineChips): ReadonlyArray<Chip> {
+function chipsOf(
+  value: string,
+  findInline: FindInlineChips,
+  results: ReadonlyArray<ResultQuotePlace> = [],
+): ReadonlyArray<Chip> {
   // Until the quote code loads no quote Octant wrote can exist, so none is found.
   const quotes = (loadedComposerQuoteTools()?.findComposerQuotes(value) ?? []).map(
-    (quote, index): Chip => ({
-      kind: "quote",
-      start: quote.start,
-      end: quote.end,
-      text: quote.chipText,
-      id: `quote:${String(index)}`,
-      quote,
-    }),
+    (quote, index): Chip => {
+      const result = results.find(
+        (place) => place.start === quote.start && place.end === quote.end,
+      );
+      return {
+        kind: "quote",
+        start: quote.start,
+        end: quote.end,
+        text: quote.chipText,
+        id:
+          result === undefined
+            ? `quote:${String(index)}`
+            : JSON.stringify(["result", result.source.row, result.source.block]),
+        quote,
+        result,
+      };
+    },
   );
   const inline = [
     ...quotes,
@@ -232,10 +253,14 @@ function chipsOf(value: string, findInline: FindInlineChips): ReadonlyArray<Chip
   return [...inline, ...models].sort((left, right) => left.start - right.start);
 }
 
-function segmentsOf(value: string, findInline: FindInlineChips): ReadonlyArray<Segment> {
+function segmentsOf(
+  value: string,
+  findInline: FindInlineChips,
+  results: ReadonlyArray<ResultQuotePlace>,
+): ReadonlyArray<Segment> {
   const segments: Array<Segment> = [];
   let at = 0;
-  for (const chip of chipsOf(value, findInline)) {
+  for (const chip of chipsOf(value, findInline, results)) {
     if (chip.start > at) segments.push({ kind: "text", text: value.slice(at, chip.start) });
     segments.push({ kind: "chip", chip });
     at = chip.end;
@@ -361,8 +386,13 @@ function chipId(node: Node): string {
   return isElement(node) ? (node.getAttribute(CHIP_ID_ATTRIBUTE) ?? "") : "";
 }
 
-function isCanonical(root: HTMLElement, value: string, findInline: FindInlineChips): boolean {
-  const expected = segmentsOf(value, findInline);
+function isCanonical(
+  root: HTMLElement,
+  value: string,
+  findInline: FindInlineChips,
+  results: ReadonlyArray<ResultQuotePlace>,
+): boolean {
+  const expected = segmentsOf(value, findInline, results);
   const nodes = Array.from(root.childNodes);
   const filler = needsFiller(value) ? 1 : 0;
   if (nodes.length !== expected.length + filler) return false;
@@ -421,6 +451,7 @@ function render(
   keys: WeakMap<HTMLElement, string>,
   nextKey: () => string,
   findInline: FindInlineChips,
+  results: ReadonlyArray<ResultQuotePlace>,
 ): ReadonlyArray<ChipHost> {
   const reusable = new Map<string, Array<HTMLElement>>();
   for (const child of Array.from(root.childNodes)) {
@@ -431,7 +462,7 @@ function render(
   const document = root.ownerDocument;
   const hosts: Array<ChipHost> = [];
   const nodes: Array<Node> = [];
-  for (const segment of segmentsOf(value, findInline)) {
+  for (const segment of segmentsOf(value, findInline, results)) {
     if (segment.kind === "text") {
       nodes.push(document.createTextNode(segment.text));
       continue;
@@ -468,6 +499,7 @@ interface Snapshot {
    * counts as typed again; one that lands on text a caller wrote does not.
    */
   readonly typed: boolean;
+  readonly resultQuotes: ReadonlyArray<ResultQuotePlace>;
 }
 
 /**
@@ -527,7 +559,14 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       at: number;
       typing: boolean;
     }>({
-      entries: [{ value, caret: value.length, typed: false }],
+      entries: [
+        {
+          value,
+          caret: value.length,
+          typed: false,
+          resultQuotes: resultQuotePlaces(scopeRef.current, value),
+        },
+      ],
       index: 0,
       at: 0,
       typing: false,
@@ -609,7 +648,16 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     };
 
     const rebuild = (root: HTMLElement) => {
-      setChipHosts(render(root, modelRef.current, keysRef.current, nextKey, findInlineRef.current));
+      setChipHosts(
+        render(
+          root,
+          modelRef.current,
+          keysRef.current,
+          nextKey,
+          findInlineRef.current,
+          resultQuotePlaces(scopeRef.current, modelRef.current),
+        ),
+      );
     };
 
     const rebuildRef = useRef(rebuild);
@@ -635,30 +683,39 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     const emit = (
       typed: string,
       typedCaret: number,
-      options: { readonly typing: boolean; readonly pastedQuotes?: ReadonlyArray<string> },
+      options: {
+        readonly typing: boolean;
+        readonly resultQuotes: ReadonlyArray<ResultQuotePlace>;
+        readonly pastedQuotes?: ReadonlyArray<string>;
+      },
     ) => {
       const root = rootRef.current;
       if (root === null) return;
       const tools = loadedComposerQuoteTools();
-      const { value: next, caret } =
-        tools === undefined
-          ? { value: typed, caret: typedCaret }
-          : tools.separateComposerQuotes(
-              typed,
-              typedCaret,
-              // The quotes it held before the edit, any the edit brought in, and
-              // any it pasted: a pasted quote glued to the text after it is not
-              // found by its shape, only by its exact text.
-              [
-                ...tools.composerQuoteTextsIn(modelRef.current),
-                ...tools.composerQuoteTextsIn(typed),
-                ...(options.pastedQuotes ?? []),
-              ],
-            );
+      const {
+        value: next,
+        caret,
+        resultQuotes,
+      } = tools === undefined
+        ? { value: typed, caret: typedCaret, resultQuotes: options.resultQuotes }
+        : tools.separateComposerQuotes(
+            typed,
+            typedCaret,
+            // The quotes it held before the edit, any the edit brought in, and
+            // any it pasted: a pasted quote glued to the text after it is not
+            // found by its shape, only by its exact text.
+            [
+              ...tools.composerQuoteTextsIn(modelRef.current),
+              ...tools.composerQuoteTextsIn(typed),
+              ...(options.pastedQuotes ?? []),
+            ],
+            options.resultQuotes,
+          );
+      rememberResultQuotePlaces(scopeRef.current, next, resultQuotes);
       modelRef.current = next;
       pendingRef.current = { start: caret, end: caret };
       lastSelectionRef.current = { start: caret, end: caret };
-      remember({ value: next, caret, typed: true }, options.typing);
+      remember({ value: next, caret, typed: true, resultQuotes }, options.typing);
       reportedRef.current = next;
       report(root);
       tick();
@@ -673,22 +730,45 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       const current = modelRef.current;
       emit(`${current.slice(0, start)}${text}${current.slice(end)}`, start + text.length, {
         typing: false,
+        resultQuotes: replaceResultQuoteRange(
+          resultQuotePlaces(scopeRef.current, current),
+          start,
+          end,
+          text.length,
+        ),
         ...(pastedQuotes === undefined ? {} : { pastedQuotes }),
       });
     };
 
     // A change made from a chip of the prompt's own (a quote's note, or the
     // quote taken out): one undo step, and not the person's typing.
-    const replaceRange = (start: number, end: number, text: string, caretAt?: number) => {
+    const replaceRange = (
+      start: number,
+      end: number,
+      text: string,
+      options?: { readonly caret?: number; readonly result?: ResultQuotePlace | undefined },
+    ) => {
       const root = rootRef.current;
       if (root === null) return;
       const current = modelRef.current;
       const next = `${current.slice(0, start)}${text}${current.slice(end)}`;
-      const caret = caretAt ?? start + text.length;
+      const caret = options?.caret ?? start + text.length;
+      const resultQuotes = [
+        ...replaceResultQuoteRange(
+          resultQuotePlaces(scopeRef.current, current),
+          start,
+          end,
+          text.length,
+        ),
+        ...(options?.result === undefined
+          ? []
+          : [{ start, end: start + text.length, source: options.result.source }]),
+      ];
+      rememberResultQuotePlaces(scopeRef.current, next, resultQuotes);
       modelRef.current = next;
       pendingRef.current = { start: caret, end: caret };
       lastSelectionRef.current = { start: caret, end: caret };
-      remember({ value: next, caret, typed: false }, false);
+      remember({ value: next, caret, typed: false, resultQuotes }, false);
       reportedRef.current = next;
       report(root, false);
       tick();
@@ -755,7 +835,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const next = sent[index + 1];
         if (next === undefined) return showing;
         recalledRef.current = { index: index + 1, text: next };
-        replaceRange(0, current.length, next, 0);
+        replaceRange(0, current.length, next, { caret: 0 });
         return true;
       }
       if (!showing || current.slice(end).includes("\n")) return false;
@@ -771,6 +851,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       const snapshot = history.entries[index];
       if (snapshot === undefined) return;
       historyRef.current = { ...history, index, at: 0, typing: false };
+      rememberResultQuotePlaces(scopeRef.current, snapshot.value, snapshot.resultQuotes);
       modelRef.current = snapshot.value;
       pendingRef.current = { start: snapshot.caret, end: snapshot.caret };
       reportedRef.current = snapshot.value;
@@ -858,7 +939,14 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           // carries state beside the text (the file joins the send) that
           // undoing the text alone would leave behind.
           historyRef.current = {
-            entries: [{ value, caret: value.length, typed: false }],
+            entries: [
+              {
+                value,
+                caret: value.length,
+                typed: false,
+                resultQuotes: resultQuotePlaces(scopeRef.current, value),
+              },
+            ],
             index: 0,
             at: 0,
             typing: false,
@@ -866,7 +954,14 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         }
       }
       if (composingRef.current) return;
-      if (!isCanonical(root, modelRef.current, findInlineRef.current)) {
+      if (
+        !isCanonical(
+          root,
+          modelRef.current,
+          findInlineRef.current,
+          resultQuotePlaces(scopeRef.current, modelRef.current),
+        )
+      ) {
         // Text can become a chip with no edit of its own (the caller chose it
         // after writing it), and rebuilding the DOM would drop the caret.
         pendingRef.current ??= readSelection(root);
@@ -928,7 +1023,15 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       const onNativeChange = () => {
         reportedRef.current = modelRef.current;
         composerTextReplaced(scopeRef.current, modelRef.current);
-        remember({ value: modelRef.current, caret: modelRef.current.length, typed: false }, false);
+        remember(
+          {
+            value: modelRef.current,
+            caret: modelRef.current.length,
+            typed: false,
+            resultQuotes: resultQuotePlaces(scopeRef.current, modelRef.current),
+          },
+          false,
+        );
         onChangeRef.current?.({ target: root, currentTarget: root });
         tick();
       };
@@ -1023,6 +1126,21 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         .then(() => tick())
         .catch(() => undefined);
     }, [marked]);
+
+    useEffect(() => {
+      if (!value.includes(LEGACY_RESULT_REFERENCE_MARK)) return;
+      let current = true;
+      void loadComposerQuoteTools()
+        .then(({ restoreLegacyResultQuoteText }) => {
+          if (!current || modelRef.current !== value) return;
+          const restored = restoreLegacyResultQuoteText(value);
+          if (restored !== value) replaceRange(0, value.length, restored);
+        })
+        .catch(() => undefined);
+      return () => {
+        current = false;
+      };
+    }, [value]);
 
     useEffect(() => {
       if (autoFocus === true) rootRef.current?.focus();
@@ -1135,7 +1253,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
               const at = lastSelectionRef.current.end;
               const separated = loaded.separateComposerQuotes(current, at, trusted);
               if (separated.value === current) tick();
-              else replaceRange(0, current.length, separated.value, separated.caret);
+              else replaceRange(0, current.length, separated.value, { caret: separated.caret });
             })
             .catch(() => undefined);
         }
@@ -1180,7 +1298,14 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const chipsChanged =
           chipsOf(next, findInlineRef.current).length !==
           chipsOf(modelRef.current, findInlineRef.current).length;
-        emit(next, caret, { typing: !chipsChanged });
+        // Browser edits leave the surviving chips in the DOM. Read their actual
+        // positions so deleting one of two identical excerpts keeps the right source.
+        const resultQuotes = chipHosts.flatMap(({ chip, node }) => {
+          if (chip.kind !== "quote" || chip.result === undefined || !root.contains(node)) return [];
+          const start = offsetOf(root, node, 0);
+          return [{ ...chip.result, start, end: start + chip.text.length }];
+        });
+        emit(next, caret, { typing: !chipsChanged, resultQuotes });
       },
     });
 
@@ -1203,7 +1328,11 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
                 onChange={(next) => {
                   const { start, end } = locate();
                   const tools = loadedComposerQuoteTools();
-                  if (tools !== undefined) replaceRange(start, end, tools.composerQuoteText(next));
+                  if (tools !== undefined) {
+                    replaceRange(start, end, tools.composerQuoteText(next), {
+                      result: chip.result,
+                    });
+                  }
                 }}
                 onRemove={() => {
                   const { start, end } = locate();
@@ -1212,6 +1341,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
                   replaceRange(start, end + lineAfter, "");
                 }}
                 quote={chip.quote}
+                result={chip.result?.source}
               />
             ) : (
               inlineChips?.render(chip.id, locate)

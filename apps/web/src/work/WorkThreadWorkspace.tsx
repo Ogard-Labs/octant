@@ -206,7 +206,12 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
-import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import {
+  LEGACY_RESULT_REFERENCE_MARK,
+  loadComposerQuoteTools,
+  promptWithReadableResultSources,
+  REPLY_QUOTE_SOURCE,
+} from "../composer/composerQuoteMark";
 import { messageTiming, useTurnSendPreference } from "../messageQueue/turnSendPreference";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
@@ -2372,7 +2377,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         return false;
       }
       const sideChatReturns = composerDraft.sideChatReturns;
-      const promptText = composerDraft.text;
+      const draft = composerDraft.text;
+      const promptText = draft.includes(LEGACY_RESULT_REFERENCE_MARK)
+        ? await promptWithReadableResultSources(draft)
+        : draft;
       if (promptText.length === 0) return false;
       const retireStashRecovery = stashSubmission.current?.();
       const sendingThreadId = String(thread.id);
@@ -3041,15 +3049,19 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           {...(readOnly
             ? {}
             : {
-                onAddToChat: (text: string, source = REPLY_QUOTE_SOURCE) => {
+                onAddToChat: (text, source) => {
                   void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
                     // The prompt as it stands once the quote code has loaded.
                     const current = textareaRef.current?.value ?? composerDraft.text;
-                    const next = appendComposerQuote(current, {
-                      source,
-                      text,
-                      comment: "",
-                    });
+                    const next = appendComposerQuote(
+                      current,
+                      {
+                        source: source?.label ?? REPLY_QUOTE_SOURCE,
+                        text,
+                        comment: "",
+                      },
+                      { threadId: typedScope, result: source },
+                    );
                     composerDraft.setDraft(next, next.length);
                     textareaRef.current?.focus();
                   });

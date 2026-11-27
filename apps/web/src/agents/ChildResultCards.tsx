@@ -1,4 +1,5 @@
-import { resultQuoteSource, useResultQuoteScope } from "../transcript/ResultQuoteScope";
+import { useResultQuoteScope } from "../transcript/ResultQuoteScope";
+import type { ResultQuoteSource } from "../composer/resultQuoteDraft";
 import { SelectionThreadSurface } from "../transcript/SelectionThread";
 import type { AgentResultSteeredIntoTurn } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
@@ -29,7 +30,7 @@ const FOLD_AFTER_LINES = 8;
  */
 interface ResultQuoteProps {
   readonly rowKey?: string | undefined;
-  readonly onQuote?: ((text: string, source: string) => void) | undefined;
+  readonly onQuote?: ((text: string, source: ResultQuoteSource) => void) | undefined;
 }
 
 export function ChildResultCards(
@@ -84,9 +85,7 @@ function ChildResultCard(
           content
         ) : (
           <SelectionThreadSurface
-            mapResultSource={() =>
-              resultQuoteSource(label, scope.threadId, { row: rowKey, block: props.blockKey })
-            }
+            resultSource={{ label, threadId: scope.threadId, row: rowKey, block: props.blockKey }}
             onResultQuote={props.onQuote}
           >
             {content}

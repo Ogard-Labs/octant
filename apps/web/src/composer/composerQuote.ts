@@ -1,4 +1,11 @@
 import {
+  rememberResultQuotePlaces,
+  replaceResultQuoteRange,
+  resultQuotePlaces,
+  type ResultQuotePlace,
+  type ResultQuoteSource,
+} from "./resultQuoteDraft";
+import {
   COMPOSER_QUOTE_CLIPBOARD_TYPE,
   composerQuoteToolsLoaded,
   QUOTE_HEADER_TAIL,
@@ -137,6 +144,24 @@ export function composerQuoteText(quote: ComposerQuote): string {
   return text;
 }
 
+// Drafts made by the first result-quote build contain a reference suffix in
+// the attribution. The old window's lookup is gone, so recover only its text.
+const LEGACY_RESULT_REFERENCE =
+  /^(a subagent result|the .+ subagent \(generation [0-9]+\)) · result reference [0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function restoreLegacyResultQuoteText(value: string): string {
+  let next = value;
+  for (const quote of findQuoteShapes(value).toReversed()) {
+    if (!LEGACY_RESULT_REFERENCE.test(quote.source)) continue;
+    const sourceStart = quote.start + "Quoted from ".length;
+    next =
+      next.slice(0, sourceStart) +
+      quote.source.replace(LEGACY_RESULT_REFERENCE, "$1") +
+      next.slice(sourceStart + quote.source.length);
+  }
+  return next;
+}
+
 /** Every quote Octant wrote in the prompt's text, in order. */
 export function findComposerQuotes(value: string): ReadonlyArray<ComposerQuotePlace> {
   return findQuoteShapes(value).filter((place) => quotesWritten.has(place.chipText));
@@ -174,8 +199,10 @@ export function separateComposerQuotes(
   value: string,
   caret: number,
   held: ReadonlyArray<string>,
-): { readonly value: string; readonly caret: number } {
+  places: ReadonlyArray<ResultQuotePlace> = [],
+) {
   let next = value;
+  let resultQuotes = places;
   let at = caret;
   for (const text of new Set(held)) {
     // An empty text is found everywhere and would never move past itself.
@@ -187,17 +214,19 @@ export function separateComposerQuotes(
       let end = start + text.length;
       if (end < next.length && next[end] !== "\n") {
         next = `${next.slice(0, end)}\n${next.slice(end)}`;
+        resultQuotes = replaceResultQuoteRange(resultQuotes, end, end, 1);
         if (at > end) at += 1;
       }
       if (start > 0 && next[start - 1] !== "\n") {
         next = `${next.slice(0, start)}\n${next.slice(start)}`;
+        resultQuotes = replaceResultQuoteRange(resultQuotes, start, start, 1);
         if (at > start) at += 1;
         end += 1;
       }
       from = end;
     }
   }
-  return { value: next, caret: at };
+  return { value: next, caret: at, resultQuotes };
 }
 
 const PREVIEW_LIMIT = 40;
@@ -212,16 +241,31 @@ export function quotePreview(text: string): string {
  * The draft with a quote added at its end on a line of its own, and a fresh
  * line after it for the person to continue on.
  */
-export function appendComposerQuote(draft: string, quote: ComposerQuote): string {
+export function appendComposerQuote(
+  draft: string,
+  quote: ComposerQuote,
+  scope?: { readonly threadId: string; readonly result?: ResultQuoteSource | undefined },
+): string {
   const existing = draft.replace(/\s+$/, "");
   const text = composerQuoteText(quote);
-  return existing === "" ? `${text}\n` : `${existing}\n\n${text}\n`;
+  const lead = existing === "" ? "" : `${existing}\n\n`;
+  const next = `${lead}${text}\n`;
+  if (scope !== undefined) {
+    rememberResultQuotePlaces(scope.threadId, next, [
+      ...resultQuotePlaces(scope.threadId, draft),
+      ...(scope.result === undefined
+        ? []
+        : [{ start: lead.length, end: lead.length + text.length, source: scope.result }]),
+    ]);
+  }
+  return next;
 }
 
 composerQuoteToolsLoaded({
   composerQuoteText,
   appendComposerQuote,
   findComposerQuotes,
+  restoreLegacyResultQuoteText,
   composerQuoteTextsIn,
   trustComposerQuotes,
   separateComposerQuotes,

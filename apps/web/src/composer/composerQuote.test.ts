@@ -67,11 +67,13 @@ describe("composer quotes", () => {
     expect(separateComposerQuotes(`why${quote}`, 3, [quote])).toEqual({
       value: `why\n${quote}`,
       caret: 3,
+      resultQuotes: [],
     });
     const after = `${quote}x`;
     expect(separateComposerQuotes(after, after.length, [quote])).toEqual({
       value: `${quote}\nx`,
       caret: after.length + 1,
+      resultQuotes: [],
     });
   });
 

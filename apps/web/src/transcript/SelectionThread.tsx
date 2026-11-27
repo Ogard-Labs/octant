@@ -1,3 +1,4 @@
+import type { ResultQuoteSource } from "../composer/resultQuoteDraft";
 import { followSelectionWithin } from "./selectionOwner";
 import type { ProjectId } from "@octant/contracts/projects";
 import { MessageSquarePlus } from "../ui/icons";
@@ -32,7 +33,7 @@ export const SelectionThreadStarterContext = createContext<
 /** What a selection in a reply can do here, in the order offered. */
 type SelectionAction = {
   readonly label: string;
-  readonly run: (text: string, source?: string) => void;
+  readonly run: (text: string, source?: ResultQuoteSource) => void;
 };
 const QuoteSelectionContext = createContext<ReadonlyArray<SelectionAction>>([]);
 
@@ -51,7 +52,7 @@ export function SelectionThreadScope(props: {
   readonly mode: "work" | "code";
   readonly projectId: ProjectId | undefined;
   /** Adds selected reply text to this thread's own composer as a quote chip. */
-  readonly onAddToChat?: ((text: string, source?: string) => void) | undefined;
+  readonly onAddToChat?: ((text: string, source?: ResultQuoteSource) => void) | undefined;
   readonly children: ReactNode;
 }) {
   const start = useContext(SelectionThreadStarterContext);
@@ -93,18 +94,18 @@ function selectionWithin(container: HTMLElement | null): string {
  */
 export function SelectionThreadSurface(props: {
   readonly children: ReactNode;
-  readonly mapResultSource?: () => string;
-  readonly onResultQuote?: ((text: string, source: string) => void) | undefined;
+  readonly resultSource?: ResultQuoteSource;
+  readonly onResultQuote?: ((text: string, source: ResultQuoteSource) => void) | undefined;
 }) {
   const actions = useContext(QuoteSelectionContext);
-  const { mapResultSource, onResultQuote } = props;
+  const { resultSource, onResultQuote } = props;
   const addToChat = onResultQuote ?? actions.find((action) => action.label === "Add to chat")?.run;
   const quote =
-    mapResultSource === undefined
+    resultSource === undefined
       ? actions
       : addToChat === undefined
         ? []
-        : [{ label: "Add to chat", run: (text: string) => addToChat(text, mapResultSource()) }];
+        : [{ label: "Add to chat", run: (text: string) => addToChat(text, resultSource) }];
   const containerRef = useRef<HTMLDivElement>(null);
   const offerRef = useRef<HTMLDivElement>(null);
   const [offer, setOffer] = useState("");

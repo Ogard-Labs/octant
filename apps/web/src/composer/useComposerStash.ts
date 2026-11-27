@@ -1,4 +1,10 @@
 import {
+  rememberResultQuotePlaces,
+  resultQuotePlaces,
+  stashResultQuotePlaces,
+  takeStashedResultQuotePlaces,
+} from "./resultQuoteDraft";
+import {
   composerTextWasTyped,
   noteTypedComposerText,
 } from "@octant/client-runtime/typed-composer-text";
@@ -304,6 +310,7 @@ export function useComposerStash(
       return;
     }
 
+    const beforeResults = resultQuotePlaces(input.typedScope, before.text);
     moving.current = true;
     setBusy(true);
     setNotice(undefined);
@@ -335,12 +342,31 @@ export function useComposerStash(
         report("The draft changed while it was moving. Reopen the composer and try again.");
         return;
       }
+      if ("savedDraftId" in record && typeof record.savedDraftId === "string") {
+        stashResultQuotePlaces(record.savedDraftId, beforeResults);
+      }
       recovery.current = record;
       committed = true;
       if (!stillCurrent()) {
         recoveryApplied.current = false;
         report("The move was saved. Reopen the composer to recover the draft.");
         return;
+      }
+      if (entry !== undefined) {
+        const offset = plan.draft.text.length - entry.draft.text.length;
+        const sameThread =
+          entry.source.mode === input.target.location.mode &&
+          entry.source.threadId === input.target.location.threadId;
+        const saved = takeStashedResultQuotePlaces(entry.id);
+        const restored = sameThread
+          ? saved.map((place) => ({
+              ...place,
+              start: place.start + offset,
+              end: place.end + offset,
+            }))
+          : [];
+        const kept = beforeResults.filter((place) => place.end <= offset);
+        rememberResultQuotePlaces(input.typedScope, plan.draft.text, [...kept, ...restored]);
       }
       restoreTypedNote(plan.draft, input.typedScope);
       prepared.apply();
