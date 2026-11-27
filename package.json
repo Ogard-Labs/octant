@@ -42,6 +42,7 @@
     "tokens:export": "bun scripts/export-design-tokens.ts",
     "tokens:check": "bun test scripts/export-design-tokens.test.ts && bun scripts/export-design-tokens.ts --check",
     "style:check": "bun test scripts/check-code-style.test.ts && bun scripts/check-code-style.ts",
+    "coordinator:eval": "bun apps/server/src/coordinator/coordinatorEvaluationCli.ts",
     "connectors:probe": "bun run --cwd scripts test check-connector-catalog && bun scripts/check-connector-catalog.ts",
     "shield:eval": "bun scripts/shield-false-allow-rate.ts",
     "prompt-size:check": "bun scripts/check-agent-prompt-size.ts",

@@ -734,3 +734,79 @@ restart; stopping checks once all items hold or the condition is cleared; never
 starting a worker; refusing non-person principals; replaying older journals
 without the field alongside updates that set and clear it; and component tests
 for viewing, adding, removing, and clearing items in the coordinator controls.
+
+### Model decision evaluation
+
+Use `coordinator:eval` when changing coordinator instructions or the threads
+tool. It compares the same synthetic cases on two checked-out revisions:
+answer a status question, start two separate assignments, and send a revision
+to the worker already assigned. The named coordinator cases exercise these
+decisions with explicit requests. The Project conversation cases ask a
+question about work in progress, request two pieces of work without telling
+the model how to delegate, and revise an assignment by title. Each checkout assembles its own roster,
+orchestration block, and registered threads tool through the production
+coordinator service, instruction store, and tool registration. This exercises
+the coordinator inputs through an OpenAI-compatible adapter. The runner
+uses each checkout’s help response and validates worker starts with that checkout’s
+contracts. It simulates list, start, and send replies, including per-recipient
+send receipts. Project conversation cases carry the roster instructions
+from the checkout's Project conversation path. A revision without that path
+reports those cases as unsupported with zero samples. The other revision can
+still run them, and a pass-rate delta requires completed samples on both sides.
+
+The Project dispatch score checks that each confirmed worker’s title is paired
+with its returned reference in the recap. A list item, heading, or worker label
+can supply the title before a separate reference field. The field takes
+precedence over mentions in the description. When a worker’s title has one
+reference in prose, a caption at the same indentation or farther left can
+start the next entry. A more deeply indented dependency note stays with its
+worker. The recorded start actions show
+what the model actually assigned when recap wording affects a score.
+
+Prepare two clean, separate Git checkouts and run `bun install --frozen-lockfile`
+in each. Copy `coordinatorEvaluation.ts` and `coordinatorEvaluationInput.test-support.ts` from
+the evaluator's `apps/server/src/coordinator/` into that same directory in each
+checkout. The runner checks that both copies match. Older revisions need the
+production interfaces those two files import.
+
+Start a local tool-capable model with an OpenAI-compatible chat completions
+endpoint on `127.0.0.1`. Use the same server and model settings throughout. From
+the checkout with the evaluation command, run:
+
+```sh
+bun run coordinator:eval "$baseline" "$candidate" \
+  http://127.0.0.1:19373/v1/chat/completions qwen3-4b-q4 2 > comparison.json
+```
+
+The optional final argument supplies synthetic orchestration text for both
+revisions. The default asks the coordinator to answer status questions from
+the roster, give independent assignments to separate workers, and send
+revisions to the assigned worker. The runner accepts only loopback endpoints.
+Use a local inference server for zero-cost runs. A loopback proxy to a billed
+service requires explicit approval before use.
+
+The JSON report records both SHAs, SHA-256 digests of the assembled case inputs
+including tool metadata, model request settings, observations, and per-case
+pass rates. A start is matched to its assignment by a keyword in the title, falling back
+to the brief when the title has no unique match. A Project conversation's
+dispatch reply must pair each confirmed worker’s title with its own reference.
+A send must name the exact
+recipient and include the requested color and button. Both “primary button” and
+“primary action button” identify the target. Refused calls fail the score.
+A direct answer needs text and no decision tool calls. List, help, and successful reads of fixture workers are allowed in all cases.
+A read returns the worker’s title and state with an empty transcript. The score measures delegation decisions. Pass rates count
+completed samples, and the delta is candidate minus baseline. Read errors and
+incomplete counts alongside the rate. Either makes the comparison command
+exit nonzero. Use the normal server tests for offline fixture, assembly, and
+scoring verification.
+
+The example used [llama.cpp b12774](https://github.com/ggml-org/llama.cpp/releases/tag/b12774)
+and [Qwen3-4B Q4_K_M](https://huggingface.co/Qwen/Qwen3-4B-GGUF), with model
+file SHA-256 `7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5`.
+On the inference host, launch the server with:
+
+```sh
+llama-server --model Qwen3-4B-Q4_K_M.gguf --alias qwen3-4b-q4 \
+  --host 127.0.0.1 --port 19373 --jinja --ctx-size 4096 --parallel 1 \
+  --chat-template-kwargs '{"enable_thinking":false}' --reasoning-budget 0
+```

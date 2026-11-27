@@ -15,7 +15,7 @@
     "apps/server/src/chat/chatTurnRunner.ts": 4,
     "apps/server/src/chat/threadWorkService.ts": 1,
     "apps/server/src/chatRoutes.ts": 3,
-    "apps/server/src/code/codeAppManagedTools.ts": 8,
+    "apps/server/src/code/codeAppManagedTools.ts": 4,
     "apps/server/src/code/codeFileService.ts": 1,
     "apps/server/src/code/codeOperationRuntime.ts": 2,
     "apps/server/src/code/codeOperationService.ts": 4,
