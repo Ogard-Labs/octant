@@ -66,6 +66,46 @@ describe("private listener control service", () => {
     expect(runtime.start).not.toHaveBeenCalled();
   });
 
+  it("enables with the host's self-made certificate when no PEMs are given, and refuses only one", async () => {
+    const runtime = idleRuntime();
+    runtime.start.mockResolvedValue({
+      hostname: "192.168.1.20",
+      port: 9443,
+      origin: "https://192.168.1.20:9443",
+      exposureClass: "lan-private",
+      certificateFingerprint: "ab".repeat(32),
+      certificateReady: true,
+      certificateSource: "self-made",
+      tlsPin: `sha256-${"Q".repeat(42)}A`,
+    });
+    const fingerprintFromPem = vi.fn(() => "ab".repeat(32));
+    const service = createPrivateListenerControlService({ runtime, fingerprintFromPem });
+    const endpoint = {
+      hostname: "192.168.1.20",
+      port: 9443,
+      origin: "https://192.168.1.20:9443",
+      localConfirmation: true,
+    };
+
+    await expect(service.enable(endpoint)).resolves.toMatchObject({
+      state: "ready",
+      certificateSource: "self-made",
+    });
+    expect(runtime.start).toHaveBeenCalledWith({
+      hostname: "192.168.1.20",
+      port: 9443,
+      origin: "https://192.168.1.20:9443",
+      exposureClass: "lan-private",
+    });
+    expect(fingerprintFromPem).not.toHaveBeenCalled();
+
+    runtime.start.mockClear();
+    await expect(
+      service.enable({ ...endpoint, certificatePem: "cert" } as PrivateListenerEnableRequest),
+    ).rejects.toMatchObject({ code: "invalid-tls" });
+    expect(runtime.start).not.toHaveBeenCalled();
+  });
+
   it("enables after local confirmation and projects public status only", async () => {
     const fingerprint = "ab".repeat(32);
     const runtime: PrivateListenerRuntimePort = {
@@ -402,6 +442,25 @@ describe("private listener host runtime (loopback bridge)", () => {
     });
   });
 
+  it("asks the server for its self-made certificate by posting no PEMs", async () => {
+    const fetchImpl = vi.fn(async (_url: unknown, _init?: RequestInit) =>
+      jsonResponse({ status: { ...readyStatus(), certificateSource: "self-made" } }),
+    );
+    const started = await runtime(fetchImpl as unknown as typeof globalThis.fetch).start({
+      hostname: "192.168.1.20",
+      port: 9443,
+      origin: "https://192.168.1.20:9443",
+      exposureClass: "lan-private",
+    });
+    expect(started.certificateSource).toBe("self-made");
+    const [, init] = fetchImpl.mock.calls[0]!;
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      hostname: "192.168.1.20",
+      port: 9443,
+      origin: "https://192.168.1.20:9443",
+    });
+  });
+
   it("throws the server-reported error code when enable fails closed", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({ category: "unavailable", errorCode: "occupied-port" }, 503),
@@ -465,7 +524,9 @@ describe("private listener host runtime (loopback bridge)", () => {
 });
 
 function enableRequest(
-  overrides: Partial<PrivateListenerEnableRequest> = {},
+  overrides: Partial<
+    Pick<PrivateListenerEnableRequest, "hostname" | "origin" | "localConfirmation">
+  > = {},
 ): PrivateListenerEnableRequest {
   return {
     hostname: "192.168.1.20",

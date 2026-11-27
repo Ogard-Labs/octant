@@ -2498,6 +2498,7 @@ Status: Built. Detail: [Architecture: Security and authority, Host identity on e
 The listener serves a pasted certificate or a self-made one, which a client pins by its public-key hash and accepts no other way.
 
 - The self-made certificate has its own owner-only key, never the host identity key, and never in a response, log or journal.
+- Settings › Remote access defaults to the self-made certificate and offers a pasted one as a choice, so a build without the full `octant` command can turn on a listener the phone app pairs with (maintainer decision, 2026-11-27).
 - A client sends nothing unless every resolved address and the connected peer are private.
 - Rotation is signed with the old key and staged by trusted hellos; a missed window needs re-pairing, never an unknown-pin fallback.
 

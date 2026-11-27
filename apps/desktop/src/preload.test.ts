@@ -1688,6 +1688,44 @@ describe("desktop preload bridge", () => {
     expect(JSON.stringify(ready)).not.toMatch(/BEGIN PRIVATE KEY|private-value/i);
   });
 
+  it("asks for a self-made certificate by sending neither PEM, and refuses only one of them", async () => {
+    const ready = {
+      enabled: true,
+      state: "ready",
+      hostname: "192.168.1.20",
+      port: 9443,
+      origin: "https://192.168.1.20:9443",
+      exposureClass: "lan-private",
+      certificateFingerprint: "ab".repeat(32),
+      certificateReady: true,
+      certificateSource: "self-made",
+      tlsPin: `sha256-${"Q".repeat(42)}A`,
+    };
+    const invoke = vi.fn().mockResolvedValue(ready);
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+    );
+    const endpoint = {
+      hostname: "192.168.1.20",
+      port: 9443,
+      origin: "https://192.168.1.20:9443",
+      localConfirmation: true,
+    } as const;
+
+    await expect(bridge.enablePrivateListener?.(endpoint)).resolves.toEqual(ready);
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.privateListenerEnable, endpoint);
+
+    invoke.mockClear();
+    await expect(
+      bridge.enablePrivateListener?.({
+        ...endpoint,
+        certificatePem: "cert",
+      } as unknown as typeof endpoint),
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("hands Settings a self-made listener's key pin and refuses a malformed one", async () => {
     const tlsPin = `sha256-${"Q".repeat(42)}A`;
     const selfMade = {

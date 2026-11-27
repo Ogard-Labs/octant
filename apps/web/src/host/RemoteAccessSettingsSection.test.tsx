@@ -11,6 +11,12 @@ import type {
 } from "../shell/hostBridge";
 import { RemoteAccessSettingsSection } from "./RemoteAccessSettingsSection";
 
+/** The form starts on the certificate this computer makes; a pasted one is a choice. */
+async function choosePastedCertificate(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("combobox", { name: "Certificate" }));
+  await user.click(await screen.findByRole("option", { name: "My own certificate" }));
+}
+
 const ticketId = "11111111-1111-4111-8111-111111111111";
 const deviceId = "22222222-2222-4222-8222-222222222222";
 const off: PrivateListenerPublicStatus = {
@@ -191,12 +197,39 @@ describe("RemoteAccessSettingsSection", () => {
     expect(await screen.findByText("Off")).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Pause remote access" })).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("Hostname"), "192.168.1.20");
+    await choosePastedCertificate(user);
     await user.type(screen.getByLabelText("Certificate (PEM)"), "-----BEGIN CERTIFICATE-----");
     await user.type(screen.getByLabelText("Private key (PEM)"), "-----BEGIN PRIVATE KEY-----");
     await user.click(screen.getByRole("button", { name: "Enable listener…" }));
     await user.click(screen.getByRole("button", { name: "Confirm enable" }));
 
     expect(await screen.findByRole("switch", { name: "Pause remote access" })).not.toBeChecked();
+  });
+
+  it("enables a listener with the certificate this computer makes, sending no key material", async () => {
+    const user = userEvent.setup();
+    const host = bridge(off);
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    expect(await screen.findByText("Off")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Certificate" })).toHaveTextContent(
+      "Made by this computer",
+    );
+    expect(screen.queryByLabelText("Certificate (PEM)")).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Hostname"), "100.101.102.103");
+    await user.click(screen.getByRole("button", { name: "Enable listener…" }));
+    const confirm = screen.getByRole("dialog", { name: "Enable remote listener?" });
+    expect(confirm).toHaveTextContent("Made by this computer; apps pair with a pairing code.");
+    await user.click(within(confirm).getByRole("button", { name: "Confirm enable" }));
+
+    await waitFor(() =>
+      expect(host.enablePrivateListener).toHaveBeenCalledWith({
+        hostname: "100.101.102.103",
+        port: 13774,
+        origin: "https://100.101.102.103:13774",
+        localConfirmation: true,
+      }),
+    );
   });
 
   it("asks for confirmation naming address, origin, and reach before enabling, and cancel changes nothing", async () => {
@@ -206,6 +239,7 @@ describe("RemoteAccessSettingsSection", () => {
 
     expect(await screen.findByText("Off")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Hostname"), "192.168.1.20");
+    await choosePastedCertificate(user);
     await user.type(screen.getByLabelText("Certificate (PEM)"), "-----BEGIN CERTIFICATE-----");
     await user.type(screen.getByLabelText("Private key (PEM)"), "-----BEGIN PRIVATE KEY-----");
     const opener = screen.getByRole("button", { name: "Enable listener…" });
@@ -249,6 +283,9 @@ describe("RemoteAccessSettingsSection", () => {
       localConfirmation: true,
     });
     expect(await screen.findByText("Listening")).toBeInTheDocument();
+    // The form starts over, and the pasted key is not kept anywhere on the page.
+    expect(screen.queryByLabelText("Private key (PEM)")).not.toBeInTheDocument();
+    await choosePastedCertificate(user);
     expect(screen.getByLabelText("Private key (PEM)")).toHaveValue("");
   });
 
@@ -263,6 +300,7 @@ describe("RemoteAccessSettingsSection", () => {
 
     expect(await screen.findByText("Off")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Hostname"), hostname);
+    await choosePastedCertificate(user);
     await user.type(screen.getByLabelText("Certificate (PEM)"), "certificate");
     await user.type(screen.getByLabelText("Private key (PEM)"), "private-key");
     await user.click(screen.getByRole("button", { name: "Enable listener…" }));
@@ -282,6 +320,7 @@ describe("RemoteAccessSettingsSection", () => {
 
     expect(await screen.findByText("Listening")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Hostname"), "mac.tailnet.ts.net");
+    await choosePastedCertificate(user);
     await user.type(screen.getByLabelText("Certificate (PEM)"), "certificate");
     await user.type(screen.getByLabelText("Private key (PEM)"), "private-key");
     await user.click(screen.getByRole("button", { name: "Move listener…" }));
@@ -315,6 +354,7 @@ describe("RemoteAccessSettingsSection", () => {
 
     expect(await screen.findByText("Off")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Hostname"), "192.168.1.20");
+    await choosePastedCertificate(user);
     await user.type(screen.getByLabelText("Certificate (PEM)"), "certificate");
     await user.type(screen.getByLabelText("Private key (PEM)"), "private-key");
     await user.click(screen.getByRole("button", { name: "Enable listener…" }));
@@ -426,6 +466,7 @@ describe("RemoteAccessSettingsSection", () => {
 
     await screen.findByText("Off");
     await user.type(screen.getByLabelText("Hostname"), "127.0.0.1");
+    await choosePastedCertificate(user);
     await user.type(screen.getByLabelText("Certificate (PEM)"), "c");
     await user.type(screen.getByLabelText("Private key (PEM)"), "k");
     expect(screen.getByRole("alert")).toHaveTextContent(/loopback address/i);
@@ -572,6 +613,7 @@ describe("RemoteAccessSettingsSection", () => {
 
     // A code names the listener's origin and pin, so moving the listener drops it.
     await user.type(screen.getByLabelText("Hostname"), "100.101.102.104");
+    await choosePastedCertificate(user);
     await user.type(screen.getByLabelText("Certificate (PEM)"), "certificate");
     await user.type(screen.getByLabelText("Private key (PEM)"), "private-key");
     await user.click(screen.getByRole("button", { name: "Move listener…" }));

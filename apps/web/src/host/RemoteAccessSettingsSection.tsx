@@ -120,6 +120,8 @@ type ListenerState =
 type ListenerDraft = {
   readonly hostname: string;
   readonly port: string;
+  /** `self-made`: the host makes its own certificate, which apps pin through a pairing code. */
+  readonly certificate: "self-made" | "pasted";
   readonly certificatePem: string;
   readonly privateKeyPem: string;
 };
@@ -127,9 +129,15 @@ type ListenerDraft = {
 const EMPTY_DRAFT: ListenerDraft = {
   hostname: "",
   port: "13774",
+  certificate: "self-made",
   certificatePem: "",
   privateKeyPem: "",
 };
+
+const CERTIFICATE_OPTIONS = [
+  { id: "self-made", label: "Made by this computer" },
+  { id: "pasted", label: "My own certificate" },
+] as const;
 
 const SOURCE_CLASS_LABELS: Readonly<Record<RemotePairingTicketSourceClass, string>> = {
   loopback: "This machine only",
@@ -239,6 +247,7 @@ export function RemoteAccessSettingsSection({
   const hostnameId = useId();
   const portId = useId();
   const certificateId = useId();
+  const certificateChoiceId = useId();
   const keyId = useId();
   const sourceId = useId();
 
@@ -297,21 +306,28 @@ export function RemoteAccessSettingsSection({
     draftOrigin !== undefined &&
     draftPort >= 1 &&
     draftPort <= 65_535 &&
-    draft.certificatePem.trim() !== "" &&
-    draft.privateKeyPem.trim() !== "" &&
+    (draft.certificate === "self-made" ||
+      (draft.certificatePem.trim() !== "" && draft.privateKeyPem.trim() !== "")) &&
     (draftExposure === "lan-private" || draftExposure === "tailscale");
 
   const stageEnable = () => {
     if (!draftComplete || draftOrigin === undefined) return;
     setListenerMessage(undefined);
-    setConfirming({
+    const endpoint = {
       hostname: draft.hostname.trim(),
       port: draftPort,
       origin: draftOrigin,
-      certificatePem: draft.certificatePem,
-      privateKeyPem: draft.privateKeyPem,
       localConfirmation: true,
-    });
+    } as const;
+    setConfirming(
+      draft.certificate === "self-made"
+        ? endpoint
+        : {
+            ...endpoint,
+            certificatePem: draft.certificatePem,
+            privateKeyPem: draft.privateKeyPem,
+          },
+    );
   };
 
   const applyListener = async (request: PrivateListenerEnableRequest) => {
@@ -594,7 +610,7 @@ export function RemoteAccessSettingsSection({
           <SettingRow
             focused={focusedSetting === "remote-listener"}
             description="The address paired devices connect to."
-            more="Use a private network or Tailscale address with a certificate browsers trust. Loopback and public addresses are refused."
+            more="Use a private network or Tailscale address. A certificate made by this computer pairs the Octant apps through a pairing code; to pair a browser, use your own certificate that browsers trust. Loopback and public addresses are refused."
             label={status?.enabled === true ? "Move the listener" : "Enable the listener"}
             scope="host"
             settingId="remote-listener"
@@ -620,29 +636,50 @@ export function RemoteAccessSettingsSection({
                 />
               </OctantField>
               <OctantField>
-                <OctantFieldLabel htmlFor={certificateId}>Certificate (PEM)</OctantFieldLabel>
-                <OctantTextarea
-                  autoComplete="off"
-                  id={certificateId}
-                  onChange={(event) => setDraft({ ...draft, certificatePem: event.target.value })}
-                  placeholder="-----BEGIN CERTIFICATE-----"
-                  rows={3}
-                  spellCheck={false}
-                  value={draft.certificatePem}
+                <OctantFieldLabel htmlFor={certificateChoiceId}>Certificate</OctantFieldLabel>
+                <OctantSelectField
+                  id={certificateChoiceId}
+                  onValueChange={(value) => {
+                    if (value === "self-made" || value === "pasted") {
+                      setDraft({ ...draft, certificate: value });
+                    }
+                  }}
+                  options={CERTIFICATE_OPTIONS}
+                  value={draft.certificate}
                 />
               </OctantField>
-              <OctantField>
-                <OctantFieldLabel htmlFor={keyId}>Private key (PEM)</OctantFieldLabel>
-                <OctantTextarea
-                  autoComplete="off"
-                  id={keyId}
-                  onChange={(event) => setDraft({ ...draft, privateKeyPem: event.target.value })}
-                  placeholder="-----BEGIN PRIVATE KEY-----"
-                  rows={3}
-                  spellCheck={false}
-                  value={draft.privateKeyPem}
-                />
-              </OctantField>
+              {draft.certificate === "self-made" ? null : (
+                <>
+                  <OctantField>
+                    <OctantFieldLabel htmlFor={certificateId}>Certificate (PEM)</OctantFieldLabel>
+                    <OctantTextarea
+                      autoComplete="off"
+                      id={certificateId}
+                      onChange={(event) =>
+                        setDraft({ ...draft, certificatePem: event.target.value })
+                      }
+                      placeholder="-----BEGIN CERTIFICATE-----"
+                      rows={3}
+                      spellCheck={false}
+                      value={draft.certificatePem}
+                    />
+                  </OctantField>
+                  <OctantField>
+                    <OctantFieldLabel htmlFor={keyId}>Private key (PEM)</OctantFieldLabel>
+                    <OctantTextarea
+                      autoComplete="off"
+                      id={keyId}
+                      onChange={(event) =>
+                        setDraft({ ...draft, privateKeyPem: event.target.value })
+                      }
+                      placeholder="-----BEGIN PRIVATE KEY-----"
+                      rows={3}
+                      spellCheck={false}
+                      value={draft.privateKeyPem}
+                    />
+                  </OctantField>
+                </>
+              )}
               {draft.hostname.trim() !== "" &&
               draftExposure !== "lan-private" &&
               draftExposure !== "tailscale" ? (
@@ -699,7 +736,13 @@ export function RemoteAccessSettingsSection({
                           ? "Tailscale"
                           : "Private LAN",
                     },
-                    { label: "Certificate", value: "Provided; fingerprint shown once it loads." },
+                    {
+                      label: "Certificate",
+                      value:
+                        confirming.certificatePem === undefined
+                          ? "Made by this computer; apps pair with a pairing code."
+                          : "Provided; fingerprint shown once it loads.",
+                    },
                   ]}
                 />
               }
