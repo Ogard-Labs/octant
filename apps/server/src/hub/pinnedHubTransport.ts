@@ -56,7 +56,7 @@ export class HubTransportRefused extends Error {
   }
 }
 
-const SYSTEM_NETWORK: HubNetwork = {
+export const SYSTEM_NETWORK: HubNetwork = {
   resolve: async (hostname) => {
     if (isIP(hostname) !== 0) return [hostname];
     return (await lookup(hostname, { all: true })).map((entry) => entry.address);

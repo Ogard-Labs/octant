@@ -14,7 +14,7 @@ import {
   type CodeThread,
   type CodeThreadId,
 } from "@octant/contracts";
-import { activeChatTurns } from "@octant/domain";
+import { activeChatTurns, parkedStopReleased } from "@octant/domain";
 import { readChatThreadView } from "../persistence/chatProjection";
 import { readCodeThread } from "../persistence/codeProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
@@ -47,15 +47,18 @@ export function codeVisitorState(
 /**
  * A Chat thread's state as a visitor reads it, from each turn's latest attempt
  * in order. Regenerating an older reply adds its attempt to that older turn, so
- * a run still going on any turn counts, not only on the last.
+ * a run still going on any turn counts, not only on the last. Only the last
+ * turn can wait on the owner, and not once a move to another account released
+ * its usage-limit stop: an older turn's stop is history once a newer turn ran.
  */
 export function chatVisitorState(
   latestOutcomes: ReadonlyArray<ChatAttemptOutcome | undefined>,
+  lastStopReleased: boolean,
 ): VisitorThreadState {
   if (latestOutcomes.some((outcome) => outcome === "queued" || outcome === "streaming")) {
     return "working";
   }
-  return latestOutcomes.some((outcome) => outcome === "waiting") ? "owner-deciding" : "idle";
+  return latestOutcomes.at(-1) === "waiting" && !lastStopReleased ? "owner-deciding" : "idle";
 }
 
 function readCode(
@@ -135,11 +138,16 @@ function readChat(connection: SqliteConnection, threadId: string): VisitorThread
       .join("");
     if (reply !== "") messages.push({ role: "agent", text: reply });
   }
+  const lastAttempt = turns.at(-1)?.attempts.at(-1);
+  const lastAttemptId = lastAttempt === undefined ? undefined : String(lastAttempt.id);
   return {
     status: "found",
     title: view.thread.title,
     archived: view.thread.lifecycle === "archived",
-    state: chatVisitorState(turns.map((turn) => turn.attempts.at(-1)?.outcome)),
+    state: chatVisitorState(
+      turns.map((turn) => turn.attempts.at(-1)?.outcome),
+      parkedStopReleased(view.thread, lastAttemptId),
+    ),
     messages: messages.slice(-MAX_MESSAGES),
   };
 }
