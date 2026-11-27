@@ -39,7 +39,9 @@ export function TrackerMentionRows(props: TrackerMentionRowsProps) {
         </span>
         <span className="thread-mention__meta">
           <span>{trackerMentionStateText(candidate.state)}</span>
-          <span>{`${TRACKER_MENTION_KIND_LABEL[candidate.kind]} · ${candidate.container}`}</span>
+          <span className="thread-mention__origin">
+            {`${TRACKER_MENTION_KIND_LABEL[candidate.kind]} · ${candidate.container}`}
+          </span>
         </span>
       </OctantButton>
     </li>

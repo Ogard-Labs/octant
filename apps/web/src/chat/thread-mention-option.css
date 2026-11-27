@@ -39,4 +39,9 @@
   .thread-mention__engine {
     display: none;
   }
+
+  /* A pull request or issue keeps its title and state; its icon says the kind. */
+  .thread-mention__origin {
+    display: none;
+  }
 }
