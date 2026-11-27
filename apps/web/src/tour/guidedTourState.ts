@@ -50,9 +50,15 @@ export function isGuidedTourOpen(): boolean {
   return open;
 }
 
-/** Showing the tour, from the offer or the menu, is what makes it seen. */
-export function openGuidedTour(): void {
+/**
+ * The card is on screen, from the offer or the menu. Not recorded on open: the
+ * card is its own chunk, and one that cannot load must not use up the offer.
+ */
+export function markGuidedTourSeen(): void {
   writeGuidedTourRecord("seen");
+}
+
+export function openGuidedTour(): void {
   if (open) return;
   open = true;
   emit();

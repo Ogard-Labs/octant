@@ -4628,10 +4628,11 @@ waits, and does not give up, while a dialog or menu is open, Settings or Project
 create is up, a What's new announcement is showing, Zen is active, or the Inbox
 counts anything that needs attention, and it closes if a dialog opens over it.
 A person who finished setup before the tour existed has no record and is never
-offered it. Showing the tour, however it was opened, records it as seen in the
-same renderer-local storage the host notices use for their dismissals (no host
-setting, network call or count); where the
-storage cannot be read the offer may come back, which is harmless. The account
+offered it. Showing the tour's card, however it was opened, records it as seen in
+the same renderer-local storage the host notices use for their dismissals (no host
+setting, network call or count); a card whose code cannot load records nothing, so
+the offer returns on a later start. Where the storage cannot be read the offer may
+come back too, which is harmless. The account
 menu's "Take the tour" opens it again at any time, in any window with the
 sidebar showing, and records nothing else.
 

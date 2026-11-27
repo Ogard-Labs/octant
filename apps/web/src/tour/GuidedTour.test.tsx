@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { GuidedTour, type GuidedTourProps } from "./GuidedTour";
 import {
   GUIDED_TOUR_STORAGE_KEY,
+  isGuidedTourOpen,
   openGuidedTour,
   readGuidedTourRecord,
   resetGuidedTour,
@@ -138,13 +139,16 @@ describe("GuidedTour", () => {
 
   it("is never offered to an installation that answered first-run setup before the tour existed", async () => {
     render(<Window blocked={false} firstRunStatus="completed" />);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // The card loads after the tour opens, so a missing dialog alone proves nothing.
+    expect(isGuidedTourOpen()).toBe(false);
+    expect(readGuidedTourRecord()).toBeUndefined();
   });
 
   it("waits while another surface needs the person", async () => {
     globalThis.localStorage.setItem(GUIDED_TOUR_STORAGE_KEY, "due");
     const { rerender } = render(<Window blocked firstRunStatus="skipped" />);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(isGuidedTourOpen()).toBe(false);
+    expect(readGuidedTourRecord()).toBe("due");
 
     rerender(<Window blocked={false} firstRunStatus="skipped" />);
     expect(

@@ -12,7 +12,7 @@ import {
 import { SIDEBAR_ACCOUNT_TRIGGER_SELECTOR } from "../shell/SidebarProfile";
 import { IconButton } from "../shell/IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
-import { closeGuidedTour } from "./guidedTourState";
+import { closeGuidedTour, markGuidedTourSeen } from "./guidedTourState";
 import {
   ANSWER_SURFACES,
   placeTourCard,
@@ -135,6 +135,9 @@ export function GuidedTourSurface() {
   // Focus moves into the card and comes back to where it was.
   const focusedIn = useRef(false);
   const placed = placement !== undefined;
+  useEffect(() => {
+    if (placed) markGuidedTourSeen();
+  }, [placed]);
   useEffect(() => {
     // The card is hidden until it is placed, and a hidden control cannot take focus.
     if (!placed || focusedIn.current) return;
