@@ -549,6 +549,23 @@ function isTailscaleIpv6(value: string): boolean {
   );
 }
 
+/**
+ * One form for a Tailscale address literal, so an address the person typed
+ * and the one a socket reports compare equal: IPv4 as written (also when a
+ * socket reports it IPv4-mapped, `::ffff:100.x.y.z`), IPv6 as its eight
+ * groups. Undefined for anything that is not a Tailscale address literal,
+ * including a `*.ts.net` name.
+ */
+export function tailscaleAddressKey(address: string): string | undefined {
+  const value = address.trim().toLowerCase();
+  const ipv4 = value.startsWith("::ffff:") ? value.slice("::ffff:".length) : value;
+  if (isTailscaleIpv4(ipv4)) return ipv4;
+  if (!isTailscaleIpv6(value)) return undefined;
+  return ipv6Groups(value)
+    ?.map((group) => group.toString(16))
+    .join(":");
+}
+
 /** The eight 16-bit groups of an IPv6 literal, or nothing when it is not one. */
 function ipv6Groups(value: string): ReadonlyArray<number> | undefined {
   const compressionIndex = value.indexOf("::");

@@ -1,6 +1,8 @@
 // The hub's public entrance: a separate HTTP server, bound to loopback, that a
 // front (Tailscale Funnel or the person's own tunnel) carries internet traffic
-// to. It shares nothing with the private listener: its own server, its own
+// to. For the person's own proxy on another machine it binds the hub's
+// Tailscale address instead, over TLS, and drops any connection whose peer is
+// not a listed front before the handshake. It shares nothing with the private listener: its own server, its own
 // closed route table, no cookie, no session, and no principal a private route
 // would accept. Every request that reaches it came from the internet, even
 // though Funnel delivers it from 127.0.0.1, so loopback means nothing here.
@@ -9,9 +11,12 @@ import {
   createServer,
   type IncomingHttpHeaders,
   type IncomingMessage,
+  type RequestListener,
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createServer as createTlsServer } from "node:https";
+import type { Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import {
   PUBLIC_ENTRANCE_MAX_HEADER_BYTES,
@@ -145,6 +150,16 @@ export interface PublicEntranceOptions {
   readonly forward?: (envelope: PublicForwardEnvelope) => Promise<PublicForwardAnswer | undefined>;
   readonly requestsPerMinute?: number;
   readonly now?: () => number;
+  /**
+   * Bind this address over TLS instead of loopback, and serve only peers
+   * `admits` takes. The service passes only the hub's own Tailscale address,
+   * its Tailscale certificate, and the listed fronts.
+   */
+  readonly tailnet?: {
+    readonly address: string;
+    readonly tls: { readonly cert: string; readonly key: string };
+    readonly admits: (remoteAddress: string | undefined) => boolean;
+  };
 }
 
 export interface PublicEntrance {
@@ -330,8 +345,9 @@ async function writeAnswer(response: ServerResponse, answer: PublicAnswer): Prom
 }
 
 /**
- * Starts the entrance on 127.0.0.1. Only the front reaches it there; the
- * service refuses any other bind before it calls this.
+ * Starts the entrance on 127.0.0.1, or on the hub's Tailscale address for a
+ * front on another machine. Only the front reaches it there; the service
+ * refuses any other bind before it calls this.
  */
 export async function startPublicEntrance(options: PublicEntranceOptions): Promise<PublicEntrance> {
   const now = options.now ?? Date.now;
@@ -413,33 +429,49 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
     });
   };
 
-  const server: Server = createServer(
-    { maxHeaderSize: PUBLIC_ENTRANCE_MAX_HEADER_BYTES },
-    (incoming, response) => {
-      const path = (incoming.url ?? "/").split("?")[0] ?? "/";
-      const request = new AbortController();
-      const abort = () => request.abort();
-      // The request's own "close" fires once its body is read, so a stream
-      // would end early; the visitor leaving is the response closing unfinished.
-      response.on("close", () => {
-        if (!response.writableFinished) abort();
-      });
-      closing.signal.addEventListener("abort", abort, { once: true });
-      void answer({
-        method: incoming.method ?? "GET",
-        path,
-        headers: publicRequestHeaders(incoming.headers),
-        readBody: readFrom(incoming),
-        signal: request.signal,
-        forwarded: false,
-      })
-        .catch((): PublicAnswer => ({ status: 500, body: "" }))
-        .then((reply) =>
-          writeAnswer(response, incoming.method === "HEAD" ? { ...reply, body: "" } : reply),
-        )
-        .finally(() => closing.signal.removeEventListener("abort", abort));
-    },
-  );
+  const onRequest: RequestListener = (incoming, response) => {
+    const path = (incoming.url ?? "/").split("?")[0] ?? "/";
+    const request = new AbortController();
+    const abort = () => request.abort();
+    // The request's own "close" fires once its body is read, so a stream
+    // would end early; the visitor leaving is the response closing unfinished.
+    response.on("close", () => {
+      if (!response.writableFinished) abort();
+    });
+    closing.signal.addEventListener("abort", abort, { once: true });
+    void answer({
+      method: incoming.method ?? "GET",
+      path,
+      headers: publicRequestHeaders(incoming.headers),
+      readBody: readFrom(incoming),
+      signal: request.signal,
+      forwarded: false,
+    })
+      .catch((): PublicAnswer => ({ status: 500, body: "" }))
+      .then((reply) =>
+        writeAnswer(response, incoming.method === "HEAD" ? { ...reply, body: "" } : reply),
+      )
+      .finally(() => closing.signal.removeEventListener("abort", abort));
+  };
+  const tailnet = options.tailnet;
+  const server: Server =
+    tailnet === undefined
+      ? createServer({ maxHeaderSize: PUBLIC_ENTRANCE_MAX_HEADER_BYTES }, onRequest)
+      : createTlsServer(
+          {
+            maxHeaderSize: PUBLIC_ENTRANCE_MAX_HEADER_BYTES,
+            cert: tailnet.tls.cert,
+            key: tailnet.tls.key,
+          },
+          onRequest,
+        );
+  if (tailnet !== undefined) {
+    // Judged on the TCP connection, before any TLS or HTTP byte is read, so an
+    // unlisted machine in the tailnet learns nothing about what answers here.
+    server.prependListener("connection", (socket: Socket) => {
+      if (!tailnet.admits(socket.remoteAddress)) socket.destroy();
+    });
+  }
   server.maxConnections = MAX_CONNECTIONS;
   server.headersTimeout = HEADER_TIMEOUT_MS;
   server.requestTimeout = REQUEST_TIMEOUT_MS;
@@ -468,7 +500,7 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(options.port, "127.0.0.1", () => {
+    server.listen(options.port, tailnet?.address ?? "127.0.0.1", () => {
       server.off("error", reject);
       resolve();
     });

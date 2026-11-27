@@ -222,7 +222,11 @@ import {
   createTailscaleCertificateSetting,
   createListenerCertificateSink,
 } from "../hub/tailscaleCertificate";
-import { createTailscaleCliDaemon, execTailscale } from "../hub/tailscaleCliDaemon";
+import {
+  createTailscaleCliDaemon,
+  execTailscale,
+  readTailscaleAddress,
+} from "../hub/tailscaleCliDaemon";
 import { PublicEntranceService } from "../hub/publicEntranceService";
 import { forwardToActingHub } from "../hub/publicEntranceForwarding";
 import { HubWebhookService } from "../hub/hubWebhookService";
@@ -1299,6 +1303,10 @@ export function wireRemote(deps: RemoteDependencies) {
     now: Date.now,
   });
   setInterval(() => void spokeSignInService.tick().catch(() => undefined), SIGN_IN_LOOK_MS).unref();
+  // The Tailscale certificate the private listener serves is also the one the
+  // public entrance serves a front on another machine; it stays in memory only.
+  const listenerCertificateSink = createListenerCertificateSink(privateListenerController);
+  let tailnetTls: { readonly cert: string; readonly key: string } | undefined;
   const tailscaleCertificate = new TailscaleCertificateService({
     setting: createTailscaleCertificateSetting(
       providerDataDirectory,
@@ -1309,7 +1317,21 @@ export function wireRemote(deps: RemoteDependencies) {
       exec: execTailscale,
       platform: process.platform,
     }),
-    sink: createListenerCertificateSink(privateListenerController),
+    sink: {
+      ...listenerCertificateSink,
+      install: async (input) => {
+        const installed = await listenerCertificateSink.install(input);
+        if (installed.status === "installed") {
+          tailnetTls = { cert: input.certificatePem, key: input.privateKeyPem };
+        }
+        return installed;
+      },
+      remove: async () => {
+        const removed = await listenerCertificateSink.remove();
+        if (removed.status === "removed") tailnetTls = undefined;
+        return removed;
+      },
+    },
     listener: () => privateListenerController.status(),
     now: Date.now,
   });
@@ -1544,9 +1566,20 @@ export function wireRemote(deps: RemoteDependencies) {
     hubVisitors.forgetCopies();
   }, WEBHOOK_LOOK_MS).unref();
   setInterval(() => void spokeWebhooks.look().catch(() => undefined), WEBHOOK_LOOK_MS).unref();
+  // Asked at most once a minute: the entrance looks every few seconds.
+  let tailnetAddress: { readonly at: number; readonly address: string | undefined } | undefined;
   const publicEntrance = new PublicEntranceService({
     state: hubStateStore,
     exec: execTailscale,
+    tailnet: async () => {
+      if (tailnetAddress === undefined || Date.now() - tailnetAddress.at > 60_000) {
+        tailnetAddress = {
+          at: Date.now(),
+          address: await readTailscaleAddress({ exec: execTailscale, platform: process.platform }),
+        };
+      }
+      return { address: tailnetAddress.address, tls: tailnetTls };
+    },
     platform: process.platform,
     record: recordHubMembership,
     remoteAccessPaused: () => readRemoteAccessPaused(persistence.connection),

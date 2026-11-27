@@ -11,6 +11,7 @@ import {
   type WebhookRefusalKind,
   type WebhookSignatureScheme,
 } from "@octant/contracts";
+import { tailscaleAddressKey } from "./remoteAccessPolicy";
 import { redactSecretsAndPrivateKeys } from "./secretShapedTextPolicy";
 
 export type WebhookHeaders = Readonly<Record<string, string | undefined>>;
@@ -253,4 +254,73 @@ function redactPaths(text: string): string {
     .replace(UNIX_PATH, "$1[path]")
     .replace(WINDOWS_PATH, "$1[path]")
     .replace(NETWORK_SHARE, "$1[path]");
+}
+
+/** How many front addresses one entrance lists. */
+export const PUBLIC_FRONTS_MAX = 8;
+
+export type PublicFrontsReading =
+  | { readonly status: "read"; readonly fronts: ReadonlyArray<string> }
+  | {
+      readonly status: "refused";
+      readonly kind: "not-a-tailscale-address";
+      readonly address: string;
+    }
+  | { readonly status: "refused"; readonly kind: "too-many" };
+
+/**
+ * The addresses of the person's own proxy on another machine. Each is a
+ * Tailscale address literal: the entrance on the hub's Tailscale address
+ * answers nothing else, so a LAN, public or wildcard address, or a name that
+ * could resolve to one, is refused.
+ */
+export function readPublicFronts(addresses: ReadonlyArray<string>): PublicFrontsReading {
+  if (addresses.length > PUBLIC_FRONTS_MAX) return { status: "refused", kind: "too-many" };
+  const fronts: string[] = [];
+  for (const address of addresses) {
+    const written = address.trim().toLowerCase();
+    if (tailscaleAddressKey(written) === undefined) {
+      return { status: "refused", kind: "not-a-tailscale-address", address };
+    }
+    if (!fronts.includes(written)) fronts.push(written);
+  }
+  return { status: "read", fronts };
+}
+
+/** Whether a connection's peer is one of the listed fronts. */
+export function publicFrontAdmitted(
+  remoteAddress: string | undefined,
+  fronts: ReadonlyArray<string>,
+): boolean {
+  const key = remoteAddress === undefined ? undefined : tailscaleAddressKey(remoteAddress);
+  return key !== undefined && fronts.some((front) => tailscaleAddressKey(front) === key);
+}
+
+export type PublicEntranceBind =
+  | { readonly kind: "loopback" }
+  | { readonly kind: "tailnet"; readonly address: string }
+  | {
+      readonly kind: "refused";
+      readonly reason: "no-tailnet-address" | "no-tailnet-certificate";
+    };
+
+/**
+ * Where the entrance listens. With no front listed, on loopback for a front
+ * on the same machine. With fronts listed, on the hub's own Tailscale address
+ * with its Tailscale certificate, and nowhere else: an address that is not a
+ * Tailscale one (a wildcard, LAN or public address) refuses the bind rather
+ * than fall back to it.
+ */
+export function decidePublicEntranceBind(input: {
+  readonly fronts: ReadonlyArray<string>;
+  readonly tailnetAddress: string | undefined;
+  readonly certificate: boolean;
+}): PublicEntranceBind {
+  if (input.fronts.length === 0) return { kind: "loopback" };
+  const address = input.tailnetAddress?.trim().toLowerCase();
+  if (address === undefined || tailscaleAddressKey(address) === undefined) {
+    return { kind: "refused", reason: "no-tailnet-address" };
+  }
+  if (!input.certificate) return { kind: "refused", reason: "no-tailnet-certificate" };
+  return { kind: "tailnet", address };
 }

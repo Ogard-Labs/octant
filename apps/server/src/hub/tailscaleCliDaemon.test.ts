@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import {
   createTailscaleCliDaemon,
+  readTailscaleAddress,
   tailscaleBinaryCandidates,
   type TailscaleExec,
   type TailscaleExecResult,
@@ -173,5 +174,36 @@ describe("the Tailscale command-line daemon client", () => {
       kind: "https-not-enabled",
     });
     expect(files).toEqual(["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"]);
+  });
+});
+
+describe("the machine's own Tailscale address", () => {
+  const exec =
+    (result: TailscaleExecResult): TailscaleExec =>
+    async () =>
+      result;
+
+  it("reads the machine's own Tailscale IPv4 address from the status output", async () => {
+    const status = JSON.stringify({
+      Self: { DNSName: `${DOMAIN}.`, TailscaleIPs: ["fd7a:115c:a1e0::9", "100.90.1.2"] },
+    });
+    expect(await readTailscaleAddress({ exec: exec(ok(status)), platform: "linux" })).toBe(
+      "100.90.1.2",
+    );
+  });
+
+  it("knows no address when the tool cannot run or lists none", async () => {
+    expect(
+      await readTailscaleAddress({
+        exec: exec({ exitCode: null, stdout: "", stderr: "" }),
+        platform: "linux",
+      }),
+    ).toBeUndefined();
+    expect(
+      await readTailscaleAddress({
+        exec: exec(ok(JSON.stringify({ Self: {} }))),
+        platform: "linux",
+      }),
+    ).toBeUndefined();
   });
 });

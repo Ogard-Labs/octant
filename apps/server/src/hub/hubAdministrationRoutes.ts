@@ -31,6 +31,7 @@ import {
   decodeHubProvisionSwitchRequest,
   decodeHubPublicEntranceSwitchRequest,
   decodeHubPublicFunnelRequest,
+  decodeHubPublicFrontsRequest,
   decodeHubPublicStandbyServeRequest,
   decodeHubWebhookCreateRequest,
   decodeHubVisitorCommentRequest,
@@ -148,6 +149,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   publicFunnel: "/api/desktop/hub/public/funnel",
   /** This host's own choice, as a standby, to serve the entrance while it stands in for the hub. */
   publicStandby: "/api/desktop/hub/public/standby",
+  /** The Tailscale addresses of the person's own proxy on another machine; only a window on this host lists them. */
+  publicFronts: "/api/desktop/hub/public/fronts",
   /** This spoke's webhook endpoints: only a window on this host mints, rotates or removes one. */
   webhookCreate: "/api/desktop/hub/webhooks/create",
   webhookRotate: "/api/desktop/hub/webhooks/rotate",
@@ -501,6 +504,11 @@ export function createHubAdministrationRouteHandler(
               WINDOW_PRINCIPAL,
             ),
           );
+        }
+        case HUB_ADMINISTRATION_ROUTES.publicFronts: {
+          const value = decodeHubPublicFrontsRequest(parseJson(request, body.text));
+          if (options.publicEntrance === undefined) return failure("unavailable", 503);
+          return outcome(await options.publicEntrance.setFronts(value.addresses, WINDOW_PRINCIPAL));
         }
         case HUB_ADMINISTRATION_ROUTES.publicStandby: {
           const value = decodeHubPublicStandbyServeRequest(parseJson(request, body.text));

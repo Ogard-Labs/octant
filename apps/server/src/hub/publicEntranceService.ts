@@ -3,7 +3,10 @@
 // only while the switch is on, remote access is not paused, and the host is a
 // hub or a member of one. Pausing remote access closes it and turns Funnel off;
 // resuming reopens the listener but never turns Funnel back on, so Octant runs
-// a Tailscale command only for a person's own switch or pause.
+// a Tailscale command only for a person's own switch or pause. With front
+// addresses listed, for the person's own proxy on another machine, it binds
+// the hub's Tailscale address with its Tailscale certificate instead of
+// loopback, serves only those addresses, and never binds anything else.
 
 import {
   type AuditActingPrincipal,
@@ -12,6 +15,7 @@ import {
   type PublicForwardEnvelope,
   type PublicFunnelPort,
 } from "@octant/contracts";
+import { decidePublicEntranceBind, publicFrontAdmitted, readPublicFronts } from "@octant/domain";
 import type { HubStatePort, PublicEntranceState } from "./hubStateStore";
 import {
   startPublicEntrance,
@@ -40,7 +44,31 @@ export interface PublicEntranceServiceOptions {
   readonly forward?: (envelope: PublicForwardEnvelope) => Promise<PublicForwardAnswer | undefined>;
   /** Only tests replace the clock that spaces out a refused Funnel off. */
   readonly now?: () => number;
+  /**
+   * This host's own Tailscale address and the Tailscale certificate it holds,
+   * for a front on another machine. Absent, listed fronts never bind.
+   */
+  readonly tailnet?: () => Promise<{
+    readonly address: string | undefined;
+    readonly tls: TailnetTls | undefined;
+  }>;
 }
+
+type TailnetTls = { readonly cert: string; readonly key: string };
+type TailnetBind = NonNullable<Parameters<typeof startPublicEntrance>[0]["tailnet"]>;
+
+export type PublicFrontsOutcome =
+  | { readonly status: "changed"; readonly fronts: ReadonlyArray<string> }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "not-a-tailscale-address"
+        | "too-many"
+        | "funnel-on"
+        | "no-tailnet-address"
+        | "no-tailnet-certificate"
+        | "listener-failed";
+    };
 
 export type PublicEntranceSwitchOutcome =
   | { readonly status: "changed"; readonly enabled: boolean }
@@ -59,6 +87,7 @@ export type PublicFunnelOutcome =
       readonly status: "refused";
       readonly kind:
         | "entrance-off"
+        | "fronts-listed"
         | "remote-access-paused"
         | "port-shadows-private-listener"
         | "funnel-not-allowed"
@@ -72,8 +101,13 @@ export interface PublicEntranceStatus {
   readonly role: PublicEntranceHostRole;
   readonly paused: boolean;
   readonly port?: number;
-  /** Where the person points their own front: the loopback address on this machine. */
+  /**
+   * Where the person points their own front: the loopback address on this
+   * machine, or the hub's Tailscale address while fronts are listed.
+   */
   readonly address?: string;
+  /** The listed front addresses; empty for a front on this machine. */
+  readonly fronts: ReadonlyArray<string>;
   readonly funnel: { readonly enabled: boolean; readonly port?: PublicFunnelPort };
   /** This host's own choice, as a standby, to serve the entrance while it stands in. */
   readonly serveWhileStandingIn: boolean;
@@ -98,6 +132,10 @@ export class PublicEntranceService {
   #funnelOffOwed = false;
   /** Set once the host stops; no later look reopens the listener. */
   #closed = false;
+  /** Where the open listener is bound and whom it admits, so a changed list rebinds it. */
+  #bound: { readonly key: string; readonly origin: string } | undefined;
+  /** Why the last look could not bind for listed fronts. */
+  #bindRefusal: "no-tailnet-address" | "no-tailnet-certificate" | undefined;
 
   constructor(options: PublicEntranceServiceOptions) {
     this.#options = options;
@@ -107,12 +145,16 @@ export class PublicEntranceService {
   status(): PublicEntranceStatus {
     const saved = this.#saved();
     const port = this.#entrance?.port ?? saved?.port;
+    const fronts = saved?.fronts ?? [];
+    const origin = this.#bound?.origin ?? (fronts.length === 0 ? "http://127.0.0.1" : undefined);
     return {
       enabled: saved?.enabled === true,
       listening: this.#entrance !== undefined,
       role: this.#options.role(),
       paused: this.#options.remoteAccessPaused(),
-      ...(port === undefined ? {} : { port, address: `http://127.0.0.1:${port}` }),
+      ...(port === undefined ? {} : { port }),
+      ...(port === undefined || origin === undefined ? {} : { address: `${origin}:${port}` }),
+      fronts,
       funnel:
         saved?.funnel === undefined
           ? { enabled: false }
@@ -149,6 +191,7 @@ export class PublicEntranceService {
         enabled,
         ...(current?.port === undefined ? {} : { port: current.port }),
         ...(current?.funnel === undefined ? {} : { funnel: current.funnel }),
+        ...(current?.fronts === undefined ? {} : { fronts: current.fronts }),
       });
       this.#options.record({
         change: "public-entrance-switch-changed",
@@ -179,6 +222,9 @@ export class PublicEntranceService {
         this.#options.record({ change: "public-funnel-changed", actingPrincipal: principal });
         return { status: "changed", enabled: false };
       }
+      // Funnel carries the internet to loopback, where nothing listens while
+      // the entrance is bound for a front on another machine.
+      if ((saved?.fronts ?? []).length > 0) return { status: "refused", kind: "fronts-listed" };
       if (saved?.enabled !== true) return { status: "refused", kind: "entrance-off" };
       if (this.#options.remoteAccessPaused()) {
         return { status: "refused", kind: "remote-access-paused" };
@@ -204,6 +250,36 @@ export class PublicEntranceService {
       this.#save({ ...this.#savedOrOff(), funnel: { port } });
       this.#options.record({ change: "public-funnel-changed", actingPrincipal: principal });
       return { status: "changed", enabled: true, port };
+    });
+  }
+
+  /**
+   * Lists the Tailscale addresses of the person's own proxy on another
+   * machine; an empty list goes back to loopback. A list the host cannot bind
+   * for while the entrance is on is refused, and the entrance keeps the bind
+   * it had.
+   */
+  setFronts(
+    addresses: ReadonlyArray<string>,
+    principal: AuditActingPrincipal,
+  ): Promise<PublicFrontsOutcome> {
+    return this.#serially(async (): Promise<PublicFrontsOutcome> => {
+      const read = readPublicFronts(addresses);
+      if (read.status === "refused") return { status: "refused", kind: read.kind };
+      const previous = this.#savedOrOff();
+      if (read.fronts.length > 0 && previous.funnel !== undefined) {
+        return { status: "refused", kind: "funnel-on" };
+      }
+      this.#save({ ...previous, fronts: read.fronts });
+      const opened = await this.#reconcile();
+      if (!opened && this.#entranceShouldOpen()) {
+        const kind = this.#bindRefusal ?? "listener-failed";
+        this.#save({ ...this.#savedOrOff(), fronts: previous.fronts });
+        await this.#reconcile();
+        return { status: "refused", kind };
+      }
+      this.#options.record({ change: "public-fronts-changed", actingPrincipal: principal });
+      return { status: "changed", fronts: read.fronts };
     });
   }
 
@@ -259,15 +335,17 @@ export class PublicEntranceService {
         this.#funnelOffRetryAt = this.#now() + FUNNEL_OFF_RETRY_MS;
       }
     }
-    if (!open || this.#funnelOffOwed) {
+    const bind = open && !this.#funnelOffOwed ? await this.#bindFor(saved) : undefined;
+    if (bind === undefined || this.#bound?.key !== bind.key) {
       const entrance = this.#entrance;
       this.#entrance = undefined;
+      this.#bound = undefined;
       await entrance?.close();
-      return false;
     }
+    if (bind === undefined || !open) return false;
     if (this.#entrance !== undefined) return true;
     try {
-      this.#entrance = await this.#start(saved.port ?? 0);
+      this.#entrance = await this.#start(saved.port ?? 0, bind.tailnet);
     } catch {
       // The saved port is taken. Funnel still sends the internet to it, and so
       // to whatever program holds it now, outside the closed route table; the
@@ -285,24 +363,73 @@ export class PublicEntranceService {
         this.#save({ ...this.#savedOrOff(), funnel: undefined });
       }
       try {
-        this.#entrance = await this.#start(0);
+        this.#entrance = await this.#start(0, bind.tailnet);
       } catch {
         return false;
       }
     }
+    this.#bound = { key: bind.key, origin: bind.origin };
     if (saved.port !== this.#entrance.port) {
       this.#save({ ...this.#savedOrOff(), port: this.#entrance.port });
     }
     return true;
   }
 
-  #start(port: number): Promise<PublicEntrance> {
+  /**
+   * Where the listener goes: loopback with no front listed, or the hub's own
+   * Tailscale address with its certificate. Undefined when listed fronts
+   * cannot be bound for; there is no fallback to another address.
+   */
+  async #bindFor(
+    saved: PublicEntranceState,
+  ): Promise<
+    { readonly key: string; readonly origin: string; readonly tailnet?: TailnetBind } | undefined
+  > {
+    const fronts = saved.fronts ?? [];
+    this.#bindRefusal = undefined;
+    if (fronts.length === 0) return { key: "loopback", origin: "http://127.0.0.1" };
+    const tailnet = await this.#options.tailnet?.();
+    const tls = tailnet?.tls;
+    const decision = decidePublicEntranceBind({
+      fronts,
+      tailnetAddress: tailnet?.address,
+      certificate: tls !== undefined,
+    });
+    if (decision.kind !== "tailnet" || tls === undefined) {
+      this.#bindRefusal = decision.kind === "refused" ? decision.reason : "no-tailnet-certificate";
+      return undefined;
+    }
+    const host = decision.address.includes(":") ? `[${decision.address}]` : decision.address;
+    return {
+      // A renewed certificate rebinds too: a TLS server keeps the one it started with.
+      key: `tailnet|${decision.address}|${fronts.join(",")}|${tls.cert}`,
+      origin: `https://${host}`,
+      tailnet: {
+        address: decision.address,
+        tls,
+        admits: (remoteAddress) => publicFrontAdmitted(remoteAddress, fronts),
+      },
+    };
+  }
+
+  #start(port: number, tailnet: TailnetBind | undefined): Promise<PublicEntrance> {
     return startPublicEntrance({
       port,
       role: () => this.#entranceRole(),
       handlers: () => this.#options.handlers?.() ?? {},
       ...(this.#options.forward === undefined ? {} : { forward: this.#options.forward }),
+      ...(tailnet === undefined ? {} : { tailnet }),
     });
+  }
+
+  /** Whether the switch, the pause and the role want the entrance open now. */
+  #entranceShouldOpen(): boolean {
+    return (
+      !this.#closed &&
+      this.#saved()?.enabled === true &&
+      !this.#options.remoteAccessPaused() &&
+      this.#options.role() !== "none"
+    );
   }
 
   /** Read on every request, so a pause or a lost role closes the door before the listener does. */
@@ -328,6 +455,7 @@ export class PublicEntranceService {
     readonly enabled: boolean;
     readonly port?: number | undefined;
     readonly funnel?: PublicEntranceState["funnel"] | undefined;
+    readonly fronts?: PublicEntranceState["fronts"] | undefined;
   }): void {
     const state = this.#options.state.load();
     const serve = state.publicEntrance?.serveWhileStandingIn;
@@ -338,6 +466,7 @@ export class PublicEntranceService {
         ...(next.port === undefined ? {} : { port: next.port }),
         ...(next.funnel === undefined ? {} : { funnel: next.funnel }),
         ...(serve === undefined ? {} : { serveWhileStandingIn: serve }),
+        ...(next.fronts === undefined || next.fronts.length === 0 ? {} : { fronts: next.fronts }),
       },
     });
   }

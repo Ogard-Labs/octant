@@ -431,6 +431,14 @@ export const PublicEntranceState = Schema.Struct({
   funnel: Schema.optional(Schema.Struct({ port: PublicFunnelPort }).annotations(strict)),
   /** A standby's own choice to serve the entrance while it stands in for the hub. */
   serveWhileStandingIn: Schema.optional(Schema.Boolean),
+  /**
+   * The Tailscale addresses of the person's own proxy on another machine.
+   * While any is listed, the entrance binds the hub's Tailscale address and
+   * serves only them.
+   */
+  fronts: Schema.optional(
+    Schema.Array(Schema.String.pipe(Schema.maxLength(64))).pipe(Schema.maxItems(8)),
+  ),
 }).annotations(strict);
 export type PublicEntranceState = typeof PublicEntranceState.Type;
 

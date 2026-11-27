@@ -69,6 +69,15 @@ export type HubCliCommand =
   /** As a standby, serve the entrance while standing in for the hub, or stop. */
   | { readonly action: "public"; readonly mode: "standby"; readonly serve: boolean }
   /**
+   * The Tailscale addresses of the person's own proxy on another machine; the
+   * entrance then binds this computer's Tailscale address. Empty clears them.
+   */
+  | {
+      readonly action: "public";
+      readonly mode: "fronts";
+      readonly addresses: ReadonlyArray<string>;
+    }
+  /**
    * This spoke's webhook endpoints; a new or rotated endpoint's secret is
    * printed once. Stripe mints its own secret, which `secret` reads from
    * standard input.
@@ -277,6 +286,16 @@ export function resolveHubCliCommand(
     }
     case "public": {
       const [mode, choice] = rest;
+      if (mode === "fronts") {
+        if (!only("clear") || !isSwitch(flags.clear)) return undefined;
+        const addresses = rest.slice(1);
+        if (flags.clear === true) {
+          return addresses.length === 0 ? { action, mode, addresses: [] } : undefined;
+        }
+        return addresses.length > 0 && addresses.length <= 8
+          ? { action, mode, addresses }
+          : undefined;
+      }
       if (mode === "standby") {
         return rest.length === 2 && only() && (choice === "on" || choice === "off")
           ? { action, mode, serve: choice === "on" }
@@ -662,6 +681,24 @@ async function runPublic(
   command: Extract<HubCliCommand, { action: "public" }>,
 ): Promise<number> {
   if (command.mode === "status") return await printPublicStatus(input);
+  if (command.mode === "fronts") {
+    const response = await post(input, "/api/desktop/hub/public/fronts", {
+      addresses: command.addresses,
+    });
+    if (!isOk(response, "changed")) {
+      return refusal(
+        input,
+        response,
+        "Octant refused those fronts. Each must be a Tailscale address of your own proxy, and Funnel must be off.",
+      );
+    }
+    input.stdout.write(
+      command.addresses.length === 0
+        ? "No front on another machine is listed; the entrance listens on this computer only.\n"
+        : "Only these addresses reach the entrance now. Point your proxy at this computer's Tailscale address:\n",
+    );
+    return await printPublicStatus(input);
+  }
   if (command.mode === "standby") {
     const response = await post(input, "/api/desktop/hub/public/standby", {
       enabled: command.serve,
@@ -901,6 +938,7 @@ async function printPublicStatus(input: Input): Promise<number> {
         field(entrance, "listening") === true ? ", listening" : ""
       }${field(entrance, "paused") === true ? " (remote access is paused)" : ""}`,
       ...(typeof address === "string" ? [`  Address on this computer  ${address}`] : []),
+      ...frontLines(field(entrance, "fronts")),
       `  Funnel  ${
         field(funnel, "enabled") === true ? `on, port ${String(field(funnel, "port"))}` : "off"
       }`,
@@ -909,6 +947,12 @@ async function printPublicStatus(input: Input): Promise<number> {
     ].join("\n") + "\n",
   );
   return 0;
+}
+
+/** The listed front addresses on another machine, when there are any. */
+function frontLines(value: unknown): ReadonlyArray<string> {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  return [`  Fronts on another machine  ${value.map(String).join(", ")}`];
 }
 
 /** The standbys' public URLs, for senders that accept a fallback address. */

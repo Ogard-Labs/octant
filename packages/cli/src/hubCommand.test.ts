@@ -993,6 +993,61 @@ describe("octant hub push", () => {
 });
 
 describe("octant hub public", () => {
+  it("reads the fronts on another machine, and clearing them", () => {
+    expect(
+      resolveHubCliCommand(["public", "fronts", "100.101.102.103", "fd7a:115c:a1e0::1"], {}),
+    ).toEqual({
+      action: "public",
+      mode: "fronts",
+      addresses: ["100.101.102.103", "fd7a:115c:a1e0::1"],
+    });
+    expect(resolveHubCliCommand(["public", "fronts"], { clear: true })).toEqual({
+      action: "public",
+      mode: "fronts",
+      addresses: [],
+    });
+    expect(resolveHubCliCommand(["public", "fronts"], {})).toBeUndefined();
+    expect(
+      resolveHubCliCommand(["public", "fronts", "100.101.102.103"], { clear: true }),
+    ).toBeUndefined();
+  });
+
+  it("lists the fronts and says where to point them", async () => {
+    const host = await fixture((request) =>
+      request.path === "/api/desktop/hub/public/fronts"
+        ? ok({ status: "changed", fronts: ["100.101.102.103"] })
+        : ok({
+            publicEntrance: {
+              enabled: true,
+              listening: true,
+              paused: false,
+              address: "https://100.90.1.2:41000",
+              fronts: ["100.101.102.103"],
+              funnel: { enabled: false },
+            },
+          }),
+    );
+    expect(
+      await host.run({ action: "public", mode: "fronts", addresses: ["100.101.102.103"] }),
+    ).toBe(0);
+    expect(host.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/public/fronts",
+      body: { addresses: ["100.101.102.103"] },
+    });
+    expect(host.text()).toContain("https://100.90.1.2:41000");
+    expect(host.text()).toContain("100.101.102.103");
+  });
+
+  it("says why a front list was refused", async () => {
+    const host = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "not-a-tailscale-address" },
+    }));
+    expect(await host.run({ action: "public", mode: "fronts", addresses: ["192.168.1.20"] })).toBe(
+      1,
+    );
+  });
+
   it("reads on, off and status with a Funnel port or the person's own front", () => {
     expect(resolveHubCliCommand(["public", "on"], {})).toEqual({
       action: "public",

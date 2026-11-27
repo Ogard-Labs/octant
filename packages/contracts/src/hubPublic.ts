@@ -208,6 +208,17 @@ export const HubPublicFunnelRequest = Schema.Struct({
 export const decodeHubPublicFunnelRequest = Schema.decodeUnknownSync(HubPublicFunnelRequest);
 
 /**
+ * The Tailscale addresses of the person's own proxy on another machine. While
+ * any is listed, the entrance binds the hub's Tailscale address with its
+ * Tailscale certificate and serves only them; an empty list goes back to
+ * loopback. The host refuses any address that is not a Tailscale one.
+ */
+export const HubPublicFrontsRequest = Schema.Struct({
+  addresses: Schema.Array(Schema.String.pipe(Schema.maxLength(64))).pipe(Schema.maxItems(8)),
+}).annotations(strict);
+export const decodeHubPublicFrontsRequest = Schema.decodeUnknownSync(HubPublicFrontsRequest);
+
+/**
  * A standby's own choice to serve the public entrance while it stands in for
  * the hub (decision H30). Off by default; without it a standing-in standby's
  * entrance keeps forwarding and serves nothing itself.

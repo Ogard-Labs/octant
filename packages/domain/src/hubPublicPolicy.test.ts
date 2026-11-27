@@ -1,8 +1,11 @@
 import type { HubMemberId, VisitorLinkId } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  decidePublicEntranceBind,
   decideVisitorLink,
   decideWebhookDelivery,
+  publicFrontAdmitted,
+  readPublicFronts,
   readWebhookHeaders,
   redactForVisitor,
   stripeEventId,
@@ -353,5 +356,73 @@ describe("what a visitor reads", () => {
     expect(redactForVisitor("https://example.com,/home/alice/notes.md")).toBe(
       "https://example.com,[path]",
     );
+  });
+});
+
+describe("a front on another machine", () => {
+  it("takes only Tailscale addresses as front addresses", () => {
+    expect(readPublicFronts([" 100.101.102.103 ", "FD7A:115C:A1E0::1"])).toEqual({
+      status: "read",
+      fronts: ["100.101.102.103", "fd7a:115c:a1e0::1"],
+    });
+    for (const address of [
+      "192.168.1.20",
+      "10.0.0.5",
+      "8.8.8.8",
+      "0.0.0.0",
+      "::",
+      "127.0.0.1",
+      "vps.tail1234.ts.net",
+      "100.064.1.1",
+    ]) {
+      expect(readPublicFronts([address])).toEqual({
+        status: "refused",
+        kind: "not-a-tailscale-address",
+        address,
+      });
+    }
+    expect(readPublicFronts(Array.from({ length: 9 }, (_, index) => `100.64.0.${index}`))).toEqual({
+      status: "refused",
+      kind: "too-many",
+    });
+  });
+
+  it("admits a connection only from a listed front, in whichever form the socket reports it", () => {
+    const fronts = ["100.101.102.103", "fd7a:115c:a1e0::1"];
+    expect(publicFrontAdmitted("100.101.102.103", fronts)).toBe(true);
+    expect(publicFrontAdmitted("::ffff:100.101.102.103", fronts)).toBe(true);
+    expect(publicFrontAdmitted("fd7a:115c:a1e0:0:0:0:0:1", fronts)).toBe(true);
+    expect(publicFrontAdmitted("100.101.102.104", fronts)).toBe(false);
+    expect(publicFrontAdmitted("127.0.0.1", fronts)).toBe(false);
+    expect(publicFrontAdmitted(undefined, fronts)).toBe(false);
+  });
+
+  it("binds the hub's Tailscale address with its certificate, and never a wildcard, LAN or public one", () => {
+    expect(
+      decidePublicEntranceBind({ fronts: [], tailnetAddress: undefined, certificate: false }),
+    ).toEqual({ kind: "loopback" });
+    expect(
+      decidePublicEntranceBind({
+        fronts: ["100.101.102.103"],
+        tailnetAddress: "100.90.1.2",
+        certificate: true,
+      }),
+    ).toEqual({ kind: "tailnet", address: "100.90.1.2" });
+    for (const address of ["0.0.0.0", "::", "192.168.1.20", "203.0.113.9", undefined]) {
+      expect(
+        decidePublicEntranceBind({
+          fronts: ["100.101.102.103"],
+          tailnetAddress: address,
+          certificate: true,
+        }),
+      ).toEqual({ kind: "refused", reason: "no-tailnet-address" });
+    }
+    expect(
+      decidePublicEntranceBind({
+        fronts: ["100.101.102.103"],
+        tailnetAddress: "100.90.1.2",
+        certificate: false,
+      }),
+    ).toEqual({ kind: "refused", reason: "no-tailnet-certificate" });
   });
 });
