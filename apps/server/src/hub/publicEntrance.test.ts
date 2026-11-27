@@ -1,5 +1,6 @@
 import { request as httpRequest } from "node:http";
 import { get as httpsGet } from "node:https";
+import { connect } from "node:net";
 import type { Duplex } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { DIRECT_PUSH_GATEWAY_ROUTES } from "./directPushRoutes";
@@ -460,5 +461,37 @@ describe("a front on another machine", () => {
   it("a connection from a listed front is served over TLS", async () => {
     const entrance = await bootTailnet((remoteAddress) => remoteAddress === "127.0.0.1");
     expect(await health(entrance.port)).toBe(200);
+  });
+
+  it("closing the entrance ends a listed front's connection that never finishes TLS", async () => {
+    const admitted = Promise.withResolvers<void>();
+    const entrance = await startPublicEntrance({
+      port: 0,
+      role: () => "serve",
+      handlers: {},
+      tailnet: {
+        address: "127.0.0.1",
+        tls: { cert: PRIVATE_LISTENER_TEST_CERT, key: PRIVATE_LISTENER_TEST_KEY },
+        admits: () => {
+          admitted.resolve();
+          return true;
+        },
+      },
+    });
+    // TCP only: no TLS byte ever follows.
+    const front = connect({ host: "127.0.0.1", port: entrance.port });
+    front.on("error", () => undefined);
+    const ended = new Promise<void>((done) => front.on("close", () => done()));
+    try {
+      await admitted.promise;
+      const closed = await Promise.race([
+        entrance.close().then(() => "closed" as const),
+        new Promise<"stalled">((resolve) => setTimeout(() => resolve("stalled"), 2_000)),
+      ]);
+      expect(closed).toBe("closed");
+      await ended;
+    } finally {
+      front.destroy();
+    }
   });
 });

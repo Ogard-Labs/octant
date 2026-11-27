@@ -465,11 +465,20 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
           },
           onRequest,
         );
+  // A TLS server counts a socket still handshaking as open, so close() waits
+  // for it, but closeAllConnections reaches only those that got to HTTP. A
+  // listed front that stalls there would hold shutdown and a front change.
+  const tlsSockets = new Set<Socket>();
   if (tailnet !== undefined) {
     // Judged on the TCP connection, before any TLS or HTTP byte is read, so an
     // unlisted machine in the tailnet learns nothing about what answers here.
     server.prependListener("connection", (socket: Socket) => {
-      if (!tailnet.admits(socket.remoteAddress)) socket.destroy();
+      if (!tailnet.admits(socket.remoteAddress)) {
+        socket.destroy();
+        return;
+      }
+      tlsSockets.add(socket);
+      socket.once("close", () => tlsSockets.delete(socket));
     });
   }
   server.maxConnections = MAX_CONNECTIONS;
@@ -547,6 +556,7 @@ export async function startPublicEntrance(options: PublicEntranceOptions): Promi
         server.close(() => resolve());
         server.closeAllConnections();
         for (const socket of relaySockets) socket.destroy();
+        for (const socket of tlsSockets) socket.destroy();
       }),
   };
 }
