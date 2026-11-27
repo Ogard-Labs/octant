@@ -154,7 +154,11 @@ async function listIssues(
   } catch {
     return refused("The Linear issue list request is invalid.");
   }
-  const filter = buildIssueFilter(request.search, request.filter);
+  const exact = request.identifier === undefined ? undefined : identifierClause(request.identifier);
+  if (request.identifier !== undefined && exact === undefined) {
+    return refused("The Linear issue list request is invalid.");
+  }
+  const filter = buildIssueFilter(request.search, exact, request.filter);
   const variables: Record<string, unknown> = {
     first: request.pageSize ?? DEFAULT_PAGE_SIZE,
   };
@@ -196,16 +200,12 @@ async function getIssueByIdentifier(
   } catch {
     return refused("The Linear issue request is invalid.");
   }
-  const match = IDENTIFIER_PATTERN.exec(request.identifier.trim().toUpperCase());
-  const teamKey = match?.[1];
-  const number = match === null ? Number.NaN : Number(match[2]);
-  if (teamKey === undefined || !Number.isInteger(number)) {
-    return refused("The Linear issue request is invalid.");
-  }
+  const named = parseIdentifier(request.identifier);
+  if (named === undefined) return refused("The Linear issue request is invalid.");
   const result = await linearGraphql(
     hostPort,
     ISSUE_BY_IDENTIFIER_QUERY,
-    { teamKey, number },
+    { teamKey: named.teamKey, number: named.number },
     signal,
   );
   if (result.kind !== "ok") return graphqlFailure(result);
@@ -225,25 +225,34 @@ async function listFilters(
   return { kind: "ok", value: options };
 }
 
+function parseIdentifier(
+  value: string,
+): { readonly teamKey: string; readonly number: number } | undefined {
+  const match = IDENTIFIER_PATTERN.exec(value.trim().toUpperCase());
+  const teamKey = match?.[1];
+  const number = match === null ? Number.NaN : Number(match[2]);
+  return teamKey === undefined || !Number.isInteger(number) ? undefined : { teamKey, number };
+}
+
+/** The filter that only the issue a public key names can pass. */
+function identifierClause(value: string): Record<string, unknown> | undefined {
+  const named = parseIdentifier(value);
+  return named === undefined
+    ? undefined
+    : { number: { eq: named.number }, team: { key: { eqIgnoreCase: named.teamKey } } };
+}
+
 function buildIssueFilter(
   search: string | undefined,
+  exact: Record<string, unknown> | undefined,
   filter: LinearIssueListFilter | undefined,
 ): Record<string, unknown> | undefined {
   const clauses: Record<string, unknown>[] = [];
+  if (exact !== undefined) clauses.push(exact);
   if (search !== undefined) {
-    const identifier = IDENTIFIER_PATTERN.exec(search.trim().toUpperCase());
-    const searchClauses: Record<string, unknown>[] = [{ title: { containsIgnoreCase: search } }];
-    if (identifier !== null) {
-      const teamKey = identifier[1];
-      const number = Number(identifier[2]);
-      if (teamKey !== undefined && Number.isInteger(number)) {
-        searchClauses.push({
-          number: { eq: number },
-          team: { key: { eqIgnoreCase: teamKey } },
-        });
-      }
-    }
-    clauses.push({ or: searchClauses });
+    const named = identifierClause(search);
+    const title = { title: { containsIgnoreCase: search } };
+    clauses.push({ or: named === undefined ? [title] : [title, named] });
   }
   if (filter?.teamId !== undefined) clauses.push({ team: { id: { eq: filter.teamId } } });
   if (filter?.stateId !== undefined) clauses.push({ state: { id: { eq: filter.stateId } } });

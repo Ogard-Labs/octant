@@ -91,7 +91,11 @@ export function createThreadMentionRouteHandler(dependencies: ThreadMentionRoute
 
     if (trackers !== undefined) {
       try {
-        const candidates = await trackers(decodeTrackerMentionSearchRequest(body), { windowId });
+        // The renderer drops a search its typing has passed; the trackers are told.
+        const candidates = await trackers(decodeTrackerMentionSearchRequest(body), {
+          windowId,
+          signal: request.signal,
+        });
         return json(decodeTrackerMentionSearchResponse({ candidates }), 200, origin);
       } catch {
         return failure("Pull request and issue search is invalid.", 400, origin);

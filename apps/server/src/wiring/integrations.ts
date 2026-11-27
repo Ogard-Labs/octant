@@ -12,7 +12,7 @@ import {
   THREAD_RETENTION_EVENT_NAMES,
 } from "@octant/contracts";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { GhAuthenticationPort } from "../github/ghAuthenticationPort";
 import { GhHomeActivityPort } from "../github/ghHomeActivityPort";
 import { GhRepositoryCataloguePort } from "../github/ghRepositoryCataloguePort";
@@ -22,12 +22,7 @@ import { GithubIssueContextService } from "../github/githubIssueContextService";
 import { LinearIssueContextService } from "../plugins/linear/linearIssueContextService";
 import { LinearReadToolService } from "../plugins/linear/linearReadToolService";
 import { linearRoutineEventSources } from "../plugins/linear/linearRoutineEventSources";
-import { GithubRepositoryName, GithubRepositoryOwner } from "@octant/contracts";
-import {
-  decodeLinearIssueListPage,
-  LINEAR_ISSUE_GET_OPERATION,
-  LINEAR_ISSUE_LIST_OPERATION,
-} from "@octant/contracts/linear-issues";
+import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "../github/githubReadToolService";
 import { GhIssueWritePort } from "../github/ghIssueWritePort";
 import { ThreadLinkedIssueStore } from "../trackerIssues/threadLinkedIssueStore";
@@ -37,6 +32,7 @@ import {
   resolveLinearIdentifier,
   type LinearOperationRunner,
 } from "../trackerIssues/trackerIssuePorts";
+import { githubTrackerSource, linearTrackerSource } from "../trackerMentions/trackerMentionSources";
 import { TerminalSessionImports } from "../terminalSessions/terminalSessionImports";
 import { createTerminalSessionRouteHandler } from "../terminalSessionRoutes";
 import {
@@ -596,60 +592,11 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     // What the composer's `#` list searches: the person's own reads through the
     // connections this host already holds. Without one, nothing is asked.
     const trackerMentionTrackers = {
-      github: {
+      github: githubTrackerSource({
+        catalogue: githubCatalogueService,
         connected: githubIntegrationIsEffective,
-        search: async (
-          input: { readonly owner: string; readonly name: string; readonly text: string },
-          signal: AbortSignal,
-        ) => {
-          const response = await githubCatalogueService.read(
-            {
-              kind: "search",
-              owner: Schema.decodeUnknownSync(GithubRepositoryOwner)(input.owner),
-              name: Schema.decodeUnknownSync(GithubRepositoryName)(input.name),
-              query: input.text,
-              pageSize: 10,
-              state: "all",
-              match: "title",
-            },
-            signal,
-          );
-          return response.kind === "search" ? response.page.rows : [];
-        },
-        item: async (
-          input: { readonly owner: string; readonly name: string; readonly number: number },
-          signal: AbortSignal,
-        ) => {
-          const response = await githubCatalogueService.read(
-            {
-              kind: "item",
-              owner: Schema.decodeUnknownSync(GithubRepositoryOwner)(input.owner),
-              name: Schema.decodeUnknownSync(GithubRepositoryName)(input.name),
-              number: input.number,
-            },
-            signal,
-          );
-          return response.kind === "item" ? response.row : undefined;
-        },
-      },
-      linear: {
-        connected: linearConnected,
-        list: async (
-          input: { readonly search: string; readonly teamId?: string },
-          signal: AbortSignal,
-        ) => {
-          const result = await runLinearOperation(
-            LINEAR_ISSUE_LIST_OPERATION,
-            {
-              search: input.search,
-              pageSize: 10,
-              ...(input.teamId === undefined ? {} : { filter: { teamId: input.teamId } }),
-            },
-            signal,
-          );
-          return result.kind === "ok" ? decodeLinearIssueListPage(result.value).rows : [];
-        },
-      },
+      }),
+      linear: linearTrackerSource({ run: runLinearOperation, connected: linearConnected }),
     };
     return {
       agentMessageProjection,

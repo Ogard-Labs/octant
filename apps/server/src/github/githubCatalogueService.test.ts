@@ -239,6 +239,24 @@ describe("GithubCatalogueService", () => {
     expect(port.listAssignedWork).not.toHaveBeenCalled();
   });
 
+  it("does not treat a read its caller abandoned as a failing GitHub", async () => {
+    const port = fakePort();
+    const abandoned = new AbortController();
+    port.listRepositories.mockImplementationOnce(async () => {
+      abandoned.abort();
+      return { kind: "unavailable" as const } as never;
+    });
+    const cacheStats = new CacheStatsProjection({ now: () => 1_000 });
+    const { service: catalogue } = service({ port, cacheStats });
+
+    await catalogue.read({ kind: "repositories", pageSize: 30 }, abandoned.signal);
+
+    expect(cacheStats.holdsUnattendedRefresh("github-catalogue")).toBe(false);
+    await expect(
+      catalogue.read({ kind: "repositories", pageSize: 30 }, signal()),
+    ).resolves.toMatchObject({ kind: "repositories" });
+  });
+
   it("serves a cached page while fresh instead of refetching", async () => {
     let clock = 0;
     const { service: catalogue, port } = service({ now: () => clock });

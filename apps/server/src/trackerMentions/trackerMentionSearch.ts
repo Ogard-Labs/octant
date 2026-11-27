@@ -57,8 +57,11 @@ export interface TrackerMentionSearchSources {
   readonly linear: {
     /** Whether Linear is on and a connection is stored, answered without reaching Linear. */
     readonly connected: () => boolean;
+    /** A key is asked for as itself; other text is matched against titles. */
     readonly list: (
-      input: { readonly search: string; readonly teamId?: string },
+      input: ({ readonly identifier: string } | { readonly search: string }) & {
+        readonly teamId?: string;
+      },
       signal: AbortSignal,
     ) => Promise<ReadonlyArray<LinearIssueRow>>;
   };
@@ -66,7 +69,11 @@ export interface TrackerMentionSearchSources {
 
 export type TrackerMentionSearch = (
   request: TrackerMentionSearchRequest,
-  context: { readonly windowId: WindowId },
+  context: {
+    readonly windowId: WindowId;
+    /** Aborted when whoever asked no longer wants the rows. */
+    readonly signal?: AbortSignal;
+  },
 ) => Promise<ReadonlyArray<TrackerMentionCandidate>>;
 
 /**
@@ -93,15 +100,16 @@ export function createTrackerMentionSearch(
     return projectId === undefined ? {} : await sources.windowProject(windowId, projectId);
   }
 
-  return async (request, { windowId }) => {
+  return async (request, { windowId, signal: abandoned }) => {
     const query = parseTrackerMentionQuery(request.query);
     if (query === undefined) return [];
     const githubConnected = query.kind !== "key" && sources.github.connected();
     const linearConnected = query.kind !== "number" && sources.linear.connected();
     if (!githubConnected && !linearConnected) return [];
     const project = await scopeOf(request, windowId);
-    if (project === undefined) return [];
-    const signal = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+    if (project === undefined || abandoned?.aborted === true) return [];
+    const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+    const signal = abandoned === undefined ? timeout : AbortSignal.any([abandoned, timeout]);
 
     const fromGithub = async () => {
       const repository = project.repository;
@@ -127,28 +135,25 @@ export function createTrackerMentionSearch(
     };
     const fromLinear = async () => {
       if (!linearConnected) return [];
-      const search = query.kind === "key" ? query.key : query.text;
       const rows = await sources.linear.list(
         {
-          search,
+          ...(query.kind === "key" ? { identifier: query.key } : { search: query.text }),
           ...(project.linearTeamId === undefined ? {} : { teamId: project.linearTeamId }),
         },
         signal,
       );
-      return rows
-        .filter((row) => query.kind !== "key" || row.identifier === query.key)
-        .flatMap((row) =>
-          shown({
-            kind: "linear-issue",
-            source: "linear",
-            id: row.identifier,
-            url: row.url,
-            title: row.title,
-            state: row.state.name,
-            container: row.teamKey ?? row.identifier.slice(0, row.identifier.lastIndexOf("-")),
-            ...(row.assignee === undefined ? {} : { person: row.assignee }),
-          }),
-        );
+      return rows.flatMap((row) =>
+        shown({
+          kind: "linear-issue",
+          source: "linear",
+          id: row.identifier,
+          url: row.url,
+          title: row.title,
+          state: row.state.name,
+          container: row.teamKey ?? row.identifier.slice(0, row.identifier.lastIndexOf("-")),
+          ...(row.assignee === undefined ? {} : { person: row.assignee }),
+        }),
+      );
     };
     const found = await Promise.all(
       [fromGithub, fromLinear].map(async (read) => {

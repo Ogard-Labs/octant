@@ -223,7 +223,32 @@ describe("Pull request and issue search of the # list", () => {
 
     expect(response?.status).toBe(200);
     await expect(response?.json()).resolves.toEqual({ candidates: [candidate] });
-    expect(trackers).toHaveBeenCalledWith({ query: "login" }, { windowId });
+    expect(trackers).toHaveBeenCalledWith(
+      { query: "login" },
+      { windowId, signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("tells the search when the renderer abandons the request", async () => {
+    const { handler, trackers } = trackerRoute();
+    const abandoned = new AbortController();
+    let seen: AbortSignal | undefined;
+    trackers.mockImplementation(async (...args: unknown[]) => {
+      seen = (args[1] as { readonly signal?: AbortSignal }).signal;
+      abandoned.abort();
+      return [];
+    });
+
+    await handler(
+      new Request(trackersUrl, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ query: "login" }),
+        signal: abandoned.signal,
+      }),
+    );
+
+    expect(seen?.aborted).toBe(true);
   });
 
   it("refuses a request with no window capability, an outside origin, or an invented principal", async () => {

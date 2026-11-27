@@ -106,6 +106,30 @@ describe("linear issue browse", () => {
     expect(body.variables).toEqual({ teamKey: "OCT", number: 188 });
   });
 
+  it("lists exactly the issue an identifier names, within the team, whatever titles hold it", async () => {
+    const { port, fetch } = hostPort();
+    const result = await executeLinearIssueOperation(port, "list-issues", {
+      identifier: "OCT-188",
+      filter: { teamId: "team-oct" },
+    });
+    expect(result).toMatchObject({ kind: "ok" });
+    const request = fetch.mock.calls[0]?.[0];
+    if (request === undefined) throw new Error("Linear GraphQL was never fetched");
+    const body = JSON.parse(await request.text()) as {
+      query?: string;
+      variables?: { filter?: unknown };
+    };
+    // No title clause: recently updated titles cannot take the issue's place in the page.
+    expect(body.variables?.filter).toEqual({
+      and: [
+        { number: { eq: 188 }, team: { key: { eqIgnoreCase: "OCT" } } },
+        { team: { id: { eq: "team-oct" } } },
+      ],
+    });
+    expect(body.query).not.toContain("comments");
+    expect(body.query).not.toContain("description");
+  });
+
   it("translates stateCategory into workflow state type filters", async () => {
     const { port, fetch } = hostPort();
     const result = await executeLinearIssueOperation(port, "list-issues", {

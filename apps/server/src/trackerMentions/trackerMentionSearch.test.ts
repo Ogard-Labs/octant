@@ -31,12 +31,12 @@ const linearRow = {
 function sources(overrides: Partial<TrackerMentionSearchSources> = {}) {
   const github = {
     connected: vi.fn(() => true),
-    search: vi.fn(async () => [pullRow]),
+    search: vi.fn(async (_input: unknown, _signal: AbortSignal) => [pullRow]),
     item: vi.fn(async () => pullRow),
   };
   const linear = {
     connected: vi.fn(() => true),
-    list: vi.fn(async () => [linearRow]),
+    list: vi.fn(async (_input: unknown, _signal: AbortSignal) => [linearRow]),
   };
   const all: TrackerMentionSearchSources = {
     threadProject: vi.fn(async () => ({ projectId })),
@@ -79,8 +79,6 @@ describe("searching pull requests and issues for the # list", () => {
 
   it("offers the Linear issue a key names, from the Project's mapped team only", async () => {
     const { search, github, linear } = sources();
-    linear.list.mockResolvedValue([{ ...linearRow, identifier: "OCT-10420" }, linearRow]);
-
     const found = await search(
       { query: "oct-1042", projectId: decodeProjectId(projectId) },
       { windowId },
@@ -90,7 +88,7 @@ describe("searching pull requests and issues for the # list", () => {
       ["linear-issue", "OCT-1042", "In Progress", "OCT"],
     ]);
     expect(linear.list).toHaveBeenCalledWith(
-      { search: "OCT-1042", teamId: "team-1" },
+      { identifier: "OCT-1042", teamId: "team-1" },
       expect.any(AbortSignal),
     );
     expect(github.search).not.toHaveBeenCalled();
@@ -173,6 +171,43 @@ describe("searching pull requests and issues for the # list", () => {
     );
 
     expect(found.map((item) => item.id)).toEqual(["OCT-1042"]);
+  });
+
+  it("stops both trackers when the search it answers is abandoned", async () => {
+    const abandoned = new AbortController();
+    const signals: AbortSignal[] = [];
+    const waits = async (_input: unknown, signal: AbortSignal) => {
+      signals.push(signal);
+      return await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    };
+    const { search, github, linear } = sources();
+    github.search.mockImplementation(waits);
+    linear.list.mockImplementation(waits);
+
+    const found = search(
+      { query: "login", readerThreadId: "thread-1" as never },
+      { windowId, signal: abandoned.signal },
+    );
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    abandoned.abort();
+
+    await expect(found).resolves.toEqual([]);
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
+  });
+
+  it("asks no tracker for a search already abandoned", async () => {
+    const { search, github, linear } = sources();
+
+    await expect(
+      search(
+        { query: "login", readerThreadId: "thread-1" as never },
+        { windowId, signal: AbortSignal.abort() },
+      ),
+    ).resolves.toEqual([]);
+    expect(github.search).not.toHaveBeenCalled();
+    expect(linear.list).not.toHaveBeenCalled();
   });
 
   it("asks no tracker for a bare # or a single letter", async () => {

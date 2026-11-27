@@ -200,6 +200,9 @@ export class GithubCatalogueService {
       if (response.kind !== "unavailable") this.#storeCache(cacheKey, response);
       return response;
     }
+    // A read its caller abandoned says nothing about GitHub, so it neither
+    // paces later reads nor stands in for them with an older page.
+    if (signal.aborted) return { kind: "unavailable", capability, reason: "unavailable" };
     // Only transient rate-limit and connectivity failures may fall back to a
     // bounded stale view. Authorization losses drop straight to unavailable so
     // revoked access never keeps private data actionable.
