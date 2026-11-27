@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CodeEvidenceStore } from "../code/codeEvidenceStore";
+import { visitorThreadSource } from "../hub/visitorThreadSources";
 import { searchCodeTranscript } from "./codeTranscriptSearchProjection";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
@@ -75,6 +76,36 @@ describe("Code message search", () => {
       expect(all.truncated).toBe(false);
       expect(searchCodeTranscript(store.connection, "parser", visible, 1).truncated).toBe(true);
       expect(searchCodeTranscript(store.connection, "parser", new Set()).matches).toEqual([]);
+    } finally {
+      store.connection.close();
+    }
+  });
+
+  it("gives a visitor a Code reply whole only once its turn's work record says completed", () => {
+    const store = openStore();
+    try {
+      store.thread(ids.thread, "Shared", now);
+      store.turn(ids.thread, operation(1), "First", ["Stopped halfway"]);
+      store.turn(ids.thread, operation(2), "Second", ["Finished entirely"]);
+      store.turn(ids.thread, operation(3), "Third", ["Parked mid"]);
+      const record = store.connection.prepare(`
+        INSERT INTO code_runtime_projection (
+          runtime_work_id, thread_id, work_kind, state, schema_version, work_json,
+          aggregate_version, updated_at, last_sequence
+        ) VALUES (?, ?, 'provider-turn', ?, 1, '{}', 1, ?, 1)
+      `);
+      record.run(operation(1), ids.thread, "interrupted", now);
+      record.run(operation(2), ids.thread, "completed", now);
+      record.run(operation(3), ids.thread, "waiting", now);
+      const read = visitorThreadSource(
+        () => store.connection,
+        () => ({}),
+      ).read("code", ids.thread);
+
+      expect(
+        read.status === "found" &&
+          read.messages.filter((message) => message.role === "agent").map(({ text }) => text),
+      ).toEqual(["Stopped ", "Finished entirely", "Parked "]);
     } finally {
       store.connection.close();
     }

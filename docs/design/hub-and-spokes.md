@@ -3141,8 +3141,11 @@ inside the transcript itself is not built yet.
   progress means a Chat reply that did not complete (still being written,
   waiting, or stopped for good, since a stopped reply can also end inside a
   secret, so a visitor may miss its last word), a Code
-  thread's newest reply while its turn runs or waits on the person, and a Work
-  reply still held live. The stream asks the spoke again every two seconds and
+  reply whose turn has not completed (the newest one unless its turn's record
+  says completed, and while it runs or waits on the person), and a Work
+  reply still held live. A `Bearer` or `Basic` just before the held word is
+  held back with it, and a credential written after one is replaced with the
+  word, so no part of its value shows. The stream asks the spoke again every two seconds and
   ends when the spoke refuses. Not built yet: step titles and states.
 - **Comments.** On a comment-only link, a visitor's message lands on the
   spoke as a **Request** in the thread with **Send** and **Dismiss**. Only

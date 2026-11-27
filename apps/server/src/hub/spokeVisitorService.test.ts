@@ -777,14 +777,15 @@ describe("a secret a Chat or Code reply is still writing", () => {
     "shows a visitor none of it while a Code turn is live (%o), and redacts it whole once settled",
     async (running) => {
       let activity = running;
+      let turnState = "running";
       let reply = partial;
       // Newest first, as the read orders them; an earlier settled reply follows.
       const connection = {
         prepare: () => ({
           all: () => [
-            { content_role: "assistant", body_text: reply },
+            { content_role: "assistant", body_text: reply, turn_state: turnState },
             { content_role: "user", body_text: "Show it" },
-            { content_role: "assistant", body_text: "Ready." },
+            { content_role: "assistant", body_text: "Ready.", turn_state: "completed" },
           ],
         }),
       };
@@ -805,6 +806,7 @@ describe("a secret a Chat or Code reply is still writing", () => {
       });
       expect(JSON.stringify(live)).not.toContain("whsec_");
       activity = { executing: false, awaitingInput: false };
+      turnState = "completed";
       reply = `The secret is ${secret}`;
       expect(context.service.fetch(request, HUB)).toMatchObject({
         projection: {
@@ -814,3 +816,111 @@ describe("a secret a Chat or Code reply is still writing", () => {
     },
   );
 });
+
+describe("a Code reply whose turn has not completed", () => {
+  const partial = "The secret is whsec_5WbX1k";
+
+  const read = async (rows: ReadonlyArray<Record<string, unknown>>) => {
+    projections.code = { title: "Check", lifecycle: "active" };
+    const context = setup({
+      source: visitorThreadSource(
+        () => ({ prepare: () => ({ all: () => rows }) }) as never,
+        // Neither executing nor asking, as a turn whose work reads waiting.
+        () => ({ executing: false, awaitingInput: false }),
+      ),
+    });
+    const link = await context.service.share({
+      mode: "code",
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    return JSON.stringify(answer);
+  };
+
+  it.each(["running", "waiting", "ambiguous", "interrupted", "failed", null])(
+    "holds back the newest reply's last unfinished word (%s)",
+    async (state) => {
+      const answer = await read([
+        { content_role: "assistant", body_text: partial, turn_state: state },
+        { content_role: "user", body_text: "Show it", turn_state: state },
+      ]);
+      expect(answer).toContain("The secret is ");
+      expect(answer).not.toContain("whsec_");
+    },
+  );
+
+  it("holds it back in an older reply whose turn stopped, and shows a completed one whole", async () => {
+    const answer = await read([
+      { content_role: "assistant", body_text: "All done.", turn_state: "completed" },
+      { content_role: "assistant", body_text: partial, turn_state: "interrupted" },
+      { content_role: "assistant", body_text: "Earlier words.", turn_state: null },
+    ]);
+    expect(answer).toContain("All done.");
+    expect(answer).toContain("Earlier words.");
+    expect(answer).not.toContain("whsec_");
+  });
+});
+
+describe("a header or scheme keyword in a reply still being written", () => {
+  const token = "q8Zr2mVn6TkYp1Ld4Hs9Wc3Bf7Xa5Ge0";
+
+  const shown = async (live: string) => {
+    const context = setup({
+      source: visitorThreadSource(
+        () => {
+          throw new Error("A Work read uses no database.");
+        },
+        () => ({}),
+        {
+          thread: () => ({ title: "Check", lifecycle: "active" }),
+          turns: () => [
+            {
+              requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+              turnId: "turn-1",
+              status: "running",
+              transcript: [],
+            },
+          ],
+          liveReplyText: () => live,
+          activity: () => ({ executing: true, awaitingInput: false }),
+        },
+      ),
+    });
+    const link = await context.service.share({
+      mode: "work",
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    return JSON.stringify(answer);
+  };
+
+  it.each([
+    "Send Authorization: Bearer ",
+    "Send authorization:\nBearer\n",
+    "Send access_token: Bearer ",
+    "Send token = Basic ",
+    "Send Bearer ",
+    "Send Basic ",
+  ])("shows no part of the token after %j, however far it has streamed", async (lead) => {
+    for (const length of [1, 12, 19, 20, token.length]) {
+      for (const tail of ["", " then"]) {
+        // Once the word is finished only a credential's shape hides it: a
+        // bare `Basic` value or a short word after a bare scheme has none.
+        if (tail !== "" && (length < 20 || lead === "Send Basic ")) continue;
+        const answer = await shown(`${lead}${token.slice(0, length)}${tail}`);
+        expect(answer).not.toContain(token.slice(0, Math.min(length, 6)));
+      }
+    }
+  });
+});
+

@@ -21,3 +21,24 @@ describe("webhook signing secrets in text", () => {
     expect(redactSecretShaped(text)).toBe(text);
   });
 });
+
+describe("a credential written after a scheme word", () => {
+  const token = "q8Zr2mVn6TkYp1Ld4Hs9Wc3Bf7Xa5Ge0";
+
+  it("replaces the value too, not only the scheme word", () => {
+    for (const lead of [
+      "access_token: Bearer ",
+      "token = Basic ",
+      "api_key=bearer ",
+      "Authorization: Bearer\n",
+    ]) {
+      expect(redactSecretShaped(`${lead}${token} then`)).not.toContain(token);
+    }
+  });
+
+  it("replaces a bearer token holding base64 characters whole", () => {
+    expect(redactSecretShaped("send Bearer q8Zr2mVn+6TkY/p1Ld4Hs9Wc3Bf7Xa5Ge0== now")).toBe(
+      "send [redacted] now",
+    );
+  });
+});
