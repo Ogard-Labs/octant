@@ -1304,6 +1304,7 @@ export class GitMutationPort {
     );
     if (tracked.exitCode !== 0) return undefined;
     const indexed = new Set(splitNulPaths(tracked.stdout));
+    const verifiedNonGitlinkAncestors = new Set<string>();
     // A path the checkout still tracks cannot be the case at issue: Git does not
     // ignore tracked paths, and a restore writing over one is exactly what the
     // undo point covers. Only a path that has left the index can be ignored now,
@@ -1314,10 +1315,12 @@ export class GitMutationPort {
       // A path strictly below a submodule gitlink (mode 160000) is not
       // captured by the superproject's `git add -A` undo point; refuse
       // fail-closed so local edits inside the submodule are never overwritten.
-      // Check modes only for ancestors that already appear as index entries so
-      // `ls-files -z` stays path-only and bounded on large repositories.
-      const matchedAncestors = indexedAncestors(path, indexed);
-      if (matchedAncestors.length > 0) {
+      // Check modes only once per ancestor that already appears as an index
+      // entry so `ls-files -z` stays path-only and bounded on large checkouts.
+      const uncheckedAncestors = indexedAncestors(path, indexed).filter(
+        (ancestor) => !verifiedNonGitlinkAncestors.has(ancestor),
+      );
+      if (uncheckedAncestors.length > 0) {
         const ancestorModes = await this.#run(
           [
             "-C",
@@ -1327,7 +1330,7 @@ export class GitMutationPort {
             "-s",
             "-z",
             "--",
-            ...matchedAncestors,
+            ...uncheckedAncestors,
           ],
           signal,
           undefined,
@@ -1339,6 +1342,7 @@ export class GitMutationPort {
           if (space === -1) return undefined;
           if (record.slice(0, space) === "160000") return undefined;
         }
+        for (const ancestor of uncheckedAncestors) verifiedNonGitlinkAncestors.add(ancestor);
       }
       let isDirectory = false;
       try {
