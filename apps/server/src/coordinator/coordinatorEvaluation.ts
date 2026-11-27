@@ -126,13 +126,16 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
   const entries: string[] = [];
   let pending: { part: "title" | "reference"; value: string } | undefined;
   const implicit = new Set<string>();
+  const referenceLines = new Set<string>();
   // An unlabelled continuation can supply the missing value. Keep it as a
   // fallback until the item ends so a later explicit field takes priority.
   const finishItem = (explicit?: string) => {
-    const partner = explicit ?? (implicit.size === 1 ? [...implicit][0] : undefined);
+    const candidates = referenceLines.size > 0 ? referenceLines : implicit;
+    const partner = explicit ?? (candidates.size === 1 ? [...candidates][0] : undefined);
     if (pending && partner) entries.push(pending.value + " " + partner);
     pending = undefined;
     implicit.clear();
+    referenceLines.clear();
   };
   for (const raw of answer.toLowerCase().split("\n")) {
     const line = raw.trim();
@@ -147,19 +150,28 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     const titles = workers.filter(({ title }) => prose.includes(title));
     const leadingRef = refs.find(({ reference }) => lead.startsWith(reference));
     const leadingTitle = titles.find(({ title }) => lead.startsWith(title));
+    // A name in a sentence is prose. A name on a line of its own can start an
+    // entry even without a list marker or a Worker label.
+    const standalone = lead.replace(/[\s`*_\])>:]+$/, "");
+    const standaloneTitle = titles.find(({ title }) => standalone === title);
+    const titleHeading = field || marker ? leadingTitle : standaloneTitle;
 
     if (pending && !marker) {
       // The identifier in a reference field belongs to the preceding title.
       // An aside in that field may name a different worker.
-      if (pending.part === "title" && leadingRef && (field || refs.length === 1)) {
+      if (pending.part === "title" && leadingRef && field) {
         finishItem(leadingRef.reference);
         continue;
       }
-      if (pending.part === "reference" && leadingTitle && refs.length === 0) {
-        finishItem(leadingTitle.title);
+      if (pending.part === "reference" && titleHeading && refs.length === 0) {
+        finishItem(titleHeading.title);
         continue;
       }
-      if (!field && !leadingTitle && !leadingRef) {
+      if (!field && !standaloneTitle) {
+        if (pending.part === "title" && leadingRef) {
+          const suffix = lead.slice(leadingRef.reference.length).replace(/^[`*_\])>\s]+/, "");
+          if (!suffix || suffix.startsWith("(")) referenceLines.add(leadingRef.reference);
+        }
         for (const worker of pending.part === "title" ? refs : titles) {
           implicit.add(pending.part === "title" ? worker.reference : worker.title);
         }
@@ -168,8 +180,8 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     }
     finishItem();
     entries.push(value);
-    const title = leadingTitle ?? (titles.length === 1 ? titles[0] : undefined);
-    if (refs.length === 0 && title && (marker || field || leadingTitle)) {
+    const title = titleHeading ?? (titles.length === 1 ? titles[0] : undefined);
+    if (refs.length === 0 && title && (marker || field || standaloneTitle)) {
       pending = { part: "title", value: title.title };
     } else if (refs.length === 1 && titles.length === 0 && leadingRef) {
       pending = { part: "reference", value: leadingRef.reference };
