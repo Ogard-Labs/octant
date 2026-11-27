@@ -1550,6 +1550,7 @@ describe("moving a thread into its own worktree", () => {
       status: "refused" as const,
       reason: "nested-changes" as const,
       paths: ["vendor/lib"],
+      submodulePaths: ["vendor/lib"],
     }));
     const withNested = harness({
       threads: [sourceThread()],
@@ -1560,7 +1561,12 @@ describe("moving a thread into its own worktree", () => {
     expect(await withNested.codeService.execute(windowId, move)).toEqual({
       kind: "thread-moved-to-worktree",
       threadId: sourceThreadId,
-      outcome: { status: "refused", reason: "nested-changes", paths: ["vendor/lib"] },
+      outcome: {
+        status: "refused",
+        reason: "nested-changes",
+        paths: ["vendor/lib"],
+        submodulePaths: ["vendor/lib"],
+      },
     });
     expect(withNested.git.addWorktree).not.toHaveBeenCalled();
     expect(fixture.git.addWorktree).not.toHaveBeenCalled();

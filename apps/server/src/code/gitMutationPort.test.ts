@@ -665,7 +665,10 @@ describe("GitMutationPort", () => {
     );
     git(repository, "commit", "-m", "add submodule");
     const port = new GitMutationPort(undefined, confinedOptions());
-    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([]);
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual({
+      submodules: [],
+      nestedRepositories: [],
+    });
 
     writeFileSync(join(repository, "vendor/lib/README.md"), "changed inside\n");
     const nested = join(repository, "scratch");
@@ -673,10 +676,10 @@ describe("GitMutationPort", () => {
     git(nested, "init", "--initial-branch=main");
     writeFileSync(join(nested, "notes.txt"), "nested\n");
 
-    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([
-      "scratch",
-      "vendor/lib",
-    ]);
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual({
+      submodules: ["vendor/lib"],
+      nestedRepositories: ["scratch"],
+    });
   });
 
   it("skips ignored folders inside an untracked folder, as a capture does", async () => {
@@ -690,7 +693,10 @@ describe("GitMutationPort", () => {
     writeFileSync(join(repository, "vendor", "README.md"), "untracked parent\n");
     const port = new GitMutationPort(undefined, confinedOptions());
 
-    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([]);
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual({
+      submodules: [],
+      nestedRepositories: [],
+    });
   });
 
   it("checks a folder named like a Git pathspec as itself, not as the path it spells", async () => {
@@ -705,9 +711,10 @@ describe("GitMutationPort", () => {
     writeFileSync(join(repository, ":build", "README.md"), "untracked parent\n");
     const port = new GitMutationPort(undefined, confinedOptions());
 
-    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([
-      ":build/lib",
-    ]);
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual({
+      submodules: [],
+      nestedRepositories: [":build/lib"],
+    });
   });
 
   it("names a nested repository below a folder that is untracked as a whole", async () => {
@@ -719,9 +726,10 @@ describe("GitMutationPort", () => {
     writeFileSync(join(repository, "vendor", "README.md"), "untracked parent\n");
     const port = new GitMutationPort(undefined, confinedOptions());
 
-    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([
-      "vendor/lib",
-    ]);
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual({
+      submodules: [],
+      nestedRepositories: ["vendor/lib"],
+    });
   });
 
   it("checkpoints the working tree and puts every kind of change back on restore", async () => {

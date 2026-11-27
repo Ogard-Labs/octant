@@ -78,7 +78,16 @@ export async function runAllowedWorktreeMove(
     return;
   }
   await notify(
-    `The move to a new worktree you allowed did not happen: ${worktreeMoveRefusalText(outcome.reason, outcome.paths)}`,
+    `The move to a new worktree you allowed did not happen: ${worktreeMoveRefusalText(
+      outcome.reason,
+      outcome.paths,
+      {
+        ...(outcome.submodulePaths === undefined ? {} : { submodulePaths: outcome.submodulePaths }),
+        ...(outcome.nestedRepositoryPaths === undefined
+          ? {}
+          : { nestedRepositoryPaths: outcome.nestedRepositoryPaths }),
+      },
+    )}`,
   );
 }
 
@@ -86,6 +95,10 @@ export async function runAllowedWorktreeMove(
 export function worktreeMoveRefusalText(
   reason: CodeThreadWorktreeMoveRefusal,
   paths?: ReadonlyArray<string>,
+  nested?: {
+    readonly submodulePaths?: ReadonlyArray<string>;
+    readonly nestedRepositoryPaths?: ReadonlyArray<string>;
+  },
 ): string {
   switch (reason) {
     case "already-own-worktree":
@@ -102,8 +115,21 @@ export function worktreeMoveRefusalText(
       return "Another task is working in this checkout right now. Ask again when it finishes.";
     case "capture-failed":
       return "this checkout's changes could not be read. Nothing was moved.";
-    case "nested-changes":
-      return `changes inside ${(paths ?? []).join(", ") || "a submodule or nested repository"} cannot be copied. Commit them there first. Nothing was moved.`;
+    case "nested-changes": {
+      const submodules = nested?.submodulePaths ?? [];
+      const repositories = nested?.nestedRepositoryPaths ?? [];
+      if (submodules.length > 0 && repositories.length > 0) {
+        return `changes inside submodule ${submodules.join(", ")} cannot be copied (commit them there first), and ${repositories.join(", ")} ${repositories.length === 1 ? "is a separate repository" : "are separate repositories"} under an untracked folder (move ${repositories.length === 1 ? "it" : "them"} out, add ${repositories.length === 1 ? "it" : "them"} to .gitignore, or add ${repositories.length === 1 ? "it" : "them"} as ${repositories.length === 1 ? "a submodule" : "submodules"}). Nothing was moved.`;
+      }
+      if (submodules.length > 0) {
+        return `changes inside ${submodules.join(", ")} cannot be copied. Commit them there first. Nothing was moved.`;
+      }
+      if (repositories.length > 0) {
+        const plural = repositories.length > 1;
+        return `${repositories.join(", ")} ${plural ? "are separate repositories inside untracked folders and cannot be copied. Move them out, add them to .gitignore, or add them as submodules" : "is a separate repository inside an untracked folder and cannot be copied. Move it out, add it to .gitignore, or add it as a submodule"}. Nothing was moved.`;
+      }
+      return `changes inside ${(paths ?? []).join(", ") || "a submodule or nested repository"} cannot be copied. Commit changes in a submodule, or move an untracked nested repository out, add it to .gitignore, or add it as a submodule. Nothing was moved.`;
+    }
     case "apply-failed":
       return "the changes could not be copied into the new worktree. Nothing was moved.";
     case "working-folder":

@@ -2135,6 +2135,8 @@ function renderCodeTab(
                             message: worktreeMoveRefusalMessage(
                               result.outcome.reason,
                               result.outcome.paths,
+                              result.outcome.submodulePaths,
+                              result.outcome.nestedRepositoryPaths,
                             ),
                           };
                     },
@@ -4175,6 +4177,8 @@ function issueLinkRefusalMessage(reason: CodeThreadIssueLinkRefusal): string {
 function worktreeMoveRefusalMessage(
   reason: CodeThreadWorktreeMoveRefusal,
   paths: ReadonlyArray<string> | undefined,
+  submodulePaths?: ReadonlyArray<string>,
+  nestedRepositoryPaths?: ReadonlyArray<string>,
 ): string {
   switch (reason) {
     case "already-own-worktree":
@@ -4191,8 +4195,20 @@ function worktreeMoveRefusalMessage(
       return "Another task is working in this checkout right now. Try again when it finishes.";
     case "capture-failed":
       return "This checkout's changes could not be read, so nothing was moved.";
-    case "nested-changes":
-      return `Changes inside ${(paths ?? []).join(", ") || "a submodule or nested repository"} cannot be copied into a worktree. Commit them there first; nothing was moved.`;
+    case "nested-changes": {
+      const sub = submodulePaths ?? [];
+      const repo = nestedRepositoryPaths ?? [];
+      if (sub.length > 0 && repo.length > 0) {
+        return `Submodule ${sub.join(", ")} has uncommitted changes (commit them there first), and ${repo.join(", ")} is a nested repository under an untracked folder (move it out, add it to .gitignore, or add it as a submodule). Nothing was moved.`;
+      }
+      if (sub.length > 0) {
+        return `Changes inside ${sub.join(", ")} cannot be copied into a worktree. Commit them there first; nothing was moved.`;
+      }
+      if (repo.length > 0) {
+        return `${repo.join(", ")} is a separate repository inside an untracked folder and cannot be copied into a worktree. Move it out, add it to .gitignore, or add it as a submodule; nothing was moved.`;
+      }
+      return `Changes inside ${(paths ?? []).join(", ") || "a submodule or nested repository"} cannot be copied into a worktree. Commit submodule changes, or move an untracked nested repository out, add it to .gitignore, or add it as a submodule; nothing was moved.`;
+    }
     case "apply-failed":
       return "The changes could not be copied into the new worktree, so nothing was moved.";
     case "working-folder":
