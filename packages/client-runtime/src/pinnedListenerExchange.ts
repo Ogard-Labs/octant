@@ -13,6 +13,7 @@ import {
   judgeListenerAddresses,
   judgeListenerCertificate,
   ListenerTrustRefused,
+  ListenerUnreachable,
   MAX_STAGED_TRUST_WINDOW_MS,
   type ListenerOriginTrust,
   type ListenerTrust,
@@ -150,7 +151,7 @@ export function createExchangeListenerFetch(options: {
     try {
       addresses = isAddress ? [hostname] : await options.port.resolve(hostname);
     } catch {
-      throw new TypeError("The listener could not be reached.");
+      throw new ListenerUnreachable();
     }
     const judged = judgeListenerAddresses(addresses);
     if (judged.status === "refused") throw new ListenerTrustRefused(judged.reason);
@@ -188,7 +189,7 @@ export function createExchangeListenerFetch(options: {
         request: new Uint8Array(0),
         signal,
       });
-      if (probe.status === "failed") throw new TypeError("The listener could not be reached.");
+      if (probe.status === "failed") throw new ListenerUnreachable();
       if (probe.status === "refused")
         throw new ListenerTrustRefused(refusalFor(previous, probe.servedPin, now()));
       try {
@@ -216,7 +217,12 @@ export function createExchangeListenerFetch(options: {
       request,
       signal,
     });
-    if (opening.status === "failed") throw new TypeError("The listener could not be reached.");
+    // Only a failure before the request was written leaves it unsent.
+    if (opening.status === "failed") {
+      throw opening.reason === "connection-failed"
+        ? new TypeError("The listener could not be reached.")
+        : new ListenerUnreachable();
+    }
     if (opening.status === "refused") {
       throw new ListenerTrustRefused(refusalFor(options.trust, opening.servedPin, now()));
     }

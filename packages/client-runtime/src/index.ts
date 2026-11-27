@@ -83,6 +83,8 @@ export * from "./ownerThreadMove";
 export { base64UrlEncode } from "./hubLinkSigning";
 export * from "./remoteListenerTrust";
 export * from "./pinnedListenerExchange";
+export * from "./pairedHostRelay";
+export * from "./relayTunnel";
 export * from "./remoteSessionBridge";
 export * from "./connectionSupervisor";
 export * from "./shellClient";

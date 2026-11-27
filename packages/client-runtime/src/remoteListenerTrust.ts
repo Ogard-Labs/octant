@@ -81,6 +81,19 @@ export class ListenerTrustRefused extends Error {
   }
 }
 
+/**
+ * The listener could not be reached and nothing of the request was sent: the
+ * name did not resolve, the address did not answer, or no handshake finished.
+ * Only this failure lets a device that chose the hub's relay try it instead,
+ * so a request that may already have reached the host is never sent twice.
+ */
+export class ListenerUnreachable extends TypeError {
+  constructor() {
+    super("The listener could not be reached.");
+    this.name = "ListenerUnreachable";
+  }
+}
+
 export type ListenerAddressJudgement =
   | { readonly status: "private"; readonly address: string }
   | { readonly status: "refused"; readonly reason: "not-private-address" };

@@ -11,7 +11,19 @@ import { createServer as createTcpServer, connect as connectTcp, type Server } f
 import { HOST_HELLO_CLIENT_NONCE_PARAMETER } from "@octant/contracts/remote-access";
 import type { HubGrant } from "@octant/contracts";
 import { decodeEventActor } from "@octant/contracts";
-import { createRelayedListenerFetch } from "@octant/client-runtime/remote-listener-tls-node";
+import {
+  createRelayedListenerFetch,
+  testOnlyListenerTls,
+} from "@octant/client-runtime/remote-listener-tls-node";
+import {
+  createRelayFallbackFetch,
+  createRemoteConnection,
+  parseRelayAdmissionPayload,
+  relayAddressFromResponse,
+  relayRouteFor,
+  type PairedHostRelayChoice,
+} from "@octant/client-runtime";
+import { decodeRelayAddress, type RelayAddress } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
 import { startPublicEntrance, type PublicEntrance } from "./publicEntrance";
@@ -82,11 +94,15 @@ async function recordingFront(targetPort: number) {
 
 async function setUp(options: { readonly grant?: HubGrant } = {}) {
   const network = new HubTestNetwork();
+  // What the hub names as its relay: its entrance through the recording front,
+  // known once both are listening.
+  let relayAddress: RelayAddress | undefined;
   const hub = await startHubTestHost({
     name: "Mac mini",
     address: "100.101.104.1",
     network,
     cleanups,
+    relayAddress: () => relayAddress,
   });
   const spoke = await startHubTestHost({
     name: "Laptop",
@@ -122,6 +138,11 @@ async function setUp(options: { readonly grant?: HubGrant } = {}) {
   const front = await recordingFront(entrance.port);
   const pin = spoke.listener.tlsPin;
   if (pin === null) throw new Error("The spoke has no pinned certificate.");
+  relayAddress = decodeRelayAddress({
+    hubMemberId: hub.hostId,
+    relayUrl: `ws://127.0.0.1:${front.port}/relay/v1`,
+  });
+  await spoke.spokeRelay.publish();
 
   const relayedFetch = (input: { readonly key?: typeof device; readonly pin?: string } = {}) =>
     createRelayedListenerFetch({
@@ -130,8 +151,10 @@ async function setUp(options: { readonly grant?: HubGrant } = {}) {
       relay: {
         url: `ws://127.0.0.1:${front.port}/relay/v1`,
         targetMemberId: spoke.hostId,
-        deviceSpki: (input.key ?? device).spki,
-        sign: (input.key ?? device).sign,
+        admit: async (payload) => ({
+          signature: (input.key ?? device).sign(payload),
+          deviceSpki: (input.key ?? device).spki,
+        }),
         timeoutMs: 5_000,
       },
     });
@@ -139,6 +162,10 @@ async function setUp(options: { readonly grant?: HubGrant } = {}) {
     hub,
     spoke,
     device,
+    registered,
+    network,
+    pin,
+    relayAddress,
     deviceId,
     entrance,
     front,
@@ -201,11 +228,14 @@ describe("your own devices through the hub", () => {
       ["POST", "/api/remote/pairing-tickets"],
       ["POST", "/api/remote/devices/revoke"],
       ["POST", "/api/hub/join"],
+      // Where the hub's relay is: told only on the private network.
+      ["GET", "/api/remote/relay-address"],
     ] as const) {
       const response = await relayedFetch()(new URL(path, spoke.origin), {
         method,
-        headers: { "content-type": "application/json" },
-        body: "{}",
+        ...(method === "GET"
+          ? {}
+          : { headers: { "content-type": "application/json" }, body: "{}" }),
       });
       expect(response.status, path).toBe(403);
       expect(await response.json(), path).toEqual({
@@ -236,6 +266,8 @@ describe("your own devices through the hub", () => {
   it("the relayed device rejects a host whose pin differs", async () => {
     const { relayedFetch, spoke } = await setUp();
     const otherPin = `sha256-${randomBytes(32).toString("base64url")}`;
+    // Refused inside the tunnel: the TLS the device runs to its host there is
+    // judged against its stored pin, exactly as at home.
     await expect(
       relayedFetch({ pin: otherPin })(new URL("/api/remote/hello", spoke.origin)),
     ).rejects.toThrow();
@@ -292,4 +324,113 @@ describe("your own devices through the hub", () => {
     await expect.poll(listed, { timeout: 5_000 }).toEqual([]);
     await expect(relayedFetch()(new URL("/api/remote/hello", spoke.origin))).rejects.toThrow();
   }, 30_000);
+
+  it("the desktop's client path learns the address at home, and relays only away and only by choice", async () => {
+    const { spoke, device, registered, network, pin, relayAddress } = await setUp();
+    if (relayAddress === undefined) throw new Error("The hub names no relay address.");
+    const trust = { current: { kind: "pinned", pin } } as const;
+    let home = true;
+    // The device's own choice for this host; off until the person turns it on.
+    let choice: PairedHostRelayChoice = { enabled: false };
+    // The private network as the device sees it: away, the host does not answer.
+    const direct = testOnlyListenerTls.createListenerFetchOver(
+      { origin: spoke.origin, trust },
+      {
+        resolve: async (hostname) => [hostname],
+        dial: (address, port) =>
+          home
+            ? network.network.dial(address, port, new AbortController().signal)
+            : Promise.reject(new Error("Away from the private network.")),
+        handshakeTimeoutMs: 5_000,
+      },
+    );
+    // As the desktop window signs: only the exact relay admission text.
+    const signed: string[] = [];
+    const windowSigner = async (payload: string) => {
+      if (parseRelayAdmissionPayload(payload) === undefined) {
+        throw new Error("The window signs only a relay admission.");
+      }
+      signed.push(payload);
+      return { signature: device.sign(payload), deviceSpki: device.spki };
+    };
+    let relayedRequests = 0;
+    const fetch = createRelayFallbackFetch({
+      direct,
+      relayed: () => {
+        const route = relayRouteFor({
+          choice,
+          signer: { targetMemberId: spoke.hostId, admit: windowSigner },
+        });
+        if (route === undefined) return undefined;
+        const relayed = createRelayedListenerFetch({
+          origin: spoke.origin,
+          trust,
+          relay: { ...route, timeoutMs: 5_000 },
+        });
+        return (input, init) => {
+          relayedRequests += 1;
+          return relayed(input, init);
+        };
+      },
+    });
+    const connection = createRemoteConnection({
+      origin: spoke.origin,
+      webBuildVersion: "0.1.0",
+      fetch,
+      deviceKey: {
+        loadOrCreate: async () => ({ publicKeyPem: device.pem, fingerprint: device.fingerprint }),
+        current: async () => ({ publicKeyPem: device.pem, fingerprint: device.fingerprint }),
+        sign: async (payload) => device.sign(payload),
+        clear: async () => undefined,
+      },
+      knownDevice: {
+        hostId: spoke.hostId,
+        deviceId: String(registered.deviceId),
+        credentialGeneration: registered.credentialGeneration,
+        hostKeyFingerprint: createHash("sha256")
+          .update(Buffer.from(spoke.hostPublicKey, "base64url"))
+          .digest("hex"),
+      },
+    });
+
+    // At home: the device signs in directly and learns where the hub's relay is.
+    await connection.connect();
+    const learned = await connection.authenticatedFetch({
+      method: "GET",
+      path: "/api/remote/relay-address",
+    });
+    expect(learned.status).toBe(200);
+    const address = await relayAddressFromResponse(learned);
+    expect(address).toEqual(relayAddress);
+    if (address === undefined || address === "unchanged") throw new Error("No address learned.");
+    choice = { ...choice, address };
+    expect(relayedRequests).toBe(0);
+
+    // Away with the choice off: nothing goes through the hub.
+    home = false;
+    connection.disconnect();
+    await expect(connection.reconnect()).rejects.toThrow();
+    expect(relayedRequests).toBe(0);
+    expect(signed).toEqual([]);
+
+    // Away with the choice on: the same client signs in through the relay.
+    choice = { ...choice, enabled: true };
+    await connection.reconnect();
+    expect(relayedRequests).toBeGreaterThan(0);
+    expect(
+      signed.every((payload) => payload.endsWith(`|${spoke.hostId}|${relayAddress.hubMemberId}`)),
+    ).toBe(true);
+    const own = await connection.authenticatedFetch({
+      method: "GET",
+      path: "/api/remote/auth/device",
+    });
+    expect(own.status).toBe(200);
+    // The address route stays at home.
+    const refused = await connection.authenticatedFetch({
+      method: "GET",
+      path: "/api/remote/relay-address",
+    });
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ status: "refused", kind: "relayed-admin-refused" });
+  }, 60_000);
 });

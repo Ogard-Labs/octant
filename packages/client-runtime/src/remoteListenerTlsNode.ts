@@ -10,11 +10,7 @@ import { request as httpRequest, type IncomingMessage } from "node:http";
 import { connect as connectTcp, isIP, type Socket } from "node:net";
 import { Duplex } from "node:stream";
 import { connect as connectTls, type TLSSocket } from "node:tls";
-import {
-  RELAY_OPENED_MESSAGE,
-  decodeRelayChallenge,
-  relayAdmissionPayload,
-} from "@octant/contracts";
+import { openRelayTunnel, type ListenerRelayRoute, type RelayTunnel } from "./relayTunnel";
 import { LISTENER_KEY_TRANSITION_HEADER } from "@octant/domain";
 import { listenerTrustAfterResponse } from "./listenerKeyTransition";
 import {
@@ -22,6 +18,7 @@ import {
   judgeListenerCertificate,
   listenerPinFromSha256,
   ListenerTrustRefused,
+  ListenerUnreachable,
   type ListenerCertificateJudgement,
   type ListenerOriginTrust,
   type ListenerTrustRefusal,
@@ -161,7 +158,7 @@ function createListenerFetchOver(
     const previous = trust;
     const connection = await connect({ ...options, trust: previous });
     if (connection.status === "refused") throw new ListenerTrustRefused(connection.reason);
-    if (connection.status === "failed") throw new TypeError("The listener could not be reached.");
+    if (connection.status === "failed") throw new ListenerUnreachable();
     const socket = connection.socket;
     try {
       await remember(previous, connection.trust);
@@ -396,34 +393,29 @@ async function resolveAll(hostname: string): Promise<ReadonlyArray<string>> {
 function dialTcp(address: string, port: number): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const socket = connectTcp({ host: address, port });
-    socket.once("error", reject);
+    // Away from the private network a private address often drops the
+    // connection attempt instead of refusing it, and the system's own limit
+    // runs past a minute; the handshake's limit bounds the dial as well.
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("The listener did not answer."));
+    }, LISTENER_HANDSHAKE_TIMEOUT_MS);
+    socket.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     socket.once("connect", () => {
-      socket.off("error", reject);
+      clearTimeout(timer);
+      socket.removeAllListeners("error");
       resolve(socket);
     });
   });
 }
 
-/**
- * How a paired device reaches its host away from the private network: the
- * hub's public relay route, the host's member id, and the device key it
- * paired with, which signs the hub's challenge (decision H36).
- */
-export interface ListenerRelayRoute {
-  /** `wss://<front>/relay/v1`; `ws:` only for a test on loopback. */
-  readonly url: string;
-  readonly targetMemberId: string;
-  /**
-   * The hub the device expects to relay through, from its roster. A challenge
-   * naming another hub is refused, so the signature is never spent on one.
-   */
-  readonly hubMemberId?: string;
-  /** The device key's DER SubjectPublicKeyInfo, base64url. */
-  readonly deviceSpki: string;
-  /** Signs a payload with the device key: P-256, IEEE-P1363, base64url. */
-  readonly sign: (payload: string) => string | Promise<string>;
-  readonly timeoutMs?: number;
-}
+export type { ListenerRelayRoute } from "./relayTunnel";
+
+/** The most a relay's unread answer may hold in this client before the tunnel ends. */
+const RELAY_RECEIVE_BUFFER_MAX_BYTES = 16 * 1024 * 1024;
 
 /**
  * Opens a relay through the hub and hands back its bytes as a stream, once the
@@ -431,94 +423,41 @@ export interface ListenerRelayRoute {
  * inside it passed the origin's stored trust, so the hub carries only
  * ciphertext.
  */
-/** The most a relay's unread answer may hold in this client before the tunnel ends. */
-const RELAY_RECEIVE_BUFFER_MAX_BYTES = 16 * 1024 * 1024;
-
 async function openRelayStream(route: ListenerRelayRoute): Promise<Duplex | undefined> {
-  const socket = new WebSocket(route.url);
-  socket.binaryType = "arraybuffer";
-  let stage: "challenge" | "opening" | "carrying" = "challenge";
+  let tunnel: RelayTunnel | undefined;
   const stream = new Duplex({
     read() {},
     write(chunk: Buffer, _encoding, callback) {
-      if (socket.readyState === WebSocket.OPEN) socket.send(Uint8Array.from(chunk));
+      tunnel?.send(Uint8Array.from(chunk));
       callback();
     },
     final(callback) {
-      socket.close(1000);
+      tunnel?.close();
       callback();
     },
     destroy(error, callback) {
-      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-        socket.close(1000);
-      }
+      tunnel?.close();
       callback(error);
     },
   });
-  return await new Promise<Duplex | undefined>((resolve) => {
-    const timer = setTimeout(() => fail(), route.timeoutMs ?? LISTENER_HANDSHAKE_TIMEOUT_MS);
-    const fail = (): void => {
-      clearTimeout(timer);
-      if (stage !== "carrying") {
-        socket.close();
-        resolve(undefined);
-      }
-      stream.destroy();
-    };
-    socket.addEventListener("error", fail);
-    socket.addEventListener("close", () => {
-      if (stage === "carrying") stream.push(null);
-      fail();
-    });
-    socket.addEventListener("message", (event: MessageEvent) => {
-      const data: unknown = event.data;
-      if (stage === "carrying") {
-        if (!(data instanceof ArrayBuffer)) return;
-        // This WebSocket cannot be paused, so a reader that falls behind would
-        // let the stream's buffer grow without end; past a bound the tunnel
-        // ends instead, and the caller sees a failed request.
-        if (stream.readableLength + data.byteLength > RELAY_RECEIVE_BUFFER_MAX_BYTES) {
-          stream.destroy(new Error("The relay sent more than this client could hold."));
-          return;
-        }
-        stream.push(Buffer.from(data));
+  tunnel = await openRelayTunnel(route, {
+    data: (bytes) => {
+      // The WebSocket cannot be paused, so a reader that falls behind would
+      // let the stream's buffer grow without end; past a bound the tunnel
+      // ends instead, and the caller sees a failed request.
+      if (stream.readableLength + bytes.byteLength > RELAY_RECEIVE_BUFFER_MAX_BYTES) {
+        stream.destroy(new Error("The relay sent more than this client could hold."));
         return;
       }
-      if (typeof data !== "string") return fail();
-      if (stage === "opening") {
-        if (data !== RELAY_OPENED_MESSAGE) return fail();
-        stage = "carrying";
-        clearTimeout(timer);
-        resolve(stream);
-        return;
-      }
-      stage = "opening";
-      void (async () => {
-        const challenge = decodeRelayChallenge(JSON.parse(data));
-        if (
-          route.hubMemberId !== undefined &&
-          String(challenge.hubMemberId) !== route.hubMemberId
-        ) {
-          fail();
-          return;
-        }
-        const signature = await route.sign(
-          relayAdmissionPayload({
-            challenge: challenge.challenge,
-            targetMemberId: route.targetMemberId,
-            hubMemberId: String(challenge.hubMemberId),
-          }),
-        );
-        socket.send(
-          JSON.stringify({
-            targetMemberId: route.targetMemberId,
-            deviceSpki: route.deviceSpki,
-            signature,
-          }),
-        );
-      })().catch(fail);
-    });
+      stream.push(Buffer.from(bytes));
+    },
+    end: () => stream.push(null),
   });
+  if (tunnel === undefined) {
+    stream.destroy();
+    return undefined;
+  }
+  return stream;
 }
 
 /**
