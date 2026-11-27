@@ -17,6 +17,7 @@ import { mergeOctantCopies, type OctantImportCopyFiles } from "./octantImportCop
 import {
   isExcludedOctantEvent,
   NEVER_COPIED_EVENT_NAMES,
+  RECORD_REMOVAL_EVENT_NAMES,
   RENUMBERABLE_AGGREGATE_TYPES,
   REPLACED_SETTINGS_AGGREGATE_TYPES,
   SELF_OBSERVED_AGGREGATE_TYPES,
@@ -51,6 +52,8 @@ interface CandidateRow {
   readonly aggregate_id: string;
   readonly aggregate_version: number;
   readonly event_name: string;
+  /** 1 for a Canvas mirror setting that names a folder of the host's choosing. */
+  readonly names_host_folder: number;
 }
 
 interface AggregateSpan {
@@ -135,7 +138,12 @@ export function mergeOctantSnapshot(input: {
     connection
       .prepare(
         `SELECT source.global_sequence, source.aggregate_type, source.aggregate_id,
-           source.aggregate_version, source.event_name
+           source.aggregate_version, source.event_name,
+           CASE WHEN source.event_name = 'artifact.mirror-setting-changed@1' THEN
+             coalesce(json_extract(source.payload_json, '$.settings.fallback.kind') = 'global-folder', 0)
+             OR EXISTS (SELECT 1 FROM json_each(source.payload_json, '$.settings.overrides') AS override
+               WHERE json_extract(override.value, '$.destination.kind') = 'global-folder')
+           ELSE 0 END AS names_host_folder
          FROM octant.event_journal AS source
          WHERE source.global_sequence > ?
            AND NOT EXISTS (SELECT 1 FROM main.event_journal AS own WHERE own.event_id = source.event_id)
@@ -185,6 +193,14 @@ export function mergeOctantSnapshot(input: {
     const key = aggregateKey(row);
     if (!advancedAggregates.has(key)) return "skip";
     const nightly = nightlySpans.get(key);
+    // Deletions are never mirrored: Octant removing a record Nightly holds
+    // leaves Nightly's record, and the whole stream with it.
+    if (nightly !== undefined && RECORD_REMOVAL_EVENT_NAMES.has(row.event_name)) return "hold";
+    // Nightly never writes into a folder Octant writes to, as with worktrees
+    // and share links. One setting event carries the default and every
+    // Project's choice, so one naming a chosen folder anywhere stays behind
+    // whole rather than being rewritten; the stream is listed as kept.
+    if (row.names_host_folder === 1) return "hold";
     if (nightly === undefined) {
       if (earlierHeldBack.has(key)) return "hold";
       // Octant had it before the last import and Nightly no longer does:
@@ -355,12 +371,17 @@ export function mergeOctantSnapshot(input: {
   const heldBack = [...held.entries()]
     .filter(([key]) => !nightlySpans.has(key))
     .map(([, entry]) => entry);
+  // Copies are never Code threads, so only threads appended under their own ids are listed.
+  const codeThreadIds = [...importedThreads]
+    .filter((thread) => octantThreads.get(thread)?.includes("code") === true)
+    .sort();
   appendImportRecord(input, {
     octantMark: input.octantHead,
     copies: copied.copies,
     conflicts: conflictList,
     heldBack,
     counts,
+    codeThreadIds,
   });
   // The next start verifies the merged journal whole, not from a watermark
   // that described Nightly's journal before the merge.
@@ -646,6 +667,8 @@ function appendImportRecord(
     readonly conflicts: ReadonlyArray<OctantImportConflict>;
     readonly heldBack: ReadonlyArray<OctantImportHeldBack>;
     readonly counts: OctantImportCounts;
+    /** The Code threads this import appended events for; a reader unions every record's. */
+    readonly codeThreadIds: ReadonlyArray<string>;
   },
 ): void {
   // Appended through the journal so the registry validates it; only the

@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -26,7 +27,21 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AutomationEventStore } from "../automation/automationEventStore";
 import { automationDefinitionFixture } from "../automation/automationTestFixtures";
 import { createCoordinatorWakeJournal } from "../coordinator/coordinatorWakeJournal";
-import { CHAT_SETTINGS_AGGREGATE_ID, readChatSettings, readChatThread } from "./chatProjection";
+import { reapsStaleProviderSession } from "@octant/domain";
+import { readProviderInstances } from "../providers/providerProjection";
+import {
+  WorkTurnProjection,
+  hydrateWorkTurnProjectionFromJournal,
+} from "../work/workTurnProjection";
+import {
+  CHAT_SETTINGS_AGGREGATE_ID,
+  readChatSettings,
+  readChatThread,
+  readChatThreads,
+  readChatThreadView,
+  writeChatContent,
+} from "./chatProjection";
+import { removeMirrorFiles } from "./threadArtifactPurge";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { importFromOctant, type OctantImportOutcome } from "./octantImport";
@@ -647,23 +662,13 @@ describe("importing Octant's data into Nightly", () => {
     const paths = folders();
     const octant = openStore(paths.octant);
     createThread(octant, ids.shared, "From Octant");
-    // A record the registry reads but the Chat projection refuses: the
-    // thread's own version disagrees with its journal position.
-    octant.connection
-      .prepare(
-        `INSERT INTO event_journal (event_id, aggregate_type, aggregate_id, aggregate_version,
-           event_name, event_version, host_id, correlation_id, actor_kind, actor_id, occurred_at,
-           payload_json)
-         VALUES (?, 'chat-thread', ?, 2, 'chat.thread-updated@1', 1, 'local', ?, 'system', ?, ?, ?)`,
-      )
-      .run(
-        randomUUID(),
-        ids.shared,
-        randomUUID(),
-        actor.actorId,
-        now,
-        JSON.stringify({ kind: "thread-updated", thread: thread(ids.shared, "Broken", 7) }),
-      );
+    // A record the registry reads but the provider projection refuses: the
+    // removal names a version other than its journal position.
+    const instanceId = "0c7a0000-0000-4000-8000-000000000c01";
+    rawEvent(octant, "provider-instance", instanceId, 1, "provider.instance-removed@1", {
+      instanceId,
+      version: 7,
+    });
     octant.close();
     const nightly = openStore(paths.nightly);
     createThread(nightly, ids.nightlyOwn, "Nightly's own");
@@ -930,6 +935,293 @@ describe("importing Octant's data into Nightly", () => {
 
     expect(second.kept).toEqual([]);
     expect(eventsIn(paths.nightly, "code-checkout", checkoutId)).toHaveLength(2);
+  });
+
+  it("never brings Octant's mirror receipts, so purging an imported Canvas in Nightly leaves Octant's mirrored file", async () => {
+    const paths = folders();
+    const mirror = realpathSync(mkdtempSync(join(tmpdir(), "octant-import-mirror-")));
+    directories.push(mirror);
+    writeFileSync(join(mirror, "note.md"), "Octant's mirrored note");
+    const octant = openStore(paths.octant);
+    const canvasId = "0c7a0000-0000-4000-8000-000000000801";
+    append(octant, "artifact-mirror", canvasId, "artifact.mirror-written@1", {
+      receipt: {
+        canvasId,
+        versionId: "0c7a0000-0000-4000-8000-000000000802",
+        projectId: null,
+        destination: { kind: "global-folder", canonicalRoot: mirror },
+        paths: ["note.md"],
+        outcome: "written",
+        commit: { status: "not-requested" },
+        observedAt: now,
+      },
+    });
+    octant.close();
+
+    imported(runImport(paths));
+    const merged = openStore(paths.nightly);
+    await removeMirrorFiles(merged.connection, [canvasId]);
+    merged.close();
+
+    expect(existsSync(join(mirror, "note.md"))).toBe(true);
+  });
+
+  it("holds back Octant's removal of a provider Nightly left unchanged and lists it as kept", () => {
+    const paths = folders();
+    const instanceId = "0c7a0000-0000-4000-8000-000000000901";
+    let octant = openStore(paths.octant);
+    append(octant, "provider-instance", instanceId, "provider.instance-created@1", {
+      instance: {
+        id: instanceId,
+        displayName: "OpenCode local",
+        driverKind: "opencode",
+        configuration: { kind: "opencode-cli", binaryPath: "/opt/homebrew/bin/opencode" },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    octant.close();
+    imported(runImport(paths));
+    octant = openStore(paths.octant);
+    append(octant, "provider-instance", instanceId, "provider.instance-removed@1", {
+      instanceId,
+      version: 2,
+    });
+    octant.close();
+
+    const second = imported(runImport(paths));
+
+    expect(second.kept).toEqual([{ aggregateType: "provider-instance", aggregateId: instanceId }]);
+    const merged = openStore(paths.nightly);
+    expect(readProviderInstances(merged.connection).map((instance) => String(instance.id))).toEqual(
+      [instanceId],
+    );
+    merged.close();
+  });
+
+  it("brings Chat and Work turns that were running in Octant settled, so Nightly's start has nothing to continue", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    createThread(octant, ids.shared, "Answering");
+    const body = "Summarize the release.";
+    const contentId = "0c7a0000-0000-4000-8000-000000000a01";
+    const digest = createHash("sha256").update(body).digest("hex");
+    const turnId = "0c7a0000-0000-4000-8000-000000000a02";
+    octant.journal.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.shared },
+        expectedVersion: 1,
+        events: [
+          {
+            eventId: randomUUID(),
+            eventName: "chat.turn-created@1",
+            eventVersion: 1,
+            correlationId: randomUUID(),
+            actor,
+            occurredAt: now,
+            payload: {
+              kind: "turn-created",
+              turn: {
+                id: turnId,
+                threadId: ids.shared,
+                sequence: 1,
+                userMessageRef: { contentId, digest, byteLength: body.length },
+                attachmentIds: [],
+                attempts: [
+                  {
+                    id: "0c7a0000-0000-4000-8000-000000000a03",
+                    turnId,
+                    threadId: ids.shared,
+                    providerInstanceId: provider,
+                    providerSessionId: "0c7a0000-0000-4000-8000-000000000a04",
+                    modelId: "model-a",
+                    contextManifestId: "0c7a0000-0000-4000-8000-000000000a05",
+                    outcome: "streaming",
+                    responseRefs: [],
+                    citationIds: [],
+                    createdAt: now,
+                    updatedAt: now,
+                  },
+                ],
+                createdAt: now,
+              },
+            },
+          },
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId,
+            threadId: ids.shared,
+            role: "user",
+            body,
+            digest,
+            byteLength: body.length,
+          });
+        },
+      },
+    );
+    const requestId = "0c7a0000-0000-4000-8000-000000000a11";
+    append(octant, "work-turn", requestId, "work.turn-accepted@1", {
+      kind: "turn-accepted",
+      requestId,
+      threadId: "0c7a0000-0000-4000-8000-000000000a12",
+      turnId: "0c7a0000-0000-4000-8000-000000000a13",
+      projectId: ids.project,
+      authority: {
+        hostId: "0c7a0000-0000-4000-8000-000000000a14",
+        projectId: ids.project,
+        bindingRevisionId: "0c7a0000-0000-4000-8000-000000000a15",
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: provider,
+        modelId: "model-a",
+      },
+      providerSessionId: "0c7a0000-0000-4000-8000-000000000a16",
+      prompt: "Continue the report.",
+      capabilities: {
+        workspace: "project-backed",
+        confinement: "project-root-confined",
+        shell: "denied",
+        git: "denied",
+        worktree: "denied",
+        pullRequest: "denied",
+        code: "denied",
+      },
+      acceptedAt: now,
+    });
+    octant.close();
+
+    imported(runImport(paths));
+
+    // The same selections Nightly's start makes before continuing anything.
+    const merged = openStore(paths.nightly);
+    const reapable = readChatThreads(merged.connection).flatMap((thread) =>
+      (readChatThreadView(merged.connection, thread.id)?.turns ?? []).flatMap((turn) =>
+        turn.attempts.filter(
+          (attempt) =>
+            reapsStaleProviderSession({
+              attempt,
+              ownedByThisProcess: false,
+              now: Date.parse(now),
+              staleAfterMs: 0,
+            }).kind === "reap",
+        ),
+      ),
+    );
+    expect(reapable).toEqual([]);
+    const workTurns = new WorkTurnProjection();
+    hydrateWorkTurnProjectionFromJournal({
+      replay: (cursor) =>
+        merged.journal.replayAggregateType({
+          aggregateType: cursor.aggregateType ?? "work-turn",
+          afterSequence: cursor.afterSequence,
+          limit: cursor.limit,
+        }),
+      projection: workTurns,
+    });
+    expect(workTurns.markInterruptedOnRestart(now)).toEqual([]);
+    merged.close();
+  });
+
+  it("records in each import the Code threads that import brought, and no Chat thread", () => {
+    const paths = folders();
+    const codeThread = (id: string) => ({
+      kind: "thread-created",
+      thread: {
+        id,
+        projectId: ids.project,
+        bindingRevisionId: "0c7a0000-0000-4000-8000-000000000d01",
+        repositoryId: `repo_${"a".repeat(64)}`,
+        checkoutId: "0c7a0000-0000-4000-8000-000000000d02",
+        title: "Code thread",
+        lifecycle: "active",
+        providerInstanceId: provider,
+        modelId: "model-a",
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        deliveryTarget: {
+          branchIntent: "feature",
+          remoteName: "origin",
+          proposedBaseRepository: "octant-dev/octant",
+          proposedBaseBranch: "main",
+          outcomeKind: "merged-pr",
+          confirmedAt: now,
+        },
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    const firstCode = "0c7a0000-0000-4000-8000-000000000d11";
+    const laterCode = "0c7a0000-0000-4000-8000-000000000d12";
+    let octant = openStore(paths.octant);
+    append(octant, "code-thread", firstCode, "code.thread-created@1", codeThread(firstCode));
+    createThread(octant, ids.shared, "A Chat thread");
+    octant.close();
+    imported(runImport(paths));
+    octant = openStore(paths.octant);
+    append(octant, "code-thread", laterCode, "code.thread-created@1", codeThread(laterCode));
+    octant.close();
+    imported(runImport(paths));
+
+    const records = eventsIn(
+      paths.nightly,
+      "octant-import",
+      "0c7a0000-0000-4000-8000-000000000001",
+    );
+    expect(records.map((record) => record.payload.codeThreadIds)).toEqual([
+      [firstCode],
+      [laterCode],
+    ]);
+  });
+
+  it("leaves behind a mirror setting that writes to a folder of Octant's, and lists it", () => {
+    const paths = folders();
+    const settingsId = "0a1f0000-0000-4000-8000-000000000475";
+    const octant = openStore(paths.octant);
+    append(octant, "artifact-mirror", settingsId, "artifact.mirror-setting-changed@1", {
+      settings: {
+        kind: "artifact-mirror-settings",
+        fallback: { kind: "global-folder", canonicalRoot: "/Users/someone/Octant/Artifacts" },
+        overrides: [],
+        autoCommit: false,
+        version: 1,
+        updatedAt: now,
+      },
+    });
+    octant.close();
+
+    const outcome = imported(runImport(paths));
+
+    expect(outcome.kept).toEqual([{ aggregateType: "artifact-mirror", aggregateId: settingsId }]);
+    expect(eventsIn(paths.nightly, "artifact-mirror", settingsId)).toEqual([]);
+  });
+
+  it("brings a mirror setting that writes inside the Project's repository", () => {
+    const paths = folders();
+    const settingsId = "0a1f0000-0000-4000-8000-000000000475";
+    const octant = openStore(paths.octant);
+    append(octant, "artifact-mirror", settingsId, "artifact.mirror-setting-changed@1", {
+      settings: {
+        kind: "artifact-mirror-settings",
+        fallback: { kind: "project-repository", relativeDirectory: "docs/artifacts" },
+        overrides: [],
+        autoCommit: false,
+        version: 1,
+        updatedAt: now,
+      },
+    });
+    octant.close();
+
+    const outcome = imported(runImport(paths));
+
+    expect(outcome.kept).toEqual([]);
+    expect(eventsIn(paths.nightly, "artifact-mirror", settingsId)).toHaveLength(1);
   });
 
   it("classifies every table of the store as rebuilt, copied, journal or left behind", () => {

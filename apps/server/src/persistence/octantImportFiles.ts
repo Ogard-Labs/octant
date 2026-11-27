@@ -324,11 +324,19 @@ function createFile(target: string, mode: number, write: (fd: number) => void): 
     throw error;
   }
   try {
-    write(fd);
-  } finally {
-    closeSync(fd);
+    try {
+      write(fd);
+    } finally {
+      closeSync(fd);
+    }
+    chmodSync(target, mode);
+  } catch (error) {
+    // The file is this import's from the moment O_EXCL created it, but it
+    // joins the receipt only once whole; a part-written one goes here, or a
+    // rollback would leave it behind.
+    rmSync(target, { force: true });
+    throw error;
   }
-  chmodSync(target, mode);
   return true;
 }
 

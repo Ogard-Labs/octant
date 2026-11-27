@@ -376,6 +376,7 @@ function prepareSnapshot(input: {
     ).head;
     let settled: number;
     try {
+      removeExcludedEvents(snapshot);
       settled = settleOctantInFlightWork({
         connection: snapshot,
         registry: input.registry,
@@ -389,6 +390,36 @@ function prepareSnapshot(input: {
     return { octantHead, settled };
   } finally {
     snapshot.close();
+  }
+}
+
+/**
+ * Drops what stays behind from the snapshot, before settling replays it:
+ * excluded families are never decoded, and need not decode with Nightly's
+ * registry. The snapshot is the import's own copy; Octant's store keeps them.
+ * Foreign keys are off for the deletion because aggregate heads and
+ * quarantine rows still name the rows; settling rebuilds the heads it reads.
+ */
+function removeExcludedEvents(connection: SqliteConnection): void {
+  const rows = connection
+    .prepare("SELECT global_sequence, aggregate_type, event_name FROM event_journal")
+    .all() as ReadonlyArray<{
+    readonly global_sequence: number;
+    readonly aggregate_type: string;
+    readonly event_name: string;
+  }>;
+  const remove = connection.prepare("DELETE FROM event_journal WHERE global_sequence = ?");
+  connection.exec("PRAGMA foreign_keys = OFF");
+  try {
+    connection.transaction(() => {
+      for (const row of rows) {
+        if (isExcludedOctantEvent(row.aggregate_type, row.event_name)) {
+          remove.run(row.global_sequence);
+        }
+      }
+    })();
+  } finally {
+    connection.exec("PRAGMA foreign_keys = ON");
   }
 }
 

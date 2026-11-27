@@ -37,9 +37,24 @@ export const EXCLUDED_AGGREGATE_TYPES: ReadonlySet<string> = new Set([
   "canvas-public-share-revocation",
 ]);
 
+/**
+ * Events that record what Octant's host did to files outside its data
+ * folder. A Canvas mirror receipt names the absolute files Octant wrote, and
+ * purging a Canvas deletes the files its receipts name; in Nightly that would
+ * unlink Octant's mirrored files. Only the mirror setting comes over.
+ */
+const EXCLUDED_EVENT_NAMES: ReadonlySet<string> = new Set([
+  "artifact.mirror-written@1",
+  "artifact.mirror-reimported@1",
+]);
+
 /** Every `remote.*` event is the paired-device and host-identity family. */
 export function isExcludedOctantEvent(aggregateType: string, eventName: string): boolean {
-  return EXCLUDED_AGGREGATE_TYPES.has(aggregateType) || eventName.startsWith("remote.");
+  return (
+    EXCLUDED_AGGREGATE_TYPES.has(aggregateType) ||
+    EXCLUDED_EVENT_NAMES.has(eventName) ||
+    eventName.startsWith("remote.")
+  );
 }
 
 /**
@@ -49,6 +64,24 @@ export function isExcludedOctantEvent(aggregateType: string, eventName: string):
  */
 export const NEVER_COPIED_EVENT_NAMES: ReadonlySet<string> = new Set([
   THREAD_RETENTION_EVENT_NAMES.threadPurged,
+]);
+
+/**
+ * Events that delete the record their stream holds. Deleting something in
+ * either app never deletes it in the other, so when Nightly already holds the
+ * stream, Octant's events for it stay behind and the record is listed as
+ * kept. Removals of an item inside a stream (a Canvas comment, a Project's
+ * extra folder, an entry of a settings list) are edits and come over.
+ */
+export const RECORD_REMOVAL_EVENT_NAMES: ReadonlySet<string> = new Set([
+  "provider.instance-removed@1",
+  "agent.profile-removed@1",
+  "agent-access.key-removed@1",
+  "benchmark-suite-deleted@1",
+  "browser.extension-removed@1",
+  "browser.flow-deleted@1",
+  "code.checkout-removed@1",
+  "todo.deleted@1",
 ]);
 
 /** A Chat deletion Octant made is dropped for a thread Nightly already holds. */

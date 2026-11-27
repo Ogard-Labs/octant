@@ -5,11 +5,16 @@ import {
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
   THREAD_WAKEUP_AGGREGATE,
   THREAD_WAKEUP_CHANGED,
+  UtcTimestamp,
   decodeNativeHarnessApproval,
   decodeNativeHarnessSession,
   decodeThreadWakeupChanged,
 } from "@octant/contracts";
+import { reapsStaleProviderSession } from "@octant/domain";
+import { transitionChatAttempt } from "@octant/domain/chat-policy";
 import { Schema } from "effect";
+
+const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 import {
   AUTOMATION_BLOCKED,
   AUTOMATION_DEFINITION_AGGREGATE_TYPE,
@@ -25,10 +30,15 @@ import {
 } from "../coordinator/coordinatorWakeJournal";
 import { THREAD_MESSAGE_QUEUE_CHANGED } from "../messageQueue/threadMessageQueuePersistence";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import {
+  WorkTurnProjection,
+  hydrateWorkTurnProjectionFromJournal,
+} from "../work/workTurnProjection";
 import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
+import { ChatProjection, readChatThreads, readChatThreadView } from "./chatProjection";
 import type { EventRegistry } from "./eventRegistry";
 import { Journal } from "./journal";
-import { ProjectionRegistry } from "./projection";
+import { ProjectionRegistry, rebuildProjections } from "./projection";
 import type { SqliteConnection } from "./sqlitePort";
 
 /**
@@ -40,7 +50,9 @@ import type { SqliteConnection } from "./sqlitePort";
  * Nightly's registry: a pending wake-up becomes missed, an enabled routine is
  * blocked as made on another host, a running goal loop is held after
  * restart, an open coordinator wake is held, every queued message is
- * cancelled, and every pending approval is cancelled. Restart continuations
+ * cancelled, every pending approval is cancelled, and every Chat answer and
+ * Work turn still running is interrupted, as a restart leaves them, so
+ * Nightly's start finds none to continue. Restart continuations
  * and queued message bodies live outside the journal and are not copied.
  *
  * Every settling event carries the import's id as its correlation id. That
@@ -86,11 +98,14 @@ export function settleOctantInFlightWork(input: {
   };
 
   let settled = 0;
+  // First: it rebuilds the aggregate heads every later append reads.
+  settled += settleChatAttempts(input.connection, journal, append, input.clock);
   settled += settleWakeups(input.connection, append);
   settled += settleAutomations(input.connection, append, input.clock);
   settled += settleGoalLoops(input.connection, append);
   settled += settleQueues(input.connection, append);
   settled += settleApprovals(input.connection, append, input.clock);
+  settled += settleWorkTurns(journal, append, input.clock);
   const open = createCoordinatorWakeJournal({
     journal,
     connection: input.connection,
@@ -113,6 +128,94 @@ export function settleOctantInFlightWork(input: {
     ]);
   }
   return settled;
+}
+
+/**
+ * Every Chat answer the journal still reads as running is interrupted, the
+ * way the host's own start reaps the ones its previous run was giving
+ * (ChatService.reapStaleProviderSessions). The Chat views are read from a
+ * rebuild in the snapshot, since the snapshot's own were Octant's and may
+ * predate Nightly's migrations.
+ */
+function settleChatAttempts(
+  connection: SqliteConnection,
+  journal: Journal,
+  append: Append,
+  clock: () => string,
+): number {
+  rebuildProjections({
+    connection,
+    journal,
+    projections: [new AggregateHeadsProjection(), new ChatProjection()],
+    clock,
+  });
+  const now = Date.parse(clock());
+  let settled = 0;
+  for (const thread of readChatThreads(connection)) {
+    const view = readChatThreadView(connection, thread.id);
+    for (const attempt of view?.turns.flatMap((turn) => turn.attempts) ?? []) {
+      const disposition = reapsStaleProviderSession({
+        attempt,
+        ownedByThisProcess: false,
+        now,
+        staleAfterMs: 0,
+      });
+      if (disposition.kind === "retain") continue;
+      const interrupted = transitionChatAttempt(attempt, {
+        outcome: "interrupted",
+        updatedAt: decodeUtcTimestamp(clock()),
+      });
+      settled += append(
+        "chat-thread",
+        String(thread.id),
+        streamHead(connection, "chat-thread", String(thread.id)),
+        [
+          {
+            eventName: "chat.attempt-updated@1",
+            payload: { kind: "attempt-updated", attempt: interrupted },
+          },
+        ],
+      );
+    }
+  }
+  return settled;
+}
+
+/** Every Work turn still accepted or running fails as cut off, the way the host's own start settles them. */
+function settleWorkTurns(journal: Journal, append: Append, clock: () => string): number {
+  const turns = new WorkTurnProjection();
+  const hydrated = hydrateWorkTurnProjectionFromJournal({
+    replay: (cursor) =>
+      journal.replayAggregateType({
+        aggregateType: cursor.aggregateType ?? "work-turn",
+        afterSequence: cursor.afterSequence,
+        limit: cursor.limit,
+      }),
+    projection: turns,
+  });
+  if (hydrated !== "ok") throw new Error("The snapshot's Work turns could not be read whole.");
+  let settled = 0;
+  for (const turn of turns.markInterruptedOnRestart(clock())) {
+    settled += append("work-turn", String(turn.requestId), turn.journaledVersion, [
+      { eventName: "work.turn-updated@1", payload: turn.settlement },
+    ]);
+  }
+  return settled;
+}
+
+function streamHead(
+  connection: SqliteConnection,
+  aggregateType: string,
+  aggregateId: string,
+): number {
+  return (
+    connection
+      .prepare(
+        `SELECT coalesce(max(aggregate_version), 0) AS head FROM event_journal
+         WHERE aggregate_type = ? AND aggregate_id = ?`,
+      )
+      .get(aggregateType, aggregateId) as { readonly head: number }
+  ).head;
 }
 
 type Append = (

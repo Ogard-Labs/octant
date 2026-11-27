@@ -75,6 +75,14 @@ export const OctantImportRecorded = Schema.Struct({
   conflicts: Schema.Array(OctantImportConflict),
   heldBack: Schema.Array(OctantImportHeldBack),
   counts: OctantImportCounts,
+  /**
+   * The Code threads this import brought from Octant, by id. A Code thread
+   * may sit on a checkout both apps can reach (the Project's own folder), so
+   * its first turn in Nightly moves it onto a worktree of Nightly's own; this
+   * is how Nightly knows the thread came from Octant when no receipt says so.
+   * Absent in a record written before the field existed.
+   */
+  codeThreadIds: Schema.optional(Schema.Array(ThreadIdText)),
 }).annotations(strict);
 export type OctantImportRecorded = typeof OctantImportRecorded.Type;
 export const decodeOctantImportRecorded = Schema.decodeUnknownSync(OctantImportRecorded);
