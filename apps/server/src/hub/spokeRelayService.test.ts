@@ -1,11 +1,32 @@
 import type { Duplex } from "node:stream";
 import { describe, expect, it } from "vitest";
-import type { HubState, HubStatePort } from "./hubStateStore";
+import { Schema } from "effect";
+import { HubLinkState, type HubState, type HubStatePort } from "./hubStateStore";
 import { SpokeRelayService } from "./spokeRelayService";
 import { takeWebSocketUpgrade } from "../webSocketRelay";
 
 const window = { kind: "local-window" } as const;
 const FINGERPRINT = "a".repeat(64);
+
+/** A complete hub link, decoded like a stored one, to the hub `hubMemberId` at `hubOrigin`. */
+function linkTo(hubMemberId: string, hubOrigin: string): HubLinkState {
+  return Schema.decodeUnknownSync(HubLinkState)({
+    selfMemberId: "33333333-3333-4333-8333-333333333333",
+    hubMemberId,
+    hubName: "Hub",
+    hubOrigin,
+    hubListenerPin: "b".repeat(64),
+    hubIdentityPublicKey: "hub-key",
+    rosterSigningPublicKey: "roster-key",
+    grant: { items: [], actProjects: [] },
+    roster: {
+      roster: { sequence: 1, members: [], standbyOrder: [], failoverAfterSeconds: 60 },
+      signedBy: { kind: "hub", memberId: hubMemberId },
+      signature: "signature",
+    },
+    peerGrants: [],
+  });
+}
 
 function memoryState(): HubStatePort {
   let state: HubState = {};
@@ -88,16 +109,17 @@ describe("relayed devices on their host", () => {
   });
 
   it("sends its device list again to a promoted hub that has never had it", async () => {
-    let state: HubState = {
-      link: { hubMemberId: "11111111-1111-4111-8111-111111111111", hubOrigin: "https://a" },
-    } as never;
-    const sent: number[] = [];
+    const OLD_HUB = "11111111-1111-4111-8111-111111111111";
+    const PROMOTED = "22222222-2222-4222-8222-222222222222";
+    let state: HubState = { link: linkTo(OLD_HUB, "https://a") };
+    // The spoke's hub client sends to whichever hub the link names at the time.
+    const received: string[] = [];
     const service = new SpokeRelayService({
       state: { load: () => state, save: (next) => void (state = next) },
       relayGranted: () => true,
       hub: {
         sendDevices: async (update) => {
-          sent.push(update.fingerprints.length);
+          received.push(`${String(state.link?.hubMemberId)} ${update.fingerprints.join(",")}`);
           return true;
         },
       },
@@ -108,16 +130,9 @@ describe("relayed devices on their host", () => {
     });
     await service.allow("phone", true, window);
     await service.look();
-    const before = sent.length;
-    state = {
-      ...state,
-      link: {
-        ...state.link,
-        hubMemberId: "22222222-2222-4222-8222-222222222222",
-        hubOrigin: "https://b",
-      },
-    } as never;
+    expect(received).toEqual([`${OLD_HUB} ${FINGERPRINT}`]);
+    state = { ...state, link: linkTo(PROMOTED, "https://b") };
     await service.look();
-    expect(sent.length).toBe(before + 1);
+    expect(received).toEqual([`${OLD_HUB} ${FINGERPRINT}`, `${PROMOTED} ${FINGERPRINT}`]);
   });
 });
