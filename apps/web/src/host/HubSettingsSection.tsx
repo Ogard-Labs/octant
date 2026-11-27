@@ -1,6 +1,6 @@
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { HUB_GRANT_ITEMS, type HubGrantItem } from "@octant/contracts";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import {
   SettingRow,
@@ -41,6 +41,10 @@ import {
   type PublicEntranceView,
 } from "./HubPublicEntranceSection";
 import { PairingCodeQr } from "./PairingCodeQr";
+
+// The public entrance's own screens load as their own chunks: the renderer has
+// no room left for them in the main one (hub-and-spokes.md, slice 25).
+const HubWebhooksSection = lazy(() => import("./HubWebhooksSection"));
 
 /**
  * The hub role and hub membership of this host. Every action goes through the
@@ -304,6 +308,13 @@ interface HubStatus {
   readonly provision?: ProvisionView;
   readonly signIn?: SignInView;
   readonly publicEntrance?: PublicEntranceView;
+  /**
+   * The status body's webhook, visitor and relay parts, as the host sent
+   * them. Each lazy screen reads its own part, so its parsing loads with it.
+   */
+  readonly entrance: {
+    readonly webhooks: unknown;
+  };
   /** Whether this computer takes work other members delegate; absent where delegation is not composed. */
   readonly delegationAccepting?: boolean;
   readonly link?: {
@@ -1821,6 +1832,19 @@ export function HubSettingsSection({
         />
       )}
 
+      <Suspense fallback={null}>
+        {status === undefined || (!hubOn && status.link?.membership !== "member") ? null : (
+          <HubWebhooksSection
+            body={status.entrance.webhooks}
+            member={status.link?.membership === "member"}
+            onChanged={refresh}
+            publicGranted={status.link?.grant.items.includes("public") === true}
+            request={request}
+            now={clock}
+          />
+        )}
+      </Suspense>
+
       {!hubOn || status === undefined ? null : (
         <SettingsSection title="Push sender">
           <div className="setgroup">
@@ -2610,6 +2634,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const pairedMergeUnlock = field(body, "pairedMergeUnlock") === true;
   const ownerApprovalAnswerUnlock = field(body, "ownerApprovalAnswerUnlock") === true;
   const delegationAccepting = field(field(body, "delegation"), "accepting");
+  const entrance = { webhooks: field(body, "webhooks") };
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -2642,6 +2667,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       ...(provision === undefined ? {} : { provision }),
       ...(signIn === undefined ? {} : { signIn }),
       ...(publicEntrance === undefined ? {} : { publicEntrance }),
+      entrance,
       ...(typeof delegationAccepting === "boolean" ? { delegationAccepting } : {}),
       link: {
         membership,
@@ -2680,6 +2706,7 @@ function readStatus(body: unknown): HubStatus | undefined {
     ...(provision === undefined ? {} : { provision }),
     ...(signIn === undefined ? {} : { signIn }),
     ...(publicEntrance === undefined ? {} : { publicEntrance }),
+    entrance,
   };
 }
 
