@@ -340,6 +340,7 @@ async function startStable(input: {
   track(child.pid, `${input.name} synthetic Stable (Electron)`);
   const events = new EventLog();
   logs.push({ name: input.name, log: events });
+  child.once("exit", (code, signal) => events.note({ event: "exited", code, signal }));
   if (child.stdout !== null) events.attach(child.stdout, input.name);
   if (child.stderr !== null) events.attach(child.stderr, input.name);
   const harness: StableHarness = {
