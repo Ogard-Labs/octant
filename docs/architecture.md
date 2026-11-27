@@ -20645,7 +20645,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     code before sending anything. Settings → Remote access starts the
     listener form on **Certificate: Made by this computer**, which sends no
     PEMs, and offers **My own certificate** for pasting a certificate and
-    key; this is how a build without the full `octant` command turns on a
+    key. Moving a listener that serves a pasted certificate starts on **My
+    own certificate** instead, because a self-made replacement would cut off
+    every browser paired with it. This is how a build without the full `octant` command turns on a
     listener the phone app can pair with.
   - **No browser link.** A browser decides whether to trust the listener
     before any Octant page loads and cannot check a certificate the host made
