@@ -78,6 +78,12 @@ export interface HubRelayStatus {
 
 const EMPTY: HubRelayHubState = { enabled: false, hosts: [] };
 
+function sameKeys(held: ReadonlyArray<string>, sent: ReadonlyArray<string>): boolean {
+  const keys = new Set(held);
+  const next = new Set(sent);
+  return keys.size === next.size && [...next].every((key) => keys.has(key));
+}
+
 function refuseUpgrade(socket: Duplex, status: string): void {
   socket.end(`HTTP/1.1 ${status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n`);
 }
@@ -187,22 +193,32 @@ export class HubRelayService {
     }
   }
 
-  /** Replaces the device keys one host lets through; an empty list withdraws them. */
+  /**
+   * Replaces the device keys one host lets through; an empty list withdraws
+   * them. Each host sends its list again every ten minutes, so a lost one
+   * recovers; a list the hub already holds is neither saved nor journaled.
+   */
   receiveDevices(memberId: string, update: HubRelayDevicesUpdate): HubRelayDevicesReceipt {
     const held = this.#load();
-    const others = held.hosts.filter((host) => String(host.memberId) !== memberId);
-    this.#save({
-      ...held,
-      hosts:
-        update.fingerprints.length === 0
-          ? others
-          : [...others, { memberId: decodeMemberId(memberId), fingerprints: update.fingerprints }],
-    });
-    this.#options.record({
-      change: "relay-devices-received",
-      actingPrincipal: { kind: "peer", memberId: decodeMemberId(memberId) },
-      memberId: decodeMemberId(memberId),
-    });
+    const listed = held.hosts.find((host) => String(host.memberId) === memberId)?.fingerprints;
+    if (!sameKeys(listed ?? [], update.fingerprints)) {
+      const others = held.hosts.filter((host) => String(host.memberId) !== memberId);
+      this.#save({
+        ...held,
+        hosts:
+          update.fingerprints.length === 0
+            ? others
+            : [
+                ...others,
+                { memberId: decodeMemberId(memberId), fingerprints: update.fingerprints },
+              ],
+      });
+      this.#options.record({
+        change: "relay-devices-received",
+        actingPrincipal: { kind: "peer", memberId: decodeMemberId(memberId) },
+        memberId: decodeMemberId(memberId),
+      });
+    }
     this.sweep();
     const relay = this.#options.address?.();
     return {

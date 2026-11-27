@@ -189,6 +189,42 @@ describe("the hub's device relay", () => {
     expect(service.status().hosts).toBe(0);
   });
 
+  it("saves and journals a host's device list only when it changes", () => {
+    let state: HubState = {};
+    let saves = 0;
+    const journaled: string[] = [];
+    const service = new HubRelayService({
+      state: {
+        load: () => state,
+        save: (next) => {
+          saves += 1;
+          state = next;
+        },
+      },
+      serving: () => true,
+      hubMemberId: () => HUB,
+      openTunnel: async () => undefined,
+      record: (change) => journaled.push(change.change),
+    });
+    const first = deviceKey().fingerprint;
+    const second = deviceKey().fingerprint;
+    // A host with no devices that the hub holds nothing for changes nothing.
+    service.receiveDevices(HOST, { fingerprints: [] });
+    expect([saves, journaled.length]).toEqual([0, 0]);
+    service.receiveDevices(HOST, { fingerprints: [first, second] });
+    expect([saves, journaled.length]).toEqual([1, 1]);
+    // The periodic resend of the same keys, in any order.
+    expect(service.receiveDevices(HOST, { fingerprints: [second, first] })).toEqual({
+      status: "recorded",
+      count: 2,
+    });
+    expect([saves, journaled.length]).toEqual([1, 1]);
+    service.receiveDevices(HOST, { fingerprints: [first] });
+    service.receiveDevices(HOST, { fingerprints: [] });
+    expect([saves, journaled.length]).toEqual([3, 3]);
+    expect(service.status().hosts).toBe(0);
+  });
+
   it("closes every relay when its switch goes off", async () => {
     const { service, url } = await relay(32);
     const key = deviceKey();

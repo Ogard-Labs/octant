@@ -3337,7 +3337,8 @@ between hosts on loopback; what is not built is listed below.
   in never does it. While its relay switch and entrance are on, the hub names
   `{ hubMemberId, relayUrl }` in its answer to each host's relay device list,
   over the signed, pinned hub link, and a host sends that list again every ten
-  minutes. A spoke and a device take only a `wss:` relay address. Each host answers its own paired devices on the authenticated
+  minutes; the hub saves and journals a list only when it differs from the one
+  it holds. A spoke and a device take only a `wss:` relay address. Each host answers its own paired devices on the authenticated
   `GET /api/remote/relay-address`, only while Relay is ticked, the device is
   listed and active, and the address names the hub it follows. The route
   answers only on the private network: through the relay it is refused
