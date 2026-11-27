@@ -1234,6 +1234,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
           ),
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
+        // The service exists only after this runtime does, so it is read lazily.
+        continueImportedThread: async (windowId, threadId) => {
+          const service = builtCodeService;
+          return service instanceof CodeService
+            ? service.continueImportedThread(windowId, threadId)
+            : { status: "own" };
+        },
         // A branch switch moves the checkout's journaled head; the service
         // exists only after this runtime does, so the callback reads it lazily.
         checkoutObserved: async (checkoutId, head) => {
@@ -2287,16 +2294,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         forgeChanges: runtimeForgeChanges,
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
-        // A thread moves into its own worktree at most once (a worktree thread
-        // is refused), so its one move record is the one this reads.
+        // A person moves a thread into its own worktree at most once (a
+        // worktree thread is refused). A thread imported from Octant may carry
+        // that move from Octant and then leave Octant's worktree for one of
+        // this host's own, so the latest of at most two records is the one
+        // this reads.
         readThreadMove: (threadId) => {
-          const [envelope] = persistence.journal.replayAggregateType({
-            aggregateType: "code-thread",
-            eventName: CODE_THREAD_MOVED_TO_WORKTREE,
-            payloadPrefix: { path: "threadId", prefix: String(threadId) },
-            afterSequence: 0,
-            limit: 1,
-          });
+          const envelope = persistence.journal
+            .replayAggregateType({
+              aggregateType: "code-thread",
+              eventName: CODE_THREAD_MOVED_TO_WORKTREE,
+              payloadPrefix: { path: "threadId", prefix: String(threadId) },
+              afterSequence: 0,
+              limit: 2,
+            })
+            .at(-1);
           if (envelope === undefined) return undefined;
           try {
             const moved = decodeCodeThreadMovedToWorktree(envelope.payload);

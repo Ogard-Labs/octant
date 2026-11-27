@@ -3,6 +3,7 @@ import {
   decodeDesktopDataChoice,
   decodeKeychainServiceFamily,
   keychainServicePrefix,
+  managedWorktreesFolderName,
   desktopDataDirectoriesOverlap,
   desktopIdentity,
   desktopIdentityForPackage,
@@ -180,6 +181,13 @@ describe("desktop application identity", () => {
     expect(keychainServicePrefix("octant")).toBe("app.octant.");
     expect(keychainServicePrefix("octant-nightly-test-data")).toBe(
       "app.octant.desktop.nightly.test-data.",
+    );
+  });
+
+  it("keeps Nightly's own host's managed worktrees under a folder name Octant never uses", () => {
+    expect(managedWorktreesFolderName("octant")).toBe(".octant-worktrees");
+    expect(managedWorktreesFolderName("octant-nightly-test-data")).toBe(
+      ".octant-nightly-worktrees",
     );
   });
 });

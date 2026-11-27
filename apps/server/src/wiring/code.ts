@@ -94,6 +94,7 @@ import {
 import { createFileHelperProcessTransport } from "../code/fileHelperProcessTransport";
 import { FileOperationPort } from "../code/fileOperationPort";
 import { createManagedWorktreeNodePorts } from "../code/managedWorktreeNodePorts";
+import { createImportedCodeWorktreePort } from "../code/importedCodeWorktree";
 import type { ManagedWorktreeRepositoryPort } from "../code/managedWorktreeService";
 import { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
 import { CodeEnvironmentService } from "../codeEnvironmentService";
@@ -901,7 +902,8 @@ export function wireCode(deps: CodeDependencies) {
         // The server remains available while Code file mutations fail closed as unavailable.
       }
     }
-    const repository = options.codeRepositoryPort ?? createManagedWorktreeNodePorts().repository;
+    const managedWorktreeNodePorts = createManagedWorktreeNodePorts();
+    const repository = options.codeRepositoryPort ?? managedWorktreeNodePorts.repository;
     const localCheckouts = createExistingWorktreeCodeCheckoutObservation({
       projects: projectService,
       readProject: persistence.readProject,
@@ -1200,6 +1202,11 @@ export function wireCode(deps: CodeDependencies) {
                     contextInputPolicy,
                   ),
           },
+          importedWorktrees: createImportedCodeWorktreePort({
+            loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+            repository,
+            git: managedWorktreeNodePorts.git,
+          }),
           managedThreadCreation: withServerWorktreeCreation(
             { store: serverProjectStore, connection: serverConnection },
             {

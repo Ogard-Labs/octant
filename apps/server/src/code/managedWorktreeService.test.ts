@@ -19,6 +19,7 @@ import type {
 import type { RepositoryIdentityObservation } from "./repositoryIdentity";
 import {
   ManagedWorktreeService,
+  managedTargetPath,
   type ManagedWorktreeAuthorityPort,
   type ManagedWorktreeFileSystemPort,
   type ManagedWorktreeGitPort,
@@ -311,6 +312,27 @@ async function plan(service: ManagedWorktreeService) {
   if (result.status !== "planned") throw new Error(`expected plan, received ${result.status}`);
   return result;
 }
+
+describe("which host's folder a managed worktree sits in", () => {
+  it("puts Nightly's own host's worktree in its own folder and under its own checkout id, Octant's where it always was", () => {
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+    try {
+      expect(managedTargetPath(repositoryRoot, repositoryId, threadId)).toBe(
+        `/workspace/.octant-nightly-worktrees/${repositoryId}/${threadId}`,
+      );
+      const nightlyCheckout = deriveManagedWorktreeCheckoutId({ repositoryId, threadId });
+      vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", undefined);
+      expect(managedTargetPath(repositoryRoot, repositoryId, threadId)).toBe(targetPath);
+      // Octant's id is the one it always derived, so its receipts keep resolving.
+      expect(String(deriveManagedWorktreeCheckoutId({ repositoryId, threadId }))).toBe(
+        "a0365414-78fb-4ddb-8178-bb9f240d048f",
+      );
+      expect(String(nightlyCheckout)).not.toBe("a0365414-78fb-4ddb-8178-bb9f240d048f");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
 
 describe("ManagedWorktreeService", () => {
   it("returns unavailable when host time recovery refuses managed-root grant issuance", async () => {

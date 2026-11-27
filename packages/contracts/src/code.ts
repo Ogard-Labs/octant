@@ -1809,7 +1809,22 @@ export const CodeThreadMovedToWorktree = Schema.Struct({
   toCheckoutId: CodeCheckoutId,
   branch: Schema.NonEmptyTrimmedString,
   sourceHead: GitObjectId,
-  capturedTrees: Schema.Struct({ worktree: GitObjectId, index: GitObjectId }).annotations(strict),
+  /** The uncommitted work the move copied. Absent when nothing was copied. */
+  capturedTrees: Schema.optional(
+    Schema.Struct({ worktree: GitObjectId, index: GitObjectId }).annotations(strict),
+  ),
+  /**
+   * Set when the thread came from Octant and left Octant's worktree for one of
+   * this host's own before its first turn here. Nothing is copied from
+   * Octant's folder, so this says what stayed behind there: `clean` (nothing),
+   * `uncommitted-changes-left`, `unread` (the folder could not be read), or
+   * `missing` (the folder was gone, and the worktree came from the branch).
+   */
+  fromOctant: Schema.optional(
+    Schema.Struct({
+      octantFolder: Schema.Literal("clean", "uncommitted-changes-left", "unread", "missing"),
+    }).annotations(strict),
+  ),
   movedAt: UtcTimestamp,
 }).annotations(strict);
 export type CodeThreadMovedToWorktree = typeof CodeThreadMovedToWorktree.Type;

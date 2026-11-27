@@ -13,6 +13,7 @@ import type {
   ManagedWorktreeRepositoryPort,
   ManagedWorktreeService,
 } from "./managedWorktreeService";
+import { managedWorktreeHostScope } from "./managedWorktreeHostScope";
 
 export interface ManagedCodeThreadCreationDeps {
   readonly readProject: (
@@ -32,12 +33,13 @@ export interface ManagedCodeThreadCreationDeps {
   ) => Promise<"applied" | "failed">;
 }
 
+/** Derived under this host's own label (see `managedWorktreeHostScope`). */
 export function deriveManagedWorktreeCheckoutId(input: {
   readonly repositoryId: string;
   readonly threadId: string;
 }) {
   const digest = createHash("sha256")
-    .update("octant.managed-worktree-checkout.v1\0")
+    .update(`${managedWorktreeHostScope().checkoutLabel}\0`)
     .update(input.repositoryId)
     .update("\0")
     .update(input.threadId)

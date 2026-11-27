@@ -259,6 +259,12 @@ import { directoryInResolvedRoot, pathInResolvedRoot } from "./codeProjectFolder
 import type { FileIdentity } from "./fileOperationPort";
 import {} from "./codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+import {
+  continuationBranchName,
+  type ImportedCodeWorktreePort,
+  type ImportedThreadContinuation,
+  type ImportedThreadContinuationRefusal,
+} from "./importedCodeWorktree";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import {
   INHERITED_MARK_REFUSAL,
@@ -934,6 +940,12 @@ export interface CodeServiceOptions {
     checkout: CodeCheckoutIdentity,
   ) => Promise<CleanedUpWorktreeStanding | undefined>;
   readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
+  /**
+   * Reads a worktree imported from Octant, so a thread on one gets a worktree
+   * of this host's own before its first turn here. Without it every thread is
+   * taken as this host's own.
+   */
+  readonly importedWorktrees?: ImportedCodeWorktreePort;
   /** Where a fork starts; without it a fork refuses as unavailable. */
   readonly forkPoints?: CodeForkPointPort;
   /**
@@ -1304,6 +1316,7 @@ export class CodeService {
   readonly #suggestingWindows = new Set<string>();
   readonly #worktreeCleanup: CodeServiceOptions["worktreeCleanup"];
   readonly #managedThreadCreation: ManagedCodeThreadCreationPort | undefined;
+  readonly #importedWorktrees: ImportedCodeWorktreePort | undefined;
   readonly #forkPoints: CodeForkPointPort | undefined;
   readonly #forkMergeBack: CodeServiceOptions["forkMergeBack"];
   readonly #forkConversation: CodeForkConversationReader | undefined;
@@ -1382,6 +1395,7 @@ export class CodeService {
     this.#worktreeBranchNames = options.worktreeBranchNames;
     this.#worktreeCleanup = options.worktreeCleanup;
     this.#managedThreadCreation = options.managedThreadCreation;
+    this.#importedWorktrees = options.importedWorktrees;
     this.#forkPoints = options.forkPoints;
     this.#forkMergeBack = options.forkMergeBack;
     this.#forkConversation = options.forkConversation;
@@ -5850,6 +5864,157 @@ export class CodeService {
         branch,
       },
     };
+  }
+
+  /**
+   * Gives a Code thread imported from Octant a worktree of this host's own
+   * before its first turn here, so the two apps never run turns in one
+   * checkout (docs/design/nightly-app.md#importing-from-octant). The new
+   * worktree is made on a new branch at the commit Octant's worktree is on,
+   * or, when that folder is gone, at its branch. Nothing is read into it from
+   * Octant's folder and nothing is written there: uncommitted changes stay in
+   * Octant, and the move record says so. The thread is rebound as a move
+   * rebinds it, so its next turn starts a new provider session with the text
+   * handoff a move takes. It asks no more than a move: the person's access to
+   * the thread's Project.
+   */
+  async continueImportedThread(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+  ): Promise<ImportedThreadContinuation> {
+    const current = this.#persistence.readCodeThread(threadId);
+    if (this.#importedWorktrees === undefined || current === undefined) return { status: "own" };
+    if (this.#persistence.readCodeCheckout(current.checkoutId)?.kind !== "managed-worktree") {
+      return { status: "own" };
+    }
+    const key = String(current.id);
+    if (this.#movingToWorktree.has(key)) return { status: "refused", reason: "turn-running" };
+    this.#movingToWorktree.add(key);
+    try {
+      return await this.#continueImportedThreadOnce(windowId, current, this.#importedWorktrees);
+    } finally {
+      this.#movingToWorktree.delete(key);
+    }
+  }
+
+  async #continueImportedThreadOnce(
+    windowId: WindowId,
+    current: CodeThread,
+    importedWorktrees: ImportedCodeWorktreePort,
+  ): Promise<ImportedThreadContinuation> {
+    const refused = (reason: ImportedThreadContinuationRefusal): ImportedThreadContinuation => ({
+      status: "refused",
+      reason,
+    });
+    // Anything the turn itself would refuse is left for it to refuse.
+    if (current.lifecycle !== "active") return { status: "own" };
+    if (!(await this.#access.canAccessProject(windowId, current.projectId))) {
+      return { status: "own" };
+    }
+    const checkout = this.#persistence.readCodeCheckout(current.checkoutId);
+    const project = this.#persistence.readProject?.(current.projectId);
+    if (checkout === undefined || project?.type !== "code") return { status: "own" };
+    const signal = new AbortController().signal;
+    const reading = await importedWorktrees.read(checkout, project.binding.canonicalRoot, signal);
+    if (reading.status === "own") return reading;
+    if (reading.status === "unavailable") return refused("unavailable");
+    if (reading.head === undefined) return refused("branch-missing");
+    const head = reading.head;
+    const executing = () =>
+      boardRuntimeActivityFromWorks(this.#persistence.readCodeRuntimeWorks(current.id)).executing;
+    if (executing()) return refused("turn-running");
+    const creation = this.#managedThreadCreation;
+    const branch = continuationBranchName(reading.sourceBranch, reading.takenBranchNames);
+    if (creation === undefined || branch === undefined) return refused("unavailable");
+    const input: ManagedCodeThreadCreationInput = {
+      authenticatedWindowId: windowId,
+      projectId: current.projectId,
+      bindingRevisionId: current.bindingRevisionId,
+      threadId: current.id,
+      branchIntent: branch,
+      sourceBranch: reading.sourceBranch,
+      startFromOrigin: false,
+      sourceRevision: head,
+      executionPolicy: current.executionPolicy,
+    };
+    const prepared = await creation.prepare(input, signal);
+    if (prepared.status !== "prepared") return refused("unavailable");
+    const preparation = prepared.preparation;
+    // The new checkout's id derives under this host's own label, so it is
+    // never the imported one: checkpoint refs are kept per checkout id in the
+    // repository both apps share.
+    if (String(preparation.checkoutId) === String(current.checkoutId)) {
+      return refused("unavailable");
+    }
+    const committed = await creation.commit(input, preparation, signal);
+    if (committed.status !== "created") return refused("unavailable");
+    if (committed.expectedHead !== head) {
+      await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
+      return refused("unavailable");
+    }
+    const observedAt = decodeTimestamp(this.#clock());
+    const continued = decodeCodeCheckoutIdentity({
+      id: preparation.checkoutId,
+      repositoryId: preparation.repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: branch, oid: head },
+      ownershipReceiptId: committed.receiptId,
+      observedAt,
+    });
+    const latest = this.#persistence.readCodeThread(current.id) ?? current;
+    const next = decodeCodeThread({
+      ...latest,
+      repositoryId: preparation.repositoryId,
+      checkoutId: continued.id,
+      deliveryTarget: { ...latest.deliveryTarget, branchIntent: branch },
+      version: latest.version + 2,
+      updatedAt: observedAt,
+    });
+    let busyAtCommit = false;
+    try {
+      this.#inUnit(() => {
+        busyAtCommit =
+          executing() ||
+          String(this.#persistence.readCodeThread(current.id)?.checkoutId) !==
+            String(current.checkoutId);
+        if (busyAtCommit) return;
+        this.#append(
+          "code-checkout",
+          continued.id,
+          this.#persistence.readCodeCheckoutAggregateVersion(continued.id),
+          "code.checkout-observed@1",
+          { kind: "checkout-observed", checkout: continued },
+        );
+        this.#appendBoth("code-thread", current.id, latest.version, [
+          [
+            CODE_THREAD_MOVED_TO_WORKTREE,
+            {
+              kind: "thread-moved-to-worktree",
+              threadId: current.id,
+              fromCheckoutId: current.checkoutId,
+              toCheckoutId: continued.id,
+              branch,
+              sourceHead: head,
+              fromOctant: { octantFolder: reading.octantFolder },
+              movedAt: observedAt,
+            },
+          ],
+          ["code.thread-updated@1", { kind: "thread-updated", thread: next }],
+        ]);
+      });
+    } catch {
+      await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
+      return refused("unavailable");
+    }
+    if (busyAtCommit) {
+      await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
+      return refused("turn-running");
+    }
+    // As for a move: every capability minted under the checkout the thread
+    // left is discarded, in every window that holds one.
+    this.#sessionAuthority.revokeThreadEverywhere(current.id);
+    return { status: "continued", checkoutId: continued.id };
   }
 
   /** Runs `body` as one journal unit where the journal offers one. */

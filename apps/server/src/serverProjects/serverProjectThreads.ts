@@ -12,6 +12,7 @@ import { decodeBindingRevisionId, type BindingRevisionId } from "@octant/contrac
 import type { ServerProject } from "@octant/contracts/server-projects";
 import type { WindowId } from "@octant/contracts/shell";
 import type { CodeCheckoutObservationPort } from "../code/codeService";
+import { managedWorktreeHostScope } from "../code/managedWorktreeHostScope";
 import type {
   NativeHarnessComposition,
   ServerFileTools,
@@ -86,7 +87,12 @@ export function serverCodeCheckout(project: ServerProject): ServerCodeCheckout {
  */
 export function serverWorktreeFolder(project: ServerProject, threadId: string): string {
   const repositoryId = String(serverCodeCheckout(project).checkout.repositoryId);
-  return posix.join(posix.dirname(project.folder), ".octant-worktrees", repositoryId, threadId);
+  return posix.join(
+    posix.dirname(project.folder),
+    managedWorktreeHostScope().folderName,
+    repositoryId,
+    threadId,
+  );
 }
 
 /**

@@ -292,6 +292,7 @@ export {
   KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
   decodeKeychainServiceFamily,
   keychainServicePrefix,
+  managedWorktreesFolderName,
   type KeychainServiceFamily,
   DESKTOP_FLAVOR_IDENTITIES,
   decodeDesktopDataChoice,

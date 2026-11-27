@@ -177,6 +177,10 @@ import type { ProjectForgeChoices } from "./standingMergeAllowance";
 import type { ServerTerminalLogin, ServerTerminalRefusal } from "../serverProjects/serverTerminal";
 import type { ProviderTerminalLaunch } from "../providers/providerTerminal";
 import { turnHoldsSandboxPolicy } from "../process/sandboxRuntimePolicy";
+import {
+  importedThreadContinuationMessage,
+  type ImportedThreadContinuation,
+} from "./importedCodeWorktree";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -1393,6 +1397,14 @@ export interface CodeOperationExecuteOptions {
 }
 
 export interface CodeOperationServiceOptions {
+  /**
+   * Gives a thread imported from Octant a worktree of this host's own before
+   * its first turn here; absent, every thread is taken as this host's own.
+   */
+  readonly continueImportedThread?: (
+    windowId: WindowId,
+    threadId: CodeThreadId,
+  ) => Promise<ImportedThreadContinuation>;
   /** Records that the person typed a turn's message, once the turn's start is journaled. */
   readonly markTurnTyped?: (input: {
     readonly threadId: string;
@@ -2015,6 +2027,32 @@ export class CodeOperationService {
     // like switching a grant off, it needs the thread and not the folder.
     if (command.kind === "resolve-unconfirmed-step") {
       return this.#resolveUnconfirmedStep(windowId, command, initiator);
+    }
+    // A Code thread imported from Octant still names Octant's worktree; its
+    // first turn here moves it onto one of this host's own, and the turn then
+    // starts there, as if the window had already seen the move.
+    if (
+      command.kind === "start-provider-turn" &&
+      options.admissionCurrent?.() !== false &&
+      String(this.#options.authority.readThread(command.threadId)?.checkoutId) ===
+        String(command.checkoutId)
+    ) {
+      const continued = await this.#options.continueImportedThread?.(windowId, command.threadId);
+      if (continued?.status === "refused")
+        return deliveredResult(
+          this.#failed(
+            command.operationId,
+            "unavailable",
+            importedThreadContinuationMessage(continued.reason),
+            "refused",
+          ),
+        );
+      if (continued?.status === "continued")
+        return this.#executeDecoded(
+          windowId,
+          { ...command, checkoutId: continued.checkoutId },
+          options,
+        );
     }
     const scope = await this.#scope(windowId, command);
     if ("failure" in scope) return this.#failed(command.operationId, scope.failure, scope.message);

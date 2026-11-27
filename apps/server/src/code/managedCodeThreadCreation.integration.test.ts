@@ -21,7 +21,7 @@ import {
   type Project,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { approvedWorkingFolderChoices } from "../approvedWorkingFolders";
 import { createCheckpointCodePort } from "../checkpoint/threadCheckpointPorts";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
@@ -61,6 +61,7 @@ import type {
 } from "./managedWorktreeService";
 import { ManagedWorktreeService } from "./managedWorktreeService";
 import { CodeContentStore } from "./codeContentStore";
+import { createImportedCodeWorktreePort } from "./importedCodeWorktree";
 import type {
   CreateManagedWorktreeReceiptInput,
   ManagedWorktreeReceipt,
@@ -172,6 +173,7 @@ function harness(
     readonly runningThreads?: ReadonlyArray<string>;
     readonly sessionAuthority?: CodeSessionAuthorityStore;
     readonly captureOverride?: NonNullable<CodeServiceOptions["forkPoints"]>["capture"];
+    readonly importedWorktrees?: CodeServiceOptions["importedWorktrees"];
   } = {},
 ) {
   // Observations: prepare repo-id lookup, prepare resolve fresh-state, commit plan fresh-state,
@@ -307,6 +309,9 @@ function harness(
     ...(options.sessionAuthority === undefined
       ? {}
       : { sessionAuthority: options.sessionAuthority }),
+    ...(options.importedWorktrees === undefined
+      ? {}
+      : { importedWorktrees: options.importedWorktrees }),
   });
   return { codeService, git, receipts, journal, repository };
 }
@@ -1630,5 +1635,218 @@ describe("moving a thread into its own worktree", () => {
       outcome: { status: "refused", reason: "unavailable" },
     });
     expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+  });
+});
+
+describe("continuing a Code thread imported from Octant", () => {
+  const importedCheckoutId = "60000000-0000-4000-8000-000000000081";
+  const importedReceiptId = "60000000-0000-4000-8000-000000000082";
+  const octantHead = "e".repeat(40);
+  const octantPath = `/workspace/.octant-worktrees/${repositoryId}/${sourceThreadId}`;
+  const nightlyPath = `/workspace/.octant-nightly-worktrees/${repositoryId}/${sourceThreadId}`;
+  const importedCheckout = decodeCodeCheckoutIdentity({
+    id: importedCheckoutId,
+    repositoryId,
+    kind: "managed-worktree",
+    availability: "available",
+    head: { kind: "branch", name: "feature/source", oid: octantHead },
+    ownershipReceiptId: importedReceiptId,
+    observedAt: now,
+  });
+  const importedReceipt = (importedFrom: "octant" | undefined) =>
+    ({
+      version: 1,
+      receiptId: importedReceiptId,
+      repositoryId: String(repositoryId),
+      threadId: String(sourceThreadId),
+      checkoutId: importedCheckoutId,
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: octantPath,
+      branchIntent: "feature/source",
+      refIntent: "refs/heads/feature/source",
+      expectedHead: octantHead,
+      state: "ready",
+      ...(importedFrom === undefined ? {} : { importedFrom }),
+      createdAt: now,
+      updatedAt: now,
+    }) as unknown as ManagedWorktreeReceipt;
+
+  beforeEach(() => {
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function continuing(
+    options: {
+      readonly octantFolder?: "clean" | "dirty" | "missing";
+      /** The branch's commit once Octant's folder is gone; absent, the branch is gone too. */
+      readonly branchHead?: string;
+      readonly importedFrom?: "octant" | undefined;
+    } = {},
+  ) {
+    const octantFolder = options.octantFolder ?? "clean";
+    const applySourceFiles = vi.fn(async () => "applied" as const);
+    const isDirty = vi.fn(async () => ({
+      status: "observed" as const,
+      dirty: octantFolder === "dirty",
+    }));
+    const resolveBranchHead = vi.fn(async () => ({
+      status: "observed" as const,
+      ...(options.branchHead === undefined ? {} : { head: options.branchHead }),
+    }));
+    let created: { readonly branch: string; readonly head: string } | undefined;
+    const observe = vi.fn(async () => {
+      const base = observation(false);
+      const entry = (path: string, branch: string, head: string) => ({
+        status: "present" as const,
+        reportedPath: path,
+        canonicalPath: path,
+        head,
+        branch: `refs/heads/${branch}`,
+        detached: false,
+      });
+      return {
+        ...base,
+        worktrees: [
+          ...base.worktrees,
+          ...(octantFolder === "missing" ? [] : [entry(octantPath, "feature/source", octantHead)]),
+          ...(created === undefined ? [] : [entry(nightlyPath, created.branch, created.head)]),
+        ],
+      };
+    });
+    const fixture = harness({
+      threads: [decodeCodeThread({ ...sourceThread(), checkoutId: importedCheckoutId })],
+      checkouts: [importedCheckout],
+      applySourceFiles,
+      importedWorktrees: createImportedCodeWorktreePort({
+        loadReceipt: async (receiptId) =>
+          receiptId === importedReceiptId
+            ? importedReceipt("importedFrom" in options ? options.importedFrom : "octant")
+            : undefined,
+        repository: { observe },
+        git: { isDirty, resolveBranchHead },
+      }),
+    });
+    (fixture.repository.observe as ReturnType<typeof vi.fn>).mockImplementation(observe);
+    (fixture.git.resolveRef as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_root: string, ref: string) => ({ status: "resolved" as const, oid: ref }),
+    );
+    (fixture.git.addWorktree as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: { readonly branchIntent: string; readonly startPoint: string }) => {
+        created = { branch: input.branchIntent, head: input.startPoint };
+        return { status: "created" as const };
+      },
+    );
+    /** Every path a Git call that changes something was pointed at. */
+    const writtenPaths = () =>
+      [
+        fixture.git.addWorktree,
+        fixture.git.removeWorktree,
+        fixture.git.deleteBranch,
+        fixture.git.removeCheckpointRefs,
+        applySourceFiles,
+      ].flatMap((call) =>
+        (call as ReturnType<typeof vi.fn>).mock.calls.map((args) => JSON.stringify(args[0])),
+      );
+    return { ...fixture, applySourceFiles, isDirty, resolveBranchHead, writtenPaths };
+  }
+
+  const threadAppend = (journal: ReturnType<typeof harness>["journal"]) =>
+    journal.append.mock.calls
+      .map(([request]) => request)
+      .find((request) => request.aggregate.aggregateType === "code-thread");
+
+  it("makes a new branch and a worktree in Nightly's own folder, and writes nothing in Octant's", async () => {
+    const fixture = continuing({ octantFolder: "dirty" });
+    const result = await fixture.codeService.continueImportedThread(windowId, sourceThreadId);
+    if (result.status !== "continued") throw new Error(JSON.stringify(result));
+    expect(String(result.checkoutId)).not.toBe(importedCheckoutId);
+    expect(fixture.git.addWorktree).toHaveBeenCalledTimes(1);
+    expect(fixture.git.addWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetPath: nightlyPath,
+        branchIntent: "feature/source-nightly",
+        startPoint: octantHead,
+      }),
+      expect.anything(),
+    );
+    expect(fixture.writtenPaths().some((args) => args.includes(octantPath))).toBe(false);
+    // Octant's uncommitted changes stay in Octant: nothing is laid over the new worktree.
+    expect(fixture.applySourceFiles).not.toHaveBeenCalled();
+    // A normal receipt of this host's own, never marked as imported.
+    expect(fixture.receipts.create).toHaveBeenCalledWith(
+      expect.objectContaining({ canonicalWorktreePath: nightlyPath }),
+    );
+    expect(fixture.receipts.create.mock.calls[0]?.[0]).not.toHaveProperty("importedFrom");
+    const append = threadAppend(fixture.journal);
+    expect(append?.events.map((event: { eventName: string }) => event.eventName)).toEqual([
+      CODE_THREAD_MOVED_TO_WORKTREE,
+      "code.thread-updated@1",
+    ]);
+    const moved = append?.events[0]?.payload;
+    expect(moved).toMatchObject({
+      fromCheckoutId: importedCheckoutId,
+      toCheckoutId: String(result.checkoutId),
+      branch: "feature/source-nightly",
+      sourceHead: octantHead,
+      fromOctant: { octantFolder: "uncommitted-changes-left" },
+    });
+    expect(moved).not.toHaveProperty("capturedTrees");
+    expect(append?.events[1]?.payload.thread).toMatchObject({
+      checkoutId: String(result.checkoutId),
+      deliveryTarget: { branchIntent: "feature/source-nightly" },
+    });
+  });
+
+  it("says nothing stayed behind when Octant's worktree was clean", async () => {
+    const fixture = continuing();
+    expect(
+      await fixture.codeService.continueImportedThread(windowId, sourceThreadId),
+    ).toMatchObject({ status: "continued" });
+    expect(threadAppend(fixture.journal)?.events[0]?.payload).toMatchObject({
+      fromOctant: { octantFolder: "clean" },
+    });
+  });
+
+  it("starts from the branch when Octant's folder is gone", async () => {
+    const branchHead = "d".repeat(40);
+    const fixture = continuing({ octantFolder: "missing", branchHead });
+    expect(
+      await fixture.codeService.continueImportedThread(windowId, sourceThreadId),
+    ).toMatchObject({ status: "continued" });
+    expect(fixture.resolveBranchHead).toHaveBeenCalledWith(
+      { repositoryRoot, branch: "feature/source" },
+      expect.anything(),
+    );
+    expect(fixture.git.addWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({ targetPath: nightlyPath, startPoint: branchHead }),
+      expect.anything(),
+    );
+    expect(threadAppend(fixture.journal)?.events[0]?.payload).toMatchObject({
+      sourceHead: branchHead,
+      fromOctant: { octantFolder: "missing" },
+    });
+  });
+
+  it("refuses as branch-missing, and makes nothing, when the folder and the branch are both gone", async () => {
+    const fixture = continuing({ octantFolder: "missing" });
+    expect(await fixture.codeService.continueImportedThread(windowId, sourceThreadId)).toEqual({
+      status: "refused",
+      reason: "branch-missing",
+    });
+    expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+    expect(fixture.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("leaves a thread on a worktree of this host's own as it is", async () => {
+    const fixture = continuing({ importedFrom: undefined });
+    expect(await fixture.codeService.continueImportedThread(windowId, sourceThreadId)).toEqual({
+      status: "own",
+    });
+    expect(fixture.isDirty).not.toHaveBeenCalled();
+    expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+    expect(fixture.journal.append).not.toHaveBeenCalled();
   });
 });

@@ -118,6 +118,17 @@ export function keychainServicePrefix(family: KeychainServiceFamily): string {
   return family === "octant" ? "app.octant." : "app.octant.desktop.nightly.test-data.";
 }
 
+/**
+ * The folder a host keeps its managed worktrees in, beside each repository.
+ * A Code thread imported from Octant keeps its id, and a worktree's path
+ * derives from the thread id, so Nightly's own host names a folder of its own:
+ * otherwise its worktree for an imported thread would be Octant's
+ * (docs/design/nightly-app.md#importing-from-octant).
+ */
+export function managedWorktreesFolderName(family: KeychainServiceFamily): string {
+  return family === "octant" ? ".octant-worktrees" : ".octant-nightly-worktrees";
+}
+
 /** Nightly's window-storage file that holds the Data choice. */
 export const DESKTOP_DATA_CHOICE_FILE = "data-choice.json";
 

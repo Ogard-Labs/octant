@@ -27,6 +27,7 @@ import {
 } from "./managedWorktreeReceiptStore";
 import { forReceipt } from "./boundedGit";
 import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
+import { managedWorktreeHostScope } from "./managedWorktreeHostScope";
 import type { RepositoryIdentityObservation } from "./repositoryIdentity";
 
 export type ManagedWorktreeRefObservation =
@@ -1346,9 +1347,12 @@ export function managedTargetPath(
   return join(managedWorktreeRoot(repositoryRoot, repositoryId), threadId);
 }
 
-/** The directory the service keeps one repository's managed worktrees under. */
+/**
+ * The directory the service keeps one repository's managed worktrees under,
+ * in this host's own folder (see `managedWorktreeHostScope`).
+ */
 export function managedWorktreeRoot(repositoryRoot: string, repositoryId: string): string {
-  return join(dirname(repositoryRoot), ".octant-worktrees", repositoryId);
+  return join(dirname(repositoryRoot), managedWorktreeHostScope().folderName, repositoryId);
 }
 
 export function branchRef(branchIntent: string): string {
