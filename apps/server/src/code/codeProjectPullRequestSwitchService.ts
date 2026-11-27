@@ -299,6 +299,7 @@ export class CodeProjectPullRequestSwitchService
   // Confirmation is local to this enrollment. A restart requires two fresh quiet observations.
   readonly #stallCandidates = new WeakMap<PullRequestSwitchFold["autoFix"], string>();
   readonly #localWindows: (() => ReadonlyArray<WindowId>) | undefined;
+  readonly #onWaitResumed: (() => void) | undefined;
   #ticking = false;
   readonly #limits: () => PullRequestSwitchLimits;
 
@@ -318,6 +319,8 @@ export class CodeProjectPullRequestSwitchService
      * attempts per failure.
      */
     readonly limits?: () => PullRequestSwitchLimits;
+    /** A window's vouch resumed a wait, which journals nothing a reader would hear. */
+    readonly onWaitResumed?: () => void;
   }) {
     this.#limits =
       options.limits ??
@@ -328,6 +331,7 @@ export class CodeProjectPullRequestSwitchService
       }));
     this.#authority = options.authority;
     this.#localWindows = options.localWindows;
+    this.#onWaitResumed = options.onWaitResumed;
     this.#forge = options.forge;
     this.#threads = options.threads;
     this.#journal = options.journal;
@@ -409,7 +413,7 @@ export class CodeProjectPullRequestSwitchService
       this.#babysitScopes.set(resolved.key, { windowId, ...(deviceCurrent && { deviceCurrent }) });
     }
     if ((fold.autoFix.status === "on" && !fold.autoFix.babysit) || fold.watch.status === "on") {
-      this.#vouchingWindows.set(resolved.key, windowId);
+      this.#resumeWaits(resolved.key, windowId);
     }
     return this.#view(fold);
   }
@@ -590,7 +594,7 @@ export class CodeProjectPullRequestSwitchService
     const canonicalTarget = resolved.target;
     if (admitted.alreadyWatching) {
       // Asking again from a window that may act renews the vouch a restart lost.
-      this.#vouchingWindows.set(resolved.key, input.windowId);
+      this.#resumeWaits(resolved.key, input.windowId);
       return this.#watchingOutcome(canonicalTarget, true);
     }
     const observation = await this.#forge.observe(forgeRequest(canonicalTarget), input.signal, {
@@ -970,6 +974,12 @@ export class CodeProjectPullRequestSwitchService
     };
   }
 
+  #resumeWaits(key: string, windowId: WindowId): void {
+    const quiet = !this.#vouchingWindows.has(key);
+    this.#vouchingWindows.set(key, windowId);
+    if (quiet) this.#onWaitResumed?.();
+  }
+
   /** The person is composing in this thread; Auto-fix and a watch hold their wake back. */
   noteComposerActivity(threadId: CodeThreadId): void {
     this.#typedAt.set(String(threadId), Date.parse(this.#clock()));
@@ -1261,8 +1271,8 @@ export class CodeProjectPullRequestSwitchService
         const autoFixHeldQuiet =
           vouched && current.autoFix.status === "on" && !current.autoFix.babysit && !mayAct.autoFix;
         const watchHeldQuiet = vouched && current.watch.status === "on" && !mayAct.watch;
-        if (autoFixHeldQuiet) this.#unreachable.autoFix.add(resolved.key);
-        if (watchHeldQuiet) this.#unreachable.watch.add(resolved.key);
+        if (autoFixHeldQuiet) this.#markUnreachable("autoFix", resolved.key);
+        if (watchHeldQuiet) this.#markUnreachable("watch", resolved.key);
         if (current.autoFix.status === "on" && current.autoFix.babysit && !mayAct.autoFix)
           this.#babysitProgress.set(resolved.key, { status: "connection" });
         const failures = current.mergeWhenReady.status === "on" || mayAct.autoFix;
@@ -1284,8 +1294,8 @@ export class CodeProjectPullRequestSwitchService
           )
             this.#babysitProgress.set(resolved.key, { status: "connection" });
           // The one read serves both switches, so its failure holds both.
-          this.#unreachable.autoFix.add(resolved.key);
-          this.#unreachable.watch.add(resolved.key);
+          this.#markUnreachable("autoFix", resolved.key);
+          this.#markUnreachable("watch", resolved.key);
           continue;
         }
         if (!autoFixHeldQuiet) this.#unreachable.autoFix.delete(resolved.key);
@@ -1313,6 +1323,11 @@ export class CodeProjectPullRequestSwitchService
     } finally {
       this.#ticking = false;
     }
+  }
+
+  /** A switch turned off, perhaps during this pass's own reads, holds no pause. */
+  #markUnreachable(kind: "autoFix" | "watch", key: string): void {
+    if (this.#folds.get(key)?.[kind].status === "on") this.#unreachable[kind].add(key);
   }
 
   /**
@@ -1883,10 +1898,17 @@ export class CodeProjectPullRequestSwitchService
     const current = this.#folds.get(resolved.key) ?? emptyPullRequestSwitchFold(resolved.target);
     if (event.kind === "auto-fix" && event.record.change.kind !== "woke")
       this.#babysitScopes.delete(resolved.key);
-    this.#folds.set(resolved.key, {
-      ...applyPullRequestSwitchEvent(current, event),
-      target: resolved.target,
-    });
+    const next = { ...applyPullRequestSwitchEvent(current, event), target: resolved.target };
+    this.#folds.set(resolved.key, next);
+    if (
+      next.mergeWhenReady.status !== "on" &&
+      next.autoFix.status !== "on" &&
+      next.watch.status !== "on"
+    ) {
+      this.#paused.delete(resolved.key);
+      this.#unreachable.autoFix.delete(resolved.key);
+      this.#unreachable.watch.delete(resolved.key);
+    }
   }
 
   #replay(journal: Pick<Journal, "replayAggregateType">): void {
@@ -2177,6 +2199,7 @@ export class CodeProjectPullRequestSwitchService
     if (change.kind !== "woke") {
       const { key } = this.#resolveIdentity(target);
       this.#babysitProgress.delete(key);
+      this.#paused.delete(key);
       this.#unreachable.autoFix.delete(key);
     }
     const record = decodeCodeProjectPullRequestAutoFixRecorded({ target, threadId, change });

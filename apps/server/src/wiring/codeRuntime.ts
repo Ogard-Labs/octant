@@ -3375,6 +3375,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     // Merge when ready and Auto-fix reuse `pullRequestSwitchForge` created above.
     const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
       localWindows: () => deps.windowAuthorityStore.listWindowIds(),
+      onWaitResumed: () => machineChangeFeed.publish(["thread-follow-ups"]),
       limits: () => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
         return {

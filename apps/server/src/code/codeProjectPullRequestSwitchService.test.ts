@@ -95,6 +95,7 @@ function fixture(
     readonly localWindows?: () => ReadonlyArray<typeof windowId>;
     readonly threadPullRequests?: ReadonlyArray<typeof target>;
     readonly pullRequestLinks?: (journal: Journal) => PullRequestLinkOwner;
+    readonly onWaitResumed?: () => void;
   } = {},
 ) {
   let authority: "authorized" | "not-authorized" | "disconnected" = "authorized";
@@ -154,6 +155,7 @@ function fixture(
     new CodeProjectPullRequestSwitchService({
       ...(pullRequestLinks && { pullRequestLinks }),
       ...(options.limits && { limits: options.limits }),
+      ...(options.onWaitResumed && { onWaitResumed: options.onWaitResumed }),
       ...(options.localWindows ? { localWindows: options.localWindows } : {}),
       authority: {
         authorizePullRequest:
@@ -1327,6 +1329,54 @@ describe("a thread watching its own pull request", () => {
     expect(f.threads.startTurn).not.toHaveBeenCalled();
     expect(restarted.threadWaits(threadId)).toMatchObject([{ kind: "watch", paused: true }]);
   });
+
+  it("raises one follow-up notice when opening the pull request resumes a watch after a restart", async () => {
+    const onWaitResumed = vi.fn();
+    const f = fixture({ onWaitResumed });
+    f.observe(activity());
+    await watching(f);
+    const restarted = f.restart();
+    onWaitResumed.mockClear();
+
+    await restarted.query(windowId, target);
+    expect(restarted.threadWaits(threadId)).toMatchObject([{ kind: "watch", paused: false }]);
+    expect(onWaitResumed).toHaveBeenCalledTimes(1);
+
+    await restarted.query(windowId, target);
+    expect(onWaitResumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("raises a follow-up notice when the thread's agent asking again resumes its watch", async () => {
+    const onWaitResumed = vi.fn();
+    const f = fixture({ onWaitResumed });
+    f.observe(activity());
+    await watching(f);
+    const restarted = f.restart();
+    onWaitResumed.mockClear();
+
+    await watching({ ...f, service: restarted });
+    expect(onWaitResumed).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["with nothing else on", "while the watch stays on"])(
+    "shows no earlier pause reason on Auto-fix turned back on %s",
+    async (scenario) => {
+      const f = fixture();
+      f.observe(activity({}, { failures: [lint] }));
+      if (scenario === "while the watch stays on") await watching(f);
+      await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+      f.setTurnActive(true);
+      await f.service.tick(signal);
+      expect((await f.service.query(windowId, target)).autoFix).toMatchObject({
+        pausedFor: "turn-active",
+      });
+
+      await f.service.setAutoFix(windowId, { kind: "disable", target }, "user");
+      await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+
+      expect((await f.service.query(windowId, target)).autoFix).not.toHaveProperty("pausedFor");
+    },
+  );
 
   it("reads babysitting whose connection was lost as paused", async () => {
     const f = fixture();

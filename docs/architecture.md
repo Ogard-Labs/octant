@@ -4817,7 +4817,10 @@ CI or reviewers should be woken, not left polling; maintainer request,
   pass), or after a pass could not read or wake it, until a pass can again;
   the last two name their reason, and the vouch is kept so the wait resumes by
   itself. Each watch and Auto-fix is judged on its own: one whose thread lost
-  its link does not pause the other on the same pull request. A settled or archived thread lists nothing, though its watch
+  its link does not pause the other on the same pull request. A switch that is
+  off holds no pause. When a window vouches again for a wait nothing vouched
+  for, the host raises the thread follow-up notice, because nothing is
+  journaled. A settled or archived thread lists nothing, though its watch
   may not have read it as gone yet. `POST /api/code-thread-waits/stop` stops one of them for the
   person (a routine's scope and a hub-introduced device are refused). It only
   takes reach away, so it asks the forge and the Project nothing: the thread

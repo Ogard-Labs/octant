@@ -1356,7 +1356,8 @@ pull request.
 A failed stop shows a sentence under the row, or in the dialog while it is
 open. The row refreshes on the thread's follow-up notices (a task starting or
 ending raises one, and so does every watch, Auto-fix or babysit change,
-including one made from the pull request's own controls), in Code also when the
+including one made from the pull request's own controls, and so does a window
+resuming a watch or Auto-fix that was paused for want of one), in Code also when the
 thread's turn ends or the thread is settled, and on a slow visible-page
 interval. It does not follow the Code navigation notice, which every live step
 of any Code turn raises. One source failing keeps its last answer and never hides
