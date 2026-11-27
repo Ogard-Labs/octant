@@ -101,6 +101,21 @@ describe("WorkspaceSurfaceDragController", () => {
 
     expect(controller.getSnapshot()).toEqual({ phase: "idle" });
     expect(onDrop).not.toHaveBeenCalled();
+    expect(controller.consumeClickSuppression(source.dragKey)).toBe(false);
+
+    // Cancelling while the button is still held suppresses the release click
+    // until a fresh gesture starts or the caller disarms it.
+    controller.start(7, source, { x: 10, y: 10 });
+    controller.move(7, { x: 30, y: 10 });
+    controller.cancel({ suppressReleaseClick: true });
     expect(controller.consumeClickSuppression(source.dragKey)).toBe(true);
+    expect(controller.consumeClickSuppression(source.dragKey)).toBe(false);
+
+    controller.start(7, source, { x: 10, y: 10 });
+    controller.move(7, { x: 30, y: 10 });
+    controller.cancel({ suppressReleaseClick: true });
+    controller.start(9, source, { x: 10, y: 10 });
+    controller.drop(9);
+    expect(controller.consumeClickSuppression(source.dragKey)).toBe(false);
   });
 });
