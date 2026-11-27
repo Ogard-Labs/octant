@@ -293,9 +293,7 @@ describe("sharing a thread with a visitor", () => {
     const context = setup({
       hubMemberId: () => followed,
       sendGrants: async () =>
-        reachable
-          ? { sent: true, hub: { memberId: HUB, publicOrigin: FRONT } }
-          : { sent: false },
+        reachable ? { sent: true, hub: { memberId: HUB, publicOrigin: FRONT } } : { sent: false },
     });
     await shared(context);
     reachable = false;
@@ -923,4 +921,3 @@ describe("a header or scheme keyword in a reply still being written", () => {
     }
   });
 });
-

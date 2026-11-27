@@ -163,10 +163,7 @@ export class HubVisitorService {
    * Replaces what this hub holds for one spoke. A grant for another spoke, or
    * one signed by a key the roster does not list for this spoke, is dropped.
    */
-  receiveGrants(
-    spokeMemberId: string,
-    update: HubVisitorGrantsUpdate,
-  ): HubVisitorGrantsReceipt {
+  receiveGrants(spokeMemberId: string, update: HubVisitorGrantsUpdate): HubVisitorGrantsReceipt {
     const listed = this.#options.rosterFingerprintFor(spokeMemberId);
     const own = update.grants.filter(
       (signed) =>
