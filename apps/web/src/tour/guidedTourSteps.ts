@@ -97,6 +97,26 @@ export function findTourTarget(step: GuidedTourStep): HTMLElement | undefined {
   return undefined;
 }
 
+/** Anything a person has to answer or has just opened, which the tour never covers. */
+export const ANSWER_SURFACES =
+  '[role="dialog"]:not([data-octant-guided-tour]), [role="alertdialog"], [role="menu"], [role="listbox"]';
+
+export interface ResolvedStep {
+  readonly step: GuidedTourStep;
+  /** Its place in the full list, so "from here on" survives a step dropping out. */
+  readonly order: number;
+  readonly element: HTMLElement;
+}
+
+export function resolveSteps(): ReadonlyArray<ResolvedStep> {
+  const resolved: ResolvedStep[] = [];
+  GUIDED_TOUR_STEPS.forEach((step, order) => {
+    const element = findTourTarget(step);
+    if (element !== undefined) resolved.push({ step, order, element });
+  });
+  return resolved;
+}
+
 export interface TourPlacementRect {
   readonly left: number;
   readonly top: number;

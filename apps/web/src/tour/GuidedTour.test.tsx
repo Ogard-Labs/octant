@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GuidedTour, type GuidedTourProps } from "./GuidedTour";
 import {
   GUIDED_TOUR_STORAGE_KEY,
@@ -57,6 +57,8 @@ function box(x: number, y: number, width: number, height: number) {
 const label = () => screen.getByText(/^\d of \d · /).textContent;
 
 describe("GuidedTour", () => {
+  // The card is its own chunk; a cold transform of it can outlast a query's wait.
+  beforeAll(() => import("./GuidedTourSurface"));
   beforeEach(() => {
     vi.stubGlobal(
       "ResizeObserver",
@@ -73,13 +75,14 @@ describe("GuidedTour", () => {
     vi.unstubAllGlobals();
   });
 
-  it("is offered once after first-run setup is answered, skipping a step whose control is not on screen", () => {
+  it("is offered once after first-run setup is answered, skipping a step whose control is not on screen", async () => {
     const { rerender } = render(<Window blocked={false} firstRunStatus="pending" />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(globalThis.localStorage.getItem(GUIDED_TOUR_STORAGE_KEY)).toBe("due");
 
     rerender(<Window blocked={false} firstRunStatus="completed" />);
 
+    await screen.findByRole("dialog");
     // The Tools step has no control in this window, so four steps remain, in order.
     expect(label()).toBe("1 of 4 · New thread");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -96,9 +99,10 @@ describe("GuidedTour", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("rings the row of Project controls and sets the card beside it, level with the ring", () => {
+  it("rings the row of Project controls and sets the card beside it, level with the ring", async () => {
     render(<Window blocked={false} firstRunStatus="completed" />);
     act(() => openGuidedTour());
+    await screen.findByRole("dialog");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(label()).toBe("2 of 4 · Projects");
 
@@ -112,44 +116,49 @@ describe("GuidedTour", () => {
     expect(card.style.top).toBe("52px");
   });
 
-  it("keeps the card centred on the control for the other steps", () => {
+  it("keeps the card centred on the control for the other steps", async () => {
     render(<Window blocked={false} firstRunStatus="completed" />);
     act(() => openGuidedTour());
+    await screen.findByRole("dialog");
     const card = screen.getByRole("dialog", { name: "Start work in a new thread" });
     // Below the 28px New chat button, centred on it (a card with no measured width sits at its centre).
     expect(card.style.top).toBe("50px");
     expect(card.style.left).toBe("254px");
   });
 
-  it("includes the Tools step when its buttons are drawn", () => {
+  it("includes the Tools step when its buttons are drawn", async () => {
     render(<Window blocked={false} firstRunStatus="completed" withTools />);
     act(() => openGuidedTour());
+    await screen.findByRole("dialog");
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(label()).toBe("3 of 5 · Tools");
   });
 
-  it("is never offered to an installation that answered first-run setup before the tour existed", () => {
+  it("is never offered to an installation that answered first-run setup before the tour existed", async () => {
     render(<Window blocked={false} firstRunStatus="completed" />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("waits while another surface needs the person", () => {
+  it("waits while another surface needs the person", async () => {
     globalThis.localStorage.setItem(GUIDED_TOUR_STORAGE_KEY, "due");
     const { rerender } = render(<Window blocked firstRunStatus="skipped" />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     rerender(<Window blocked={false} firstRunStatus="skipped" />);
-    expect(screen.getByRole("dialog", { name: "Start work in a new thread" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: "Start work in a new thread" }),
+    ).toBeInTheDocument();
   });
 
-  it("moves with the arrow keys, closes on Escape and returns focus to where it was", () => {
+  it("moves with the arrow keys, closes on Escape and returns focus to where it was", async () => {
     render(<Window blocked={false} firstRunStatus="completed" />);
     const opener = screen.getByRole("button", { name: "Account menu, Test" });
     opener.focus();
 
     act(() => openGuidedTour());
+    await screen.findByRole("dialog");
     expect(screen.getByRole("button", { name: "Next" })).toHaveFocus();
 
     fireEvent.keyDown(document.body, { key: "ArrowRight" });

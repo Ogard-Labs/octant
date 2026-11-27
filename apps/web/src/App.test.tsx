@@ -1738,6 +1738,8 @@ describe("App", () => {
   });
 
   it("opens a mentioned pull request in the browser from Chat, which has no pull-request pane", async () => {
+    // The mention chip is its own chunk; a cold transform of it can outlast a query's wait.
+    await import("./transcript/SentMentionText");
     const user = userEvent.setup();
     const openBrowserExternal = vi.fn(async () => undefined);
     const url = "https://github.com/octant/octant/pull/7";
