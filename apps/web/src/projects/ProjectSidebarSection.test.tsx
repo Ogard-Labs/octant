@@ -1344,7 +1344,7 @@ describe("ProjectSidebarSection activity view", () => {
     }
   });
 
-  it("opens a thread row on the next click after an Escape-cancelled drag, while a completed drag still swallows its trailing click", () => {
+  it("opens a thread row on the next click after an Escape- or pointer-cancelled drag while suppressing the cancelled press's own release click", () => {
     window.localStorage.clear();
     const layout = layOutDropZones();
     const onSelectThread = vi.fn();
@@ -1370,17 +1370,46 @@ describe("ProjectSidebarSection activity view", () => {
         />,
       );
       const row = screen.getByRole("button", { name: /Open work/ });
+
+      // 1. Escape while holding the button, then releasing on the same row:
+      // the cancelled press's own release click is swallowed, and the next
+      // fresh click opens the thread.
       fireEvent.pointerDown(row, { button: 0, pointerId: 1, clientX: 20, clientY: 300 });
       fireEvent.pointerMove(row, { pointerId: 1, clientX: 20, clientY: 50 });
       fireEvent.keyDown(window, { key: "Escape" });
+      fireEvent.pointerUp(row, { pointerId: 1, clientX: 20, clientY: 300 });
+      fireEvent.click(row);
+      expect(onSelectThread).not.toHaveBeenCalled();
 
+      fireEvent.pointerDown(row, { button: 0, pointerId: 2, clientX: 20, clientY: 300 });
+      fireEvent.pointerUp(row, { pointerId: 2, clientX: 20, clientY: 300 });
       fireEvent.click(row);
       expect(onSelectThread).toHaveBeenCalledTimes(1);
-      expect(onSelectThread).toHaveBeenCalledWith("thread-open");
+      expect(onSelectThread).toHaveBeenLastCalledWith("thread-open");
 
+      // 2. Escape while holding the button, then releasing away from the row
+      // (no click emitted), followed by a fresh click on the row: opens it.
+      fireEvent.pointerDown(row, { button: 0, pointerId: 3, clientX: 20, clientY: 300 });
+      fireEvent.pointerMove(row, { pointerId: 3, clientX: 20, clientY: 50 });
+      fireEvent.keyDown(window, { key: "Escape" });
+      fireEvent.pointerUp(window, { pointerId: 3, clientX: 20, clientY: 50 });
+
+      fireEvent.pointerDown(row, { button: 0, pointerId: 4, clientX: 20, clientY: 300 });
+      fireEvent.pointerUp(row, { pointerId: 4, clientX: 20, clientY: 300 });
+      fireEvent.click(row);
+      expect(onSelectThread).toHaveBeenCalledTimes(2);
+
+      // 3. Pointer cancel followed by a plain click opens the thread.
+      fireEvent.pointerDown(row, { button: 0, pointerId: 5, clientX: 20, clientY: 300 });
+      fireEvent.pointerMove(row, { pointerId: 5, clientX: 20, clientY: 50 });
+      fireEvent.pointerCancel(row, { pointerId: 5 });
+      fireEvent.click(row);
+      expect(onSelectThread).toHaveBeenCalledTimes(3);
+
+      // 4. A completed drag still swallows its trailing click.
       dragRowTo(row, 50);
       fireEvent.click(row);
-      expect(onSelectThread).toHaveBeenCalledTimes(1);
+      expect(onSelectThread).toHaveBeenCalledTimes(3);
     } finally {
       layout.mockRestore();
       window.localStorage.clear();
