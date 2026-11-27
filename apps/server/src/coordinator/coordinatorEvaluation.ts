@@ -160,7 +160,9 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
       if (!tail || tail === ":") return true;
       // A punctuated name can introduce a caption or a dependency note.
       // Keep it inside an unfinished item unless it carries an inline pair.
-      const canStartCaption = !pending || (referenceLines.size > 0 && indent <= pending.indent);
+      const hasPriorReference =
+        referenceLines.size > 0 || (pending?.part === "title" && implicit.size === 1);
+      const canStartCaption = !pending || (hasPriorReference && indent <= pending.indent);
       if (canStartCaption && /^(?:[:–—]|-\s)/.test(tail)) return true;
       const link = tail.replace(/^[\s`*_[(<:–—-]+/, "");
       return refs.some(({ reference }) => link.startsWith(reference));

@@ -85,6 +85,9 @@ it("requires the Project conversation to name and link each confirmed worker", (
       .toBe(!swapped);
     for (const recap of [
       `**CSV parser** — running\n${parserRef}\n**Changelog** — running\n${changelogRef}`,
+      `**CSV parser** — running\n${parserRef} is fixing quoted commas.\n**Changelog** — running\nStarted as ${changelogRef}.`,
+      `**CSV parser** — running\nThread: ${parserRef}\n\n**Changelog** — running\nThread: ${changelogRef}`,
+      `- **CSV parser**\nSee changelog@project for release notes.\n  **Changelog**: waits on this.\n  Reference: ${parserRef}\n- **Changelog**\nSee parser@project for changes.\n  **CSV parser**: waits on this.\n  Reference: ${changelogRef}`,
       `- **CSV parser**\n${parserRef} — running\nSee changelog@project for release notes.\n- **Changelog**\n${changelogRef} — running\nSee parser@project for changes.`,
       `${parserRef}\nCSV parser is fixing quoted commas.\n\nChangelog: ${changelogRef}`,
       `**CSV parser**\n\`${parserRef}\`\n${changelogRef} — Changelog`,

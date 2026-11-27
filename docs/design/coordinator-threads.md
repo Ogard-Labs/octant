@@ -727,7 +727,10 @@ still run them, and a pass-rate delta requires completed samples on both sides.
 The Project dispatch score checks that each confirmed worker’s title is paired
 with its returned reference in the recap. A list item, heading, or worker label
 can supply the title before a separate reference field. The field takes
-precedence over mentions in the description. The recorded start actions show
+precedence over mentions in the description. When a worker’s title has one
+reference in prose, a caption at the same indentation or farther left can
+start the next entry. A more deeply indented dependency note stays with its
+worker. The recorded start actions show
 what the model actually assigned when recap wording affects a score.
 
 Prepare two clean, separate Git checkouts and run `bun install --frozen-lockfile`
