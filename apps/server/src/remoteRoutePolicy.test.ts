@@ -296,6 +296,9 @@ describe("remote route policy", () => {
       "/api/host-control/export",
       "/api/secret-stores/settings",
       "/api/secret-stores/commands",
+      // Steering a subagent stays with a window here; a device reads and stops.
+      "/api/agent-runs/steer",
+      "/api/agent-runs/observed/message",
       "/api/missing",
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);
@@ -306,7 +309,7 @@ describe("remote route policy", () => {
     expect(fixture.authenticatedProduct).not.toHaveBeenCalled();
   });
 
-  it("forwards person-paired routes for servers, notifications, artifacts, tool records, tooling, sessions, and replica sync with no remote action for other devices", async () => {
+  it("forwards person-paired routes for servers, notifications, artifacts, tool records, tooling, sessions, subagents, and replica sync with no remote action for other devices", async () => {
     const cases: ReadonlyArray<{ readonly path: string; readonly method: string }> = [
       { path: "/api/shield/servers?projectId=p1", method: "GET" },
       { path: "/api/shield/servers", method: "POST" },
@@ -323,6 +326,9 @@ describe("remote route policy", () => {
       { path: "/api/mcp-plan-read-only/commands", method: "POST" },
       { path: "/api/code-live-tasks?threadId=t1", method: "GET" },
       { path: "/api/work-live-tasks?threadId=t1", method: "GET" },
+      { path: "/api/agent-runs/parent-summary?parentThreadId=t1", method: "GET" },
+      { path: "/api/agent-runs/cancel", method: "POST" },
+      { path: "/api/agent-runs/observed/stop", method: "POST" },
       { path: "/api/replica-store/settings", method: "GET" },
       { path: "/api/replica-store/commands", method: "POST" },
       { path: "/api/replica-membership/state", method: "GET" },

@@ -9,8 +9,12 @@ export interface MobilePlace {
   readonly id: MobilePlaceId;
   /** Spoken for the icon-only item. */
   readonly label: string;
-  readonly symbol: SFSymbol;
-  readonly selectedSymbol: SFSymbol;
+  /**
+   * The system's symbol for the bar on iOS. Absent where the system has none
+   * that reads right, and the bar draws the icon below instead.
+   */
+  readonly symbol?: SFSymbol;
+  readonly selectedSymbol?: SFSymbol;
   readonly icon: MobileIconName;
   readonly selectedIcon: MobileIconName;
   /** False for a place whose own work has not landed; it keeps its order. */
@@ -48,11 +52,12 @@ export const MOBILE_PLACES: ReadonlyArray<MobilePlace> = [
   {
     id: "prs",
     label: "Pull requests",
-    symbol: "arrow.triangle.pull",
-    selectedSymbol: "arrow.triangle.pull",
+    // The system's pull symbol is a filled arrowhead that reads as a figure
+    // in the bar (seen on the iOS 26 Simulator), so the bar keeps the glyph
+    // developers know.
     icon: "git-pull-request-outline",
     selectedIcon: "git-pull-request",
-    shipped: false,
+    shipped: true,
   },
   {
     id: "inbox",

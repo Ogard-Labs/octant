@@ -258,6 +258,9 @@ describe("authenticated product route dispatch", () => {
       ["/api/mcp-plan-read-only/commands", "POST"],
       ["/api/code-live-tasks", "GET"],
       ["/api/work-live-tasks", "GET"],
+      ["/api/agent-runs/parent-summary", "GET"],
+      ["/api/agent-runs/cancel", "POST"],
+      ["/api/agent-runs/observed/stop", "POST"],
     ] as const;
 
     for (const [path, method] of routes) {
@@ -312,6 +315,9 @@ describe("authenticated product route dispatch", () => {
       ["/api/mcp-plan-read-only/commands", "POST"],
       ["/api/code-live-tasks", "GET"],
       ["/api/work-live-tasks", "GET"],
+      ["/api/agent-runs/parent-summary", "GET"],
+      ["/api/agent-runs/cancel", "POST"],
+      ["/api/agent-runs/observed/stop", "POST"],
     ] as const) {
       expect((await product({ ...handoff(path, method), principal: introduced }))?.status).toBe(
         403,
@@ -345,6 +351,9 @@ describe("authenticated product route dispatch", () => {
         ["/api/providers/credentials/set", "POST"],
         ["/api/remote/devices/revoke", "POST"],
         ["/api/extensions/lifecycle", "POST"],
+        ["/api/agent-runs/parent-summary", "GET"],
+        ["/api/agent-runs/cancel", "POST"],
+        ["/api/agent-runs/observed/stop", "POST"],
       ] as const) {
         expect((await product({ ...handoff(path, method), principal: device }))?.status).toBe(403);
       }

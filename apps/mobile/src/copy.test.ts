@@ -21,6 +21,7 @@ describe("mobile package identity", () => {
       home: "Octant",
       threads: "Threads",
       inbox: "Inbox",
+      pullRequests: "Pull requests",
       thread: "Thread",
       settings: "Settings",
       todos: "To-dos",

@@ -164,6 +164,7 @@ run(["xcodebuild", "-version"])
 work = Path(tempfile.mkdtemp(prefix="octant-ios-demo-", dir=os.environ["RUNNER_TEMP"]))
 derived_data = work / "derived"
 device = None
+extra_devices = []
 creation_attempted = False
 creation_name = "Octant offline acceptance " + uuid.uuid4().hex
 before_creation = set()
@@ -186,9 +187,13 @@ try:
     before_creation = {entry["udid"] for entries in available["devices"].values() for entry in entries}
     if any(entry.get("name") == creation_name for entries in available["devices"].values() for entry in entries):
         raise RuntimeError("The task-owned Simulator creation name already exists.")
+    # A drive on an iPad alone builds for and runs on an iPad; a second
+    # Simulator created beside the first was not offered to xcodebuild.
+    family = "iPad" if os.environ.get("OCTANT_DRIVE_STEPS") and \
+        os.environ.get("OCTANT_DRIVE_DEVICES", "").strip() == "ipad" else "iPhone"
     candidates = [(runtime, entry) for runtime, entries in available["devices"].items()
                   if ".iOS-" in runtime for entry in entries
-                  if entry.get("isAvailable") and entry.get("name", "").startswith("iPhone")]
+                  if entry.get("isAvailable") and entry.get("name", "").startswith(family)]
     if not candidates:
         raise RuntimeError("The hosted runner has no available iPhone runtime.")
     runtime, template = candidates[-1]
@@ -221,7 +226,69 @@ try:
             run(["ditto", str(plan), str(kept / "drive.xctestrun")], timeout=60)
         run(["ditto", "-c", "-k", "--norsrc", "--keepParent", str(kept),
              str(artifacts / "Octant-simulator.zip")], timeout=300)
-    for label, size, appearance, method in (
+    drive_steps = os.environ.get("OCTANT_DRIVE_STEPS", "")
+    if drive_steps:
+        # A run started by hand drives the app through the given steps instead
+        # of the acceptance scenarios, on each named device kind, and keeps its
+        # screenshots and any crash report for a person to look at.
+        started = time.time()
+        outcomes = []
+        for kind in os.environ.get("OCTANT_DRIVE_DEVICES", "iphone").split(","):
+            kind = kind.strip()
+            target = device
+            if kind == "ipad" and family != "iPad":
+                # The iPhone's runtime: Xcode may not offer a device on another one
+                # as a destination (seen when an iPad came from a newer runtime).
+                tablets = [(runtime, entry) for entry in available["devices"].get(runtime, [])
+                           if entry.get("isAvailable") and entry.get("name", "").startswith("iPad")]
+                if not tablets:
+                    raise RuntimeError("The hosted runner has no available iPad runtime.")
+                tablet_runtime, tablet = tablets[-1]
+                target = run(["xcrun", "simctl", "create", creation_name + " iPad",
+                              tablet["deviceTypeIdentifier"], tablet_runtime], capture=True).strip()
+                if not re.fullmatch(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", target):
+                    raise RuntimeError("The owned iPad Simulator identifier is invalid.")
+                extra_devices.append(target)
+                run(["xcrun", "simctl", "boot", target])
+                run(["xcrun", "simctl", "bootstatus", target, "-b"], timeout=180)
+            elif kind not in ("iphone", "ipad"):
+                raise RuntimeError("Drive devices are iphone and ipad.")
+            ENV["TEST_RUNNER_OCTANT_DRIVE_STEPS"] = drive_steps
+            try:
+                run(["xcodebuild", "test-without-building", "-workspace", str(ios / "Octant.xcworkspace"),
+                     "-scheme", "OctantOfflineNativeTests", "-configuration", "Release",
+                     "-destination", "id=" + target, "-derivedDataPath", str(derived_data),
+                     "-resultBundlePath", str(artifacts / ("drive-" + kind + ".xcresult")),
+                     "-parallel-testing-enabled", "NO", "-test-timeouts-enabled", "YES",
+                     "-maximum-test-execution-time-allowance", "600",
+                     "-only-testing:OctantOfflineNativeTests/OfflineDemoTests/testDriveByHand",
+                     "CODE_SIGNING_ALLOWED=NO"], timeout=1800)
+                outcomes.append({"device": kind, "passed": True})
+            except (RuntimeError, subprocess.TimeoutExpired):
+                outcomes.append({"device": kind, "passed": False})
+            finally:
+                del ENV["TEST_RUNNER_OCTANT_DRIVE_STEPS"]
+            # The app's own log says what a crash report leaves out, such as
+            # the reason of an exception a native module threw.
+            try:
+                log = run(["xcrun", "simctl", "spawn", target, "log", "show", "--last", "20m",
+                           "--style", "compact", "--predicate",
+                           'process == "Octant" AND (messageType == error OR messageType == fault'
+                           ' OR subsystem == "com.facebook.react.log")'],
+                          timeout=300, capture=True)
+                (artifacts / ("log-" + kind + ".txt")).write_text(log[-2_000_000:])
+            except (RuntimeError, subprocess.TimeoutExpired):
+                pass
+        reports = Path.home() / "Library/Logs/DiagnosticReports"
+        for report in reports.glob("*.ips") if reports.is_dir() else []:
+            if report.stat().st_mtime >= started and "Octant" in report.name:
+                shutil.copy2(report, artifacts / report.name)
+        (artifacts / "drive.json").write_text(json.dumps({"steps": drive_steps, "runs": outcomes}, indent=2) + "\n")
+        # Recorded first, so the screenshots and logs of a failed drive are kept;
+        # the run still fails.
+        if not all(outcome["passed"] for outcome in outcomes):
+            raise RuntimeError("A hand-driven run failed; drive.json names the device.")
+    for label, size, appearance, method in () if drive_steps else (
         ("standard", "large", "light", "testColdDemoReplyForegroundAndReset"),
         ("large-text", "accessibility-extra-large", "light", "testLargeTextEntryAndReply"),
         ("dark", "large", "dark", "testDarkPlacesAndMenus"),
@@ -262,6 +329,12 @@ finally:
                     "taskCreationName": creation_name,
                 }) + "\n")
                 raise RuntimeError("Uncertain Simulator creation has no unique owned UUID; cleanup is unverified.")
+        for extra in extra_devices:
+            try:
+                run(["xcrun", "simctl", "shutdown", extra], timeout=120)
+            except (RuntimeError, subprocess.TimeoutExpired):
+                pass
+            run(["xcrun", "simctl", "delete", extra], timeout=120)
         if device is not None:
             try:
                 run(["xcrun", "simctl", "shutdown", device], timeout=120)
@@ -271,8 +344,11 @@ finally:
                 # only the UUID this fixture created, then verify absence.
                 pass
             run(["xcrun", "simctl", "delete", device], timeout=120)
+        # Every Simulator this run created is gone, the drive's iPad too.
+        owned = ([device] if device is not None else []) + extra_devices
+        if owned:
             remaining = run(["xcrun", "simctl", "list", "devices", "-j"], capture=True)
-            if device in remaining:
+            if any(entry in remaining for entry in owned):
                 raise RuntimeError("Owned Simulator cleanup is incomplete.")
         if ACTIVE:
             raise RuntimeError("Owned build/test command cleanup is incomplete.")

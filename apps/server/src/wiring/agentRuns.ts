@@ -394,6 +394,123 @@ export function authorizeAgentRunParentThread(input: {
   );
 }
 
+/**
+ * The parent thread a paired device asks about, found in this host's own
+ * stores: its mode and Project, when that Project is still active here. A
+ * Chat outside any Project counts, as the sidebar lists it.
+ */
+function devicePartOfAgentRunParent(input: {
+  readonly persistence: PersistenceService;
+  readonly workThreadProjection: WorkThreadProjection;
+  readonly parentThreadId: string;
+}): { readonly mode: OctantMode; readonly projectId: ProjectId | null } | undefined {
+  const { persistence, parentThreadId } = input;
+  if (
+    persistence.connection
+      .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+      .get(parentThreadId) !== undefined
+  ) {
+    return undefined;
+  }
+  const projectActive = (projectId: ProjectId, mode: OctantMode) => {
+    const project = persistence.readProject(projectId);
+    return project?.lifecycle === "active" && project.type === mode;
+  };
+  try {
+    const code = persistence.readCodeThread(decodeCodeThreadId(parentThreadId));
+    if (code !== undefined) {
+      return projectActive(code.projectId, "code")
+        ? { mode: "code", projectId: code.projectId }
+        : undefined;
+    }
+    const work = input.workThreadProjection.read(decodeWorkThreadId(parentThreadId));
+    if (work !== undefined) {
+      return projectActive(work.projectId, "work")
+        ? { mode: "work", projectId: work.projectId }
+        : undefined;
+    }
+    const chat = persistence.readChatThread(decodeChatThreadId(parentThreadId));
+    if (chat === undefined) return undefined;
+    const chatProjectId = chat.projectId ?? null;
+    return chatProjectId === null || projectActive(chatProjectId, "chat")
+      ? { mode: "chat", projectId: chatProjectId }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Who may read a parent thread's subagents and stop one through the AgentRun
+ * routes. A window here is judged by its own workspace, as before. A device
+ * the host's own person paired at Full is that person, so it reaches any
+ * thread whose Project is active on this host, as it reaches the thread's live
+ * tasks. Every other device (a narrower level, one the hub introduced, an
+ * agent grant) is refused here as well as by the remote action catalogue.
+ */
+export function createAgentRunRouteAuthority(input: {
+  readonly persistence: PersistenceService;
+  readonly workThreadProjection: WorkThreadProjection;
+  readonly isPairedDeviceScope: (scopeId: WindowId) => boolean;
+  readonly isRestrictedDeviceScope: (scopeId: WindowId) => boolean;
+}): Pick<AgentRunRouteDependencies, "authorizeCancellation" | "authorizeParentThread"> {
+  const { persistence, workThreadProjection } = input;
+  const fullDevice = (windowId: string): boolean | undefined => {
+    const scopeId = windowId as WindowId;
+    if (!input.isPairedDeviceScope(scopeId)) return undefined;
+    return !input.isRestrictedDeviceScope(scopeId);
+  };
+  return {
+    authorizeCancellation: ({ run, windowId }) => {
+      const device = fullDevice(windowId);
+      if (device === undefined) {
+        return authorizeAgentRunCancellation({
+          persistence,
+          workThreadProjection,
+          run,
+          windowId,
+        });
+      }
+      if (!device) return false;
+      const parent = devicePartOfAgentRunParent({
+        persistence,
+        workThreadProjection,
+        parentThreadId: String(run.parentThreadId),
+      });
+      const mode = run.routingReceipt.mode;
+      return (
+        parent !== undefined &&
+        parent.mode === mode &&
+        run.workspaceReceipt.mode === mode &&
+        String(run.routingReceipt.hostId) === String(LOCAL_HOST_ID) &&
+        (run.routingReceipt.projectId === undefined ||
+          String(run.routingReceipt.projectId) === String(parent.projectId)) &&
+        (run.workspaceReceipt.kind === "chat-virtual" ||
+          String(run.workspaceReceipt.projectId) === String(parent.projectId))
+      );
+    },
+    authorizeParentThread: ({ parentThreadId, windowId }) => {
+      const device = fullDevice(windowId);
+      if (device === undefined) {
+        return authorizeAgentRunParentThread({
+          persistence,
+          workThreadProjection,
+          parentThreadId,
+          windowId,
+        });
+      }
+      return (
+        device &&
+        devicePartOfAgentRunParent({
+          persistence,
+          workThreadProjection,
+          parentThreadId: String(parentThreadId),
+        }) !== undefined
+      );
+    },
+  };
+}
+
 function resolveAgentRunCenterContext(input: {
   readonly persistence: PersistenceService;
   readonly workThreadProjection: WorkThreadProjection;
@@ -712,7 +829,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     codeParentActiveTurn,
     codeSessionAuthority,
     configuredDriverOptions,
+    isPairedDeviceScope,
     isProjectPolicyTargetAllowed,
+    isRestrictedDeviceScope,
     liveTurns,
     nativeHarnessApprovals,
     nativeHarnessSessions,
@@ -1849,25 +1968,17 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       }),
     orchestration: agentRunOrchestration,
     authorizeCreation: agentRunAdmission.authorizeCreation,
-    authorizeCancellation: ({ run, windowId }) =>
-      authorizeAgentRunCancellation({
-        persistence,
-        workThreadProjection: workThreadProjection,
-        run,
-        windowId,
-      }),
     // Parent-summary reads and result acknowledgements are gated the same
     // way as cancellation: the parent thread is resolved from this host's
-    // own thread stores and the window's own workspace, never from a scope
-    // the caller supplied. `workThreadProjection` is declared later in
-    // this scope; the closure runs per request, long after boot.
-    authorizeParentThread: ({ parentThreadId, windowId }) =>
-      authorizeAgentRunParentThread({
-        persistence,
-        workThreadProjection: workThreadProjection,
-        parentThreadId,
-        windowId,
-      }),
+    // own thread stores and the window's own workspace (or, for the person's
+    // own paired device, the thread's active Project), never from a scope
+    // the caller supplied.
+    ...createAgentRunRouteAuthority({
+      persistence,
+      workThreadProjection,
+      isPairedDeviceScope,
+      isRestrictedDeviceScope,
+    }),
     coordinatorWorkers: (coordinatorThreadId) =>
       coordinatorWorkersHolder.read?.(coordinatorThreadId),
     resolveCenterContext: ({ parentThreadId, mode, requestId, workspaceReceipt }) =>

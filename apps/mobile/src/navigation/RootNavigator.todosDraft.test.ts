@@ -22,6 +22,7 @@ const context = vi.hoisted(() => {
   return { current: undefined as unknown };
 });
 
+vi.mock("../hosts/expoOwnerUnlockPorts", () => ({ createExpoPhoneUnlockKey: () => undefined }));
 vi.mock("../outbox/OutboxContext", () => ({
   OutboxProvider: (props: { readonly children: unknown }) => props.children,
   useOutbox: () => ({ waitingFor: () => [] }),

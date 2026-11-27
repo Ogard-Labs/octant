@@ -35,6 +35,7 @@ import {
   mockLocalServers,
   mockUsageQuery,
 } from "./mobileMockThreadPanes";
+import { createMockPullRequests } from "./mobileMockPullRequests";
 import {
   resolveMobileMockScenario,
   type MobileMockScenario,
@@ -614,6 +615,99 @@ function pullRequestReview(operationId: string) {
 const MOCK_TODO_HOST_ID = "00000000-0000-4000-8000-0000000007ff";
 
 /** React Native's Response constructor has no static JSON factory. */
+/**
+ * The Code thread's subagents: two the thread's agent started that finished,
+ * one still at work, one that failed, and one the provider started itself.
+ * Times are measured from the clock, so a running one's time counts up.
+ */
+function subagentSummary(threadId: string) {
+  if (threadId !== CODE_THREAD_ID)
+    return { parentThreadId: threadId, entries: [], observations: [] };
+  const ago = (seconds: number) => new Date(Date.now() - seconds * 1_000).toISOString();
+  const run = (
+    index: number,
+    task: string,
+    lifecycleStatus: string,
+    started: number,
+    ended: number,
+    reply?: string,
+  ) => ({
+    runId: `71000000-0000-4000-8000-00000000000${index}`,
+    requestId: `72000000-0000-4000-8000-00000000000${index}`,
+    parentThreadId: threadId,
+    role: "implementation",
+    task,
+    lifecycleStatus,
+    executionKind: "provider-session",
+    usageQuality: "exact",
+    route: {
+      requestedProviderInstanceId: PROVIDER_ID,
+      requestedModelId: MODEL_ID,
+      executionProviderInstanceId: PROVIDER_ID,
+      executionModelId: MODEL_ID,
+      poolDerived: false,
+    },
+    normalizedReasoning: "medium",
+    resultAcknowledgement: { required: false, acknowledged: true },
+    ...(reply === undefined
+      ? {}
+      : { result: { reference: `result-${index}`, text: reply, truncated: false } }),
+    version: 3,
+    createdAt: ago(started),
+    updatedAt: ago(ended),
+  });
+  return {
+    parentThreadId: threadId,
+    entries: [
+      run(
+        1,
+        "Map the review sheet's diff rows",
+        "completed",
+        1_260,
+        738,
+        "The diff rows are drawn by UnifiedDiff. Each row knows its side and line, so colours can follow the file.",
+      ),
+      run(
+        2,
+        "Write tests for the terminal's wide characters",
+        "completed",
+        1_100,
+        696,
+        "Five tests added. A wide character redrawn in place now keeps both halves.",
+      ),
+      run(3, "Check the iPad layout at every width", "running", 214, 2),
+      run(
+        4,
+        "Run the Android build",
+        "failed",
+        900,
+        840,
+        "Gradle stopped: the Kotlin plugin is too old.",
+      ),
+    ],
+    observations: [
+      {
+        kind: "observed",
+        observationId: "mock-observed-1",
+        parentThreadId: threadId,
+        mode: "code",
+        control: "stop",
+        providerInstanceId: PROVIDER_ID,
+        sessionId: "73000000-0000-4000-8000-000000000001",
+        childAgentId: "explorer-1",
+        modelId: MODEL_ID,
+        task: "Find every caller of the old terminal helper",
+        lifecycleStatus: "running",
+        latestSummary: "Reading src/surfaces/ProjectToolSheets.tsx",
+        firstObservedAt: ago(48),
+        updatedAt: ago(1),
+        historyStatus: "partial",
+        history: [],
+      },
+    ],
+  };
+}
+
 function mockJsonResponse(value: unknown, init?: ResponseInit): Response {
   const headers = new Headers(init?.headers);
   if (!headers.has("content-type")) headers.set("content-type", "application/json");
@@ -1098,10 +1192,28 @@ function createMockTransport(input: {
       },
     ]);
   }
+  const pullRequests = createMockPullRequests(input.hostId, {
+    studioHostId: STUDIO_HOST_ID,
+    travelHostId: MACBOOK_HOST_ID,
+    codeProjectId: CODE_PROJECT_ID,
+    codeThreadId: CODE_THREAD_ID,
+    resumeThreadId: CODE_RESUME_THREAD_ID,
+  });
 
   return {
     hostId: input.hostId,
     async authenticatedFetch(request) {
+      // The real transport puts the query after the path as given, so one
+      // without its "?" reaches no route; the sample computer refuses it too.
+      if (request.query !== undefined && request.query !== "" && !request.query.startsWith("?"))
+        return new Response(null, { status: 404 });
+      const pullRequestAnswer = pullRequests(request);
+      if (pullRequestAnswer !== undefined) return pullRequestAnswer;
+      if (request.method === "GET" && request.path === "/api/agent-runs/parent-summary") {
+        return mockJsonResponse(
+          subagentSummary(new URLSearchParams(request.query ?? "").get("parentThreadId") ?? ""),
+        );
+      }
       if (request.method === "GET" && request.path === "/api/todos") {
         return mockJsonResponse(todoView());
       }

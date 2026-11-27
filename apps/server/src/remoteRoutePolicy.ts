@@ -1826,6 +1826,24 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 4_096,
   })),
+  // A thread's subagents, read and stopped by a device the host's own person
+  // paired at Full; steering one stays with a window here. No remote action
+  // covers these, so every other device is refused before the route, and the
+  // route refuses it again.
+  {
+    kind: "exact" as const,
+    path: "/api/agent-runs/parent-summary",
+    methods: ["GET"] as const,
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  ...["/api/agent-runs/cancel", "/api/agent-runs/observed/stop"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+  })),
   ...["/api/agent-grants", "/api/agent-grants/threads"].map((path) => ({
     kind: "exact" as const,
     path,

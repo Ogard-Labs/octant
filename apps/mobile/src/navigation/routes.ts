@@ -1,4 +1,5 @@
 import type { MobileInboxRow } from "@octant/client-runtime";
+import type { CodeProjectPullRequestRow } from "@octant/contracts";
 
 /** What a Home count lists. */
 export type CountedThreads = "attention" | "working" | "review";
@@ -8,7 +9,9 @@ export type MobileStackParams = {
   readonly homeRoot: undefined;
   readonly threadsRoot: undefined;
   readonly inboxRoot: undefined;
+  readonly prsRoot: undefined;
   readonly counted: { readonly view: CountedThreads };
+  readonly pullRequest: { readonly hostId: string; readonly row: CodeProjectPullRequestRow };
   readonly thread: { readonly row: MobileInboxRow; readonly focusTurnId?: string | undefined };
   readonly settings: {
     readonly notice?: string | undefined;
