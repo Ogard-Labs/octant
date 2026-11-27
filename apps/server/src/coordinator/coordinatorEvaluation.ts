@@ -123,21 +123,35 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     workers.push({ title: title.toLowerCase(), reference: startedReference });
   }
 
-  const paired = new Set<string>();
-  // A recap can repeat references in its introduction. Match within each
-  // line so titles cannot cross list entries, and keep inline lists working.
+  // A worker's reference can continue its list item or sit below its heading.
+  // Keep other items separate even when the whole list is indented.
+  const entries: string[] = [];
   for (const line of answer.toLowerCase().split("\n")) {
+    const previous = entries.at(-1);
+    const startsItem = /^\s*(?:[-+*]|\d+[.)]|#{1,6})\s/.test(line);
+    const continuesItem = /^[ \t]+\S|^(?:worker|reference)\s*:/.test(line);
+    if (previous && !startsItem && continuesItem) {
+      entries[entries.length - 1] = `${previous} ${line.trimStart()}`;
+    } else {
+      entries.push(line);
+    }
+  }
+
+  const paired = new Set<string>();
+  for (const entry of entries) {
     const mentions = workers
       .flatMap(({ title, reference }) => {
-        const at = line.indexOf(reference);
+        const at = entry.indexOf(reference);
         return at < 0 ? [] : [{ title, reference, at, end: at + reference.length }];
       })
       .sort((left, right) => left.at - right.at);
     if (
-      mentions.every((entry, i) =>
-        line.slice(mentions[i - 1]?.end ?? 0, entry.at).includes(entry.title),
+      mentions.every((mention, i) =>
+        entry.slice(mentions[i - 1]?.end ?? 0, mention.at).includes(mention.title),
       ) ||
-      mentions.every((entry, i) => line.slice(entry.end, mentions[i + 1]?.at).includes(entry.title))
+      mentions.every((mention, i) =>
+        entry.slice(mention.end, mentions[i + 1]?.at).includes(mention.title),
+      )
     ) {
       for (const { reference } of mentions) paired.add(reference);
     }

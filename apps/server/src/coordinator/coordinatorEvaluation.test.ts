@@ -63,6 +63,46 @@ it("requires the Project conversation to name and link each confirmed worker", (
       score(
         cases.projectAssign,
         actions,
+        [
+          "- **CSV parser**",
+          "  Reference: parser@project",
+          "- **Changelog**",
+          "  Reference: changelog@project",
+        ].join("\n"),
+      ),
+    )
+    .toBe(true);
+  expect
+    .soft(
+      score(
+        cases.projectAssign,
+        actions,
+        [
+          "### CSV parser",
+          "Worker: parser@project",
+          "### Changelog",
+          "Worker: changelog@project",
+        ].join("\n"),
+      ),
+    )
+    .toBe(true);
+  expect(
+    score(
+      cases.projectAssign,
+      actions,
+      [
+        "- **CSV parser**",
+        "  Reference: changelog@project",
+        "- **Changelog**",
+        "  Reference: parser@project",
+      ].join("\n"),
+    ),
+  ).toBe(false);
+  expect
+    .soft(
+      score(
+        cases.projectAssign,
+        actions,
         "I started `parser@project` and `changelog@project`.\n- CSV parser (`parser@project`)\n- Changelog (`changelog@project`)",
       ),
     )
