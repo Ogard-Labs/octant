@@ -1436,8 +1436,10 @@ export function wireRemote(deps: RemoteDependencies) {
         sign: (payload) => identity.signing.signHostPayload(payload),
       };
     },
-    source: visitorThreadSource(() => persistence.connection, (threadId) =>
-      deps.codeService instanceof CodeService ? deps.codeService.threadActivity(threadId) : {},
+    source: visitorThreadSource(
+      () => persistence.connection,
+      (threadId) =>
+        deps.codeService instanceof CodeService ? deps.codeService.threadActivity(threadId) : {},
     ),
     taint: (input) => {
       const result = visitorTaint.record({

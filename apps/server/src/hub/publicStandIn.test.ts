@@ -1,12 +1,7 @@
 import type { HubMembershipChangedPayload } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import {
-  HubLinkState,
-  type HubSideState,
-  type HubState,
-  type HubStatePort,
-} from "./hubStateStore";
+import { HubLinkState, type HubSideState, type HubState, type HubStatePort } from "./hubStateStore";
 import {
   handBackPublicQueue,
   holdsPublicCopies,

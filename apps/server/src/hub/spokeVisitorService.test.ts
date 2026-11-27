@@ -383,8 +383,7 @@ describe("visitor comments", () => {
 
   it("counts the whole projection, its state and message list included, against the byte budget", async () => {
     const full = "x".repeat(32_000);
-    const envelope = (text: string) =>
-      Buffer.byteLength(JSON.stringify({ role: "agent", text }));
+    const envelope = (text: string) => Buffer.byteLength(JSON.stringify({ role: "agent", text }));
     // Twelve full messages plus an oldest one sized to fill the budget exactly
     // when only the title and the messages are counted.
     const counted = Buffer.byteLength(JSON.stringify({ title: "T" })) + 12 * (envelope(full) + 1);

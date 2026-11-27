@@ -1116,7 +1116,11 @@ describe("octant hub public", () => {
         ? ok({
             hub: { enabled: true },
             spoke: { membership: "none" },
-            publicEntrance: { enabled: true, listening: true, funnel: { enabled: true, port: 10000 } },
+            publicEntrance: {
+              enabled: true,
+              listening: true,
+              funnel: { enabled: true, port: 10000 },
+            },
           })
         : { status: 409, body: { status: "refused", kind: "funnel-off-failed" } },
     );

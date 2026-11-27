@@ -186,7 +186,10 @@ describe("the visitor viewer's comments", () => {
   const COMMENTS = `/v/${LINK_ID}/comments`;
 
   it.each([
-    ["comments-full", "The owner has not read your earlier comments yet. Send this once they have."],
+    [
+      "comments-full",
+      "The owner has not read your earlier comments yet. Send this once they have.",
+    ],
     ["rate-limited", "Too many comments at once. Wait a minute, then send it again."],
   ])("tells a visitor whose comment was refused with %s why", async (error, message) => {
     const viewer = openViewer((path) => {
