@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import {
   HUB_AUTO_APPLY_KINDS,
   HUB_GRANT_ITEMS,
+  PUBLIC_FUNNEL_PORTS,
   type AppReleaseRing,
   type HubAutoApplyKind,
   type HubGrantItem,
@@ -1647,7 +1648,7 @@ async function funnelOffRefusal(
   }
   const status = await input.session.send({ path: "/api/desktop/hub/status", method: "GET" });
   const port = field(field(field(status.body, "publicEntrance"), "funnel"), "port");
-  if (status.status !== 200 || (port !== 443 && port !== 10000)) {
+  if (status.status !== 200 || !PUBLIC_FUNNEL_PORTS.some((known) => known === port)) {
     return refusal(input, response, fallback);
   }
   input.stderr.write(

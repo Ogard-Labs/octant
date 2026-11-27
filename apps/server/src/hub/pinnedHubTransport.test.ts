@@ -9,12 +9,14 @@ const PIN = listenerPinFromDigest("ab".repeat(32));
 /** A network whose dial never connects, as to a host that drops packets silently; a late socket is recorded. */
 function silentNetwork() {
   let connect: ((socket: Socket) => void) | undefined;
+  let attempt: AbortSignal | undefined;
   const late = new Socket();
   const destroyed = vi.spyOn(late, "destroy");
   const network: HubNetwork = {
     resolve: async () => ["100.101.102.103"],
-    dial: () =>
+    dial: (_address, _port, signal) =>
       new Promise<Socket>((resolve) => {
+        attempt = signal;
         connect = resolve;
       }),
   };
@@ -22,6 +24,7 @@ function silentNetwork() {
     network,
     destroyed,
     dialling: () => connect !== undefined,
+    attemptAborted: () => attempt?.aborted === true,
     connectLate: () => connect?.(late),
   };
 }
@@ -39,6 +42,7 @@ describe("a pinned request to a listener that never answers the dial", () => {
     await vi.waitFor(() => expect(silent.dialling()).toBe(true));
     controller.abort(new Error("deadline"));
     await expect(answer).rejects.toThrow("deadline");
+    expect(silent.attemptAborted()).toBe(true);
     silent.connectLate();
     await vi.waitFor(() => expect(silent.destroyed).toHaveBeenCalled());
   });
@@ -51,5 +55,6 @@ describe("a pinned request to a listener that never answers the dial", () => {
     const settled = expect(answer).rejects.toThrow("dial timed out");
     await vi.advanceTimersByTimeAsync(10_000);
     await settled;
+    expect(silent.attemptAborted()).toBe(true);
   });
 });

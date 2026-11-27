@@ -36,8 +36,12 @@ export type HubTransport = (target: { readonly origin: string; readonly pin: str
 export interface HubNetwork {
   /** Every address the name resolves to. */
   readonly resolve: (hostname: string) => Promise<ReadonlyArray<string>>;
-  /** Opens TCP to an address that was judged private. */
-  readonly dial: (address: string, port: number) => Promise<Socket>;
+  /**
+   * Opens TCP to an address that was judged private. When `signal` aborts
+   * while the connection is still being made, the attempt is closed at once,
+   * so a host that never answers does not keep sockets open across retries.
+   */
+  readonly dial: (address: string, port: number, signal: AbortSignal) => Promise<Socket>;
 }
 
 export type HubTransportRefusal = "not-private" | "pin-mismatch" | "wrong-origin" | "invalid-pin";
@@ -57,20 +61,31 @@ const SYSTEM_NETWORK: HubNetwork = {
     if (isIP(hostname) !== 0) return [hostname];
     return (await lookup(hostname, { all: true })).map((entry) => entry.address);
   },
-  dial: (address, port) =>
+  dial: (address, port, signal) =>
     new Promise<Socket>((resolve, reject) => {
       const socket = connectTcp({ host: address, port });
-      socket.once("error", reject);
+      const onAbort = () => {
+        socket.destroy();
+        reject(signal.reason);
+      };
+      const onError = (error: Error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      socket.once("error", onError);
       socket.once("connect", () => {
-        socket.off("error", reject);
+        signal.removeEventListener("abort", onAbort);
+        socket.off("error", onError);
         resolve(socket);
       });
     }),
 };
 
 /**
- * Dials within the timeout and the caller's signal. A connection that arrives
- * after either gave up is closed, so nothing holds it open.
+ * Dials within the timeout and the caller's signal. Giving up aborts the
+ * attempt itself, and a connection that still arrives afterwards is closed, so
+ * nothing holds it open.
  */
 async function dialWithin(
   network: HubNetwork,
@@ -79,13 +94,13 @@ async function dialWithin(
   signal: AbortSignal | undefined,
 ): Promise<Socket> {
   signal?.throwIfAborted();
-  const dialled = network.dial(address, port);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let onAbort: (() => void) | undefined;
+  const giveUp = new AbortController();
+  const timer = setTimeout(() => giveUp.abort(new Error("dial timed out")), DIAL_TIMEOUT_MS);
+  const onAbort = () => giveUp.abort(signal?.reason);
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const dialled = network.dial(address, port, giveUp.signal);
   const gaveUp = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error("dial timed out")), DIAL_TIMEOUT_MS);
-    onAbort = () => reject(signal?.reason);
-    signal?.addEventListener("abort", onAbort, { once: true });
+    giveUp.signal.addEventListener("abort", () => reject(giveUp.signal.reason), { once: true });
   });
   try {
     return await Promise.race([dialled, gaveUp]);
@@ -97,7 +112,7 @@ async function dialWithin(
     throw error;
   } finally {
     clearTimeout(timer);
-    if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+    signal?.removeEventListener("abort", onAbort);
   }
 }
 

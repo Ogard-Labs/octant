@@ -44,10 +44,18 @@ export function codeVisitorState(
   return activity.executing === true ? "working" : "idle";
 }
 
-/** A Chat thread's state as a visitor reads it, from its last turn's latest attempt. */
-export function chatVisitorState(outcome: ChatAttemptOutcome | undefined): VisitorThreadState {
-  if (outcome === "queued" || outcome === "streaming") return "working";
-  return outcome === "waiting" ? "owner-deciding" : "idle";
+/**
+ * A Chat thread's state as a visitor reads it, from each turn's latest attempt
+ * in order. Regenerating an older reply adds its attempt to that older turn, so
+ * a run still going on any turn counts, not only on the last.
+ */
+export function chatVisitorState(
+  latestOutcomes: ReadonlyArray<ChatAttemptOutcome | undefined>,
+): VisitorThreadState {
+  if (latestOutcomes.some((outcome) => outcome === "queued" || outcome === "streaming")) {
+    return "working";
+  }
+  return latestOutcomes.some((outcome) => outcome === "waiting") ? "owner-deciding" : "idle";
 }
 
 function readCode(
@@ -131,7 +139,7 @@ function readChat(connection: SqliteConnection, threadId: string): VisitorThread
     status: "found",
     title: view.thread.title,
     archived: view.thread.lifecycle === "archived",
-    state: chatVisitorState(turns.at(-1)?.attempts.at(-1)?.outcome),
+    state: chatVisitorState(turns.map((turn) => turn.attempts.at(-1)?.outcome)),
     messages: messages.slice(-MAX_MESSAGES),
   };
 }
