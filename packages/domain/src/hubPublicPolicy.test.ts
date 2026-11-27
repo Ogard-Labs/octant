@@ -11,6 +11,8 @@ import {
   stripeEventId,
   visitorLinkSigningPayload,
   webhookDedupeKeys,
+  publicFrontOrigin,
+  relayUrlForPublicOrigin,
 } from "./hubPublicPolicy";
 
 const NOW = 1_800_000_000_000;
@@ -448,5 +450,31 @@ describe("a front on another machine", () => {
         certificate: true,
       }),
     ).toEqual({ kind: "tailnet", address: "100.90.1.2" });
+  });
+});
+
+describe("the public address a person types for their own front", () => {
+  it("takes an https origin with a DNS name and derives its relay route", () => {
+    expect(publicFrontOrigin("  https://Octant.Example.com/  ")).toBe("https://octant.example.com");
+    expect(publicFrontOrigin("https://hub.example.com:8443")).toBe("https://hub.example.com:8443");
+    expect(relayUrlForPublicOrigin("https://hub.example.com:8443")).toBe(
+      "wss://hub.example.com:8443/relay/v1",
+    );
+  });
+
+  it("refuses anything but a bare https origin with a DNS name", () => {
+    for (const text of [
+      "http://hub.example.com",
+      "https://user:secret@hub.example.com",
+      "https://hub.example.com/path",
+      "https://hub.example.com?query=1",
+      "https://hub.example.com#part",
+      "https://100.101.104.1",
+      "https://localhost",
+      "hub.example.com",
+      "",
+    ]) {
+      expect(publicFrontOrigin(text), text).toBeUndefined();
+    }
   });
 });

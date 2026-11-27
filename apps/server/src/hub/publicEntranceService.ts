@@ -11,14 +11,18 @@
 // loopback, serves only those addresses, and never binds anything else.
 
 import {
-  publicFrontOrigin,
   type AuditActingPrincipal,
   type HubMembershipChangedPayload,
   type PublicForwardAnswer,
   type PublicForwardEnvelope,
   type PublicFunnelPort,
 } from "@octant/contracts";
-import { decidePublicEntranceBind, publicFrontAdmitted, readPublicFronts } from "@octant/domain";
+import {
+  decidePublicEntranceBind,
+  publicFrontAdmitted,
+  publicFrontOrigin,
+  readPublicFronts,
+} from "@octant/domain";
 import type { HubStatePort, PublicEntranceState } from "./hubStateStore";
 import {
   startPublicEntrance,

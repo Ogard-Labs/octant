@@ -17,7 +17,6 @@ import {
   RELAY_UNAVAILABLE_CLOSE_CODE,
   decodeRelayAdmission,
   relayAdmissionPayload,
-  relayUrlForPublicOrigin,
   type AuditActingPrincipal,
   type HubRelayDevicesReceipt,
   type RelayAddress,
@@ -25,6 +24,7 @@ import {
   type HubRelayDevicesUpdate,
   type RelayAdmission,
 } from "@octant/contracts";
+import { relayUrlForPublicOrigin } from "@octant/domain";
 import { Schema } from "effect";
 import {
   WebSocketEndpoint,

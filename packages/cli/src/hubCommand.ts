@@ -4,11 +4,11 @@ import {
   HUB_AUTO_APPLY_KINDS,
   HUB_GRANT_ITEMS,
   PUBLIC_FUNNEL_PORTS,
-  publicFrontOrigin,
   type AppReleaseRing,
   type HubAutoApplyKind,
   type HubGrantItem,
 } from "@octant/contracts";
+import { publicFrontOrigin } from "@octant/domain";
 import { diskEncryptionWarning, type DiskEncryption } from "./diskEncryption";
 import {
   failureMessage,

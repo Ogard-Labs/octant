@@ -585,30 +585,3 @@ export const HubPublicAddressRequest = Schema.Struct({
 }).annotations(strict);
 export type HubPublicAddressRequest = typeof HubPublicAddressRequest.Type;
 export const decodeHubPublicAddressRequest = Schema.decodeUnknownSync(HubPublicAddressRequest);
-
-/**
- * The public address a person types for their own front: exactly an `https:`
- * origin with a DNS name, no path, credentials, query or fragment. Undefined
- * for anything else.
- */
-export function publicFrontOrigin(text: string): string | undefined {
-  let url: URL;
-  try {
-    url = new URL(text.trim());
-  } catch {
-    return undefined;
-  }
-  if (url.protocol !== "https:" || url.username !== "" || url.password !== "") return undefined;
-  if (url.search !== "" || url.hash !== "" || (url.pathname !== "/" && url.pathname !== "")) {
-    return undefined;
-  }
-  // A DNS name only: a front on the internet is reached by name, and an
-  // address literal here would be a mistyped private one.
-  if (!/^(?=.*[A-Za-z])[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(url.hostname)) return undefined;
-  return url.origin;
-}
-
-/** The relay route behind a public origin. */
-export function relayUrlForPublicOrigin(origin: string): string {
-  return `${origin.replace(/^https:/, "wss:")}/relay/v1`;
-}
