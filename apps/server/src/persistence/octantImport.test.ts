@@ -393,7 +393,7 @@ describe("importing Octant's data into Nightly", () => {
     );
   });
 
-  it("merges a later import: Nightly-only work stays, Octant-only work comes over, and a thread both changed is held back as a conflict", () => {
+  it("merges a later import: Nightly-only work stays, Octant-only work comes over, and a thread both changed arrives as a copy", () => {
     const paths = folders();
     let octant = openStore(paths.octant);
     createThread(octant, ids.shared, "Shared");
@@ -411,22 +411,106 @@ describe("importing Octant's data into Nightly", () => {
     createThread(octant, ids.octantLater, "Started in Octant");
     octant.close();
 
+    const nightlyBefore = eventsIn(paths.nightly, "chat-thread", ids.shared);
     const second = imported(runImport(paths));
 
-    expect(second.conflicts).toEqual([{ mode: "chat", octantThreadId: ids.shared }]);
+    expect(second.conflicts).toEqual([]);
+    expect(second.copies).toHaveLength(1);
+    const copy = second.copies[0];
+    if (copy === undefined) throw new Error("the conflicting thread must arrive as a copy");
+    expect(copy).toMatchObject({ mode: "chat", octantThreadId: ids.shared });
+    expect(copy.copyThreadId).not.toBe(ids.shared);
+    expect(eventsIn(paths.nightly, "chat-thread", ids.shared)).toEqual(nightlyBefore);
     expect(titleIn(paths.nightly, ids.shared)).toBe("Renamed in Nightly");
+    expect(titleIn(paths.nightly, copy.copyThreadId)).toBe("Renamed in Octant (from Octant)");
     expect(titleIn(paths.nightly, ids.octantOnly)).toBe("Continued in Octant");
     expect(titleIn(paths.nightly, ids.octantLater)).toBe("Started in Octant");
     expect(titleIn(paths.nightly, ids.nightlyLater)).toBe("Started in Nightly");
 
-    // Octant goes on with the conflicting thread while Nightly leaves it be:
-    // it stays held back, since Nightly's stream never took the turn between.
+    // Octant goes on with the conflicting thread: its new events land on the
+    // copy, which is not copied again, and Nightly's thread stays as it was.
     octant = openStore(paths.octant);
     renameThread(octant, ids.shared, "Renamed in Octant again");
     octant.close();
     const third = imported(runImport(paths));
-    expect(third.conflicts).toEqual([{ mode: "chat", octantThreadId: ids.shared }]);
+    expect(third.conflicts).toEqual([]);
+    expect(third.copies).toEqual([]);
     expect(titleIn(paths.nightly, ids.shared)).toBe("Renamed in Nightly");
+    expect(titleIn(paths.nightly, copy.copyThreadId)).toBe("Renamed in Octant again (from Octant)");
+    expect(eventsIn(paths.nightly, "chat-thread", copy.copyThreadId)).toHaveLength(3);
+    expect(eventsIn(paths.nightly, "chat-thread", ids.shared)).toEqual(nightlyBefore);
+
+    // Nightly continues the copy and Octant its thread: the copy is Nightly's
+    // thread now, and Octant's arrives as a new copy beside both.
+    const again = openStore(paths.nightly);
+    renameThread(again, copy.copyThreadId, "Copy renamed in Nightly");
+    again.close();
+    octant = openStore(paths.octant);
+    renameThread(octant, ids.shared, "Renamed in Octant a third time");
+    octant.close();
+    const fourth = imported(runImport(paths));
+    const newer = fourth.copies[0];
+    if (newer === undefined) throw new Error("a diverged copy must make a new copy");
+    expect(newer.copyThreadId).not.toBe(copy.copyThreadId);
+    expect(titleIn(paths.nightly, copy.copyThreadId)).toBe("Copy renamed in Nightly");
+    expect(titleIn(paths.nightly, newer.copyThreadId)).toBe(
+      "Renamed in Octant a third time (from Octant)",
+    );
+  });
+
+  it("brings a conflicting thread's content and files with its copy under the copy's own ids", () => {
+    const paths = folders();
+    let octant = openStore(paths.octant);
+    createThread(octant, ids.shared, "Shared");
+    octant.close();
+    imported(runImport(paths));
+    const nightly = openStore(paths.nightly);
+    renameThread(nightly, ids.shared, "Renamed in Nightly");
+    nightly.close();
+    octant = openStore(paths.octant);
+    renameThread(octant, ids.shared, "Renamed in Octant");
+    const contentId = "0c7a0000-0000-4000-8000-000000000801";
+    const body = "What Octant's thread said.";
+    octant.connection
+      .prepare(
+        `INSERT INTO chat_content_store (content_id, thread_id, content_role, body_text, digest, byte_length)
+         VALUES (?, ?, 'user', ?, ?, ?)`,
+      )
+      .run(
+        contentId,
+        ids.shared,
+        body,
+        createHash("sha256").update(body).digest("hex"),
+        Buffer.byteLength(body),
+      );
+    octant.close();
+    put(paths.octant, `chat/threads/${ids.shared}/a1/finalized.bin`, "octant's attachment");
+
+    const outcome = imported(runImport(paths));
+
+    const copy = outcome.copies[0];
+    if (copy === undefined) throw new Error("the conflicting thread must arrive as a copy");
+    const store = openStore(paths.nightly);
+    try {
+      const rows = store.connection
+        .prepare("SELECT content_id, thread_id, body_text FROM chat_content_store")
+        .all() as ReadonlyArray<{
+        readonly content_id: string;
+        readonly thread_id: string;
+        readonly body_text: string;
+      }>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.thread_id).toBe(copy.copyThreadId);
+      expect(rows[0]?.body_text).toBe(body);
+      expect(rows[0]?.content_id).not.toBe(contentId);
+    } finally {
+      store.close();
+    }
+    const arrived = tree(paths.nightly);
+    expect(arrived[`chat/threads/${copy.copyThreadId}/a1/finalized.bin`]).toBe(
+      "octant's attachment",
+    );
+    expect(Object.keys(arrived).filter((path) => path.includes(ids.shared))).toEqual([]);
   });
 
   it("leaves Octant's host identity and paired devices behind", () => {
@@ -780,8 +864,20 @@ describe("importing Octant's data into Nightly", () => {
 
     const second = imported(runImport(paths));
 
-    expect(second.conflicts).toEqual([{ mode: "chat", octantThreadId: ids.shared }]);
+    // Nightly's record stays whole; the record comes over whole with the copy.
+    expect(second.conflicts).toEqual([]);
     expect(eventsIn(paths.nightly, "fixture", record)).toHaveLength(2);
+    const store = openStore(paths.nightly);
+    try {
+      const copied = store.connection
+        .prepare(
+          "SELECT count(*) AS events FROM event_journal WHERE aggregate_type = 'fixture' AND aggregate_id <> ?",
+        )
+        .get(record) as { readonly events: number };
+      expect(copied.events).toBe(3);
+    } finally {
+      store.close();
+    }
   });
 
   it("lists an aggregate an earlier import held back instead of treating it as deleted in Nightly", () => {
@@ -919,7 +1015,7 @@ const receipt = (threadId: string) => ({
 });
 
 describe("importing the files that belong to Octant's data", () => {
-  it("brings the files of the threads that came over and leaves a held-back thread's behind", () => {
+  it("brings the files of the threads that came over and a conflicting thread's only with its copy", () => {
     const paths = folders();
     const octant = openStore(paths.octant);
     createThread(octant, ids.octantOnly, "Octant only");
@@ -951,7 +1047,9 @@ describe("importing the files that belong to Octant's data", () => {
 
     const outcome = imported(runImport(paths));
 
-    expect(outcome.conflicts).toEqual([{ mode: "chat", octantThreadId: ids.shared }]);
+    expect(outcome.conflicts).toEqual([]);
+    const copy = outcome.copies[0];
+    if (copy === undefined) throw new Error("the conflicting thread must arrive as a copy");
     const arrived = tree(paths.nightly);
     expect(arrived[`chat/threads/${ids.octantOnly}/a1/finalized.bin`]).toBe("chat/threads");
     expect(arrived[`work-threads/${ids.octantOnly}/a1/finalized.bin`]).toBe("work-threads");
@@ -965,7 +1063,8 @@ describe("importing the files that belong to Octant's data", () => {
     expect(arrived["extensions/versions/e/p/1/content/run.js"]).toBe("code");
     expect(Object.keys(arrived).filter((path) => path.includes(ids.shared))).toEqual([]);
     expect(Object.keys(arrived).filter((path) => path.endsWith(".tmp"))).toEqual([]);
-    expect(outcome.counts.files).toBe(11);
+    expect(arrived[`work-threads/${copy.copyThreadId}/a1/finalized.bin`]).toBe("held back");
+    expect(outcome.counts.files).toBe(17);
     const mode = (path: string) => statSync(join(paths.nightly, path)).mode & 0o777;
     expect(mode(`work-threads/${ids.octantOnly}/a1/finalized.bin`)).toBe(0o600);
     expect(mode("extensions/versions/e/p/1/content/run.js")).toBe(0o700);

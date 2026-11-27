@@ -13,6 +13,7 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
 import type { EventRegistry } from "./eventRegistry";
 import { Journal } from "./journal";
+import { mergeOctantCopies, type OctantImportCopyFiles } from "./octantImportCopies";
 import {
   isExcludedOctantEvent,
   NEVER_COPIED_EVENT_NAMES,
@@ -38,6 +39,10 @@ export interface OctantImportMergeResult {
   readonly aggregates: ReadonlySet<string>;
   /** Ids of the images the image jobs that came over name, for the library's files. */
   readonly imageArtifacts: ReadonlySet<string>;
+  /** Copies of conflicting threads this import made. */
+  readonly copies: ReadonlyArray<OctantImportCopy>;
+  /** The files each copy made or continued brings, under the copy's ids. */
+  readonly copyFiles: ReadonlyArray<OctantImportCopyFiles>;
 }
 
 interface CandidateRow {
@@ -82,6 +87,10 @@ interface AggregateSpan {
  *   Octant's line: when Octant goes on with a stream whose Nightly end is
  *   only such events, they are dropped for Octant's own, and the snapshot's
  *   fresh settling events follow if the work is still in flight.
+ * - A conflicting thread arrives as a copy beside Nightly's, and a thread an
+ *   earlier import copied goes on in its copy, never in Nightly's thread
+ *   (octantImportCopies.ts). With `makeCopies` false, the conflicts stay
+ *   held back and the copies are not continued.
  */
 export function mergeOctantSnapshot(input: {
   readonly connection: SqliteConnection;
@@ -92,6 +101,7 @@ export function mergeOctantSnapshot(input: {
   readonly importId: string;
   readonly clock: () => string;
   readonly uuid: () => string;
+  readonly makeCopies: boolean;
 }): OctantImportMergeResult {
   const connection = input.connection;
   const records = readImports(connection);
@@ -99,6 +109,8 @@ export function mergeOctantSnapshot(input: {
   const firstImport = previous === undefined;
   const octantMark = previous?.octantMark ?? 0;
   const nightlyMark = previous?.nightlyMark ?? 0;
+  const previousCopies = previous?.copies ?? [];
+  const copiedThreads = new Set(previousCopies.map((copy) => copy.octantThreadId));
 
   const octantThreads = octantThreadModes(connection);
   const octantSpans = aggregateSpans(connection, "octant");
@@ -154,7 +166,7 @@ export function mergeOctantSnapshot(input: {
 
   const conflicts = new Set<string>(previous?.conflicts.map((entry) => entry.octantThreadId));
   for (const thread of advancedThreads) {
-    if (purged.has(thread)) continue;
+    if (purged.has(thread) || copiedThreads.has(thread)) continue;
     const nightlyLast = nightlyLastByThread.get(thread);
     if (nightlyLast !== undefined && (firstImport || nightlyLast > nightlyMark)) {
       conflicts.add(thread);
@@ -207,6 +219,7 @@ export function mergeOctantSnapshot(input: {
         take =
           advancedThreads.has(thread) &&
           !conflicts.has(thread) &&
+          !copiedThreads.has(thread) &&
           !purged.has(thread) &&
           !NEVER_COPIED_EVENT_NAMES.has(row.event_name) &&
           !(THREAD_DELETION_EVENT_NAMES.has(row.event_name) && nightlyLastByThread.has(thread));
@@ -289,15 +302,54 @@ export function mergeOctantSnapshot(input: {
     if (row.aggregate_type === "image-job") collectAttachmentIds(connection, row, imageArtifacts);
   }
   const contentRows = copyContent(connection, importedThreads, importedIds);
-  const conflictList: ReadonlyArray<OctantImportConflict> = [...conflicts]
+
+  const octantThreadOfKey = new Map<string, string | undefined>();
+  for (const [key, span] of octantSpans) {
+    const [, aggregateId] = JSON.parse(key) as [string, string];
+    const named = span.namedThread;
+    octantThreadOfKey.set(
+      key,
+      octantThreads.has(aggregateId)
+        ? aggregateId
+        : named !== undefined && octantThreads.has(named)
+          ? named
+          : undefined,
+    );
+  }
+  const copied = input.makeCopies
+    ? mergeOctantCopies({
+        connection,
+        importId: input.importId,
+        octantMark,
+        octantHead: input.octantHead,
+        nightlyMark,
+        previousCopies,
+        conflicts,
+        octantThreads,
+        octantThreadOfKey,
+        nightlySpans,
+        settlingTails,
+        nightlyLastByThread,
+        purged,
+      })
+    : {
+        copies: previousCopies,
+        made: [],
+        uncopied: conflicts,
+        events: 0,
+        contentRows: 0,
+        threads: 0,
+        files: [],
+      };
+  const conflictList: ReadonlyArray<OctantImportConflict> = [...copied.uncopied]
     .sort()
     .flatMap((thread) =>
       (octantThreads.get(thread) ?? []).map((mode) => ({ mode, octantThreadId: thread })),
     );
   const counts: OctantImportCounts = {
-    events: accepted.length,
-    threads: importedThreads.size,
-    contentRows,
+    events: accepted.length + copied.events,
+    threads: importedThreads.size + copied.threads,
+    contentRows: contentRows + copied.contentRows,
     settled: input.settled,
   };
   const heldBack = [...held.entries()]
@@ -305,7 +357,7 @@ export function mergeOctantSnapshot(input: {
     .map(([, entry]) => entry);
   appendImportRecord(input, {
     octantMark: input.octantHead,
-    copies: previous?.copies ?? [],
+    copies: copied.copies,
     conflicts: conflictList,
     heldBack,
     counts,
@@ -323,6 +375,8 @@ export function mergeOctantSnapshot(input: {
     threads: importedThreads,
     aggregates: importedIds,
     imageArtifacts,
+    copies: copied.made,
+    copyFiles: copied.files,
   };
 }
 

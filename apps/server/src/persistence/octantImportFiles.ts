@@ -19,6 +19,7 @@ import {
 } from "node:fs";
 import { IMAGE_LIBRARY_SCOPE_ID } from "@octant/contracts";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { remapIds, type OctantImportCopyFiles } from "./octantImportCopies";
 import { isPathWithinDirectory } from "./storePath";
 
 /**
@@ -100,10 +101,18 @@ export function copyOctantSideFiles(input: {
   readonly threads: ReadonlySet<string>;
   readonly aggregates: ReadonlySet<string>;
   readonly imageArtifacts: ReadonlySet<string>;
+  readonly copies?: ReadonlyArray<OctantImportCopyFiles>;
 }): number {
   const octant = realpathSync(input.octantDirectory);
   const nightly = input.nightlyDirectory;
-  const plan = planCopy(octant, nightly, input.threads, input.aggregates, input.imageArtifacts);
+  const plan = planCopy(
+    octant,
+    nightly,
+    input.threads,
+    input.aggregates,
+    input.imageArtifacts,
+    input.copies ?? [],
+  );
   if (plan.length === 0) return 0;
 
   const directories = new Set<string>();
@@ -186,6 +195,7 @@ function planCopy(
   threads: ReadonlySet<string>,
   aggregates: ReadonlySet<string>,
   imageArtifacts: ReadonlySet<string>,
+  copies: ReadonlyArray<OctantImportCopyFiles>,
 ): ReadonlyArray<PlannedFile> {
   const plan = new Map<string, PlannedFile>();
   const add = (entry: PlannedFile) => {
@@ -205,6 +215,28 @@ function planCopy(
   for (const image of imageArtifacts) {
     if (SAFE_NAME.test(image)) {
       addTree(join("generated-images", String(IMAGE_LIBRARY_SCOPE_ID), image));
+    }
+  }
+  // A copy of a conflicting thread brings the thread's files under the
+  // copy's ids, so its attachments are its own and never Nightly's thread's.
+  for (const copy of copies) {
+    if (!SAFE_NAME.test(copy.octantThreadId) || !SAFE_NAME.test(copy.copyThreadId)) continue;
+    for (const folder of THREAD_FOLDERS) {
+      const from = join(folder, copy.octantThreadId);
+      for (const path of listRegularFiles(octant, from)) {
+        const rest = path.slice(from.length + 1);
+        add({
+          path: join(folder, copy.copyThreadId, remapIds(rest, copy.ids)),
+          source: join(octant, path),
+        });
+      }
+    }
+    for (const [image, copied] of copy.ids) {
+      const library = join("generated-images", String(IMAGE_LIBRARY_SCOPE_ID));
+      for (const path of listRegularFiles(octant, join(library, image))) {
+        const rest = path.slice(join(library, image).length + 1);
+        add({ path: join(library, copied, remapIds(rest, copy.ids)), source: join(octant, path) });
+      }
     }
   }
   for (const folder of AGGREGATE_FILE_FOLDERS) {

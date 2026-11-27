@@ -13,6 +13,7 @@ import {
   OCTANT_IMPORT_AGGREGATE_TYPE,
   OCTANT_IMPORT_RECORDED,
   type OctantImportConflict,
+  type OctantImportCopy,
   type OctantImportOutcomeCounts,
 } from "@octant/contracts";
 import { classifySqliteFailure } from "./journalErrors";
@@ -62,8 +63,13 @@ export type OctantImportOutcome =
   | {
       readonly kind: "imported";
       readonly counts: OctantImportOutcomeCounts;
-      /** Threads both apps changed since the last import; Nightly's stayed as they were. */
+      /**
+       * Threads both apps changed since the last import that arrived without
+       * a copy (Code threads); Nightly's stayed as they were.
+       */
       readonly conflicts: ReadonlyArray<OctantImportConflict>;
+      /** Threads both apps changed that arrived as a second thread beside Nightly's. */
+      readonly copies: ReadonlyArray<OctantImportCopy>;
       /** Settings, Projects and other records both changed; Nightly's value stayed. */
       readonly kept: ReadonlyArray<OctantImportKept>;
     }
@@ -165,17 +171,35 @@ export function importFromOctant(input: {
     }
 
     const finalPath = join(importDirectory, "final.sqlite3");
-    const result = buildMergedStore({
-      mergePath,
-      snapshotPath,
-      finalPath,
-      dataDirectory: input.nightlyDataDirectory,
-      octantHead: prepared.octantHead,
-      settled: prepared.settled,
-      importId,
-      clock: input.clock,
-      uuid,
-    });
+    const build = (path: string, makeCopies: boolean) =>
+      buildMergedStore({
+        mergePath: path,
+        snapshotPath,
+        finalPath,
+        dataDirectory: input.nightlyDataDirectory,
+        octantHead: prepared.octantHead,
+        settled: prepared.settled,
+        importId,
+        clock: input.clock,
+        uuid,
+        makeCopies,
+      });
+    let result: OctantImportMergeResult;
+    try {
+      result = build(mergePath, true);
+    } catch (error) {
+      // A copy of a conflicting thread the rebuild cannot take must not cost
+      // the person the rest of the import: build again from Nightly's backup
+      // with the conflicts held back, as they were before copies existed.
+      if (!(error instanceof ImportStopped) || !isRebuildFailure(error.outcome)) throw error;
+      const retryPath = join(importDirectory, "merged-without-copies.sqlite3");
+      try {
+        copyFileSync(backupPathFor(databasePath, BACKUP_LABEL), retryPath);
+      } catch {
+        throw error;
+      }
+      result = build(retryPath, false);
+    }
 
     // The files go before the swap so a failure at any step can take them
     // back; the store is the only thing that makes the import count.
@@ -188,6 +212,7 @@ export function importFromOctant(input: {
         threads: result.threads,
         aggregates: result.aggregates,
         imageArtifacts: result.imageArtifacts,
+        copies: result.copyFiles,
       });
     } catch {
       removeCopiedFiles(input.nightlyDataDirectory, importId);
@@ -217,6 +242,7 @@ export function importFromOctant(input: {
       kind: "imported",
       counts: { ...result.counts, files },
       conflicts: result.conflicts,
+      copies: result.copies,
       kept: result.kept,
     };
   } catch (error) {
@@ -412,6 +438,7 @@ function buildMergedStore(input: {
   readonly importId: string;
   readonly clock: () => string;
   readonly uuid: () => string;
+  readonly makeCopies: boolean;
 }): OctantImportMergeResult {
   const merged = openSqlite(input.mergePath);
   try {
@@ -432,6 +459,7 @@ function buildMergedStore(input: {
           importId: input.importId,
           clock: input.clock,
           uuid: input.uuid,
+          makeCopies: input.makeCopies,
         }),
       )();
       merged.exec("PRAGMA foreign_keys = ON");
@@ -476,6 +504,10 @@ function buildMergedStore(input: {
   } finally {
     merged.close();
   }
+}
+
+function isRebuildFailure(outcome: OctantImportOutcome): boolean {
+  return outcome.kind === "failed" && (outcome.stage === "rebuild" || outcome.stage === "verify");
 }
 
 function removeStore(path: string): void {
