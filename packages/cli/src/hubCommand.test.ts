@@ -1602,7 +1602,8 @@ describe("octant hub webhook", () => {
         Readable.from(["whsec_fromStripe0123456789\n"]),
       ),
     ).toBe(1);
-    expect(host.errors()).toContain("still takes two replaced secrets");
+    expect(host.errors()).toContain("still holds two replaced secrets");
+    expect(host.errors()).toContain("two days after the oldest was replaced");
     expect(host.errors()).toContain("(too-many-replaced-secrets)");
   });
 
