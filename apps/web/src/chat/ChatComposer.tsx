@@ -114,6 +114,10 @@ export interface ChatComposerModelOption {
  */
 const MODEL_OPTION_DEFAULT_ID = "(provider default)";
 
+export type ChatFileSelectionResult =
+  | { readonly status: "accepted" }
+  | { readonly status: "refused"; readonly reason: string };
+
 export interface ChatComposerProps {
   /** The draft this composer holds (see `threadDraftScope`). */
   readonly typedScope?: string | undefined;
@@ -134,10 +138,12 @@ export interface ChatComposerProps {
   readonly onDraftChange: (draft: string, caretIndex?: number) => void;
   /** Receives the browser-selected File only; file paths are not accepted or exposed. */
   /**
-   * Takes a chosen, dropped or pasted file. It may answer, once it knows, the
-   * reason the file was not attached, or undefined when it was.
+   * Takes a chosen, dropped or pasted file and reports whether Chat accepted
+   * it or refused it with a reason.
    */
-  readonly onFileSelected: (file: File) => void | Promise<string | undefined>;
+  readonly onFileSelected: (
+    file: File,
+  ) => ChatFileSelectionResult | Promise<ChatFileSelectionResult>;
   readonly onModelChange: (modelId: string) => void;
   readonly onProviderChange: (providerId: string) => void;
   readonly onResearchEnabledChange: (enabled: boolean) => void;
@@ -645,7 +651,11 @@ export function ChatComposer(props: ChatComposerProps) {
           ? undefined
           : (file: File) => {
               const answer = props.onFileSelected(file);
-              return answer instanceof Promise ? answer : undefined;
+              return answer instanceof Promise
+                ? answer.then((result) => (result.status === "refused" ? result.reason : undefined))
+                : answer.status === "refused"
+                  ? answer.reason
+                  : undefined;
             }
       }
       inlineChips={mention.inlineChips}

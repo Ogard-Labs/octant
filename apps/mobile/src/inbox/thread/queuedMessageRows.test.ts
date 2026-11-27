@@ -21,15 +21,28 @@ describe("the phone's queued messages", () => {
       ] as never,
       true,
     );
-    expect(rows.map((row) => [row.text, row.changeable])).toEqual([
-      ["Also update the docs", true],
-      ["Also update the docs", false],
-      ["Also update the docs", false],
-      ["The host no longer holds this message's words.", false],
+    expect(rows.map((row) => [row.text, row.changeable, row.actions])).toEqual([
+      ["Also update the docs", true, ["edit", "send-now", "remove"]],
+      ["Also update the docs", false, []],
+      ["Also update the docs", false, []],
+      ["The host no longer holds this message's words.", false, []],
     ]);
   });
 
-  it("offers no change to a waiting message on a phone that may only read the queue", () => {
-    expect(queuedMessageRows([item({})] as never, false)[0]?.changeable).toBe(false);
+  it("shows queued messages with no Edit, Send now, or Remove actions on a phone paired read-only", () => {
+    const rows = queuedMessageRows(
+      [
+        item({}),
+        item({
+          messageId: "00000000-0000-4000-8000-000000000305",
+          payload: { mode: "work", prompt: "Then check tests" },
+        }),
+      ] as never,
+      false,
+    );
+    expect(rows.map((row) => [row.text, row.changeable, row.actions])).toEqual([
+      ["Also update the docs", false, []],
+      ["Then check tests", false, []],
+    ]);
   });
 });
