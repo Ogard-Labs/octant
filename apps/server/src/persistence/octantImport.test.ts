@@ -1495,6 +1495,23 @@ describe("importing Octant's data into Nightly", () => {
         .at(-1);
     expect(threadResume("work-thread", workThread)).toBe("invalidated");
     expect(threadResume("code-thread", codeThread)).toBe("invalidated");
+    // Commands compare the thread's own version with the stream's head, so the
+    // settled row must carry the head's version or they refuse it as stale.
+    const versionAtHead = (aggregateType: string, aggregateId: string) => {
+      const rows = eventsIn(paths.nightly, aggregateType, aggregateId);
+      const latest = rows
+        .map((entry) => (entry.payload.thread as { readonly version?: number })?.version)
+        .filter((version) => version !== undefined)
+        .at(-1);
+      return { latest, head: rows.length };
+    };
+    for (const [type, id] of [
+      ["work-thread", workThread],
+      ["code-thread", codeThread],
+    ] as const) {
+      const { latest, head } = versionAtHead(type, id);
+      expect(latest).toBe(head);
+    }
     octant = openStore(paths.octant);
     rename(octant, "work", "Work renamed in Octant");
     rename(octant, "code", "Code renamed in Octant");
@@ -1510,6 +1527,13 @@ describe("importing Octant's data into Nightly", () => {
         .filter((title) => title !== undefined);
     expect(titles("work-thread", workThread)).toContain("Work renamed in Octant");
     expect(titles("code-thread", codeThread)).toContain("Code renamed in Octant");
+    for (const [type, id] of [
+      ["work-thread", workThread],
+      ["code-thread", codeThread],
+    ] as const) {
+      const { latest, head } = versionAtHead(type, id);
+      expect(latest).toBe(head);
+    }
     merged = openStore(paths.nightly);
     expect(listPendingUsageResumes(merged.connection)).toEqual([]);
     merged.close();
