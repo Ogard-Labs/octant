@@ -327,6 +327,7 @@ export type HubAdministrationOperation =
   | "webhook-rotate"
   | "webhook-remove"
   | "visitors"
+  | "visitor-list"
   | "visitor-share"
   | "visitor-stop"
   | "visitor-comment"

@@ -304,6 +304,19 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(4);
   });
 
+  it("reads this host's visitor links alone with a bodiless GET", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({}));
+    await sendHubAdministrationOperation(controls, "visitor-list", undefined);
+    expect(calls.map((call) => [call.init?.method, call.url])).toEqual([
+      ["GET", "http://127.0.0.1:4317/api/desktop/hub/visitors"],
+    ]);
+    expect(calls[0]?.init?.body).toBeUndefined();
+    expect(
+      await sendHubAdministrationOperation(controls, "visitor-list", { enabled: true }),
+    ).toMatchObject({ status: 400 });
+    expect(calls).toHaveLength(1);
+  });
+
   it("sends the direct sending operations only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 

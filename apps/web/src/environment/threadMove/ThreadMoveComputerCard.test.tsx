@@ -662,7 +662,7 @@ describe("the Computer card", () => {
     await user.click(screen.getByRole("button", { name: "Share with visitor…" }));
     const dialog = await screen.findByRole("dialog", { name: "Share with visitor" });
     expect(within(dialog).getByText(/a link to “Add dark mode”/)).toBeInTheDocument();
-    await waitFor(() => expect(hubRequest).toHaveBeenCalledWith("status"));
+    await waitFor(() => expect(hubRequest).toHaveBeenCalledWith("visitor-list"));
   });
 
   // Once the contract names every mode, there is no such thread left to try.

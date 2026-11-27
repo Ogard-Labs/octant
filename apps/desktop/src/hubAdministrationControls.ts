@@ -261,6 +261,7 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     decodeBody: decodeHubWebhookEndpointRequest,
   },
   // The hub's visitor-link switch, and this spoke's links and the comments waiting on them.
+  "visitor-list": { method: "GET", path: "/api/desktop/hub/visitors" },
   visitors: {
     method: "POST",
     path: "/api/desktop/hub/visitors",

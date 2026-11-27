@@ -157,7 +157,7 @@ export const HUB_ADMINISTRATION_ROUTES = {
   webhookRemove: "/api/desktop/hub/webhooks/remove",
   /** The secret Stripe minted for one of this spoke's Stripe endpoints, pasted in a window on this host. */
   webhookSecret: "/api/desktop/hub/webhooks/secret",
-  /** The hub's visitor-link switch, and this spoke's links and their comments: only a window on this host changes them. */
+  /** The hub's visitor-link switch, and this spoke's links and their comments: only a window on this host reads or changes them. */
   visitorSwitch: "/api/desktop/hub/visitors",
   visitorShare: "/api/desktop/hub/visitors/share",
   visitorStop: "/api/desktop/hub/visitors/stop",
@@ -238,6 +238,11 @@ export function createHubAdministrationRouteHandler(
 ): (request: Request) => Promise<Response | undefined> {
   const maxBody = options.maxRequestBodySize ?? DEFAULT_BODY_LIMIT;
   const now = options.now ?? Date.now;
+  /** The visitor view the status and the visitor read both answer; absent where not composed. */
+  const visitorsView = () =>
+    options.visitors === undefined || options.spokeVisitors === undefined
+      ? {}
+      : { visitors: { hub: options.visitors.status(), spoke: options.spokeVisitors.view() } };
   return async (request) => {
     const url = new URL(request.url);
     if (
@@ -300,11 +305,7 @@ export function createHubAdministrationRouteHandler(
           : {
               webhooks: { hub: options.webhooks.status(), spoke: options.spokeWebhooks.view() },
             }),
-        ...(options.visitors === undefined || options.spokeVisitors === undefined
-          ? {}
-          : {
-              visitors: { hub: options.visitors.status(), spoke: options.spokeVisitors.view() },
-            }),
+        ...visitorsView(),
         ...(options.relay === undefined || options.spokeRelay === undefined
           ? {}
           : { relay: { hub: options.relay.status(), devices: options.spokeRelay.view() } }),
@@ -314,6 +315,11 @@ export function createHubAdministrationRouteHandler(
       return Response.json(options.certificate.status(), {
         headers: { "cache-control": "no-store" },
       });
+    }
+    // The share dialog reads this every few seconds while open. The whole status
+    // would run direct sending's credential checks, each a Keychain helper on macOS.
+    if (route === HUB_ADMINISTRATION_ROUTES.visitorSwitch && request.method === "GET") {
+      return Response.json(visitorsView(), { headers: { "cache-control": "no-store" } });
     }
     if (request.method !== "POST") return failure("invalid", 400);
     const body = await readBody(request, maxBody);

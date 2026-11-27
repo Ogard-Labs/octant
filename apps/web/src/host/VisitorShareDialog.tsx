@@ -73,7 +73,7 @@ export default function VisitorShareDialog(props: {
   const read = useCallback(async () => {
     const failed = (error: string) => setLoaded((previous) => ({ ...previous, error }));
     try {
-      const reply = await request("status");
+      const reply = await request("visitor-list");
       const view = reply.status === 200 ? readVisitors(field(reply.body, "visitors")) : undefined;
       if (view === undefined) {
         failed("This computer is not set up for visitor links. Join a hub and tick Public first.");

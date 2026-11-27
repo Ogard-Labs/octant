@@ -79,7 +79,7 @@ describe("VisitorShareDialog", () => {
   it("makes a link for this thread with the chosen scope and expiry, and shows it once", async () => {
     const user = userEvent.setup();
     const { calls } = renderDialog({
-      status: statusWith({ links: [], comments: [], published: true }),
+      "visitor-list": statusWith({ links: [], comments: [], published: true }),
       "visitor-share": {
         status: 200,
         body: {
@@ -121,7 +121,7 @@ describe("VisitorShareDialog", () => {
     const user = userEvent.setup();
     renderDialog({
       // A hub with its own Funnel on is no exception: the link goes to the hub it joined.
-      status: {
+      "visitor-list": {
         status: 200,
         body: {
           spoke: { membership: "none" },
@@ -153,7 +153,7 @@ describe("VisitorShareDialog", () => {
     const user = userEvent.setup();
     let reads = 0;
     renderDialog({
-      status: () => {
+      "visitor-list": () => {
         reads += 1;
         return reads === 1 ? statusWith(shared) : { status: 503, body: {} };
       },
@@ -183,7 +183,7 @@ describe("VisitorShareDialog", () => {
     const both = statusWith({ ...shared, comments: [...shared.comments, second] });
     let answer: Answer = both;
     renderDialog({
-      status: () => answer,
+      "visitor-list": () => answer,
       "visitor-comment": () => {
         answer = { status: 503, body: {} };
         return { status: 200, body: { status: "sent", text: "A visitor wrote: hello" } };
@@ -218,7 +218,7 @@ describe("VisitorShareDialog", () => {
   it("lists only this thread's links and requests, and stops sharing one", async () => {
     const user = userEvent.setup();
     const { calls } = renderDialog({
-      status: statusWith(shared),
+      "visitor-list": statusWith(shared),
       "visitor-stop": { status: 200, body: { status: "stopped" } },
     });
     const links = await screen.findByRole("list", { name: "Visitor links" });
@@ -234,7 +234,7 @@ describe("VisitorShareDialog", () => {
   it("hands the person a visitor's request to send only after Send, framed as the host framed it", async () => {
     const user = userEvent.setup();
     const { calls } = renderDialog({
-      status: statusWith(shared),
+      "visitor-list": statusWith(shared),
       "visitor-comment": {
         status: 200,
         body: {
@@ -259,7 +259,7 @@ describe("VisitorShareDialog", () => {
   it("dismisses a visitor's request only after the person confirms, without sending it", async () => {
     const user = userEvent.setup();
     const { calls } = renderDialog({
-      status: statusWith(shared),
+      "visitor-list": statusWith(shared),
       "visitor-comment": { status: 200, body: { status: "dismissed" } },
     });
     const requests = await screen.findByRole("list", { name: "Visitor requests" });
@@ -279,7 +279,7 @@ describe("VisitorShareDialog", () => {
   it("says a sent request was dismissed because its link no longer exists", async () => {
     const user = userEvent.setup();
     renderDialog({
-      status: statusWith(shared),
+      "visitor-list": statusWith(shared),
       "visitor-comment": { status: 200, body: { status: "dismissed" } },
     });
     const requests = await screen.findByRole("list", { name: "Visitor requests" });
@@ -295,7 +295,7 @@ describe("VisitorShareDialog", () => {
   it("keeps a new link until Done, and makes no other link over it", async () => {
     const user = userEvent.setup();
     renderDialog({
-      status: statusWith({ links: [], comments: [], published: true }),
+      "visitor-list": statusWith({ links: [], comments: [], published: true }),
       "visitor-share": madeLink,
     });
     await screen.findByText("Nothing is shared with a visitor.");
@@ -314,7 +314,7 @@ describe("VisitorShareDialog", () => {
     const user = userEvent.setup();
     const second = { commentId: "D".repeat(22), linkId: LINK, text: "And this?", at: NOW };
     renderDialog({
-      status: statusWith({ ...shared, comments: [...shared.comments, second] }),
+      "visitor-list": statusWith({ ...shared, comments: [...shared.comments, second] }),
       "visitor-comment": {
         status: 200,
         body: { status: "sent", text: "A visitor wrote: hello" },
@@ -334,7 +334,7 @@ describe("VisitorShareDialog", () => {
     const user = userEvent.setup();
     let reads = 0;
     renderDialog({
-      status: () => {
+      "visitor-list": () => {
         reads += 1;
         return statusWith(
           reads === 1
@@ -367,7 +367,7 @@ describe("VisitorShareDialog", () => {
   it("says why the host refused to share, and offers nothing to make where visitor links are not set up", async () => {
     const user = userEvent.setup();
     renderDialog({
-      status: statusWith({ links: [], comments: [], published: true }),
+      "visitor-list": statusWith({ links: [], comments: [], published: true }),
       "visitor-share": { status: 409, body: { status: "refused", kind: "public-not-granted" } },
     });
     await screen.findByText("Nothing is shared with a visitor.");
@@ -378,7 +378,7 @@ describe("VisitorShareDialog", () => {
   });
 
   it("explains a computer that is not in a hub instead of offering a link", async () => {
-    renderDialog({ status: { status: 200, body: { hub: { enabled: false } } } });
+    renderDialog({ "visitor-list": { status: 200, body: { hub: { enabled: false } } } });
     expect(
       await screen.findByText(
         "This computer is not set up for visitor links. Join a hub and tick Public first.",
@@ -400,7 +400,7 @@ describe("VisitorShareDialog while it stays open", () => {
   it("shows a request a visitor posts, and keeps it when a later read fails", async () => {
     vi.useFakeTimers();
     let answer: Answer = nothing;
-    renderDialog({ status: () => answer });
+    renderDialog({ "visitor-list": () => answer });
     await pass(0);
     expect(screen.queryByRole("list", { name: "Visitor requests" })).not.toBeInTheDocument();
 
@@ -417,7 +417,7 @@ describe("VisitorShareDialog while it stays open", () => {
   it("does not dismiss from a confirmation left open while the links cannot be read", async () => {
     vi.useFakeTimers();
     let answer: Answer = statusWith(shared);
-    const { calls } = renderDialog({ status: () => answer });
+    const { calls } = renderDialog({ "visitor-list": () => answer });
     await pass(0);
     fireEvent.click(screen.getByRole("button", { name: /^Dismiss the visitor's request/ }));
 
@@ -429,11 +429,24 @@ describe("VisitorShareDialog while it stays open", () => {
     expect(calls.some((call) => call.operation === "visitor-comment")).toBe(false);
   });
 
+  it("reads only the visitor links each time, never the whole hub status", async () => {
+    vi.useFakeTimers();
+    const { calls } = renderDialog({ "visitor-list": nothing });
+    await pass(0);
+    await pass(15_000);
+    await pass(15_000);
+    expect(calls.map((call) => call.operation)).toEqual([
+      "visitor-list",
+      "visitor-list",
+      "visitor-list",
+    ]);
+  });
+
   it("starts no read while one is still unanswered", async () => {
     vi.useFakeTimers();
     let finish: (answer: Answer) => void = () => undefined;
     const { calls } = renderDialog({
-      status: () =>
+      "visitor-list": () =>
         new Promise<Answer>((resolve) => {
           finish = resolve;
         }),
@@ -448,7 +461,7 @@ describe("VisitorShareDialog while it stays open", () => {
   it("reads nothing while the window is hidden, and at once when it is shown again", async () => {
     vi.useFakeTimers();
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-    const { calls } = renderDialog({ status: nothing });
+    const { calls } = renderDialog({ "visitor-list": nothing });
     await pass(0);
 
     visibility.mockReturnValue("hidden");
@@ -465,7 +478,7 @@ describe("VisitorShareDialog while it stays open", () => {
   it("waits to read until the window is shown when it opens hidden", async () => {
     vi.useFakeTimers();
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-    const { calls } = renderDialog({ status: nothing });
+    const { calls } = renderDialog({ "visitor-list": nothing });
     await pass(60_000);
     expect(calls).toHaveLength(0);
 
@@ -478,7 +491,7 @@ describe("VisitorShareDialog while it stays open", () => {
 
   it("stops reading once it is closed", async () => {
     vi.useFakeTimers();
-    const { calls, unmount } = renderDialog({ status: nothing });
+    const { calls, unmount } = renderDialog({ "visitor-list": nothing });
     await pass(0);
     unmount();
     await pass(60_000);
