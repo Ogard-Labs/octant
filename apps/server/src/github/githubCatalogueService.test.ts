@@ -126,6 +126,30 @@ function service(
 }
 
 describe("GithubCatalogueService", () => {
+  it("keeps recent repositories when a read is cancelled during the account check", async () => {
+    const abandoned = new AbortController();
+    const catalogue = new GithubCatalogueService({
+      port: fakePort() as never,
+      // A cancelled `gh auth status` reads as no account at all.
+      snapshot: async (given) => {
+        if (given !== abandoned.signal) return readySnapshot;
+        abandoned.abort();
+        return { state: "unavailable", capabilities: [] };
+      },
+    });
+    await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());
+    await catalogue.recordRecentRepository(
+      { kind: "record-recent-repository", nodeId: observationRow.nodeId } as never,
+      signal(),
+    );
+
+    await catalogue.read({ kind: "recent-repositories" }, abandoned.signal);
+
+    await expect(catalogue.read({ kind: "recent-repositories" }, signal())).resolves.toMatchObject({
+      rows: [{ nodeId: observationRow.nodeId }],
+    });
+  });
+
   it("passes the closed reason to GitHub and never serves one reason's page for another", async () => {
     const { service: catalogue, port } = service();
     const base = {
@@ -237,6 +261,24 @@ describe("GithubCatalogueService", () => {
       capability: "issues-read",
     });
     expect(port.listAssignedWork).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a read its caller abandoned as a failing GitHub", async () => {
+    const port = fakePort();
+    const abandoned = new AbortController();
+    port.listRepositories.mockImplementationOnce(async () => {
+      abandoned.abort();
+      return { kind: "unavailable" as const } as never;
+    });
+    const cacheStats = new CacheStatsProjection({ now: () => 1_000 });
+    const { service: catalogue } = service({ port, cacheStats });
+
+    await catalogue.read({ kind: "repositories", pageSize: 30 }, abandoned.signal);
+
+    expect(cacheStats.holdsUnattendedRefresh("github-catalogue")).toBe(false);
+    await expect(
+      catalogue.read({ kind: "repositories", pageSize: 30 }, signal()),
+    ).resolves.toMatchObject({ kind: "repositories" });
   });
 
   it("serves a cached page while fresh instead of refetching", async () => {

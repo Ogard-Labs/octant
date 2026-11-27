@@ -2915,6 +2915,72 @@ describe("ChatService", () => {
     expect(mentionEntries?.[0]?.posture).toBe("compressible");
   });
 
+  it("keeps the pull requests and issues a Chat message mentioned, and reads nothing for the agent", async () => {
+    const asked = vi.fn(async () => []);
+    const { service, fakeDriver, contextHarness } = openFixture({
+      resolveThreadMentionContext: asked,
+    });
+    const planTurn = vi.spyOn(contextHarness, "planTurn");
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Launch plan",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const prompt =
+      "Compare [#2901 Fix login](https://github.com/acme/app/pull/2901) with [OCT-1042 Mentions](https://linear.app/acme/issue/OCT-1042/mentions)";
+    const recorded = [
+      {
+        kind: "pull-request",
+        source: "github",
+        id: "2901",
+        url: "https://github.com/acme/app/pull/2901",
+      },
+      {
+        kind: "linear-issue",
+        source: "linear",
+        id: "OCT-1042",
+        url: "https://linear.app/acme/issue/OCT-1042/mentions",
+      },
+    ];
+
+    await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt,
+      },
+      { windowId: "84000000-0000-4000-8000-000000000099" as WindowId },
+    );
+
+    // The provider is sent the text and nothing fetched on the person's behalf.
+    expect(asked).not.toHaveBeenCalled();
+    expect(fakeDriver.sentTurns[0]?.prompt).toBe(prompt);
+    expect(JSON.stringify(fakeDriver.sentTurns[0]?.context ?? [])).not.toContain("acme/app");
+    expect(
+      planTurn.mock.calls
+        .at(-1)?.[0]
+        .entries.some((entry) => /mention/.test(String(entry.source.referenceId))),
+    ).toBe(false);
+    const view = service.read(created.thread.id);
+    expect(view.turns.map((turn) => turn.trackerMentions)).toEqual([recorded]);
+    const turnId = view.turns[0]?.id;
+    if (turnId === undefined) throw new Error("Expected a turn.");
+    const branched = await service.execute({
+      kind: "branch-chat-thread",
+      threadId: created.thread.id,
+      expectedVersion: view.thread.version,
+      turnId,
+      title: "Second direction",
+      branchThreadId: "84000000-0000-4000-8000-0000000000b8",
+    });
+    if (branched.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(service.read(branched.thread.id).turns.map((turn) => turn.trackerMentions)).toEqual([
+      recorded,
+    ]);
+  });
+
   it("does not carry a turn's mention context into the next turn", async () => {
     const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
     const { service, fakeDriver } = openFixture({

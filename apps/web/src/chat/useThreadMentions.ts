@@ -1,4 +1,6 @@
 import { createThreadMentionClient, type ThreadMentionClient } from "@octant/client-runtime";
+import type { SearchTrackerMentions } from "@octant/client-runtime/tracker-mention-search-client";
+import type { TrackerMentionCandidate } from "@octant/contracts/tracker-mention-search";
 import {
   decodeMentionableThreadId,
   type MentionableThreadId,
@@ -28,6 +30,15 @@ export interface ThreadMentionsOptions {
    * composer may attach: a Code thread its own Project's Code threads.
    */
   readonly readerThreadId?: MentionableThreadId;
+  /**
+   * Where the `#` list looks for pull requests and issues: the composer's own
+   * thread, or the Project a new thread would start in. Absent searches no
+   * Project, which leaves only a connected Linear.
+   */
+  readonly trackerThreadId?: string;
+  /** Injected search; otherwise built from the loopback server URL. */
+  readonly trackerSearch?: SearchTrackerMentions;
+  readonly trackerProjectId?: string;
   /** Chips restored with a persisted new-task draft after Settings unmounts. */
   readonly initialChips?: ReadonlyArray<ChatComposerThreadMentionChip>;
 }
@@ -137,6 +148,39 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     })();
     return () => controller.abort();
   }, [client, newRequestId, query, readerThreadId]);
+
+  // Pull requests and issues come from other services; their search loads
+  // with the first token typed.
+  const { trackerSearch, trackerThreadId, trackerProjectId, serverUrl, windowCapability } = options;
+  const [trackers, setTrackers] = useState<ReadonlyArray<TrackerMentionCandidate>>([]);
+  useEffect(() => {
+    setTrackers([]);
+    if (query === undefined || query.length === 0) return;
+    let abandoned = false;
+    let stop: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { startTrackerMentionSearch } =
+          await import("../trackerMentions/startTrackerMentionSearch");
+        if (abandoned) return;
+        stop = startTrackerMentionSearch({
+          query,
+          search: trackerSearch,
+          serverUrl,
+          windowCapability,
+          threadId: trackerThreadId,
+          projectId: trackerProjectId,
+          onFound: setTrackers,
+        });
+      } catch {
+        // A tab left open across an update may no longer have the file.
+      }
+    })();
+    return () => {
+      abandoned = true;
+      stop?.();
+    };
+  }, [query, serverUrl, trackerProjectId, trackerSearch, trackerThreadId, windowCapability]);
 
   // Chips are structured selections over the draft; when the user edits a chip
   // out of the text, it must stop contributing context.
@@ -323,6 +367,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     if (client === undefined) return undefined;
     return {
       candidates,
+      trackers,
       chips,
       ...(options.dialogueEnabled === true ? { dialogueEnabled: true } : {}),
       onQueryChange: setQuery,
@@ -341,6 +386,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     busy,
     canOpenSideChat,
     candidates,
+    trackers,
     options.dialogueEnabled,
     chips,
     client,

@@ -47,6 +47,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -187,12 +188,13 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     setPrompt(promptRequest.text);
     textareaRef.current?.focus();
   }, [promptRequest]);
-  const mentionListId = "work-new-thread-mentions";
+  const mentionListId = useId();
   const images = useWorkComposerImages();
   const threadMentions = useThreadMentions({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+    ...(props.projectId === undefined ? {} : { trackerProjectId: String(props.projectId) }),
     ...(storedMentionChips.length === 0 ? {} : { initialChips: storedMentionChips }),
   });
   const structuredDraftScope = useRef(draftScope);
@@ -539,14 +541,24 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={atMenu.open || slash.open}
-                aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
+                aria-expanded={atMenu.open || slash.open || mention.listed}
+                aria-controls={
+                  atMenu.open
+                    ? atMenu.listId
+                    : slash.open
+                      ? slash.listId
+                      : mention.listed
+                        ? mentionListId
+                        : undefined
+                }
                 aria-activedescendant={
                   atMenu.active !== undefined
                     ? `${atMenu.listId}-${atMenu.active.id}`
-                    : slash.active === undefined
-                      ? undefined
-                      : `${slash.listId}-${slash.active.id}`
+                    : slash.active !== undefined
+                      ? `${slash.listId}-${slash.active.id}`
+                      : mention.activeOptionId === undefined
+                        ? undefined
+                        : `${mentionListId}-${mention.activeOptionId}`
                 }
                 autoFocus
                 className="composer-input"
@@ -588,6 +600,8 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                   candidates={threadMentions.composer?.candidates ?? []}
                   listId={mentionListId}
                   onChoose={mention.choose}
+                  onChooseTracker={mention.chooseTracker}
+                  trackers={mention.trackers}
                   onHover={mention.setActiveIndex}
                 />
               ) : null

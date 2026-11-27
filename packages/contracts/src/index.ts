@@ -218,6 +218,7 @@ export * from "./githubCatalogue";
 export * from "./githubIssueContext";
 export * from "./linearIssueContext";
 export * from "./trackerReference";
+export * from "./trackerMention";
 export * from "./githubClone";
 export * from "./githubOnboarding";
 export * from "./codeProjectPullRequests";

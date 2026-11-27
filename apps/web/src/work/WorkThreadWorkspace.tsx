@@ -1611,6 +1611,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+    trackerThreadId: String(props.threadId),
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -3223,6 +3224,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           <SentMessageText
                             text={row.entry.text}
                             threadMentionIds={row.turn.threadMentionIds}
+                            trackerMentions={row.turn.trackerMentions}
                           />
                         </div>
                         {row.at === undefined ? null : (
@@ -3833,14 +3835,24 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"
               aria-autocomplete="list"
-              aria-expanded={atMenu.open || slash.open}
-              aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
+              aria-expanded={atMenu.open || slash.open || mention.listed}
+              aria-controls={
+                atMenu.open
+                  ? atMenu.listId
+                  : slash.open
+                    ? slash.listId
+                    : mention.listed
+                      ? mentionListId
+                      : undefined
+              }
               aria-activedescendant={
                 atMenu.active !== undefined
                   ? `${atMenu.listId}-${atMenu.active.id}`
-                  : slash.active === undefined
-                    ? undefined
-                    : `${slash.listId}-${slash.active.id}`
+                  : slash.active !== undefined
+                    ? `${slash.listId}-${slash.active.id}`
+                    : mention.activeOptionId === undefined
+                      ? undefined
+                      : `${mentionListId}-${mention.activeOptionId}`
               }
               autoFocus
               className="composer-input"
@@ -3896,6 +3908,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     candidates={threadMentions.composer?.candidates ?? []}
                     listId={mentionListId}
                     onChoose={mention.choose}
+                    onChooseTracker={mention.chooseTracker}
+                    trackers={mention.trackers}
                     onHover={mention.setActiveIndex}
                   />
                 ) : null}

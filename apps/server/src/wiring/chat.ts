@@ -73,6 +73,8 @@ import {
   type SideChatFileSource,
 } from "../chat/sideChatSourceTools";
 import { createThreadMentionRouteHandler } from "../threadMentionRoutes";
+import { createTrackerMentionProjects } from "../trackerMentions/trackerMentionProjects";
+import { createTrackerMentionSearch } from "../trackerMentions/trackerMentionSearch";
 import { ThreadNoteStore, ThreadNotesService } from "../threadNotes/threadNotes";
 import { createThreadNotesRouteHandler } from "../threadNotes/threadNotesRoutes";
 import { threadToolCallRecorders } from "../threadToolCallRecorder";
@@ -157,6 +159,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "githubIssueContextService"
     | "linearIssueContextService"
     | "threadOutsideContentMarks"
+    | "trackerMentionTrackers"
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
   Pick<
@@ -165,6 +168,8 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "keptImageChoices"
     | "keptVideoChoices"
     | "projectMemoryAccess"
+    | "projectService"
+    | "gitObservationPort"
     | "shellService"
   > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
@@ -211,6 +216,9 @@ export function wireChat(deps: ChatDependencies) {
   const imageDescriber = deps.imageDescriber;
   const {
     conversationInputTransfer,
+    gitObservationPort,
+    projectService,
+    trackerMentionTrackers,
     threadAwaitsHarnessApproval,
     agentMessageProjection,
     agentMessageService,
@@ -1026,8 +1034,30 @@ export function wireChat(deps: ChatDependencies) {
       // already a Side Chat, even before its selection is confirmed.
       isSideChat: (threadId) => sideChatSidecars.hiddenThreadIds().has(threadId),
     });
+    const trackerMentionSearch = createTrackerMentionSearch({
+      ...trackerMentionTrackers,
+      threadProject: async (windowId, threadId) => {
+        // A Side Chat holds no Project of its own; it searches with the thread
+        // it sits beside.
+        let sidecar;
+        try {
+          sidecar = sideChatSidecars.findBySidecarThread(decodeChatThreadId(String(threadId)));
+        } catch {
+          sidecar = undefined;
+        }
+        return await threadMentionService.openableThread(
+          windowId,
+          sidecar?.sourceThreadId ?? threadId,
+        );
+      },
+      windowProject: createTrackerMentionProjects({
+        projects: projectService,
+        remotes: (root) => gitObservationPort.observeRemotes(root),
+      }),
+    });
     const threadMentionRoutes = createThreadMentionRouteHandler({
       service: threadMentionService,
+      trackers: trackerMentionSearch,
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });

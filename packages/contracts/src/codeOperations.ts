@@ -78,6 +78,7 @@ import {
 } from "./providers";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { ThreadMentionIds } from "./threadMentionIdentity";
+import { TrackerMentions } from "./trackerMention";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 import {
@@ -1914,6 +1915,8 @@ const ConversationTurnStartedEvent = Schema.Struct({
   reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
   /** The threads this turn's message mentioned; absent when it mentioned none. */
   threadMentionIds: Schema.optional(ThreadMentionIds),
+  /** The pull requests and issues this turn's message mentioned; absent when it mentioned none. */
+  trackerMentions: Schema.optional(TrackerMentions),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   /** Images sent with this turn. Absent when the turn attached none. */
   attachments: Schema.optional(
@@ -2705,6 +2708,8 @@ export const CodeConversationTurn = Schema.Struct({
   reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
   /** The threads this turn's message mentioned; absent when it mentioned none. */
   threadMentionIds: Schema.optional(ThreadMentionIds),
+  /** The pull requests and issues this turn's message mentioned; absent when it mentioned none. */
+  trackerMentions: Schema.optional(TrackerMentions),
   reviewPreview: Schema.optional(CodeTurnReviewPreview),
   /** Images the user attached to this turn. Absent when it attached none. */
   attachments: Schema.optional(

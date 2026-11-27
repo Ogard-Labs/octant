@@ -2,6 +2,7 @@ import {
   cleanedUpWorktreeSentence,
   type CleanedUpWorktreeStanding,
 } from "@octant/domain/code-worktree-cleanup-policy";
+import { recordedTrackerMentions } from "@octant/domain/tracker-mention-policy";
 import type { EventActor, ProviderDriverKind } from "@octant/contracts";
 import type { CodeOperationEventAuthor } from "./codeOperationEventStore";
 import {
@@ -372,6 +373,11 @@ export interface CodeOperationEvidencePort {
     metadata?: { readonly truncated?: boolean },
   ) => CodeEvidenceReference;
   readonly read?: (reference: CodeEvidenceReference) => Awaitable<string | undefined>;
+  /**
+   * The same content read without yielding, for a step that nothing may run
+   * between. Absent, a turn's start records no pull request or issue mention.
+   */
+  readonly readNow?: (reference: CodeEvidenceReference) => string | undefined;
 }
 
 export type CodeOperationReplay =
@@ -2494,6 +2500,11 @@ export class CodeOperationService {
                     expectedCursor: resultCursor,
                     event: {
                       kind: "conversation-turn-started",
+                      // Read from the person's own message, never a delivery
+                      // the host composed; no tracker is asked for anything.
+                      ...(command.delivery === undefined
+                        ? recordedTrackerMentions(this.#options.evidence.readNow?.(command.prompt))
+                        : {}),
                       ...(command.toolCatalogHandoff === undefined
                         ? {}
                         : { toolCatalogHandoff: command.toolCatalogHandoff }),

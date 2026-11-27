@@ -56,6 +56,7 @@ import { CanvasContextSelection, MAX_CHAT_TURN_CANVAS_SELECTIONS } from "./canva
 import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { ThreadMentionIds } from "./threadMentionIdentity";
+import { TrackerMentions } from "./trackerMention";
 import { ThreadTaskProgressList } from "./threadTasks";
 import { ThreadToolStep, ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
@@ -462,6 +463,8 @@ export const ChatTurn = Schema.Struct({
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   /** The threads this turn's message mentioned; absent when it mentioned none. */
   threadMentionIds: Schema.optional(ThreadMentionIds),
+  /** The pull requests and issues this turn's message mentioned; absent when it mentioned none. */
+  trackerMentions: Schema.optional(TrackerMentions),
   attachmentIds: Schema.Array(ChatAttachmentId),
   originalInputs: Schema.optional(
     Schema.Array(ConversationInputReference).pipe(Schema.maxItems(MAX_CHAT_TURN_ATTACHMENTS)),

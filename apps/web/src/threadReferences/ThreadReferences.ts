@@ -1,6 +1,8 @@
+import type { ConnectedGitHubRepository, ThreadBoardPullRequestIdentity } from "@octant/contracts";
 import { createContext, useMemo, useRef } from "react";
 import type { CommandThread } from "../palette/buildOctantCommands";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
+import type { ExternalUrlHost } from "../shell/openExternalUrl";
 
 type Rows = ReadonlyArray<ChatThreadNavigationItem>;
 
@@ -14,8 +16,22 @@ export interface ThreadReferenceLists {
   readonly work: Rows;
   readonly code: Rows;
   readonly withProviderMark: (thread: ChatThreadNavigationItem) => ChatThreadNavigationItem;
-  readonly projects: ReadonlyArray<{ readonly id: unknown; readonly name: string }>;
+  /** Every Project the window lists; a Code one carries the repository the host observed. */
+  readonly projects: ReadonlyArray<{
+    readonly id: unknown;
+    readonly name: string;
+    readonly type?: string;
+    readonly lifecycle?: string;
+    readonly connectedRepository?: ConnectedGitHubRepository | undefined;
+  }>;
   readonly onOpen: (thread: CommandThread) => void;
+  /**
+   * Opens Octant's pane on a pull request a text names, in a Project this window
+   * holds. Absent while the window has no such pane to show it in.
+   */
+  readonly onOpenPullRequest?: ((identity: ThreadBoardPullRequestIdentity) => void) | undefined;
+  /** Where any other link named in text opens: the desktop's browser, else the window's. */
+  readonly externalHost?: ExternalUrlHost | undefined;
 }
 
 export const ThreadReferencesContext = createContext<ThreadReferenceLists | undefined>(undefined);
@@ -24,8 +40,22 @@ export const ThreadReferencesContext = createContext<ThreadReferenceLists | unde
 export function useThreadReferenceLists(input: ThreadReferenceLists): ThreadReferenceLists {
   const open = useRef(input.onOpen);
   open.current = input.onOpen;
+  const openPullRequest = useRef(input.onOpenPullRequest);
+  openPullRequest.current = input.onOpenPullRequest;
   return useMemo(
-    () => ({ ...input, onOpen: (thread) => open.current(thread) }),
-    [input.chat, input.work, input.code, input.withProviderMark, input.projects],
+    () => ({
+      ...input,
+      onOpen: (thread) => open.current(thread),
+      onOpenPullRequest:
+        input.onOpenPullRequest && ((identity) => openPullRequest.current?.(identity)),
+    }),
+    [
+      input.chat,
+      input.work,
+      input.code,
+      input.withProviderMark,
+      input.projects,
+      !input.onOpenPullRequest,
+    ],
   );
 }

@@ -335,6 +335,15 @@ export const GithubCatalogueReadRequest = Schema.Union(
     pageSize: GithubCataloguePageSize,
     cursor: Schema.optional(GithubCatalogueCursor),
     state: Schema.optional(GithubIssueStateFilter),
+    /** Matches the terms against titles only; absent searches titles and bodies. */
+    match: Schema.optional(Schema.Literal("title")),
+  }).annotations(strict),
+  /** One issue or pull request by its number, as a search row: no body, no comments. */
+  Schema.Struct({
+    kind: Schema.Literal("item"),
+    owner: GithubRepositoryOwner,
+    name: GithubRepositoryName,
+    number: Schema.Int.pipe(Schema.positive()),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-requests"),
@@ -409,6 +418,11 @@ export const GithubCatalogueReadResponse = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("search"),
     page: GithubSearchPage,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("item"),
+    row: GithubSearchRow,
+    freshness: GithubCatalogueFreshness,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("projects"),

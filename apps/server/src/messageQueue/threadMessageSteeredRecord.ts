@@ -20,6 +20,7 @@ import {
   type ThreadMessageSteered,
   type ThreadMessageSteeredIntoTurn,
 } from "@octant/contracts";
+import { recordedTrackerMentions } from "@octant/domain/tracker-mention-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 
@@ -70,6 +71,7 @@ export function journalThreadMessageSteered(
     messageId: input.messageId,
     body: input.body,
     steeredAt: input.steeredAt,
+    ...recordedTrackerMentions(input.body),
   });
   journal.append({
     aggregate: {
@@ -162,9 +164,10 @@ export function withThreadMessageSteered(
   const current = existing ?? [];
   if (current.some((entry) => entry.messageId === record.messageId)) return current;
   if (current.length >= MAX_THREAD_MESSAGES_STEERED_PER_TURN) return current;
+  const { messageId, body, steeredAt, trackerMentions } = record;
   return [
     ...current,
-    { messageId: record.messageId, body: record.body, steeredAt: record.steeredAt },
+    { messageId, body, steeredAt, ...(trackerMentions === undefined ? {} : { trackerMentions }) },
   ];
 }
 

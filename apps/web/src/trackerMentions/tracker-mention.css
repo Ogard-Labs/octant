@@ -1,0 +1,72 @@
+/* A pull request or issue named in text, and the card it opens. Loaded with the
+   chip's own chunk, the first time a text names one. */
+.tracker-mention {
+  max-width: 100%;
+  vertical-align: baseline;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tracker-mention > svg {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.tracker-mention:hover,
+.tracker-mention[data-popup-open] {
+  background: var(--oct-fg-soft);
+}
+
+.tracker-mention-card {
+  display: flex;
+  width: min(320px, calc(100vw - 24px));
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) 12px;
+  line-height: 1.25;
+}
+
+.tracker-mention-card__kind {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.tracker-mention-card__title {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tracker-mention-card__facts {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  font-size: var(--oct-text-xs);
+}
+
+.tracker-mention-card__facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.tracker-mention-card__facts dt {
+  color: var(--oct-meta);
+}
+
+.tracker-mention-card__facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: end;
+}
+
+.tracker-mention-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}

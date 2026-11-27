@@ -6031,6 +6031,9 @@ function LaunchedShell(
     withProviderMark: navigationModel.withProviderMark,
     projects: projectController.allProjects,
     onOpen: openCommandThread,
+    // The pane is a Code tool; elsewhere a mentioned pull request opens on the web.
+    onOpenPullRequest: activeMode === "code" ? selectProjectPullRequestIdentity : undefined,
+    externalHost: props.hostBridge,
   });
 
   const sidebarTileCounts = useMemo(

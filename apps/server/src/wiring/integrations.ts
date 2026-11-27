@@ -32,6 +32,7 @@ import {
   resolveLinearIdentifier,
   type LinearOperationRunner,
 } from "../trackerIssues/trackerIssuePorts";
+import { githubTrackerSource, linearTrackerSource } from "../trackerMentions/trackerMentionSources";
 import { TerminalSessionImports } from "../terminalSessions/terminalSessionImports";
 import { createTerminalSessionRouteHandler } from "../terminalSessionRoutes";
 import {
@@ -588,6 +589,15 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       service: integrationService,
       isEffective: (slug) => slug !== "linear" || linearIntegrationIsEffective(),
     });
+    // What the composer's `#` list searches: the person's own reads through the
+    // connections this host already holds. Without one, nothing is asked.
+    const trackerMentionTrackers = {
+      github: githubTrackerSource({
+        catalogue: githubCatalogueService,
+        connected: githubIntegrationIsEffective,
+      }),
+      linear: linearTrackerSource({ run: runLinearOperation, connected: linearConnected }),
+    };
     return {
       agentMessageProjection,
       agentMessageService,
@@ -630,6 +640,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
+      trackerMentionTrackers,
       providerRuntimeNetwork,
       safeNetworkRoutes,
       safeNetworkStore,

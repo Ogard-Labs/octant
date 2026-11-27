@@ -165,6 +165,9 @@ export class WorkTurnProjection {
         ...(accepted.threadMentionIds === undefined
           ? {}
           : { threadMentionIds: accepted.threadMentionIds }),
+        ...(accepted.trackerMentions === undefined
+          ? {}
+          : { trackerMentions: accepted.trackerMentions }),
         transcript: [{ role: "user", text: accepted.prompt }],
         ...(accepted.attachments === undefined || accepted.attachments.length === 0
           ? {}

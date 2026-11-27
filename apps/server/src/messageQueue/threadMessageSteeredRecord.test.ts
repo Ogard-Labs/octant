@@ -10,6 +10,8 @@ import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import {
   journalThreadMessageSteered,
   readNewestThreadMessagesSteered,
+  readThreadMessagesSteered,
+  threadMessagesSteeredInto,
 } from "./threadMessageSteeredRecord";
 
 const directories: string[] = [];
@@ -57,5 +59,48 @@ describe("steered messages of a thread", () => {
     expect(
       readNewestThreadMessagesSteered(journal, threadId, 1).map((record) => record.body),
     ).toEqual(["message 1099"]);
+  });
+
+  it("keeps the pull requests and issues a steered message mentioned on the turn it entered", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-steered-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    connections.push(connection);
+    const now = "2026-11-01T10:00:00.000Z";
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const threadId = randomUUID();
+    const turnKey = randomUUID();
+    journalThreadMessageSteered(journal, {
+      mode: "code",
+      threadId,
+      turnKey,
+      messageId: randomUUID(),
+      body: "also [#7 Bug](https://github.com/acme/app/issues/7)",
+      steeredAt: now,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000001" as never },
+    });
+
+    expect(
+      threadMessagesSteeredInto(readThreadMessagesSteered(journal, threadId), turnKey).map(
+        (message) => message.trackerMentions,
+      ),
+    ).toEqual([
+      [
+        {
+          kind: "github-issue",
+          source: "github",
+          id: "7",
+          url: "https://github.com/acme/app/issues/7",
+        },
+      ],
+    ]);
   });
 });

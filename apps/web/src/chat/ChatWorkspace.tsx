@@ -520,6 +520,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ...(activeThreadId === undefined
       ? {}
       : { readerThreadId: decodeMentionableThreadId(String(activeThreadId)) }),
+    ...(activeThreadId === undefined ? {} : { trackerThreadId: String(activeThreadId) }),
   });
   threadMentionChipsRef.current = threadMentions.chips;
   const threadDropKey = useComposerThreadDropRegistration({

@@ -34,6 +34,7 @@ import {
 import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { ThreadMentionIds } from "./threadMentionIdentity";
+import { TrackerMentions } from "./trackerMention";
 import { ThreadTaskProgressList } from "./threadTasks";
 import { ThreadToolStep, ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
@@ -348,6 +349,8 @@ export const WorkTurnState = Schema.Struct({
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   /** The threads this turn's message mentioned; absent when it mentioned none. */
   threadMentionIds: Schema.optional(ThreadMentionIds),
+  /** The pull requests and issues this turn's message mentioned; absent when it mentioned none. */
+  trackerMentions: Schema.optional(TrackerMentions),
   version: AggregateVersion,
   acceptedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -616,6 +619,8 @@ export const WorkTurnAccepted = Schema.Struct({
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   /** The threads this turn's message mentioned; absent when it mentioned none. */
   threadMentionIds: Schema.optional(ThreadMentionIds),
+  /** The pull requests and issues this turn's message mentioned; absent when it mentioned none. */
+  trackerMentions: Schema.optional(TrackerMentions),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),

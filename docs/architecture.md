@@ -5808,7 +5808,12 @@ can show which thread a `#[Title]` in the message names (maintainer decision,
 2026-11-25). They are presentation alone: no title, transcript or authority of
 the mentioned thread is stored, a later turn never reads them as context, and a
 retry or resume resolves nothing from them. A Chat branch's and a Work fork's
-copies of the message keep them. In Chat, an explicit mention of a Chat thread also grants the source
+copies of the message keep them. The pull requests and issues a message links
+are recorded the same way (`trackerMentions`: kind, source, id and URL, read by
+the host from the person's own message text, never from a delivery it composed),
+for the chip alone: recording one calls no tracker, adds no context and grants
+nothing ([Thread view](design/thread-view.md#mentioning-a-pull-request-or-issue-in-a-prompt),
+maintainer decision, 2026-11-27). In Chat, an explicit mention of a Chat thread also grants the source
 provider the bounded `octant_ask_thread` tool for that turn: it may send one of
 the user's instructions to the mentioned Chat thread and receive its completed
 reply. Under Strict it may do so at most three times a turn, a count the

@@ -13,6 +13,7 @@
     "./apple-toolchain-client": "./src/appleToolchainClient.ts",
     "./android-toolchain-client": "./src/androidToolchainClient.ts",
     "./chat-client": "./src/chatClient.ts",
+    "./tracker-mention-search-client": "./src/trackerMentionSearchClient.ts",
     "./browser-automation-client": "./src/browserAutomationClient.ts",
     "./canvas-client": "./src/canvasClient.ts",
     "./image-generation-client": "./src/imageGenerationClient.ts",

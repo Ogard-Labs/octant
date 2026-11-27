@@ -1,27 +1,66 @@
-import { findSentThreadMentions } from "@octant/domain";
+import type { TrackerMention } from "@octant/contracts";
+import {
+  findSentThreadMentions,
+  findTrackerMentionSpans,
+  maskTrackerMentions,
+} from "@octant/domain";
 import { Fragment, type ReactNode } from "react";
 import { ThreadReferenceChip } from "../threadReferences/ThreadReferenceChip";
+import { TrackerMentionChip } from "../trackerMentions/TrackerMentionChip";
 import { useThreadReferences } from "../threadReferences/useThreadReferences";
 import { useTrackerReferenceResolutions } from "../tracker/TrackerReferenceContext";
 import { renderWithTrackerReferences } from "../tracker/TrackerReferenceText";
 
 /**
- * A message's text with its tracker tags and the threads it mentioned as chips.
- * The turn records only the mentioned ids, so a mention is a chip while this
- * window lists its thread and otherwise stays the text the person wrote.
+ * A message's text with its tracker tags and what it mentioned as chips. The
+ * turn records only a thread's id, so a thread is a chip while this window
+ * lists it and otherwise stays the text the person wrote. A pull request or
+ * issue is drawn from the turn's own record and the text, asking no tracker.
  */
 export function SentMentionText(props: {
   readonly text: string;
   readonly threadMentionIds: ReadonlyArray<string>;
+  readonly trackerMentions: ReadonlyArray<TrackerMention>;
 }) {
   const { text } = props;
-  const { spans, byIdentity } = useTrackerReferenceResolutions(text);
+  const { spans, byIdentity } = useTrackerReferenceResolutions(
+    maskTrackerMentions(text, props.trackerMentions),
+  );
   const references = useThreadReferences();
-  const mentions = findSentThreadMentions(
+  const threads = findSentThreadMentions(
     text,
     props.threadMentionIds,
     (threadId) => references.find(threadId)?.thread.title,
-  );
+  ).map((mention) => ({
+    start: mention.start,
+    end: mention.end,
+    chip: (
+      <ThreadReferenceChip
+        key={`mention-${String(mention.start)}`}
+        threadId={mention.threadId}
+        title={mention.text.slice(2, -1)}
+      />
+    ),
+  }));
+  const recorded = new Map(props.trackerMentions.map((mention) => [mention.url, mention]));
+  const items = findTrackerMentionSpans(text).flatMap((span) => {
+    const mention = recorded.get(span.mention.url);
+    return mention === undefined
+      ? []
+      : [
+          {
+            start: span.start,
+            end: span.end,
+            chip: (
+              <TrackerMentionChip
+                key={`item-${String(span.start)}`}
+                mention={mention}
+                title={span.title}
+              />
+            ),
+          },
+        ];
+  });
   const between = (start: number, end: number): ReactNode =>
     renderWithTrackerReferences(
       text.slice(start, end),
@@ -32,14 +71,10 @@ export function SentMentionText(props: {
     );
   const parts: ReactNode[] = [];
   let cursor = 0;
-  for (const mention of mentions) {
+  for (const mention of [...threads, ...items].sort((left, right) => left.start - right.start)) {
     parts.push(
       <Fragment key={`text-${String(cursor)}`}>{between(cursor, mention.start)}</Fragment>,
-      <ThreadReferenceChip
-        key={`mention-${String(mention.start)}`}
-        threadId={mention.threadId}
-        title={mention.text.slice(2, -1)}
-      />,
+      mention.chip,
     );
     cursor = mention.end;
   }

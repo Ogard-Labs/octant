@@ -3151,6 +3151,35 @@ describe("WorkTurnService", () => {
     expect(replayed.lookup(ids.request)?.threadMentionIds).toEqual(["release-notes-thread"]);
   });
 
+  it("keeps the pull requests and issues a Work message mentioned through a replay, reading nothing for the agent", async () => {
+    const run = vi.fn(async () => ({ kind: "completed" as const, response: "done" }));
+    const fixture = serviceFixture({ turnRuntime: { run } });
+    const prompt = "Fix [#12 Bug](https://github.com/acme/app/issues/12)";
+    await fixture.service.startFirstTurn(ids.window, { ...startCommand(), prompt });
+    await fixture.waitForIdle();
+
+    const recorded = [
+      {
+        kind: "github-issue",
+        source: "github",
+        id: "12",
+        url: "https://github.com/acme/app/issues/12",
+      },
+    ];
+    const accepted = fixture.persistence.journal.append.mock.calls[0]?.[0]?.events[0]?.payload;
+    expect(accepted).toMatchObject({ prompt, trackerMentions: recorded });
+    // The provider gets the message as typed and no context about what it links.
+    const sent = run.mock.calls[0] as unknown as ReadonlyArray<{
+      readonly command: { readonly prompt: string };
+      readonly context?: ReadonlyArray<unknown>;
+    }>;
+    expect(sent[0]?.command.prompt).toBe(prompt);
+    expect(JSON.stringify(sent[0]?.context ?? [])).not.toContain("acme/app");
+    const replayed = new WorkTurnProjection();
+    replayed.apply(decodeWorkTurnAccepted(accepted));
+    expect(replayed.lookup(ids.request)?.trackerMentions).toEqual(recorded);
+  });
+
   it("refuses changed skill selections when a Work request is retried", async () => {
     const fixture = serviceFixture({
       resolveSelectedExtensions: async () => ({

@@ -2498,6 +2498,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         evidence: {
           put: (content, metadata) => codeEvidence.put(content, metadata),
           read: async (reference) => codeEvidence.read(reference),
+          readNow: (reference) => codeEvidence.read(reference),
         },
         actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
         clock: () => new Date().toISOString(),

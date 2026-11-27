@@ -1,7 +1,10 @@
 import type { MentionableThreadId, ThreadMentionCandidate } from "@octant/contracts";
+import type { TrackerMentionCandidate } from "@octant/contracts/tracker-mention-search";
 import {
   applyThreadMentionChip,
+  applyTrackerMention,
   findThreadMentionTags,
+  findTrackerMentionSpans,
   parseThreadMentionToken,
   type ThreadMentionToken,
 } from "@octant/domain";
@@ -11,11 +14,26 @@ import type { ComposerInlineChips, ComposerInputElement } from "../composer/Comp
 import { lazyOr } from "../lib/lazyOr";
 import type { ThreadMentionChipProps } from "./ThreadMentionInlineChip";
 import { LazyThreadMentionOption } from "./LazyThreadMentionOption";
+import type { TrackerMentionChipProps } from "../trackerMentions/TrackerMentionChip";
+import type { TrackerMentionRowsProps } from "../trackerMentions/TrackerMentionRows";
 
 const LazyThreadMentionChip = lazyOr<ThreadMentionChipProps>(
   async () => (await import("./ThreadMentionInlineChip")).ThreadMentionInlineChip,
   ({ chip }) => <span>{chip.title}</span>,
 );
+
+const LazyTrackerMentionChip = lazyOr<TrackerMentionChipProps>(
+  async () => (await import("../trackerMentions/TrackerMentionChip")).TrackerMentionChip,
+  ({ title }) => <span>{title}</span>,
+);
+
+const LazyTrackerMentionRows = lazyOr<TrackerMentionRowsProps>(
+  async () => (await import("../trackerMentions/TrackerMentionRows")).TrackerMentionRows,
+  () => null,
+);
+
+/** Chip ids that name a pull request or issue by its URL rather than a thread. */
+const TRACKER_CHIP = "tracker:";
 
 /**
  * A `#thread` chip a composer is currently carrying. The chip is a structured
@@ -41,6 +59,8 @@ export interface ThreadMentionChip {
  */
 export interface ThreadMentions {
   readonly candidates: ReadonlyArray<ThreadMentionCandidate>;
+  /** Pull requests and issues the host found for the same token, listed after threads. */
+  readonly trackers?: ReadonlyArray<TrackerMentionCandidate>;
   readonly chips: ReadonlyArray<ThreadMentionChip>;
   /** The current Chat turn may explicitly ask a mentioned Chat thread to reply. */
   readonly dialogueEnabled?: boolean;
@@ -57,8 +77,14 @@ export interface ThreadMentions {
 
 export interface ThreadMentionTypeaheadController {
   readonly open: boolean;
+  /** Open with rows, the only time there is a listbox to point assistive technology at. */
+  readonly listed: boolean;
   readonly activeIndex: number;
-  readonly activeCandidate: ThreadMentionCandidate | undefined;
+  /** The highlighted row's id within the list, whichever kind of row it is. */
+  readonly activeOptionId: string | undefined;
+  /** The list's pull requests and issues, after its threads. */
+  readonly trackers: ReadonlyArray<TrackerMentionCandidate>;
+  readonly chooseTracker: (candidate: TrackerMentionCandidate) => void;
   readonly setActiveIndex: (index: number) => void;
   /** Recompute the token after every edit or caret move. */
   readonly sync: (draft: string, caretIndex: number | null) => void;
@@ -91,23 +117,43 @@ export function useThreadMentionTypeahead(input: {
   const [activeIndex, setActiveIndex] = useState(0);
   const mentions = input.mentions;
   const candidates = mentions?.candidates ?? [];
+  const trackers = mentions?.trackers ?? [];
+  const rows = candidates.length + trackers.length;
   const open = mentions !== undefined && token !== undefined && input.disabled !== true;
   const activeCandidate = open ? candidates[activeIndex] : undefined;
+  const activeTracker = open ? trackers[activeIndex - candidates.length] : undefined;
+  const activeOptionId =
+    activeCandidate !== undefined
+      ? String(activeCandidate.threadId)
+      : activeTracker === undefined
+        ? undefined
+        : `${activeTracker.source}-${activeTracker.id}`;
 
   function sync(draft: string, caretIndex: number | null) {
     if (mentions === undefined) return;
     if (caretIndex !== null) mentions.onDraftEdited?.(draft, caretIndex);
     const next = caretIndex === null ? undefined : parseThreadMentionToken(draft, caretIndex);
     setToken(next);
-    setActiveIndex(0);
+    // An arrow's release reads the same token again and keeps its highlight.
+    if (next?.start !== token?.start || next?.query !== token?.query) setActiveIndex(0);
     mentions.onQueryChange(next?.query);
   }
 
   function choose(candidate: ThreadMentionCandidate) {
     if (mentions === undefined || token === undefined) return;
-    const applied = applyThreadMentionChip(input.draft, token, candidate.title);
-    input.onDraftChange(applied.draft, applied.caretIndex);
+    place(applyThreadMentionChip(input.draft, token, candidate.title));
     mentions.onSelectCandidate(candidate);
+  }
+
+  // The reference in the text is the whole mention, so nothing else is held.
+  function chooseTracker(candidate: TrackerMentionCandidate) {
+    if (mentions === undefined || token === undefined) return;
+    place(applyTrackerMention(input.draft, token, candidate));
+  }
+
+  function place(applied: { readonly draft: string; readonly caretIndex: number }) {
+    if (mentions === undefined) return;
+    input.onDraftChange(applied.draft, applied.caretIndex);
     setToken(undefined);
     setActiveIndex(0);
     mentions.onQueryChange(undefined);
@@ -121,20 +167,25 @@ export function useThreadMentionTypeahead(input: {
   }
 
   function handleKeyDown(event: KeyboardEvent<ComposerInputElement>): boolean {
-    if (open && candidates.length > 0) {
+    if (open && rows > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setActiveIndex((current) => (current + 1) % candidates.length);
+        setActiveIndex((current) => (current + 1) % rows);
         return true;
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setActiveIndex((current) => (current - 1 + candidates.length) % candidates.length);
+        setActiveIndex((current) => (current - 1 + rows) % rows);
         return true;
       }
-      if ((event.key === "Enter" || event.key === "Tab") && !event.shiftKey && activeCandidate) {
+      if (
+        (event.key === "Enter" || event.key === "Tab") &&
+        !event.shiftKey &&
+        activeOptionId !== undefined
+      ) {
         event.preventDefault();
-        choose(activeCandidate);
+        if (activeCandidate !== undefined) choose(activeCandidate);
+        else if (activeTracker !== undefined) chooseTracker(activeTracker);
         return true;
       }
     }
@@ -152,13 +203,38 @@ export function useThreadMentionTypeahead(input: {
       ? undefined
       : {
           find: (value) =>
-            findThreadMentionTags(value, mentions.chips).map((tag) => ({
-              start: tag.start,
-              end: tag.end,
-              text: tag.text,
-              id: String(tag.chip.threadId),
-            })),
+            [
+              ...findThreadMentionTags(value, mentions.chips).map((tag) => ({
+                start: tag.start,
+                end: tag.end,
+                text: tag.text,
+                id: String(tag.chip.threadId),
+              })),
+              ...findTrackerMentionSpans(value).map((span) => ({
+                start: span.start,
+                end: span.end,
+                text: span.text,
+                id: `${TRACKER_CHIP}${span.mention.url}`,
+              })),
+            ].sort((left, right) => left.start - right.start),
           render: (id) => {
+            if (id.startsWith(TRACKER_CHIP)) {
+              const url = id.slice(TRACKER_CHIP.length);
+              const span = findTrackerMentionSpans(input.draft).find(
+                (each) => each.mention.url === url,
+              );
+              return span === undefined ? null : (
+                <LazyTrackerMentionChip
+                  mention={span.mention}
+                  composer={{
+                    draft: input.draft,
+                    onDraftChange: input.onDraftChange,
+                    textarea: input.textarea,
+                  }}
+                  title={span.title}
+                />
+              );
+            }
             const chip = mentions.chips.find((each) => String(each.threadId) === id);
             return chip === undefined ? null : (
               <LazyThreadMentionChip
@@ -174,8 +250,11 @@ export function useThreadMentionTypeahead(input: {
 
   return {
     open,
+    listed: open && rows > 0,
     activeIndex,
-    activeCandidate,
+    activeOptionId,
+    trackers,
+    chooseTracker,
     setActiveIndex,
     sync,
     handleKeyDown,
@@ -192,14 +271,17 @@ export function useThreadMentionTypeahead(input: {
 export function ThreadMentionTypeahead(props: {
   readonly listId: string;
   readonly candidates: ReadonlyArray<ThreadMentionCandidate>;
+  readonly trackers?: ReadonlyArray<TrackerMentionCandidate>;
   readonly activeIndex: number;
   readonly busy?: boolean;
   readonly onHover: (index: number) => void;
   readonly onChoose: (candidate: ThreadMentionCandidate) => void;
+  readonly onChooseTracker?: (candidate: TrackerMentionCandidate) => void;
 }) {
+  const trackers = props.trackers ?? [];
   return (
     <div className="thread-mention__typeahead">
-      {props.candidates.length === 0 ? (
+      {props.candidates.length === 0 && trackers.length === 0 ? (
         <p className="thread-mention__empty" role="status">
           {props.busy === true
             ? "Searching threads you can open…"
@@ -207,7 +289,11 @@ export function ThreadMentionTypeahead(props: {
         </p>
       ) : (
         <ul
-          aria-label="Threads you can mention"
+          aria-label={
+            trackers.length === 0
+              ? "Threads you can mention"
+              : "Threads, pull requests and issues you can mention"
+          }
           className="thread-mention__list"
           id={props.listId}
           role="listbox"
@@ -232,6 +318,15 @@ export function ThreadMentionTypeahead(props: {
               </OctantButton>
             </li>
           ))}
+          {trackers.length === 0 ? null : (
+            <LazyTrackerMentionRows
+              activeIndex={props.activeIndex - props.candidates.length}
+              candidates={trackers}
+              listId={props.listId}
+              onChoose={(candidate) => props.onChooseTracker?.(candidate)}
+              onHover={(index) => props.onHover(props.candidates.length + index)}
+            />
+          )}
         </ul>
       )}
     </div>

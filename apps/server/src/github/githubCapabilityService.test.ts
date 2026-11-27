@@ -34,6 +34,39 @@ describe("GithubCapabilityService", () => {
     });
   });
 
+  it("probes again after a caller cancels while the probes are running", async () => {
+    const abandoned = new AbortController();
+    // A cancelled probe command reads as an operation GitHub refused.
+    const probeOperations = vi.fn(async (signal: AbortSignal) => {
+      const granted = signal !== abandoned.signal;
+      if (!granted) abandoned.abort();
+      return {
+        "repository-catalogue": granted,
+        "issues-read": granted,
+        "pull-requests-read": granted,
+        "projects-read": granted,
+      };
+    });
+    const service = new GithubCapabilityService(
+      {
+        observe: async () => ({
+          kind: "observed",
+          accounts: [
+            { login: "octocat", source: "keyring", scopes: ["repo"], gitProtocol: "https" },
+          ],
+        }),
+      } as never,
+      { probes: { probeOperations } },
+    );
+
+    await service.snapshot(abandoned.signal);
+
+    await expect(service.snapshot(new AbortController().signal)).resolves.toMatchObject({
+      capabilities: expect.arrayContaining([{ kind: "pull-requests-read", available: true }]),
+    });
+    expect(probeOperations).toHaveBeenCalledTimes(2);
+  });
+
   it("advertises only live-probed operations for an observed secure account", async () => {
     const probeOperations = vi.fn(async () => ({
       "repository-catalogue": true,

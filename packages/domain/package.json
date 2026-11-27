@@ -33,6 +33,7 @@
     "./shield-evaluation-fixtures": "./src/shieldEvaluationFixtures.ts",
     "./shield-watcher-policy": "./src/shieldWatcherPolicy.ts",
     "./provider-availability-policy": "./src/providerAvailabilityPolicy.ts",
+    "./tracker-mention-policy": "./src/trackerMentionPolicy.ts",
     "./thread-board-policy": "./src/threadBoardPolicy.ts",
     "./turn-decision-policy": "./src/turnDecisionPolicy.ts",
     "./pull-request-stack-policy": "./src/pullRequestStackPolicy.ts",

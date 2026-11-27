@@ -187,6 +187,7 @@ import {
   transitionChatAttempt,
   unsupportedModelOptionValues,
 } from "@octant/domain/chat-policy";
+import { findTrackerMentions } from "@octant/domain/tracker-mention-policy";
 import {
   completedThreadArchiveDue,
   decideCompleteThread,
@@ -3363,6 +3364,9 @@ export class ChatService {
         ...(command.threadMentionIds === undefined
           ? {}
           : { threadMentionIds: command.threadMentionIds }),
+        // Read from the message's own text: recording a mention asks no
+        // tracker for anything and adds nothing to what the provider is sent.
+        trackerMentions: findTrackerMentions(command.prompt),
         ...(attachmentIds !== undefined && attachmentIds.length > 0 ? { attachmentIds } : {}),
         ...(prepared.extensionSelections.length === 0
           ? {}
@@ -4097,6 +4101,9 @@ export class ChatService {
           ...(sourceTurn.threadMentionIds === undefined
             ? {}
             : { threadMentionIds: sourceTurn.threadMentionIds }),
+          ...(sourceTurn.trackerMentions === undefined
+            ? {}
+            : { trackerMentions: sourceTurn.trackerMentions }),
           attempts,
           createdAt: sourceTurn.createdAt,
         }),

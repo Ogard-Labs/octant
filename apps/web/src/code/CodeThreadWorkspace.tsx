@@ -863,6 +863,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft,
     readerThreadId: decodeMentionableThreadId(String(props.threadId)),
+    trackerThreadId: String(props.threadId),
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -2611,6 +2612,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                 <SentMessageText
                                   text={followUpPrompt ?? message.text}
                                   threadMentionIds={message.threadMentionIds}
+                                  trackerMentions={message.trackerMentions}
                                 />
                               ) : null}
                             </div>
@@ -3408,8 +3410,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   ? `${atMenu.listId}-${atMenu.active.id}`
                   : slash.active !== undefined
                     ? `${slash.listId}-${slash.active.id}`
-                    : mention.activeCandidate !== undefined
-                      ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                    : mention.activeOptionId !== undefined
+                      ? `${mentionListId}-${mention.activeOptionId}`
                       : pathMentionOpen && pathMentions.activeCandidate !== undefined
                         ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
                         : undefined
@@ -3420,13 +3422,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   ? atMenu.listId
                   : slash.open
                     ? slash.listId
-                    : mention.open
+                    : mention.listed
                       ? mentionListId
                       : pathMentionOpen
                         ? pathMentionListId
                         : undefined
               }
-              aria-expanded={atMenu.open || slash.open || mention.open || pathMentionOpen}
+              aria-expanded={atMenu.open || slash.open || mention.listed || pathMentionOpen}
               className="composer-input window-no-drag"
               id={`code-thread-composer-${String(thread.id)}`}
               onChange={(event) => {
@@ -3486,6 +3488,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     candidates={threadMentions.composer?.candidates ?? []}
                     listId={mentionListId}
                     onChoose={mention.choose}
+                    onChooseTracker={mention.chooseTracker}
+                    trackers={mention.trackers}
                     onHover={mention.setActiveIndex}
                   />
                 ) : null}

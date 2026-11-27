@@ -3,14 +3,20 @@ import {
   type ThreadMentionCommandResult,
   type WindowId,
 } from "@octant/contracts";
+import {
+  decodeTrackerMentionSearchRequest,
+  decodeTrackerMentionSearchResponse,
+} from "@octant/contracts/tracker-mention-search";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
+import type { TrackerMentionSearch } from "./trackerMentions/trackerMentionSearch";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 const JSON_BODY_LIMIT = 262_144;
 const METHODS = "POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 const COMMANDS_PATH = "/api/thread-mentions/commands";
+const TRACKERS_PATH = "/api/thread-mentions/trackers";
 
 export interface ThreadMentionRouteDependencies {
   readonly service: {
@@ -19,6 +25,8 @@ export interface ThreadMentionRouteDependencies {
       context: { readonly windowId: WindowId },
     ): Promise<ThreadMentionCommandResult>;
   };
+  /** The pull requests and issues the `#` list offers. Absent serves none. */
+  readonly trackers?: TrackerMentionSearch;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly now?: () => number;
@@ -39,7 +47,8 @@ export function createThreadMentionRouteHandler(dependencies: ThreadMentionRoute
 
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== COMMANDS_PATH) return undefined;
+    const trackers = url.pathname === TRACKERS_PATH ? dependencies.trackers : undefined;
+    if (url.pathname !== COMMANDS_PATH && trackers === undefined) return undefined;
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
       return failure("Thread mention API requests must use loopback.", 400, null);
@@ -78,6 +87,19 @@ export function createThreadMentionRouteHandler(dependencies: ThreadMentionRoute
         return failure("Thread mention request is unauthorized.", 401, origin);
       }
       return failure("Thread mention request is invalid.", 400, origin);
+    }
+
+    if (trackers !== undefined) {
+      try {
+        // The renderer drops a search its typing has passed; the trackers are told.
+        const candidates = await trackers(decodeTrackerMentionSearchRequest(body), {
+          windowId,
+          signal: request.signal,
+        });
+        return json(decodeTrackerMentionSearchResponse({ candidates }), 200, origin);
+      } catch {
+        return failure("Pull request and issue search is invalid.", 400, origin);
+      }
     }
 
     let result: ThreadMentionCommandResult;

@@ -148,6 +148,8 @@ export type LinearIssueListFilter = typeof LinearIssueListFilter.Type;
 
 export const LinearIssueListInput = Schema.Struct({
   search: Schema.optional(safeText(128)),
+  /** Lists only the issue this public key names, whatever other titles hold it. */
+  identifier: Schema.optional(LinearIssueIdentifier),
   filter: Schema.optional(LinearIssueListFilter),
   pageSize: Schema.optional(LinearIssuePageSize),
   cursor: Schema.optional(LinearIssueCursor),

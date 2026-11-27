@@ -1,5 +1,5 @@
 import type { ThreadMessageSteeredIntoTurn } from "@octant/contracts";
-import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
+import { SentMessageText } from "../transcript/SentMessageText";
 import { TurnTime } from "../transcript/TurnHeader";
 import "./thread-message-queue.css";
 
@@ -24,7 +24,7 @@ export function SteeredMessages(props: {
         >
           <p className="oct-meta turn-user__steered">Sent while the turn ran</p>
           <div className="bubble">
-            <TrackerReferenceText asParagraph text={entry.body} />
+            <SentMessageText text={entry.body} trackerMentions={entry.trackerMentions} />
           </div>
           <TurnTime at={entry.steeredAt} copyValue={entry.body} />
         </article>
