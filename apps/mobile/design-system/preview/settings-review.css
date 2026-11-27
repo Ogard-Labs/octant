@@ -1,0 +1,181 @@
+.screen[data-route="settings"],
+.screen[data-route^="computer/"] {
+  background: var(--app-bg);
+}
+.screen[data-route="settings"] > .scroll,
+.screen[data-route^="computer/"] > .scroll {
+  width: 100%;
+  max-width: 620px;
+  margin-inline: auto;
+  padding-inline: 16px;
+}
+.settings-title {
+  margin: 4px 4px 22px;
+  font-size: 34px;
+  line-height: 1.12;
+  font-weight: 720;
+  letter-spacing: -1.1px;
+}
+.settings-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 44px;
+  padding-inline: 4px 12px;
+  color: var(--accent);
+  font-size: 16px;
+}
+.set-head {
+  color: var(--text-secondary);
+  margin: 22px 8px 7px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-title + .set-head {
+  margin-top: 0;
+}
+.set-group {
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--floating);
+}
+.phone[data-theme="light"] .set-group {
+  background: var(--workspace);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.set-row {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 11px;
+  min-height: 50px;
+  padding: 9px 14px;
+  text-align: start;
+  list-style: none;
+}
+button.set-row:active,
+summary.set-row:active,
+label.set-row:active {
+  background: var(--control-hover);
+}
+.set-ic {
+  flex: none;
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  border-radius: 8px;
+}
+.set-ic > svg {
+  width: 17px;
+  height: 17px;
+}
+.set-main {
+  flex: 1;
+  min-width: 0;
+}
+.set-label {
+  font-size: 16px;
+  line-height: 1.25;
+  font-weight: 480;
+}
+.set-sub,
+.set-foot {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.set-sub {
+  margin-top: 2px;
+}
+.set-foot {
+  margin: 7px 8px 12px;
+}
+.set-val {
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: end;
+}
+.set-chev {
+  color: var(--text-muted);
+  opacity: 0.75;
+  margin-inline-start: -5px;
+}
+.set-chev .ic {
+  width: 13px;
+  height: 13px;
+}
+.set-sep {
+  height: 1px;
+  margin-inline-start: 54px;
+  background: var(--border);
+}
+.set-row.accent {
+  color: var(--accent);
+}
+.set-row.danger {
+  color: var(--danger-text);
+}
+.set-connected {
+  color: var(--success-text);
+}
+.set-connected::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-inline-end: 5px;
+  vertical-align: 2px;
+  background: currentColor;
+}
+.set-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  cursor: pointer;
+  width: 44px;
+  height: 27px;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  background: var(--control-hover);
+}
+.set-switch:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.set-switch::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px #0004;
+  transition: transform 160ms ease;
+}
+.set-switch:checked::after {
+  transform: translateX(17px);
+}
+.set-disclosure > summary {
+  cursor: pointer;
+}
+.set-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.set-disclosure[open] > summary .set-chev {
+  transform: rotate(90deg);
+}
+.set-group :focus-visible,
+.settings-back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .set-switch::after {
+    transition: none;
+  }
+}
