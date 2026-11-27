@@ -120,9 +120,13 @@ test count.
   is its own deliverable with its own evidence, sequenced by the current plugin design; folding
   it into an unrelated fix or feature adds migration risk. Features the table
   keeps in the host are not candidates.
-- Record worthwhile adjacent improvements as follow-ups. Include them now only
-  when inseparable from correctness, security, privacy, accessibility, data-loss
-  protection, or the stated acceptance criteria.
+- Fix what you find while working on the same branch, before merge: review
+  findings, small adjacent gaps, and flaky tests that fail CI on your branch.
+  File a separate issue only when the fix needs a maintainer decision that
+  cannot be made now, or belongs to a clearly different outcome, and ask the
+  maintainer before filing it. (In November 2026 one session filed four
+  follow-up issues and logged five flaky tests in a single day, and the
+  maintainer's backlog grew faster than it shrank.)
 - Stop when the acceptance criteria are satisfied, the changed code is clear,
   proportionate verification passes, and no known in-scope correctness problem
   remains.
@@ -449,8 +453,10 @@ conditions below are met; it does not authorize merging or releasing.
   relevant inputs changed. Integration acceptance remains distinct from child
   completion. A required merged-build check still needs that build.
 - A new finding blocks this issue only when it violates its criteria, is a
-  regression caused by the change, or prevents relevant verification. Record
-  independent defects as separate follow-ups; do not expand the finish line.
+  regression caused by the change, or prevents relevant verification. Fix an
+  independent defect on the open branch rather than filing it (see
+  [Implementation Discipline](#implementation-discipline)); it does not hold
+  the issue open.
 - When the conditions are met, update the acceptance summary and transition the
   issue to Done in the same pass. Read back the status. Otherwise record the exact
   remaining action, its owner, and missing prerequisite or evidence; use In Review
