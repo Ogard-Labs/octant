@@ -57,6 +57,7 @@ describe("copying Octant's window preferences", () => {
       scratchDirectory,
       overwrite: true,
       rendererOrigin: () => "file://",
+      storageReadable: () => true,
       readStorage: async (copy) => {
         seen.push(copy);
         expect(await readdir(join(copy, "Local Storage", "leveldb"))).toEqual(["000003.log"]);
@@ -82,6 +83,7 @@ describe("copying Octant's window preferences", () => {
         scratchDirectory,
         overwrite: false,
         rendererOrigin: () => "file://",
+        storageReadable: () => true,
         readStorage: async (copy) => {
           seen.push((await readdir(copy)).sort());
           return {};
@@ -103,11 +105,28 @@ describe("copying Octant's window preferences", () => {
         scratchDirectory,
         overwrite: true,
         rendererOrigin: () => undefined,
+        storageReadable: () => true,
         readStorage: async () => ({}),
         writeStorage,
       }),
     ).resolves.toEqual({ status: "unavailable", reason: "origin-differs" });
     expect(writeStorage).not.toHaveBeenCalled();
+  });
+
+  it("asks for a relaunch instead of reading Octant's storage a second time in one process", async () => {
+    const readStorage = vi.fn(async () => ({}));
+    await expect(
+      copyOctantWindowPreferences({
+        octantDataDirectory: octant,
+        scratchDirectory,
+        overwrite: false,
+        rendererOrigin: () => "file://",
+        storageReadable: () => false,
+        readStorage,
+        writeStorage: async () => 0,
+      }),
+    ).resolves.toEqual({ status: "unavailable", reason: "relaunch-needed" });
+    expect(readStorage).not.toHaveBeenCalled();
   });
 
   it("reports missing storage and failures without throwing", async () => {
@@ -119,6 +138,7 @@ describe("copying Octant's window preferences", () => {
           scratchDirectory,
           overwrite: true,
           rendererOrigin: () => "file://",
+          storageReadable: () => true,
           readStorage: async () => ({}),
           writeStorage: async () => 0,
         }),
@@ -132,6 +152,7 @@ describe("copying Octant's window preferences", () => {
         scratchDirectory,
         overwrite: true,
         rendererOrigin: () => "file://",
+        storageReadable: () => true,
         readStorage: async () => {
           throw new Error("no page");
         },

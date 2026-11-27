@@ -3060,6 +3060,7 @@ function decodeNightlyOctantImportOutcome(value: unknown): NightlyOctantImportOu
     if (
       preferences.reason !== "origin-differs" &&
       preferences.reason !== "octant-storage-missing" &&
+      preferences.reason !== "relaunch-needed" &&
       preferences.reason !== "failed"
     )
       throw invalid();

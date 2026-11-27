@@ -402,7 +402,7 @@ export const NightlyOctantImportPreferences = Schema.Union(
   Schema.Struct({ status: Schema.Literal("copied"), copied: ImportCount }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
-    reason: Schema.Literal("origin-differs", "octant-storage-missing", "failed"),
+    reason: Schema.Literal("origin-differs", "octant-storage-missing", "relaunch-needed", "failed"),
   }).annotations(strict),
 );
 export type NightlyOctantImportPreferences = typeof NightlyOctantImportPreferences.Type;

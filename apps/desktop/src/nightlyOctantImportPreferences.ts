@@ -77,6 +77,12 @@ export async function copyOctantWindowPreferences(input: {
   /** The origin Nightly's windows load from. */
   readonly rendererOrigin: () => string | undefined;
   readonly overwrite: boolean;
+  /**
+   * False once this process has read Octant's storage: Electron keeps the
+   * scratch session and its open storage until quit, so a second read would
+   * see the first copy. The person is told to relaunch instead.
+   */
+  readonly storageReadable: () => boolean;
   /** Reads every key of the storage folder copied into `userDataCopy`. */
   readonly readStorage: (userDataCopy: string) => Promise<Readonly<Record<string, unknown>>>;
   readonly writeStorage: (
@@ -86,6 +92,7 @@ export async function copyOctantWindowPreferences(input: {
 }): Promise<NightlyOctantImportPreferences> {
   if (input.rendererOrigin() !== PACKAGED_RENDERER_ORIGIN)
     return { status: "unavailable", reason: "origin-differs" };
+  if (!input.storageReadable()) return { status: "unavailable", reason: "relaunch-needed" };
   const source = join(input.octantDataDirectory, "Local Storage");
   try {
     const metadata = await lstat(source);

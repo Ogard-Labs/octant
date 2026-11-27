@@ -85,7 +85,9 @@ export function importSummaryLines(
         ? "Window preferences were not copied: this build loads from a development server."
         : preferences.reason === "octant-storage-missing"
           ? "Window preferences were not copied: Octant has none saved."
-          : "Window preferences could not be copied.",
+          : preferences.reason === "relaunch-needed"
+            ? "Window preferences were not copied: relaunch Octant Nightly, then import again to bring them over."
+            : "Window preferences could not be copied.",
     );
   return lines;
 }

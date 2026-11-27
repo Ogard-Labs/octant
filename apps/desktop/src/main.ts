@@ -1550,11 +1550,8 @@ const nightlyOctantImportControl =
             scratchDirectory: join(nightlyWindowStorage, "import-scratch"),
             // Windows load from `file://` unless a development server is named.
             rendererOrigin: () => (process.env.OCTANT_WEB_URL ? undefined : "file://"),
-            // Electron keeps the scratch session, and its open storage, until
-            // quit, so a second read in this process would see the first copy.
+            storageReadable: () => !nightlyImportStorageRead,
             readStorage: (copy) => {
-              if (nightlyImportStorageRead)
-                throw new Error("Relaunch to read Octant's storage again.");
               nightlyImportStorageRead = true;
               return readCopiedLocalStorage(copy);
             },
