@@ -1297,13 +1297,22 @@ export class GitMutationPort {
     );
     if (listed.exitCode !== 0) return undefined;
     const tracked = await this.#run(
-      ["-C", checkoutRoot, "ls-files", "-z"],
+      ["-C", checkoutRoot, "ls-files", "-s", "-z"],
       signal,
       undefined,
       executionPolicy,
     );
     if (tracked.exitCode !== 0) return undefined;
-    const indexed = new Set(splitNulPaths(tracked.stdout));
+    const indexed = new Set<string>();
+    const gitlinks = new Set<string>();
+    for (const record of splitNulPaths(tracked.stdout)) {
+      const tab = record.indexOf("\t");
+      const space = record.indexOf(" ");
+      if (tab === -1 || space === -1) return undefined;
+      const entryPath = record.slice(tab + 1);
+      indexed.add(entryPath);
+      if (record.slice(0, space) === "160000") gitlinks.add(entryPath);
+    }
     // A path the checkout still tracks cannot be the case at issue: Git does not
     // ignore tracked paths, and a restore writing over one is exactly what the
     // undo point covers. Only a path that has left the index can be ignored now,
@@ -1311,6 +1320,42 @@ export class GitMutationPort {
     for (const path of splitNulPaths(listed.stdout)) {
       if (indexed.has(path)) continue;
       if (!(await this.#dependencies.pathExists(join(checkoutRoot, path)))) continue;
+      // A path strictly below a submodule gitlink (mode 160000) is not
+      // captured by the superproject's `git add -A` undo point; refuse
+      // fail-closed so local edits inside the submodule are never overwritten.
+      if (hasGitlinkAncestor(path, gitlinks)) return undefined;
+      let isDirectory = false;
+      try {
+        isDirectory = (await lstat(join(checkoutRoot, path))).isDirectory();
+      } catch {
+        // Mocked `pathExists` or concurrent removal: fall through to file check.
+      }
+      if (isDirectory) {
+        // A regular file in the snapshot replacing a directory on disk loses
+        // unrecoverable data only if ignored files sit inside that directory.
+        // Directories holding only tracked or unignored files are covered by
+        // the undo point and restore cleanly.
+        const ignoredInside = await this.#run(
+          [
+            "-C",
+            checkoutRoot,
+            "--literal-pathspecs",
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "-z",
+            "--",
+            path,
+          ],
+          signal,
+          undefined,
+          executionPolicy,
+        );
+        if (ignoredInside.exitCode !== 0) return undefined;
+        if (ignoredInside.stdout.length > 0) return true;
+        continue;
+      }
       // `--no-index` prevents Git from expanding `*`, `?`, or `[` in the
       // pathname against tracked entries in the index (every tracked path was
       // already skipped above via `indexed.has(path)`). `-q` answers through
@@ -1869,4 +1914,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 function asPlainPath(path: string): string {
   return path.startsWith(":") ? `./${path}` : path;
+}
+
+function hasGitlinkAncestor(path: string, gitlinks: ReadonlySet<string>): boolean {
+  if (gitlinks.size === 0) return false;
+  let slash = path.indexOf("/");
+  while (slash !== -1) {
+    if (gitlinks.has(path.slice(0, slash))) return true;
+    slash = path.indexOf("/", slash + 1);
+  }
+  return false;
 }
