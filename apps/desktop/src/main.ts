@@ -1448,6 +1448,13 @@ const nightlyDataControl =
         requestRelaunch: () => nightlyRelaunch.request(),
       })
     : undefined;
+let nightlyImportStartsRelease: (() => void) | undefined;
+let nightlyImportStorageRead = false;
+const nightlyWindowStorage = desktopWindowStorageDirectory(
+  applicationIdentity,
+  "",
+  app.getPath("appData"),
+);
 // An import runs with Nightly's own host stopped; the control stops it through
 // the menu's path, runs the packaged maintenance entry, and starts it again.
 const nightlyOctantImportControl =
@@ -1463,8 +1470,18 @@ const nightlyOctantImportControl =
         ),
         env: process.env,
         now: () => new Date(),
-        stopHost: () => stopHostFromMenu(),
-        startHost: () => startHostFromMenu(),
+        stopHost: async () => {
+          // Already stopped (tray, crash) is the wanted state; starts stay held
+          // until the import is over.
+          keepAwakeController?.hostStopped();
+          nightlyImportStartsRelease = await hostLifecycle.holdStartsStopped();
+          updateHostTray();
+        },
+        startHost: async () => {
+          nightlyImportStartsRelease?.();
+          nightlyImportStartsRelease = undefined;
+          await startHostFromMenu();
+        },
         reloadOtherWindows: (requester) => {
           for (const window of BrowserWindow.getAllWindows())
             if (!window.isDestroyed() && window.webContents.id !== requester)
@@ -1516,6 +1533,7 @@ const nightlyOctantImportControl =
               keychainHelperPath,
               storeScope: deriveHostRuntimeHostId(octantDataDirectory),
               family: "octant",
+              readOnly: true,
             }),
             nightlyStores: desktopKeyStores({
               platform: process.platform,
@@ -1529,9 +1547,17 @@ const nightlyOctantImportControl =
           copyOctantWindowPreferences({
             octantDataDirectory,
             overwrite,
+            scratchDirectory: join(nightlyWindowStorage, "import-scratch"),
             // Windows load from `file://` unless a development server is named.
             rendererOrigin: () => (process.env.OCTANT_WEB_URL ? undefined : "file://"),
-            readStorage: readCopiedLocalStorage,
+            // Electron keeps the scratch session, and its open storage, until
+            // quit, so a second read in this process would see the first copy.
+            readStorage: (copy) => {
+              if (nightlyImportStorageRead)
+                throw new Error("Relaunch to read Octant's storage again.");
+              nightlyImportStorageRead = true;
+              return readCopiedLocalStorage(copy);
+            },
             writeStorage: writeNightlyLocalStorage,
           }),
       })

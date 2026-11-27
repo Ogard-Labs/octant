@@ -1,5 +1,4 @@
-import { cp, lstat, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cp, lstat, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { NightlyOctantImportPreferences } from "@octant/contracts/app-updates";
 
@@ -69,6 +68,12 @@ export const PACKAGED_RENDERER_ORIGIN = "file://";
  */
 export async function copyOctantWindowPreferences(input: {
   readonly octantDataDirectory: string;
+  /**
+   * One fixed folder in Nightly's own storage, emptied before and after each
+   * run. It is fixed because Electron keeps every `session.fromPath` session
+   * for the life of the process: a folder per import would leak one each time.
+   */
+  readonly scratchDirectory: string;
   /** The origin Nightly's windows load from. */
   readonly rendererOrigin: () => string | undefined;
   readonly overwrite: boolean;
@@ -89,8 +94,10 @@ export async function copyOctantWindowPreferences(input: {
   } catch {
     return { status: "unavailable", reason: "octant-storage-missing" };
   }
-  const scratch = await mkdtemp(join(tmpdir(), "octant-nightly-import-"));
+  const scratch = input.scratchDirectory;
   try {
+    await rm(scratch, { recursive: true, force: true });
+    await mkdir(scratch, { recursive: true, mode: 0o700 });
     // LOCK belongs to the process that holds it; the copy starts unlocked.
     await cp(source, join(scratch, "Local Storage"), {
       recursive: true,

@@ -18,12 +18,17 @@ import { desktopHomeDirectory, octantDefaultDataDirectory } from "./nightlyTestD
 export const LAST_OCTANT_IMPORT_FILE = "last-octant-import.json";
 const STORE_FILE = "octant.sqlite3";
 const MAX_RECORD_BYTES = 1_024;
-const MAX_MAINTENANCE_OUTPUT_BYTES = 256 * 1_024;
+/** The report lists every held-back record, so it can be long; counted in bytes. */
+const MAX_MAINTENANCE_OUTPUT_BYTES = 8 * 1_024 * 1_024;
+/** How long a killed maintenance process gets to exit before it is given up on. */
+const KILL_EXIT_GRACE_MS = 10_000;
 
 export interface MaintenanceRun {
   /** `null` when the process could not run or was stopped. */
   readonly exitCode: number | null;
   readonly stdout: string;
+  /** The output outgrew its cap, so `stdout` is cut short. */
+  readonly truncated?: boolean;
 }
 
 type ServerRefusal = Extract<NightlyOctantImportOutcome, { kind: "refused" }>["reason"];
@@ -47,7 +52,7 @@ export function decodeImportReport(
   | { readonly kind: "refused"; readonly reason: ServerRefusal }
   | { readonly kind: "failed"; readonly stage: (typeof NIGHTLY_OCTANT_IMPORT_STAGES)[number] } {
   const failed = { kind: "failed", stage: "maintenance" } as const;
-  if (Buffer.byteLength(run.stdout) > MAX_MAINTENANCE_OUTPUT_BYTES) return failed;
+  if (run.truncated === true) return failed;
   let parsed: unknown;
   try {
     parsed = JSON.parse(run.stdout);
@@ -124,10 +129,14 @@ export function runMaintenanceProcess(
     readonly env: NodeJS.ProcessEnv;
   },
   timeoutMs: number,
+  graceMs: number = KILL_EXIT_GRACE_MS,
 ): Promise<MaintenanceRun> {
   return new Promise((resolve) => {
-    let stdout = "";
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let truncated = false;
     let settled = false;
+    let grace: ReturnType<typeof setTimeout> | undefined;
     const child = spawn(spec.command, [...spec.args], {
       env: spec.env,
       stdio: ["ignore", "pipe", "ignore"],
@@ -137,19 +146,32 @@ export function runMaintenanceProcess(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ exitCode, stdout });
+      clearTimeout(grace);
+      resolve({
+        exitCode,
+        stdout: Buffer.concat(chunks).toString("utf8"),
+        ...(truncated ? { truncated: true } : {}),
+      });
     };
+    // A timed-out run is reported only once the process has exited (or the
+    // grace ran out), so the host never starts while the import still holds
+    // Nightly's store.
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      finish(null);
+      grace = setTimeout(() => finish(null), graceMs);
+      grace.unref();
     }, timeoutMs);
     timer.unref();
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      if (stdout.length < MAX_MAINTENANCE_OUTPUT_BYTES) stdout += chunk;
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (bytes + chunk.length > MAX_MAINTENANCE_OUTPUT_BYTES) {
+        truncated = true;
+        return;
+      }
+      bytes += chunk.length;
+      chunks.push(chunk);
     });
     child.once("error", () => finish(null));
-    child.once("close", (code) => finish(code));
+    child.once("close", (code) => finish(grace === undefined ? code : null));
   });
 }
 
@@ -316,7 +338,17 @@ async function importWithHostStopped(input: {
   const { options, octant } = input;
   const run = await options.runMaintenance(["import-octant", "--from", octant]);
   const report = decodeImportReport(run);
-  if (report.kind !== "imported") return report;
+  if (report.kind !== "imported") {
+    // Exit 0 is only ever an import that was swapped in. Record it before
+    // saying the report is unreadable, so the next import is not taken for the first.
+    if (run.exitCode === 0 && report.kind === "failed") {
+      await writeLastOctantImport(options.windowStorageDirectory, options.now()).catch(
+        () => undefined,
+      );
+      return { kind: "failed", stage: "report" };
+    }
+    return report;
+  }
   // The merged store is committed: record it before the optional copies, so a
   // failure in either never hides that the import happened.
   await writeLastOctantImport(options.windowStorageDirectory, options.now()).catch(() => undefined);

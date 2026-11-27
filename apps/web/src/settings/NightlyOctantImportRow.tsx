@@ -39,6 +39,8 @@ const FAILURE_MESSAGES: Readonly<
   swap: "Octant Nightly could not put the combined data in place. Nothing was changed.",
   "stop-host": "Octant Nightly's host would not stop, so nothing was imported.",
   maintenance: "The import did not finish. Nothing was changed.",
+  report:
+    "The import finished, but Octant Nightly could not read its report. Reload Octant Nightly to see what came over.",
   "start-host":
     "The import finished, but Octant Nightly's host did not start again. Relaunch Octant Nightly.",
 };

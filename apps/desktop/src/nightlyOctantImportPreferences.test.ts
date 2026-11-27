@@ -10,15 +10,18 @@ import {
 } from "./nightlyOctantImportPreferences";
 
 let octant: string;
+let scratchDirectory: string;
 
 beforeEach(async () => {
   octant = await realpath(await mkdtemp(join(tmpdir(), "octant-prefs-")));
+  scratchDirectory = join(octant, "..", `scratch-${String(Date.now())}`);
   await mkdir(join(octant, "Local Storage", "leveldb"), { recursive: true });
   await writeFile(join(octant, "Local Storage", "leveldb", "000003.log"), "x");
   await writeFile(join(octant, "Local Storage", "leveldb", "LOCK"), "");
 });
 
 afterEach(async () => {
+  await rm(scratchDirectory, { recursive: true, force: true });
   await rm(octant, { recursive: true, force: true });
 });
 
@@ -51,6 +54,7 @@ describe("copying Octant's window preferences", () => {
     );
     const outcome = await copyOctantWindowPreferences({
       octantDataDirectory: octant,
+      scratchDirectory,
       overwrite: true,
       rendererOrigin: () => "file://",
       readStorage: async (copy) => {
@@ -62,10 +66,33 @@ describe("copying Octant's window preferences", () => {
     });
     expect(outcome).toEqual({ status: "copied", copied: 1 });
     expect(writeStorage).toHaveBeenCalledWith([["octant.keybindings.v1", "{}"]], true);
-    expect(seen[0]).not.toContain(octant);
-    await expect(readdir(seen[0] ?? "")).rejects.toThrow();
+    expect(seen[0]).toBe(scratchDirectory);
+    await expect(readdir(scratchDirectory)).rejects.toThrow();
     // Octant's folder is untouched.
     expect(await readdir(join(octant, "Local Storage", "leveldb"))).toEqual(["000003.log", "LOCK"]);
+  });
+
+  it("reuses one fixed scratch folder for every import and clears leftovers first", async () => {
+    await mkdir(scratchDirectory, { recursive: true });
+    await writeFile(join(scratchDirectory, "left-over"), "x");
+    const seen: string[][] = [];
+    for (let run = 0; run < 2; run += 1) {
+      await copyOctantWindowPreferences({
+        octantDataDirectory: octant,
+        scratchDirectory,
+        overwrite: false,
+        rendererOrigin: () => "file://",
+        readStorage: async (copy) => {
+          seen.push((await readdir(copy)).sort());
+          return {};
+        },
+        writeStorage: async () => 0,
+      });
+    }
+    expect(seen).toEqual([
+      ["Local Storage", "blank.html"],
+      ["Local Storage", "blank.html"],
+    ]);
   });
 
   it("reports a different renderer origin instead of writing into the wrong storage", async () => {
@@ -73,6 +100,7 @@ describe("copying Octant's window preferences", () => {
     await expect(
       copyOctantWindowPreferences({
         octantDataDirectory: octant,
+        scratchDirectory,
         overwrite: true,
         rendererOrigin: () => undefined,
         readStorage: async () => ({}),
@@ -88,6 +116,7 @@ describe("copying Octant's window preferences", () => {
       await expect(
         copyOctantWindowPreferences({
           octantDataDirectory: missing,
+          scratchDirectory,
           overwrite: true,
           rendererOrigin: () => "file://",
           readStorage: async () => ({}),
@@ -100,6 +129,7 @@ describe("copying Octant's window preferences", () => {
     await expect(
       copyOctantWindowPreferences({
         octantDataDirectory: octant,
+        scratchDirectory,
         overwrite: true,
         rendererOrigin: () => "file://",
         readStorage: async () => {

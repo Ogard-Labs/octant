@@ -8,6 +8,7 @@ import {
   createNightlyOctantImportControl,
   decodeImportReport,
   LAST_OCTANT_IMPORT_FILE,
+  runMaintenanceProcess,
   type MaintenanceRun,
 } from "./nightlyOctantImport";
 import { resolveStartupHostRole } from "./nightlyTestData";
@@ -261,5 +262,67 @@ describe("Nightly's import from Octant", () => {
     await expect(f.control.import(false, 2)).resolves.toEqual({ kind: "refused", reason: "busy" });
     release();
     await first;
+  });
+
+  it("starts its host again after a refusal, a failure and an unreadable report", async () => {
+    for (const maintenance of [
+      { exitCode: 1, stdout: JSON.stringify({ kind: "refused", reason: "busy" }) },
+      { exitCode: null, stdout: "" },
+      { exitCode: 0, stdout: "{" },
+    ]) {
+      const f = control({ maintenance });
+      await f.control.import(true, 1);
+      expect(f.startHost).toHaveBeenCalledOnce();
+      expect(f.calls.at(-2)).toBe("start");
+    }
+  });
+
+  it("never takes the next import for the first when the report of a finished import is unreadable", async () => {
+    const f = control({ maintenance: { exitCode: 0, stdout: "{", truncated: true } });
+    await expect(f.control.import(false, 1)).resolves.toEqual({ kind: "failed", stage: "report" });
+    await expect(f.control.preview()).resolves.toMatchObject({
+      lastImportedAt: "2026-11-27T10:00:00.000Z",
+    });
+    const next = control();
+    await next.control.import(false, 1);
+    expect(next.copyPreferences.mock.calls[0]?.[0].overwrite).toBe(false);
+  });
+});
+
+describe("running the maintenance command", () => {
+  const node = (script: string) => ({
+    command: process.execPath,
+    args: ["-e", script],
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  });
+
+  it("keeps a report far longer than a quarter megabyte, counted in bytes", async () => {
+    const run = await runMaintenanceProcess(
+      node('process.stdout.write("é".repeat(600000))'),
+      30_000,
+    );
+    expect(run.exitCode).toBe(0);
+    expect(run.truncated).toBeUndefined();
+    expect(Buffer.byteLength(run.stdout)).toBe(1_200_000);
+  });
+
+  it("flags output beyond its cap instead of passing a cut-off report off as whole", async () => {
+    const run = await runMaintenanceProcess(
+      node('process.stdout.write("x".repeat(9 * 1024 * 1024))'),
+      30_000,
+    );
+    expect(run.truncated).toBe(true);
+    expect(decodeImportReport(run)).toEqual({ kind: "failed", stage: "maintenance" });
+  });
+
+  it("reports a timed-out run only after the process has exited", async () => {
+    const run = await runMaintenanceProcess(
+      node("console.log(process.pid); setInterval(() => {}, 1000)"),
+      300,
+    );
+    expect(run.exitCode).toBeNull();
+    const pid = Number(run.stdout.trim());
+    expect(Number.isInteger(pid)).toBe(true);
+    expect(() => process.kill(pid, 0)).toThrow();
   });
 });

@@ -55,6 +55,25 @@ describe("copying Octant's keys", () => {
     expect(nightly.writes).toEqual([`provider:${id(1)}`]);
   });
 
+  it("only reads the source store: no set or delete ever reaches it", async () => {
+    const octant = memoryStores({ [`provider:${id(1)}`]: "k" });
+    const touched: string[] = [];
+    const watched: KeyStoreFactory = (namespace) => {
+      const store = octant.factory(namespace);
+      return {
+        ...store,
+        set: async () => void touched.push("set"),
+        delete: async () => void touched.push("delete"),
+      };
+    };
+    await copyOctantKeys({
+      references: [{ namespace: "provider", id: id(1) }],
+      octantStores: watched,
+      nightlyStores: memoryStores().factory,
+    });
+    expect(touched).toEqual([]);
+  });
+
   it("never replaces an item Nightly already has, and counts it", async () => {
     const octant = memoryStores({ [`ssh-key:${id(1)}`]: "from-octant" });
     const nightly = memoryStores({ [`ssh-key:${id(1)}`]: "nightlys-own" });

@@ -94,6 +94,8 @@ export function desktopKeyStores(options: {
   readonly keychainHelperPath: string;
   readonly storeScope: string;
   readonly family: KeychainServiceFamily;
+  /** Octant's items are only read: no re-scoping, no write, no delete. */
+  readonly readOnly?: boolean;
 }): KeyStoreFactory | undefined {
   if (options.platform === "darwin")
     return (namespace) =>
@@ -101,6 +103,7 @@ export function desktopKeyStores(options: {
         storeScope: options.storeScope,
         serviceFamily: options.family,
         namespace,
+        ...(options.readOnly === true ? { readOnly: true } : {}),
       });
   if (options.platform === "linux")
     return (namespace) => makeSecretServiceCredentialStore({ namespace, family: options.family });

@@ -2985,6 +2985,7 @@ const NIGHTLY_OCTANT_IMPORT_STAGE_VALUES: ReadonlyArray<unknown> = [
   "swap",
   "stop-host",
   "maintenance",
+  "report",
   "start-host",
 ];
 

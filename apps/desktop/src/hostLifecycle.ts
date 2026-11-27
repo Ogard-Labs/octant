@@ -44,7 +44,8 @@ export interface HostLifecycleOperations {
 
 export type HostAction = "start" | "stop" | "restart";
 /**
- * Start and restart refuse once quit was accepted. That refusal is the
+ * Start and restart refuse once quit was accepted, or while maintenance holds
+ * the host stopped. That refusal is the
  * expected end of a queued request during shutdown, not a startup failure, so
  * callers receive it as a value and never report it as one.
  */
@@ -143,6 +144,7 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
   let activity: LocalHostActivity = { activeAgentCount: 0, attentionRequired: false };
   let pending: Promise<unknown> = Promise.resolve();
   let quitAccepted = false;
+  let startsHeld = false;
   const acceptQuit = (): void => {
     quitAccepted = true;
   };
@@ -173,7 +175,7 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
 
   const ensureRunning = (): Promise<HostAdmission> =>
     runExclusive(async (): Promise<HostAdmission> => {
-      if (quitAccepted) return closing;
+      if (quitAccepted || startsHeld) return closing;
       if (host !== undefined && state !== "stopped") return { status: "running", host };
       state = "starting";
       try {
@@ -224,7 +226,7 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
 
   const restart = (): Promise<HostAdmission> =>
     runExclusive(async (): Promise<HostAdmission> => {
-      if (quitAccepted) return closing;
+      if (quitAccepted || startsHeld) return closing;
       if (host !== undefined && host.ownership !== "desktop-owned") {
         throw new Error("Octant cannot restart a separately managed host.");
       }
@@ -254,6 +256,27 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
       }
     });
 
+  /**
+   * Stops the desktop-owned host, if one runs, and refuses every start until
+   * the returned release is called, so a tray "Start host" or a window
+   * reconnect cannot start a host under an offline maintenance step. A host
+   * that is already stopped is the wanted state; a separately managed host
+   * cannot be stopped, so the hold is not taken.
+   */
+  const holdStartsStopped = async (): Promise<() => void> => {
+    if (startsHeld) throw new Error("Octant host starts are already held.");
+    startsHeld = true;
+    try {
+      await stop();
+    } catch (error) {
+      startsHeld = false;
+      throw error;
+    }
+    return () => {
+      startsHeld = false;
+    };
+  };
+
   const prepareQuit = (confirmQuit: () => boolean | Promise<boolean>): Promise<HostQuitResult> =>
     runExclusive(async () => {
       const current = snapshot();
@@ -278,6 +301,7 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
     /** Only after the existing quit confirmation accepts; never while it is pending. */
     acceptQuit,
     ensureRunning,
+    holdStartsStopped,
     onLastWindowClosed: (): void => undefined,
     prepareQuit,
     reattachManagedHost,

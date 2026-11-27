@@ -97,12 +97,15 @@ export function keychainHelperSpec(
   storeScope: string,
   namespace: KeychainCredentialNamespace = "provider",
   serviceFamily: KeychainServiceFamily = "octant",
+  readOnly = false,
 ): KeychainHelperSpec {
   if (namespace === "provider") {
     return {
       command: helperPath,
       args: keychainHelperArguments(serviceFamily),
-      stdin: `${JSON.stringify({ version: 1, storeScope, ...request })}\n`,
+      // The helper re-scopes earlier records on an ordinary read; `readOnly`
+      // makes it read the exact scoped item and write nothing.
+      stdin: `${JSON.stringify({ version: 1, storeScope, ...request, ...(readOnly ? { readOnly: true } : {}) })}\n`,
     };
   }
   const { providerInstanceId, ...rest } = request;
@@ -120,6 +123,11 @@ interface MakeKeychainCredentialStoreOptions {
   readonly timeoutMs?: number;
   readonly namespace?: KeychainCredentialNamespace;
   readonly serviceFamily?: KeychainServiceFamily;
+  /**
+   * A store of another app's items: it only reads, never re-scopes a legacy
+   * item, and refuses `set` and `delete`.
+   */
+  readonly readOnly?: boolean;
 }
 
 export function makeKeychainCredentialStore(
@@ -145,6 +153,11 @@ export function makeKeychainCredentialStore(
     if (request.operation === "set" && request.credential.length === 0) {
       throw new CredentialStoreFailure("invalid");
     }
+    if (
+      options.readOnly === true &&
+      (request.operation === "set" || request.operation === "delete")
+    )
+      throw new CredentialStoreFailure("invalid");
 
     const normalizedRequest = { ...request, providerInstanceId };
     const spec = keychainHelperSpec(
@@ -153,6 +166,7 @@ export function makeKeychainCredentialStore(
       options.storeScope,
       options.namespace,
       options.serviceFamily,
+      options.readOnly === true,
     );
     if (Buffer.byteLength(spec.stdin) > KEYCHAIN_HELPER_MAX_BYTES) {
       throw new CredentialStoreFailure("invalid");

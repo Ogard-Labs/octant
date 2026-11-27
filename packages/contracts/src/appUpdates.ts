@@ -429,6 +429,8 @@ export const NIGHTLY_OCTANT_IMPORT_STAGES = [
   "swap",
   "stop-host",
   "maintenance",
+  /** The import finished, but its report could not be read. */
+  "report",
   "start-host",
 ] as const;
 
