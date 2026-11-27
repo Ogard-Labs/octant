@@ -78,8 +78,8 @@ export function HostsScreen(props: {
   const [removeFailed, setRemoveFailed] = useState(false);
   const [notificationKeyKept, setNotificationKeyKept] = useState(false);
   const removeMobileHostInTurn = useMemo(
-    () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
-    [deviceKeyStore, hub, registry],
+    () => createMobileHostRemover({ registry, hub, deviceKeyStore, relayChoices }),
+    [deviceKeyStore, hub, registry, relayChoices],
   );
   const notificationPermission = mobileNotificationPort;
   const pushRegistrations = mobilePushRegistrationBook();
@@ -377,7 +377,6 @@ export function HostsScreen(props: {
                             <RemoveHostPanel
                               hostLabel={host.label}
                               onRemove={() => {
-                                void relayChoices.forget(host.origin).catch(() => undefined);
                                 removeHost(host.hostId);
                               }}
                               testIdSuffix={host.hostId}

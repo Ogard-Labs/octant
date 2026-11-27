@@ -41,7 +41,7 @@ export function createRelayChoiceStore(storage: MobileHostRegistryStorage): Rela
       return {};
     }
   };
-  const change = async (
+  const write = async (
     origin: string,
     next: (current: PairedHostRelayChoice | undefined) => PairedHostRelayChoice | undefined,
   ): Promise<void> => {
@@ -52,6 +52,14 @@ export function createRelayChoiceStore(storage: MobileHostRegistryStorage): Rela
       STORE_KEY,
       JSON.stringify(updated === undefined ? rest : { ...rest, [origin]: updated }),
     );
+  };
+  // One change at a time: each reads every choice and writes them all back, so
+  // two that overlapped could bring a forgotten computer's choice back.
+  let last: Promise<unknown> = Promise.resolve();
+  const change = (...args: Parameters<typeof write>): Promise<void> => {
+    const run = last.then(() => write(...args));
+    last = run.catch(() => undefined);
+    return run;
   };
   return {
     read: async (origin) => (await readAll())[origin],

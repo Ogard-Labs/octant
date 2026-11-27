@@ -296,11 +296,18 @@ export async function requestPairedComputer(input: {
     input.pins.pinFor(origin) === undefined ||
     pathname === "/api/remote/pairing" ||
     pathname.startsWith("/api/remote/pairing/");
+  const away = input.pins.relayAwayFor(origin);
+  const direct = fetchFor(origin, trust);
   const transport =
     neverRelayed || admitRelay === undefined || hostId === undefined
-      ? fetchFor(origin, trust)
+      ? direct
       : createRelayFallbackFetch({
-          direct: fetchFor(origin, trust),
+          ...(away === undefined ? {} : { away }),
+          // Which path answered last is the one the reply came from.
+          direct: (url, init) => {
+            relayed = false;
+            return direct(url, init);
+          },
           relayed: () => {
             const route = relayRouteFor({
               choice: input.pins.relayFor(origin),

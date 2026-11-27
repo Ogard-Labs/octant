@@ -29,7 +29,11 @@ import {
   type HubWindowComputers,
 } from "@octant/contracts";
 import type { PairedComputerRelayChoice } from "@octant/contracts/desktop-bridge";
-import type { PairedHostRelayChoice } from "@octant/client-runtime/paired-host-relay";
+import {
+  createRelayAwayMemory,
+  type PairedHostRelayChoice,
+  type RelayAwayMemory,
+} from "@octant/client-runtime/paired-host-relay";
 import { classifyRemoteListenerAddress } from "@octant/domain";
 import {
   sendHubAdministrationOperation,
@@ -100,6 +104,8 @@ export class PairedComputerPins {
   readonly #now: () => number;
   readonly #staged = new Map<string, { readonly record: PinRecord; readonly expiresAt: number }>();
   #records: ReadonlyArray<PinRecord>;
+  /** Keyed by the record itself, which is replaced when anything in it changes. */
+  readonly #away = new WeakMap<PinRecord, RelayAwayMemory>();
 
   constructor(path: string, now: () => number = Date.now) {
     this.#path = path;
@@ -168,6 +174,18 @@ export class PairedComputerPins {
   /** This app's choice and stored relay address for a recorded computer. */
   relayFor(origin: string): PairedHostRelayChoice | undefined {
     return this.#records.find((record) => record.origin === origin)?.relay;
+  }
+
+  /**
+   * Until when requests to a recorded computer go to the relay first. A new
+   * pairing, choice, or relay address starts again from home.
+   */
+  relayAwayFor(origin: string): RelayAwayMemory | undefined {
+    const record = this.#records.find((item) => item.origin === origin);
+    if (record === undefined) return undefined;
+    const away = this.#away.get(record) ?? createRelayAwayMemory();
+    this.#away.set(record, away);
+    return away;
   }
 
   /** Turns this app's choice to relay to one recorded computer on or off; false for an unknown one. */

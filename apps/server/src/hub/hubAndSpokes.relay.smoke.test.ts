@@ -151,7 +151,7 @@ async function setUp(options: { readonly grant?: HubGrant } = {}) {
   if (pin === null) throw new Error("The spoke has no pinned certificate.");
   relayAddress = decodeRelayAddress({
     hubMemberId: hub.hostId,
-    relayUrl: `ws://127.0.0.1:${front.port}/relay/v1`,
+    relayUrl: `wss://127.0.0.1:${front.port}/relay/v1`,
   });
   await spoke.spokeRelay.publish();
 
@@ -373,10 +373,12 @@ describe("your own devices through the hub", () => {
           signer: { targetMemberId: spoke.hostId, admit: windowSigner },
         });
         if (route === undefined) return undefined;
+        // The device took the hub's `wss:` address; the test's entrance has no
+        // front to terminate it, so only this dial goes to it unencrypted.
         const relayed = createRelayedListenerFetch({
           origin: spoke.origin,
           trust,
-          relay: { ...route, timeoutMs: 5_000 },
+          relay: { ...route, url: route.url.replace(/^wss:/, "ws:"), timeoutMs: 5_000 },
         });
         return (input, init) => {
           relayedRequests += 1;

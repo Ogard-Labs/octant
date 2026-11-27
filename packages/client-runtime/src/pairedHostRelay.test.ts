@@ -80,6 +80,19 @@ describe("reaching a paired host through the hub", () => {
     expect(direct).toHaveBeenCalledTimes(2);
   });
 
+  it("tries home again after a preferred relay failed, without sending that request twice", async () => {
+    const direct = fetchOf(() => Promise.reject(new ListenerUnreachable()));
+    const relayed = fetchOf(() => Promise.resolve(new Response("relayed")));
+    const fetch = createRelayFallbackFetch({ direct, relayed: () => relayed });
+    await fetch(`${ORIGIN}/api/remote/hello`);
+    const lost = new TypeError("The listener could not be reached.");
+    relayed.mockImplementationOnce(() => Promise.reject(lost));
+    await expect(fetch(`${ORIGIN}/api/work/turns`, { method: "POST" })).rejects.toBe(lost);
+    expect(direct).toHaveBeenCalledTimes(1);
+    await fetch(`${ORIGIN}/api/remote/hello`);
+    expect(direct).toHaveBeenCalledTimes(2);
+  });
+
   it("names no route without a stored address, and holds the route to the hub the host named", () => {
     const admit = async () => ({ signature: "signature", deviceSpki: "spki" });
     expect(relayRouteFor({ choice: { enabled: true } })).toBeUndefined();
@@ -94,12 +107,14 @@ describe("reaching a paired host through the hub", () => {
       hubMemberId: HUB,
       admit,
     });
-    expect(
-      relayRouteFor({
-        choice: { enabled: true, address: { ...ADDRESS, relayUrl: "wss://evil/x" } },
-        signer: { targetMemberId: HOST, admit },
-      }),
-    ).toBeUndefined();
+    for (const relayUrl of ["wss://evil/x", "ws://127.0.0.1:8443/relay/v1"]) {
+      expect(
+        relayRouteFor({
+          choice: { enabled: true, address: { ...ADDRESS, relayUrl } },
+          signer: { targetMemberId: HOST, admit },
+        }),
+      ).toBeUndefined();
+    }
   });
 });
 

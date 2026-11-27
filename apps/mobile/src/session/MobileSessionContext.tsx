@@ -241,8 +241,8 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   // roster again, so a removed member disappears and a new one is asked to
   // admit the phone. It runs once; a hub that cannot be reached changes nothing.
   const removeHost = useMemo(
-    () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
-    [deviceKeyStore, hub, registry],
+    () => createMobileHostRemover({ registry, hub, deviceKeyStore, relayChoices }),
+    [deviceKeyStore, hub, registry, relayChoices],
   );
   const guestHubReopened = useRef(false);
   useEffect(() => {

@@ -167,23 +167,44 @@ describe("the phone's session fetch", () => {
         status: "available",
         fetch: relayedFetch,
       }));
+      const directFetch = vi.fn(async (): Promise<Response> => {
+        throw failure;
+      });
+      let chosen = choice;
       const fetch = createMobileListenerFetch({
         deviceKeyStore: storeWith(pinned),
-        pinnedTransport: () => ({
-          status: "available",
-          fetch: async () => {
-            throw failure;
-          },
-        }),
+        pinnedTransport: () => ({ status: "available", fetch: directFetch }),
         platformFetch: vi.fn(async () => new Response("platform")),
         relay: {
-          choiceFor: async () => choice,
+          choiceFor: async () => chosen,
           transport: relayTransport,
           admit: async () => ({ signature: "s", deviceSpki: "k" }),
         },
       });
-      return { fetch, relayedFetch, relayTransport };
+      const choose = (next: PairedHostRelayChoice) => {
+        chosen = next;
+      };
+      return { fetch, directFetch, relayedFetch, relayTransport, choose };
     }
+
+    it("goes to the relay first for the next request, without dialing home again", async () => {
+      const phone = away({ enabled: true, address: ADDRESS });
+      await phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`);
+      await phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`);
+      expect(phone.directFetch).toHaveBeenCalledTimes(1);
+      expect(phone.relayedFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("dials home first again once the choice or the address changes", async () => {
+      const phone = away({ enabled: true, address: ADDRESS });
+      await phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`);
+      phone.choose({
+        enabled: true,
+        address: { ...ADDRESS, relayUrl: "wss://other.example.com/relay/v1" },
+      });
+      await phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`);
+      expect(phone.directFetch).toHaveBeenCalledTimes(2);
+    });
 
     it("never relays while the phone's choice for that computer is off", async () => {
       const phone = away({ enabled: false, address: ADDRESS });

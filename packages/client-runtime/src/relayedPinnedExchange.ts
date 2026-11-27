@@ -103,14 +103,16 @@ export function createRelayedExchangePort(input: {
           }
           close();
           if (event.status === "refused") return { status: "refused", servedPin: event.servedPin };
-          // Nothing was written before the handshake passed; a carrier that
-          // ended first is the hub or the host going away.
+          // Only a failed handshake proves the request was never written. A
+          // stream that lost its connection, or ended, may already have sent
+          // the request's bytes into the tunnel, so it reads as on the
+          // direct path: possibly sent, and never sent again elsewhere.
           return {
             status: "failed",
             reason:
               event.status === "failed" && event.reason === "handshake-failed"
                 ? "handshake-failed"
-                : "unreachable",
+                : "connection-failed",
           };
         }
       } finally {

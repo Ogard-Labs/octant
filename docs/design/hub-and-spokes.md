@@ -3320,9 +3320,12 @@ between hosts on loopback; what is not built is listed below.
 - **When a device relays.** Only when its choice for that host is on, it
   holds the relay address that host told it, and the direct private
   connection failed before anything was sent. A refused host key, or a
-  failure after a request left, is never retried through the hub. After the
-  relay answers, the device goes to the relay first for a minute, then tries
-  home again.
+  failure after a request may have left, is never retried through the hub.
+  After the relay answers, the device goes to the relay first for a minute,
+  then tries home again; a relayed request that fails, or a change to the
+  pairing, the choice, or the stored address, sends the next one home first.
+  Revoking the phone from the phone itself, or removing the computer there,
+  forgets the choice and the address, so pairing again starts with it off.
 - **How a device learns the relay address.** The acting hub works out its
   own public address: the address the person typed for their own front
   (`octant hub public address <https-url>`, taken only as an `https:` origin
@@ -3330,7 +3333,7 @@ between hosts on loopback; what is not built is listed below.
   port. While its relay switch and entrance are on, the hub names
   `{ hubMemberId, relayUrl }` in its answer to each host's relay device list,
   over the signed, pinned hub link, and a host sends that list again every ten
-  minutes. Each host answers its own paired devices on the authenticated
+  minutes. A spoke and a device take only a `wss:` relay address. Each host answers its own paired devices on the authenticated
   `GET /api/remote/relay-address`, only while Relay is ticked, the device is
   listed and active, and the address names the hub it follows. The route
   answers only on the private network: through the relay it is refused

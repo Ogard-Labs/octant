@@ -855,6 +855,67 @@ describe("reaching a paired computer through its hub when away", () => {
     expect(scene.relayed).not.toHaveBeenCalled();
   });
 
+  function relayingPins(): PairedComputerPins {
+    const pins = pinsWithHost();
+    pins.rememberRelayAddress(
+      ORIGIN,
+      decodeRelayAddress({ hubMemberId: HUB, relayUrl: RELAY_URL }),
+    );
+    pins.setRelayChoice(ORIGIN, true);
+    return pins;
+  }
+
+  it("goes to the relay first for the next request, without dialing home again", async () => {
+    const pins = relayingPins();
+    const scene = away();
+    await requestPairedComputer({ request: hello, ...scene.options(pins) });
+    const answer = await requestPairedComputer({ request: hello, ...scene.options(pins) });
+    expect(answer.status).toBe("answered");
+    expect(scene.direct).toHaveBeenCalledTimes(1);
+    expect(scene.relayed).toHaveBeenCalledTimes(2);
+  });
+
+  it("dials home first again once the choice, the address, or the pairing changes", async () => {
+    const pins = relayingPins();
+    const scene = away();
+    const send = () => requestPairedComputer({ request: hello, ...scene.options(pins) });
+    await send();
+    pins.setRelayChoice(ORIGIN, false);
+    pins.setRelayChoice(ORIGIN, true);
+    await send();
+    expect(scene.direct).toHaveBeenCalledTimes(2);
+    pins.rememberRelayAddress(
+      ORIGIN,
+      decodeRelayAddress({ hubMemberId: HUB, relayUrl: "wss://other.example.com/relay/v1" }),
+    );
+    await send();
+    expect(scene.direct).toHaveBeenCalledTimes(3);
+    pins.forget(ORIGIN);
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: PIN, hostId: HOST });
+    pins.rememberRelayAddress(
+      ORIGIN,
+      decodeRelayAddress({ hubMemberId: HUB, relayUrl: "wss://other.example.com/relay/v1" }),
+    );
+    pins.setRelayChoice(ORIGIN, true);
+    await send();
+    expect(scene.direct).toHaveBeenCalledTimes(4);
+  });
+
+  it("learns the address from home's answer after a relay that was preferred failed", async () => {
+    const pins = relayingPins();
+    const scene = away();
+    await requestPairedComputer({ request: hello, ...scene.options(pins) });
+    scene.relayed.mockImplementation(async () => {
+      throw new ListenerUnreachable();
+    });
+    scene.direct.mockImplementation(async () => Response.json({ status: "unavailable" }));
+    await requestPairedComputer({
+      request: { origin: ORIGIN, method: "GET", path: "/api/remote/relay-address" },
+      ...scene.options(pins),
+    });
+    expect(pins.relayFor(ORIGIN)).toEqual({ enabled: true });
+  });
+
   it("keeps the choice and the address across a restart", () => {
     const path = join(mkdtempSync(join(directory, "pins-")), "pins.json");
     const pins = new PairedComputerPins(path);

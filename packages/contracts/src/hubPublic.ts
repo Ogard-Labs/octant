@@ -529,14 +529,11 @@ export const RELAYED_ADMIN_REFUSED = "relayed-admin-refused";
 
 /**
  * The relay route a device opens: `wss://<the hub's public address>/relay/v1`.
- * Only the hub's own loopback may be named with `ws:`, and only in a test the
- * hub is never part of; a device refuses any other address.
+ * Devices and spokes refuse any other address, an unencrypted one included.
  */
 export const RelayUrl = Schema.String.pipe(
   Schema.maxLength(300),
-  Schema.pattern(
-    /^(?:wss:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?|ws:\/\/127\.0\.0\.1:[0-9]{1,5})\/relay\/v1$/,
-  ),
+  Schema.pattern(/^wss:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?\/relay\/v1$/),
 );
 export type RelayUrl = typeof RelayUrl.Type;
 export const isRelayUrl = Schema.is(RelayUrl);

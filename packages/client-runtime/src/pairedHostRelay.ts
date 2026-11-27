@@ -106,28 +106,46 @@ type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 export const RELAY_AWAY_MS = 60_000;
 
 /**
+ * What a device remembers about one host between requests: until when it goes
+ * to the relay first. A caller that builds a fetch per request keeps one of
+ * these per host and drops it when the pairing, the choice, or the stored
+ * relay address changes.
+ */
+export interface RelayAwayMemory {
+  until: number;
+}
+
+export function createRelayAwayMemory(): RelayAwayMemory {
+  return { until: 0 };
+}
+
+/**
  * A `fetch` to one paired host that tries the private network and, only when
  * that failed before sending anything, the hub's relay. `relayed` is asked at
  * each failure, so a choice turned off takes effect at once. Once the direct
  * path failed and the relay answered, requests go to the relay first for a
  * minute, so a device away from home does not wait out a dial each time; the
- * relay failing sends them home again.
+ * relay failing sends them home again. A request that may have left through
+ * the relay fails rather than being sent a second time.
  */
 export function createRelayFallbackFetch(input: {
   readonly direct: Fetch;
   readonly relayed: () => Fetch | undefined;
   readonly now?: () => number;
+  /** Shared by every fetch built for the same host; absent, this fetch keeps its own. */
+  readonly away?: RelayAwayMemory;
 }): Fetch {
   const now = input.now ?? Date.now;
-  let awayUntil = 0;
+  const away = input.away ?? createRelayAwayMemory();
   return async (request, init) => {
-    const relayed = now() < awayUntil ? input.relayed() : undefined;
+    const relayed = now() < away.until ? input.relayed() : undefined;
     if (relayed !== undefined) {
       try {
         return await relayed(request, init);
       } catch (error) {
+        // A request the caller gave up on says nothing about the relay.
+        if (init?.signal?.aborted !== true) away.until = 0;
         if (!(error instanceof ListenerUnreachable)) throw error;
-        awayUntil = 0;
       }
     }
     try {
@@ -137,7 +155,7 @@ export function createRelayFallbackFetch(input: {
       const relay = input.relayed();
       if (relay === undefined) throw error;
       const response = await relay(request, init);
-      awayUntil = now() + RELAY_AWAY_MS;
+      away.until = now() + RELAY_AWAY_MS;
       return response;
     }
   };

@@ -1,5 +1,6 @@
 import {
   NO_PINNED_TRANSPORT_COPY,
+  createRelayAwayMemory,
   createRelayFallbackFetch,
   relayRouteFor,
   type ListenerOriginTrust,
@@ -7,6 +8,7 @@ import {
   type PairedHostRelayChoice,
   type PinnedListenerTransportPort,
   type RelayAdmissionSignature,
+  type RelayAwayMemory,
   type RemoteDeviceKeyStore,
 } from "@octant/client-runtime";
 
@@ -48,6 +50,19 @@ export function createMobileListenerFetch(input: {
     ) => Promise<RelayAdmissionSignature | undefined>;
   };
 }): typeof globalThis.fetch {
+  // Per computer, until when its requests go to the relay first. `basis` is
+  // the pairing, choice, and address it was learned under.
+  const awayByOrigin = new Map<
+    string,
+    { readonly basis: string; readonly memory: RelayAwayMemory }
+  >();
+  const awayFor = (origin: string, basis: string): RelayAwayMemory => {
+    const held = awayByOrigin.get(origin);
+    if (held?.basis === basis) return held.memory;
+    const memory = createRelayAwayMemory();
+    awayByOrigin.set(origin, { basis, memory });
+    return memory;
+  };
   return async (request, init) => {
     const url =
       typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
@@ -82,6 +97,7 @@ export function createMobileListenerFetch(input: {
     if (relay === undefined) return transport.fetch(request, init);
     const choice = await relay.choiceFor(origin);
     return createRelayFallbackFetch({
+      away: awayFor(origin, JSON.stringify([record.keyId, record.hostId, trust, choice])),
       direct: transport.fetch,
       relayed: () => {
         const route = relayRouteFor({

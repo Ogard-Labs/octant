@@ -17,7 +17,7 @@ import {
  * paired with, which signs the hub's challenge (decision H36).
  */
 export interface ListenerRelayRoute {
-  /** `wss://<front>/relay/v1`; `ws:` only for a test on loopback. */
+  /** `wss://<front>/relay/v1`, as `relayRouteFor` admits it; a test on loopback builds its own. */
   readonly url: string;
   readonly targetMemberId: string;
   /**

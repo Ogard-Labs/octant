@@ -70,6 +70,9 @@ class PinnedTlsStream(serverName: String?, pins: List<String>, private val reque
   companion object {
     /** A listener has this long to finish the handshake through the relay, as on the desktop. */
     const val HANDSHAKE_TIMEOUT_MS = 10_000L
+
+    /** How often a waiting pull looks whether its stream was cancelled or closed. */
+    const val PULL_CHECK_MS = 1_000L
   }
 
   /** Starts the handshake: its first flight comes out as `Send` events. */
@@ -111,13 +114,26 @@ class PinnedTlsStream(serverName: String?, pins: List<String>, private val reque
     }
   }
 
-  /** The next event, waiting up to the handshake limit; a silent carrier fails the stream. */
+  /**
+   * The next event. A carrier silent past the handshake limit fails a stream
+   * still opening. An open stream may stay quiet for as long as it lives, but
+   * no pull outlasts it: a finished stream queues nothing more, so a pull left
+   * waiting after another took the last event answers `End` and frees its
+   * thread.
+   */
   fun next(): PinnedTlsStreamEvent {
-    val waitMs = if (opened) Long.MAX_VALUE else HANDSHAKE_TIMEOUT_MS
-    val event = events.poll(waitMs, TimeUnit.MILLISECONDS)
-    if (event != null) return event
-    synchronized(lock) { if (!settled) settle(PinnedTlsStreamEvent.Failed("handshake-failed")) }
-    return events.poll() ?: PinnedTlsStreamEvent.Failed("handshake-failed")
+    val started = System.nanoTime()
+    while (true) {
+      val event = events.poll(PULL_CHECK_MS, TimeUnit.MILLISECONDS)
+      if (event != null) return event
+      synchronized(lock) {
+        if (finished) return events.poll() ?: PinnedTlsStreamEvent.End
+        val waitedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+        if (!settled && waitedMs >= HANDSHAKE_TIMEOUT_MS) {
+          settle(PinnedTlsStreamEvent.Failed("handshake-failed"))
+        }
+      }
+    }
   }
 
   fun cancel() {
