@@ -146,6 +146,8 @@ const REFUSALS: Readonly<Record<string, string>> = {
   "invalid-secret": "That is not a Stripe signing secret. It starts with whsec_.",
   "scheme-mints-its-own":
     "That endpoint uses the secret Octant made; only a Stripe endpoint takes one pasted in.",
+  "too-many-replaced-secrets":
+    "This endpoint still keeps two replaced secrets for deliveries the hub may hold, and another would drop one early. Paste again two days after the oldest was replaced, or rotate the endpoint for a new URL.",
 };
 
 interface Minted {

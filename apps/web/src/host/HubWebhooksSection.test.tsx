@@ -303,6 +303,30 @@ describe("HubWebhooksSection", () => {
     expect(screen.queryByText("whsec_from-stripe-0123456789")).not.toBeInTheDocument();
   });
 
+  it("says why a new Stripe secret is refused while two replaced ones are still kept", async () => {
+    const user = userEvent.setup();
+    renderSection({
+      view: body({
+        endpoints: [{ ...deploys, scheme: "stripe", label: "Refunds", awaitingSecret: false }],
+      }),
+      answers: {
+        "webhook-secret": {
+          status: 409,
+          body: { status: "refused", kind: "too-many-replaced-secrets" },
+        },
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Paste new secret for Refunds" }));
+    const paste = screen.getByRole("group", { name: "Stripe signing secret" });
+    await user.type(
+      within(paste).getByLabelText("Signing secret from Stripe"),
+      "whsec_5WbX1kEMOo2N8gQk9Ff3LhZtA7cYdRsV",
+    );
+    await user.click(within(paste).getByRole("button", { name: "Save secret" }));
+    expect(await screen.findByText(/still keeps two replaced secrets/)).toBeInTheDocument();
+    expect(screen.getByText(/two days after the oldest was replaced/)).toBeInTheDocument();
+  });
+
   it("marks a Stripe endpoint still waiting for its secret, and takes a rolled one later", async () => {
     const user = userEvent.setup();
     const { calls } = renderSection({
