@@ -3059,8 +3059,16 @@ person's work without any service Octant runs (maintainer decision,
 #### Visitor links
 
 Built for a hub and its spokes, for Code, Chat and Work threads, from
-`octant hub visitor` (slice 25); the window's Share menu and Request card
-are not built yet. A standing-in standby serves them too (slice 26).
+`octant hub visitor` and the window (slice 25). A standing-in standby serves
+them too (slice 26). In the window, Share with
+visitor sits on the Computer card of the thread's Environment tool, shown
+only for a thread on this computer in a local desktop window and only for a
+kind of thread the visitor-link contract names; it opens a dialog, loaded as
+its own chunk, with the thread's links and the Requests waiting on them.
+Settings › Remote access › Visitor links lists every link and holds the
+hub's switch. The thread list's menu has no Share item: the main chunk has
+no room for one (`scripts/initial-renderer-budget.json`). A Request card
+inside the transcript itself is not built yet.
 
 - **Sharing.** In a thread's Share menu on the spoke that owns it, **Share
   with visitor** makes a read-only or comment-only link with an expiry, and
@@ -3151,8 +3159,9 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   routine that named the old one reads the new one without an edit or a
   re-arm; a rotate refused for want of Public leaves the old pair working.
   An endpoint id never begins with `-`, so the CLI never reads one as a flag.
-  `octant hub webhook create|list|rotate|remove|secret` and the
-  loopback administration routes do this; a window screen for it is not built.
+  `octant hub webhook create|list|rotate|remove|secret`, the loopback
+  administration routes, and Settings › Remote access › Webhook endpoints
+  (with the recent delivery log) do this.
 - **Sealed to the hub.** The hub keeps a P-256 sealing key in its state file
   and hands it out signed with its host identity key; a spoke takes it only
   when the signer's fingerprint is the roster's key for the hub, so no roster
@@ -3309,8 +3318,8 @@ desktop apps do not use the client yet (below).
   device's own per-host choice; WebSocket routes inside a relay (a host
   answers them 501); a relay through a forwarding member or a standing-in
   standby (only the acting hub admits relays, and a forwarding member answers
-  the relay route 404); a window control for the switch and the device list
-  (the CLI and loopback routes have them).
+  the relay route 404). The switch and each host's device list are in
+  Settings › Remote access › Device relay as well as the CLI.
 - **Phone push is separate.** The relay carries a device's own connection,
   not notifications. The store build of the phone app still gets push through
   the minimal Octant push gateway
@@ -4776,8 +4785,8 @@ limits, and the device relay's channel design.
     Built as [Webhook triggers](#webhook-triggers) records, as a Webhook
     source on the integration-event trigger rather than a new trigger kind;
     tested by server tests and a two-host loopback smoke with a fake
-    Wake-on-LAN socket. Not built: a window screen for endpoints (the CLI and
-    loopback routes make them). The standby's copy is slice 26.
+    Wake-on-LAN socket. The CLI, the loopback routes and Settings › Remote
+    access make endpoints. The standby's copy is slice 26.
     **Linux container: yes**; a real GitHub delivery is a maintainer gate.
 25. **Visitor links.** Share with visitor and Stop sharing, expiry, the
     redacted live projection, and comment Requests with Send and Dismiss on
@@ -4789,8 +4798,9 @@ limits, and the device relay's channel design.
     the CLI and loopback administration, with server tests and a headless
     Chromium check of the viewer at 1280 and 390 pixels in light and dark
     (no horizontal scroll) and of two tabs opening one link at once (one
-    key); not built: the window's Share menu and Request card (the renderer has no
-    room left for them outside a lazy chunk), step titles in the projection,
+    key); the window's Share with visitor and its Requests with Send and
+    Dismiss are built as lazy chunks (the renderer has no room left for them
+    outside one); not built: step titles in the projection,
     and Send posting into the thread itself. **Linux container: yes**, with
     a rendered check; a phone outside the tailnet is a maintainer gate.
 26. **Failover of the public entrance.** Sealed copies on standbys, the
@@ -4798,8 +4808,8 @@ limits, and the device relay's channel design.
     hand-back, and spoke-side dedupe in a split network. Acceptance: a
     three-host loopback smoke stops the hub, the standby serves both
     features, and no delivery is lost or runs twice. Built, with that smoke;
-    not built yet: a window control for the standby's choice (the CLI and
-    the loopback route carry it), and a test of a member forwarding to a
+    the standby's window has the Serve the public entrance switch; not
+    built yet: a test of a member forwarding to a
     standing-in standby through a real entrance. **Linux container: yes**;
     failover on a real network is a maintainer gate.
 27. **Your own devices through the hub.** The relay route, the host's relay
