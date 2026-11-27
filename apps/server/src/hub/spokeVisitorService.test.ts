@@ -31,6 +31,17 @@ vi.mock("node:crypto", async (importOriginal) => {
   };
 });
 
+// What the Chat and Code projections hold, for the reads of a streaming reply.
+const projections = vi.hoisted(() => ({ chat: undefined as unknown, code: undefined as unknown }));
+vi.mock("../persistence/chatProjection", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../persistence/chatProjection")>()),
+  readChatThreadView: () => projections.chat,
+}));
+vi.mock("../persistence/codeProjection", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../persistence/codeProjection")>()),
+  readCodeThread: () => projections.code,
+}));
+
 const SPOKE = "11111111-1111-4111-8111-111111111111" as HubMemberId;
 const HUB = "22222222-2222-4222-8222-222222222222";
 const BROWSER = "a".repeat(64);
@@ -607,4 +618,121 @@ describe("visitor comments", () => {
     await context.service.look();
     expect(context.sent).toHaveLength(2);
   });
+});
+
+describe("a secret a Chat or Code reply is still writing", () => {
+  const secret = "whsec_5WbX1kEMOo2N8gQk9Ff3LhZtA7cYdRsV";
+  // Shorter than the redactor's pattern, as the first streamed pieces are.
+  const partial = `The secret is ${secret.slice(0, 12)}`;
+  const settled = {
+    projection: {
+      messages: [
+        { role: "person", text: "Show it" },
+        { role: "agent", text: "The secret is [redacted]" },
+      ],
+    },
+  };
+  const streamed = {
+    projection: {
+      messages: [
+        { role: "person", text: "Show it" },
+        { role: "agent", text: "The secret is " },
+      ],
+    },
+  };
+
+  async function opened(context: ReturnType<typeof setup>, mode: "chat" | "code") {
+    const link = await context.service.share({
+      mode,
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    return fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) });
+  }
+
+  it.each(["queued", "streaming", "waiting"])(
+    "shows a visitor none of it while a Chat reply is %s, and redacts it whole once settled",
+    async (outcome) => {
+      const chat = (state: string, reply: string) => ({
+        thread: { title: "Check", lifecycle: "active" },
+        contents: [
+          { contentId: "asked", role: "user", body: "Show it" },
+          { contentId: "reply-1", role: "assistant", body: reply.slice(0, 7) },
+          { contentId: "reply-2", role: "assistant", body: reply.slice(7) },
+        ],
+        turns: [
+          {
+            id: "turn-1",
+            userMessageRef: { contentId: "asked" },
+            attempts: [
+              {
+                id: "attempt-1",
+                outcome: state,
+                responseRefs: [{ contentId: "reply-1" }, { contentId: "reply-2" }],
+              },
+            ],
+          },
+        ],
+      });
+      projections.chat = chat(outcome, partial);
+      const context = setup({
+        source: visitorThreadSource(
+          () => ({}) as never,
+          () => ({}),
+        ),
+      });
+      const request = await opened(context, "chat");
+
+      const live = context.service.fetch(request, HUB);
+      expect(live).toMatchObject(streamed);
+      expect(JSON.stringify(live)).not.toContain("whsec_");
+      projections.chat = chat("completed", `The secret is ${secret}`);
+      expect(context.service.fetch(request, HUB)).toMatchObject(settled);
+    },
+  );
+
+  it.each([
+    { executing: true, awaitingInput: false },
+    { executing: false, awaitingInput: true },
+  ])(
+    "shows a visitor none of it while a Code turn is live (%o), and redacts it whole once settled",
+    async (running) => {
+      let activity = running;
+      let reply = partial;
+      // Newest first, as the read orders them; an earlier settled reply follows.
+      const connection = {
+        prepare: () => ({
+          all: () => [
+            { content_role: "assistant", body_text: reply },
+            { content_role: "user", body_text: "Show it" },
+            { content_role: "assistant", body_text: "Ready." },
+          ],
+        }),
+      };
+      projections.code = { title: "Check", lifecycle: "active" };
+      const context = setup({
+        source: visitorThreadSource(
+          () => connection as never,
+          () => activity,
+        ),
+      });
+      const request = await opened(context, "code");
+
+      const live = context.service.fetch(request, HUB);
+      expect(live).toMatchObject({
+        projection: {
+          messages: [{ role: "agent", text: "Ready." }, ...streamed.projection.messages],
+        },
+      });
+      expect(JSON.stringify(live)).not.toContain("whsec_");
+      activity = { executing: false, awaitingInput: false };
+      reply = `The secret is ${secret}`;
+      expect(context.service.fetch(request, HUB)).toMatchObject({
+        projection: {
+          messages: [{ role: "agent", text: "Ready." }, ...settled.projection.messages],
+        },
+      });
+    },
+  );
 });

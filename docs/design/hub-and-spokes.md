@@ -3102,12 +3102,14 @@ are not built yet. A standing-in standby serves them too (slice 26).
   prompts and replies, Chat's messages and replies, Work's prompts and
   replies from each turn's transcript, with a streaming reply's text so far)
   with paths and
-  secret-shaped values replaced. A streaming Work reply is shown only up to
-  its last whitespace until it settles: the first characters of a secret do
-  not yet have the shape that is replaced, so its unfinished last word is
-  held back (the hard line that Octant redacts secrets). The stream asks the
-  spoke again every two seconds and ends when the spoke refuses. Not built
-  yet: step titles and states.
+  secret-shaped values replaced. In all three modes an in-progress reply
+  shows only completed words, up to its last whitespace: the first characters
+  of a secret do not yet have the shape that is replaced, so the unfinished
+  last word is held back (the hard line that Octant redacts secrets). In
+  progress means a Chat reply that is queued, streaming, or waiting, a Code
+  thread's newest reply while its turn runs or waits on the person, and a Work
+  reply still held live. The stream asks the spoke again every two seconds and
+  ends when the spoke refuses. Not built yet: step titles and states.
 - **Comments.** On a comment-only link, a visitor's message lands on the
   spoke as a **Request** in the thread with **Send** and **Dismiss**. Only
   the person's Send delivers it, framed as outside content from the visitor.

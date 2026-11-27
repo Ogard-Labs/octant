@@ -210,22 +210,29 @@ function readCode(
     readonly content_role: "user" | "assistant";
     readonly body_text: string;
   }>;
+  const turnActivity = activity(id);
+  // A turn parked on a question or an approval has not finished its reply
+  // either. Only the newest turn can be live, and its reply row comes first.
+  const live =
+    turnActivity.executing === true || turnActivity.awaitingInput === true
+      ? rows.find((row) => row.content_role === "assistant")
+      : undefined;
   // A completed turn's prompt and reply share a sequence. Newest first, the
   // reply comes before its prompt here, so the reversal below puts the prompt first.
   const messages: Message[] = rows
-    .filter((row) => row.body_text.trim() !== "")
     .map(
       (row): Message => ({
         role: row.content_role === "user" ? "person" : "agent",
-        text: row.body_text,
+        text: row === live ? finishedWords(row.body_text) : row.body_text,
       }),
     )
+    .filter((message) => message.text.trim() !== "")
     .reverse();
   return {
     status: "found",
     title: thread.title,
     archived: thread.lifecycle === "archived",
-    state: codeVisitorState(thread.lifecycle, activity(id)),
+    state: codeVisitorState(thread.lifecycle, turnActivity),
     messages,
   };
 }
@@ -260,7 +267,13 @@ function readChat(connection: SqliteConnection, threadId: string): VisitorThread
       .map((ref) => textOf(String(ref.contentId), "assistant"))
       .filter((text): text is string => text !== undefined)
       .join("");
-    if (reply !== "") messages.push({ role: "agent", text: reply });
+    // A waiting attempt can resume and go on writing the same reply.
+    const unfinished =
+      latest?.outcome === "queued" ||
+      latest?.outcome === "streaming" ||
+      latest?.outcome === "waiting";
+    const shown = unfinished ? finishedWords(reply) : reply;
+    if (shown.trim() !== "") messages.push({ role: "agent", text: shown });
   }
   const lastAttempt = turns.at(-1)?.attempts.at(-1);
   const lastAttemptId = lastAttempt === undefined ? undefined : String(lastAttempt.id);
