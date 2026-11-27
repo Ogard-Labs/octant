@@ -750,7 +750,7 @@ The JSON report records both SHAs, SHA-256 digests of the assembled case inputs
 including tool metadata, model request settings, observations, and per-case
 pass rates. A start is matched to its assignment by a keyword in the title, falling back
 to the brief when the title has no unique match. A Project conversation's
-dispatch reply must also give each confirmed worker's title and reference.
+dispatch reply must pair each confirmed worker’s title with its own reference.
 A send must name the exact
 recipient and include the requested color and button. Both “primary button” and
 “primary action button” identify the target. Refused calls fail the score.

@@ -102,20 +102,7 @@ export function score(
     );
   }
   if (decisions.length !== workerCount) return false;
-  if (fixture.projectConversation === true) {
-    const recap = answer.toLowerCase();
-    if (
-      !decisions.every(
-        ({ title, startedReference }) =>
-          title?.trim() &&
-          startedReference !== undefined &&
-          recap.includes(title.toLowerCase()) &&
-          recap.includes(startedReference),
-      )
-    ) {
-      return false;
-    }
-  }
+  if (fixture.projectConversation === true && !recapNamesWorkers(decisions, answer)) return false;
   const assignments = decisions.map(({ title, prompt }) => {
     if (!title?.trim() || !prompt?.trim()) return [];
     const titleMatches = targets.filter((target) => title.toLowerCase().includes(target));
@@ -126,6 +113,26 @@ export function score(
   return (
     assignments.every((matches) => matches.length === 1) &&
     targets.every((target) => assignments.some((matches) => matches.includes(target)))
+  );
+}
+
+function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boolean {
+  const recap = answer.toLowerCase();
+  const mentions: Array<{ title: string; at: number; end: number }> = [];
+  for (const { title, startedReference } of starts) {
+    if (!title?.trim() || startedReference === undefined) return false;
+    const at = recap.indexOf(startedReference);
+    if (at < 0) return false;
+    mentions.push({ title: title.toLowerCase(), at, end: at + startedReference.length });
+  }
+  mentions.sort((left, right) => left.at - right.at);
+  // Each reference belongs with its own title, whether the recap puts the
+  // label first (including Markdown links) or begins each entry with the reference.
+  return (
+    mentions.every((entry, i) =>
+      recap.slice(mentions[i - 1]?.end ?? 0, entry.at).includes(entry.title),
+    ) ||
+    mentions.every((entry, i) => recap.slice(entry.end, mentions[i + 1]?.at).includes(entry.title))
   );
 }
 
