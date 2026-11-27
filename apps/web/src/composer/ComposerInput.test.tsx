@@ -421,17 +421,25 @@ describe("ComposerInput", () => {
     expect(screen.getByRole("status")).toHaveTextContent("second-delivery");
   });
 
-  it("keeps the exact delivery when a result quote is cut and pasted in its thread", async () => {
+  it("opens the correct delivery for each of two identical quotes after moving one", async () => {
     const user = userEvent.setup();
     const threadId = "chat:move-result";
-    const quote = { source: "a subagent result", text: "Moved finding.", comment: "" };
-    const draft = appendComposerQuote("Why?", quote, {
-      threadId,
-      result: { label: quote.source, threadId, row: "delivered", block: "0" },
-    });
+    const quote = { source: "a subagent result", text: "Repeated finding.", comment: "" };
+    const first = { label: quote.source, threadId, row: "earlier-delivery", block: "0" };
+    const second = { ...first, row: "later-delivery", block: "1" };
+    const draft = appendComposerQuote(
+      appendComposerQuote("Why?", quote, { threadId, result: first }),
+      quote,
+      { threadId, result: second },
+    );
+    function RevealedDelivery() {
+      const target = useResultQuoteScope()?.target;
+      return <output>{target === undefined ? "" : `${target.row}/${target.block}`}</output>;
+    }
     render(
       <ResultQuoteScope threadId={threadId}>
         <Controlled typedScope={threadId} value={draft} />
+        <RevealedDelivery />
       </ResultQuoteScope>,
     );
     const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
@@ -442,15 +450,25 @@ describe("ComposerInput", () => {
       getData: (type: string) => data.get(type) ?? "",
     };
     input.focus();
-    input.setSelectionRange(draft.indexOf(text), draft.indexOf(text) + text.length);
+    const laterOffset = draft.lastIndexOf(text);
+    input.setSelectionRange(laterOffset, laterOffset + text.length);
     fireEvent.cut(input, { clipboardData });
     expect(clipboardData.getData("text/plain")).toBe(text);
     input.setSelectionRange(0, 0);
     fireEvent.paste(input, { clipboardData });
-    await user.click(
-      await screen.findByRole("button", { name: "Quote from a subagent result: Moved finding." }),
-    );
-    expect(screen.getByRole("button", { name: "Show source" })).toBeVisible();
+    expect(input.value.startsWith(`${text}\nWhy?`)).toBe(true);
+    const chips = await screen.findAllByRole("button", {
+      name: "Quote from a subagent result: Repeated finding.",
+    });
+    expect(chips).toHaveLength(2);
+    const [moved, stationary] = chips;
+    if (moved === undefined || stationary === undefined) throw new Error("Expected both quotes.");
+    await user.click(moved);
+    await user.click(screen.getByRole("button", { name: "Show source" }));
+    expect(screen.getByRole("status")).toHaveTextContent("later-delivery/1");
+    await user.click(stationary);
+    await user.click(screen.getByRole("button", { name: "Show source" }));
+    expect(screen.getByRole("status")).toHaveTextContent("earlier-delivery/0");
   });
 
   it("recalls the newest accepted message's source when prompts have identical text", async () => {

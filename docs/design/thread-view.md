@@ -879,9 +879,11 @@ chip as ordinary text.
   keeps its delivery reference separately from the text, so two identical
   excerpts can point to different deliveries. Inserts, undo, and moving a
   quote within the parent composer preserve its source in that window. The
-  reference can also follow a recalled message when the send supplies a stable
-  message identity. A draft restored in another window preserves the attribution
-  and excerpt.
+  reference also follows recalled direct sends in Chat, Work and Code, and
+  queued messages in Chat and Work. A recalled queued Code prompt keeps the
+  attribution and excerpt because its queue item has no public link to the
+  accepted turn. A draft restored in another window keeps the attribution and
+  excerpt.
 - The quote is the prompt's own text: a line that names its source and says
   the words are for reference only, not instructions, then the words in a
   fence longer than any backtick run inside them, then the person's note on a
