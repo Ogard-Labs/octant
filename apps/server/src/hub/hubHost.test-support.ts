@@ -838,6 +838,7 @@ export async function startHubTestHost(input: {
     state,
     serving: servesPublicNow,
     standingIn: () => !hub.status().enabled && servesPublicNow(),
+    remoteAccessPaused: () => false,
     hubMemberId: () => hub.hubMemberId(),
     rosterFingerprintFor: (memberId) =>
       servingRosterMembers(state.load()).find((member) => String(member.memberId) === memberId)

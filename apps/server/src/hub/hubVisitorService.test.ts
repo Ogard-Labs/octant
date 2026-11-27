@@ -76,6 +76,7 @@ function world() {
     const hub = new HubVisitorService({
       state: memoryState({ visitorHub: { enabled: true, grants: [] } }),
       serving: () => true,
+      remoteAccessPaused: () => false,
       hubMemberId: () => memberId,
       rosterFingerprintFor: (member) =>
         String(member) === SPOKE ? publicKeyFingerprint(spokeKey.publicKey) : undefined,
@@ -282,6 +283,7 @@ describe("visitor links on the hub", () => {
     const hub = new HubVisitorService({
       state: memoryState(),
       serving: () => true,
+      remoteAccessPaused: () => false,
       hubMemberId: () => HUB,
       rosterFingerprintFor: () => undefined,
       ask: async () => undefined,
@@ -295,6 +297,28 @@ describe("visitor links on the hub", () => {
     expect(answered()).toEqual({ status: "recorded", count: 0, publicOrigin: origin });
     origin = "http://192.168.1.20";
     expect(answered()).toEqual({ status: "recorded", count: 0 });
+  });
+
+  it("names no public origin to a spoke while remote access is paused", async () => {
+    let paused = false;
+    const origin = "https://octant.example.com";
+    const hub = new HubVisitorService({
+      state: memoryState({ visitorHub: { enabled: true, grants: [] } }),
+      serving: () => true,
+      remoteAccessPaused: () => paused,
+      hubMemberId: () => HUB,
+      rosterFingerprintFor: () => undefined,
+      ask: async () => undefined,
+      publicOrigin: () => origin,
+      record: () => {},
+      now: () => NOW,
+    });
+    const answered = () => hub.receiveGrants(SPOKE, { grants: [] });
+    expect(answered()).toEqual({ status: "recorded", count: 0, publicOrigin: origin });
+    paused = true;
+    expect(answered()).toEqual({ status: "recorded", count: 0 });
+    paused = false;
+    expect(answered()).toEqual({ status: "recorded", count: 0, publicOrigin: origin });
   });
 
   it("a comment-only visitor cannot answer an approval", async () => {
@@ -485,6 +509,7 @@ describe("the viewer page", () => {
     const hub = new HubVisitorService({
       state: memoryState({ visitorHub: { enabled: true, grants: [] } }),
       serving: () => true,
+      remoteAccessPaused: () => false,
       hubMemberId: () => HUB,
       rosterFingerprintFor: () => undefined,
       ask: async (_spoke, fetched) => context.spoke.fetch(fetched, HUB),

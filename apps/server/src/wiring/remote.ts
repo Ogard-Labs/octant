@@ -1503,6 +1503,7 @@ export function wireRemote(deps: RemoteDependencies) {
     state: hubStateStore,
     serving: servesPublicNow,
     standingIn: () => !hubService.status().enabled && servesPublicNow(),
+    remoteAccessPaused: () => readRemoteAccessPaused(persistence.connection),
     hubMemberId: () => hubService.hubMemberId(),
     rosterFingerprintFor: (memberId) =>
       servingRosterMembers(hubStateStore.load()).find(

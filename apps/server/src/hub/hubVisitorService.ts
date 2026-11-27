@@ -58,6 +58,8 @@ export interface HubVisitorServiceOptions {
    * the entrance; that choice covers visitor links, whatever its own switch says.
    */
   readonly standingIn?: () => boolean;
+  /** Whether this host's person paused remote access; a paused hub names no public origin. */
+  readonly remoteAccessPaused: () => boolean;
   readonly hubMemberId: () => string;
   /** The identity-key fingerprint the signed roster lists for a member. */
   readonly rosterFingerprintFor: (memberId: string) => string | undefined;
@@ -195,9 +197,14 @@ export class HubVisitorService {
     return this.#receipt(own.length);
   }
 
-  /** Names the public origin only while a link behind it would open: the visitor switch on. */
+  /**
+   * Names the public origin only while a link behind it would open: the visitor
+   * switch on and remote access not paused. `publicOrigin` names none while the
+   * hub role or the entrance is off.
+   */
   #receipt(count: number): HubVisitorGrantsReceipt {
-    const named = this.#load().enabled ? this.#options.publicOrigin?.() : undefined;
+    const open = this.#load().enabled && !this.#options.remoteAccessPaused();
+    const named = open ? this.#options.publicOrigin?.() : undefined;
     // An address a spoke would refuse to read is left out, not sent.
     return {
       status: "recorded",
