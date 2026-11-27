@@ -5,10 +5,14 @@ import {
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
   THREAD_WAKEUP_AGGREGATE,
   THREAD_WAKEUP_CHANGED,
+  USAGE_RESUME_SETTLED,
   UtcTimestamp,
+  decodeChatThreadId,
+  decodeCodeThreadId,
   decodeNativeHarnessApproval,
   decodeNativeHarnessSession,
   decodeThreadWakeupChanged,
+  decodeWorkThreadId,
 } from "@octant/contracts";
 import { reapsStaleProviderSession } from "@octant/domain";
 import { transitionChatAttempt } from "@octant/domain/chat-policy";
@@ -31,11 +35,22 @@ import {
 import { THREAD_MESSAGE_QUEUE_CHANGED } from "../messageQueue/threadMessageQueuePersistence";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
+  WorkThreadProjection,
+  hydrateWorkThreadProjectionFromJournal,
+} from "../work/workThreadProjection";
+import {
   WorkTurnProjection,
   hydrateWorkTurnProjectionFromJournal,
 } from "../work/workTurnProjection";
 import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
-import { ChatProjection, readChatThreads, readChatThreadView } from "./chatProjection";
+import {
+  ChatProjection,
+  readChatThread,
+  readChatThreads,
+  readChatThreadView,
+} from "./chatProjection";
+import { CodeProjection, readCodeThread } from "./codeProjection";
+import { listPendingUsageResumes, UsageResumeProjection } from "./usageResumeProjection";
 import type { EventRegistry } from "./eventRegistry";
 import { Journal } from "./journal";
 import { ProjectionRegistry, rebuildProjections } from "./projection";
@@ -98,8 +113,22 @@ export function settleOctantInFlightWork(input: {
   };
 
   let settled = 0;
-  // First: it rebuilds the aggregate heads every later append reads.
-  settled += settleChatAttempts(input.connection, journal, append, input.clock);
+  // The views settling reads, rebuilt in the snapshot because the
+  // snapshot's own were Octant's and may predate Nightly's migrations; the
+  // aggregate heads every append below reads come with them.
+  rebuildProjections({
+    connection: input.connection,
+    journal,
+    projections: [
+      new AggregateHeadsProjection(),
+      new ChatProjection(),
+      new CodeProjection(),
+      new UsageResumeProjection(),
+    ],
+    clock: input.clock,
+  });
+  settled += settleUsageResumes(input.connection, journal, append, input.clock);
+  settled += settleChatAttempts(input.connection, append, input.clock);
   settled += settleWakeups(input.connection, append);
   settled += settleAutomations(input.connection, append, input.clock);
   settled += settleGoalLoops(input.connection, append);
@@ -130,25 +159,83 @@ export function settleOctantInFlightWork(input: {
   return settled;
 }
 
+const IMPORTED_RESUME_DETAIL =
+  "Brought from Octant, which scheduled this resume; Nightly does not continue it by itself.";
+
 /**
- * Every Chat answer the journal still reads as running is interrupted, the
- * way the host's own start reaps the ones its previous run was giving
- * (ChatService.reapStaleProviderSessions). The Chat views are read from a
- * rebuild in the snapshot, since the snapshot's own were Octant's and may
- * predate Nightly's migrations.
+ * Every resume Octant scheduled for a usage-limited stop settles invalidated,
+ * as the host settles one whose premise no longer holds, so Nightly's resume
+ * service arms none for imported work. Like the host's own settle
+ * (UsageResumeService and the mode ports' settleUpdate), a Chat, Work or Code
+ * thread's row comes with it at the next version, because those threads
+ * carry their stream's version and refuse a command against a stale one.
  */
-function settleChatAttempts(
+function settleUsageResumes(
   connection: SqliteConnection,
   journal: Journal,
   append: Append,
   clock: () => string,
 ): number {
-  rebuildProjections({
-    connection,
-    journal,
-    projections: [new AggregateHeadsProjection(), new ChatProjection()],
-    clock,
+  const workThreads = new WorkThreadProjection();
+  const hydrated = hydrateWorkThreadProjectionFromJournal({
+    replay: (cursor) =>
+      journal.replayAggregateType({
+        aggregateType: cursor.aggregateType ?? "work-thread",
+        afterSequence: cursor.afterSequence,
+        limit: cursor.limit,
+      }),
+    projection: workThreads,
   });
+  if (hydrated !== "ok") throw new Error("The snapshot's Work threads could not be read whole.");
+  let settled = 0;
+  for (const pending of listPendingUsageResumes(connection)) {
+    const head = streamHead(connection, pending.aggregateType, pending.threadId);
+    const usageResume = {
+      record: pending.record,
+      status: "invalidated",
+      detail: IMPORTED_RESUME_DETAIL,
+    };
+    const thread =
+      pending.aggregateType === "chat-thread"
+        ? readChatThread(connection, decodeChatThreadId(pending.threadId))
+        : pending.aggregateType === "work-thread"
+          ? workThreads.read(decodeWorkThreadId(pending.threadId))
+          : pending.aggregateType === "code-thread"
+            ? readCodeThread(connection, decodeCodeThreadId(pending.threadId))
+            : undefined;
+    const threadUpdate =
+      thread === undefined
+        ? []
+        : [
+            {
+              eventName: `${pending.aggregateType.slice(0, -"-thread".length)}.thread-updated@1`,
+              payload: {
+                kind: "thread-updated",
+                thread: { ...thread, usageResume, version: head + 2, updatedAt: clock() },
+              },
+            },
+          ];
+    settled += append(pending.aggregateType, pending.threadId, head, [
+      {
+        eventName: USAGE_RESUME_SETTLED,
+        payload: { resume: pending.record, outcome: "invalidated", detail: IMPORTED_RESUME_DETAIL },
+      },
+      ...threadUpdate,
+    ]);
+  }
+  return settled;
+}
+
+/**
+ * Every Chat answer the journal still reads as running is interrupted, the
+ * way the host's own start reaps the ones its previous run was giving
+ * (ChatService.reapStaleProviderSessions).
+ */
+function settleChatAttempts(
+  connection: SqliteConnection,
+  append: Append,
+  clock: () => string,
+): number {
   const now = Date.parse(clock());
   let settled = 0;
   for (const thread of readChatThreads(connection)) {

@@ -52,8 +52,6 @@ interface CandidateRow {
   readonly aggregate_id: string;
   readonly aggregate_version: number;
   readonly event_name: string;
-  /** 1 for a Canvas mirror setting that names a folder of the host's choosing. */
-  readonly names_host_folder: number;
 }
 
 interface AggregateSpan {
@@ -134,22 +132,26 @@ export function mergeOctantSnapshot(input: {
     ).map((row) => row.thread_id),
   );
 
+  const folderMirrorStreams = currentFolderMirrorStreams(connection);
   const candidates = (
     connection
       .prepare(
         `SELECT source.global_sequence, source.aggregate_type, source.aggregate_id,
-           source.aggregate_version, source.event_name,
-           CASE WHEN source.event_name = 'artifact.mirror-setting-changed@1' THEN
-             coalesce(json_extract(source.payload_json, '$.settings.fallback.kind') = 'global-folder', 0)
-             OR EXISTS (SELECT 1 FROM json_each(source.payload_json, '$.settings.overrides') AS override
-               WHERE json_extract(override.value, '$.destination.kind') = 'global-folder')
-           ELSE 0 END AS names_host_folder
+           source.aggregate_version, source.event_name
          FROM octant.event_journal AS source
-         WHERE source.global_sequence > ?
+         WHERE (source.global_sequence > ?
+             OR EXISTS (SELECT 1 FROM json_each(?) AS held
+               WHERE json_extract(held.value, '$[0]') = source.aggregate_type
+                 AND json_extract(held.value, '$[1]') = source.aggregate_id))
            AND NOT EXISTS (SELECT 1 FROM main.event_journal AS own WHERE own.event_id = source.event_id)
          ORDER BY source.global_sequence`,
       )
-      .all(octantMark) as ReadonlyArray<CandidateRow>
+      // A stream an earlier import held back is offered whole again, since
+      // the events it held are older than the mark.
+      .all(
+        octantMark,
+        JSON.stringify([...earlierHeldBack].map((key) => JSON.parse(key))),
+      ) as ReadonlyArray<CandidateRow>
   ).filter((row) => !isExcludedOctantEvent(row.aggregate_type, row.event_name));
 
   const threadOf = (row: CandidateRow): string | undefined => {
@@ -197,12 +199,14 @@ export function mergeOctantSnapshot(input: {
     // leaves Nightly's record, and the whole stream with it.
     if (nightly !== undefined && RECORD_REMOVAL_EVENT_NAMES.has(row.event_name)) return "hold";
     // Nightly never writes into a folder Octant writes to, as with worktrees
-    // and share links. One setting event carries the default and every
-    // Project's choice, so one naming a chosen folder anywhere stays behind
-    // whole rather than being rewritten; the stream is listed as kept.
-    if (row.names_host_folder === 1) return "hold";
+    // and share links. Each setting event carries the whole configuration and
+    // the latest one is what applies, so the stream stays behind (listed as
+    // kept) while Octant's current one names a chosen folder anywhere; an
+    // older folder in the stream's history never makes Nightly write there.
+    if (folderMirrorStreams.has(key)) return "hold";
     if (nightly === undefined) {
-      if (earlierHeldBack.has(key)) return "hold";
+      // Held back before and Nightly still has none: offered again whole.
+      if (earlierHeldBack.has(key)) return "append";
       // Octant had it before the last import and Nightly no longer does:
       // Nightly deleted it, and deletions are never mirrored.
       const first = octantFirst.get(key) ?? 0;
@@ -577,6 +581,29 @@ function aggregateSpans(
       },
     ]),
   );
+}
+
+/**
+ * Octant's Canvas mirror setting streams whose current configuration, their
+ * newest setting event, sends files to a folder of the person's choosing as
+ * the default or for any Project.
+ */
+function currentFolderMirrorStreams(connection: SqliteConnection): ReadonlySet<string> {
+  const rows = connection
+    .prepare(
+      `SELECT source.aggregate_type, source.aggregate_id FROM octant.event_journal AS source
+       WHERE source.event_name = 'artifact.mirror-setting-changed@1'
+         AND source.global_sequence = (
+           SELECT max(newer.global_sequence) FROM octant.event_journal AS newer
+           WHERE newer.aggregate_type = source.aggregate_type
+             AND newer.aggregate_id = source.aggregate_id
+             AND newer.event_name = source.event_name)
+         AND (coalesce(json_extract(source.payload_json, '$.settings.fallback.kind') = 'global-folder', 0)
+           OR EXISTS (SELECT 1 FROM json_each(source.payload_json, '$.settings.overrides') AS override
+             WHERE json_extract(override.value, '$.destination.kind') = 'global-folder'))`,
+    )
+    .all() as ReadonlyArray<{ readonly aggregate_type: string; readonly aggregate_id: string }>;
+  return new Set(rows.map(aggregateKey));
 }
 
 function octantFirstSequences(connection: SqliteConnection): ReadonlyMap<string, number> {

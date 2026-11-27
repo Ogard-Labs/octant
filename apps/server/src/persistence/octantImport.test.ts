@@ -53,6 +53,7 @@ import {
   TRIGGER_MAINTAINED_TABLES,
 } from "./octantImportTables";
 import { readProject } from "./projectProjection";
+import { listPendingUsageResumes } from "./usageResumeProjection";
 import { THREAD_RETENTION_AGGREGATE_ID } from "./threadRetentionProjection";
 import { readDeviceRegistrations, readHostIdentity } from "./remoteAccessProjection";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
@@ -312,6 +313,27 @@ function wakeup(id: string, status: "pending" | "ended", change: "scheduled" | "
     },
     change,
   };
+}
+
+const MIRROR_SETTINGS_ID = "0a1f0000-0000-4000-8000-000000000475";
+
+function setMirror(store: Store, fallback: Record<string, unknown>, version: number): void {
+  append(store, "artifact-mirror", MIRROR_SETTINGS_ID, "artifact.mirror-setting-changed@1", {
+    settings: {
+      kind: "artifact-mirror-settings",
+      fallback,
+      overrides: [],
+      autoCommit: false,
+      version,
+      updatedAt: now,
+    },
+  });
+}
+
+function mirrorFallbackIn(folder: string): unknown {
+  const events = eventsIn(folder, "artifact-mirror", MIRROR_SETTINGS_ID);
+  const settings = events.at(-1)?.payload.settings as { readonly fallback?: unknown } | undefined;
+  return settings?.fallback;
 }
 
 describe("importing Octant's data into Nightly", () => {
@@ -1178,6 +1200,102 @@ describe("importing Octant's data into Nightly", () => {
       [firstCode],
       [laterCode],
     ]);
+  });
+
+  it("brings the repository mirror setting Octant switched to from a folder before the first import", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    setMirror(
+      octant,
+      { kind: "global-folder", canonicalRoot: "/Users/someone/Octant/Artifacts" },
+      1,
+    );
+    setMirror(octant, { kind: "project-repository", relativeDirectory: "docs/artifacts" }, 2);
+    octant.close();
+
+    const outcome = imported(runImport(paths));
+
+    expect(outcome.kept).toEqual([]);
+    expect(mirrorFallbackIn(paths.nightly)).toEqual({
+      kind: "project-repository",
+      relativeDirectory: "docs/artifacts",
+    });
+  });
+
+  it("brings a held folder mirror setting once Octant switches to its repository", () => {
+    const paths = folders();
+    let octant = openStore(paths.octant);
+    setMirror(
+      octant,
+      { kind: "global-folder", canonicalRoot: "/Users/someone/Octant/Artifacts" },
+      1,
+    );
+    octant.close();
+    expect(imported(runImport(paths)).kept).toEqual([
+      { aggregateType: "artifact-mirror", aggregateId: MIRROR_SETTINGS_ID },
+    ]);
+    octant = openStore(paths.octant);
+    setMirror(octant, { kind: "project-repository", relativeDirectory: "docs/artifacts" }, 2);
+    octant.close();
+
+    const second = imported(runImport(paths));
+
+    expect(second.kept).toEqual([]);
+    expect(mirrorFallbackIn(paths.nightly)).toEqual({
+      kind: "project-repository",
+      relativeDirectory: "docs/artifacts",
+    });
+  });
+
+  it("brings a Chat thread waiting on a usage limit with its scheduled resume settled, so Nightly schedules nothing", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    createThread(octant, ids.shared, "Waiting on a limit");
+    const resetsAt = "2026-11-27T18:00:00.000Z";
+    const record = {
+      threadId: ids.shared,
+      turnId: "0c7a0000-0000-4000-8000-000000000e01",
+      attemptId: "0c7a0000-0000-4000-8000-000000000e02",
+      providerInstanceId: provider,
+      usageLimit: { kind: "exhausted", resetsAt },
+      resetsAt,
+      scheduledAt: now,
+    };
+    const event = (eventName: string, payload: unknown) => ({
+      eventId: randomUUID(),
+      eventName,
+      eventVersion: 1,
+      correlationId: randomUUID(),
+      actor,
+      occurredAt: now,
+      payload,
+    });
+    octant.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.shared },
+      expectedVersion: 1,
+      events: [
+        event("usage-resume.scheduled@1", { resume: record }),
+        event("chat.thread-updated@1", {
+          kind: "thread-updated",
+          thread: {
+            ...thread(ids.shared, "Waiting on a limit", 3),
+            usageResume: { record, status: "scheduled" },
+          },
+        }),
+      ],
+    });
+    expect(listPendingUsageResumes(octant.connection)).toHaveLength(1);
+    octant.close();
+
+    imported(runImport(paths));
+
+    const merged = openStore(paths.nightly);
+    expect(listPendingUsageResumes(merged.connection)).toEqual([]);
+    expect(readChatThread(merged.connection, ids.shared as ChatThread["id"])).toMatchObject({
+      version: 5,
+      usageResume: { status: "invalidated" },
+    });
+    merged.close();
   });
 
   it("leaves behind a mirror setting that writes to a folder of Octant's, and lists it", () => {
