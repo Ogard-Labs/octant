@@ -1,6 +1,8 @@
 // Webhook endpoints on the spoke that owns them (decisions H33 and H34). The
 // spoke mints each endpoint and its secret, shows the secret once, and hands
-// the hub only the secret sealed to the hub's own sealing key. A delivery the
+// the hub only the secret sealed to the hub's own sealing key. Stripe mints
+// its own secret after it is given the URL, so a Stripe endpoint waits for its
+// person to paste that secret and reaches the hub only then. A delivery the
 // hub forwards is checked again here on its original bytes and claimed by its
 // dedupe keys, which this spoke keeps seven days; only then does it become an
 // event of the webhook source, which a routine reads through the ordinary
@@ -26,12 +28,7 @@ import {
   type WebhookDeliveryEnvelope,
   type WebhookSignatureScheme,
 } from "@octant/contracts";
-import {
-  decideWebhookDelivery,
-  readWebhookHeaders,
-  webhookDedupeKeys,
-  hubSealingKeyPayload,
-} from "@octant/domain";
+import { decideWebhookDelivery, readWebhookHeaders, hubSealingKeyPayload } from "@octant/domain";
 import type { IntegrationEventSourceProvider } from "@octant/plugin-api/integration";
 import { Schema } from "effect";
 import { publicKeyFingerprint, verifySignature } from "./hubCrypto";
@@ -45,8 +42,7 @@ import {
   mintPublicId,
   mintWebhookSecret,
   sealWebhookSecret,
-  verifyWebhookSignature,
-  webhookBodyDigest,
+  verifiedWebhookDelivery,
 } from "./publicEntranceCrypto";
 
 const decodeEndpointId = Schema.decodeUnknownSync(WebhookEndpointId);
@@ -60,6 +56,8 @@ const CLAIMED_MAX = 50_000;
 // A routine takes at most 32 waiting events at one look, so a spoke takes no
 // more than this many unread deliveries per endpoint; the rest stay on the hub.
 const UNREAD_PER_ENDPOINT_MAX = 16;
+/** Stripe's signing secret as its dashboard shows it; Stripe keys the HMAC with the whole string. */
+const STRIPE_SECRET = /^whsec_[A-Za-z0-9+/=_-]{16,240}$/;
 
 /**
  * The hub this spoke hands its endpoints to, and each named standby when the
@@ -105,9 +103,27 @@ export type SpokeWebhookCreated =
       readonly path: string;
       readonly published: boolean;
     }
+  /** A Stripe endpoint: give Stripe the URL, then paste the secret Stripe shows. */
+  | {
+      readonly status: "awaiting-secret";
+      readonly endpointId: string;
+      readonly path: string;
+    }
   | {
       readonly status: "refused";
       readonly kind: "public-not-granted" | "unknown-endpoint" | "full";
+    };
+
+export type SpokeWebhookSecretSet =
+  | { readonly status: "set"; readonly published: boolean }
+  | {
+      readonly status: "refused";
+      /** `secret-not-pasted`: the endpoint's scheme takes the secret this spoke minted. */
+      readonly kind:
+        | "public-not-granted"
+        | "unknown-endpoint"
+        | "secret-not-pasted"
+        | "invalid-secret";
     };
 
 export interface SpokeWebhookView {
@@ -118,6 +134,8 @@ export interface SpokeWebhookView {
     readonly createdAt: number;
     readonly path: string;
     readonly deliveries: number;
+    /** A Stripe endpoint whose secret has not been pasted; it takes no delivery yet. */
+    readonly awaitingSecret: boolean;
   }>;
   readonly log: SpokeWebhookState["log"];
   readonly published: boolean;
@@ -166,13 +184,17 @@ export class SpokeWebhookService {
         deliveries: held.deliveries.filter(
           (delivery) => String(delivery.endpointId) === String(endpoint.endpointId),
         ).length,
+        awaitingSecret: endpoint.secret === undefined,
       })),
       log: held.log,
       published: held.unpublished !== true,
     };
   }
 
-  /** Mints a new endpoint and its secret, then hands the hub its sealed copy. */
+  /**
+   * Mints a new endpoint and its secret, then hands the hub its sealed copy.
+   * A Stripe endpoint gets no secret here; it waits for {@link setSecret}.
+   */
   async create(input: {
     readonly scheme: WebhookSignatureScheme;
     readonly label: string;
@@ -184,7 +206,7 @@ export class SpokeWebhookService {
     const endpoint: SpokeWebhookEndpoint = {
       endpointId: decodeEndpointId(mintPublicId()),
       scheme: input.scheme,
-      secret: mintWebhookSecret(),
+      ...(input.scheme === "stripe" ? {} : { secret: mintWebhookSecret() }),
       label: input.label.trim().slice(0, 128) || "Webhook",
       createdAt: this.#options.now(),
       ...(input.formerIds === undefined || input.formerIds.length === 0
@@ -195,13 +217,41 @@ export class SpokeWebhookService {
     this.#save({ ...held, endpoints: [...held.endpoints, endpoint], unpublished: true });
     this.#options.record({ change: "webhook-endpoint-created", actingPrincipal: LOCAL_WINDOW });
     const published = await this.publish();
-    return {
-      status: "created",
-      endpointId: String(endpoint.endpointId),
-      secret: endpoint.secret,
-      path: `/hooks/${String(endpoint.endpointId)}`,
-      published,
-    };
+    const path = `/hooks/${String(endpoint.endpointId)}`;
+    return endpoint.secret === undefined
+      ? { status: "awaiting-secret", endpointId: String(endpoint.endpointId), path }
+      : {
+          status: "created",
+          endpointId: String(endpoint.endpointId),
+          secret: endpoint.secret,
+          path,
+          published,
+        };
+  }
+
+  /**
+   * Takes the secret Stripe minted for one of this spoke's Stripe endpoints,
+   * first or after the person rolled it in Stripe, and hands the hub its
+   * sealed copy. No other scheme takes a pasted secret.
+   */
+  async setSecret(endpointId: string, secret: string): Promise<SpokeWebhookSecretSet> {
+    if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
+    const held = this.#load();
+    const endpoint = held.endpoints.find((entry) => String(entry.endpointId) === endpointId);
+    if (endpoint === undefined) return { status: "refused", kind: "unknown-endpoint" };
+    if (endpoint.scheme !== "stripe") return { status: "refused", kind: "secret-not-pasted" };
+    const trimmed = secret.trim();
+    if (!STRIPE_SECRET.test(trimmed)) return { status: "refused", kind: "invalid-secret" };
+    this.#revision += 1;
+    this.#save({
+      ...held,
+      endpoints: held.endpoints.map((entry) =>
+        entry === endpoint ? { ...entry, secret: trimmed } : entry,
+      ),
+      unpublished: true,
+    });
+    this.#options.record({ change: "webhook-endpoint-secret-set", actingPrincipal: LOCAL_WINDOW });
+    return { status: "set", published: await this.publish() };
   }
 
   /**
@@ -259,7 +309,12 @@ export class SpokeWebhookService {
     const epoch = hub.copyEpoch?.() ?? "";
     const revision = this.#revision;
     const held = this.#load();
-    const endpoints = this.#options.publicGranted() ? held.endpoints : [];
+    // A Stripe endpoint still waiting for its secret has nothing the hub could check.
+    const endpoints = this.#options.publicGranted()
+      ? held.endpoints.flatMap((endpoint) =>
+          endpoint.secret === undefined ? [] : [{ ...endpoint, secret: endpoint.secret }],
+        )
+      : [];
     const keys = new Map<string, HubSealingKey>();
     if (endpoints.length > 0) {
       for (const target of targets) {
@@ -353,7 +408,10 @@ export class SpokeWebhookService {
     const held = this.#prune(this.#load(), now);
     const endpointId = String(envelope.endpointId);
     const endpoint = held.endpoints.find((entry) => String(entry.endpointId) === endpointId);
-    if (endpoint === undefined) return { status: "refused", kind: "unknown-endpoint" };
+    const secret = endpoint?.secret;
+    if (endpoint === undefined || secret === undefined) {
+      return { status: "refused", kind: "unknown-endpoint" };
+    }
     const body = Buffer.from(envelope.body, "base64");
     const outcome = (result: WebhookDeliveryAnswer): WebhookDeliveryAnswer => {
       const latest = this.#load();
@@ -372,14 +430,7 @@ export class SpokeWebhookService {
     };
     const reading = readWebhookHeaders(endpoint.scheme, envelope.headers);
     if (reading.status === "refused") return outcome({ status: "refused", kind: reading.kind });
-    const keys =
-      endpoint.scheme === "github"
-        ? webhookDedupeKeys({
-            scheme: "github",
-            deliveryId: reading.deliveryId,
-            bodyDigest: webhookBodyDigest(body),
-          })
-        : webhookDedupeKeys({ scheme: "standard-webhooks", deliveryId: reading.deliveryId });
+    const verified = verifiedWebhookDelivery({ scheme: endpoint.scheme, secret, reading, body });
     const claimed = new Set(
       held.claimed
         .filter((entry) => entry.key.startsWith(`${endpointId}|`))
@@ -394,19 +445,16 @@ export class SpokeWebhookService {
         ? ({ status: "refused", kind: "stale-timestamp" } as const)
         : decideWebhookDelivery({
             endpointEnabled: true,
-            signatureMatches: verifyWebhookSignature({
-              scheme: endpoint.scheme,
-              secret: endpoint.secret,
-              reading,
-              body,
-            }),
+            signatureMatches: verified !== undefined,
             ...(reading.timestampMs === undefined ? {} : { timestampMs: reading.timestampMs }),
             nowMs: envelope.receivedAt,
-            dedupeKeys: keys,
+            dedupeKeys: verified?.keys ?? [],
             claimed: (key) => claimed.has(`${endpointId}|${key}`),
           });
     if (decision.status === "duplicate") return outcome({ status: "duplicate" });
     if (decision.status === "refused") return outcome({ status: "refused", kind: decision.kind });
+    // An accepted decision always has a verified delivery; this narrows it.
+    if (verified === undefined) return outcome({ status: "refused", kind: "bad-signature" });
     // Claims are the only replay guard for GitHub, so they are never evicted
     // to make room; a spoke that is full, or whose routine has not read what
     // it holds, answers busy and the hub keeps the delivery for a later look.
@@ -421,7 +469,7 @@ export class SpokeWebhookService {
     }
     const delivery: SpokeWebhookDelivery = {
       endpointId: endpoint.endpointId,
-      deliveryId: reading.deliveryId,
+      deliveryId: verified.deliveryId,
       receivedAt: envelope.receivedAt,
       ...(reading.event === undefined
         ? {}

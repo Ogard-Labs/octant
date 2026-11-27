@@ -24,20 +24,14 @@ import {
   type WebhookDeliveryEnvelope,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import {
-  decideWebhookDelivery,
-  readWebhookHeaders,
-  webhookDedupeKeys,
-  hubSealingKeyPayload,
-} from "@octant/domain";
+import { decideWebhookDelivery, readWebhookHeaders, hubSealingKeyPayload } from "@octant/domain";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort, HubWebhookQueued } from "./hubStateStore";
 import type { PublicAnswer, PublicRequest } from "./publicEntrance";
 import {
   makeSealingKeyPair,
   openWebhookSecret,
-  verifyWebhookSignature,
-  webhookBodyDigest,
+  verifiedWebhookDelivery,
 } from "./publicEntranceCrypto";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
@@ -197,27 +191,23 @@ export class HubWebhookService {
     const now = this.#options.now();
     if (
       reading.status === "refused" ||
-      reading.deliveryId !== queued.envelope.deliveryId ||
       receivedAt > now + WEBHOOK_TIMESTAMP_WINDOW_MS ||
       now - receivedAt > WEBHOOK_HOLD_MS
     ) {
       return { status: "refused" };
     }
-    const keys =
-      endpoint.scheme === "github"
-        ? webhookDedupeKeys({
-            scheme: "github",
-            deliveryId: reading.deliveryId,
-            bodyDigest: webhookBodyDigest(body),
-          })
-        : webhookDedupeKeys({ scheme: "standard-webhooks", deliveryId: reading.deliveryId });
+    const verified = verifiedWebhookDelivery({ scheme: endpoint.scheme, secret, reading, body });
+    if (verified !== undefined && verified.deliveryId !== queued.envelope.deliveryId) {
+      return { status: "refused" };
+    }
+    const keys = verified?.keys ?? [];
     const forEndpoint = hub.queue.filter(
       (entry) => String(entry.envelope.endpointId) === endpointId,
     );
     const held = new Set(forEndpoint.flatMap((entry) => entry.keys));
     const decision = decideWebhookDelivery({
       endpointEnabled: true,
-      signatureMatches: verifyWebhookSignature({ scheme: endpoint.scheme, secret, reading, body }),
+      signatureMatches: verified !== undefined,
       ...(reading.timestampMs === undefined ? {} : { timestampMs: reading.timestampMs }),
       nowMs: receivedAt,
       dedupeKeys: keys,
@@ -351,14 +341,13 @@ export class HubWebhookService {
     }
     const secret = this.#secretFor(endpoint, hub.sealingKey.privateKey);
     if (secret === undefined) return NOT_FOUND;
-    const keys =
-      endpoint.scheme === "github"
-        ? webhookDedupeKeys({
-            scheme: "github",
-            deliveryId: reading.deliveryId,
-            bodyDigest: webhookBodyDigest(body.bytes),
-          })
-        : webhookDedupeKeys({ scheme: "standard-webhooks", deliveryId: reading.deliveryId });
+    const verified = verifiedWebhookDelivery({
+      scheme: endpoint.scheme,
+      secret,
+      reading,
+      body: body.bytes,
+    });
+    const keys = verified?.keys ?? [];
     const queuedKeys = new Set(
       hub.queue
         .filter((queued) => String(queued.envelope.endpointId) === endpointId)
@@ -366,21 +355,18 @@ export class HubWebhookService {
     );
     const decision = decideWebhookDelivery({
       endpointEnabled: true,
-      signatureMatches: verifyWebhookSignature({
-        scheme: endpoint.scheme,
-        secret,
-        reading,
-        body: body.bytes,
-      }),
+      signatureMatches: verified !== undefined,
       ...(reading.timestampMs === undefined ? {} : { timestampMs: reading.timestampMs }),
       nowMs: now,
       dedupeKeys: keys,
       claimed: (key) => queuedKeys.has(key),
     });
     if (decision.status === "duplicate") return answer(200, { duplicate: true });
-    if (decision.status === "refused") {
+    // An accepted decision always has a verified delivery; the second test narrows it.
+    if (decision.status === "refused" || verified === undefined) {
       this.#count("refused");
-      return answer(decision.kind === "stale-timestamp" ? 400 : 401, { error: decision.kind });
+      const kind = decision.status === "refused" ? decision.kind : "bad-signature";
+      return answer(kind === "stale-timestamp" ? 400 : 401, { error: kind });
     }
     const forEndpoint = hub.queue.filter(
       (queued) => String(queued.envelope.endpointId) === endpointId,
@@ -399,7 +385,7 @@ export class HubWebhookService {
       bytes: body.bytes.length,
       envelope: {
         endpointId: endpoint.endpointId,
-        deliveryId: reading.deliveryId,
+        deliveryId: verified.deliveryId,
         receivedAt: now,
         headers,
         body: body.bytes.toString("base64"),

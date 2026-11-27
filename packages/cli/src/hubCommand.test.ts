@@ -1471,8 +1471,57 @@ describe("octant hub webhook", () => {
       mode: "rotate",
       endpointId: "AAAAAAAAAAAAAAAAAAAAAA",
     });
-    expect(resolveHubCliCommand(["webhook", "create"], { scheme: "stripe" })).toBeUndefined();
+    expect(resolveHubCliCommand(["webhook", "create"], { scheme: "stripe" })).toEqual({
+      action: "webhook",
+      mode: "create",
+      scheme: "stripe",
+      label: "Webhook",
+    });
+    expect(resolveHubCliCommand(["webhook", "secret", "AAAAAAAAAAAAAAAAAAAAAA"], {})).toEqual({
+      action: "webhook",
+      mode: "secret",
+      endpointId: "AAAAAAAAAAAAAAAAAAAAAA",
+    });
+    expect(resolveHubCliCommand(["webhook", "create"], { scheme: "paypal" })).toBeUndefined();
     expect(resolveHubCliCommand(["webhook", "remove"], {})).toBeUndefined();
+  });
+
+  it("a new Stripe endpoint prints its path and asks for the secret Stripe shows", async () => {
+    const created = await fixture(() =>
+      ok({
+        status: "awaiting-secret",
+        endpointId: "AAAAAAAAAAAAAAAAAAAAAA",
+        path: "/hooks/AAAAAAAAAAAAAAAAAAAAAA",
+      }),
+    );
+    expect(
+      await created.run({ action: "webhook", mode: "create", scheme: "stripe", label: "Payments" }),
+    ).toBe(0);
+    expect(created.text()).toContain("/hooks/AAAAAAAAAAAAAAAAAAAAAA");
+    expect(created.text()).toContain("octant hub webhook secret AAAAAAAAAAAAAAAAAAAAAA");
+  });
+
+  it("reads Stripe's secret from standard input, never from the command line", async () => {
+    const host = await fixture(() => ok({ status: "set", published: true }));
+    expect(
+      await host.run(
+        { action: "webhook", mode: "secret", endpointId: "AAAAAAAAAAAAAAAAAAAAAA" },
+        Readable.from(["whsec_fromStripe0123456789\n"]),
+      ),
+    ).toBe(0);
+    expect(host.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/webhooks/secret",
+      body: { endpointId: "AAAAAAAAAAAAAAAAAAAAAA", secret: "whsec_fromStripe0123456789" },
+    });
+    expect(host.text()).not.toContain("whsec_fromStripe0123456789");
+    const empty = await fixture(() => ok({ status: "set", published: true }));
+    expect(
+      await empty.run(
+        { action: "webhook", mode: "secret", endpointId: "AAAAAAAAAAAAAAAAAAAAAA" },
+        Readable.from([]),
+      ),
+    ).toBe(1);
+    expect(empty.sent).toHaveLength(0);
   });
 
   it("prints a new endpoint's secret once, with its path", async () => {

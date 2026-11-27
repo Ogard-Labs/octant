@@ -68,15 +68,23 @@ export type HubCliCommand =
   | { readonly action: "public"; readonly mode: "status" }
   /** As a standby, serve the entrance while standing in for the hub, or stop. */
   | { readonly action: "public"; readonly mode: "standby"; readonly serve: boolean }
-  /** This spoke's webhook endpoints; a new or rotated endpoint's secret is printed once. */
+  /**
+   * This spoke's webhook endpoints; a new or rotated endpoint's secret is
+   * printed once. Stripe mints its own secret, which `secret` reads from
+   * standard input.
+   */
   | {
       readonly action: "webhook";
       readonly mode: "create";
-      readonly scheme: "standard-webhooks" | "github";
+      readonly scheme: "standard-webhooks" | "github" | "stripe";
       readonly label: string;
     }
   | { readonly action: "webhook"; readonly mode: "list" }
-  | { readonly action: "webhook"; readonly mode: "rotate" | "remove"; readonly endpointId: string }
+  | {
+      readonly action: "webhook";
+      readonly mode: "rotate" | "remove" | "secret";
+      readonly endpointId: string;
+    }
   /** The hub's visitor-link switch, and this spoke's links and the comments waiting on them. */
   | { readonly action: "visitor"; readonly mode: "on" | "off" | "list" }
   | {
@@ -291,7 +299,7 @@ export function resolveHubCliCommand(
     case "webhook": {
       const [mode, endpointId] = rest;
       if (mode === "list") return rest.length === 1 && only() ? { action, mode } : undefined;
-      if (mode === "rotate" || mode === "remove") {
+      if (mode === "rotate" || mode === "remove" || mode === "secret") {
         return rest.length === 2 &&
           only() &&
           endpointId !== undefined &&
@@ -302,7 +310,10 @@ export function resolveHubCliCommand(
       if (mode !== "create" || rest.length !== 1 || !only("scheme", "label")) return undefined;
       const scheme = flags.scheme ?? "standard-webhooks";
       const label = flags.label ?? "Webhook";
-      if ((scheme !== "standard-webhooks" && scheme !== "github") || typeof label !== "string") {
+      if (
+        (scheme !== "standard-webhooks" && scheme !== "github" && scheme !== "stripe") ||
+        typeof label !== "string"
+      ) {
         return undefined;
       }
       return { action, mode, scheme, label };
@@ -503,8 +514,15 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runCertificate(input, command.mode, command.acknowledgeTransparency);
     case "public":
       return await runPublic(input, command);
-    case "webhook":
-      return await runWebhook(input, command);
+    case "webhook": {
+      if (command.mode !== "secret") return await runWebhook(input, command);
+      const secret = await readOneLine(input.stdin);
+      if (secret === undefined || secret.trim() === "") {
+        input.stderr.write("No secret arrived on standard input.\n");
+        return 1;
+      }
+      return await runWebhookSecret(input, command.endpointId, secret.trim());
+    }
     case "visitor":
       return await runVisitor(input, command);
     case "relay":
@@ -695,9 +713,22 @@ async function runPublic(
   return 0;
 }
 
+async function runWebhookSecret(input: Input, endpointId: string, secret: string): Promise<number> {
+  const response = await post(input, "/api/desktop/hub/webhooks/secret", { endpointId, secret });
+  if (!isOk(response, "set")) {
+    return refusal(input, response, "Octant refused that secret.");
+  }
+  input.stdout.write(
+    field(response.body, "published") === true
+      ? "The endpoint takes Stripe's deliveries now.\n"
+      : "The secret is kept; the hub has not taken it yet, and this computer tries again shortly.\n",
+  );
+  return 0;
+}
+
 async function runWebhook(
   input: Input,
-  command: Extract<HubCliCommand, { action: "webhook" }>,
+  command: Exclude<Extract<HubCliCommand, { action: "webhook" }>, { mode: "secret" }>,
 ): Promise<number> {
   if (command.mode === "list") {
     const response = await input.session.send({ path: "/api/desktop/hub/status", method: "GET" });
@@ -735,6 +766,18 @@ async function runWebhook(
           label: command.label,
         })
       : await post(input, "/api/desktop/hub/webhooks/rotate", { endpointId: command.endpointId });
+  if (isOk(response, "awaiting-secret")) {
+    const endpointId = String(field(response.body, "endpointId"));
+    input.stdout.write(
+      [
+        `Path on your hub's public address  ${String(field(response.body, "path"))}`,
+        "Add the full URL as an endpoint in Stripe, then copy the signing secret Stripe shows and run:",
+        `  octant hub webhook secret ${endpointId}`,
+        "It reads the secret from standard input. The endpoint takes no delivery until then.",
+      ].join("\n") + "\n",
+    );
+    return 0;
+  }
   if (!isOk(response, "created")) {
     return refusal(input, response, "Octant refused to make the endpoint.");
   }

@@ -18,10 +18,14 @@ export type WebhookHeaders = Readonly<Record<string, string | undefined>>;
 export type WebhookHeaderReading =
   | {
       readonly status: "read";
-      readonly deliveryId: string;
+      /**
+       * Absent for Stripe, whose event id is inside the signed body and is
+       * read only once the signature passes ({@link stripeEventId}).
+       */
+      readonly deliveryId?: string;
       /** Present only for a scheme that signs a timestamp. */
       readonly timestampMs?: number;
-      /** The signatures to compare: base64 for Standard Webhooks, hex for GitHub. */
+      /** The signatures to compare: base64 for Standard Webhooks, hex for GitHub and Stripe. */
       readonly signatures: ReadonlyArray<string>;
       readonly event?: string;
     }
@@ -64,6 +68,20 @@ export function readWebhookHeaders(
       signatures,
     };
   }
+  if (scheme === "stripe") {
+    // `t=<seconds>,v1=<hex>[,v1=<hex>...]`; `v0` and any other scheme are ignored.
+    let timestamp: string | undefined;
+    const signatures: string[] = [];
+    for (const entry of (headers["stripe-signature"] ?? "").split(",")) {
+      const [name, value = ""] = entry.trim().split("=", 2);
+      if (name === "t" && timestamp === undefined) timestamp = value;
+      if (name === "v1" && /^[0-9a-f]{64}$/i.test(value)) signatures.push(value.toLowerCase());
+    }
+    if (timestamp === undefined || !/^\d{1,12}$/.test(timestamp) || signatures.length === 0) {
+      return MISSING;
+    }
+    return { status: "read", timestampMs: Number(timestamp) * 1000, signatures };
+  }
   const deliveryId = nonEmpty(headers["x-github-delivery"]);
   const header = headers["x-hub-signature-256"]?.trim() ?? "";
   const match = /^sha256=([0-9a-f]{64})$/i.exec(header);
@@ -78,18 +96,33 @@ export function readWebhookHeaders(
 }
 
 /**
+ * The event id of a Stripe delivery, from its body. Read only after the
+ * signature passed, so an unsigned body can never name a claim.
+ */
+export function stripeEventId(body: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || !("id" in parsed)) return undefined;
+  return typeof parsed.id === "string" ? nonEmpty(parsed.id) : undefined;
+}
+
+/**
  * The keys a spoke claims for one delivery. GitHub's delivery id is not under
  * its signature, so a captured body could come back under a fresh id; the body's
  * digest is a second key, and either one already claimed makes it a duplicate.
  */
 export function webhookDedupeKeys(
   input:
-    | { readonly scheme: "standard-webhooks"; readonly deliveryId: string }
+    | { readonly scheme: "standard-webhooks" | "stripe"; readonly deliveryId: string }
     | { readonly scheme: "github"; readonly deliveryId: string; readonly bodyDigest: string },
 ): ReadonlyArray<string> {
-  return input.scheme === "standard-webhooks"
-    ? [`id:${input.deliveryId}`]
-    : [`id:${input.deliveryId}`, `body:${input.bodyDigest}`];
+  return input.scheme === "github"
+    ? [`id:${input.deliveryId}`, `body:${input.bodyDigest}`]
+    : [`id:${input.deliveryId}`];
 }
 
 export type WebhookDeliveryDecision =

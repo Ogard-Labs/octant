@@ -40,6 +40,7 @@ import {
   decodeHubRelaySwitchRequest,
   decodeHubRelayDeviceRequest,
   decodeHubWebhookEndpointRequest,
+  decodeHubWebhookSecretRequest,
   decodeHubPushSwitchRequest,
   decodeHubSignInAsk,
   decodeHubSignInDecisionRequest,
@@ -151,6 +152,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   webhookCreate: "/api/desktop/hub/webhooks/create",
   webhookRotate: "/api/desktop/hub/webhooks/rotate",
   webhookRemove: "/api/desktop/hub/webhooks/remove",
+  /** The secret Stripe minted for one of this spoke's Stripe endpoints, pasted in a window on this host. */
+  webhookSecret: "/api/desktop/hub/webhooks/secret",
   /** The hub's visitor-link switch, and this spoke's links and their comments: only a window on this host changes them. */
   visitorSwitch: "/api/desktop/hub/visitors",
   visitorShare: "/api/desktop/hub/visitors/share",
@@ -213,7 +216,10 @@ export interface HubAdministrationRouteOptions {
   };
   /** The hub's webhook receipt and this host's own endpoints; absent, their routes answer unavailable. */
   readonly webhooks?: Pick<HubWebhookService, "status">;
-  readonly spokeWebhooks?: Pick<SpokeWebhookService, "view" | "create" | "rotate" | "remove">;
+  readonly spokeWebhooks?: Pick<
+    SpokeWebhookService,
+    "view" | "create" | "rotate" | "remove" | "setSecret"
+  >;
   /** The hub's visitor links and this host's own; absent, their routes answer unavailable. */
   readonly visitors?: Pick<HubVisitorService, "status" | "setEnabled">;
   readonly spokeVisitors?: Pick<SpokeVisitorService, "view" | "share" | "stop" | "decideComment">;
@@ -507,6 +513,13 @@ export function createHubAdministrationRouteHandler(
           const value = decodeHubWebhookCreateRequest(parseJson(request, body.text));
           if (options.spokeWebhooks === undefined) return failure("unavailable", 503);
           return outcome(await options.spokeWebhooks.create(value));
+        }
+        case HUB_ADMINISTRATION_ROUTES.webhookSecret: {
+          const value = decodeHubWebhookSecretRequest(parseJson(request, body.text));
+          if (options.spokeWebhooks === undefined) return failure("unavailable", 503);
+          return outcome(
+            await options.spokeWebhooks.setSecret(String(value.endpointId), value.secret),
+          );
         }
         case HUB_ADMINISTRATION_ROUTES.webhookRotate:
         case HUB_ADMINISTRATION_ROUTES.webhookRemove: {

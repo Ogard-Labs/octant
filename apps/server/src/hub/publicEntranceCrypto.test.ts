@@ -9,6 +9,7 @@ import {
   mintWebhookSecret,
   openWebhookSecret,
   sealWebhookSecret,
+  verifiedWebhookDelivery,
   verifyWebhookSignature,
   visitorLinkSecretHash,
 } from "./publicEntranceCrypto";
@@ -159,6 +160,54 @@ describe("webhook signatures", () => {
     expect(
       verifyWebhookSignature({ scheme: "github", secret: mintWebhookSecret(), reading, body }),
     ).toBe(false);
+  });
+});
+
+describe("Stripe webhook signatures", () => {
+  const secret = "whsec_test0123456789abcdefABCDEF";
+  const body = Buffer.from('{"id":"evt_1","type":"invoice.paid"}');
+  const sign = (text: Buffer, t = "1800000000") =>
+    createHmac("sha256", secret).update(`${t}.`).update(text).digest("hex");
+  const reading = (signatures: ReadonlyArray<string>) =>
+    ({ status: "read", timestampMs: 1_800_000_000_000, signatures }) as const;
+
+  it("passes a delivery when any v1 signature matches, and names it by the event id in its body", () => {
+    expect(
+      verifiedWebhookDelivery({
+        scheme: "stripe",
+        secret,
+        reading: reading(["0".repeat(64), sign(body)]),
+        body,
+      }),
+    ).toEqual({ deliveryId: "evt_1", keys: ["id:evt_1"] });
+  });
+
+  it("refuses a mismatched signature, one over another timestamp, and a signed body with no event id", () => {
+    expect(
+      verifiedWebhookDelivery({
+        scheme: "stripe",
+        secret,
+        reading: reading(["0".repeat(64)]),
+        body,
+      }),
+    ).toBeUndefined();
+    expect(
+      verifiedWebhookDelivery({
+        scheme: "stripe",
+        secret,
+        reading: reading([sign(body, "1800000001")]),
+        body,
+      }),
+    ).toBeUndefined();
+    const noId = Buffer.from('{"type":"invoice.paid"}');
+    expect(
+      verifiedWebhookDelivery({
+        scheme: "stripe",
+        secret,
+        reading: reading([sign(noId)]),
+        body: noId,
+      }),
+    ).toBeUndefined();
   });
 });
 

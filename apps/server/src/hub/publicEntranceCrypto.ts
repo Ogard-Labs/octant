@@ -21,8 +21,10 @@ import type {
 } from "@octant/contracts";
 import {
   decideVisitorLink,
+  stripeEventId,
   visitorLinkSecretHashInput,
   visitorLinkSigningPayload,
+  webhookDedupeKeys,
   type VisitorLinkDecision,
   type WebhookHeaderReading,
 } from "@octant/domain";
@@ -108,7 +110,7 @@ const STANDARD_WEBHOOKS_PREFIX = "whsec_";
 
 /**
  * A new endpoint secret. Standard Webhooks senders expect `whsec_` and base64;
- * GitHub takes any text, so one form serves both.
+ * GitHub takes any text, so one form serves both. Stripe mints its own.
  */
 export function mintWebhookSecret(): string {
   return `${STANDARD_WEBHOOKS_PREFIX}${randomBytes(32).toString("base64")}`;
@@ -133,17 +135,55 @@ export function verifyWebhookSignature(input: {
   if (input.scheme === "standard-webhooks") {
     const seconds = Math.floor((input.reading.timestampMs ?? 0) / 1000);
     const expected = createHmac("sha256", standardWebhooksKey(input.secret))
-      .update(`${input.reading.deliveryId}.${seconds}.`)
+      .update(`${input.reading.deliveryId ?? ""}.${seconds}.`)
       .update(input.body)
       .digest();
     return input.reading.signatures.some((presented) =>
       sameBytes(Buffer.from(presented, "base64"), expected),
     );
   }
-  const expected = createHmac("sha256", input.secret).update(input.body).digest();
+  // Stripe signs `<t>.<raw body>` with its whole `whsec_` secret as the key.
+  const hmac = createHmac("sha256", input.secret);
+  if (input.scheme === "stripe") {
+    hmac.update(`${Math.floor((input.reading.timestampMs ?? 0) / 1000)}.`);
+  }
+  const expected = hmac.update(input.body).digest();
   return input.reading.signatures.some((presented) =>
     sameBytes(Buffer.from(presented, "hex"), expected),
   );
+}
+
+/**
+ * A delivery whose signature passed, with the sender's id for it and the
+ * keys a duplicate is judged by; undefined when the signature does not pass.
+ * Stripe's id is read from the body only here, after its signature passed,
+ * and a signed Stripe body with no event id is no Stripe event.
+ */
+export function verifiedWebhookDelivery(input: {
+  readonly scheme: WebhookSignatureScheme;
+  readonly secret: string;
+  readonly reading: Extract<WebhookHeaderReading, { status: "read" }>;
+  readonly body: Uint8Array;
+}): { readonly deliveryId: string; readonly keys: ReadonlyArray<string> } | undefined {
+  if (!verifyWebhookSignature(input)) return undefined;
+  if (input.scheme === "stripe") {
+    const deliveryId = stripeEventId(Buffer.from(input.body).toString("utf8"));
+    if (deliveryId === undefined) return undefined;
+    return { deliveryId, keys: webhookDedupeKeys({ scheme: "stripe", deliveryId }) };
+  }
+  const deliveryId = input.reading.deliveryId;
+  if (deliveryId === undefined) return undefined;
+  return {
+    deliveryId,
+    keys:
+      input.scheme === "github"
+        ? webhookDedupeKeys({
+            scheme: "github",
+            deliveryId,
+            bodyDigest: webhookBodyDigest(input.body),
+          })
+        : webhookDedupeKeys({ scheme: "standard-webhooks", deliveryId }),
+  };
 }
 
 /** SHA-256 of a body as lowercase hex: GitHub's second dedupe key. */

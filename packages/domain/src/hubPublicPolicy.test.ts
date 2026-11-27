@@ -5,6 +5,7 @@ import {
   decideWebhookDelivery,
   readWebhookHeaders,
   redactForVisitor,
+  stripeEventId,
   visitorLinkSigningPayload,
   webhookDedupeKeys,
 } from "./hubPublicPolicy";
@@ -60,6 +61,76 @@ describe("webhook headers", () => {
         "x-github-delivery": "guid",
       }),
     ).toEqual({ status: "refused", kind: "missing-signature" });
+  });
+});
+
+describe("Stripe webhook headers", () => {
+  it("reads a Stripe delivery's timestamp and every v1 signature, ignoring v0", () => {
+    const one = "a".repeat(64);
+    const two = "B".repeat(64);
+    expect(
+      readWebhookHeaders("stripe", {
+        "stripe-signature": `t=${seconds(NOW)},v1=${one},v0=${"c".repeat(64)},v1=${two}`,
+      }),
+    ).toEqual({
+      status: "read",
+      timestampMs: Math.floor(NOW / 1000) * 1000,
+      signatures: [one, two.toLowerCase()],
+    });
+  });
+
+  it("refuses a Stripe delivery with no timestamp or no v1 signature", () => {
+    expect(readWebhookHeaders("stripe", { "stripe-signature": `v1=${"a".repeat(64)}` })).toEqual({
+      status: "refused",
+      kind: "missing-signature",
+    });
+    expect(
+      readWebhookHeaders("stripe", {
+        "stripe-signature": `t=${seconds(NOW)},v0=${"a".repeat(64)}`,
+      }),
+    ).toEqual({ status: "refused", kind: "missing-signature" });
+    expect(readWebhookHeaders("stripe", {})).toEqual({
+      status: "refused",
+      kind: "missing-signature",
+    });
+  });
+
+  it("names a Stripe delivery by the event id in its body", () => {
+    expect(stripeEventId('{"id":"evt_1","type":"invoice.paid"}')).toBe("evt_1");
+    expect(stripeEventId('{"type":"invoice.paid"}')).toBeUndefined();
+    expect(stripeEventId("not json")).toBeUndefined();
+    expect(stripeEventId(`{"id":"${"e".repeat(257)}"}`)).toBeUndefined();
+  });
+
+  it("a Stripe delivery signed more than five minutes ago is refused", () => {
+    const read = readWebhookHeaders("stripe", {
+      "stripe-signature": `t=${seconds(NOW - 5 * 60_000 - 1_000)},v1=${"a".repeat(64)}`,
+    });
+    if (read.status !== "read") throw new Error(read.kind);
+    expect(
+      decideWebhookDelivery({
+        endpointEnabled: true,
+        signatureMatches: true,
+        ...(read.timestampMs === undefined ? {} : { timestampMs: read.timestampMs }),
+        nowMs: NOW,
+        dedupeKeys: webhookDedupeKeys({ scheme: "stripe", deliveryId: "evt_1" }),
+        claimed: () => false,
+      }),
+    ).toEqual({ status: "refused", kind: "stale-timestamp" });
+  });
+
+  it("a redelivered Stripe event starts no second run", () => {
+    const claimedKeys = new Set(webhookDedupeKeys({ scheme: "stripe", deliveryId: "evt_1" }));
+    expect(
+      decideWebhookDelivery({
+        endpointEnabled: true,
+        signatureMatches: true,
+        timestampMs: NOW,
+        nowMs: NOW,
+        dedupeKeys: webhookDedupeKeys({ scheme: "stripe", deliveryId: "evt_1" }),
+        claimed: (key) => claimedKeys.has(key),
+      }),
+    ).toEqual({ status: "duplicate" });
   });
 });
 

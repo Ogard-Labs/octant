@@ -1069,8 +1069,10 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "hub wake on|off" },
   { octant: "hub push on|off" },
   { octant: "hub public on [--port 443|10000] [--own-front] | off | status | standby on|off" },
-  { octant: "hub webhook create [--scheme standard-webhooks|github] [--label <name>] | list" },
-  { octant: "hub webhook rotate|remove <endpoint-id>" },
+  {
+    octant: "hub webhook create [--scheme standard-webhooks|github|stripe] [--label <name>] | list",
+  },
+  { octant: "hub webhook rotate|remove|secret <endpoint-id>" },
   { octant: "hub visitor on|off|list" },
   { octant: "hub visitor share code|chat <thread-id> [--comment] [--hours <1-168>]" },
   { octant: "hub visitor stop <link-id> | send|dismiss <comment-id>" },

@@ -90,10 +90,11 @@ export type WebhookEndpointId = typeof WebhookEndpointId.Type;
 
 /**
  * How a sender signs. Standard Webhooks signs an id and a timestamp with the
- * body; GitHub signs the body alone. Stripe's format comes later (maintainer
- * decision, 2026-11-26).
+ * body; GitHub signs the body alone; Stripe signs a timestamp with the body
+ * and puts the event id inside it. Stripe mints its own secret, so a Stripe
+ * endpoint's secret is pasted in rather than minted.
  */
-export const WebhookSignatureScheme = Schema.Literal("standard-webhooks", "github");
+export const WebhookSignatureScheme = Schema.Literal("standard-webhooks", "github", "stripe");
 export type WebhookSignatureScheme = typeof WebhookSignatureScheme.Type;
 
 export const WEBHOOK_TIMESTAMP_WINDOW_MS = 5 * 60 * 1000;
@@ -143,6 +144,7 @@ export const WEBHOOK_FORWARDED_HEADERS = [
   "x-hub-signature-256",
   "x-github-delivery",
   "x-github-event",
+  "stripe-signature",
   "content-type",
 ] as const;
 
@@ -322,6 +324,13 @@ export const HubWebhookCreateRequest = Schema.Struct({
   label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
 }).annotations(strict);
 export const decodeHubWebhookCreateRequest = Schema.decodeUnknownSync(HubWebhookCreateRequest);
+
+/** A window on a spoke pastes the secret Stripe minted for one of its Stripe endpoints. */
+export const HubWebhookSecretRequest = Schema.Struct({
+  endpointId: WebhookEndpointId,
+  secret: Schema.String.pipe(Schema.maxLength(256)),
+}).annotations(strict);
+export const decodeHubWebhookSecretRequest = Schema.decodeUnknownSync(HubWebhookSecretRequest);
 
 /** A window on a spoke rotates or removes one of its endpoints. */
 export const HubWebhookEndpointRequest = Schema.Struct({

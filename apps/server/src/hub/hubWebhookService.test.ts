@@ -146,6 +146,98 @@ function delivery(input: {
   };
 }
 
+const STRIPE_ENDPOINT = "SSSSSSSSSSSSSSSSSSSSSS" as WebhookEndpointId;
+const STRIPE_SECRET = "whsec_stripeTestSecret0123456789";
+
+/** The hub with one Stripe endpoint whose secret Stripe minted. */
+function stripeSetup() {
+  const context = setup({ forward: "unreachable" });
+  const key = context.service.sealingKey();
+  context.service.receiveEndpoints(SPOKE, {
+    endpoints: [
+      {
+        endpointId: STRIPE_ENDPOINT,
+        spokeMemberId: SPOKE,
+        scheme: "stripe",
+        sealedSecrets: [
+          sealWebhookSecret({
+            secret: STRIPE_SECRET,
+            endpointId: STRIPE_ENDPOINT,
+            recipientMemberId: HUB as HubMemberId,
+            recipientPublicKey: key.sealingPublicKey,
+          }),
+        ],
+      },
+    ],
+  });
+  return context;
+}
+
+function stripeDelivery(input: {
+  readonly eventId: string;
+  readonly timestampMs: number;
+  readonly secret?: string;
+}): PublicRequest {
+  const body = Buffer.from(JSON.stringify({ id: input.eventId, type: "invoice.paid" }));
+  const seconds = Math.floor(input.timestampMs / 1000);
+  const signature = createHmac("sha256", input.secret ?? STRIPE_SECRET)
+    .update(`${seconds}.`)
+    .update(body)
+    .digest("hex");
+  return {
+    route: "webhook",
+    params: { id: STRIPE_ENDPOINT },
+    method: "POST",
+    path: `/hooks/${STRIPE_ENDPOINT}`,
+    headers: new Map([
+      ["stripe-signature", `t=${seconds},v1=${signature}`],
+      ["content-type", "application/json"],
+    ]),
+    principal: { kind: "webhook", endpointId: STRIPE_ENDPOINT },
+    readBody: async (maxBytes) =>
+      body.length > maxBytes ? { status: "too-large" } : { status: "read", bytes: body },
+    signal: new AbortController().signal,
+  };
+}
+
+describe("Stripe deliveries on the hub", () => {
+  it("queues a Stripe-signed delivery under its event id", async () => {
+    const { service } = stripeSetup();
+    const answer = await service.handle(stripeDelivery({ eventId: "evt_1", timestampMs: NOW }));
+    expect(answer.status).toBe(202);
+    expect(service.status().queued).toBe(1);
+  });
+
+  it("refuses a Stripe delivery signed more than five minutes ago", async () => {
+    const { service } = stripeSetup();
+    const answer = await service.handle(
+      stripeDelivery({ eventId: "evt_1", timestampMs: NOW - 5 * 60_000 - 1_000 }),
+    );
+    expect(answer.status).toBe(400);
+    expect(service.status().queued).toBe(0);
+  });
+
+  it("refuses a Stripe delivery signed with another secret", async () => {
+    const { service } = stripeSetup();
+    const answer = await service.handle(
+      stripeDelivery({ eventId: "evt_1", timestampMs: NOW, secret: "whsec_someoneElse" }),
+    );
+    expect(answer.status).toBe(401);
+    expect(service.status().queued).toBe(0);
+  });
+
+  it("a redelivered Stripe event starts no second run", async () => {
+    const { service } = stripeSetup();
+    await service.handle(stripeDelivery({ eventId: "evt_1", timestampMs: NOW }));
+    const again = await service.handle(
+      stripeDelivery({ eventId: "evt_1", timestampMs: NOW + 1_000 }),
+    );
+    expect(again.status).toBe(200);
+    expect(again.body).toBe('{"duplicate":true}');
+    expect(service.status().queued).toBe(1);
+  });
+});
+
 describe("webhook receipt on the hub", () => {
   it("queues a signed delivery and answers 202", async () => {
     const { service, secret } = setup({ forward: "unreachable" });

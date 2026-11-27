@@ -465,7 +465,8 @@ export const HubWebhookHubState = Schema.Struct({
 export const SpokeWebhookEndpoint = Schema.Struct({
   endpointId: WebhookEndpointId,
   scheme: WebhookSignatureScheme,
-  secret: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  /** Absent only for a Stripe endpoint whose person has not pasted Stripe's secret yet. */
+  secret: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))),
   label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
   createdAt: Schema.Int.pipe(Schema.nonNegative()),
   /** The ids this endpoint replaced by rotation, so a routine that names one still reads it. */

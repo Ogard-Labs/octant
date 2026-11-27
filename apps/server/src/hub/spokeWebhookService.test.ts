@@ -385,6 +385,104 @@ describe("webhook deliveries on the spoke", () => {
   });
 });
 
+describe("Stripe endpoints on the spoke", () => {
+  const STRIPE_SECRET = "whsec_stripeTestSecret0123456789";
+
+  function stripeEnvelope(input: {
+    readonly endpointId: string;
+    readonly eventId: string;
+    readonly receivedAt: number;
+    readonly secret?: string;
+  }): WebhookDeliveryEnvelope {
+    const body = JSON.stringify({ id: input.eventId, type: "invoice.paid" });
+    const seconds = Math.floor(input.receivedAt / 1000);
+    const signature = createHmac("sha256", input.secret ?? STRIPE_SECRET)
+      .update(`${seconds}.${body}`)
+      .digest("hex");
+    return {
+      endpointId: input.endpointId as WebhookEndpointId,
+      deliveryId: input.eventId,
+      receivedAt: input.receivedAt,
+      headers: { "stripe-signature": `t=${seconds},v1=${signature}` },
+      body: Buffer.from(body).toString("base64"),
+    };
+  }
+
+  function recordingHub() {
+    const sent: Array<ReadonlyArray<string>> = [];
+    const key = makeSealingKeyPair();
+    const hub: SpokeWebhookHubPort = {
+      targets: () => [{ memberId: HUB_ID, fingerprint: publicKeyFingerprint(SIGNER.publicKey) }],
+      sealingKey: async () => SIGNER.sealingKey(key.publicKey),
+      sendEndpoints: async (_memberId, update) => {
+        sent.push(update.endpoints.map((endpoint) => String(endpoint.endpointId)));
+        return true;
+      },
+    };
+    return { hub, sent };
+  }
+
+  it("hands the hub a Stripe endpoint only once its person has pasted Stripe's secret", async () => {
+    const { hub, sent } = recordingHub();
+    const { service } = setup(true, { hub });
+    const created = await service.create({ scheme: "stripe", label: "Payments" });
+    if (created.status !== "awaiting-secret") throw new Error(created.status);
+    expect(created).not.toHaveProperty("secret");
+    expect(sent.at(-1)).toEqual([]);
+    expect(
+      service.receive(
+        stripeEnvelope({ endpointId: created.endpointId, eventId: "evt_1", receivedAt: NOW }),
+      ),
+    ).toEqual({ status: "refused", kind: "unknown-endpoint" });
+    expect(await service.setSecret(created.endpointId, STRIPE_SECRET)).toEqual({
+      status: "set",
+      published: true,
+    });
+    expect(sent.at(-1)).toEqual([created.endpointId]);
+  });
+
+  it("a Stripe delivery starts its routine once, and a redelivered event is a duplicate", async () => {
+    const { service } = setup();
+    const created = await service.create({ scheme: "stripe", label: "Payments" });
+    if (created.status !== "awaiting-secret") throw new Error(created.status);
+    await service.setSecret(created.endpointId, STRIPE_SECRET);
+    const delivery = stripeEnvelope({
+      endpointId: created.endpointId,
+      eventId: "evt_1",
+      receivedAt: NOW,
+    });
+    expect(service.receive(delivery)).toEqual({ status: "accepted" });
+    expect(service.receive(delivery)).toEqual({ status: "duplicate" });
+    expect(
+      service.receive(
+        stripeEnvelope({
+          endpointId: created.endpointId,
+          eventId: "evt_2",
+          receivedAt: NOW,
+          secret: "whsec_someoneElse",
+        }),
+      ),
+    ).toEqual({ status: "refused", kind: "bad-signature" });
+    expect((await readEvents(service, created.endpointId)).events).toHaveLength(1);
+  });
+
+  it("takes a pasted secret only for a Stripe endpoint, and only in Stripe's shape", async () => {
+    const { service } = setup();
+    const github = await service.create({ scheme: "github", label: "Pushes" });
+    if (github.status !== "created") throw new Error(github.status);
+    expect(await service.setSecret(github.endpointId, STRIPE_SECRET)).toEqual({
+      status: "refused",
+      kind: "secret-not-pasted",
+    });
+    const stripe = await service.create({ scheme: "stripe", label: "Payments" });
+    if (stripe.status !== "awaiting-secret") throw new Error(stripe.status);
+    expect(await service.setSecret(stripe.endpointId, "not a stripe secret")).toEqual({
+      status: "refused",
+      kind: "invalid-secret",
+    });
+  });
+});
+
 describe("copies on a standby", () => {
   const SPOKE = "33333333-3333-4333-8333-333333333333";
   const HUB = "11111111-1111-4111-8111-111111111111";
