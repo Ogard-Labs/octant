@@ -145,9 +145,9 @@ describe("GithubCatalogueService", () => {
 
     await catalogue.read({ kind: "recent-repositories" }, abandoned.signal);
 
-    await expect(
-      catalogue.read({ kind: "recent-repositories" }, signal()),
-    ).resolves.toMatchObject({ rows: [{ nodeId: observationRow.nodeId }] });
+    await expect(catalogue.read({ kind: "recent-repositories" }, signal())).resolves.toMatchObject({
+      rows: [{ nodeId: observationRow.nodeId }],
+    });
   });
 
   it("passes the closed reason to GitHub and never serves one reason's page for another", async () => {
