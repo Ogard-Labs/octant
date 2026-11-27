@@ -301,7 +301,10 @@ export type PublicEntranceBind =
   | { readonly kind: "tailnet"; readonly address: string }
   | {
       readonly kind: "refused";
-      readonly reason: "no-tailnet-address" | "no-tailnet-certificate";
+      readonly reason:
+        | "no-tailnet-address"
+        | "no-tailnet-certificate"
+        | "no-front-in-address-family";
     };
 
 /**
@@ -309,7 +312,9 @@ export type PublicEntranceBind =
  * on the same machine. With fronts listed, on the hub's own Tailscale address
  * with its Tailscale certificate, and nowhere else: an address that is not a
  * Tailscale one (a wildcard, LAN or public address) refuses the bind rather
- * than fall back to it.
+ * than fall back to it. A listener on an IPv4 address takes no IPv6 peer and
+ * the reverse, so a list with no front of the bound address's family, which
+ * would admit nothing, is refused too.
  */
 export function decidePublicEntranceBind(input: {
   readonly fronts: ReadonlyArray<string>;
@@ -322,5 +327,9 @@ export function decidePublicEntranceBind(input: {
     return { kind: "refused", reason: "no-tailnet-address" };
   }
   if (!input.certificate) return { kind: "refused", reason: "no-tailnet-certificate" };
+  const ipv6 = address.includes(":");
+  if (!input.fronts.some((front) => front.includes(":") === ipv6)) {
+    return { kind: "refused", reason: "no-front-in-address-family" };
+  }
   return { kind: "tailnet", address };
 }

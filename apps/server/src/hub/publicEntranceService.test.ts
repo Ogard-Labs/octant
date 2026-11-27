@@ -286,6 +286,17 @@ describe("a front on another machine", () => {
     }
   });
 
+  it("refuses a front list of IPv6 addresses only while the hub binds its IPv4 one", async () => {
+    const { service } = setup({ tailnet: { address: "100.90.1.2", certificate: true } });
+    await service.setEnabled(true, WINDOW);
+    expect(await service.setFronts(["fd7a:115c:a1e0::1"], WINDOW)).toEqual({
+      status: "refused",
+      kind: "no-front-in-address-family",
+    });
+    expect(service.status().fronts).toEqual([]);
+    expect(await health(service)).toBe(200);
+  });
+
   it("a front list the host cannot bind for is refused, and the loopback entrance keeps serving", async () => {
     const { service } = setup({ tailnet: { address: "192.168.1.20", certificate: true } });
     await service.setEnabled(true, WINDOW);

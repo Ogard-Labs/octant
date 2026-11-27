@@ -72,6 +72,7 @@ export type PublicFrontsOutcome =
         | "funnel-on"
         | "no-tailnet-address"
         | "no-tailnet-certificate"
+        | "no-front-in-address-family"
         | "listener-failed";
     };
 
@@ -140,7 +141,11 @@ export class PublicEntranceService {
   /** Where the open listener is bound and whom it admits, so a changed list rebinds it. */
   #bound: { readonly key: string; readonly origin: string } | undefined;
   /** Why the last look could not bind for listed fronts. */
-  #bindRefusal: "no-tailnet-address" | "no-tailnet-certificate" | undefined;
+  #bindRefusal:
+    | "no-tailnet-address"
+    | "no-tailnet-certificate"
+    | "no-front-in-address-family"
+    | undefined;
 
   constructor(options: PublicEntranceServiceOptions) {
     this.#options = options;

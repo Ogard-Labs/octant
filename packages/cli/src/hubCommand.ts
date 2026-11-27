@@ -1693,6 +1693,8 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "funnel-off-failed":
     "Tailscale did not turn Funnel off. Run `tailscale funnel --https=<port> off` yourself, with the port `octant hub public status` shows.",
   "listener-failed": "The public entrance could not open a port on this computer.",
+  "no-front-in-address-family":
+    "None of those fronts can reach the entrance: it listens on this computer's IPv4 Tailscale address when it has one, otherwise its IPv6 one. List a front of the same kind.",
   "public-not-granted":
     "This computer's hub grant does not tick Public. Tick it with `octant hub grant --items` first.",
   "unknown-endpoint": "This computer has no endpoint with that id.",

@@ -425,4 +425,28 @@ describe("a front on another machine", () => {
       }),
     ).toEqual({ kind: "refused", reason: "no-tailnet-certificate" });
   });
+
+  it("refuses a front list none of whose addresses can reach the bound address's family", () => {
+    expect(
+      decidePublicEntranceBind({
+        fronts: ["fd7a:115c:a1e0::1"],
+        tailnetAddress: "100.90.1.2",
+        certificate: true,
+      }),
+    ).toEqual({ kind: "refused", reason: "no-front-in-address-family" });
+    expect(
+      decidePublicEntranceBind({
+        fronts: ["100.101.102.103"],
+        tailnetAddress: "fd7a:115c:a1e0::2",
+        certificate: true,
+      }),
+    ).toEqual({ kind: "refused", reason: "no-front-in-address-family" });
+    expect(
+      decidePublicEntranceBind({
+        fronts: ["fd7a:115c:a1e0::1", "100.101.102.103"],
+        tailnetAddress: "100.90.1.2",
+        certificate: true,
+      }),
+    ).toEqual({ kind: "tailnet", address: "100.90.1.2" });
+  });
 });

@@ -1048,6 +1048,18 @@ describe("octant hub public", () => {
     );
   });
 
+  it("says a front list cannot reach the address family this computer listens on", async () => {
+    const host = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "no-front-in-address-family" },
+    }));
+    expect(
+      await host.run({ action: "public", mode: "fronts", addresses: ["fd7a:115c:a1e0::1"] }),
+    ).toBe(1);
+    expect(host.errors()).toContain("IPv4");
+    expect(host.errors()).toContain("(no-front-in-address-family)");
+  });
+
   it("reads on, off and status with a Funnel port or the person's own front", () => {
     expect(resolveHubCliCommand(["public", "on"], {})).toEqual({
       action: "public",

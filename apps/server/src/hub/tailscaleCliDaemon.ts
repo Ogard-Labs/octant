@@ -134,7 +134,8 @@ export function createTailscaleCliDaemon(options: TailscaleCliDaemonOptions): Ta
 
 /**
  * This machine's own Tailscale address, from `tailscale status --json`: the
- * IPv4 one when it has one, which every front can reach. Undefined when the
+ * IPv4 one when it has one; a front list must hold one front of the family
+ * bound, or the bind is refused. Undefined when the
  * tool cannot run or lists none; the caller still checks it is a Tailscale
  * address before it binds.
  */
