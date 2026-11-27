@@ -132,6 +132,31 @@ export function createTailscaleCliDaemon(options: TailscaleCliDaemonOptions): Ta
   };
 }
 
+/** `tailscale status --json` through the first binary that starts. */
+async function readStatus(input: {
+  readonly exec: TailscaleExec;
+  readonly platform: NodeJS.Platform;
+}): Promise<TailscaleExecResult> {
+  let status: TailscaleExecResult = { exitCode: null, stdout: "", stderr: "" };
+  for (const file of tailscaleBinaryCandidates(input.platform)) {
+    status = await input.exec(file, ["status", "--json"]);
+    if (status.exitCode !== null) break;
+  }
+  return status;
+}
+
+/**
+ * This machine's own tailnet name, the one Funnel serves, from
+ * `tailscale status --json`. Undefined when the tool cannot run or lists none.
+ */
+export async function readTailscaleName(input: {
+  readonly exec: TailscaleExec;
+  readonly platform: NodeJS.Platform;
+}): Promise<string | undefined> {
+  const status = await readStatus(input);
+  return status.exitCode === 0 ? selfDnsName(status.stdout).name : undefined;
+}
+
 /**
  * This machine's own Tailscale address, from `tailscale status --json`: the
  * IPv4 one when it has one; a front list must hold one front of the family
@@ -143,11 +168,7 @@ export async function readTailscaleAddress(input: {
   readonly exec: TailscaleExec;
   readonly platform: NodeJS.Platform;
 }): Promise<string | undefined> {
-  let status: TailscaleExecResult = { exitCode: null, stdout: "", stderr: "" };
-  for (const file of tailscaleBinaryCandidates(input.platform)) {
-    status = await input.exec(file, ["status", "--json"]);
-    if (status.exitCode !== null) break;
-  }
+  const status = await readStatus(input);
   if (status.exitCode !== 0) return undefined;
   try {
     const parsed: unknown = JSON.parse(status.stdout);

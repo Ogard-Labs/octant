@@ -85,10 +85,16 @@ function refuseUpgrade(socket: Duplex, status: string): void {
 /**
  * The relay address this host hands its spokes while it serves as the hub:
  * the public address the person typed for their own front, or else its
- * Funnel front on its own tailnet name. Undefined while the relay switch or
- * the entrance is off, or the address is not known.
+ * Funnel front on its own tailnet name, as the local Tailscale daemon reports
+ * it (`funnelName`). The roster's private names stand in until that is read; a
+ * listener bound to an IP address has none. Undefined while the relay switch
+ * or the entrance is off, or the address is not known.
  */
-export function hubRelayAddress(state: HubState, hubMemberId: string): RelayAddress | undefined {
+export function hubRelayAddress(
+  state: HubState,
+  hubMemberId: string,
+  funnelName?: string,
+): RelayAddress | undefined {
   const entrance = state.publicEntrance;
   if (state.hub?.enabled !== true || state.relayHub?.enabled !== true) return undefined;
   if (entrance?.enabled !== true) return undefined;
@@ -97,7 +103,9 @@ export function hubRelayAddress(state: HubState, hubMemberId: string): RelayAddr
     const self = state.hub.roster?.roster.members.find(
       (member) => String(member.memberId) === hubMemberId,
     );
-    const name = self?.privateNames.find((candidate) => candidate.endsWith(".ts.net"));
+    const name = [funnelName, ...(self?.privateNames ?? [])].find((candidate) =>
+      candidate?.endsWith(".ts.net"),
+    );
     if (name !== undefined) {
       origin =
         entrance.funnel.port === 443

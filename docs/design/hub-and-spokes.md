@@ -3330,7 +3330,11 @@ between hosts on loopback; what is not built is listed below.
   own public address: the address the person typed for their own front
   (`octant hub public address <https-url>`, taken only as an `https:` origin
   with a DNS name), or else its Funnel front on its own tailnet name and
-  port. While its relay switch and entrance are on, the hub names
+  port. The hub reads that name from the local Tailscale daemon
+  (`tailscale status`) while Funnel and its relay switch are on, at most once
+  a minute, because a private listener bound to an IP address has no name in
+  the roster. Reading it changes nothing in Tailscale, and a standby standing
+  in never does it. While its relay switch and entrance are on, the hub names
   `{ hubMemberId, relayUrl }` in its answer to each host's relay device list,
   over the signed, pinned hub link, and a host sends that list again every ten
   minutes. A spoke and a device take only a `wss:` relay address. Each host answers its own paired devices on the authenticated

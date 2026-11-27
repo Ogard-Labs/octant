@@ -206,7 +206,14 @@ describe("the hub's device relay", () => {
 
 describe("the relay address a hub hands its hosts", () => {
   /** A hub whose own roster entry has the tailnet name, with its relay and entrance as given. */
-  function hubState(entrance: HubState["publicEntrance"], relayOn = true): HubState {
+  function hubState(
+    entrance: HubState["publicEntrance"],
+    relayOn = true,
+    listener: { readonly privateNames: string[]; readonly addresses: string[] } = {
+      privateNames: ["mac-mini.tail1234.ts.net"],
+      addresses: [],
+    },
+  ): HubState {
     return decodeHubState({
       hub: {
         enabled: true,
@@ -222,8 +229,7 @@ describe("the relay address a hub hands its hosts", () => {
                 role: "hub",
                 identityKeyFingerprint: "f".repeat(64),
                 listenerPin: "e".repeat(64),
-                privateNames: ["mac-mini.tail1234.ts.net"],
-                addresses: [],
+                ...listener,
                 owner: false,
               },
             ],
@@ -247,6 +253,28 @@ describe("the relay address a hub hands its hosts", () => {
     expect(
       hubRelayAddress(hubState({ enabled: true, funnel: { port: 10000 } }), HUB)?.relayUrl,
     ).toBe("wss://mac-mini.tail1234.ts.net:10000/relay/v1");
+  });
+
+  it("names its Funnel front when its private listener is bound to an IP address only", () => {
+    const state = hubState({ enabled: true, funnel: { port: 8443 } }, true, {
+      privateNames: [],
+      addresses: ["100.101.104.1"],
+    });
+    expect(hubRelayAddress(state, HUB)).toBeUndefined();
+    expect(hubRelayAddress(state, HUB, "mac-mini.tail1234.ts.net")?.relayUrl).toBe(
+      "wss://mac-mini.tail1234.ts.net:8443/relay/v1",
+    );
+    expect(
+      hubRelayAddress(
+        hubState(
+          { enabled: true, funnel: { port: 443 }, ownFrontOrigin: "https://octant.example.com" },
+          true,
+          { privateNames: [], addresses: ["100.101.104.1"] },
+        ),
+        HUB,
+        "mac-mini.tail1234.ts.net",
+      )?.relayUrl,
+    ).toBe("wss://octant.example.com/relay/v1");
   });
 
   it("names the address the person typed for their own front over Funnel", () => {

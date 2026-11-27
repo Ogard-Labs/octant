@@ -1546,7 +1546,11 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
     address: () =>
       hubService.status().enabled
-        ? hubRelayAddress(hubStateStore.load(), hubService.hubMemberId())
+        ? hubRelayAddress(
+            hubStateStore.load(),
+            hubService.hubMemberId(),
+            publicEntrance.funnelName(),
+          )
         : undefined,
   });
   const spokeRelay = new SpokeRelayService({
@@ -1652,6 +1656,7 @@ export function wireRemote(deps: RemoteDependencies) {
       .then((open) => {
         if (!open) hubRelay.closeAll();
         hubRelay.sweep();
+        return publicEntrance.refreshFunnelName();
       })
       .catch(() => undefined);
   };
