@@ -164,6 +164,12 @@ export class SpokeVisitorService {
   /** The hub that took the last list; a promoted hub holds none of it yet. */
   #publishedTo: string | undefined;
   #publishedRecipients: string | undefined;
+  /**
+   * The public origin the hub last named in its answer, which new links are put
+   * behind. Held in memory only: an older build reads the saved state strictly
+   * and would drop all of it on rollback, and each grant list sent names it again.
+   */
+  #hubAddress: { readonly memberId: string; readonly origin: string } | undefined;
 
   constructor(options: SpokeVisitorServiceOptions) {
     this.#options = options;
@@ -405,25 +411,17 @@ export class SpokeVisitorService {
   /** Keeps what the followed hub said of its address; without Public nothing is kept. */
   #keepHubOrigin(granted: boolean, answered: SpokeVisitorSendOutcome["hub"]): void {
     if (granted && answered === undefined) return;
-    const { publicAddress: previous, ...rest } = this.#load();
-    const next =
+    this.#hubAddress =
       granted && answered?.publicOrigin !== undefined
-        ? {
-            hubMemberId: decodeMemberId(answered.memberId),
-            origin: answered.publicOrigin,
-          }
+        ? { memberId: answered.memberId, origin: answered.publicOrigin }
         : undefined;
-    if (previous === undefined && next === undefined) return;
-    this.#save({ ...rest, ...(next === undefined ? {} : { publicAddress: next }) });
   }
 
   /** The origin the hub this host follows now last named; another hub's is never used. */
   #hubOrigin(): string | undefined {
-    const held = this.#load().publicAddress;
+    const held = this.#hubAddress;
     const target = this.#options.hub?.target();
-    return held !== undefined && target?.memberId === String(held.hubMemberId)
-      ? held.origin
-      : undefined;
+    return held !== undefined && target?.memberId === held.memberId ? held.origin : undefined;
   }
 
   #takeComment(

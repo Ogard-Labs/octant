@@ -74,6 +74,7 @@ function setup(
     sendGrants?: (update: HubVisitorGrantsUpdate) => Promise<SpokeVisitorSendOutcome>;
     hubMemberId?: () => string;
     source?: VisitorThreadSource;
+    state?: HubStatePort;
   } = {},
 ) {
   let now = 1_800_000_000_000;
@@ -82,7 +83,7 @@ function setup(
   const sent: unknown[] = [];
   const key = signer();
   const service = new SpokeVisitorService({
-    state: memoryState(),
+    state: options.state ?? memoryState(),
     publicGranted: options.granted ?? (() => true),
     remoteAccessPaused: options.paused ?? (() => false),
     hub: {
@@ -322,6 +323,18 @@ describe("sharing a thread with a visitor", () => {
     expect((await shared(context)).url.startsWith(`${FRONT}/v/`)).toBe(true);
     followed = "33333333-3333-4333-8333-333333333333";
     expect((await shared(context)).url.startsWith("/v/")).toBe(true);
+  });
+
+  it("keeps the hub's origin out of the saved state, which an older build reads strictly", async () => {
+    const state = memoryState();
+    const context = setup({
+      state,
+      sendGrants: async () => ({ sent: true, hub: { memberId: HUB, publicOrigin: FRONT } }),
+    });
+    expect((await shared(context)).url.startsWith(`${FRONT}/v/`)).toBe(true);
+    // A rolled-back build refuses the whole hub state over one unknown field.
+    expect(JSON.stringify(state.load())).not.toContain(FRONT);
+    expect(Object.keys(state.load().visitors ?? {}).sort()).toEqual(["comments", "links"]);
   });
 
   it("refuses to share while the Public item is unticked", async () => {
