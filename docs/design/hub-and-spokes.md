@@ -3106,7 +3106,9 @@ are not built yet. A standing-in standby serves them too (slice 26).
   shows only completed words, up to its last whitespace: the first characters
   of a secret do not yet have the shape that is replaced, so the unfinished
   last word is held back (the hard line that Octant redacts secrets). In
-  progress means a Chat reply that is queued, streaming, or waiting, a Code
+  progress means a Chat reply that did not complete (still being written,
+  waiting, or stopped for good, since a stopped reply can also end inside a
+  secret, so a visitor may miss its last word), a Code
   thread's newest reply while its turn runs or waits on the person, and a Work
   reply still held live. The stream asks the spoke again every two seconds and
   ends when the spoke refuses. Not built yet: step titles and states.

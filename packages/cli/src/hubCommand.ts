@@ -1632,7 +1632,7 @@ async function runRemove(input: Input, member: string): Promise<number> {
 
 const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "too-many-replaced-secrets":
-    "This endpoint still holds two replaced secrets: each takes new deliveries for a day after it was replaced and is kept a day more for deliveries the hub still holds, and another would drop one early. Run this again two days after the oldest was replaced. Rotating the endpoint instead ends its URL at once, drops the deliveries it has not run yet, and needs the new URL and secret set in Stripe.",
+    "This endpoint still holds two replaced secrets: each takes new deliveries for a day after it was replaced and is kept a day more for deliveries the hub still holds, and another would drop one early. Run this again two days after the oldest was replaced. Rotating the endpoint instead retires its URL (a standby standing in for the hub stops taking it once it hears), drops the deliveries it has not run yet, and needs the new URL and secret set in Stripe.",
   "hub-role-off": "The hub role is off. Turn it on with `octant hub enable`.",
   "listener-not-running":
     "The remote listener is not running. Turn it on first with `octant listener enable`.",

@@ -692,60 +692,45 @@ describe("a secret a Chat or Code reply is still writing", () => {
     },
   );
 
-  it("shows a Chat reply whole once its usage-limit stop is superseded or released", async () => {
-    const turn = (id: string, outcome: string, reply: string, usageLimit: boolean) => ({
-      id,
-      userMessageRef: { contentId: `${id}-asked` },
-      attempts: [
-        {
-          id: `${id}-attempt`,
-          outcome,
-          ...(usageLimit ? { usageLimit: { resetsAt: 0 } } : {}),
-          responseRefs: [{ contentId: `${id}-reply` }],
-        },
-      ],
-    });
-    const chat = (
-      thread: Record<string, unknown>,
-      turns: ReadonlyArray<ReturnType<typeof turn>>,
-    ) => ({
-      thread: { title: "Check", lifecycle: "active", ...thread },
-      contents: turns.flatMap((entry, index) => [
-        { contentId: `${entry.id}-asked`, role: "user", body: "Go on" },
-        {
-          contentId: `${entry.id}-reply`,
-          role: "assistant",
-          body: index === 0 ? "The failing check is lint" : "Fixed",
-        },
-      ]),
-      turns,
-    });
-    const context = setup({
-      source: visitorThreadSource(
-        () => ({}) as never,
-        () => ({}),
-      ),
-    });
-    const request = await opened(context, "chat");
-
-    projections.chat = chat({}, [
-      turn("turn-1", "waiting", "", true),
-      turn("turn-2", "completed", "", false),
-    ]);
-    expect(JSON.stringify(context.service.fetch(request, HUB))).toContain(
-      "The failing check is lint",
-    );
-
-    projections.chat = chat({ releasedStopId: "turn-1-attempt" }, [
-      turn("turn-1", "waiting", "", true),
-    ]);
-    expect(JSON.stringify(context.service.fetch(request, HUB))).toContain(
-      "The failing check is lint",
-    );
-
-    projections.chat = chat({}, [turn("turn-1", "waiting", "", true)]);
-    expect(JSON.stringify(context.service.fetch(request, HUB))).not.toContain("lint");
-  });
+  it.each(["waiting", "interrupted", "cancelled", "failed"])(
+    "keeps back the last word of a Chat reply that stopped (%s), even once a newer turn completed",
+    async (outcome) => {
+      projections.chat = {
+        thread: { title: "Check", lifecycle: "active", releasedStopId: "attempt-1" },
+        contents: [
+          { contentId: "asked-1", role: "user", body: "Show it" },
+          { contentId: "reply-1", role: "assistant", body: `The secret is ${secret.slice(0, 12)}` },
+          { contentId: "asked-2", role: "user", body: "Go on" },
+          { contentId: "reply-2", role: "assistant", body: "Done" },
+        ],
+        turns: [
+          {
+            id: "turn-1",
+            userMessageRef: { contentId: "asked-1" },
+            attempts: [{ id: "attempt-1", outcome, responseRefs: [{ contentId: "reply-1" }] }],
+          },
+          {
+            id: "turn-2",
+            userMessageRef: { contentId: "asked-2" },
+            attempts: [
+              { id: "attempt-2", outcome: "completed", responseRefs: [{ contentId: "reply-2" }] },
+            ],
+          },
+        ],
+      };
+      const context = setup({
+        source: visitorThreadSource(
+          () => ({}) as never,
+          () => ({}),
+        ),
+      });
+      const request = await opened(context, "chat");
+      const read = JSON.stringify(context.service.fetch(request, HUB));
+      expect(read).toContain("The secret is");
+      expect(read).toContain("Done");
+      expect(read).not.toContain("whsec_");
+    },
+  );
 
   it.each([
     { executing: true, awaitingInput: false },
