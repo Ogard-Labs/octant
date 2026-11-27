@@ -100,6 +100,52 @@ describe("HubWebhooksSection", () => {
     expect(screen.queryByText("whsec_shown-once")).not.toBeInTheDocument();
   });
 
+  it("keeps a shown secret until Done, blocking whatever would replace it", async () => {
+    const user = userEvent.setup();
+    const billing = {
+      endpointId: "BBBBBBBBBBBBBBBBBBBBBB",
+      scheme: "stripe",
+      label: "Billing",
+      path: "/hooks/BBBBBBBBBBBBBBBBBBBBBB",
+      deliveries: 0,
+    };
+    renderSection({
+      view: body({ endpoints: [deploys, billing] }),
+      answers: {
+        "webhook-create": {
+          status: 200,
+          body: {
+            status: "created",
+            endpointId: ENDPOINT_ID,
+            secret: "whsec_shown-once",
+            path: `/hooks/${ENDPOINT_ID}`,
+            published: true,
+          },
+        },
+      },
+    });
+    await user.type(screen.getByLabelText("Name"), "Deploys");
+    await user.click(screen.getByRole("combobox", { name: "Signing" }));
+    await user.click(await screen.findByRole("option", { name: "GitHub" }));
+    await user.click(screen.getByRole("button", { name: "Make endpoint" }));
+    const shown = await screen.findByRole("group", { name: "New endpoint secret" });
+    await user.type(screen.getByLabelText("Name"), "Releases");
+
+    const make = screen.getByRole("button", { name: "Make endpoint" });
+    const paste = screen.getByRole("button", { name: "Paste new secret for Billing" });
+    const rotateOther = screen.getByRole("button", { name: "Rotate Billing" });
+    for (const blocked of [make, paste, rotateOther]) {
+      expect(blocked).toBeDisabled();
+      expect(blocked).toHaveAccessibleDescription(/press Done/);
+    }
+    // The shown endpoint's own rotate and remove still replace or forget it.
+    expect(screen.getByRole("button", { name: "Rotate Deploys" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Remove Billing" })).toBeEnabled();
+
+    await user.click(within(shown).getByRole("button", { name: "Done" }));
+    for (const freed of [make, paste, rotateOther]) expect(freed).toBeEnabled();
+  });
+
   it("says to tick Public before an endpoint can be made", () => {
     renderSection({ view: body({}), publicGranted: false });
     expect(

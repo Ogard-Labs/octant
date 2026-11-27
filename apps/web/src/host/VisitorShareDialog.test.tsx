@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HubAdministrationOperation } from "../shell/hostBridge";
 import VisitorShareDialog from "./VisitorShareDialog";
 
@@ -10,7 +10,9 @@ const OTHER_LINK = "M".repeat(22);
 const COMMENT = "C".repeat(22);
 
 type Answer = { readonly status: number; readonly body: unknown };
-type Answers = Partial<Record<HubAdministrationOperation, Answer | (() => Answer)>>;
+type Answers = Partial<
+  Record<HubAdministrationOperation, Answer | (() => Answer | Promise<Answer>)>
+>;
 
 function statusWith(spoke: Record<string, unknown>) {
   return {
@@ -92,7 +94,7 @@ function renderDialog(answers: Answers) {
     return (typeof answer === "function" ? answer() : answer) ?? { status: 200, body: {} };
   });
   const onClose = vi.fn();
-  render(
+  const view = render(
     <VisitorShareDialog
       mode="code"
       now={() => NOW}
@@ -102,7 +104,7 @@ function renderDialog(answers: Answers) {
       title="Fix the login page"
     />,
   );
-  return { calls, onClose };
+  return { calls, onClose, unmount: view.unmount };
 }
 
 describe("VisitorShareDialog", () => {
@@ -295,6 +297,44 @@ describe("VisitorShareDialog", () => {
     expect(screen.queryByText("Octant could not send that comment.")).not.toBeInTheDocument();
   });
 
+  it("keeps a new link until Done, and makes no other link over it", async () => {
+    const user = userEvent.setup();
+    renderDialog({
+      status: statusWith({ links: [], comments: [], published: true }),
+      "visitor-share": madeLink,
+    });
+    await screen.findByText("Nothing is shared with a visitor.");
+    const make = screen.getByRole("button", { name: "Make link" });
+    await user.click(make);
+    const link = await screen.findByRole("group", { name: "New visitor link" });
+    expect(make).toBeDisabled();
+    expect(make).toHaveAccessibleDescription(/press Done/);
+    await user.click(within(link).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("group", { name: "New visitor link" })).not.toBeInTheDocument();
+    expect(make).toBeEnabled();
+    expect(make).toHaveFocus();
+  });
+
+  it("keeps a sent request's comment until Done, and sends no other over it", async () => {
+    const user = userEvent.setup();
+    const second = { commentId: "D".repeat(22), linkId: LINK, text: "And this?", at: NOW };
+    renderDialog({
+      status: statusWith({ ...shared, comments: [...shared.comments, second] }),
+      "visitor-comment": {
+        status: 200,
+        body: { status: "sent", text: "A visitor wrote: hello" },
+      },
+    });
+    const requests = await screen.findByRole("list", { name: "Visitor requests" });
+    const send = within(requests).getByRole("button", { name: /^Send .*And this/ });
+    await user.click(within(requests).getByRole("button", { name: /^Send .*Could you try/ }));
+    const toSend = await screen.findByRole("group", { name: "Comment to send" });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAccessibleDescription(/press Done/);
+    await user.click(within(toSend).getByRole("button", { name: "Done" }));
+    expect(send).toBeEnabled();
+  });
+
   it("moves focus to a new link, and forgets it once that link is stopped", async () => {
     const user = userEvent.setup();
     let reads = 0;
@@ -350,5 +390,74 @@ describe("VisitorShareDialog", () => {
       ),
     ).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Make link" })).toBeDisabled());
+  });
+});
+
+describe("VisitorShareDialog while it stays open", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const pass = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+  const nothing = statusWith({ links: [], comments: [], published: true });
+
+  it("shows a request a visitor posts, and keeps it when a later read fails", async () => {
+    vi.useFakeTimers();
+    let answer: Answer = nothing;
+    renderDialog({ status: () => answer });
+    await pass(0);
+    expect(screen.queryByRole("list", { name: "Visitor requests" })).not.toBeInTheDocument();
+
+    answer = statusWith(shared);
+    await pass(15_000);
+    expect(screen.getByRole("list", { name: "Visitor requests" })).toBeInTheDocument();
+
+    answer = { status: 503, body: {} };
+    await pass(15_000);
+    expect(screen.getByRole("list", { name: "Visitor requests" })).toBeInTheDocument();
+    expect(screen.getByText(/This computer is not set up for visitor links/)).toBeInTheDocument();
+  });
+
+  it("starts no read while one is still unanswered", async () => {
+    vi.useFakeTimers();
+    let finish: (answer: Answer) => void = () => undefined;
+    const { calls } = renderDialog({
+      status: () =>
+        new Promise<Answer>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    await pass(60_000);
+    expect(calls).toHaveLength(1);
+    await act(async () => finish(nothing));
+    await pass(15_000);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("reads nothing while the window is hidden, and at once when it is shown again", async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const { calls } = renderDialog({ status: nothing });
+    await pass(0);
+
+    visibility.mockReturnValue("hidden");
+    act(() => void document.dispatchEvent(new Event("visibilitychange")));
+    await pass(60_000);
+    expect(calls).toHaveLength(1);
+
+    visibility.mockReturnValue("visible");
+    act(() => void document.dispatchEvent(new Event("visibilitychange")));
+    await pass(0);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("stops reading once it is closed", async () => {
+    vi.useFakeTimers();
+    const { calls, unmount } = renderDialog({ status: nothing });
+    await pass(0);
+    unmount();
+    await pass(60_000);
+    expect(calls).toHaveLength(1);
   });
 });

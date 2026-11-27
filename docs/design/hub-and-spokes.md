@@ -3071,6 +3071,13 @@ name in its signed roster and the Funnel port. Elsewhere it shows the path,
 names it as one, and asks the person to put the hub's public address in
 front of it, as the command line does. A sent request's framed comment stays
 in the dialog even when the links cannot be read again.
+While it is open and the window is shown, the dialog reads the links and
+requests again 15 seconds after the last read ends, so a request a visitor
+posts appears without reopening it; reads never overlap, and a failed one
+keeps the last good view. A new link, and a sent request's comment, are
+shown once: until the person presses its Done, the window offers no Make link
+or Send that would put another in its place. Stopping the shown link clears
+it.
 Settings › Remote access › Visitor links lists every link and holds the
 hub's switch. The thread list's menu has no Share item: the main chunk has
 no room for one (`scripts/initial-renderer-budget.json`). A Request card
@@ -3167,7 +3174,11 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   An endpoint id never begins with `-`, so the CLI never reads one as a flag.
   `octant hub webhook create|list|rotate|remove|secret`, the loopback
   administration routes, and Settings › Remote access › Webhook endpoints
-  (with the recent delivery log) do this.
+  (with the recent delivery log) do this. While the window shows a new
+  secret and the person has not pressed Done, it offers no new endpoint, no
+  Stripe secret form, and no rotation of another endpoint, any of which would
+  clear a secret that is never read back; rotating or removing the shown
+  endpoint still clears it.
 - **Sealed to the hub.** The hub keeps a P-256 sealing key in its state file
   and hands it out signed with its host identity key; a spoke takes it only
   when the signer's fingerprint is the roster's key for the hub, so no roster

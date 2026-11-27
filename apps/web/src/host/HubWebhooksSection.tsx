@@ -193,6 +193,10 @@ export default function HubWebhooksSection(props: {
   const labelId = useId();
   const schemeId = useId();
   const secretId = useId();
+  const keepId = useId();
+  // The host never reads a minted secret back, so until the person presses
+  // Done nothing that would put another in its place is offered.
+  const keeping = minted !== undefined;
   const nameInput = useRef<HTMLInputElement>(null);
   const formHint = useRef<HTMLParagraphElement>(null);
   const mintedPanel = useRef<HTMLDivElement>(null);
@@ -372,7 +376,8 @@ export default function HubWebhooksSection(props: {
             </OctantField>
             <div className="host-settings__controls">
               <OctantButton
-                disabled={action.busy || !props.publicGranted || label.trim() === ""}
+                aria-describedby={keeping ? keepId : undefined}
+                disabled={action.busy || keeping || !props.publicGranted || label.trim() === ""}
                 onClick={() => void create()}
               >
                 Make endpoint
@@ -422,6 +427,10 @@ export default function HubWebhooksSection(props: {
                   The hub has not taken the endpoint yet; this computer tries again shortly.
                 </p>
               )}
+              <p className="setrow-hint" id={keepId}>
+                Keep the secret, then press Done. Until then you cannot make an endpoint or change
+                another one's secret.
+              </p>
               <div className="host-settings__controls">
                 <OctantButton onClick={() => setMinted(undefined)} variant="secondary">
                   Done
@@ -520,10 +529,10 @@ export default function HubWebhooksSection(props: {
                     {endpoint.scheme !== "stripe" ? null : (
                       <OctantButton
                         aria-label={`${endpoint.awaitingSecret ? "Paste secret" : "Paste new secret"} for ${endpoint.label}`}
-                        disabled={action.busy || !props.publicGranted}
+                        aria-describedby={keeping ? keepId : undefined}
+                        disabled={action.busy || keeping || !props.publicGranted}
                         onClick={() => {
                           setSecretDraft("");
-                          setMinted(undefined);
                           setPasting({
                             endpointId: endpoint.endpointId,
                             label: endpoint.label,
@@ -539,7 +548,12 @@ export default function HubWebhooksSection(props: {
                     )}
                     <OctantButton
                       aria-label={`Rotate ${endpoint.label}`}
-                      disabled={action.busy}
+                      aria-describedby={
+                        keeping && minted.endpointId !== endpoint.endpointId ? keepId : undefined
+                      }
+                      disabled={
+                        action.busy || (keeping && minted.endpointId !== endpoint.endpointId)
+                      }
                       onClick={() => setConfirming({ kind: "rotate", endpoint })}
                       ref={
                         confirming?.endpoint.endpointId === endpoint.endpointId &&

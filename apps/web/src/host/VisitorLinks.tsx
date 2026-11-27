@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -135,6 +135,7 @@ export function VisitorLinkList(props: {
   const [dismissing, setDismissing] = useState<VisitorComment>();
   const dismissOpener = useRef<HTMLButtonElement>(null);
   const sentPanel = useRef<HTMLDivElement>(null);
+  const keepId = useId();
   // Send removes the request's row, so focus goes to what it handed back.
   useEffect(() => {
     if (sent !== undefined) sentPanel.current?.focus();
@@ -194,6 +195,9 @@ export function VisitorLinkList(props: {
             The thread now carries outside content. Send this as your next message there:
           </p>
           <pre className="setrow-hint hub-entrance__secret">{visitorText(sent)}</pre>
+          <p className="setrow-hint" id={keepId}>
+            Octant cannot show this again, so press Done before you send another request.
+          </p>
           <div className="host-settings__controls">
             <OctantButton
               onClick={() =>
@@ -235,7 +239,10 @@ export function VisitorLinkList(props: {
                 <div className="setrow-control">
                   <OctantButton
                     aria-label={`Send the visitor's request: ${visitorText(comment.text).slice(0, 40)}`}
-                    disabled={action.busy}
+                    aria-describedby={sent === undefined ? undefined : keepId}
+                    // Another Send would put its comment over this one, which
+                    // the host cannot hand out again.
+                    disabled={action.busy || sent !== undefined}
                     onClick={() => void decide(comment, "send")}
                     size="sm"
                   >

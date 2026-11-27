@@ -1,5 +1,6 @@
 import { VISITOR_LINK_DEFAULT_LIFETIME_MS, VISITOR_LINK_MAX_LIFETIME_MS } from "@octant/contracts";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -23,6 +24,8 @@ import { readVisitors, VISITOR_REFUSALS, VisitorLinkList, type VisitorsView } fr
  */
 
 const HOUR_MS = 60 * 60 * 1000;
+/** How often the open dialog reads again, so a visitor's new request appears. */
+const REREAD_MS = 15_000;
 const EXPIRY_CHOICES: ReadonlyArray<{
   readonly id: string;
   readonly label: string;
@@ -99,9 +102,13 @@ export default function VisitorShareDialog(props: {
   const titleId = useId();
   const scopeId = useId();
   const expiryId = useId();
+  const keepId = useId();
+  const makeButton = useRef<HTMLButtonElement>(null);
+  /** The read in progress and any waiting behind it; reads never overlap. */
+  const reads = useRef(Promise.resolve());
   const { request, mode, threadId } = props;
 
-  const refresh = useCallback(async () => {
+  const read = useCallback(async () => {
     const failed = (error: string) => setLoaded((previous) => ({ ...previous, error }));
     try {
       const reply = await request("status");
@@ -122,12 +129,42 @@ export default function VisitorShareDialog(props: {
     }
   }, [request, mode, threadId]);
 
+  // A read asked for after an action waits its turn, so an earlier read can
+  // never answer last and bring back what the action just removed.
+  const refresh = useCallback(() => {
+    reads.current = reads.current.then(read);
+    return reads.current;
+  }, [read]);
+
+  // A visitor can post a request at any time, so the dialog reads again while
+  // it is open and the window is shown, each wait starting once a read ends.
   useEffect(() => {
-    void refresh();
+    let closed = false;
+    let reading = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const hidden = () => document.visibilityState === "hidden";
+    const reread = async () => {
+      clearTimeout(timer);
+      if (closed || reading) return;
+      reading = true;
+      await refresh();
+      reading = false;
+      if (!closed && !hidden()) timer = setTimeout(() => void reread(), REREAD_MS);
+    };
+    const onVisibility = () => {
+      if (hidden()) clearTimeout(timer);
+      else void reread();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    void reread();
+    return () => {
+      closed = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [refresh]);
 
   const share = async () => {
-    setShared(undefined);
     const lifetimeMs = EXPIRY_CHOICES.find((choice) => choice.id === expiry)?.ms;
     const body = await action.run(
       "visitor-share",
@@ -201,8 +238,15 @@ export default function VisitorShareDialog(props: {
           Close
         </OctantButton>
         <OctantButton
-          disabled={action.busy || loaded.view === undefined || loaded.error !== undefined}
+          aria-describedby={shared === undefined ? undefined : keepId}
+          disabled={
+            action.busy ||
+            shared !== undefined ||
+            loaded.view === undefined ||
+            loaded.error !== undefined
+          }
           onClick={() => void share()}
+          ref={makeButton}
           type="button"
         >
           Make link
@@ -243,7 +287,21 @@ export default function VisitorShareDialog(props: {
             >
               {`Copy ${address.noun}`}
             </OctantButton>
+            <OctantButton
+              onClick={() => {
+                // The button is enabled again before focus goes back to it.
+                flushSync(() => setShared(undefined));
+                makeButton.current?.focus();
+              }}
+              size="sm"
+              variant="secondary"
+            >
+              Done
+            </OctantButton>
           </div>
+          <p className="setrow-hint" id={keepId}>
+            Once you have sent it, press Done. Until then you cannot make another link.
+          </p>
           {shared.published ? null : (
             <p className="setrow-hint">
               The hub has not taken the link yet; this computer tries again shortly.
