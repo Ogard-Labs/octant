@@ -2872,9 +2872,9 @@ hold it, so the task would keep editing that folder), a running turn, and
 another thread's running turn on the same checkout, and reads the last
 two again inside the journal unit that records the move, so a turn started
 during the copy refuses it. A second move of the same thread is refused
-while the first runs. It refuses too, naming the paths, when a
-submodule has changes of its own or an untracked folder, at any depth below
-an untracked parent, is a repository of its own: a capture records either
+while the first runs. It refuses too, naming the paths and which case applies, when a
+submodule has changes of its own (commit them there first) or an untracked folder, at any depth below
+an untracked parent, is a repository of its own (move it out, add it to `.gitignore`, or add it as a submodule): a capture records either
 only as a commit pointer, so a copy would leave that work behind. The search
 for such folders walks at most 100,000 untracked entries per move, skipping
 folders Git ignores; past that it refuses rather than claim a full copy. A

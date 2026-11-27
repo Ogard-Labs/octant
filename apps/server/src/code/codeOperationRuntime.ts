@@ -2965,7 +2965,18 @@ export function createCodeOperationRuntime(
       // A port that cannot tell refuses rather than claim a complete copy.
       const nested = await mutation.uncopyableNestedChanges?.({ checkoutRoot: root.checkoutRoot });
       if (nested === undefined) return { status: "refused", reason: "unavailable" };
-      if (nested.length > 0) return { status: "refused", reason: "nested-changes", paths: nested };
+      const paths = [...new Set([...nested.submodules, ...nested.nestedRepositories])].sort();
+      if (paths.length > 0) {
+        return {
+          status: "refused",
+          reason: "nested-changes",
+          paths,
+          ...(nested.submodules.length > 0 ? { submodulePaths: nested.submodules } : {}),
+          ...(nested.nestedRepositories.length > 0
+            ? { nestedRepositoryPaths: nested.nestedRepositories }
+            : {}),
+        };
+      }
       return captureCheckoutNow(windowId, source);
     },
     readEvidence: async (windowId, threadId, operationId, contentId, admissionCurrent) => {
