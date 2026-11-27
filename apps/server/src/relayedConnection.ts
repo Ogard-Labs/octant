@@ -20,6 +20,8 @@ const REFUSED_PREFIXES = [
   "/api/remote/pairing-tickets",
   "/api/hub",
   "/api/desktop",
+  // Where the hub's relay is: a device learns it at home, never through the relay.
+  "/api/remote/relay-address",
 ] as const;
 /** Paths a relayed connection may read but never change. */
 const READ_ONLY_PREFIXES = ["/api/remote/devices", "/api/remote/access-pause"] as const;

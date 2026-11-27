@@ -4,6 +4,7 @@ import {
   HUB_AUTO_APPLY_KINDS,
   HUB_GRANT_ITEMS,
   PUBLIC_FUNNEL_PORTS,
+  publicFrontOrigin,
   type AppReleaseRing,
   type HubAutoApplyKind,
   type HubGrantItem,
@@ -77,6 +78,11 @@ export type HubCliCommand =
       readonly mode: "fronts";
       readonly addresses: ReadonlyArray<string>;
     }
+  /**
+   * The public address the person's own front answers on, so the hub can tell
+   * paired devices where its relay is; `clear` forgets it.
+   */
+  | { readonly action: "public"; readonly mode: "address"; readonly url?: string }
   /**
    * This spoke's webhook endpoints; a new or rotated endpoint's secret is
    * printed once. Stripe mints its own secret, which `secret` reads from
@@ -300,6 +306,11 @@ export function resolveHubCliCommand(
         return rest.length === 2 && only() && (choice === "on" || choice === "off")
           ? { action, mode, serve: choice === "on" }
           : undefined;
+      }
+      if (mode === "address") {
+        if (rest.length !== 2 || !only() || choice === undefined) return undefined;
+        if (choice === "clear") return { action, mode };
+        return publicFrontOrigin(choice) === undefined ? undefined : { action, mode, url: choice };
       }
       if (rest.length !== 1) return undefined;
       if (mode === "off") return only() ? { action, mode } : undefined;
@@ -715,6 +726,23 @@ async function runPublic(
     );
     return 0;
   }
+  if (command.mode === "address") {
+    const response = await post(
+      input,
+      "/api/desktop/hub/public/address",
+      command.url === undefined ? {} : { url: command.url },
+    );
+    if (!isOk(response, "changed")) {
+      return refusal(input, response, "Octant refused that public address.");
+    }
+    const origin = field(response.body, "ownFrontOrigin");
+    input.stdout.write(
+      typeof origin === "string"
+        ? `Paired devices that choose to reach this hub's computers when away will open its relay at ${origin}.\n`
+        : "This computer no longer names a public address of its own front.\n",
+    );
+    return 0;
+  }
   if (command.mode === "off") {
     const funnel = await post(input, "/api/desktop/hub/public/funnel", { enabled: false });
     if (!isOk(funnel, "changed")) {
@@ -945,6 +973,9 @@ async function printPublicStatus(input: Input): Promise<number> {
         field(funnel, "enabled") === true ? `on, port ${String(field(funnel, "port"))}` : "off"
       }`,
       `  Serve while standing in  ${field(entrance, "serveWhileStandingIn") === true ? "on" : "off"}`,
+      ...(typeof field(entrance, "ownFrontOrigin") === "string"
+        ? [`  Your front's public address  ${String(field(entrance, "ownFrontOrigin"))}`]
+        : []),
       ...standbyUrlLines(field(response.body, "publicStandbyUrls")),
     ].join("\n") + "\n",
   );

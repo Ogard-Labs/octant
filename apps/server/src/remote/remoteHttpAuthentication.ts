@@ -34,6 +34,8 @@ import {
   type RemoteServerGrantRequest,
   type RemoteServerGrantSource,
   type RemoteServerProxyRefusalReason,
+  RELAYED_ADMIN_REFUSED,
+  type RemoteRelayAddressAnswer,
 } from "@octant/contracts";
 import type { RemoteAuthenticatedRequestResultV1 } from "@octant/contracts/remote-request-proof";
 import { buildRemoteSessionMetadataPayload, canonicalizeRemotePathQuery } from "@octant/domain";
@@ -74,6 +76,7 @@ export const REMOTE_AUTH_ROUTE_IDS = {
   rotateKey: "remote-auth-rotate-key",
   revokeSelf: "remote-auth-revoke-self",
   pushToken: "remote-auth-push-token",
+  relayAddress: "remote-relay-address",
   serverProxySession: "remote-auth-server-proxy-session",
 } as const;
 
@@ -317,6 +320,8 @@ export interface RemoteHttpAuthenticationOptions {
   readonly proofService: RemoteRequestProofService;
   /** A paired device's key fingerprint, for tying a relayed session to its relay's device. */
   readonly pairedDeviceKeyFingerprint?: (deviceId: string) => string | undefined;
+  /** What this host tells one of its paired devices about reaching it through the hub. */
+  readonly relayAddressFor?: (deviceId: string) => RemoteRelayAddressAnswer;
   readonly signNegotiationMetadata: (payload: string) => string;
   readonly admission?: RemoteAdmissionPort;
   readonly credentialSelfService?: RemoteCredentialSelfServicePort;
@@ -696,6 +701,21 @@ export function createRemoteHttpAuthentication(
         registryRelease?.();
         registryRelease = undefined;
         return response;
+      }
+
+      if (route?.id === REMOTE_AUTH_ROUTE_IDS.relayAddress) {
+        registryRelease?.();
+        registryRelease = undefined;
+        // Refused through the relay before routing; this holds even if a
+        // relayed request reached here some other way.
+        if (transport.relayedDeviceFingerprint !== undefined) {
+          return jsonResponse(403, { status: "refused", kind: RELAYED_ADMIN_REFUSED });
+        }
+        const principal = handoff.principal;
+        if (principal.kind !== "remote-device" || options.relayAddressFor === undefined) {
+          return jsonResponse(200, { status: "unavailable" });
+        }
+        return jsonResponse(200, options.relayAddressFor(String(principal.deviceId)));
       }
 
       if (isPushTokenRoute) {

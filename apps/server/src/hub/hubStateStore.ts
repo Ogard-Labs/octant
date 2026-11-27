@@ -31,6 +31,7 @@ import {
   NewMemberAlert,
   PeerGrant,
   PublicFunnelPort,
+  RelayAddress,
   SignedVisitorLinkGrant,
   VisitorThreadMode,
   HubWebhookEndpoint,
@@ -440,6 +441,8 @@ export const PublicEntranceState = Schema.Struct({
   fronts: Schema.optional(
     Schema.Array(Schema.String.pipe(Schema.maxLength(64))).pipe(Schema.maxItems(8)),
   ),
+  /** The public address the person's own front answers on, as they typed it on this host. */
+  ownFrontOrigin: Schema.optional(Schema.String.pipe(Schema.maxLength(300))),
 }).annotations(strict);
 export type PublicEntranceState = typeof PublicEntranceState.Type;
 
@@ -598,6 +601,8 @@ export const SpokeRelayState = Schema.Struct({
   deviceIds: Schema.Array(Schema.String.pipe(Schema.maxLength(128))).pipe(Schema.maxItems(256)),
   /** The hub has not taken the current list yet; the next look sends it again. */
   unpublished: Schema.optional(Schema.Literal(true)),
+  /** The relay address the hub last named in its answer, which this host tells its own devices. */
+  address: Schema.optional(RelayAddress),
 }).annotations(strict);
 export type SpokeRelayState = typeof SpokeRelayState.Type;
 

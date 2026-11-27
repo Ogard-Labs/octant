@@ -1,6 +1,7 @@
 import type { Duplex } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
+import { decodeRelayAddress, type RelayAddress } from "@octant/contracts";
 import { HubLinkState, type HubState, type HubStatePort } from "./hubStateStore";
 import { SpokeRelayService } from "./spokeRelayService";
 import { takeWebSocketUpgrade } from "../webSocketRelay";
@@ -41,7 +42,7 @@ function host() {
   const service = new SpokeRelayService({
     state: memoryState(),
     relayGranted: () => granted,
-    hub: { sendDevices: async () => true },
+    hub: { sendDevices: async () => ({ taken: true }) },
     devices: () => [{ deviceId: "phone", fingerprint: FINGERPRINT, active }],
     paused: () => paused,
     serve: (socket) => {
@@ -120,7 +121,7 @@ describe("relayed devices on their host", () => {
       hub: {
         sendDevices: async (update) => {
           received.push(`${String(state.link?.hubMemberId)} ${update.fingerprints.join(",")}`);
-          return true;
+          return { taken: true };
         },
       },
       devices: () => [{ deviceId: "phone", fingerprint: FINGERPRINT, active: true }],
@@ -134,5 +135,81 @@ describe("relayed devices on their host", () => {
     state = { ...state, link: linkTo(PROMOTED, "https://b") };
     await service.look();
     expect(received).toEqual([`${OLD_HUB} ${FINGERPRINT}`, `${PROMOTED} ${FINGERPRINT}`]);
+  });
+
+  it("tells a listed device the relay address its hub named, and no other device", async () => {
+    const HUB = "11111111-1111-4111-8111-111111111111";
+    let state: HubState = { link: linkTo(HUB, "https://a") };
+    let relay: RelayAddress | undefined = decodeRelayAddress({
+      hubMemberId: HUB,
+      relayUrl: "wss://hub.example.com/relay/v1",
+    });
+    let granted = true;
+    const service = new SpokeRelayService({
+      state: { load: () => state, save: (next) => void (state = next) },
+      relayGranted: () => granted,
+      hub: {
+        sendDevices: async () => (relay === undefined ? { taken: true } : { taken: true, relay }),
+      },
+      devices: () => [
+        { deviceId: "phone", fingerprint: FINGERPRINT, active: true },
+        { deviceId: "tablet", fingerprint: "c".repeat(64), active: true },
+      ],
+      paused: () => false,
+      serve: () => true,
+      record: () => undefined,
+    });
+    expect(service.relayAddressFor("phone")).toEqual({ status: "unavailable" });
+    await service.allow("phone", true, window);
+    expect(service.relayAddressFor("phone")).toEqual({
+      status: "available",
+      hubMemberId: HUB,
+      relayUrl: "wss://hub.example.com/relay/v1",
+    });
+    // Not listed through the relay: told nothing.
+    expect(service.relayAddressFor("tablet")).toEqual({ status: "unavailable" });
+    // Relay unticked in the hub grant: told nothing.
+    granted = false;
+    expect(service.relayAddressFor("phone")).toEqual({ status: "unavailable" });
+    granted = true;
+    // An address naming another hub is never kept.
+    relay = decodeRelayAddress({
+      hubMemberId: "44444444-4444-4444-8444-444444444444",
+      relayUrl: "wss://x/relay/v1",
+    });
+    await service.publish();
+    expect(service.relayAddressFor("phone")).toEqual({ status: "unavailable" });
+    // The hub naming none (its switch off) clears what was kept.
+    relay = decodeRelayAddress({ hubMemberId: HUB, relayUrl: "wss://hub.example.com/relay/v1" });
+    await service.publish();
+    relay = undefined;
+    await service.publish();
+    expect(service.relayAddressFor("phone")).toEqual({ status: "unavailable" });
+  });
+
+  it("sends its list again after a while, so a changed relay address reaches its devices", async () => {
+    let now = 0;
+    let sent = 0;
+    const service = new SpokeRelayService({
+      state: memoryState(),
+      relayGranted: () => true,
+      hub: {
+        sendDevices: async () => {
+          sent += 1;
+          return { taken: true };
+        },
+      },
+      devices: () => [],
+      paused: () => false,
+      serve: () => true,
+      record: () => undefined,
+      now: () => now,
+    });
+    await service.look();
+    await service.look();
+    expect(sent).toBe(1);
+    now += 10 * 60 * 1000;
+    await service.look();
+    expect(sent).toBe(2);
   });
 });

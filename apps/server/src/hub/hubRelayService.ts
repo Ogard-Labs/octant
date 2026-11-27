@@ -17,7 +17,10 @@ import {
   RELAY_UNAVAILABLE_CLOSE_CODE,
   decodeRelayAdmission,
   relayAdmissionPayload,
+  relayUrlForPublicOrigin,
   type AuditActingPrincipal,
+  type HubRelayDevicesReceipt,
+  type RelayAddress,
   type HubMembershipChangedPayload,
   type HubRelayDevicesUpdate,
   type RelayAdmission,
@@ -30,7 +33,7 @@ import {
   type WebSocketMessage,
 } from "../webSocketRelay";
 import { publicKeyFingerprint, verifySignature } from "./hubCrypto";
-import type { HubRelayHubState, HubStatePort } from "./hubStateStore";
+import type { HubRelayHubState, HubState, HubStatePort } from "./hubStateStore";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
 /** One relayed message is one TLS record or a few; far above that is not a device. */
@@ -61,6 +64,8 @@ export interface HubRelayServiceOptions {
     deviceFingerprint: string,
   ) => Promise<RelayTunnelEnd | undefined>;
   readonly record: (change: HubMembershipChangedPayload) => void;
+  /** Where devices open this hub's relay, while it knows; named to each host in its answer. */
+  readonly address?: () => RelayAddress | undefined;
   readonly maxTunnels?: number;
   readonly admissionTimeoutMs?: number;
 }
@@ -75,6 +80,33 @@ const EMPTY: HubRelayHubState = { enabled: false, hosts: [] };
 
 function refuseUpgrade(socket: Duplex, status: string): void {
   socket.end(`HTTP/1.1 ${status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n`);
+}
+
+/**
+ * The relay address this host hands its spokes while it serves as the hub:
+ * the public address the person typed for their own front, or else its
+ * Funnel front on its own tailnet name. Undefined while the relay switch or
+ * the entrance is off, or the address is not known.
+ */
+export function hubRelayAddress(state: HubState, hubMemberId: string): RelayAddress | undefined {
+  const entrance = state.publicEntrance;
+  if (state.hub?.enabled !== true || state.relayHub?.enabled !== true) return undefined;
+  if (entrance?.enabled !== true) return undefined;
+  let origin = entrance.ownFrontOrigin;
+  if (origin === undefined && entrance.funnel !== undefined) {
+    const self = state.hub.roster?.roster.members.find(
+      (member) => String(member.memberId) === hubMemberId,
+    );
+    const name = self?.privateNames.find((candidate) => candidate.endsWith(".ts.net"));
+    if (name !== undefined) {
+      origin =
+        entrance.funnel.port === 443
+          ? `https://${name}`
+          : `https://${name}:${entrance.funnel.port}`;
+    }
+  }
+  if (origin === undefined) return undefined;
+  return { hubMemberId: decodeMemberId(hubMemberId), relayUrl: relayUrlForPublicOrigin(origin) };
 }
 
 export class HubRelayService {
@@ -148,10 +180,7 @@ export class HubRelayService {
   }
 
   /** Replaces the device keys one host lets through; an empty list withdraws them. */
-  receiveDevices(
-    memberId: string,
-    update: HubRelayDevicesUpdate,
-  ): { readonly status: "recorded"; readonly count: number } {
+  receiveDevices(memberId: string, update: HubRelayDevicesUpdate): HubRelayDevicesReceipt {
     const held = this.#load();
     const others = held.hosts.filter((host) => String(host.memberId) !== memberId);
     this.#save({
@@ -167,7 +196,12 @@ export class HubRelayService {
       memberId: decodeMemberId(memberId),
     });
     this.sweep();
-    return { status: "recorded", count: update.fingerprints.length };
+    const relay = this.#options.address?.();
+    return {
+      status: "recorded",
+      count: update.fingerprints.length,
+      ...(relay === undefined ? {} : { relay }),
+    };
   }
 
   /** The entrance's relay route; absent while the switch is off or this host is not the acting hub. */

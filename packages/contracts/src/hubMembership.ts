@@ -67,6 +67,7 @@ export const HubMembershipChange = Schema.Literal(
   "public-funnel-changed",
   "public-standby-serve-changed",
   "public-fronts-changed",
+  "public-address-changed",
   "webhook-endpoint-created",
   "webhook-endpoint-removed",
   "webhook-endpoint-secret-set",

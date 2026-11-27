@@ -1167,6 +1167,37 @@ describe("octant hub public", () => {
     expect(host.text()).toContain("https://standby.tail1234.ts.net");
   });
 
+  it("records the public address of the person's own front, and takes only an https origin", async () => {
+    expect(resolveHubCliCommand(["public", "address", "https://octant.example.com"], {})).toEqual({
+      action: "public",
+      mode: "address",
+      url: "https://octant.example.com",
+    });
+    expect(resolveHubCliCommand(["public", "address", "clear"], {})).toEqual({
+      action: "public",
+      mode: "address",
+    });
+    for (const refused of [
+      "http://octant.example.com",
+      "https://octant.example.com/relay",
+      "https://100.64.0.1",
+      "https://user@octant.example.com",
+    ]) {
+      expect(resolveHubCliCommand(["public", "address", refused], {}), refused).toBeUndefined();
+    }
+    const host = await fixture(() =>
+      ok({ status: "changed", ownFrontOrigin: "https://octant.example.com" }),
+    );
+    expect(
+      await host.run({ action: "public", mode: "address", url: "https://octant.example.com" }),
+    ).toBe(0);
+    expect(host.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/public/address",
+      body: { url: "https://octant.example.com" },
+    });
+    expect(host.text()).toContain("https://octant.example.com");
+  });
+
   it("says why Funnel was refused", async () => {
     const host = await fixture((request) =>
       request.path === "/api/desktop/hub/public"

@@ -3,7 +3,7 @@
 // the device keys it lets through, and the hub opening one device's tunnel on
 // that host as a WebSocket whose upgrade the host checks like any hub request.
 
-import type { HubRelayDevicesUpdate } from "@octant/contracts";
+import { decodeHubRelayDevicesReceipt, type HubRelayDevicesUpdate } from "@octant/contracts";
 import { WebSocketEndpoint, newWebSocketKey, webSocketAcceptFor } from "../webSocketRelay";
 import { listenerPinFromDigest } from "./hubCrypto";
 import {
@@ -35,7 +35,7 @@ export function spokeRelayHubPort(deps: LinkDependencies): SpokeRelayHubPort {
   return {
     sendDevices: async (update: HubRelayDevicesUpdate) => {
       const link = deps.state.load().link;
-      if (link === undefined || link.removed === true) return false;
+      if (link === undefined || link.removed === true) return { taken: false };
       const identity = deps.identity();
       const answer = await sendHubLinkRequest({
         transport: deps.transport,
@@ -49,7 +49,17 @@ export function spokeRelayHubPort(deps: LinkDependencies): SpokeRelayHubPort {
         headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
         now: deps.now(),
       });
-      return answer.status === "answered" && answer.response.ok;
+      if (answer.status !== "answered" || !answer.response.ok) return { taken: false };
+      // The answer came over the connection held to the hub's pin; an answer
+      // that does not read is taken, and names no relay.
+      try {
+        const receipt = decodeHubRelayDevicesReceipt(await answer.response.json());
+        return receipt.relay === undefined
+          ? { taken: true }
+          : { taken: true, relay: receipt.relay };
+      } catch {
+        return { taken: true };
+      }
     },
   };
 }

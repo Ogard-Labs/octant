@@ -9,6 +9,7 @@
 // loopback, serves only those addresses, and never binds anything else.
 
 import {
+  publicFrontOrigin,
   type AuditActingPrincipal,
   type HubMembershipChangedPayload,
   type PublicForwardAnswer,
@@ -117,7 +118,13 @@ export interface PublicEntranceStatus {
   readonly funnel: { readonly enabled: boolean; readonly port?: PublicFunnelPort };
   /** This host's own choice, as a standby, to serve the entrance while it stands in. */
   readonly serveWhileStandingIn: boolean;
+  /** The public address the person typed for their own front, when they did. */
+  readonly ownFrontOrigin?: string;
 }
+
+export type PublicAddressOutcome =
+  | { readonly status: "changed"; readonly ownFrontOrigin?: string }
+  | { readonly status: "refused"; readonly kind: "invalid-address" };
 
 const DEFAULT_FUNNEL_PORT: PublicFunnelPort = 443;
 
@@ -170,7 +177,38 @@ export class PublicEntranceService {
           ? { enabled: false }
           : { enabled: true, port: saved.funnel.port },
       serveWhileStandingIn: saved?.serveWhileStandingIn === true,
+      ...(saved?.ownFrontOrigin === undefined ? {} : { ownFrontOrigin: saved.ownFrontOrigin }),
     };
+  }
+
+  /**
+   * Records the public address the person's own front answers on, so the hub
+   * can tell paired devices where its relay is. Octant cannot see a front it
+   * does not run, so the person types it; only an `https:` origin with a DNS
+   * name is taken. It opens nothing: the entrance and its route table are
+   * unchanged.
+   */
+  setOwnFrontAddress(
+    url: string | undefined,
+    principal: AuditActingPrincipal,
+  ): Promise<PublicAddressOutcome> {
+    return this.#serially(async (): Promise<PublicAddressOutcome> => {
+      const origin = url === undefined ? undefined : publicFrontOrigin(url);
+      if (url !== undefined && origin === undefined) {
+        return { status: "refused", kind: "invalid-address" };
+      }
+      const state = this.#options.state.load();
+      const current = state.publicEntrance ?? { enabled: false };
+      const { ownFrontOrigin: _previous, ...rest } = current;
+      this.#options.state.save({
+        ...state,
+        publicEntrance: origin === undefined ? rest : { ...rest, ownFrontOrigin: origin },
+      });
+      this.#options.record({ change: "public-address-changed", actingPrincipal: principal });
+      return origin === undefined
+        ? { status: "changed" }
+        : { status: "changed", ownFrontOrigin: origin };
+    });
   }
 
   setEnabled(
@@ -476,6 +514,7 @@ export class PublicEntranceService {
   }): void {
     const state = this.#options.state.load();
     const serve = state.publicEntrance?.serveWhileStandingIn;
+    const ownFrontOrigin = state.publicEntrance?.ownFrontOrigin;
     this.#options.state.save({
       ...state,
       publicEntrance: {
@@ -484,6 +523,7 @@ export class PublicEntranceService {
         ...(next.funnel === undefined ? {} : { funnel: next.funnel }),
         ...(serve === undefined ? {} : { serveWhileStandingIn: serve }),
         ...(next.fronts === undefined || next.fronts.length === 0 ? {} : { fronts: next.fronts }),
+        ...(ownFrontOrigin === undefined ? {} : { ownFrontOrigin }),
       },
     });
   }
