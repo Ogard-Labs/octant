@@ -45,42 +45,48 @@ describe("the Project report", () => {
     const { threads } = await client.bootstrap();
     const worker = threads.find((thread) => thread.coordinatorThreadId !== undefined);
     if (worker?.coordinatorThreadId === undefined) throw new Error("Expected a Project worker.");
-    const newest = decodeCodeProjectReport({
-      workerId: worker.id,
-      operationId: "00000000-0000-4000-8000-000000000892",
-      sequence: 4,
-      title: worker.title,
-      state: "completed",
-      summary: "Newest result",
-      updatedAt: worker.updatedAt,
+    const reports = Array.from({ length: 27 }, (_, index) => {
+      const sequence = 27 - index;
+      return decodeCodeProjectReport({
+        workerId: worker.id,
+        operationId: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
+        sequence,
+        title: worker.title,
+        state: "completed",
+        summary: `Result ${sequence}`,
+        updatedAt: worker.updatedAt,
+      });
     });
-    const older = decodeCodeProjectReport({
-      ...newest,
-      operationId: "00000000-0000-4000-8000-000000000893",
-      sequence: 2,
-      summary: "Earlier result",
+    const newest = reports[0];
+    const boundary = reports[24];
+    const shifted = reports[25];
+    const oldest = reports[26];
+    if (!newest || !boundary || !shifted || !oldest) throw new Error("Expected two report pages.");
+    let visible = reports;
+    const execute = vi.fn<typeof client.execute>(async (command) => {
+      if (command.kind !== "read-code-project-report-page")
+        throw new Error("Expected a report read.");
+      const before = command.before;
+      const remaining = visible.filter(
+        (row) => before === undefined || row.sequence < before.sequence,
+      );
+      const page = remaining.slice(0, 25);
+      const last = page.at(-1);
+      return {
+        kind: "project-report-page",
+        reports: page,
+        ...(remaining.length > page.length && last
+          ? { next: { sequence: last.sequence, operationId: last.operationId } }
+          : {}),
+      };
     });
-    const retained = decodeCodeProjectReport({
-      ...older,
-      operationId: "00000000-0000-4000-8000-000000000894",
-      sequence: 1,
-      summary: "Still visible",
-    });
-    let rewound = false;
-    const next = { sequence: newest.sequence, operationId: newest.operationId };
-    const execute = vi.fn<typeof client.execute>(async (command) => ({
-      kind: "project-report-page",
-      ...(command.kind === "read-code-project-report-page" && command.before !== undefined
-        ? { reports: rewound ? [retained] : [older, retained] }
-        : { reports: [newest], next }),
-    }));
     const onRead = vi.fn();
     const props = {
       projectId,
       conversationId: worker.coordinatorThreadId,
       client: { ...client, execute },
       reportSequence: newest.sequence,
-      reportCount: 3,
+      reportCount: visible.length,
       onRead,
       onOpen: vi.fn(),
       onOpenBeside: vi.fn(),
@@ -89,19 +95,32 @@ describe("the Project report", () => {
     const view = render(<CodeProjectWork {...props} />);
     expect(await screen.findByText(newest.summary)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Load earlier reports" }));
-    expect(await screen.findByText(older.summary)).toBeVisible();
+    expect(await screen.findByText(oldest.summary)).toBeVisible();
     expect(screen.getAllByText(newest.summary)).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Load earlier reports" })).toBeNull();
     expect(execute).toHaveBeenLastCalledWith(
-      { kind: "read-code-project-report-page", projectId, before: next },
+      {
+        kind: "read-code-project-report-page",
+        projectId,
+        before: { sequence: boundary.sequence, operationId: boundary.operationId },
+      },
       expect.any(AbortSignal),
     );
-    expect(screen.getByText(retained.summary)).toBeVisible();
-    rewound = true;
-    view.rerender(<CodeProjectWork {...props} reportCount={2} />);
-    await waitFor(() => expect(screen.queryByText(older.summary)).toBeNull());
+    expect(screen.getByText(boundary.summary)).toBeVisible();
+    visible = reports.filter((row) => row.operationId !== boundary.operationId);
+    view.rerender(<CodeProjectWork {...props} reportCount={visible.length} />);
+    await waitFor(() => expect(screen.queryByText(boundary.summary)).toBeNull());
     expect(screen.getByText(newest.summary)).toBeVisible();
-    expect(screen.getByText(retained.summary)).toBeVisible();
+    expect(screen.getAllByText(shifted.summary)).toHaveLength(1);
+    expect(screen.getByText(oldest.summary)).toBeVisible();
+    expect(execute).toHaveBeenLastCalledWith(
+      {
+        kind: "read-code-project-report-page",
+        projectId,
+        before: { sequence: shifted.sequence, operationId: shifted.operationId },
+      },
+      expect.any(AbortSignal),
+    );
     expect(onRead.mock.calls).toEqual([[worker.coordinatorThreadId, newest.sequence]]);
   });
 });
