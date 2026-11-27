@@ -1079,6 +1079,7 @@ export type CodeOperationPullRequestReview =
         readonly baseBranch: string;
         readonly headRepository: string;
         readonly headBranch: string;
+        readonly headSha?: string;
         readonly author: string;
         readonly matchesDeliveryBranch: boolean;
         readonly pullRequestNodeId?: string;
@@ -7070,6 +7071,7 @@ export class CodeOperationService {
       baseBranch: pr.baseBranch,
       headRepository: pr.headRepository,
       headBranch: pr.headBranch,
+      ...(pr.headSha === undefined || pr.headSha.length === 0 ? {} : { headSha: pr.headSha }),
       author: pr.author,
       matchesDeliveryBranch: pr.matchesDeliveryBranch,
       description: this.#options.evidence.put(result.description),

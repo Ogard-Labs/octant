@@ -619,6 +619,7 @@ const DIFF_KIND_WORDS = {
   removed: "Removed line",
   context: "Line",
   hunk: "Section",
+  meta: "Note",
 } as const;
 
 /**
@@ -628,7 +629,7 @@ const DIFF_KIND_WORDS = {
 function diffRowLabel(line: NumberedDiffLine): string {
   const number = line.newNumber ?? line.oldNumber;
   const head = DIFF_KIND_WORDS[line.kind];
-  const text = line.kind === "hunk" ? line.text : line.text.slice(1);
+  const text = line.kind === "hunk" || line.kind === "meta" ? line.text : line.text.slice(1);
   return number === undefined ? `${head}: ${text}` : `${head} ${number}: ${text}`;
 }
 
@@ -652,7 +653,7 @@ function DiffRow(props: {
       ? diff.addedText
       : line.kind === "removed"
         ? diff.removedText
-        : line.kind === "hunk"
+        : line.kind === "hunk" || line.kind === "meta"
           ? diff.hunkText
           : null;
   return (
@@ -669,7 +670,7 @@ function DiffRow(props: {
           {line.newNumber ?? ""}
         </Text>
       </View>
-      {runs === undefined || line.kind === "hunk" ? (
+      {runs === undefined || line.kind === "hunk" || line.kind === "meta" ? (
         <Text style={[diff.line, ink]}>{line.text}</Text>
       ) : (
         // The mark keeps the diff ink; the code takes its syntax colours, and

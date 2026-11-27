@@ -15,6 +15,7 @@ import {
 import { GitHistoryResult, decodeGitHistoryQuery } from "@octant/contracts/git-history";
 import type { GitHistoryPage } from "@octant/contracts/git-history";
 import { UsageQueryResponse } from "@octant/contracts/usage-rpc";
+import { parseUnifiedDiff } from "@octant/domain";
 import { executeMobileCodeOperation } from "./mobileCodeOperationsClient";
 import { fetchMobileCodeBoard, type MobileRemoteTransport } from "./mobileInboxClient";
 
@@ -137,7 +138,7 @@ export function loadMobileCodeBoardCard(
   }, failure);
 }
 
-export type MobileDiffLineKind = "hunk" | "added" | "removed" | "context";
+export type MobileDiffLineKind = "hunk" | "added" | "removed" | "context" | "meta";
 
 export interface MobileDiffLine {
   readonly kind: MobileDiffLineKind;
@@ -186,64 +187,34 @@ export function mobileChangedFiles(
 
 /**
  * Splits Git's unified diff into files and counts each file's added and
- * removed lines. Headers (`diff --git`, `index`, `---`, `+++`) are not lines of
- * the file and are not counted, so a `+++` header never reads as an addition.
+ * removed lines using the shared domain parser, so quoted/tab-delimited Git
+ * paths and final-newline markers stay accurate across both desktop and phone.
  */
 export function parseMobileUnifiedDiff(text: string): ReadonlyArray<MobileDiffFile> {
-  const files: Array<{
-    path: string;
-    additions: number;
-    deletions: number;
-    binary: boolean;
-    lines: MobileDiffLine[];
-  }> = [];
-  let current: (typeof files)[number] | undefined;
-  let inHunk = false;
-  for (const line of text.split("\n")) {
-    if (line.startsWith("diff --git ")) {
-      // A plain search, not a regex: `/ b\/(.+)$/` backtracks polynomially on
-      // a header holding many " b/" runs, and the diff text comes from the host.
-      const pathStart = line.indexOf(" b/");
-      current = {
-        path: pathStart >= 0 ? line.slice(pathStart + 3) : line.slice(11),
-        additions: 0,
-        deletions: 0,
-        binary: false,
-        lines: [],
-      };
-      files.push(current);
-      inHunk = false;
-      continue;
-    }
-    if (current === undefined) continue;
-    if (!inHunk) {
-      if (line.startsWith("+++ ")) {
-        const path = line.slice(4);
-        if (path.startsWith("b/")) current.path = path.slice(2);
-        continue;
-      }
-      if (line.startsWith("Binary files ")) {
-        current.binary = true;
-        continue;
+  return parseUnifiedDiff(text).map((file): MobileDiffFile => {
+    const lines: MobileDiffLine[] = [];
+    for (const hunk of file.hunks) {
+      const heading = hunk.heading.length === 0 ? "" : ` ${hunk.heading}`;
+      lines.push({
+        kind: "hunk",
+        text: `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@${heading}`,
+      });
+      for (const line of hunk.lines) {
+        const prefix = line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ";
+        lines.push({ kind: line.kind, text: `${prefix}${line.text}` });
+        if (line.noNewlineAtEndOfFile) {
+          lines.push({ kind: "meta", text: "\\ No newline at end of file" });
+        }
       }
     }
-    if (line.startsWith("@@")) {
-      inHunk = true;
-      current.lines.push({ kind: "hunk", text: line });
-      continue;
-    }
-    if (!inHunk) continue;
-    if (line.startsWith("+")) {
-      current.additions += 1;
-      current.lines.push({ kind: "added", text: line });
-    } else if (line.startsWith("-")) {
-      current.deletions += 1;
-      current.lines.push({ kind: "removed", text: line });
-    } else if (line.startsWith(" ")) {
-      current.lines.push({ kind: "context", text: line });
-    }
-  }
-  return files;
+    return {
+      path: file.path,
+      additions: file.additions,
+      deletions: file.deletions,
+      binary: file.binary,
+      lines,
+    };
+  });
 }
 
 export interface MobileWorkingTreeReview {

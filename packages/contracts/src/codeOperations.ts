@@ -1658,6 +1658,8 @@ const PullRequestReviewResult = Schema.Union(
     baseBranch: boundedNonEmptyText(255),
     headRepository: boundedText(512),
     headBranch: boundedNonEmptyText(255),
+    /** Authoritative pull request head commit SHA reported by the forge, when available. */
+    headSha: Schema.optional(boundedNonEmptyText(64)),
     author: boundedText(255),
     matchesDeliveryBranch: Schema.Boolean,
     description: CodeEvidenceReference,

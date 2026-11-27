@@ -21,6 +21,8 @@ import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system/theme";
 
+const RUNNING_GUIDE_REFRESH_MS = 3_000;
+
 export interface PullRequestReviewPanelProps {
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
@@ -89,7 +91,7 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
       setReview(next);
       if (next.state === "observed") {
         setGuideBusy(true);
-        const headSha = next.commits.at(-1)?.oid;
+        const headSha = next.headSha;
         try {
           const guide = await loadMobilePullRequestGuide({
             transport: props.transport,
@@ -131,6 +133,34 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
       diffRunRef.current += 1;
     };
   }, [refresh]);
+
+  const guideRunning = guideView?.running === true;
+  const observedReview = review?.state === "observed" ? review : undefined;
+  useEffect(() => {
+    if (!guideRunning || observedReview === undefined || projectId === undefined) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void loadMobilePullRequestGuide({
+        transport: props.transport,
+        target: {
+          projectId,
+          baseRepository: observedReview.baseRepository,
+          number: observedReview.number,
+        },
+        ...(observedReview.headSha === undefined ? {} : { headSha: observedReview.headSha }),
+      })
+        .then((nextGuide) => {
+          if (cancelled) return;
+          setGuideView(nextGuide);
+          setGuideError(undefined);
+        })
+        .catch(() => undefined);
+    }, RUNNING_GUIDE_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [guideRunning, guideView, observedReview, projectId, props.transport]);
 
   const openChangedFile = useCallback(
     (observed: CodePullRequestReviewObserved, target: OpenedFileTarget) => {
@@ -336,6 +366,8 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
         : undefined;
     const numbered = parsedFile === undefined ? [] : numberedDiffLines(parsedFile.lines);
     const anchor = openedFile.anchor;
+    const anchorVerified =
+      anchor !== undefined && guideView?.stale === false && review.headSha !== undefined;
     return (
       <View style={styles.block} testID="mobile-pr-file-view">
         <Pressable
@@ -354,6 +386,19 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
             : `+${summaryFile.additions}/−${summaryFile.deletions}`}
           {anchor === undefined ? "" : ` · ${anchorRangeLabel(anchor)}`}
         </Text>
+        {anchor !== undefined && !anchorVerified ? (
+          <Text style={styles.warning} testID="mobile-pr-file-anchor-stale">
+            {guideView?.stale === true
+              ? `Written for an older push (${anchorRangeLabel(anchor)} may have moved), so no lines are highlighted here.`
+              : `Guide freshness is unknown (${anchorRangeLabel(anchor)} may have moved), so no lines are highlighted here.`}
+          </Text>
+        ) : null}
+        {diffState.status === "ready" && diffState.truncated ? (
+          <Text style={styles.warning} testID="mobile-pr-file-truncated">
+            The pull request diff hit the phone&apos;s diff limit; later changes or anchor lines may
+            be missing. Open the desktop host for the full patch.
+          </Text>
+        ) : null}
         {diffState.status === "loading" ? (
           <ActivityIndicator color={colors.accent} />
         ) : diffState.status === "error" ? (
@@ -370,7 +415,7 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
           <ScrollView style={styles.diffScroll}>
             {numbered.map((line, index) => {
               const inAnchor =
-                anchor !== undefined &&
+                anchorVerified &&
                 line.newNumber !== undefined &&
                 line.newNumber >= anchor.startLine &&
                 line.newNumber <= anchor.endLine;
@@ -389,7 +434,7 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
                       ? styles.diffAdded
                       : line.kind === "removed"
                         ? styles.diffRemoved
-                        : line.kind === "hunk"
+                        : line.kind === "hunk" || line.kind === "meta"
                           ? styles.diffHunk
                           : null,
                     inAnchor ? styles.diffAnchorLine : null,
@@ -436,6 +481,10 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
             {guideView.stale ? (
               <Text style={styles.warning} testID="mobile-pr-guide-stale">
                 Written for an older push.
+              </Text>
+            ) : guide !== undefined && review.headSha === undefined ? (
+              <Text style={styles.help} testID="mobile-pr-guide-freshness-unknown">
+                Guide freshness could not be checked against the latest push.
               </Text>
             ) : null}
             {guideView.running ? (

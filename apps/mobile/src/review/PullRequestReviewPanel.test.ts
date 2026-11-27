@@ -29,6 +29,7 @@ vi.mock("./usePullRequestMerge", () => ({
 
 const roots: Root[] = [];
 afterEach(() => {
+  vi.useRealTimers();
   for (const root of roots.splice(0)) act(() => root.unmount());
   document.body.replaceChildren();
 });
@@ -39,6 +40,7 @@ const CHECKOUT_ID = "30000000-0000-4000-8000-000000000001";
 const NOW = "2026-11-26T12:00:00.000Z";
 const HEAD_SHA = "a".repeat(40);
 const OLD_SHA = "b".repeat(40);
+const EARLIER_COMMIT_SHA = "c".repeat(40);
 const DIFF_CONTENT_ID = "10000000-0000-4000-8000-000000000901";
 
 const SAMPLE_DIFF = [
@@ -79,7 +81,8 @@ const codeThread = decodeCodeThread({
 });
 
 function createTransport(input: {
-  readonly guideResponse: unknown;
+  readonly guideResponse: unknown | (() => unknown);
+  readonly headSha?: string | undefined;
   readonly diffText?: string;
   readonly diffTruncated?: boolean;
 }) {
@@ -87,6 +90,7 @@ function createTransport(input: {
     [];
   const diffBytes =
     input.diffText === undefined ? 0 : new TextEncoder().encode(input.diffText).byteLength;
+  const authoritativeHead = "headSha" in input ? input.headSha : HEAD_SHA;
   const transport: MobileRemoteTransport = {
     hostId: "host-1",
     authenticatedFetch: async (request) => {
@@ -127,6 +131,7 @@ function createTransport(input: {
           baseBranch: "main",
           headRepository: "ogard-labs/octant",
           headBranch: "fix/auth-gate",
+          ...(authoritativeHead === undefined ? {} : { headSha: authoritativeHead }),
           author: "henrik",
           matchesDeliveryBranch: true,
           description: {
@@ -141,7 +146,11 @@ function createTransport(input: {
             byteLength: diffBytes,
             truncated: input.diffTruncated ?? false,
           },
-          commits: [{ oid: HEAD_SHA, messageHeadline: "Reject empty tokens", author: "henrik" }],
+          // Deliberately end the summary commits list at an earlier SHA to prove
+          // freshness uses the authoritative headSha, never commits.at(-1).
+          commits: [
+            { oid: EARLIER_COMMIT_SHA, messageHeadline: "Earlier commit", author: "henrik" },
+          ],
           files: [{ path: "src/auth.ts", additions: 1, deletions: 0 }],
           checks: [{ name: "CI", state: "success" }],
           reviews: [],
@@ -150,7 +159,9 @@ function createTransport(input: {
       }
 
       if (request.method === "POST" && request.path === "/api/code/pull-request-guides/query") {
-        return Response.json(input.guideResponse);
+        const body =
+          typeof input.guideResponse === "function" ? input.guideResponse() : input.guideResponse;
+        return Response.json(body);
       }
 
       if (request.method === "POST" && request.path === "/api/code/evidence/batch") {
@@ -212,13 +223,14 @@ async function mountPanel(transport: MobileRemoteTransport) {
 }
 
 describe("the phone's pull request review guide", () => {
-  it("lists stops in order with Needs your decision, flags an older push, offers no write controls, and opens an anchor's changed file", async () => {
+  it("lists stops in order with Needs your decision, highlights fresh anchor lines, warns on truncated patches, and offers no write controls", async () => {
     const { calls, transport } = createTransport({
       diffText: SAMPLE_DIFF,
+      diffTruncated: true,
       guideResponse: {
         guide: {
           guideId: "40000000-0000-4000-8000-000000000001",
-          headSha: OLD_SHA,
+          headSha: HEAD_SHA,
           providerInstanceId: "60000000-0000-4000-8000-000000000001",
           modelId: "claude-sonnet-4",
           recordedAt: NOW,
@@ -239,7 +251,7 @@ describe("the phone's pull request review guide", () => {
             },
           ],
         },
-        stale: true,
+        stale: false,
         running: false,
         modelPicked: true,
       },
@@ -258,9 +270,7 @@ describe("the phone's pull request review guide", () => {
       headSha: HEAD_SHA,
     });
 
-    expect(container.querySelector("[data-testid='mobile-pr-guide-stale']")?.textContent).toBe(
-      "Written for an older push.",
-    );
+    expect(container.querySelector("[data-testid='mobile-pr-guide-stale']")).toBeNull();
 
     const stop0 = container.querySelector("[data-testid='mobile-pr-guide-stop-0']");
     const stop1 = container.querySelector("[data-testid='mobile-pr-guide-stop-1']");
@@ -292,6 +302,8 @@ describe("the phone's pull request review guide", () => {
     expect(
       container.querySelector("[data-testid='mobile-pr-file-anchor-line-11']")?.textContent,
     ).toContain("if (token.length === 0) return false;");
+    // Even with captured lines present, a truncated diff shows the truncation warning.
+    expect(container.querySelector("[data-testid='mobile-pr-file-truncated']")).not.toBeNull();
 
     const backButton = container.querySelector<HTMLElement>("[data-testid='mobile-pr-file-back']");
     await act(async () => {
@@ -300,8 +312,57 @@ describe("the phone's pull request review guide", () => {
     expect(container.querySelector("[data-testid='mobile-pr-guide']")).not.toBeNull();
   });
 
-  it("offers no Write guide control when no guide has been written yet and omits stale warning for fresh guides", async () => {
+  it("warns on a stale guide and opens its anchored file without highlighting old line numbers", async () => {
+    const { transport } = createTransport({
+      diffText: SAMPLE_DIFF,
+      guideResponse: {
+        guide: {
+          guideId: "40000000-0000-4000-8000-000000000002",
+          headSha: OLD_SHA,
+          providerInstanceId: "60000000-0000-4000-8000-000000000001",
+          modelId: "claude-sonnet-4",
+          recordedAt: NOW,
+          stops: [
+            {
+              id: "stale-stop",
+              title: "Moved check",
+              why: "Originally at line 11 before a push moved it.",
+              needsDecision: false,
+              anchors: [{ path: "src/auth.ts", startLine: 11, endLine: 11 }],
+            },
+          ],
+        },
+        stale: true,
+        running: false,
+        modelPicked: true,
+      },
+    });
+
+    const container = await mountPanel(transport);
+    expect(container.querySelector("[data-testid='mobile-pr-guide-stale']")?.textContent).toBe(
+      "Written for an older push.",
+    );
+
+    const anchorButton = container.querySelector<HTMLElement>(
+      "[data-testid='mobile-pr-guide-anchor-stale-stop-0']",
+    );
+    await act(async () => {
+      anchorButton?.click();
+    });
+    await flush();
+
+    expect(container.querySelector("[data-testid='mobile-pr-file-path']")?.textContent).toBe(
+      "src/auth.ts",
+    );
+    expect(container.querySelector("[data-testid='mobile-pr-file-anchor-line-11']")).toBeNull();
+    expect(
+      container.querySelector("[data-testid='mobile-pr-file-anchor-stale']")?.textContent,
+    ).toContain("Written for an older push");
+  });
+
+  it("reports unknown freshness when the host omits headSha and offers no Write guide when empty", async () => {
     const emptyHost = createTransport({
+      headSha: undefined,
       guideResponse: {
         stale: false,
         running: false,
@@ -315,5 +376,38 @@ describe("the phone's pull request review guide", () => {
     expect(emptyContainer.querySelector("[data-testid='mobile-pr-guide-stale']")).toBeNull();
     expect(emptyContainer.textContent).not.toContain("Write guide");
     expect(emptyContainer.textContent).not.toContain("Rewrite");
+    const emptyQuery = emptyHost.calls.find(
+      (call) => call.path === "/api/code/pull-request-guides/query",
+    );
+    expect(emptyQuery?.body).toEqual({
+      target: {
+        projectId: PROJECT_ID,
+        repositoryOwner: "ogard-labs",
+        repositoryName: "octant",
+        number: 42,
+      },
+    });
+
+    const unknownHeadHost = createTransport({
+      headSha: undefined,
+      guideResponse: {
+        guide: {
+          guideId: "40000000-0000-4000-8000-000000000003",
+          headSha: HEAD_SHA,
+          providerInstanceId: "60000000-0000-4000-8000-000000000001",
+          modelId: "claude-sonnet-4",
+          recordedAt: NOW,
+          stops: [],
+        },
+        stale: false,
+        running: false,
+        modelPicked: true,
+      },
+    });
+    const unknownContainer = await mountPanel(unknownHeadHost.transport);
+    expect(
+      unknownContainer.querySelector("[data-testid='mobile-pr-guide-freshness-unknown']")
+        ?.textContent,
+    ).toContain("freshness could not be checked");
   });
 });
