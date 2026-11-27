@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ThreadMessageQueueSnapshot } from "@octant/contracts";
+import { decodeThreadMessageQueueSnapshot } from "@octant/contracts";
 import type { RemoteSessionStanding } from "@octant/client-runtime";
 import { ThemeProvider } from "../../../design-system/theme";
 import {
@@ -32,7 +32,10 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-const queueSnapshot = {
+const queueSnapshot = decodeThreadMessageQueueSnapshot({
+  scope: { mode: "work", threadId: "84000000-0000-4000-8000-000000000001" },
+  version: 1,
+  paused: false,
   items: [
     {
       messageId: "00000000-0000-4000-8000-000000000301",
@@ -49,8 +52,7 @@ const queueSnapshot = {
       payload: { mode: "work", prompt: "Run the checks next" },
     },
   ],
-  paused: false,
-} as never as ThreadMessageQueueSnapshot;
+});
 
 function renderQueue(session: RemoteSessionStanding) {
   const surfaces = listMobileThreadSurfaces({ mode: "work", session });
