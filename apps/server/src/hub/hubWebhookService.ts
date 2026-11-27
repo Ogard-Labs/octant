@@ -454,8 +454,8 @@ export class HubWebhookService {
 
   /**
    * This host's copy of the endpoint's secret, then, for a Stripe endpoint
-   * whose person pasted a new one within the day, the one it replaced: a
-   * delivery held signed with the old secret was answered and will not come
+   * whose person pasted new ones within the day, each one they replaced: a
+   * delivery held signed with an old secret was answered and will not come
    * again. Empty when nothing here opens.
    */
   #secretsFor(endpoint: HubWebhookEndpoint, privateKey: string): ReadonlyArray<string> {

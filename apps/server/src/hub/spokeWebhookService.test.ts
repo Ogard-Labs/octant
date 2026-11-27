@@ -712,6 +712,106 @@ describe("copies on a standby", () => {
       });
     });
 
+    const THIRD = "whsec_rolledAThirdTime0123456789";
+    const HOUR = 60 * 60_000;
+
+    async function stripeEndpoint(spoke: SpokeWebhookService) {
+      const created = await spoke.create({ scheme: "stripe", label: "Payments" });
+      if (created.status !== "awaiting-secret") throw new Error(created.status);
+      return created.endpointId;
+    }
+
+    it("a delivery held on the hub starts its routine once after the secret was changed twice within a day", async () => {
+      const { clock, reach, hub, spoke } = wired();
+      const endpointId = await stripeEndpoint(spoke);
+      await spoke.setSecret(endpointId, OLD);
+      expect((await hub.service.handle(request(endpointId, "evt_1", OLD, clock.now))).status).toBe(
+        202,
+      );
+      await hub.service.tick();
+
+      clock.now += HOUR;
+      await spoke.setSecret(endpointId, NEW);
+      clock.now += HOUR;
+      await spoke.setSecret(endpointId, THIRD);
+      // The hub still takes the first secret for what Stripe signed with it.
+      expect((await hub.service.handle(request(endpointId, "evt_2", OLD, clock.now))).status).toBe(
+        202,
+      );
+      await hub.service.tick();
+
+      reach.spokeAway = false;
+      await hub.service.tick();
+      expect(hub.service.status()).toMatchObject({ queued: 0, forwarded: 2, refused: 0 });
+      expect((await readEvents(spoke, endpointId)).events.map((event) => event.id)).toEqual([
+        `${endpointId}:evt_1`,
+        `${endpointId}:evt_2`,
+      ]);
+      expect(spoke.receive(envelope(endpointId, "evt_1", OLD, clock.now))).toEqual({
+        status: "duplicate",
+      });
+    });
+
+    it("stops taking each replaced secret a day after its own replacement", async () => {
+      const { clock, reach, hub, spoke } = wired();
+      reach.spokeAway = false;
+      const endpointId = await stripeEndpoint(spoke);
+      await spoke.setSecret(endpointId, OLD);
+      await spoke.setSecret(endpointId, NEW);
+      clock.now += HOUR;
+      await spoke.setSecret(endpointId, THIRD);
+
+      const takes = async (eventId: string, secret: string) => ({
+        spoke: spoke.receive(envelope(endpointId, `${eventId}_s`, secret, clock.now)).status,
+        hub: (await hub.service.handle(request(endpointId, `${eventId}_h`, secret, clock.now)))
+          .status,
+      });
+      const taken = { spoke: "accepted", hub: 202 };
+      const refused = { spoke: "refused", hub: 401 };
+
+      clock.now = NOW + WEBHOOK_HOLD_MS + 60_000;
+      await spoke.look();
+      expect(await takes("evt_1", OLD)).toEqual(refused);
+      expect(await takes("evt_2", NEW)).toEqual(taken);
+      expect(await takes("evt_3", THIRD)).toEqual(taken);
+
+      clock.now += HOUR;
+      await spoke.look();
+      expect(await takes("evt_4", NEW)).toEqual(refused);
+      expect(await takes("evt_5", THIRD)).toEqual(taken);
+    });
+
+    it("refuses a paste that would drop a replaced secret whose day is not over", async () => {
+      const { clock, reach, spoke } = wired();
+      reach.spokeAway = false;
+      const endpointId = await stripeEndpoint(spoke);
+      const rolled = (index: number) => `whsec_rolledNumber${index}_0123456789`;
+      for (let index = 0; index < 5; index += 1) {
+        expect(await spoke.setSecret(endpointId, rolled(index))).toMatchObject({ status: "set" });
+        clock.now += 60_000;
+      }
+
+      expect(await spoke.setSecret(endpointId, rolled(5))).toEqual({
+        status: "refused",
+        kind: "too-many-replaced-secrets",
+      });
+      expect(spoke.receive(envelope(endpointId, "evt_1", rolled(0), clock.now))).toEqual({
+        status: "accepted",
+      });
+      expect(spoke.receive(envelope(endpointId, "evt_2", rolled(4), clock.now))).toEqual({
+        status: "accepted",
+      });
+      expect(spoke.receive(envelope(endpointId, "evt_3", rolled(5), clock.now))).toEqual({
+        status: "refused",
+        kind: "bad-signature",
+      });
+      // Going back to a replaced secret drops none, so it is taken.
+      expect(await spoke.setSecret(endpointId, rolled(2))).toMatchObject({ status: "set" });
+
+      clock.now = NOW + WEBHOOK_HOLD_MS + 2 * 60_000;
+      expect(await spoke.setSecret(endpointId, rolled(5))).toMatchObject({ status: "set" });
+    });
+
     it("stops taking the old secret a day after the new one was pasted", async () => {
       const { clock, reach, hub, spoke } = wired();
       reach.spokeAway = false;

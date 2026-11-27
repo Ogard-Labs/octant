@@ -242,7 +242,7 @@ export function sealWebhookSecret(input: {
 }
 
 /**
- * The Stripe secret an endpoint's person replaced, sealed like the current one
+ * A Stripe secret an endpoint's person replaced, sealed like the current one
  * and sent after it for the same recipient, with the time it stops being taken
  * inside the seal. Stripe has already been answered for a delivery the hub
  * holds, and will not send it again, so the old secret keeps verifying for the

@@ -469,6 +469,9 @@ export const HubWebhookHubState = Schema.Struct({
   }).annotations(strict),
 }).annotations(strict);
 
+/** How many replaced Stripe secrets one endpoint can still be taking at once. */
+export const SPOKE_REPLACED_SECRETS_MAX = 4;
+
 /** One of this spoke's endpoints, with the secret it checks deliveries with; only the person sees the secret, once. */
 export const SpokeWebhookEndpoint = Schema.Struct({
   endpointId: WebhookEndpointId,
@@ -476,14 +479,17 @@ export const SpokeWebhookEndpoint = Schema.Struct({
   /** Absent only for a Stripe endpoint whose person has not pasted Stripe's secret yet. */
   secret: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))),
   /**
-   * The Stripe secret a newer paste replaced, still taken until `until`: a day
-   * after the paste, so a delivery the hub held, already answered, still runs.
+   * The Stripe secrets newer pastes replaced, oldest first, each still taken
+   * until its own `until`: a day after the paste that replaced it, so a
+   * delivery the hub held, already answered, still runs.
    */
-  previousSecret: Schema.optional(
-    Schema.Struct({
-      secret: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-      until: Schema.Int.pipe(Schema.nonNegative()),
-    }).annotations(strict),
+  previousSecrets: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        secret: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+        until: Schema.Int.pipe(Schema.nonNegative()),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(SPOKE_REPLACED_SECRETS_MAX)),
   ),
   label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
   createdAt: Schema.Int.pipe(Schema.nonNegative()),
