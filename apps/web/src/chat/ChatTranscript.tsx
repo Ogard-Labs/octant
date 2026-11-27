@@ -1,6 +1,8 @@
+import type { ResultQuoteSource } from "../composer/resultQuoteDraft";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
+import { ResultSourceNotice } from "../transcript/ResultQuoteScope";
 import { ConversationInputs } from "../continuity/ConversationInputs";
 import { QuestionnaireSummary } from "../transcript/QuestionnaireCard";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -117,6 +119,7 @@ export interface ChatTranscriptProps {
   readonly onQuoteSelection?: (input: {
     readonly turnId: ChatTurnId;
     readonly text: string;
+    readonly source?: ResultQuoteSource;
   }) => void;
   /** True while a turn is running, so rewinding and forking stay unavailable. */
   readonly busy?: boolean;
@@ -152,6 +155,7 @@ export interface ChatTranscriptWindowControls {
   readonly onLoadEarlier: () => void;
   readonly onLoadLater: () => void;
   readonly onJumpToLatest: () => void;
+  readonly loadResultRow?: (row: string) => Promise<boolean>;
 }
 
 export interface ChatTranscriptCheckpoints {
@@ -439,6 +443,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           {props.readOnly === true ? null : (
             <p>Ask a question, draft something, or explore an idea.</p>
           )}
+          <ResultSourceNotice
+            key={String(props.view.thread.id)}
+            missing
+            loadRow={props.transcriptWindow?.loadResultRow}
+          />
         </div>
         {trail}
       </section>
@@ -455,6 +464,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       itemAt={turnEndedAt}
       itemKey={(turn) => String(turn.id)}
       items={turns}
+      loadResultRow={props.transcriptWindow?.loadResultRow}
       {...(props.afterTurn === undefined ? {} : { afterItem: props.afterTurn })}
       itemTag="li"
       // Showing a different run (a jump, or Jump to latest) starts the list
@@ -650,7 +660,17 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   turn.delivery?.kind === "side-task-report" ? (
                     <SideTaskReportCards text={delivery.body} />
                   ) : (
-                    <ChildResultCards providerGroups={props.providerGroups} text={delivery.body} />
+                    <ChildResultCards
+                      providerGroups={props.providerGroups}
+                      rowKey={String(turn.id)}
+                      onQuote={
+                        props.onQuoteSelection === undefined
+                          ? undefined
+                          : (text, source) =>
+                              props.onQuoteSelection?.({ turnId: turn.id, text, source })
+                      }
+                      text={delivery.body}
+                    />
                   )
                 ) : (
                   <>
@@ -728,6 +748,12 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               ))}
             </TurnActionMenu>
             <SteeredChildResults
+              rowKey={String(turn.id)}
+              onQuote={
+                props.onQuoteSelection === undefined
+                  ? undefined
+                  : (text, source) => props.onQuoteSelection?.({ turnId: turn.id, text, source })
+              }
               providerGroups={props.providerGroups}
               steered={turn.steeredResults}
             />

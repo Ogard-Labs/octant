@@ -1,3 +1,8 @@
+export interface SentPrompt {
+  readonly id?: string;
+  readonly text: string;
+}
+
 const RECALL_LIMIT = 100;
 
 /**
@@ -7,14 +12,16 @@ const RECALL_LIMIT = 100;
  */
 export function sentPromptsNewestFirst<Item>(
   items: ReadonlyArray<Item>,
-  read: (item: Item) => string | undefined,
-): ReadonlyArray<string> {
-  const prompts: Array<string> = [];
+  read: (item: Item) => SentPrompt | undefined,
+): ReadonlyArray<SentPrompt> {
+  const prompts: Array<SentPrompt> = [];
   for (let index = items.length - 1; index >= 0 && prompts.length < RECALL_LIMIT; index -= 1) {
     const item = items[index];
-    const text = item === undefined ? undefined : read(item)?.trim();
-    if (text === undefined || text === "" || prompts.at(-1) === text) continue;
-    prompts.push(text);
+    const prompt = item === undefined ? undefined : read(item);
+    if (prompt === undefined) continue;
+    const text = prompt.text.trim();
+    if (text === "" || prompts.at(-1)?.text === text) continue;
+    prompts.push({ ...prompt, text });
   }
   return prompts;
 }
@@ -26,7 +33,7 @@ export function sentPromptsNewestFirst<Item>(
  */
 export function promptsToRecall(
   beside: Readonly<Record<string, number>>,
-  prompts: () => ReadonlyArray<string>,
-): ReadonlyArray<string> | undefined {
+  prompts: () => ReadonlyArray<SentPrompt>,
+): ReadonlyArray<SentPrompt> | undefined {
   return Object.values(beside).some((count) => count > 0) ? undefined : prompts();
 }

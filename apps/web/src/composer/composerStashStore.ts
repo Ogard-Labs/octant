@@ -195,7 +195,7 @@ export function createComposerStashStore(factory: IDBFactory) {
         const cleared = recovery(move.location, move.beforeText, emptyComposerStashDraft());
         saved.add(entry);
         recovered.put(cleared, key);
-        return cleared;
+        return { ...cleared, savedDraftId: entry.id };
       }),
     restore: (id: string, move: ComposerDraftMove, draft: ComposerStashDraft) =>
       inDraftStorage(factory, "readwrite", async (saved, recovered) => {

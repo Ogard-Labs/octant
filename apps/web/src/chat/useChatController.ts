@@ -1333,23 +1333,23 @@ export function useChatController(options: ChatControllerOptions) {
    * alone, as it was before transcripts loaded in pages.
    */
   const revealTurn = useCallback(
-    async (turnId: ChatTurnId) => {
+    async (turnId: ChatTurnId): Promise<boolean> => {
       const threadId = activeThreadIdRef.current;
       const state = transcriptWindowRef.current;
       const tail = activeViewRef.current;
-      if (threadId === undefined || state === undefined || tail === undefined) return;
+      if (threadId === undefined || state === undefined || tail === undefined) return false;
       const threadKey = String(threadId);
-      if (state.threadKey !== threadKey || String(tail.thread.id) !== threadKey) return;
+      if (state.threadKey !== threadKey || String(tail.thread.id) !== threadKey) return false;
       const key = String(turnId);
       if (holdsTurn(tail, key)) {
         jumpToLatest();
-        return;
+        return true;
       }
-      if (!state.windowed) return;
+      if (!state.windowed) return false;
       // A newer jump, even one that needs no read, outdates any page still
       // being read for an earlier one.
       const generation = ++revealGeneration.current;
-      if (holdsTurn(state.detached?.view, key)) return;
+      if (holdsTurn(state.detached?.view, key)) return true;
       try {
         const page = await client.threadWindow(threadId, {
           limit: CHAT_WINDOW_PAGE_TURNS,
@@ -1360,11 +1360,12 @@ export function useChatController(options: ChatControllerOptions) {
           String(activeThreadIdRef.current ?? "") !== threadKey ||
           generation !== revealGeneration.current
         ) {
-          return;
+          return false;
         }
         const current = transcriptWindowRef.current;
         const currentTail = activeViewRef.current;
-        if (current === undefined || currentTail === undefined) return;
+        if (current === undefined || currentTail === undefined || !holdsTurn(page.view, key))
+          return false;
         applyTail(
           currentTail,
           {
@@ -1382,8 +1383,10 @@ export function useChatController(options: ChatControllerOptions) {
           },
           false,
         );
+        return true;
       } catch {
         // A superseded or unreachable target stays where the reader is.
+        return false;
       }
     },
     [applyTail, client, jumpToLatest],
@@ -1541,6 +1544,7 @@ export function useChatController(options: ChatControllerOptions) {
         readonly draftRevision?: number;
         /** The person typed this message into the composer; a button's text is not. */
         readonly typedByPerson?: true;
+        readonly onQuoteSend?: (messageId: string | null, prompt: string) => void;
       } = { composerDraft: "consume" },
       sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> = [],
       toolCatalogHandoff = false,
@@ -1606,6 +1610,7 @@ export function useChatController(options: ChatControllerOptions) {
         composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
       ) {
         if (clearsBeforeSend && result === undefined) {
+          sendOptions.onQuoteSend?.(null, prompt);
           composerDraftRef.current.restoreFor(sendingThreadId, {
             ...previousDraft,
             text: prompt,
@@ -1615,6 +1620,9 @@ export function useChatController(options: ChatControllerOptions) {
         } else if (!clearsBeforeSend && result !== undefined) {
           composerDraftRef.current.clearFor(sendingThreadId);
         }
+      }
+      if (result?.kind === "turn-created") {
+        sendOptions.onQuoteSend?.(String(result.turn.submissionId ?? result.turn.id), prompt);
       }
       if (result !== undefined) pendingSubmissionIds.current.delete(submissionKey);
       return result !== undefined;

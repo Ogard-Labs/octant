@@ -63,7 +63,7 @@ export interface ThreadMessageQueue {
   readonly message: string | undefined;
   readonly enqueue: (
     payload: ThreadMessageQueuePayload,
-    accepted?: () => void,
+    accepted?: (messageId: string) => void,
     onRefused?: () => void | Promise<void>,
     draft?: QueueDraft,
     /** `next-turn`: the person chose Queue, so it never steers the running turn. */
@@ -382,7 +382,7 @@ export function useThreadMessageQueue(options: {
   const enqueue = useCallback(
     async (
       payload: ThreadMessageQueuePayload,
-      accepted?: () => void,
+      accepted?: (messageId: string) => void,
       onRefused?: () => void | Promise<void>,
       draft?: QueueDraft,
       timing?: "next-turn",
@@ -397,12 +397,14 @@ export function useThreadMessageQueue(options: {
         await onRefused?.();
         return "refused";
       }
+      const requestId = crypto.randomUUID();
+      const messageId = crypto.randomUUID();
       const command = decodeThreadMessageQueueCommand({
         kind: "enqueue",
         scope,
         expectedVersion: current.current.version,
-        requestId: crypto.randomUUID(),
-        messageId: crypto.randomUUID(),
+        requestId,
+        messageId,
         payload,
         ...(timing === undefined ? {} : { timing }),
       });
@@ -414,7 +416,7 @@ export function useThreadMessageQueue(options: {
           accepted: () => {
             if (settled) return;
             settled = true;
-            accepted?.();
+            accepted?.(messageId);
           },
           onRefused: async () => {
             if (settled) return;

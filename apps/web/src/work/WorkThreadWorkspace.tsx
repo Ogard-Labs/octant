@@ -1,3 +1,8 @@
+import {
+  appendToResultQuoteDraft,
+  rememberSentResultQuotes,
+  resultQuotePlaces,
+} from "../composer/resultQuoteDraft";
 import { threadDraftScope, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
@@ -120,7 +125,8 @@ import type { ThreadSessionClient } from "../code/codeSessionClient";
 import { createWorkSessionClient } from "./workSessionClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
-import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
+import { ThreadReplyDetailMenu } from "../transcript/ThreadReplyDetail";
+import { ThreadTranscriptScope } from "../transcript/ThreadTranscriptScope";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -205,7 +211,12 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
-import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import {
+  LEGACY_RESULT_REFERENCE_MARK,
+  loadComposerQuoteTools,
+  promptWithReadableResultSources,
+  REPLY_QUOTE_SOURCE,
+} from "../composer/composerQuoteMark";
 import { messageTiming, useTurnSendPreference } from "../messageQueue/turnSendPreference";
 import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
 import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
@@ -2371,7 +2382,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         return false;
       }
       const sideChatReturns = composerDraft.sideChatReturns;
-      const promptText = composerDraft.text;
+      const draft = composerDraft.text;
+      const resultQuotes = resultQuotePlaces(typedScope, draft);
+      const promptText = draft.includes(LEGACY_RESULT_REFERENCE_MARK)
+        ? await promptWithReadableResultSources(draft)
+        : draft;
       if (promptText.length === 0) return false;
       const retireStashRecovery = stashSubmission.current?.();
       const sendingThreadId = String(thread.id);
@@ -2423,7 +2438,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               extensionSelections,
               ...typedClaimFor(typedScope, promptText),
             },
-            () => {
+            (messageId) => {
+              rememberSentResultQuotes(typedScope, `${messageId}:0`, draft, resultQuotes);
               retireStashRecovery?.();
               continuation.reset();
               if (currentThreadKeyRef.current !== sendingThreadId) return;
@@ -2475,6 +2491,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           setErrorMessage("The Work turn could not be started.");
           return false;
         }
+        rememberSentResultQuotes(typedScope, `${started.turn.turnId}:0`, draft, resultQuotes);
         retireStashRecovery?.();
         {
           continuation.reset();
@@ -3022,7 +3039,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         });
 
   return (
-    <ThreadReplyDetailScope thread={{ mode: "work", threadId: String(props.threadId) }}>
+    <ThreadTranscriptScope thread={{ mode: "work", threadId: String(props.threadId) }}>
       <section aria-label="Task workspace" className="work-thread-workspace">
         <h1 className="sr-only">{props.title}</h1>
         <OctantDialogPresence>
@@ -3040,15 +3057,19 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           {...(readOnly
             ? {}
             : {
-                onAddToChat: (text: string) => {
+                onAddToChat: (text, source) => {
                   void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
                     // The prompt as it stands once the quote code has loaded.
                     const current = textareaRef.current?.value ?? composerDraft.text;
-                    const next = appendComposerQuote(current, {
-                      source: REPLY_QUOTE_SOURCE,
-                      text,
-                      comment: "",
-                    });
+                    const next = appendComposerQuote(
+                      current,
+                      {
+                        source: source?.label ?? REPLY_QUOTE_SOURCE,
+                        text,
+                        comment: "",
+                      },
+                      { threadId: typedScope, result: source },
+                    );
                     composerDraft.setDraft(next, next.length);
                     textareaRef.current?.focus();
                   });
@@ -3065,6 +3086,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             itemAt={workRowHappenedAt}
             itemKey={(row) => row.key}
             items={transcriptRows}
+            loadResultRow={() => {
+              if (!firstPageSettled) return true;
+              if (!loaded.hasEarlier || earlierState === "failed") return false;
+              if (earlierState === "idle") void loadEarlier();
+              return true;
+            }}
             {...(revealKey === undefined ? {} : { revealKey })}
             {...(onTurnRevealed === undefined ? {} : { onRevealed: () => onTurnRevealed() })}
             lead={
@@ -3158,6 +3185,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           <SideTaskReportCards text={row.entry.text} />
                         ) : (
                           <ChildResultCards
+                            rowKey={row.key}
                             providerGroups={props.providerGroups}
                             text={row.entry.text}
                           />
@@ -3371,6 +3399,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               if (row.kind === "steered") {
                 return (
                   <SteeredChildResults
+                    rowKey={row.key}
                     providerGroups={props.providerGroups}
                     steered={row.steered}
                   />
@@ -3650,7 +3679,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     notes={{
                       threadId: String(thread.id),
                       onInsert: (note) => {
-                        const next = draftWithNote(prompt, note);
+                        const next = appendToResultQuoteDraft(
+                          typedScope,
+                          prompt,
+                          draftWithNote(prompt, note),
+                        );
                         composerDraft.setDraft(next, next.length);
                       },
                     }}
@@ -3780,12 +3813,16 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   sentPromptsNewestFirst(
                     turns.flatMap((turn) =>
                       turn.delivery === undefined
-                        ? turn.transcript.filter((entry) => entry.role === "user")
+                        ? turn.transcript.flatMap((entry, index) =>
+                            entry.role === "user"
+                              ? [{ id: `${turn.turnId}:${index}`, text: entry.text }]
+                              : [],
+                          )
                         : [],
                     ),
                     (entry) =>
                       parseAutomationFollowUpTurnPrompt(entry.text) === undefined
-                        ? entry.text
+                        ? entry
                         : undefined,
                   ),
               )}
@@ -4147,6 +4184,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           ]}
         />
       </section>
-    </ThreadReplyDetailScope>
+    </ThreadTranscriptScope>
   );
 }

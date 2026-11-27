@@ -1,3 +1,5 @@
+import { appendComposerQuote } from "../composer/composerQuote";
+import { observeResultQuoteSend, sentResultQuotes } from "../composer/resultQuoteDraft";
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import {
   decodeChatBootstrap,
@@ -1297,6 +1299,39 @@ describe("useChatController", () => {
 
     expect(result.current.errorMessage).toBeUndefined();
     expect(result.current.activeView?.thread.id).toBe(otherThreadId);
+  });
+
+  it("records a sent quote's source against the host's accepted turn identity", async () => {
+    const accepted = "90000000-0000-4000-8000-000000000001";
+    const scope = `chat:${threadId}`;
+    const quote = { source: "a subagent result", text: "Accepted excerpt", comment: "" };
+    const draft = appendComposerQuote("   Send this", quote, {
+      threadId: scope,
+      result: { label: quote.source, threadId: scope, row: "first-delivery", block: "0" },
+    });
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute: vi.fn().mockResolvedValue({ kind: "turn-created", turn: { id: accepted } }),
+    });
+    const { result } = renderHook(() => useChatController({ activeThreadId: threadId, client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    act(() => result.current.setPendingDraft(draft));
+    const onQuoteSend = observeResultQuoteSend(scope, draft);
+    if (onQuoteSend === undefined) throw new Error("The draft quote should have a send receipt.");
+    await act(async () =>
+      expect(
+        await result.current.sendTurn(draft.trim(), [], [], [], [], [], undefined, {
+          composerDraft: "consume",
+          onQuoteSend,
+        }),
+      ).toBe(true),
+    );
+    expect(
+      sentResultQuotes(scope, accepted, draft.trim()).map((place) => place.source.row),
+    ).toEqual(["first-delivery"]);
+    expect(sentResultQuotes(scope, "different-turn", draft.trim())).toEqual([]);
   });
 
   it("clears the composer as soon as send starts and restores the text if send fails", async () => {
@@ -2943,13 +2978,13 @@ describe("useChatController thread windows", () => {
     const { result } = renderWindowed(host, { threadWindow });
     await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
 
-    let first: Promise<void> | undefined;
+    let first: Promise<boolean> | undefined;
     act(() => {
       first = result.current.revealTurn(turnIdAt(5) as never);
     });
     await act(async () => result.current.revealTurn(turnIdAt(40) as never));
     held.resolve();
-    await act(async () => first);
+    await act(async () => expect(await first).toBe(false));
 
     expect(indexes(result.current.transcriptWindow?.detached?.view).at(-1)).toBe(40);
   });
@@ -2967,14 +3002,14 @@ describe("useChatController thread windows", () => {
     await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
     await act(async () => result.current.revealTurn(turnIdAt(40) as never));
 
-    let earlier: Promise<void> | undefined;
+    let earlier: Promise<boolean> | undefined;
     act(() => {
       earlier = result.current.revealTurn(turnIdAt(5) as never);
     });
     // Already in the run on screen, so no read; it is still the newest jump.
     await act(async () => result.current.revealTurn(turnIdAt(35) as never));
     held.resolve();
-    await act(async () => earlier);
+    await act(async () => expect(await earlier).toBe(false));
 
     expect(indexes(result.current.transcriptWindow?.detached?.view).at(-1)).toBe(40);
   });

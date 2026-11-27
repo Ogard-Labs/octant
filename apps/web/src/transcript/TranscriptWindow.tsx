@@ -1,3 +1,4 @@
+import { ResultSourceNotice, useResultQuoteScope } from "./ResultQuoteScope";
 import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { ContextSubjectRef } from "@octant/contracts/context";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
@@ -71,6 +72,8 @@ export interface TranscriptWindowProps<T> {
   readonly listRole?: "list";
   readonly listTag?: "div" | "ol";
   readonly itemTag?: "div" | "li";
+  /** Bring a quoted delivery back into the loaded history. False means the source is unavailable. */
+  readonly loadResultRow?: ((key: string) => boolean | Promise<boolean>) | undefined;
   readonly revealKey?: string;
   /**
    * Called once the `revealKey` row has been brought into view, so the owner
@@ -188,7 +191,8 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const restoreKey = props.restoreKey;
   const viewStore = useContext(WorkspaceViewStateContext);
   const savedView = viewStore?.read(`transcript:${restoreKey}`);
-  const revealKey = props.revealKey;
+  const resultQuote = useResultQuoteScope();
+  const resultRevealKey = resultQuote?.revealRow;
   const firstKey = items[0] === undefined ? undefined : itemKey(items[0], 0);
   const remembered =
     (viewStore === undefined ? scrollMemory.get(restoreKey) : undefined) ??
@@ -228,8 +232,11 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     });
     return index;
   }, [items, itemKey]);
+  const missingResultRow =
+    resultRevealKey !== undefined && !keyIndex.has(resultRevealKey) ? resultRevealKey : undefined;
+  const revealKey =
+    missingResultRow === undefined ? (resultRevealKey ?? props.revealKey) : props.revealKey;
   const revealIndex = revealKey === undefined ? -1 : (keyIndex.get(revealKey) ?? -1);
-
   const pinnedFromKeys = new Set<number>();
   if (props.pinnedKeys !== undefined) {
     for (const key of props.pinnedKeys) {
@@ -415,7 +422,16 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const keyIndexRef = useRef(keyIndex);
   keyIndexRef.current = keyIndex;
   const onRevealedRef = useRef(props.onRevealed);
-  onRevealedRef.current = props.onRevealed;
+  onRevealedRef.current = (key) => {
+    if (key === resultRevealKey) {
+      scrollElementRef.current
+        ?.querySelector<HTMLElement>("[data-result-quote-target]")
+        ?.focus({ preventScroll: true });
+      resultQuote?.revealed();
+    } else {
+      props.onRevealed?.(key);
+    }
+  };
   const settleRevealRef = useRef<RevealSettling | undefined>(undefined);
   // A list that goes away while a reveal settles (the reader left the thread,
   // or the run holding the row was let go) has done what it could with the
@@ -466,9 +482,10 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
               settleRevealRef.current = undefined;
               onRevealedRef.current?.(key);
             },
+            key === resultRevealKey,
           );
     if (settleRevealRef.current === undefined) onRevealedRef.current?.(key);
-  }, [itemKey, items, revealKey, virtualizer]);
+  }, [itemKey, items, resultRevealKey, revealKey, virtualizer]);
 
   // Only a row added at the end is news. Earlier rows loaded above, a row that
   // grows while it streams, and an older row exposed when the last one is
@@ -869,6 +886,10 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
             </OctantButton>
           </div>
         ) : null}
+        <ResultSourceNotice
+          missing={missingResultRow !== undefined}
+          loadRow={props.loadResultRow}
+        />
         <div aria-live="polite" className="sr-only" data-transcript-live="">
           {liveMessage}
         </div>
@@ -909,6 +930,7 @@ function settleReveal(
   indexOfTarget: () => number | undefined,
   scrollTo: (offset: number) => void,
   done: () => void,
+  revealResult: boolean,
 ): RevealSettling | undefined {
   if (typeof requestAnimationFrame !== "function") return undefined;
   const startedAt = performance.now();
@@ -942,8 +964,10 @@ function settleReveal(
     const row = scroll.querySelector(`[data-transcript-row][data-index="${String(index)}"]`);
     if (row instanceof HTMLElement) {
       const frameRect = scroll.getBoundingClientRect();
-      const rowRect = row.getBoundingClientRect();
-      const offset = rowRect.top + rowRect.height / 2 - (frameRect.top + frameRect.height / 2);
+      const result = revealResult ? row.querySelector("[data-result-quote-target]") : null;
+      const rect = (result ?? row).getBoundingClientRect();
+      const offset =
+        rect.top - frameRect.top + (result === null ? (rect.height - frameRect.height) / 2 : -16);
       const height = scroll.scrollHeight;
       const max = height - scroll.clientHeight;
       const target = Math.max(0, Math.min(max, scroll.scrollTop + offset));

@@ -3608,6 +3608,7 @@ export function useCodeController(options: CodeControllerOptions) {
         readonly onRefused?: (message: string) => void;
         readonly pullRequestLineNotesSource?: CodePullRequestLineNotesSource;
       },
+      onQuoteSend?: (messageId: string | null, prompt: string) => void,
     ): Promise<boolean> => {
       const outsideComposer = fromOutsideComposer !== undefined;
       const trimmed = prompt.trim();
@@ -3646,6 +3647,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ) {
           return;
         }
+        onQuoteSend?.(null, trimmed);
         composerDraftRef.current.restoreFor(sendingThreadId, {
           ...previousDraft,
           text: trimmed,
@@ -3739,6 +3741,7 @@ export function useCodeController(options: CodeControllerOptions) {
         });
         setTurnStatus("running");
         fromOutsideComposer?.onAccepted();
+        onQuoteSend?.(String(operationId), trimmed);
         // A steered send may have emptied the composer so the user can keep
         // typing. Clearing here is safe only when no draft revision landed
         // after this dispatch.

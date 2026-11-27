@@ -1,6 +1,9 @@
+import { useResultQuoteScope } from "../transcript/ResultQuoteScope";
+import type { ResultQuoteSource } from "../composer/resultQuoteDraft";
+import { SelectionThreadSurface } from "../transcript/SelectionThread";
 import type { AgentResultSteeredIntoTurn } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { useContext, useId, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { ChatRichText } from "../chat/ChatRichText";
 import { modelDisplayName } from "../providers/providerModelLabel";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -25,10 +28,18 @@ const FOLD_AFTER_LINES = 8;
  * the person's own right-aligned message. Run and provider ids, which are for
  * support and for addressing the run, sit behind Details.
  */
-export function ChildResultCards(props: {
-  readonly text: string;
-  readonly providerGroups?: ReadonlyArray<PickerGroup> | undefined;
-}) {
+interface ResultQuoteProps {
+  readonly rowKey?: string | undefined;
+  readonly onQuote?: ((text: string, source: ResultQuoteSource) => void) | undefined;
+}
+
+export function ChildResultCards(
+  props: ResultQuoteProps & {
+    readonly text: string;
+    readonly deliveryKey?: string;
+    readonly providerGroups?: ReadonlyArray<PickerGroup> | undefined;
+  },
+) {
   const parsed = parseChildResultDelivery(props.text);
   const blocks: ReadonlyArray<ChildResultBlock> =
     parsed.length === 0 ? [{ kind: "raw", text: props.text }] : parsed;
@@ -36,6 +47,9 @@ export function ChildResultCards(props: {
     <div className="child-results">
       {blocks.map((block, index) => (
         <ChildResultCard
+          rowKey={props.rowKey}
+          onQuote={props.onQuote}
+          blockKey={`${props.deliveryKey ?? "queued"}:${index}`}
           block={block}
           // The delivery is immutable text, so a block's position is its identity.
           key={index}
@@ -46,18 +60,47 @@ export function ChildResultCards(props: {
   );
 }
 
-function ChildResultCard(props: {
-  readonly block: ChildResultBlock;
-  readonly providerGroups: ReadonlyArray<PickerGroup> | undefined;
-}) {
+function ChildResultCard(
+  props: ResultQuoteProps & {
+    readonly blockKey: string;
+    readonly block: ChildResultBlock;
+    readonly providerGroups: ReadonlyArray<PickerGroup> | undefined;
+  },
+) {
   const block = props.block;
+  const scope = useResultQuoteScope();
+  const label =
+    block.kind === "raw"
+      ? "a subagent result"
+      : `the ${subagentRoleWord(block.role).toLowerCase()} subagent (generation ${block.generation})`;
+  const target =
+    scope?.target?.row === props.rowKey && scope?.target?.block === props.blockKey
+      ? scope.target
+      : undefined;
+  const rowKey = props.rowKey;
+  const resultText = (text: string, markdown = false) => (
+    <FoldedText markdown={markdown} text={text} target={target}>
+      {(content) =>
+        scope === undefined || rowKey === undefined ? (
+          content
+        ) : (
+          <SelectionThreadSurface
+            resultSource={{ label, threadId: scope.threadId, row: rowKey, block: props.blockKey }}
+            onResultQuote={props.onQuote}
+          >
+            {content}
+          </SelectionThreadSurface>
+        )
+      }
+    </FoldedText>
+  );
   if (block.kind === "raw") {
     return (
       <article aria-label="Subagent result" className="child-result">
         <header className="child-result__head">
           <span className="child-result__title">Subagent result</span>
         </header>
-        <FoldedText text={block.text} />
+        {resultText(block.text)}
       </article>
     );
   }
@@ -94,7 +137,7 @@ function ChildResultCard(props: {
         block.text === undefined ? (
           <p className="child-result__note">The reply was not kept.</p>
         ) : (
-          <FoldedText markdown text={block.text} />
+          resultText(block.text, true)
         )
       ) : (
         <p className="child-result__note">{block.text ?? "No reason was recorded."}</p>
@@ -111,7 +154,7 @@ function ChildResultCard(props: {
     </article>
   );
   return finished ? (
-    <FinishedResult generation={block.generation} role={role} runId={block.runId}>
+    <FinishedResult generation={block.generation} role={role} runId={block.runId} target={target}>
       {card}
     </FinishedResult>
   ) : (
@@ -128,10 +171,15 @@ function FinishedResult(props: {
   readonly role: string;
   readonly runId: string;
   readonly generation: string;
+  readonly target: object | undefined;
   readonly children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
+  const { target } = props;
+  useEffect(() => {
+    if (target !== undefined) setOpen(true);
+  }, [target]);
   const subagents = useContext(ThreadSubagentsContext);
   const entry =
     subagents?.status === "ready"
@@ -172,16 +220,35 @@ function FinishedResult(props: {
   );
 }
 
-export function FoldedText(props: { readonly text: string; readonly markdown?: boolean }) {
+export function FoldedText(props: {
+  readonly text: string;
+  readonly markdown?: boolean;
+  readonly target?: object | undefined;
+  readonly children?: (content: ReactNode) => ReactNode;
+}) {
   const long =
     props.text.length > FOLD_AFTER_CHARACTERS || props.text.split("\n").length > FOLD_AFTER_LINES;
   const [open, setOpen] = useState(false);
   const id = useId();
+  const { target } = props;
+  useEffect(() => {
+    if (target === undefined) return;
+    setOpen(true);
+  }, [target]);
+  const content = (
+    <div
+      className="child-result__text"
+      data-folded={long && !open ? "true" : "false"}
+      id={id}
+      data-result-quote-target={target === undefined ? undefined : ""}
+      tabIndex={target === undefined ? undefined : -1}
+    >
+      {props.markdown === true ? <ChatRichText body={props.text} /> : <p>{props.text}</p>}
+    </div>
+  );
   return (
     <div className="child-result__text-frame">
-      <div className="child-result__text" data-folded={long && !open ? "true" : "false"} id={id}>
-        {props.markdown === true ? <ChatRichText body={props.text} /> : <p>{props.text}</p>}
-      </div>
+      {props.children === undefined ? content : props.children(content)}
       {long ? (
         <OctantButton
           aria-controls={id}
@@ -204,10 +271,12 @@ export function FoldedText(props: { readonly text: string; readonly markdown?: b
  * sit inside that turn, after its reply, and say so; the cards are the same a
  * queued delivery shows.
  */
-export function SteeredChildResults(props: {
-  readonly steered: ReadonlyArray<AgentResultSteeredIntoTurn> | undefined;
-  readonly providerGroups?: ReadonlyArray<PickerGroup> | undefined;
-}) {
+export function SteeredChildResults(
+  props: ResultQuoteProps & {
+    readonly steered: ReadonlyArray<AgentResultSteeredIntoTurn> | undefined;
+    readonly providerGroups?: ReadonlyArray<PickerGroup> | undefined;
+  },
+) {
   if (props.steered === undefined || props.steered.length === 0) return null;
   return (
     <>
@@ -219,7 +288,13 @@ export function SteeredChildResults(props: {
           key={`${String(entry.delivery.runId)}:${entry.steeredAt}`}
         >
           <p className="oct-meta child-result__steered">Delivered into the running turn</p>
-          <ChildResultCards providerGroups={props.providerGroups} text={entry.body} />
+          <ChildResultCards
+            deliveryKey={`${entry.delivery.runId}:${entry.steeredAt}`}
+            onQuote={props.onQuote}
+            providerGroups={props.providerGroups}
+            rowKey={props.rowKey}
+            text={entry.body}
+          />
         </article>
       ))}
     </>

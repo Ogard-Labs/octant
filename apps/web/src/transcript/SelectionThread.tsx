@@ -1,3 +1,4 @@
+import type { ResultQuoteSource } from "../composer/resultQuoteDraft";
 import { followSelectionWithin } from "./selectionOwner";
 import type { ProjectId } from "@octant/contracts/projects";
 import { MessageSquarePlus } from "../ui/icons";
@@ -30,7 +31,10 @@ export const SelectionThreadStarterContext = createContext<
 >(undefined);
 
 /** What a selection in a reply can do here, in the order offered. */
-type SelectionAction = { readonly label: string; readonly run: (text: string) => void };
+type SelectionAction = {
+  readonly label: string;
+  readonly run: (text: string, source?: ResultQuoteSource) => void;
+};
 const QuoteSelectionContext = createContext<ReadonlyArray<SelectionAction>>([]);
 
 /** Selected prose as a Markdown block quote, ready for a composer to continue under. */
@@ -48,7 +52,7 @@ export function SelectionThreadScope(props: {
   readonly mode: "work" | "code";
   readonly projectId: ProjectId | undefined;
   /** Adds selected reply text to this thread's own composer as a quote chip. */
-  readonly onAddToChat?: ((text: string) => void) | undefined;
+  readonly onAddToChat?: ((text: string, source?: ResultQuoteSource) => void) | undefined;
   readonly children: ReactNode;
 }) {
   const start = useContext(SelectionThreadStarterContext);
@@ -88,16 +92,36 @@ function selectionWithin(container: HTMLElement | null): string {
  * chip in this thread's composer) and "New thread from selection" as small
  * actions under the reply and in the right-click menu.
  */
-export function SelectionThreadSurface(props: { readonly children: ReactNode }) {
-  const quote = useContext(QuoteSelectionContext);
+export function SelectionThreadSurface(props: {
+  readonly children: ReactNode;
+  readonly resultSource?: ResultQuoteSource;
+  readonly onResultQuote?: ((text: string, source: ResultQuoteSource) => void) | undefined;
+}) {
+  const actions = useContext(QuoteSelectionContext);
+  const { resultSource, onResultQuote } = props;
+  const addToChat = onResultQuote ?? actions.find((action) => action.label === "Add to chat")?.run;
+  const quote =
+    resultSource === undefined
+      ? actions
+      : addToChat === undefined
+        ? []
+        : [{ label: "Add to chat", run: (text: string) => addToChat(text, resultSource) }];
   const containerRef = useRef<HTMLDivElement>(null);
+  const offerRef = useRef<HTMLDivElement>(null);
   const [offer, setOffer] = useState("");
   const [menuText, setMenuText] = useState("");
   const enabled = quote.length > 0;
 
   useEffect(() => {
     if (!enabled) return;
-    return followSelectionWithin(() => containerRef.current, setOffer);
+    return followSelectionWithin(
+      () => containerRef.current,
+      (text) => {
+        // Moving keyboard focus to an action can collapse the document selection.
+        if (text === "" && offerRef.current?.contains(document.activeElement) === true) return;
+        setOffer(text);
+      },
+    );
   }, [enabled]);
 
   const start = useCallback((text: string, action: SelectionAction | undefined) => {
@@ -131,7 +155,18 @@ export function SelectionThreadSurface(props: { readonly children: ReactNode }) 
         {props.children}
       </OctantContextMenu>
       {offer === "" ? null : (
-        <div className="transcript-selection-thread__offer">
+        <div
+          className="transcript-selection-thread__offer"
+          onBlur={(event) => {
+            if (
+              !event.currentTarget.contains(event.relatedTarget) &&
+              selectionWithin(containerRef.current) === ""
+            ) {
+              setOffer("");
+            }
+          }}
+          ref={offerRef}
+        >
           {quote.map((action) => (
             <OctantButton
               key={action.label}

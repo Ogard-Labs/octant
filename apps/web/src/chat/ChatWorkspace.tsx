@@ -1,3 +1,9 @@
+import {
+  appendToResultQuoteDraft,
+  observeResultQuoteSend,
+  rememberSentResultQuotes,
+  resultQuotePlaces,
+} from "../composer/resultQuoteDraft";
 import { threadDraftScope, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
@@ -21,6 +27,7 @@ import type {
 } from "@octant/contracts";
 import {
   decodeChatAttachmentId,
+  decodeChatTurnId,
   type ChatAttachmentId,
   type ChatAttempt,
   type ChatResearchRouting,
@@ -78,12 +85,18 @@ import {
 } from "./ChatComposer";
 import { attemptCanForceStop } from "./attemptForceStop";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
-import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
+import { ThreadReplyDetailMenu } from "../transcript/ThreadReplyDetail";
+import { ThreadTranscriptScope } from "../transcript/ThreadTranscriptScope";
 import { ChatPendingQuestions, ChatTranscript, type ChatTranscriptProps } from "./ChatTranscript";
 import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
-import { loadComposerQuoteTools, REPLY_QUOTE_SOURCE } from "../composer/composerQuoteMark";
+import {
+  LEGACY_RESULT_REFERENCE_MARK,
+  loadComposerQuoteTools,
+  promptWithReadableResultSources,
+  REPLY_QUOTE_SOURCE,
+} from "../composer/composerQuoteMark";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
-import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
+import { promptsToRecall, sentPromptsNewestFirst, type SentPrompt } from "../composer/sentPrompts";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
@@ -344,6 +357,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const turnActive = view !== undefined && latestActiveAttempt(view) !== undefined;
   const transcriptWindow = props.controller.transcriptWindow;
   const revealTurn = props.controller.revealTurn;
+  const loadResultRow = useCallback(
+    (row: string) => revealTurn(decodeChatTurnId(row)),
+    [revealTurn],
+  );
   // A jump target on a page that is not loaded asks the controller for that
   // page; one already loaded is revealed by the transcript without a read.
   useEffect(() => {
@@ -1321,6 +1338,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       return false;
     }
     const sideChatReturns = props.controller.draftSideChatReturns ?? [];
+    const onQuoteSend = observeResultQuoteSend(typedScope, draft);
     const retireStashRecovery = stashSubmission.current?.();
     const sendingDraftRevision = props.controller.draftRevision;
     const extensionReceiptsForSend = pendingExtensionRef.current;
@@ -1340,7 +1358,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     const sendingThreadId = String(view.thread.id);
     const threadMentionIds = await threadMentions.resolveForSend();
     if (activeThreadIdRef.current !== sendingThreadId) return false;
-    const outgoing = draft.trim();
+    const outgoing = (
+      draft.includes(LEGACY_RESULT_REFERENCE_MARK)
+        ? await promptWithReadableResultSources(draft)
+        : draft
+    ).trim();
     const attachmentIds = claimedAttachments.map((attachment) => attachment.id);
     if (outgoing.trim().length === 0 && attachmentIds.length === 0) return false;
     const context: ChatSendContext = {
@@ -1380,7 +1402,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           sendingDraftRevision !== undefined ||
           continuation.policy === "text-only" ||
           retireStashRecovery !== undefined ||
-          typed.typedByPerson === true
+          typed.typedByPerson === true ||
+          onQuoteSend !== undefined
         )
           args[7] = {
             composerDraft: retireStashRecovery === undefined ? "consume" : "consume-on-acceptance",
@@ -1389,6 +1412,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               : {}),
             ...(sendingDraftRevision === undefined ? {} : { draftRevision: sendingDraftRevision }),
             ...typed,
+            ...(onQuoteSend === undefined ? {} : { onQuoteSend }),
           };
         if (sideChatReturns.length > 0) args[8] = sideChatReturns;
         if (toolCatalogHandoff) args[9] = true;
@@ -1515,7 +1539,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   });
 
   return (
-    <ThreadReplyDetailScope thread={{ mode: "chat", threadId: String(view.thread.id) }}>
+    <ThreadTranscriptScope thread={{ mode: "chat", threadId: String(view.thread.id) }}>
       <ThreadConnectionLostContext value={connectionLost}>
         <section aria-label="Chat workspace" className="chat-workspace">
           <ThreadConnectionNotice connected={!connectionLost} onRetry={props.controller.retry} />
@@ -1807,6 +1831,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                       onLoadEarlier: () => void props.controller.loadEarlier(),
                       onLoadLater: () => void props.controller.loadLater(),
                       onJumpToLatest: props.controller.jumpToLatest,
+                      loadResultRow,
                     },
                   })}
               {...(!readOnly && checkpoints.available
@@ -1841,14 +1866,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {...(readOnly
                 ? {}
                 : ({
-                    onQuoteSelection: ({ text }) => {
+                    onQuoteSelection: ({ text, source }) => {
                       void loadComposerQuoteTools().then(({ appendComposerQuote }) => {
                         // The draft as it stands once the quote code has loaded.
-                        const next = appendComposerQuote(latestDraftRef.current, {
-                          source: REPLY_QUOTE_SOURCE,
-                          text,
-                          comment: "",
-                        });
+                        const next = appendComposerQuote(
+                          latestDraftRef.current,
+                          {
+                            source: source?.label ?? REPLY_QUOTE_SOURCE,
+                            text,
+                            comment: "",
+                          },
+                          { threadId: typedScope, result: source },
+                        );
                         draftEditRevisionRef.current += 1;
                         props.controller.setPendingDraft(next, next.length);
                       });
@@ -2082,7 +2111,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 notes={{
                   threadId: String(view.thread.id),
                   onInsert: (note) => {
-                    const next = draftWithNote(props.controller.pendingDraft, note);
+                    const next = appendToResultQuoteDraft(
+                      typedScope,
+                      props.controller.pendingDraft,
+                      draftWithNote(props.controller.pendingDraft, note),
+                    );
                     draftEditRevisionRef.current += 1;
                     props.controller.setPendingDraft(next, next.length);
                   },
@@ -2278,13 +2311,17 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   restoreClaim();
                   return false;
                 }
+                const resultQuotes = resultQuotePlaces(typedScope, draft);
                 const result = await messageQueue.enqueue(
                   {
                     mode: "chat",
                     ...(continuation.policy === "text-only"
                       ? { contextInputPolicy: continuation.policy }
                       : {}),
-                    prompt: draft.trim(),
+                    prompt: (draft.includes(LEGACY_RESULT_REFERENCE_MARK)
+                      ? await promptWithReadableResultSources(draft)
+                      : draft
+                    ).trim(),
                     attachmentIds: context.attachmentIds,
                     previewSelections: context.previewSelections,
                     canvasSelections: context.canvasSelections,
@@ -2295,7 +2332,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
                     ...typedClaimFor(typedScope, draft),
                   },
-                  () => {
+                  (messageId) => {
+                    rememberSentResultQuotes(typedScope, messageId, draft, resultQuotes);
                     retireStashRecovery?.();
                     releaseClaim();
                     continuation.reset();
@@ -2482,7 +2520,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           />
         </section>
       </ThreadConnectionLostContext>
-    </ThreadReplyDetailScope>
+    </ThreadTranscriptScope>
   );
 }
 
@@ -2692,7 +2730,7 @@ function researchBackend(
 }
 
 /** The person's own prompts in a Chat thread, newest first; delivered reports are the host's. */
-function chatPromptsNewestFirst(view: ChatThreadView): ReadonlyArray<string> {
+function chatPromptsNewestFirst(view: ChatThreadView): ReadonlyArray<SentPrompt> {
   const bodies = new Map(
     view.contents.flatMap((content) =>
       content.role === "user" ? [[String(content.contentId), content.body] as const] : [],
@@ -2704,6 +2742,6 @@ function chatPromptsNewestFirst(view: ChatThreadView): ReadonlyArray<string> {
     // A routine's scheduled follow-up is sent as an ordinary turn, but it is the host's.
     return body === undefined || parseAutomationFollowUpTurnPrompt(body) !== undefined
       ? undefined
-      : body;
+      : { id: String(turn.submissionId ?? turn.id), text: body };
   });
 }
