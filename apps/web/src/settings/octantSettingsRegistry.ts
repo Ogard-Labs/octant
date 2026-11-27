@@ -167,10 +167,16 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "octant nightly own data separate host test relaunch",
         },
         {
+          id: settingId("app-nightly-octant-import"),
+          label: "Import from Octant",
+          scope: "app",
+          keywords: "octant nightly import copy bring threads projects keys merge",
+        },
+        {
           id: settingId("app-nightly-test-data"),
           label: "Nightly's own data",
           scope: "app",
-          keywords: "octant nightly own data test folder trash remove",
+          keywords: "octant nightly own test folder trash",
         },
         {
           id: settingId("user-profile"),

@@ -20,6 +20,7 @@ import type {
   BundledWhatsNew,
   OctantHostBridge,
 } from "../shell/hostBridge";
+import { NightlyOctantImportRow } from "./NightlyOctantImportRow";
 import { SettingRow, SettingsDisclosure } from "./primitives";
 import { acknowledgeWhatsNewOnce } from "./whatsNewAcknowledgement";
 import { WhatsNewDialog } from "./WhatsNewDialog";
@@ -274,6 +275,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
       )}
 
       <NightlyDataRow bridge={bridge} />
+      <NightlyOctantImportRow bridge={bridge} />
 
       <SettingRow
         description={`Turning this off stops ${productName} contacting the update service; you can still check by hand.`}

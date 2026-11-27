@@ -68,6 +68,8 @@ export const DESKTOP_IPC_CHANNELS = {
   nightlyDataChoose: "octant:nightly-data:choose",
   nightlyDataRemove: "octant:nightly-data:remove",
   nightlyDataRelaunch: "octant:nightly-data:relaunch",
+  nightlyDataImportPreview: "octant:nightly-data:import-preview",
+  nightlyDataImport: "octant:nightly-data:import",
   approvalSurfacePalette: "octant:window:approval-surface-palette",
   clearProviderCredential: "octant:provider-credential:clear",
   codeDeepLink: "octant:code:deep-link",

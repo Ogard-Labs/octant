@@ -153,7 +153,7 @@ export function resolveHostOwningStartup(options: {
  * Octant's default data folder, named without touching it: resolving it
  * through the host-runtime resolver would create the folder.
  */
-function octantDefaultDataDirectory(
+export function octantDefaultDataDirectory(
   home: string,
   platform: NodeJS.Platform,
   env: Readonly<Record<string, string | undefined>>,

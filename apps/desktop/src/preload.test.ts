@@ -146,6 +146,52 @@ describe("desktop preload bridge", () => {
     await expect(bridge.readNightlyData?.()).rejects.toThrow();
   });
 
+  it("offers the Octant import only on Nightly's own data and sends nothing but a boolean", async () => {
+    const imported = {
+      kind: "imported",
+      counts: { events: 1, threads: 2, contentRows: 3, settled: 0 },
+      conflicts: 0,
+      heldBack: 0,
+      keys: { status: "not-requested" },
+      preferences: { status: "copied", copied: 2 },
+    };
+    const invoke = vi.fn(
+      async (channel: string): Promise<unknown> =>
+        channel === IPC_CHANNELS.nightlyDataImportPreview
+          ? { octantDataPresent: true, lastImportedAt: "2026-11-27T10:00:00.000Z" }
+          : imported,
+    );
+    const create = (data: "octant" | "test-data") =>
+      createHostBridge(
+        { invoke, on: vi.fn(), removeListener: vi.fn() },
+        projectWindowCapability,
+        undefined,
+        "darwin",
+        undefined,
+        true,
+        { flavor: "nightly", productName: "Octant Nightly", data },
+      );
+    expect(create("octant").importNightlyOctantData).toBeUndefined();
+    expect(create("octant").previewNightlyOctantImport).toBeUndefined();
+    const bridge = create("test-data");
+    await expect(bridge.previewNightlyOctantImport?.()).resolves.toEqual({
+      octantDataPresent: true,
+      lastImportedAt: "2026-11-27T10:00:00.000Z",
+    });
+    expect(invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.nightlyDataImportPreview);
+    await expect(bridge.importNightlyOctantData?.(true)).resolves.toEqual(imported);
+    expect(invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.nightlyDataImport, true);
+    // Anything but `true` asks for no keys, so a renderer cannot widen the request.
+    await bridge.importNightlyOctantData?.("/Users/someone" as unknown as boolean);
+    expect(invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.nightlyDataImport, false);
+    invoke.mockResolvedValueOnce({ kind: "refused", reason: "made-up" });
+    await expect(bridge.importNightlyOctantData?.(false)).rejects.toThrow();
+    invoke.mockResolvedValueOnce({ ...imported, folder: "/x" });
+    await expect(bridge.importNightlyOctantData?.(false)).rejects.toThrow();
+    invoke.mockResolvedValueOnce({ octantDataPresent: true, path: "/x" });
+    await expect(bridge.previewNightlyOctantImport?.()).rejects.toThrow();
+  });
+
   it.each([
     {
       arguments: [

@@ -147,7 +147,23 @@ export function hostMaintenanceSpawnSpec(options: {
   readonly args: ReadonlyArray<string>;
   readonly env: NodeJS.ProcessEnv;
 } {
-  const commandArguments = hostMaintenanceArguments(options.action);
+  return maintenanceCommandSpawnSpec(options, hostMaintenanceArguments(options.action));
+}
+
+/** Runs the offline maintenance entry with the given command arguments. */
+export function maintenanceCommandSpawnSpec(
+  options: {
+    readonly packaged: boolean;
+    readonly root: string;
+    readonly execPath: string;
+    readonly env: NodeJS.ProcessEnv;
+  },
+  commandArguments: ReadonlyArray<string>,
+): {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly env: NodeJS.ProcessEnv;
+} {
   if (!options.packaged) {
     return {
       command: "bun",

@@ -7,7 +7,7 @@ import {
   createDesktopFilesClose,
   shouldPreflightNativeQuit,
 } from "./desktopFilesClose";
-import { readHostStartupRefusal } from "./hostRecovery";
+import { maintenanceCommandSpawnSpec, readHostStartupRefusal } from "./hostRecovery";
 import { showHostRecovery } from "./hostRecoveryWindow";
 import {
   attachWindowsDesktopHost,
@@ -159,6 +159,14 @@ import type {
   HostCapabilities,
 } from "@octant/contracts/desktop-bridge";
 import { createAppUpdateService } from "./appUpdateService";
+import { createNightlyOctantImportControl, runMaintenanceProcess } from "./nightlyOctantImport";
+import {
+  copyOctantKeys,
+  decodeCredentialReferences,
+  desktopKeyStores,
+} from "./nightlyOctantImportKeys";
+import { copyOctantWindowPreferences } from "./nightlyOctantImportPreferences";
+import { readCopiedLocalStorage, writeNightlyLocalStorage } from "./nightlyOctantImportStorage";
 import { createNightlyInstaller } from "./nightlyInstaller";
 import {
   createNightlyDataControl,
@@ -1438,6 +1446,94 @@ const nightlyDataControl =
         env: process.env,
         trashItem: (path) => shell.trashItem(path),
         requestRelaunch: () => nightlyRelaunch.request(),
+      })
+    : undefined;
+// An import runs with Nightly's own host stopped; the control stops it through
+// the menu's path, runs the packaged maintenance entry, and starts it again.
+const nightlyOctantImportControl =
+  desktopHostRole.kind === "test-host" && nightlyDataControl !== undefined
+    ? createNightlyOctantImportControl({
+        role: desktopHostRole,
+        platform: process.platform,
+        appDataDirectory: app.getPath("appData"),
+        windowStorageDirectory: desktopWindowStorageDirectory(
+          applicationIdentity,
+          "",
+          app.getPath("appData"),
+        ),
+        env: process.env,
+        now: () => new Date(),
+        stopHost: () => stopHostFromMenu(),
+        startHost: () => startHostFromMenu(),
+        reloadOtherWindows: (requester) => {
+          for (const window of BrowserWindow.getAllWindows())
+            if (!window.isDestroyed() && window.webContents.id !== requester)
+              window.webContents.reloadIgnoringCache();
+        },
+        runMaintenance: (args) =>
+          runMaintenanceProcess(
+            maintenanceCommandSpawnSpec(
+              {
+                packaged: app.isPackaged,
+                root: resolveDesktopHostRoot({
+                  packaged: app.isPackaged,
+                  platform: process.platform,
+                  resourcesPath: process.resourcesPath,
+                  appRoot: repositoryRoot(),
+                }),
+                execPath: resolveDesktopNodeRuntime({
+                  packaged: app.isPackaged,
+                  platform: process.platform,
+                  resourcesPath: process.resourcesPath,
+                  execPath: process.execPath,
+                }),
+                env: {
+                  ...process.env,
+                  OCTANT_DATA_DIR: desktopDataDirectory,
+                  ...desktopHostStartup.hostEnvironment,
+                },
+              },
+              args,
+            ),
+            // A large history takes minutes; a stuck run must not hold Nightly's host stopped.
+            30 * 60_000,
+          ),
+        copyKeys: async ({ octantDataDirectory, runMaintenance }) => {
+          const keychainHelperPath = resolveKeychainHelperPath({
+            packaged: app.isPackaged,
+            resourcesPath: process.resourcesPath,
+            moduleUrl: import.meta.url,
+          });
+          const references = await runMaintenance([
+            "list-credential-references",
+            "--from",
+            octantDataDirectory,
+          ]);
+          return await copyOctantKeys({
+            references: decodeCredentialReferences(references.exitCode, references.stdout),
+            octantStores: desktopKeyStores({
+              platform: process.platform,
+              keychainHelperPath,
+              storeScope: deriveHostRuntimeHostId(octantDataDirectory),
+              family: "octant",
+            }),
+            nightlyStores: desktopKeyStores({
+              platform: process.platform,
+              keychainHelperPath,
+              storeScope: desktopHostId,
+              family: desktopKeychainServiceFamily,
+            }),
+          });
+        },
+        copyPreferences: ({ octantDataDirectory, overwrite }) =>
+          copyOctantWindowPreferences({
+            octantDataDirectory,
+            overwrite,
+            // Windows load from `file://` unless a development server is named.
+            rendererOrigin: () => (process.env.OCTANT_WEB_URL ? undefined : "file://"),
+            readStorage: readCopiedLocalStorage,
+            writeStorage: writeNightlyLocalStorage,
+          }),
       })
     : undefined;
 /** The Nightly label and its "Test data" label for the test host's windows. */
@@ -4446,6 +4542,23 @@ function installIpcHandlers(): void {
   }
   // Nightly's test host keeps its Data setting here; the choice, relaunch and
   // removal requests carry nothing but the fixed choice values.
+  if (nightlyOctantImportControl !== undefined) {
+    const octantImport = nightlyOctantImportControl;
+    ipcMain.handle(
+      IPC_CHANNELS.nightlyDataImportPreview,
+      (event, ...rest: ReadonlyArray<unknown>) => {
+        ownedTopLevelWindowContext(event);
+        if (rest.length !== 0) throw new Error("Octant Nightly rejected an import request.");
+        return octantImport.preview();
+      },
+    );
+    // The one value a request carries is whether to copy saved keys.
+    ipcMain.handle(IPC_CHANNELS.nightlyDataImport, (event, ...rest: ReadonlyArray<unknown>) => {
+      ownedTopLevelWindowContext(event);
+      if (rest.length !== 1) throw new Error("Octant Nightly rejected an import request.");
+      return octantImport.import(rest[0], event.sender.id);
+    });
+  }
   if (nightlyDataControl !== undefined) {
     const data = nightlyDataControl;
     for (const [channel, request] of [

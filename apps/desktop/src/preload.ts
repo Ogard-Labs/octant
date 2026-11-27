@@ -101,6 +101,9 @@ import type {
   AppVersion,
   NightlyDataChoice,
   NightlyDataState,
+  NightlyOctantImportKeys,
+  NightlyOctantImportOutcome,
+  NightlyOctantImportPreview,
   NightlyInstallRefusal,
   NightlyInstallState,
 } from "@octant/contracts/app-updates";
@@ -363,6 +366,13 @@ export interface OctantHostBridge {
   readonly chooseNightlyData?: (choice: NightlyDataChoice) => Promise<NightlyDataState>;
   readonly removeNightlyTestData?: () => Promise<NightlyDataState>;
   readonly relaunchNightly?: () => Promise<{ readonly kind: "relaunching" | "unchanged" }>;
+  /**
+   * Nightly's "Import from Octant", present only on its own data. The request
+   * carries no folder: the main process resolves both, and the one thing it
+   * takes is whether to copy saved keys.
+   */
+  readonly previewNightlyOctantImport?: () => Promise<NightlyOctantImportPreview>;
+  readonly importNightlyOctantData?: (copyKeys: boolean) => Promise<NightlyOctantImportOutcome>;
   readonly readBundledWhatsNew: () => Promise<BundledWhatsNew>;
   readonly acknowledgeWhatsNew: () => Promise<void>;
   readonly openBrowserExternal: (url: string) => Promise<void>;
@@ -1037,6 +1047,18 @@ export function createHostBridge(
             decodeNightlyDataState(await ipc.invoke(IPC_CHANNELS.nightlyDataChoose, choice)),
           removeNightlyTestData: async () =>
             decodeNightlyDataState(await ipc.invoke(IPC_CHANNELS.nightlyDataRemove)),
+          ...(applicationIdentity.data === "test-data"
+            ? {
+                previewNightlyOctantImport: async () =>
+                  decodeNightlyOctantImportPreview(
+                    await ipc.invoke(IPC_CHANNELS.nightlyDataImportPreview),
+                  ),
+                importNightlyOctantData: async (copyKeys: boolean) =>
+                  decodeNightlyOctantImportOutcome(
+                    await ipc.invoke(IPC_CHANNELS.nightlyDataImport, copyKeys === true),
+                  ),
+              }
+            : {}),
           relaunchNightly: async () => {
             const outcome: unknown = await ipc.invoke(IPC_CHANNELS.nightlyDataRelaunch);
             const kind = isRecord(outcome) ? outcome.kind : undefined;
@@ -2924,6 +2946,136 @@ function decodeNightlyDataState(value: unknown): NightlyDataState {
     ...(value.removal === undefined
       ? {}
       : { removal: value.removal as NonNullable<NightlyDataState["removal"]> }),
+  });
+}
+
+function decodeNightlyOctantImportPreview(value: unknown): NightlyOctantImportPreview {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some((key) => key !== "octantDataPresent" && key !== "lastImportedAt") ||
+    typeof value.octantDataPresent !== "boolean" ||
+    (value.lastImportedAt !== undefined &&
+      (typeof value.lastImportedAt !== "string" || value.lastImportedAt.length > 64))
+  ) {
+    throw new TypeError("Invalid Octant Nightly import preview.");
+  }
+  return Object.freeze({
+    octantDataPresent: value.octantDataPresent,
+    ...(value.lastImportedAt === undefined ? {} : { lastImportedAt: value.lastImportedAt }),
+  });
+}
+
+const NIGHTLY_OCTANT_IMPORT_REFUSAL_VALUES: ReadonlyArray<unknown> = [
+  "octant-missing",
+  "octant-newer",
+  "busy",
+  "unsafe-folder",
+  "unreadable-event",
+  "not-test-host",
+];
+const NIGHTLY_OCTANT_IMPORT_STAGE_VALUES: ReadonlyArray<unknown> = [
+  "snapshot",
+  "migrate-snapshot",
+  "settle",
+  "open-nightly",
+  "backup",
+  "merge",
+  "rebuild",
+  "verify",
+  "swap",
+  "stop-host",
+  "maintenance",
+  "start-host",
+];
+
+function decodeNightlyOctantImportOutcome(value: unknown): NightlyOctantImportOutcome {
+  const invalid = () => new TypeError("Invalid Octant Nightly import outcome.");
+  const count = (candidate: unknown): number => {
+    if (typeof candidate !== "number" || !Number.isInteger(candidate) || candidate < 0)
+      throw invalid();
+    return candidate;
+  };
+  const exactly = (candidate: unknown, keys: ReadonlyArray<string>): Record<string, unknown> => {
+    if (
+      !isRecord(candidate) ||
+      Object.keys(candidate).length !== keys.length ||
+      !keys.every((key) => key in candidate)
+    )
+      throw invalid();
+    return candidate;
+  };
+  if (!isRecord(value)) throw invalid();
+  if (value.kind === "refused") {
+    const refused = exactly(value, ["kind", "reason"]);
+    if (!NIGHTLY_OCTANT_IMPORT_REFUSAL_VALUES.includes(refused.reason)) throw invalid();
+    return Object.freeze({
+      kind: "refused",
+      reason: refused.reason as Extract<NightlyOctantImportOutcome, { kind: "refused" }>["reason"],
+    });
+  }
+  if (value.kind === "failed") {
+    const failed = exactly(value, ["kind", "stage"]);
+    if (!NIGHTLY_OCTANT_IMPORT_STAGE_VALUES.includes(failed.stage)) throw invalid();
+    return Object.freeze({
+      kind: "failed",
+      stage: failed.stage as Extract<NightlyOctantImportOutcome, { kind: "failed" }>["stage"],
+    });
+  }
+  const imported = exactly(value, [
+    "kind",
+    "counts",
+    "conflicts",
+    "heldBack",
+    "keys",
+    "preferences",
+  ]);
+  if (imported.kind !== "imported") throw invalid();
+  const counts = exactly(imported.counts, ["events", "threads", "contentRows", "settled"]);
+  const keys = isRecord(imported.keys) ? imported.keys : undefined;
+  let decodedKeys: NightlyOctantImportKeys;
+  if (keys?.status === "not-requested") {
+    exactly(keys, ["status"]);
+    decodedKeys = { status: "not-requested" };
+  } else if (keys?.status === "copied") {
+    exactly(keys, ["status", "copied", "existing", "failed"]);
+    decodedKeys = {
+      status: "copied",
+      copied: count(keys.copied),
+      existing: count(keys.existing),
+      failed: count(keys.failed),
+    };
+  } else if (keys?.status === "unavailable") {
+    exactly(keys, ["status", "reason"]);
+    if (keys.reason !== "cannot-list" && keys.reason !== "unsupported-platform") throw invalid();
+    decodedKeys = { status: "unavailable", reason: keys.reason };
+  } else throw invalid();
+  const preferences = isRecord(imported.preferences) ? imported.preferences : undefined;
+  let decodedPreferences: Extract<NightlyOctantImportOutcome, { kind: "imported" }>["preferences"];
+  if (preferences?.status === "copied") {
+    exactly(preferences, ["status", "copied"]);
+    decodedPreferences = { status: "copied", copied: count(preferences.copied) };
+  } else if (preferences?.status === "unavailable") {
+    exactly(preferences, ["status", "reason"]);
+    if (
+      preferences.reason !== "origin-differs" &&
+      preferences.reason !== "octant-storage-missing" &&
+      preferences.reason !== "failed"
+    )
+      throw invalid();
+    decodedPreferences = { status: "unavailable", reason: preferences.reason };
+  } else throw invalid();
+  return Object.freeze({
+    kind: "imported",
+    counts: {
+      events: count(counts.events),
+      threads: count(counts.threads),
+      contentRows: count(counts.contentRows),
+      settled: count(counts.settled),
+    },
+    conflicts: count(imported.conflicts),
+    heldBack: count(imported.heldBack),
+    keys: decodedKeys,
+    preferences: decodedPreferences,
   });
 }
 
