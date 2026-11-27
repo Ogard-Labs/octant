@@ -1354,9 +1354,12 @@ for nothing: a watch a restart left quiet stays paused until a window shows the
 pull request.
 
 A failed stop shows a sentence under the row, or in the dialog while it is
-open. The row refreshes on the thread's follow-up notices, in Code also on the
-Code navigation notice the sidebar reloads on (a switch turned on from the pull
-request's own controls raises that one), and on a slow visible-page interval; one source failing keeps its last answer and never hides
+open. The row refreshes on the thread's follow-up notices (a task starting or
+ending raises one, and so does every watch, Auto-fix or babysit change,
+including one made from the pull request's own controls), in Code also when the
+thread's turn ends or the thread is settled, and on a slow visible-page
+interval. It does not follow the Code navigation notice, which every live step
+of any Code turn raises. One source failing keeps its last answer and never hides
 the other. A turn the runtime starts by itself on the idle thread opens with
 the host's line `The agent started this turn by itself after background work it
 was running reported.` in place of a person's message. The rules are in

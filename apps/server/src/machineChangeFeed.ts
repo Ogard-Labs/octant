@@ -15,6 +15,7 @@ import {
 } from "@octant/contracts";
 import { CHANGE_NOTICE_AGGREGATE_TYPE } from "@octant/contracts/access-activity";
 import { PROVIDER_KEY_AGGREGATE_TYPE } from "@octant/contracts/provider-key-journal";
+import { CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE } from "@octant/contracts/code-project-pull-request-switches";
 import { REMOTE_ACCESS_EVENT_NAMES } from "@octant/contracts/remote-access";
 import {
   decodeMachineChangeFrame,
@@ -296,6 +297,11 @@ function topicsForEvent(event: {
   )
     return ["thread-follow-ups"];
   if (aggregateType === "thread-message-queue") return ["thread-message-queue"];
+  // A watch or Auto-fix changes what its thread waits on. The row above the
+  // composer reads that on the follow-up notice: the navigation notice also
+  // arrives for every live step of any Code turn.
+  if (aggregateType === CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE)
+    return ["thread-follow-ups", "code-navigation"];
   // A thread's issue links ride on its Code navigation row but sit on an
   // aggregate of their own: without this the desktop's linking dialog kept
   // the list it opened with.

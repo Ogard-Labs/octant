@@ -172,7 +172,7 @@ import {
 } from "./polling/interactionTrace";
 import { useSnoozeClock } from "./polling/useSnoozeClock";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
-import { ThreadActivityRevisionsProvider } from "./polling/ThreadActivityRevisions";
+import { ThreadActivityRevisionsContext } from "./polling/ThreadActivityRevisions";
 import type {
   CodeOperationId,
   NativeHarnessFollowUpCreation,
@@ -10475,10 +10475,7 @@ function LaunchedShell(
                   <CanvasChoiceAnswersChangeRevisionContext.Provider
                     value={machineChanges.canvasChoiceAnswers}
                   >
-                    <ThreadActivityRevisionsProvider
-                      value={threadActivityRevisions}
-                      codeNavigation={machineChanges.codeNavigation}
-                    >
+                    <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
                       <SpeechCapabilityProvider
                         client={speechClient}
                         instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
@@ -10791,7 +10788,7 @@ function LaunchedShell(
                           </OctantCommandProvider>
                         </TodoListHostSettingsContext.Provider>
                       </SpeechCapabilityProvider>
-                    </ThreadActivityRevisionsProvider>
+                    </ThreadActivityRevisionsContext.Provider>
                   </CanvasChoiceAnswersChangeRevisionContext.Provider>
                 </ImageJobChangeRevisionContext.Provider>
               </PluginContributionsProvider>

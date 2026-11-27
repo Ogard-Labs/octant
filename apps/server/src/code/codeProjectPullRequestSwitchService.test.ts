@@ -1380,6 +1380,20 @@ describe("a thread watching its own pull request", () => {
     expect(wait).not.toHaveProperty("pausedBy");
   });
 
+  it("keeps Auto-fix waiting when another thread's watch on the same pull request loses its link", async () => {
+    const other = decodeCodeThreadId("22222222-2222-4222-8222-2222222222ff");
+    const linked = [String(threadId), String(other)];
+    const f = fixture({ linked });
+    f.observe(activity());
+    await watching(f);
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId: other }, "user");
+    linked.splice(0, 1);
+    await f.service.tick(signal);
+
+    expect(f.service.threadWaits(other)).toMatchObject([{ kind: "auto-fix", paused: false }]);
+    expect(f.service.threadWaits(threadId)).toMatchObject([{ kind: "watch", paused: true }]);
+  });
+
   it("looks up no pull-request link for a stopped switch when the sidebar reads who waits", async () => {
     let resolved = 0;
     const f = fixture({

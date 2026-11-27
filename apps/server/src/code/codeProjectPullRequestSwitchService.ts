@@ -282,10 +282,12 @@ export class CodeProjectPullRequestSwitchService
    */
   readonly #vouchingWindows = new Map<string, WindowId>();
   /**
-   * Vouched watches and Auto-fix the last pass could not poll or wake. Not
-   * journaled: the next pass reads it again.
+   * Vouched watches and Auto-fix the last pass could not poll or wake. Kept
+   * per switch: two threads can hold one each on the same pull request, and
+   * one losing its link must not read the other as paused. Not journaled: the
+   * next pass reads it again.
    */
-  readonly #unreachable = new Set<string>();
+  readonly #unreachable = { autoFix: new Set<string>(), watch: new Set<string>() };
   readonly #babysitScopes = new Map<
     string,
     { windowId: WindowId; deviceCurrent?: () => boolean }
@@ -810,19 +812,20 @@ export class CodeProjectPullRequestSwitchService
       const { autoFix, watch } = fold;
       const vouched = this.#vouchingWindows.has(key);
       // An unvouched wait says how to resume it, so a failed pass adds nothing.
-      const ordinary = revoked
-        ? PAUSED_BY_DISCONNECT
-        : !vouched
-          ? { paused: true }
-          : this.#unreachable.has(key)
-            ? PAUSED_UNREACHABLE
-            : { paused: false };
+      const ordinary = (kind: "autoFix" | "watch") =>
+        revoked
+          ? PAUSED_BY_DISCONNECT
+          : !vouched
+            ? { paused: true }
+            : this.#unreachable[kind].has(key)
+              ? PAUSED_UNREACHABLE
+              : { paused: false };
       if (watch.status === "on" && watch.threadId === String(threadId)) {
         waits.push({
           kind: "watch",
           target: fold.target,
           since: decodeUtcTimestamp(watch.enabledAt),
-          ...ordinary,
+          ...ordinary("watch"),
           wakes: watch.wakes,
           wakeLimit: limits.watchWakes,
           endsAt: decodeUtcTimestamp(
@@ -837,7 +840,7 @@ export class CodeProjectPullRequestSwitchService
                 kind: "auto-fix",
                 target: fold.target,
                 since: decodeUtcTimestamp(autoFix.enabledAt),
-                ...ordinary,
+                ...ordinary("autoFix"),
               }
             : {
                 kind: "babysit",
@@ -1254,11 +1257,12 @@ export class CodeProjectPullRequestSwitchService
         const priorStall = this.#stallCandidates.get(current.autoFix);
         this.#stallCandidates.delete(current.autoFix);
         const mayAct = await this.#threadSwitchesMayAct(current, resolved.key);
-        const heldQuiet =
-          this.#vouchingWindows.has(resolved.key) &&
-          ((current.autoFix.status === "on" && !current.autoFix.babysit && !mayAct.autoFix) ||
-            (current.watch.status === "on" && !mayAct.watch));
-        if (heldQuiet) this.#unreachable.add(resolved.key);
+        const vouched = this.#vouchingWindows.has(resolved.key);
+        const autoFixHeldQuiet =
+          vouched && current.autoFix.status === "on" && !current.autoFix.babysit && !mayAct.autoFix;
+        const watchHeldQuiet = vouched && current.watch.status === "on" && !mayAct.watch;
+        if (autoFixHeldQuiet) this.#unreachable.autoFix.add(resolved.key);
+        if (watchHeldQuiet) this.#unreachable.watch.add(resolved.key);
         if (current.autoFix.status === "on" && current.autoFix.babysit && !mayAct.autoFix)
           this.#babysitProgress.set(resolved.key, { status: "connection" });
         const failures = current.mergeWhenReady.status === "on" || mayAct.autoFix;
@@ -1279,10 +1283,13 @@ export class CodeProjectPullRequestSwitchService
             this.#fold(resolved.target).autoFix === current.autoFix
           )
             this.#babysitProgress.set(resolved.key, { status: "connection" });
-          this.#unreachable.add(resolved.key);
+          // The one read serves both switches, so its failure holds both.
+          this.#unreachable.autoFix.add(resolved.key);
+          this.#unreachable.watch.add(resolved.key);
           continue;
         }
-        if (!heldQuiet) this.#unreachable.delete(resolved.key);
+        if (!autoFixHeldQuiet) this.#unreachable.autoFix.delete(resolved.key);
+        if (!watchHeldQuiet) this.#unreachable.watch.delete(resolved.key);
         if (
           expectedPullRequestNodeId !== undefined &&
           observation.pullRequestNodeId !== undefined &&
@@ -2170,7 +2177,7 @@ export class CodeProjectPullRequestSwitchService
     if (change.kind !== "woke") {
       const { key } = this.#resolveIdentity(target);
       this.#babysitProgress.delete(key);
-      this.#unreachable.delete(key);
+      this.#unreachable.autoFix.delete(key);
     }
     const record = decodeCodeProjectPullRequestAutoFixRecorded({ target, threadId, change });
     const occurredAt = this.#append(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, record, actor);
@@ -2183,7 +2190,7 @@ export class CodeProjectPullRequestSwitchService
     change: CodeProjectPullRequestWatchRecorded["change"],
     actor: EventActor,
   ): void {
-    if (change.kind !== "woke") this.#unreachable.delete(this.#resolveIdentity(target).key);
+    if (change.kind !== "woke") this.#unreachable.watch.delete(this.#resolveIdentity(target).key);
     const record = decodeCodeProjectPullRequestWatchRecorded({ target, threadId, change });
     const occurredAt = this.#append(CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED, record, actor);
     this.#apply({ kind: "watch", occurredAt, record });

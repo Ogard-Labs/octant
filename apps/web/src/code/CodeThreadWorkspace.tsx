@@ -3143,6 +3143,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   threadId: props.threadId,
                   client: waitClient,
                   turnRunning: busy,
+                  resting: thread.lifecycle !== "active" || thread.completedAt !== undefined,
                 }}
               />
               <CodeNativeSession

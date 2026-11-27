@@ -1,12 +1,19 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { MachineChangeClient } from "@octant/client-runtime/machine-change-client";
 import { decodeCodeThreadId, type CodeLiveTask } from "@octant/contracts";
+import {
+  decodeMachineChangeFrame,
+  type MachineChangeFrame,
+  type MachineChangeTopic,
+} from "@octant/contracts/machine-changes";
 import {
   decodeCodeThreadPullRequestWaits,
   type CodeThreadPullRequestWait,
 } from "@octant/contracts/code-project-pull-request-switches";
-import { CodeNavigationRevisionContext } from "../polling/ThreadActivityRevisions";
+import { ThreadActivityRevisionsContext } from "../polling/ThreadActivityRevisions";
+import { useMachineChangeFeed } from "../polling/useMachineChangeFeed";
 import { ThreadBackgroundWork } from "./ThreadBackgroundWork";
 import type { CodeSessionClient } from "./codeSessionClient";
 import { createThreadWaitClient, type ThreadWaitClient } from "./threadWaitClient";
@@ -49,7 +56,38 @@ function waiting(initial: ReadonlyArray<CodeThreadPullRequestWait>, turnRunning 
     return true;
   });
   const value: ThreadWaitClient = { waits: vi.fn(async () => waits), stop };
-  return { pullRequests: { threadId, client: value, turnRunning }, stop, client: value };
+  return {
+    pullRequests: { threadId, client: value, turnRunning, resting: false },
+    stop,
+    client: value,
+  };
+}
+
+/** A host's change feed, one frame per publish. */
+function machineChanges() {
+  const queued: MachineChangeFrame[] = [];
+  let wake: () => void = () => undefined;
+  let sequence = 0;
+  const client: MachineChangeClient = {
+    async *subscribe(_afterSequence, signal) {
+      while (!signal.aborted) {
+        const next = queued.shift();
+        if (next !== undefined) yield next;
+        else
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+      }
+    },
+  };
+  return {
+    client,
+    publish: (topics: ReadonlyArray<MachineChangeTopic>) => {
+      queued.push(decodeMachineChangeFrame({ kind: "changed", sequence: ++sequence, topics }));
+      wake();
+    },
+  };
 }
 
 describe("a thread's background work", () => {
@@ -154,25 +192,68 @@ describe("a thread's background work", () => {
     expect(within(dialog).queryByText(/Open the pull request to resume/)).toBeNull();
   });
 
-  it("reads a Code thread's waits again as soon as the Code navigation notice arrives", async () => {
+  it("reads waits again for a switch change, not for a running turn's steps elsewhere", async () => {
     let waits: ReadonlyArray<CodeThreadPullRequestWait> = [];
     const read = vi.fn(async () => waits);
     const pullRequests = {
       threadId,
       client: { waits: read, stop: async () => true },
       turnRunning: false,
+      resting: false,
     };
-    const row = (revision: number) => (
-      <CodeNavigationRevisionContext.Provider value={revision}>
-        <ThreadBackgroundWork threadId={threadId} client={undefined} pullRequests={pullRequests} />
-      </CodeNavigationRevisionContext.Provider>
-    );
-    const view = render(row(0));
+    const host = machineChanges();
+    function Window() {
+      const changes = useMachineChangeFeed(host.client);
+      return (
+        <ThreadActivityRevisionsContext.Provider
+          value={{
+            browserCaptures: changes.browserCaptures,
+            toolApprovals: changes.toolApprovals,
+            threadFollowUps: changes.threadFollowUps,
+            threadMessageQueue: changes.threadMessageQueue,
+          }}
+        >
+          <ThreadBackgroundWork
+            threadId={threadId}
+            client={undefined}
+            pullRequests={pullRequests}
+          />
+          <output aria-label="Code navigation notices">{changes.codeNavigation}</output>
+        </ThreadActivityRevisionsContext.Provider>
+      );
+    }
+    render(<Window />);
     await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
 
+    // A live step in any Code thread raises only the Code navigation notice.
+    host.publish(["code-navigation"]);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Code navigation notices").textContent).toBe("1"),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+
+    // Auto-fix turned on from the pull request's controls.
     waits = [wait({ kind: "auto-fix" })];
-    view.rerender(row(1));
+    host.publish(["thread-follow-ups", "code-navigation"]);
     expect(await screen.findByText("Auto-fixing pull request #372")).toBeTruthy();
+  });
+
+  it("reads waits again when the thread's turn ends or the thread is settled", async () => {
+    const read = vi.fn(async () => [wait()]);
+    const waitsClient = { waits: read, stop: async () => true };
+    const stable = (turnRunning: boolean, resting: boolean) => (
+      <ThreadBackgroundWork
+        threadId={threadId}
+        client={undefined}
+        pullRequests={{ threadId, client: waitsClient, turnRunning, resting }}
+      />
+    );
+    const view = render(stable(true, false));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    view.rerender(stable(false, false));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    view.rerender(stable(false, true));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(3));
   });
 
   it("lists every task and pull request in Details with its state, and stops one by name", async () => {

@@ -4,7 +4,6 @@ import type { CodeThreadPullRequestWait } from "@octant/contracts/code-project-p
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
-  useCodeNavigationRevision,
   useThreadActivityRevision,
 } from "../polling/ThreadActivityRevisions";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
@@ -37,6 +36,8 @@ export function ThreadBackgroundWork<Id extends string>(props: {
         readonly threadId: CodeThreadId;
         readonly client: ThreadWaitClient | undefined;
         readonly turnRunning: boolean;
+        /** Not active, or settled: the host then lists no wait. */
+        readonly resting: boolean;
       }
     | undefined;
 }) {
@@ -44,6 +45,7 @@ export function ThreadBackgroundWork<Id extends string>(props: {
   const waitClient = props.pullRequests?.client;
   const waitThreadId = props.pullRequests?.threadId;
   const turnRunning = props.pullRequests?.turnRunning ?? false;
+  const resting = props.pullRequests?.resting ?? false;
   const [tasks, setTasks] = useState<ReadonlyArray<CodeLiveTask>>([]);
   const [waits, setWaits] = useState<ReadonlyArray<CodeThreadPullRequestWait>>([]);
   const [stopping, setStopping] = useState<string>();
@@ -87,15 +89,10 @@ export function ThreadBackgroundWork<Id extends string>(props: {
     [client, threadId, waitClient, waitThreadId],
   );
   const followUps = useThreadActivityRevision("threadFollowUps");
-  // A watch or Auto-fix turned on from the pull request's own controls raises
-  // only the Code navigation notice. Both counts only rise, so their sum moves
-  // whenever either does.
-  const navigationNotice = useCodeNavigationRevision();
-  const navigation = waitThreadId === undefined ? undefined : navigationNotice;
-  const revision =
-    followUps === undefined && navigation === undefined
-      ? undefined
-      : (followUps ?? 0) + (navigation ?? 0);
+  // A turn ending and the thread being settled change the answers too, and
+  // raise no follow-up notice of their own. Not the Code navigation notice:
+  // it arrives for every live step of any Code turn.
+  const revision = (followUps ?? 0) * 4 + (turnRunning ? 2 : 0) + (resting ? 1 : 0);
   useVisibleRefresh(
     refresh,
     revision,
