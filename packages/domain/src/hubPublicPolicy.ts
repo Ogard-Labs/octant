@@ -5,6 +5,7 @@
 
 import {
   VISITOR_LINK_MAX_LIFETIME_MS,
+  WEBHOOK_HOLD_MS,
   WEBHOOK_TIMESTAMP_WINDOW_MS,
   type VisitorLinkGrant,
   type VisitorLinkRefusalKind,
@@ -130,6 +131,28 @@ export type WebhookDeliveryDecision =
   | { readonly status: "accept"; readonly claimKeys: ReadonlyArray<string> }
   | { readonly status: "duplicate" }
   | { readonly status: "refused"; readonly kind: WebhookRefusalKind };
+
+/**
+ * Whether a host still holds a replaced Stripe secret. `until` is when new
+ * deliveries signed with it stop being taken; one received just before then
+ * may wait a whole hold for its spoke, so the secret is kept that much longer.
+ */
+export function replacedWebhookSecretKept(until: number, nowMs: number): boolean {
+  return nowMs < until + WEBHOOK_HOLD_MS;
+}
+
+/**
+ * Whether a replaced Stripe secret verifies a delivery: it was still taken
+ * when the delivery was received, however much later the delivery is handed on.
+ * A delivery from the internet is received now, so none is taken after `until`.
+ */
+export function replacedWebhookSecretVerifies(input: {
+  readonly until: number;
+  readonly receivedAtMs: number;
+  readonly nowMs: number;
+}): boolean {
+  return input.receivedAtMs < input.until && replacedWebhookSecretKept(input.until, input.nowMs);
+}
 
 /**
  * Whether a delivery may start its routine. The hub runs it before it queues,

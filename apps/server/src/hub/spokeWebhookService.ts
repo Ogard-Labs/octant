@@ -28,7 +28,13 @@ import {
   type WebhookDeliveryEnvelope,
   type WebhookSignatureScheme,
 } from "@octant/contracts";
-import { decideWebhookDelivery, readWebhookHeaders, hubSealingKeyPayload } from "@octant/domain";
+import {
+  decideWebhookDelivery,
+  readWebhookHeaders,
+  hubSealingKeyPayload,
+  replacedWebhookSecretKept,
+  replacedWebhookSecretVerifies,
+} from "@octant/domain";
 import type { IntegrationEventSourceProvider } from "@octant/plugin-api/integration";
 import { Schema } from "effect";
 import { publicKeyFingerprint, verifySignature } from "./hubCrypto";
@@ -239,10 +245,11 @@ export class SpokeWebhookService {
   /**
    * Takes the secret Stripe minted for one of this spoke's Stripe endpoints,
    * first or after the person rolled it in Stripe, and hands the hub its
-   * sealed copy. No other scheme takes a pasted secret. Each replaced secret
-   * is still taken for a day, as Stripe itself does: the hub answered Stripe
-   * for what it holds, and Stripe will not send those deliveries again. So a
-   * paste that would have to drop one before its day is over is refused.
+   * sealed copy. No other scheme takes a pasted secret. New deliveries signed
+   * with a replaced secret are still taken for a day, as Stripe itself does,
+   * and the secret is kept a further hold after that, because the hub answered
+   * Stripe for what it holds and Stripe will not send those deliveries again.
+   * So a paste that would have to drop one still kept is refused.
    */
   async setSecret(endpointId: string, secret: string): Promise<SpokeWebhookSecretSet> {
     if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
@@ -255,7 +262,7 @@ export class SpokeWebhookService {
     const now = this.#options.now();
     // A secret pasted back becomes the current one again, so it leaves the list.
     const previousSecrets = [
-      ...livePrevious(endpoint, now).filter((previous) => previous.secret !== trimmed),
+      ...keptPrevious(endpoint, now).filter((previous) => previous.secret !== trimmed),
       ...(endpoint.secret === undefined || endpoint.secret === trimmed
         ? []
         : [{ secret: endpoint.secret, until: now + WEBHOOK_HOLD_MS }]),
@@ -385,7 +392,7 @@ export class SpokeWebhookService {
                 // first one for its member id checks with the current secret.
                 return [
                   sealWebhookSecret({ ...recipient, secret: endpoint.secret }),
-                  ...livePrevious(endpoint, now).map((previous) =>
+                  ...keptPrevious(endpoint, now).map((previous) =>
                     sealPreviousWebhookSecret({ ...recipient, ...previous }),
                   ),
                 ];
@@ -469,7 +476,18 @@ export class SpokeWebhookService {
     if (reading.status === "refused") return outcome({ status: "refused", kind: reading.kind });
     const verified = verifiedWebhookDeliveryByAny({
       scheme: endpoint.scheme,
-      secrets: [secret, ...livePrevious(endpoint, now).map((previous) => previous.secret)],
+      secrets: [
+        secret,
+        ...keptPrevious(endpoint, now)
+          .filter((previous) =>
+            replacedWebhookSecretVerifies({
+              until: previous.until,
+              receivedAtMs: envelope.receivedAt,
+              nowMs: now,
+            }),
+          )
+          .map((previous) => previous.secret),
+      ],
       reading,
       body,
     });
@@ -622,12 +640,12 @@ export class SpokeWebhookService {
     return true;
   }
 
-  /** Forgets each replaced Stripe secret whose day is over, and withdraws its sealed copies. */
+  /** Forgets each replaced Stripe secret nothing held can still need, and withdraws its sealed copies. */
   #dropEndedPrevious(): void {
     const held = this.#load();
     const now = this.#options.now();
     const ended = (entry: SpokeWebhookEndpoint) =>
-      (entry.previousSecrets?.length ?? 0) > livePrevious(entry, now).length;
+      (entry.previousSecrets?.length ?? 0) > keptPrevious(entry, now).length;
     if (!held.endpoints.some(ended)) return;
     this.#revision += 1;
     this.#save({
@@ -635,8 +653,8 @@ export class SpokeWebhookService {
       endpoints: held.endpoints.map((entry) => {
         if (!ended(entry)) return entry;
         const { previousSecrets: _ended, ...rest } = entry;
-        const live = livePrevious(entry, now);
-        return live.length === 0 ? rest : { ...rest, previousSecrets: live };
+        const kept = keptPrevious(entry, now);
+        return kept.length === 0 ? rest : { ...rest, previousSecrets: kept };
       }),
       unpublished: true,
     });
@@ -660,13 +678,15 @@ export class SpokeWebhookService {
   }
 }
 
-/** The secrets Stripe pastes replaced that are still taken, oldest first. */
-function livePrevious(
+/** The secrets Stripe pastes replaced that this spoke still holds, oldest first. */
+function keptPrevious(
   endpoint: SpokeWebhookEndpoint,
   now: number,
 ): NonNullable<SpokeWebhookEndpoint["previousSecrets"]> {
   if (endpoint.scheme !== "stripe") return [];
-  return (endpoint.previousSecrets ?? []).filter((previous) => now < previous.until);
+  return (endpoint.previousSecrets ?? []).filter((previous) =>
+    replacedWebhookSecretKept(previous.until, now),
+  );
 }
 
 /** Trims the oldest deliveries a routine already read, never one it has not. */

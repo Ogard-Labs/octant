@@ -3187,18 +3187,23 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   person adds the URL in Stripe and pastes the secret Stripe shows with
   `octant hub webhook secret <id>`, which reads it from standard input. Until
   then the spoke hands the hub nothing for it and it takes no delivery;
-  pasting again after rolling the secret in Stripe replaces it, and, as
-  Stripe does, each replaced secret is still taken for a day
-  (`WEBHOOK_HOLD_MS`) after the paste that replaced it: a delivery the hub or
-  a standby holds was already answered and Stripe will not send it again, so
-  the spoke keeps each old secret and hands each holder a further sealed copy
-  of it, after the current one, until its own day ends; then both drop it. An
-  endpoint takes at most four replaced secrets at once, and a paste that would
-  need a fifth is refused (`too-many-replaced-secrets`) rather than drop one
-  early. That limit is no guardrail a level changes: it keeps an answered
-  delivery from being lost, it ends by itself when the oldest day does, and
-  rotating the endpoint, which ends every old secret with the old URL, is
-  there for a person who will not wait. The
+  pasting again after rolling the secret in Stripe replaces it. A replaced
+  secret has two deadlines, because the hub or a standby may have answered
+  202 for a delivery signed with it that Stripe will not send again. The hub
+  and a standby take a new delivery signed with it, as Stripe itself does,
+  until its end: a day (`WEBHOOK_HOLD_MS`) after the paste that replaced it.
+  At hand-off (the hub checking what a standby hands back, and the spoke's
+  own check) a queued delivery verifies against it when it was still taken at
+  the delivery's recorded receipt time, however much later within the
+  delivery's hold the hand-off comes. So the spoke
+  keeps each old secret, and hands each holder a further sealed copy of it
+  after the current one, until a hold past its end; then both drop it. An
+  endpoint holds at most eight replaced secrets at once, and a paste that
+  would need a ninth is refused (`too-many-replaced-secrets`) rather than
+  drop one early. That limit is no guardrail a level changes: it keeps an
+  answered delivery from being lost, it ends by itself when the oldest is
+  dropped, and rotating the endpoint, which ends every old secret with the
+  old URL, is there for a person who will not wait. The
   `Stripe-Signature` header holds `t=<unix seconds>` and one or more
   `v1=<hex HMAC-SHA256 of "<t>.<raw body>">` keyed with the whole secret; a
   delivery passes if any `v1` matches, compared in constant time, and `v0`

@@ -24,7 +24,12 @@ import {
   type WebhookDeliveryEnvelope,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { decideWebhookDelivery, readWebhookHeaders, hubSealingKeyPayload } from "@octant/domain";
+import {
+  decideWebhookDelivery,
+  readWebhookHeaders,
+  hubSealingKeyPayload,
+  replacedWebhookSecretVerifies,
+} from "@octant/domain";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort, HubWebhookQueued } from "./hubStateStore";
 import type { PublicAnswer, PublicRequest } from "./publicEntrance";
@@ -184,11 +189,11 @@ export class HubWebhookService {
         String(entry.spokeMemberId) === String(queued.spokeMemberId),
     );
     if (endpoint === undefined) return { status: "unknown-endpoint" };
-    const secrets = this.#secretsFor(endpoint, hub.sealingKey.privateKey);
+    const receivedAt = queued.envelope.receivedAt;
+    const secrets = this.#secretsFor(endpoint, hub.sealingKey.privateKey, receivedAt);
     if (secrets.length === 0) return { status: "unknown-endpoint" };
     const body = Buffer.from(queued.envelope.body, "base64");
     const reading = readWebhookHeaders(endpoint.scheme, queued.envelope.headers);
-    const receivedAt = queued.envelope.receivedAt;
     const now = this.#options.now();
     if (
       reading.status === "refused" ||
@@ -345,7 +350,7 @@ export class HubWebhookService {
       this.#count("refused");
       return answer(401, { error: reading.kind });
     }
-    const secrets = this.#secretsFor(endpoint, hub.sealingKey.privateKey);
+    const secrets = this.#secretsFor(endpoint, hub.sealingKey.privateKey, now);
     if (secrets.length === 0) return NOT_FOUND;
     const verified = verifiedWebhookDeliveryByAny({
       scheme: endpoint.scheme,
@@ -454,11 +459,15 @@ export class HubWebhookService {
 
   /**
    * This host's copy of the endpoint's secret, then, for a Stripe endpoint
-   * whose person pasted new ones within the day, each one they replaced: a
-   * delivery held signed with an old secret was answered and will not come
-   * again. Empty when nothing here opens.
+   * whose person pasted new ones, each replaced one that was still taken when
+   * the delivery was received (now, for one from the internet; the standby's
+   * receipt, for one handed back). Empty when nothing here opens.
    */
-  #secretsFor(endpoint: HubWebhookEndpoint, privateKey: string): ReadonlyArray<string> {
+  #secretsFor(
+    endpoint: HubWebhookEndpoint,
+    privateKey: string,
+    receivedAtMs: number,
+  ): ReadonlyArray<string> {
     const [current, ...replaced] = endpoint.sealedSecrets.filter(
       (entry) => String(entry.recipientMemberId) === this.#options.hubMemberId(),
     );
@@ -474,7 +483,10 @@ export class HubWebhookService {
       secret,
       ...replaced.flatMap((sealed) => {
         const previous = openPreviousWebhookSecret({ sealed, endpointId, privateKey });
-        return previous !== undefined && now < previous.until ? [previous.secret] : [];
+        return previous !== undefined &&
+          replacedWebhookSecretVerifies({ until: previous.until, receivedAtMs, nowMs: now })
+          ? [previous.secret]
+          : [];
       }),
     ];
   }

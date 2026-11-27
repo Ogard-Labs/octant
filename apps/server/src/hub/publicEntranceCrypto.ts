@@ -243,10 +243,11 @@ export function sealWebhookSecret(input: {
 
 /**
  * A Stripe secret an endpoint's person replaced, sealed like the current one
- * and sent after it for the same recipient, with the time it stops being taken
- * inside the seal. Stripe has already been answered for a delivery the hub
- * holds, and will not send it again, so the old secret keeps verifying for the
- * hold; a hub that reads only the first copy for its member id never sees it.
+ * and sent after it for the same recipient, with the time new deliveries
+ * signed with it stop being taken inside the seal. Stripe has already been
+ * answered for a delivery the hub holds, and will not send it again, so the
+ * old secret keeps verifying what was received before that time; a hub that
+ * reads only the first copy for its member id never sees it.
  */
 export function sealPreviousWebhookSecret(
   input: Parameters<typeof sealWebhookSecret>[0] & { readonly until: number },
