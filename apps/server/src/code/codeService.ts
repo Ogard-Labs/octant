@@ -849,13 +849,14 @@ export interface CodeServiceOptions {
    * navigation row would call a parked turn executing.
    */
   readonly turnAwaiting?: (threadId: string) => "approval" | "user-input" | undefined;
-  /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
+  readonly projectReportPage?: import("./projectReports").ProjectReportReader["projectReportPage"];
   readonly projectReports?: (
     projectId: ProjectId,
   ) => ReadonlyArray<import("@octant/contracts").CodeProjectReport>;
   readonly projectReportSequence?: (
     projectId: ProjectId,
   ) => CodeThreadActivity["lastSequence"] | undefined;
+  /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
   /** The person's Settings choice to put a thread away once it is done; absent is off. */
   readonly putAwayWhenDone?: () => boolean;
@@ -1321,6 +1322,7 @@ export class CodeService {
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
   readonly #touchedIssues: CodeNavigationTouchedIssueSource | undefined;
   readonly #linkedIssues: CodeLinkedIssuesPort | undefined;
+  readonly #projectReportPage: CodeServiceOptions["projectReportPage"];
   readonly #projectReports: CodeServiceOptions["projectReports"];
   readonly #projectReportSequence: CodeServiceOptions["projectReportSequence"];
   readonly #readLatestFinishedReceipt:
@@ -1402,6 +1404,7 @@ export class CodeService {
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#turnAwaiting = options.turnAwaiting;
+    this.#projectReportPage = options.projectReportPage;
     this.#projectReports = options.projectReports;
     this.#projectReportSequence = options.projectReportSequence;
     this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
@@ -2196,20 +2199,26 @@ export class CodeService {
         );
         return { kind: "worktree-source-previewed", preview };
       }
-      if (command.kind === "read-code-project-reports") {
+      if (
+        command.kind === "read-code-project-reports" ||
+        command.kind === "read-code-project-report-page"
+      ) {
         if (
           isRoutineHostScope(authenticatedWindowId) ||
           !(await this.#access.canAccessProject(authenticatedWindowId, command.projectId))
         )
           throw this.#failure("unauthorized", "This window cannot read the Project conversation.");
         const project = this.#persistence.readProject?.(command.projectId);
-        if (
-          project?.type !== "code" ||
-          project.lifecycle !== "active" ||
-          this.#projectReports === undefined
-        )
-          throw this.#failure("unavailable", "Project reports are unavailable.");
-        return { kind: "project-reports", reports: this.#projectReports(command.projectId) };
+        if (project?.type === "code" && project.lifecycle === "active") {
+          if (
+            command.kind === "read-code-project-report-page" &&
+            this.#projectReportPage !== undefined
+          )
+            return this.#projectReportPage(command.projectId, command.before);
+          if (command.kind === "read-code-project-reports" && this.#projectReports !== undefined)
+            return { kind: "project-reports", reports: this.#projectReports(command.projectId) };
+        }
+        throw this.#failure("unavailable", "Project reports are unavailable.");
       }
       const openingConversation = command.kind === "open-code-project-conversation";
       if (command.kind === "open-code-project-conversation") {

@@ -577,8 +577,8 @@ export async function projectConversationCodes(): Promise<CodeClient> {
     execute: vi.fn<CodeClient["execute"]>(async (command, signal) => {
       if (command.kind === "open-code-project-conversation")
         return { kind: "project-conversation-opened", thread: conversation };
-      if (command.kind === "read-code-project-reports")
-        return { kind: "project-reports", reports: [report] };
+      if (command.kind === "read-code-project-report-page")
+        return { kind: "project-report-page", reports: [report] };
       return api.execute(command, signal);
     }),
   };

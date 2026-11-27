@@ -990,6 +990,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             command !== undefined &&
             (callerAuthority !== "local-window" || agentGrantSession) &&
             (command.kind === "read-code-project-reports" ||
+              command.kind === "read-code-project-report-page" ||
               command.kind === "open-code-project-conversation" ||
               command.kind === "set-code-thread-coordinator" ||
               command.kind === "set-code-thread-coordinator-bounds" ||
@@ -1006,7 +1007,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             const action =
               command.kind === "open-code-project-conversation"
                 ? "open the Project conversation"
-                : command.kind === "read-code-project-reports"
+                : command.kind === "read-code-project-reports" ||
+                    command.kind === "read-code-project-report-page"
                   ? "read Project reports"
                   : "set coordinators and wake switches";
             return failureResponse(

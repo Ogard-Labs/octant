@@ -82,6 +82,38 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     chooseProjectTree();
   });
 
+  it("keeps hidden worker counts on a closed Project row while status marks are shown", async () => {
+    const project = chatProjectA;
+    const user = userEvent.setup();
+    const props = {
+      archivedProjects: [],
+      availabilityByProject: new Map(),
+      hiddenProjectWorkers: new Map([[String(project.id), { working: 2, attention: 1 }]]),
+      onArchive: vi.fn(),
+      onMove: vi.fn(),
+      onProjectOpen: vi.fn(),
+      onReorder: vi.fn(),
+      onRestore: vi.fn(),
+      onSelectThread: vi.fn(),
+      projects: [project],
+      threads: [],
+    };
+    const { rerender } = render(<ProjectSidebarSection {...props} />);
+    expect(screen.getByRole("img", { name: "Test: 1 needs attention, 2 working" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Collapse Test" }));
+    expect(screen.getByRole("img", { name: "Test: 1 needs attention, 2 working" })).toBeVisible();
+    rerender(
+      <ProjectSidebarSection
+        {...props}
+        rowProperties={{
+          ...DEFAULT_SIDEBAR_ROW_PROPERTIES,
+          projects: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.projects, status: false },
+        }}
+      />,
+    );
+    expect(screen.queryByRole("img", { name: /needs attention, 2 working/ })).toBeNull();
+  });
+
   it("keeps one empty Projects affordance and hides an empty Archive", () => {
     render(
       <ProjectSidebarSection

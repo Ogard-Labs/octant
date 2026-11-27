@@ -4487,6 +4487,36 @@ describe("useCodeController", () => {
     expect(closed.result.current.navigation[0]?.threadId).toBe(ids.thread);
   });
 
+  it("keeps an unread worker report separate from the Project conversation’s own unread reply", async () => {
+    const snapshot = bootstrap(1, 8);
+    const activity = snapshot.activity[0];
+    if (activity === undefined) throw new Error("Expected a Code activity row");
+    const client = fakeClient({
+      bootstrap: async () => ({
+        ...snapshot,
+        projectConversationIds: [ids.thread],
+        activity: [{ ...activity, projectReportSequence: activity.lastSequence }],
+      }),
+    });
+    const readCursorStore = createCodeReadCursorStore();
+    const { result } = renderHook(() => useCodeController({ client, readCursorStore }));
+    await waitFor(() =>
+      expect(result.current.navigation[0]).toMatchObject({
+        unread: true,
+        unreadProjectReports: true,
+      }),
+    );
+    act(() => result.current.markThreadRead(ids.thread));
+    await waitFor(() =>
+      expect(result.current.navigation[0]).toMatchObject({
+        unread: false,
+        unreadProjectReports: true,
+      }),
+    );
+    act(() => result.current.markProjectReportsRead(ids.thread, activity.lastSequence));
+    await waitFor(() => expect(result.current.navigation[0]?.unreadProjectReports).toBeUndefined());
+  });
+
   it("keeps background activity unread until the active thread's own evidence renders", async () => {
     // The navigation refresh reports activity for every thread, including the
     // one on screen whose snapshot has not arrived yet. A read cursor only

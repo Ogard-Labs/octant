@@ -5749,6 +5749,49 @@ describe("App", () => {
     }
   });
 
+  it("recovers from an unavailable default Project conversation only when explicitly retried", async () => {
+    const user = userEvent.setup();
+    const codeApi = await projectConversationCodes();
+    let available = false;
+    const openConversation = vi.fn();
+    const execute: CodeClient["execute"] = async (command, signal) => {
+      if (command.kind === "open-code-project-conversation") {
+        openConversation();
+        if (!available) throw new Error("Project checkout is unavailable.");
+      }
+      return codeApi.execute(command, signal);
+    };
+    const key = `octant.code.project-destination.${projectId}`;
+    localStorage.removeItem(key);
+    try {
+      render(
+        <App
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          codeClient={{ ...codeApi, execute }}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          shellClient={client()}
+        />,
+      );
+      await openSidebarProject(user, "Octant");
+      expect(await screen.findByDisplayValue("Octant")).toBeVisible();
+      await waitFor(() => expect(openConversation).toHaveBeenCalledOnce());
+      await openSidebarProject(user, "Octant");
+      expect(await screen.findByDisplayValue("Octant")).toBeVisible();
+      expect(openConversation).toHaveBeenCalledOnce();
+      available = true;
+      const views = screen.getByRole("navigation", { name: "Project views" });
+      await user.click(within(views).getByRole("button", { name: "Conversation" }));
+      expect(
+        await screen.findByText("Retry coverage now includes interrupted downloads."),
+      ).toBeVisible();
+      expect(openConversation).toHaveBeenCalledTimes(2);
+    } finally {
+      localStorage.removeItem(key);
+    }
+  });
+
   it("does not disclose a thread environment for a Project overview", async () => {
     const user = userEvent.setup();
     render(

@@ -269,6 +269,7 @@ export interface CodeThreadNavigationItem {
   /** Present on a coordinator thread (docs/design/coordinator-threads.md). */
   readonly coordinator?: true;
   readonly projectConversation?: true;
+  readonly unreadProjectReports?: true;
   /**
    * The thread is its Project's designated planner, which reads as a
    * coordinator whose starts always need approval. Its role follows the
@@ -2670,10 +2671,12 @@ export function useCodeController(options: CodeControllerOptions) {
             followUp: followUps.get(String(thread.id))?.followUp?.state === "open",
             unread:
               markedUnreadThreads.has(String(thread.id)) ||
-              (reportSequences.get(thread.id) ?? 0) >
-                (readCursors.get(`project-reports:${thread.id}`) ?? 0) ||
               (activityByThread.get(String(thread.id)) ?? 0) >
                 (readCursors.get(String(thread.id)) ?? 0),
+            ...((reportSequences.get(thread.id) ?? 0) >
+            (readCursors.get(`project-reports:${thread.id}`) ?? 0)
+              ? { unreadProjectReports: true as const }
+              : {}),
             ...(runtime?.executing === true ? { executing: true } : {}),
             ...(runtime?.awaitingKind === undefined
               ? {}

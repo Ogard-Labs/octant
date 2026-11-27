@@ -730,7 +730,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                       draftProjectBinding.current = binding;
                       void binding.catch(() => undefined);
                     }}
-                    projectWorkRevision={machineChanges.codeNavigation}
                     onOpenCodeWorkerBeside={actions.openCodeWorkerBeside}
                     onOpenProjectDestination={actions.openSelectedProject}
                     onNewThreadInProject={(projectId, options) =>

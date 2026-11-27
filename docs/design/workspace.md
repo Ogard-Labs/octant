@@ -475,7 +475,13 @@ Project-wide listings name each worker’s coordinator. Opening a worker lets th
 person inspect and steer it. **Open beside** focuses a visible worker or opens a
 second pane, preserving the Project draft. A narrow window opens the worker in
 place and offers a return to the Project conversation. Read state and pending
-decisions are independent. [Coordinator threads](coordinator-threads.md) owns
+decisions are independent. **Load earlier reports** adds the next older page.
+With Show workers off for the sidebar, working and needs-you counts for the
+Project conversation's hidden workers appear on the Project row even when its
+thread list is closed. The Status row setting controls those marks.
+If a default open fails, ordinary opens show Overview for the rest of the window
+session. Conversation and the pinned shortcut retry, and a successful retry
+restores ordinary opens. [Coordinator threads](coordinator-threads.md) owns
 identity, worker dispatch and reporting.
 
 ### Coordinators

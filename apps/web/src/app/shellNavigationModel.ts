@@ -8,6 +8,10 @@ import type { sidebarThreadGroupsForMode } from "../shell/shellModeRouting";
  * the sidebar and another in the pane.
  */
 export interface ShellNavigationModel {
+  readonly hiddenProjectWorkers: ReadonlyMap<
+    string,
+    NonNullable<ChatThreadNavigationItem["hiddenWorkers"]>
+  >;
   readonly unreadCodeProjects: ReadonlySet<string>;
   readonly codeProjectThreads: ReadonlyArray<ChatThreadNavigationItem>;
   /** The Code rows the sidebar lists: workers hidden by Show workers are left out. */

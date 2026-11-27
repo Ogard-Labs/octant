@@ -293,6 +293,10 @@ const PROJECT_SORT_ITEMS: ReadonlyArray<OctantMenuItem> = [
 ];
 
 export interface ProjectSidebarSectionProps {
+  readonly hiddenProjectWorkers?: ReadonlyMap<
+    string,
+    NonNullable<ChatThreadNavigationItem["hiddenWorkers"]>
+  >;
   readonly activeProjectId?: ProjectId;
   readonly activeThreadId?: string;
   readonly openThreadIds?: ReadonlyArray<string>;
@@ -704,6 +708,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         {...(props.onOpenContextHealth === undefined
           ? {}
           : { onOpenContextHealth: props.onOpenContextHealth })}
+        {...(props.hiddenProjectWorkers === undefined
+          ? {}
+          : { hiddenProjectWorkers: props.hiddenProjectWorkers })}
         hideWhenEmpty={hideEmptyProjects}
         label={label}
         onArchive={props.onArchive}
@@ -1100,6 +1107,10 @@ function ProjectGroup(props: {
   /** The list's view, filter, and arrangement controls, shown in this heading. */
   /** Every visible Project, across sections, for telling same-named ones apart. */
   readonly allProjects: ReadonlyArray<ProjectSummary>;
+  readonly hiddenProjectWorkers?: ReadonlyMap<
+    string,
+    NonNullable<ChatThreadNavigationItem["hiddenWorkers"]>
+  >;
   readonly activeProjectId?: ProjectId;
   readonly activeThreadId?: string;
   readonly openThreadIds?: ReadonlyArray<string>;
@@ -1238,6 +1249,7 @@ function ProjectGroup(props: {
         const degradedContext =
           contextHealth === undefined || contextHealth === "healthy" ? undefined : contextHealth;
         const nestedThreads = props.threadsByProjectId?.get(String(project.id)) ?? [];
+        const hiddenWorkers = props.hiddenProjectWorkers?.get(String(project.id));
         const previousProject = props.projects[index - 1];
         const nextProject = props.projects[index + 1];
         const showNested =
@@ -1286,6 +1298,13 @@ function ProjectGroup(props: {
                   {unavailable ? <small>Relink required</small> : null}
                 </span>
               </OctantButton>
+              {hiddenWorkers !== undefined && (
+                <CoordinatorWorkerCounts
+                  coordinatorTitle={project.name}
+                  hidden={hiddenWorkers}
+                  workers={[]}
+                />
+              )}
               {showNested && expanded && nestedThreads.length > 0 ? null : (
                 <ProjectStatusRollup projectName={project.name} threads={nestedThreads} />
               )}

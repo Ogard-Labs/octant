@@ -314,7 +314,6 @@ export type RevealedThreadTurn =
     };
 
 export interface WorkspaceViewProps {
-  readonly projectWorkRevision?: number;
   readonly onOpenCodeWorkerBeside?: (
     pane: PaneId,
     threadId: CodeThreadId,
@@ -1838,7 +1837,6 @@ function renderCodeTab(
         conversationId={tab.threadId}
         onRead={props.codeController.markProjectReportsRead}
         client={codeController.client}
-        revision={props.projectWorkRevision ?? 0}
         reportSequence={
           props.codeController.bootstrap?.activity.find((row) => row.threadId === tab.threadId)
             ?.projectReportSequence ?? 0

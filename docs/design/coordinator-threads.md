@@ -49,7 +49,10 @@ at the commit recorded when the conversation opened. Settled worker turns supply
 worker, including blockers and decisions. A completed turn uses its recorded
 finished summary when available. A long reply without a finished summary shows
 its opening and conclusion, with the full exchange in the linked worker. Reports derive from journaled turns,
-so recovery preserves their identity without another provider call. Activity
+so recovery preserves their identity without another provider call. The reader
+opens on the newest report page and can read earlier pages in descending
+journal order. The latest report’s sequence drives unread and page refresh.
+Activity
 updates the roster. Reading a report spends unread, and the worker retains each
 unanswered request until the person answers it.
 

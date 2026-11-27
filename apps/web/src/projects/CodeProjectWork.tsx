@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import type { CodeProjectReport, CodeThreadId } from "@octant/contracts/code";
+import type { CodeProjectReportPage, CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
 import {
   COORDINATOR_WORKER_STATE_WORDS,
@@ -14,32 +14,75 @@ export function CodeProjectWork(props: {
   readonly conversationId: CodeThreadId;
   readonly client: CodeClient;
   readonly onRead: (id: CodeThreadId, sequence: number) => void;
-  readonly revision: number;
   readonly reportSequence: number;
   readonly threads: ReadonlyArray<CodeThreadNavigationItem>;
   readonly onOpen: (id: CodeThreadId, title: string) => void;
   readonly onOpenBeside: (id: CodeThreadId, title: string) => void;
 }) {
-  const { projectId, client, revision, reportSequence } = props;
-  const [reports, setReports] = useState<ReadonlyArray<CodeProjectReport>>([]);
+  const { projectId, client, reportSequence } = props;
+  const [page, setPage] = useState<CodeProjectReportPage>();
   const [failure, setFailure] = useState<string>();
+  const [before, setBefore] = useState<CodeProjectReportPage["next"]>();
+  const [loading, setLoading] = useState(false);
   const [retry, setRetry] = useState(0);
+  const request = useRef<AbortController>(null);
+
+  const readReports = useCallback(
+    (abort: AbortController, cursor?: CodeProjectReportPage["next"]) => {
+      setLoading(true);
+      setFailure(undefined);
+      void client
+        .execute(
+          {
+            kind: "read-code-project-report-page",
+            projectId,
+            ...(cursor === undefined ? {} : { before: cursor }),
+          },
+          abort.signal,
+        )
+        .then((result) => {
+          if (abort.signal.aborted) return;
+          if (result.kind !== "project-report-page")
+            throw new Error("Project reports are unavailable.");
+          setPage((current) => {
+            if (cursor === undefined || current === undefined) return result;
+            const seen = new Set(current.reports.map((report) => report.operationId));
+            return {
+              ...result,
+              reports: [
+                ...current.reports,
+                ...result.reports.filter((report) => !seen.has(report.operationId)),
+              ],
+            };
+          });
+        })
+        .catch((error: unknown) => {
+          if (!abort.signal.aborted)
+            setFailure(error instanceof Error ? error.message : "Project reports are unavailable.");
+        })
+        .finally(() => {
+          if (!abort.signal.aborted) setLoading(false);
+        });
+    },
+    [client, projectId],
+  );
+
   useEffect(() => {
     const abort = new AbortController();
-    void client
-      .execute({ kind: "read-code-project-reports", projectId }, abort.signal)
-      .then((result) => {
-        if (abort.signal.aborted) return;
-        if (result.kind !== "project-reports") throw new Error("Project reports are unavailable.");
-        setReports(result.reports);
-        setFailure(undefined);
-      })
-      .catch((error: unknown) => {
-        if (!abort.signal.aborted)
-          setFailure(error instanceof Error ? error.message : "Project reports are unavailable.");
-      });
+    request.current = abort;
+    setBefore(undefined);
+    readReports(abort);
     return () => abort.abort();
-  }, [client, projectId, revision, reportSequence, retry]);
+  }, [readReports, reportSequence, retry]);
+
+  function loadEarlier() {
+    const cursor = page?.next;
+    if (request.current === null || cursor === undefined || loading) return;
+    setBefore(cursor);
+    readReports(request.current, cursor);
+  }
+
+  const reports = page?.reports ?? [];
   const newestReport = reports[0]?.sequence;
   const { conversationId, onRead } = props;
   const latestResult = useRef<HTMLElement>(null);
@@ -130,12 +173,24 @@ export function CodeProjectWork(props: {
               {report.summary && <p>{report.summary}</p>}
             </article>
           ))}
+          {page?.next !== undefined && (failure === undefined || before === undefined) && (
+            <OctantButton size="sm" variant="ghost" disabled={loading} onClick={loadEarlier}>
+              {loading && before !== undefined ? "Loading earlier reports" : "Load earlier reports"}
+            </OctantButton>
+          )}
         </section>
       )}
       {failure && (
         <p role="status">
           {failure}{" "}
-          <OctantButton size="sm" variant="ghost" onClick={() => setRetry((n) => n + 1)}>
+          <OctantButton
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              if (before === undefined) setRetry((n) => n + 1);
+              else loadEarlier();
+            }}
+          >
             Retry
           </OctantButton>
         </p>

@@ -1274,6 +1274,7 @@ function LaunchedShell(
    * exists to remove.
    */
   const projectOpenRequest = useRef(0);
+  const failedProjectAutoOpens = useRef(new Set<ProjectId>());
   const draftProjectBinding = useRef<Promise<void> | undefined>(undefined);
   const [draftProjectSelection, setDraftProjectSelection] = useState<
     Partial<Readonly<Record<OctantMode, ProjectId>>>
@@ -2931,7 +2932,7 @@ function LaunchedShell(
   );
   const restartNoticeThreads = useMemo(
     () => [
-      ...listedCodeThreads.map((thread) => ({
+      ...codeController.navigation.map((thread) => ({
         mode: "code" as const,
         threadId: String(thread.threadId),
         title: thread.title,
@@ -2950,7 +2951,7 @@ function LaunchedShell(
         ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
       })),
     ],
-    [chatController.navigation, listedCodeThreads, workNavigation.navigation],
+    [chatController.navigation, codeController.navigation, workNavigation.navigation],
   );
   // Bringing a Code thread's tab in front is the user opening it: the thread's
   // view — or its error state — fills the workspace, so its unread dot is
@@ -5909,7 +5910,7 @@ function LaunchedShell(
     // Workers the person has not asked to see in the sidebar stay out of the
     // list but still count on their coordinator's row. Everything else that
     // reads Code threads (Needs you, search, the Agents dock) keeps the full list.
-    const codeSidebarThreads = sidebarThreadsWithWorkers(
+    const { threads: codeSidebarThreads, hiddenProjectWorkers } = sidebarThreadsWithWorkers(
       codeProjectThreads,
       codeController.bootstrap?.settings,
       codeController.bootstrap?.projectConversationIds,
@@ -5993,11 +5994,12 @@ function LaunchedShell(
     return {
       unreadCodeProjects: new Set(
         codeController.navigation
-          .filter((t) => t.projectConversation === true && t.unread)
+          .filter((t) => t.projectConversation === true && (t.unread || t.unreadProjectReports))
           .map((t) => String(t.projectId)),
       ),
       codeProjectThreads,
       codeSidebarThreads,
+      hiddenProjectWorkers,
       liveThreadTitles,
       markedChatNavigation,
       markedThreadGroups,
@@ -6011,6 +6013,7 @@ function LaunchedShell(
     activeMode,
     chatController.navigation,
     codeController.bootstrap?.settings,
+    codeController.bootstrap?.projectConversationIds,
     codeController.navigation,
     codeController.status,
     listedCodeThreads,
@@ -7442,7 +7445,8 @@ function LaunchedShell(
     const conversation =
       project.type === "code" &&
       project.lifecycle === "active" &&
-      (destination ?? rememberedProjectDestination(project.id)) === "conversation";
+      (destination ?? rememberedProjectDestination(project.id)) === "conversation" &&
+      (destination !== undefined || !failedProjectAutoOpens.current.has(project.id));
     const needsProjectSurface =
       !conversation || activeMode !== "code" || activeProjectId !== project.id;
     if (needsProjectSurface) await controller.openProject(project.id, project.type, project.name);
@@ -7460,6 +7464,7 @@ function LaunchedShell(
     });
     if (projectOpenRequest.current !== request) return;
     if (opened?.kind !== "project-conversation-opened") {
+      failedProjectAutoOpens.current.add(project.id);
       if (!needsProjectSurface)
         await controller.openProject(project.id, project.type, project.name);
       setThreadExportNotice(
@@ -7468,6 +7473,7 @@ function LaunchedShell(
       );
       return;
     }
+    failedProjectAutoOpens.current.delete(project.id);
     await controller.openCodeThread(opened.thread.id, project.name, undefined, project.id);
   }
 

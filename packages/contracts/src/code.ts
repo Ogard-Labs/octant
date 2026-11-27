@@ -987,7 +987,18 @@ export const decodeCodeProjectConversationBound = Schema.decodeUnknownSync(
   CodeProjectConversationBound,
 );
 
+export const CodeProjectReportCursor = Schema.Struct({
+  sequence: GlobalSequence,
+  operationId: CodeRuntimeWorkId,
+}).annotations(strict);
+export type CodeProjectReportCursor = typeof CodeProjectReportCursor.Type;
+
 export const CodeCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("read-code-project-report-page"),
+    projectId: ProjectId,
+    before: Schema.optional(CodeProjectReportCursor),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("read-code-project-reports"),
     projectId: ProjectId,
@@ -1899,7 +1910,15 @@ export const CodeProjectReport = Schema.Struct({
 export type CodeProjectReport = typeof CodeProjectReport.Type;
 export const decodeCodeProjectReport = Schema.decodeUnknownSync(CodeProjectReport);
 
+export const CodeProjectReportPage = Schema.Struct({
+  kind: Schema.Literal("project-report-page"),
+  reports: Schema.Array(CodeProjectReport),
+  next: Schema.optional(CodeProjectReportCursor),
+}).annotations(strict);
+export type CodeProjectReportPage = typeof CodeProjectReportPage.Type;
+
 export const CodeCommandResult = Schema.Union(
+  CodeProjectReportPage,
   Schema.Struct({
     kind: Schema.Literal("project-reports"),
     reports: Schema.Array(CodeProjectReport),

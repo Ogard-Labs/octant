@@ -835,6 +835,9 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                   {...(openSidebarThreadIds === undefined || openSidebarThreadIds.length === 0
                     ? {}
                     : { openThreadIds: openSidebarThreadIds })}
+                  {...(activeMode === "code"
+                    ? { hiddenProjectWorkers: props.navigation.hiddenProjectWorkers }
+                    : {})}
                   archivedProjects={workSide ? workSideArchivedProjects : archivedProjects}
                   availabilityByProject={availabilityByProject}
                   contextHealthByProject={contextHealthByProject}

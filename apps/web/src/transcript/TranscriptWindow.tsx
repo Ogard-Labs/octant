@@ -189,7 +189,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const viewStore = useContext(WorkspaceViewStateContext);
   const savedView = viewStore?.read(`transcript:${restoreKey}`);
   const revealKey = props.revealKey;
-  const firstKey = items[0] === undefined ? props.emptyContentKey : itemKey(items[0], 0);
+  const firstKey = items[0] === undefined ? undefined : itemKey(items[0], 0);
   const remembered =
     (viewStore === undefined ? scrollMemory.get(restoreKey) : undefined) ??
     (savedView?.kind === "transcript"
@@ -200,7 +200,8 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
           measurements: [],
         }
       : undefined);
-  const restored = remembered?.firstKey === firstKey ? remembered : undefined;
+  const contentKey = firstKey ?? props.emptyContentKey;
+  const restored = remembered?.firstKey === contentKey ? remembered : undefined;
   // A list that mounts empty beside a saved view of a reader who had scrolled
   // away must not start out following: the first page arrives before the
   // restore below has run, and the virtualizer follows that append to the end,
@@ -214,7 +215,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const pendingFocusRef = useRef<
     { readonly index: number; readonly edge: "start" | "end" } | undefined
   >(undefined);
-  const firstKeyRef = useRef(firstKey);
+  const firstKeyRef = useRef(contentKey);
   const lastKeyRef = useRef(lastKeyOf(items, itemKey));
   const countRef = useRef(items.length);
   // One index map per item list: the reveal target and every pinned key resolve
@@ -323,8 +324,8 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   // Updated after the cleanup above has read it, so leaving a thread records
   // the first row it was showing rather than the next thread's.
   useLayoutEffect(() => {
-    firstKeyRef.current = firstKey;
-  }, [firstKey]);
+    firstKeyRef.current = contentKey;
+  }, [contentKey]);
 
   // The virtualizer starts from a remembered offset, but the frame itself
   // mounts at the top, and its rows lay out a frame or two later, so until
@@ -378,7 +379,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     for (const type of inputs) scroll.addEventListener(type, stop, { passive: true });
     apply();
     return stop;
-  }, [restoreKey, firstKey, viewStore]);
+  }, [restoreKey, contentKey, viewStore]);
 
   useLayoutEffect(() => {
     followingRef.current =
