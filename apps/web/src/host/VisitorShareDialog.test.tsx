@@ -24,40 +24,6 @@ function statusWith(spoke: Record<string, unknown>) {
   };
 }
 
-function hubStatus(options: {
-  readonly enabled: boolean;
-  readonly port?: number;
-  readonly hub?: boolean;
-  readonly paused?: boolean;
-  readonly names?: ReadonlyArray<string>;
-  readonly membership?: "none" | "member" | "removed";
-}) {
-  const isHub = options.hub !== false;
-  return {
-    status: 200,
-    body: {
-      spoke: { membership: options.membership ?? "none" },
-      hub: {
-        enabled: isHub,
-        roster: {
-          roster: {
-            members: [
-              { role: "spoke", privateNames: ["laptop.tail1234.ts.net"] },
-              { role: "hub", privateNames: options.names ?? ["studio.tail1234.ts.net"] },
-            ],
-          },
-        },
-      },
-      publicEntrance: {
-        enabled: true,
-        paused: options.paused === true,
-        funnel: options.enabled ? { enabled: true, port: options.port ?? 443 } : { enabled: false },
-      },
-      visitors: { spoke: { links: [], comments: [], published: true } },
-    },
-  };
-}
-
 const shared = {
   links: [
     {
@@ -151,56 +117,37 @@ describe("VisitorShareDialog", () => {
     },
   };
 
-  it.each([
-    { port: 443, origin: "https://studio.tail1234.ts.net" },
-    { port: 8443, origin: "https://studio.tail1234.ts.net:8443" },
-  ])(
-    "shows and copies the whole link on a hub whose Funnel carries port $port",
-    async ({ port, origin }) => {
-      const user = userEvent.setup();
-      renderDialog({
-        status: hubStatus({ enabled: true, port }),
-        "visitor-share": madeLink,
-      });
-      await screen.findByText("Nothing is shared with a visitor.");
-      await user.click(screen.getByRole("button", { name: "Make link" }));
-      const link = await screen.findByRole("group", { name: "New visitor link" });
-      const whole = `${origin}/v/${LINK}#k=secret-part`;
-      expect(within(link).getByText(whole)).toBeInTheDocument();
-      await user.click(within(link).getByRole("button", { name: "Copy link" }));
-      expect(await navigator.clipboard.readText()).toBe(whole);
-    },
-  );
-
-  it.each([
-    { where: "a computer that is not the hub", status: hubStatus({ enabled: true, hub: false }) },
-    { where: "a hub without Funnel", status: hubStatus({ enabled: false }) },
-    { where: "a paused hub", status: hubStatus({ enabled: true, paused: true }) },
-    { where: "a hub with no tailnet name", status: hubStatus({ enabled: true, names: [] }) },
-    {
-      where: "a hub that has also joined another hub, which holds the link",
-      status: hubStatus({ enabled: true, membership: "member" }),
-    },
-    {
-      where: "a hub that another hub removed",
-      status: hubStatus({ enabled: true, membership: "removed" }),
-    },
-  ])(
-    "calls the link a path, to go after the hub's public address, on $where",
-    async ({ status }) => {
-      const user = userEvent.setup();
-      renderDialog({ status, "visitor-share": madeLink });
-      await screen.findByText("Nothing is shared with a visitor.");
-      await user.click(screen.getByRole("button", { name: "Make link" }));
-      const link = await screen.findByRole("group", { name: "New visitor link" });
-      expect(
-        within(link).getByText(/Put your hub's public address in front of it/),
-      ).toBeInTheDocument();
-      expect(within(link).queryByRole("button", { name: "Copy link" })).not.toBeInTheDocument();
-      await user.click(within(link).getByRole("button", { name: "Copy path" }));
-      expect(await navigator.clipboard.readText()).toBe(`/v/${LINK}#k=secret-part`);
-    },
-  );
+  it("shows a new link as a path to put the hub's public address in front of, and copies the path", async () => {
+    const user = userEvent.setup();
+    renderDialog({
+      // A hub with its own Funnel on is no exception: the link goes to the hub it joined.
+      status: {
+        status: 200,
+        body: {
+          spoke: { membership: "none" },
+          hub: {
+            enabled: true,
+            roster: {
+              roster: { members: [{ role: "hub", privateNames: ["studio.tail1234.ts.net"] }] },
+            },
+          },
+          publicEntrance: { enabled: true, funnel: { enabled: true, port: 443 } },
+          visitors: { spoke: { links: [], comments: [], published: true } },
+        },
+      },
+      "visitor-share": madeLink,
+    });
+    await screen.findByText("Nothing is shared with a visitor.");
+    await user.click(screen.getByRole("button", { name: "Make link" }));
+    const link = await screen.findByRole("group", { name: "New visitor link" });
+    expect(
+      within(link).getByText(/Put your hub's public address in front of it/),
+    ).toBeInTheDocument();
+    expect(within(link).getByText(`/v/${LINK}#k=secret-part`)).toBeInTheDocument();
+    expect(within(link).queryByRole("button", { name: "Copy link" })).not.toBeInTheDocument();
+    await user.click(within(link).getByRole("button", { name: "Copy path" }));
+    expect(await navigator.clipboard.readText()).toBe(`/v/${LINK}#k=secret-part`);
+  });
 
   it("keeps a sent request's comment copyable when the links cannot be read again", async () => {
     const user = userEvent.setup();
@@ -513,6 +460,20 @@ describe("VisitorShareDialog while it stays open", () => {
     act(() => void document.dispatchEvent(new Event("visibilitychange")));
     await pass(0);
     expect(calls).toHaveLength(2);
+  });
+
+  it("waits to read until the window is shown when it opens hidden", async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const { calls } = renderDialog({ status: nothing });
+    await pass(60_000);
+    expect(calls).toHaveLength(0);
+
+    visibility.mockReturnValue("visible");
+    act(() => void document.dispatchEvent(new Event("visibilitychange")));
+    await pass(0);
+    expect(calls).toHaveLength(1);
+    expect(screen.getByText("Nothing is shared with a visitor.")).toBeInTheDocument();
   });
 
   it("stops reading once it is closed", async () => {

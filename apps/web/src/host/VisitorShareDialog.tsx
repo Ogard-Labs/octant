@@ -6,13 +6,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import {
-  copyToClipboard,
-  field,
-  list,
-  useHubEntranceAction,
-  type HubRequest,
-} from "./hubEntranceAction";
+import { copyToClipboard, field, useHubEntranceAction, type HubRequest } from "./hubEntranceAction";
 import { readVisitors, VISITOR_REFUSALS, VisitorLinkList, type VisitorsView } from "./VisitorLinks";
 
 /**
@@ -42,43 +36,7 @@ const EXPIRY_CHOICES: ReadonlyArray<{
  */
 interface Loaded {
   readonly view?: VisitorsView;
-  /** Where visitors reach a link made here, when this computer's own hub takes it. */
-  readonly origin?: string | undefined;
   readonly error?: string | undefined;
-}
-
-/**
- * The hub's own public address from its status: Funnel serves the hub's
- * tailnet name, which the signed roster carries. A link goes to the hub this
- * computer joined, so a computer that has joined one, or was removed from one,
- * gets no address even while its own hub role and Funnel are on: the hub
- * behind that address never receives the link. Every other computer, and a
- * hub behind the person's own front, has no address a visitor could use here.
- */
-function funnelOrigin(status: unknown): string | undefined {
-  const hub = field(status, "hub");
-  const entrance = field(status, "publicEntrance");
-  const funnel = field(entrance, "funnel");
-  const port = field(funnel, "port");
-  if (
-    field(field(status, "spoke"), "membership") !== "none" ||
-    field(hub, "enabled") !== true ||
-    field(entrance, "enabled") !== true ||
-    field(entrance, "paused") === true ||
-    field(funnel, "enabled") !== true ||
-    typeof port !== "number"
-  ) {
-    return undefined;
-  }
-  const self = list(field(field(field(hub, "roster"), "roster"), "members")).find(
-    (member) => field(member, "role") === "hub",
-  );
-  const name = list(field(self, "privateNames")).find(
-    (candidate): candidate is string =>
-      typeof candidate === "string" && candidate.endsWith(".ts.net"),
-  );
-  if (name === undefined) return undefined;
-  return port === 443 ? `https://${name}` : `https://${name}:${port}`;
 }
 
 export default function VisitorShareDialog(props: {
@@ -126,7 +84,6 @@ export default function VisitorShareDialog(props: {
       const ids = new Set(links.map((link) => link.linkId));
       setLoaded({
         view: { ...view, links, comments: view.comments.filter((c) => ids.has(c.linkId)) },
-        origin: funnelOrigin(reply.body),
       });
     } catch {
       failed("Octant could not read this computer's visitor links.");
@@ -160,7 +117,8 @@ export default function VisitorShareDialog(props: {
       else void reread();
     };
     document.addEventListener("visibilitychange", onVisibility);
-    void reread();
+    // Opened in a hidden window, the first read waits until it is shown.
+    if (!hidden()) void reread();
     return () => {
       closed = true;
       clearTimeout(timer);
@@ -189,15 +147,6 @@ export default function VisitorShareDialog(props: {
     }
     await refresh();
   };
-
-  // What the person copies: the whole link where the address is known, else
-  // the path the host answered, named as one.
-  const address =
-    shared === undefined
-      ? undefined
-      : loaded.origin === undefined
-        ? { text: shared.url, noun: "path" }
-        : { text: `${loaded.origin}${shared.url}`, noun: "link" };
 
   return (
     <OctantDialog
@@ -256,7 +205,7 @@ export default function VisitorShareDialog(props: {
           Make link
         </OctantButton>
       </div>
-      {shared === undefined || address === undefined ? null : (
+      {shared === undefined ? null : (
         <div
           aria-label="New visitor link"
           className="settings-panel__stack"
@@ -265,31 +214,25 @@ export default function VisitorShareDialog(props: {
           tabIndex={-1}
         >
           <p className="setrow-hint">
-            {address.noun === "link"
-              ? "Link on your hub's public address. The part after # is its secret; Octant does not show it again, so send the whole link now."
-              : "This is the link's path, not a whole link. Put your hub's public address in front of it and send the whole link now. The part after # is its secret; Octant does not show it again."}
+            This is the link's path, not a whole link. Put your hub's public address in front of it
+            and send the whole link now. The part after # is its secret; Octant does not show it
+            again.
           </p>
-          <code className="hub-entrance__secret">{address.text}</code>
+          <code className="hub-entrance__secret">{shared.url}</code>
           <div className="host-settings__controls">
             <OctantButton
               onClick={() =>
-                void copyToClipboard(address.text).then((copied) =>
+                void copyToClipboard(shared.url).then((copied) =>
                   action.say(
                     copied
-                      ? {
-                          kind: "success",
-                          text: address.noun === "link" ? "Link copied." : "Path copied.",
-                        }
-                      : {
-                          kind: "error",
-                          text: `The ${address.noun} could not be copied. Select it instead.`,
-                        },
+                      ? { kind: "success", text: "Path copied." }
+                      : { kind: "error", text: "The path could not be copied. Select it instead." },
                   ),
                 )
               }
               size="sm"
             >
-              {`Copy ${address.noun}`}
+              Copy path
             </OctantButton>
             <OctantButton
               onClick={() => {
