@@ -1109,6 +1109,21 @@ describe("octant hub public", () => {
     expect(await host.run({ action: "public", mode: "on", front: "funnel", port: 443 })).toBe(1);
     expect(host.errors()).toContain("funnel-not-allowed");
   });
+
+  it("names the port Funnel is on when Tailscale would not turn it off", async () => {
+    const host = await fixture((request) =>
+      request.method === "GET"
+        ? ok({
+            hub: { enabled: true },
+            spoke: { membership: "none" },
+            publicEntrance: { enabled: true, listening: true, funnel: { enabled: true, port: 10000 } },
+          })
+        : { status: 409, body: { status: "refused", kind: "funnel-off-failed" } },
+    );
+    expect(await host.run({ action: "public", mode: "off" })).toBe(1);
+    expect(host.errors()).toContain("tailscale funnel --https=10000 off");
+    expect(host.errors()).not.toContain("--https=443");
+  });
 });
 
 describe("octant hub failover commands", () => {
