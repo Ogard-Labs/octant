@@ -42,6 +42,7 @@ describe("SettingsSectionId", () => {
       "todos",
       "sync",
       "remote-access",
+      "public-entrance",
       "host",
       "usage",
     ]);

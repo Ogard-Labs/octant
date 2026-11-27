@@ -11,6 +11,13 @@ const MOVED_SETTINGS: ReadonlyArray<{
   readonly to: SettingsSectionId;
 }> = [
   { from: "host", setting: "host-automation-notifications", to: "general" },
+  // The public entrance's controls sat on Remote access, which was full; they
+  // have their own page.
+  ...["hub-public-entrance", "hub-public-funnel"].map((setting) => ({
+    from: "remote-access" as const,
+    setting,
+    to: "public-entrance" as const,
+  })),
   ...["public-links", "public-link-service", "browser-site-approvals", "tool-approvals"].map(
     (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
   ),

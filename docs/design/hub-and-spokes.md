@@ -3019,7 +3019,7 @@ person's work without any service Octant runs (maintainer decision,
   ids, spoke-signed grants, sealed secrets, the delivery queue, and counts.
 - **Outside content.** Visitor text and webhook payloads taint the thread
   they reach and are never instructions or grants.
-- **The front.** Settings › Remote access › Hub and `octant hub public`
+- **The front.** Settings › Public entrance and `octant hub public`
   turn the Funnel switch on, which runs
   `tailscale funnel --bg --https=443 http://127.0.0.1:<port>` through the
   local Tailscale daemon, and off, which runs
@@ -3089,7 +3089,7 @@ until a read succeeds. A new link, and a sent request's comment, are
 shown once: until the person presses its Done, the window offers no Make link
 or Send that would put another in its place. Stopping the shown link clears
 it.
-Settings › Remote access › Visitor links lists every link and holds the
+Settings › Public entrance › Visitor links lists every link and holds the
 hub's switch. The thread list's menu has no Share item: the main chunk has
 no room for one (`scripts/initial-renderer-budget.json`). A Request card
 inside the transcript itself is not built yet.
@@ -3187,7 +3187,7 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   re-arm; a rotate refused for want of Public leaves the old pair working.
   An endpoint id never begins with `-`, so the CLI never reads one as a flag.
   `octant hub webhook create|list|rotate|remove|secret`, the loopback
-  administration routes, and Settings › Remote access › Webhook endpoints
+  administration routes, and Settings › Public entrance › Webhook endpoints
   (with the recent delivery log) do this. While the window shows a new
   secret and the person has not pressed Done, it offers no new endpoint, no
   Stripe secret form, and no rotation of another endpoint, any of which would
@@ -3242,7 +3242,7 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   secret once it has the URL, so a Stripe endpoint starts without one: the
   person adds the URL in Stripe and pastes the secret Stripe shows with
   `octant hub webhook secret <id>`, which reads it from standard input, or in
-  Settings › Remote access › Webhook endpoints, which shows the URL, marks the
+  Settings › Public entrance › Webhook endpoints, which shows the URL, marks the
   endpoint as waiting for its secret, and takes the secret in a masked field
   it empties on send and never shows back. Until
   then the spoke hands the hub nothing for it and it takes no delivery;
@@ -3394,7 +3394,7 @@ between hosts on loopback; what is not built is listed below.
   answers them 501); a relay through a forwarding member or a standing-in
   standby (only the acting hub admits relays, and a forwarding member answers
   the relay route 404). The switch and each host's device list are in
-  Settings › Remote access › Device relay as well as the CLI.
+  Settings › Public entrance › Device relay as well as the CLI.
 - **Phone push is separate.** The relay carries a device's own connection,
   not notifications. The store build of the phone app still gets push through
   the minimal Octant push gateway

@@ -2169,19 +2169,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "hub delegated work delegation take accept stop pause other members requests running carries on",
         },
         {
-          id: settingId("hub-public-entrance"),
-          label: "Public entrance",
-          scope: "host",
-          keywords:
-            "hub public entrance internet visitor links share comment requests webhooks endpoint secret rotate delivery log device relay allow withdraw standby serve away from home off by default",
-        },
-        {
-          id: settingId("hub-public-funnel"),
-          label: "Tailscale Funnel",
-          scope: "host",
-          keywords: "hub public entrance tailscale funnel port 443 tls front own tunnel proxy",
-        },
-        {
           id: settingId("hub-push-sender"),
           label: "Push sender",
           scope: "host",
@@ -2248,6 +2235,51 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Join the hub as a guest",
           scope: "host",
           keywords: "hub join guest browser code owner passkey comparison leave",
+        },
+      ],
+    },
+    {
+      ...octantSettingsNavigation["public-entrance"],
+      keywords:
+        "public entrance internet hub visitor links webhooks device relay funnel tunnel proxy front standby",
+      settings: [
+        {
+          id: settingId("hub-public-entrance"),
+          label: "Public entrance",
+          scope: "host",
+          keywords: "hub public entrance internet open close listener address off by default",
+        },
+        {
+          id: settingId("hub-public-funnel"),
+          label: "Tailscale Funnel",
+          scope: "host",
+          keywords: "hub public entrance tailscale funnel port 443 tls front own tunnel proxy",
+        },
+        {
+          id: settingId("hub-public-standby"),
+          label: "Serve the public entrance",
+          scope: "host",
+          keywords: "hub standby stand in standing in failover serve answer",
+        },
+        {
+          id: settingId("hub-visitor-links"),
+          label: "Visitor links",
+          scope: "host",
+          keywords:
+            "hub visitor link share thread read only comment requests send dismiss stop sharing",
+        },
+        {
+          id: settingId("hub-webhook-endpoints"),
+          label: "Webhook endpoints",
+          scope: "host",
+          keywords:
+            "hub webhooks endpoint secret rotate remove delivery log routine stripe github signature",
+        },
+        {
+          id: settingId("hub-device-relay"),
+          label: "Device relay",
+          scope: "host",
+          keywords: "hub device relay allow withdraw paired devices phone away from home",
         },
       ],
     },

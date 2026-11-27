@@ -226,6 +226,15 @@ describe("a link written for an earlier Settings layout", () => {
     }
   });
 
+  it.each(["hub-public-entrance", "hub-public-funnel"])(
+    "lands Remote access's %s on the Public entrance page",
+    (setting) => {
+      const link = currentSettingsLink({ section: "remote-access", setting: settingId(setting) });
+      expect(link).toEqual({ section: "public-entrance", setting });
+      expect(resolveDeepLink(octantSettingsRegistry, capabilities, link)?.settingId).toBe(setting);
+    },
+  );
+
   it("keeps a sandbox scope the link carried", () => {
     expect(
       currentSettingsLink({

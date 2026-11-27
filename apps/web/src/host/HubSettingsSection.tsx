@@ -1,6 +1,6 @@
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { HUB_GRANT_ITEMS, type HubGrantItem } from "@octant/contracts";
-import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import {
   SettingRow,
@@ -34,19 +34,7 @@ import {
   type OwnerKeyMismatchRow,
   type OwnerRow,
 } from "./HubOwnerPanels";
-import {
-  HubPublicEntranceSection,
-  PUBLIC_ENTRANCE_REFUSALS,
-  readPublicEntrance,
-  type PublicEntranceView,
-} from "./HubPublicEntranceSection";
 import { PairingCodeQr } from "./PairingCodeQr";
-
-// The public entrance's own screens load as their own chunks: the renderer has
-// no room left for them in the main one (hub-and-spokes.md, slice 25).
-const HubWebhooksSection = lazy(() => import("./HubWebhooksSection"));
-const HubDeviceRelaySection = lazy(() => import("./HubDeviceRelaySection"));
-const HubVisitorLinksSection = lazy(() => import("./HubVisitorLinksSection"));
 
 /**
  * The hub role and hub membership of this host. Every action goes through the
@@ -74,10 +62,6 @@ export interface HubSettingsSectionProps {
    * item names. A saved id missing here stays listed so it can be unticked.
    */
   readonly projectNames?: ReadonlyMap<string, string>;
-  /** This computer's paired devices' names by device id, for the device relay list. */
-  readonly deviceNames?: ReadonlyMap<string, string>;
-  /** Thread titles by `mode:threadId`, for the visitor link list. */
-  readonly threadTitles?: ReadonlyMap<string, string>;
 }
 
 const NO_PROJECTS: ReadonlyMap<string, string> = new Map();
@@ -313,16 +297,6 @@ interface HubStatus {
   readonly directPush?: DirectPushView;
   readonly provision?: ProvisionView;
   readonly signIn?: SignInView;
-  readonly publicEntrance?: PublicEntranceView;
-  /**
-   * The status body's webhook, visitor and relay parts, as the host sent
-   * them. Each lazy screen reads its own part, so its parsing loads with it.
-   */
-  readonly entrance: {
-    readonly webhooks: unknown;
-    readonly relay: unknown;
-    readonly visitors: unknown;
-  };
   /** Whether this computer takes work other members delegate; absent where delegation is not composed. */
   readonly delegationAccepting?: boolean;
   readonly link?: {
@@ -463,12 +437,7 @@ interface CertificateStatus {
 
 type StatusState =
   | { readonly kind: "loading" }
-  /**
-   * `last` is the status read before the failure. Only the public entrance's
-   * screens keep using it: one of them may be showing a secret the host
-   * mints once, and dropping it on a failed read would lose it for good.
-   */
-  | { readonly kind: "error"; readonly message: string; readonly last?: HubStatus }
+  | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "ready"; readonly status: HubStatus };
 
 type JoinState =
@@ -499,8 +468,6 @@ export function HubSettingsSection({
   ownerUnlock,
   now,
   projectNames = NO_PROJECTS,
-  deviceNames = NO_PROJECTS,
-  threadTitles = NO_PROJECTS,
 }: HubSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   /** The public half of the unlock key made for the join in progress; the private half never leaves the Secure Enclave. */
@@ -566,16 +533,7 @@ export function HubSettingsSection({
   );
 
   const refresh = useCallback(async () => {
-    const failed = (message: string) =>
-      setState((previous) => {
-        const last =
-          previous.kind === "ready"
-            ? previous.status
-            : previous.kind === "error"
-              ? previous.last
-              : undefined;
-        return { kind: "error", message, ...(last === undefined ? {} : { last }) };
-      });
+    const failed = (message: string) => setState({ kind: "error", message });
     try {
       const reply = await request("status");
       const status = reply.status === 200 ? readStatus(reply.body) : undefined;
@@ -635,10 +593,6 @@ export function HubSettingsSection({
 
   const status = state.kind === "ready" ? state.status : undefined;
   const hubOn = status?.enabled === true;
-  const entranceStatus = state.kind === "error" ? state.last : status;
-  const entranceHubOn = entranceStatus?.enabled === true;
-  const entranceShown =
-    entranceStatus !== undefined && (entranceHubOn || entranceStatus.link?.membership === "member");
 
   // Run an act and say plainly why the server refused it.
   const act = async (
@@ -847,59 +801,6 @@ export function HubSettingsSection({
         on
           ? "Push sender is on. A computer uses it only if its person ticked Push."
           : "Push sender is off. The hub forgot its counts.",
-      );
-    }
-    await refresh();
-  };
-
-  const setPublicEntrance = async (on: boolean) => {
-    const reply = await act(
-      "public",
-      { enabled: on },
-      "changed",
-      on
-        ? "Octant could not open the public entrance."
-        : "Octant could not close the public entrance.",
-      PUBLIC_ENTRANCE_REFUSALS,
-    );
-    if (reply !== undefined) {
-      setMessage(
-        on
-          ? "Public entrance is open on this computer. Turn on Funnel, or point your own front at it."
-          : "Public entrance is closed.",
-      );
-    }
-    await refresh();
-  };
-
-  const setPublicFunnel = async (on: boolean) => {
-    const reply = await act(
-      "public-funnel",
-      on ? { enabled: true, port: 443 } : { enabled: false },
-      "changed",
-      on ? "Octant could not turn Funnel on." : "Octant could not turn Funnel off.",
-      PUBLIC_ENTRANCE_REFUSALS,
-    );
-    if (reply !== undefined) {
-      setMessage(on ? "Funnel carries the public entrance on port 443." : "Funnel is off.");
-    }
-    await refresh();
-  };
-
-  const setStandbyServe = async (on: boolean) => {
-    const reply = await act(
-      "public-standby",
-      { enabled: on },
-      "changed",
-      on
-        ? "Octant could not turn on serving while standing in."
-        : "Octant could not turn off serving while standing in.",
-    );
-    if (reply !== undefined) {
-      setMessage(
-        on
-          ? "Serve the public entrance is on. This computer answers visitor links and webhooks only while it stands in for the hub."
-          : "Serve the public entrance is off. While standing in, this computer's entrance forwards and serves nothing itself.",
       );
     }
     await refresh();
@@ -1505,7 +1406,7 @@ export function HubSettingsSection({
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Accept moved threads is|Push sender is|Serve the public entrance is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address|Saved\. A member|A member.s window can see this hub)/.test(
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Accept moved threads is|Push sender is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address|Saved\. A member|A member.s window can see this hub)/.test(
                 message,
               )
                 ? "success"
@@ -1863,51 +1764,6 @@ export function HubSettingsSection({
           )}
         </SettingsSection>
       )}
-
-      {status?.publicEntrance === undefined ||
-      (!hubOn && status.link?.membership !== "member") ? null : (
-        <HubPublicEntranceSection
-          busy={busy}
-          onEntrance={(on) => void setPublicEntrance(on)}
-          onFunnel={(on) => void setPublicFunnel(on)}
-          namedStandby={status.link?.namedStandby === true}
-          onStandbyServe={(on) => void setStandbyServe(on)}
-          view={status.publicEntrance}
-        />
-      )}
-
-      <Suspense fallback={null}>
-        {!entranceShown ? null : (
-          <>
-            <HubWebhooksSection
-              body={entranceStatus.entrance.webhooks}
-              member={entranceStatus.link?.membership === "member"}
-              onChanged={refresh}
-              publicGranted={entranceStatus.link?.grant.items.includes("public") === true}
-              request={request}
-              now={clock}
-            />
-            <HubVisitorLinksSection
-              body={entranceStatus.entrance.visitors}
-              hubOn={entranceHubOn}
-              member={entranceStatus.link?.membership === "member"}
-              now={clock}
-              onChanged={refresh}
-              request={request}
-              threadTitles={threadTitles}
-            />
-            <HubDeviceRelaySection
-              body={entranceStatus.entrance.relay}
-              deviceNames={deviceNames}
-              hubOn={entranceHubOn}
-              member={entranceStatus.link?.membership === "member"}
-              onChanged={refresh}
-              relayGranted={entranceStatus.link?.grant.items.includes("relay") === true}
-              request={request}
-            />
-          </>
-        )}
-      </Suspense>
 
       {!hubOn || status === undefined ? null : (
         <SettingsSection title="Push sender">
@@ -2691,18 +2547,12 @@ function readStatus(body: unknown): HubStatus | undefined {
   const grant = readGrant(field(spoke, "grant"));
   const wake = readWake(field(body, "wake"));
   const push = readPush(field(body, "push"));
-  const publicEntrance = readPublicEntrance(field(body, "publicEntrance"));
   const directPush = readDirectPush(field(body, "directPush"));
   const provision = readProvision(field(body, "provision"));
   const signIn = readSignIn(field(body, "signIn"));
   const pairedMergeUnlock = field(body, "pairedMergeUnlock") === true;
   const ownerApprovalAnswerUnlock = field(body, "ownerApprovalAnswerUnlock") === true;
   const delegationAccepting = field(field(body, "delegation"), "accepting");
-  const entrance = {
-    webhooks: field(body, "webhooks"),
-    relay: field(body, "relay"),
-    visitors: field(body, "visitors"),
-  };
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -2734,8 +2584,6 @@ function readStatus(body: unknown): HubStatus | undefined {
       ...(directPush === undefined ? {} : { directPush }),
       ...(provision === undefined ? {} : { provision }),
       ...(signIn === undefined ? {} : { signIn }),
-      ...(publicEntrance === undefined ? {} : { publicEntrance }),
-      entrance,
       ...(typeof delegationAccepting === "boolean" ? { delegationAccepting } : {}),
       link: {
         membership,
@@ -2773,8 +2621,6 @@ function readStatus(body: unknown): HubStatus | undefined {
     ...(directPush === undefined ? {} : { directPush }),
     ...(provision === undefined ? {} : { provision }),
     ...(signIn === undefined ? {} : { signIn }),
-    ...(publicEntrance === undefined ? {} : { publicEntrance }),
-    entrance,
   };
 }
 

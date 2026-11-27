@@ -8,6 +8,8 @@ import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-r
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
 import { HostResourceSettings } from "../settings/HostResourceSettings";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useId,
@@ -266,6 +268,9 @@ import "../styles/extension-library.css";
 // into more chunks and grows the first load.
 export { RemoteHostPermissions } from "../remote/RemoteHostPermissions";
 export { RemoteProviderTooling } from "../remote/RemoteProviderTooling";
+
+// The public entrance's page and its screens load only when it is opened.
+const LazyPublicEntranceSettings = lazy(() => import("../host/PublicEntranceSettingsSection"));
 
 export interface SettingsViewProps {
   readonly pickSkillFolder?: () => Promise<string | undefined>;
@@ -1562,14 +1567,6 @@ function ActiveSectionContent({
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}
             projectNames={props.actProjectNames ?? NO_PROJECT_NAMES}
-            threadTitles={
-              new Map(
-                privacyThreadsFromSettings(props).map((thread) => [
-                  `${thread.mode}:${thread.id}`,
-                  thread.title,
-                ]),
-              )
-            }
             pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
             newDeviceAlerts={props.newDeviceAlertsClient}
             accessActivity={
@@ -1601,6 +1598,35 @@ function ActiveSectionContent({
           </section>
           {agentAccess}
         </div>
+      );
+    }
+    case "public-entrance": {
+      if (props.hostBridge?.managedInOctant === true)
+        return (
+          <section aria-label="Public entrance" id="settings-public-entrance">
+            <p className="settings-managed-in-octant">
+              Managed in Octant. The public entrance is set up in the Octant app.
+            </p>
+          </section>
+        );
+      const hub = hubAdministrationOf(props.hostBridge);
+      const devices = remoteAccessAdministrationOf(props.hostBridge);
+      return (
+        <Suspense fallback={<SettingsState kind="loading">Loading Public entrance…</SettingsState>}>
+          <LazyPublicEntranceSettings
+            {...(hub === undefined ? {} : { hub })}
+            {...(devices === undefined ? {} : { devices })}
+            {...(focusedSetting === undefined ? {} : { focusedSetting: String(focusedSetting) })}
+            threadTitles={
+              new Map(
+                privacyThreadsFromSettings(props).map((thread) => [
+                  `${thread.mode}:${thread.id}`,
+                  thread.title,
+                ]),
+              )
+            }
+          />
+        </Suspense>
       );
     }
     case "host": {
