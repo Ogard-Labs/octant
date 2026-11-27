@@ -1591,7 +1591,7 @@ describe("octant hub webhook", () => {
     expect(empty.sent).toHaveLength(0);
   });
 
-  it("says why a paste is refused while four replaced secrets are still taken", async () => {
+  it("says why a paste is refused while two replaced secrets are still taken", async () => {
     const host = await fixture(() => ({
       status: 409,
       body: { status: "refused", kind: "too-many-replaced-secrets" },
@@ -1602,7 +1602,7 @@ describe("octant hub webhook", () => {
         Readable.from(["whsec_fromStripe0123456789\n"]),
       ),
     ).toBe(1);
-    expect(host.errors()).toContain("still takes four replaced secrets");
+    expect(host.errors()).toContain("still takes two replaced secrets");
     expect(host.errors()).toContain("(too-many-replaced-secrets)");
   });
 

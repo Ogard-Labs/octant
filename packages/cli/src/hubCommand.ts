@@ -1632,7 +1632,7 @@ async function runRemove(input: Input, member: string): Promise<number> {
 
 const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "too-many-replaced-secrets":
-    "This endpoint still takes four replaced secrets, each for a day after it was replaced, and another would drop one early. Run this again when the oldest day ends.",
+    "This endpoint still takes two replaced secrets, each for a day after it was replaced, and another would drop one early. Run this again when the oldest day ends.",
   "hub-role-off": "The hub role is off. Turn it on with `octant hub enable`.",
   "listener-not-running":
     "The remote listener is not running. Turn it on first with `octant listener enable`.",

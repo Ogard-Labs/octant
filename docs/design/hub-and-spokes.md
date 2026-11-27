@@ -3210,12 +3210,19 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   delivery's hold the hand-off comes. So the spoke
   keeps each old secret, and hands each holder a further sealed copy of it
   after the current one, until a hold past its end; then both drop it. An
-  endpoint holds at most eight replaced secrets at once, and a paste that
-  would need a ninth is refused (`too-many-replaced-secrets`) rather than
+  endpoint holds at most two replaced secrets at once, and a paste that
+  would need a third is refused (`too-many-replaced-secrets`) rather than
   drop one early. That limit is no guardrail a level changes: it keeps an
   answered delivery from being lost, it ends by itself when the oldest is
   dropped, and rotating the endpoint, which ends every old secret with the
-  old URL, is there for a person who will not wait. The
+  old URL, is there for a person who will not wait. The hard line it
+  protects is that an answered delivery is never silently lost. Why two: every
+  replaced secret is a further sealed copy in the endpoint list the spoke
+  hands each holder, and that private route takes at most 128 KiB. With 64
+  endpoints and every secret at the longest a paste may be (246 characters),
+  two replaced secrets each make about 121,000 bytes and three about 159,000,
+  and a holder would refuse that list whole and keep checking against its
+  older one. The
   `Stripe-Signature` header holds `t=<unix seconds>` and one or more
   `v1=<hex HMAC-SHA256 of "<t>.<raw body>">` keyed with the whole secret; a
   delivery passes if any `v1` matches, compared in constant time, and `v0`

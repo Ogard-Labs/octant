@@ -34,6 +34,7 @@ import {
   SignedVisitorLinkGrant,
   VisitorThreadMode,
   HubWebhookEndpoint,
+  HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE,
   WebhookDeliveryEnvelope,
   WebhookEndpointId,
   WebhookSignatureScheme,
@@ -471,9 +472,12 @@ export const HubWebhookHubState = Schema.Struct({
 
 /**
  * How many replaced Stripe secrets one endpoint can hold at once. Each is held
- * up to two days, so this is four pastes a day.
+ * up to two days. Every one is a further sealed copy in the endpoint list the
+ * spoke hands its hub, and two is the most that keeps a full spoke's longest
+ * list inside that route's request limit; a list the hub refuses would leave it
+ * checking deliveries against secrets the spoke no longer has.
  */
-export const SPOKE_REPLACED_SECRETS_MAX = 8;
+export const SPOKE_REPLACED_SECRETS_MAX = 2;
 
 /** One of this spoke's endpoints, with the secret it checks deliveries with; only the person sees the secret, once. */
 export const SpokeWebhookEndpoint = Schema.Struct({
@@ -523,7 +527,9 @@ export type SpokeWebhookLogEntry = typeof SpokeWebhookLogEntry.Type;
 
 /** This spoke's endpoints, the deliveries it accepted, the keys it claimed (kept seven days), and a short log. */
 export const SpokeWebhookState = Schema.Struct({
-  endpoints: Schema.Array(SpokeWebhookEndpoint).pipe(Schema.maxItems(64)),
+  endpoints: Schema.Array(SpokeWebhookEndpoint).pipe(
+    Schema.maxItems(HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE),
+  ),
   deliveries: Schema.Array(SpokeWebhookDelivery).pipe(Schema.maxItems(1_024)),
   claimed: Schema.Array(
     Schema.Struct({

@@ -14,6 +14,7 @@ import {
   AUTOMATION_WEBHOOK_ENDPOINT_FILTER,
   AUTOMATION_WEBHOOK_INTEGRATION_ID,
   AUTOMATION_WEBHOOK_SOURCE_ID,
+  HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE,
   HubMemberId,
   UtcTimestamp,
   WEBHOOK_DEDUPE_RETENTION_MS,
@@ -64,8 +65,10 @@ const CLAIMED_MAX = 50_000;
 // A routine takes at most 32 waiting events at one look, so a spoke takes no
 // more than this many unread deliveries per endpoint; the rest stay on the hub.
 const UNREAD_PER_ENDPOINT_MAX = 16;
+/** The longest part after `whsec_` a pasted Stripe secret may have; it bounds the published list. */
+export const STRIPE_SECRET_BODY_MAX = 240;
 /** Stripe's signing secret as its dashboard shows it; Stripe keys the HMAC with the whole string. */
-const STRIPE_SECRET = /^whsec_[A-Za-z0-9+/=_-]{16,240}$/;
+const STRIPE_SECRET = new RegExp(`^whsec_[A-Za-z0-9+/=_-]{16,${STRIPE_SECRET_BODY_MAX}}$`);
 
 /**
  * The hub this spoke hands its endpoints to, and each named standby when the
@@ -215,7 +218,9 @@ export class SpokeWebhookService {
   }): Promise<SpokeWebhookCreated> {
     if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
     const held = this.#load();
-    if (held.endpoints.length >= 64) return { status: "refused", kind: "full" };
+    if (held.endpoints.length >= HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE) {
+      return { status: "refused", kind: "full" };
+    }
     const endpoint: SpokeWebhookEndpoint = {
       endpointId: decodeEndpointId(mintPublicId()),
       scheme: input.scheme,

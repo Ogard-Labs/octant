@@ -1,19 +1,28 @@
 import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import {
+  decodeHubWebhookEndpointsUpdate,
+  HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE,
   type HubMemberId,
   type HubSealingKey,
+  type HubWebhookEndpointsUpdate,
   type WebhookDeliveryEnvelope,
   type WebhookEndpointId,
   WEBHOOK_HOLD_MS,
 } from "@octant/contracts";
 import { hubSealingKeyPayload } from "@octant/domain";
 import { describe, expect, it } from "vitest";
-import type { HubState, HubStatePort } from "./hubStateStore";
+import { createRemoteRoutePolicy } from "../remoteRoutePolicy";
+import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
+import { SPOKE_REPLACED_SECRETS_MAX, type HubState, type HubStatePort } from "./hubStateStore";
 import { publicKeyFingerprint } from "./hubCrypto";
 import { HubWebhookService, type HubWebhookServiceOptions } from "./hubWebhookService";
 import type { PublicRequest } from "./publicEntrance";
 import { makeSealingKeyPair } from "./publicEntranceCrypto";
-import { SpokeWebhookService, type SpokeWebhookHubPort } from "./spokeWebhookService";
+import {
+  SpokeWebhookService,
+  STRIPE_SECRET_BODY_MAX,
+  type SpokeWebhookHubPort,
+} from "./spokeWebhookService";
 
 const NOW = 1_800_000_000_000;
 const SPOKE = "11111111-1111-4111-8111-111111111111";
@@ -384,6 +393,66 @@ describe("webhook deliveries on the spoke", () => {
     await Promise.all([first, second]);
     expect(sent.at(-1)).toBe(2);
     expect(service.view().published).toBe(true);
+  });
+});
+
+describe("the spoke's endpoint list on the private link", () => {
+  it("fits the route's request limit with every endpoint and replaced secret at its largest", async () => {
+    const key = makeSealingKeyPair();
+    const sent: HubWebhookEndpointsUpdate[] = [];
+    const state = memoryState();
+    const longest = (index: number) =>
+      `whsec_${String(index).padStart(STRIPE_SECRET_BODY_MAX, "a")}`;
+    state.save({
+      link: { selfMemberId: SPOKE } as unknown as HubState["link"],
+      webhooks: {
+        endpoints: Array.from({ length: HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE }, (_, endpoint) => ({
+          endpointId: String(endpoint).padStart(22, "e") as WebhookEndpointId,
+          scheme: "stripe" as const,
+          secret: longest(0),
+          previousSecrets: Array.from({ length: SPOKE_REPLACED_SECRETS_MAX }, (_, previous) => ({
+            secret: longest(previous + 1),
+            until: NOW + WEBHOOK_HOLD_MS,
+          })),
+          label: "Payments",
+          createdAt: NOW,
+        })),
+        deliveries: [],
+        claimed: [],
+        log: [],
+      },
+    });
+    const service = new SpokeWebhookService({
+      state,
+      publicGranted: () => true,
+      remoteAccessPaused: () => false,
+      hub: {
+        targets: () => [{ memberId: HUB_ID, fingerprint: publicKeyFingerprint(SIGNER.publicKey) }],
+        sealingKey: async () => SIGNER.sealingKey(key.publicKey),
+        sendEndpoints: async (_memberId, update) => {
+          sent.push(update);
+          return true;
+        },
+      },
+      record: () => undefined,
+      now: () => NOW,
+    });
+    expect(await service.publish()).toBe(true);
+
+    const origin = "https://100.101.102.103:8443";
+    const decision = createRemoteRoutePolicy({ origin }).inspect(
+      new Request(`${origin}${HUB_LINK_ROUTES.publicWebhookEndpoints}`, {
+        method: "POST",
+        headers: { host: "100.101.102.103:8443", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    if (decision.kind !== "allow") throw new Error(decision.kind);
+    const update = decodeHubWebhookEndpointsUpdate(sent[0]);
+    expect(update.endpoints[0]?.sealedSecrets).toHaveLength(SPOKE_REPLACED_SECRETS_MAX + 1);
+    expect(Buffer.byteLength(JSON.stringify(update))).toBeLessThanOrEqual(
+      decision.route?.maxBodyBytes ?? 0,
+    );
   });
 });
 
@@ -786,33 +855,39 @@ describe("copies on a standby", () => {
       reach.spokeAway = false;
       const endpointId = await stripeEndpoint(spoke);
       const rolled = (index: number) => `whsec_rolledNumber${index}_0123456789`;
-      for (let index = 0; index < 9; index += 1) {
+      // The first paste replaces nothing; each one after it replaces one more.
+      const newest = SPOKE_REPLACED_SECRETS_MAX;
+      for (let index = 0; index <= newest; index += 1) {
         expect(await spoke.setSecret(endpointId, rolled(index))).toMatchObject({ status: "set" });
         clock.now += 60_000;
       }
 
-      expect(await spoke.setSecret(endpointId, rolled(9))).toEqual({
+      expect(await spoke.setSecret(endpointId, rolled(newest + 1))).toEqual({
         status: "refused",
         kind: "too-many-replaced-secrets",
       });
       expect(spoke.receive(envelope(endpointId, "evt_1", rolled(0), clock.now))).toEqual({
         status: "accepted",
       });
-      expect(spoke.receive(envelope(endpointId, "evt_2", rolled(8), clock.now))).toEqual({
+      expect(spoke.receive(envelope(endpointId, "evt_2", rolled(newest), clock.now))).toEqual({
         status: "accepted",
       });
-      expect(spoke.receive(envelope(endpointId, "evt_3", rolled(9), clock.now))).toEqual({
+      expect(spoke.receive(envelope(endpointId, "evt_3", rolled(newest + 1), clock.now))).toEqual({
         status: "refused",
         kind: "bad-signature",
       });
       // Going back to a replaced secret drops none, so it is taken.
-      expect(await spoke.setSecret(endpointId, rolled(2))).toMatchObject({ status: "set" });
+      expect(await spoke.setSecret(endpointId, rolled(1))).toMatchObject({ status: "set" });
 
       // Past its end a secret is still held for what was answered under it.
       clock.now = NOW + 2 * WEBHOOK_HOLD_MS;
-      expect(await spoke.setSecret(endpointId, rolled(9))).toMatchObject({ status: "refused" });
+      expect(await spoke.setSecret(endpointId, rolled(newest + 1))).toMatchObject({
+        status: "refused",
+      });
       clock.now = NOW + 2 * WEBHOOK_HOLD_MS + 2 * 60_000;
-      expect(await spoke.setSecret(endpointId, rolled(9))).toMatchObject({ status: "set" });
+      expect(await spoke.setSecret(endpointId, rolled(newest + 1))).toMatchObject({
+        status: "set",
+      });
     });
 
     it("runs a delivery received before the old secret's end, once, when the spoke returns after it", async () => {
