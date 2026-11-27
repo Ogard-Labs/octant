@@ -3065,16 +3065,21 @@ visitor sits on the Computer card of the thread's Environment tool, shown
 only for a thread on this computer in a local desktop window and only for a
 kind of thread the visitor-link contract names; it opens a dialog, loaded as
 its own chunk, with the thread's links and the Requests waiting on them.
-The dialog shows and copies a whole link only where the window already
-knows the address: on the acting hub with Funnel on, from the hub's tailnet
-name in its signed roster and the Funnel port. Elsewhere it shows the path,
-names it as one, and asks the person to put the hub's public address in
-front of it, as the command line does. A sent request's framed comment stays
-in the dialog even when the links cannot be read again.
+The dialog shows and copies a whole link only where this computer's own hub
+receives the link and the window already knows its address: its hub role and
+Funnel on, in no other hub (neither joined nor removed), from the hub's
+tailnet name in its signed roster and the Funnel port. A computer that has
+joined another hub hands the link to that hub, so its own Funnel address
+would be wrong. Elsewhere the dialog shows the path, names it as one, and
+asks the person to put the hub's public address in front of it, as the
+command line does. Sharing needs a joined hub today, so a link made in the
+window is shown as a path. A sent request's framed comment stays in the
+dialog even when the links cannot be read again.
 While it is open and the window is shown, the dialog reads the links and
 requests again 15 seconds after the last read ends, so a request a visitor
 posts appears without reopening it; reads never overlap, and a failed one
-keeps the last good view. A new link, and a sent request's comment, are
+keeps the last good view, with Send, Dismiss and Stop sharing held back
+until a read succeeds. A new link, and a sent request's comment, are
 shown once: until the person presses its Done, the window offers no Make link
 or Send that would put another in its place. Stopping the shown link clears
 it.

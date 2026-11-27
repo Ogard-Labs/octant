@@ -126,6 +126,8 @@ export function VisitorLinkList(props: {
   readonly threadLabel?: (link: VisitorLink) => string;
   /** Told once a link is stopped, so a caller showing it once can forget it. */
   readonly onStopped?: (linkId: string) => void;
+  /** The view could not be read again, so nothing may act on its rows. */
+  readonly stale?: boolean;
   readonly now: number;
 }) {
   const { view, action } = props;
@@ -136,6 +138,9 @@ export function VisitorLinkList(props: {
   const dismissOpener = useRef<HTMLButtonElement>(null);
   const sentPanel = useRef<HTMLDivElement>(null);
   const keepId = useId();
+  const staleId = useId();
+  const stale = props.stale === true;
+  const staleHint = "These may be out of date. Actions return once Octant reads them again.";
   // Send removes the request's row, so focus goes to what it handed back.
   useEffect(() => {
     if (sent !== undefined) sentPanel.current?.focus();
@@ -222,6 +227,11 @@ export function VisitorLinkList(props: {
           </div>
         </div>
       )}
+      {!stale || view.comments.length + view.links.length === 0 ? null : (
+        <p className="setrow-hint" id={staleId}>
+          {staleHint}
+        </p>
+      )}
       {view.comments.length === 0 ? null : (
         <ul aria-label="Visitor requests" className="setgroup">
           {view.comments.map((comment) => {
@@ -239,10 +249,10 @@ export function VisitorLinkList(props: {
                 <div className="setrow-control">
                   <OctantButton
                     aria-label={`Send the visitor's request: ${visitorText(comment.text).slice(0, 40)}`}
-                    aria-describedby={sent === undefined ? undefined : keepId}
+                    aria-describedby={stale ? staleId : sent === undefined ? undefined : keepId}
                     // Another Send would put its comment over this one, which
                     // the host cannot hand out again.
-                    disabled={action.busy || sent !== undefined}
+                    disabled={action.busy || stale || sent !== undefined}
                     onClick={() => void decide(comment, "send")}
                     size="sm"
                   >
@@ -250,7 +260,8 @@ export function VisitorLinkList(props: {
                   </OctantButton>
                   <OctantButton
                     aria-label={`Dismiss the visitor's request: ${visitorText(comment.text).slice(0, 40)}`}
-                    disabled={action.busy}
+                    aria-describedby={stale ? staleId : undefined}
+                    disabled={action.busy || stale}
                     onClick={() => setDismissing(comment)}
                     ref={dismissing?.commentId === comment.commentId ? dismissOpener : undefined}
                     size="sm"
@@ -283,7 +294,8 @@ export function VisitorLinkList(props: {
               <div className="setrow-control">
                 <OctantButton
                   aria-label={`Stop sharing ${props.threadLabel?.(link) ?? "this link"}, ${SCOPE_COPY[link.scope].toLowerCase()}`}
-                  disabled={action.busy}
+                  aria-describedby={stale ? staleId : undefined}
+                  disabled={action.busy || stale}
                   onClick={() => void stop(link)}
                   size="sm"
                   variant="secondary"
@@ -303,7 +315,9 @@ export function VisitorLinkList(props: {
       <OctantDialogPresence>
         {dismissing === undefined ? null : (
           <OctantConfirmDialog
+            confirmDisabled={stale}
             confirmLabel="Dismiss request"
+            details={stale ? staleHint : undefined}
             destructive
             onCancel={() => setDismissing(undefined)}
             onConfirm={() => {

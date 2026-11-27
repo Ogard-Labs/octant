@@ -42,14 +42,17 @@ const EXPIRY_CHOICES: ReadonlyArray<{
  */
 interface Loaded {
   readonly view?: VisitorsView;
-  /** Where visitors reach this computer, when it is the hub and its Funnel says so. */
+  /** Where visitors reach a link made here, when this computer's own hub takes it. */
   readonly origin?: string | undefined;
   readonly error?: string | undefined;
 }
 
 /**
  * The hub's own public address from its status: Funnel serves the hub's
- * tailnet name, which the signed roster carries. Every other computer, and a
+ * tailnet name, which the signed roster carries. A link goes to the hub this
+ * computer joined, so a computer that has joined one, or was removed from one,
+ * gets no address even while its own hub role and Funnel are on: the hub
+ * behind that address never receives the link. Every other computer, and a
  * hub behind the person's own front, has no address a visitor could use here.
  */
 function funnelOrigin(status: unknown): string | undefined {
@@ -58,6 +61,7 @@ function funnelOrigin(status: unknown): string | undefined {
   const funnel = field(entrance, "funnel");
   const port = field(funnel, "port");
   if (
+    field(field(status, "spoke"), "membership") !== "none" ||
     field(hub, "enabled") !== true ||
     field(entrance, "enabled") !== true ||
     field(entrance, "paused") === true ||
@@ -323,6 +327,8 @@ export default function VisitorShareDialog(props: {
           action={action}
           now={(props.now ?? Date.now)()}
           onChanged={refresh}
+          // The kept rows may have ended or changed since the last good read.
+          stale={loaded.error !== undefined}
           onStopped={(linkId) =>
             setShared((current) => (current?.linkId === linkId ? undefined : current))
           }

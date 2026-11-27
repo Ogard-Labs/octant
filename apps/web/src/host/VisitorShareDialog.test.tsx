@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HubAdministrationOperation } from "../shell/hostBridge";
@@ -30,11 +30,13 @@ function hubStatus(options: {
   readonly hub?: boolean;
   readonly paused?: boolean;
   readonly names?: ReadonlyArray<string>;
+  readonly membership?: "none" | "member" | "removed";
 }) {
   const isHub = options.hub !== false;
   return {
     status: 200,
     body: {
+      spoke: { membership: options.membership ?? "none" },
       hub: {
         enabled: isHub,
         roster: {
@@ -175,6 +177,14 @@ describe("VisitorShareDialog", () => {
     { where: "a hub without Funnel", status: hubStatus({ enabled: false }) },
     { where: "a paused hub", status: hubStatus({ enabled: true, paused: true }) },
     { where: "a hub with no tailnet name", status: hubStatus({ enabled: true, names: [] }) },
+    {
+      where: "a hub that has also joined another hub, which holds the link",
+      status: hubStatus({ enabled: true, membership: "member" }),
+    },
+    {
+      where: "a hub that another hub removed",
+      status: hubStatus({ enabled: true, membership: "removed" }),
+    },
   ])(
     "calls the link a path, to go after the hub's public address, on $where",
     async ({ status }) => {
@@ -218,6 +228,44 @@ describe("VisitorShareDialog", () => {
     const toSend = screen.getByRole("group", { name: "Comment to send" });
     await user.click(within(toSend).getByRole("button", { name: "Copy comment" }));
     expect(await navigator.clipboard.readText()).toBe("A visitor wrote: hello");
+  });
+
+  it("holds back row actions while the links cannot be read again, until a read succeeds", async () => {
+    const user = userEvent.setup();
+    const second = { commentId: "D".repeat(22), linkId: LINK, text: "And this?", at: NOW };
+    const both = statusWith({ ...shared, comments: [...shared.comments, second] });
+    let answer: Answer = both;
+    renderDialog({
+      status: () => answer,
+      "visitor-comment": () => {
+        answer = { status: 503, body: {} };
+        return { status: 200, body: { status: "sent", text: "A visitor wrote: hello" } };
+      },
+    });
+    const requests = await screen.findByRole("list", { name: "Visitor requests" });
+    await user.click(within(requests).getByRole("button", { name: /^Send .*Could you try/ }));
+    await screen.findByText(/This computer is not set up for visitor links/);
+    const toSend = screen.getByRole("group", { name: "Comment to send" });
+    await user.click(within(toSend).getByRole("button", { name: "Copy comment" }));
+    expect(await navigator.clipboard.readText()).toBe("A visitor wrote: hello");
+    await user.click(within(toSend).getByRole("button", { name: "Done" }));
+
+    const actions = [
+      screen.getByRole("button", { name: /^Send .*And this/ }),
+      screen.getByRole("button", { name: /^Dismiss .*And this/ }),
+      screen.getByRole("button", { name: /^Stop sharing/ }),
+    ];
+    for (const button of actions) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAccessibleDescription(/may be out of date/);
+    }
+
+    answer = both;
+    act(() => void document.dispatchEvent(new Event("visibilitychange")));
+    await waitFor(() => {
+      for (const button of actions) expect(button).toBeEnabled();
+    });
+    expect(screen.queryByText(/may be out of date/)).not.toBeInTheDocument();
   });
 
   it("lists only this thread's links and requests, and stops sharing one", async () => {
@@ -417,6 +465,21 @@ describe("VisitorShareDialog while it stays open", () => {
     await pass(15_000);
     expect(screen.getByRole("list", { name: "Visitor requests" })).toBeInTheDocument();
     expect(screen.getByText(/This computer is not set up for visitor links/)).toBeInTheDocument();
+  });
+
+  it("does not dismiss from a confirmation left open while the links cannot be read", async () => {
+    vi.useFakeTimers();
+    let answer: Answer = statusWith(shared);
+    const { calls } = renderDialog({ status: () => answer });
+    await pass(0);
+    fireEvent.click(screen.getByRole("button", { name: /^Dismiss the visitor's request/ }));
+
+    answer = { status: 503, body: {} };
+    await pass(15_000);
+    const confirm = screen.getByRole("button", { name: "Dismiss request" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(calls.some((call) => call.operation === "visitor-comment")).toBe(false);
   });
 
   it("starts no read while one is still unanswered", async () => {
