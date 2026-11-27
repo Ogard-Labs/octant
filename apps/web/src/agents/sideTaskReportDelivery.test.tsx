@@ -1,5 +1,11 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { SideTask } from "@octant/contracts";
+import { describe, expect, it, vi } from "vitest";
+import { SideTaskProvider } from "../followUps/SideTaskCards";
+import type { ChatThreadNavigationItem } from "../shell/navigationModel";
+import { listsOf } from "../threadReferences/threadReferenceLists.test-support";
+import { ThreadReferencesContext } from "../threadReferences/ThreadReferences";
 import { SideTaskReportCards } from "./SideTaskReportCards";
 import { parseSideTaskReportDelivery } from "./sideTaskReportDelivery";
 
@@ -129,5 +135,105 @@ describe("SideTaskReportCards", () => {
     expect(cards[0]).toHaveTextContent("Docs updated.");
     expect(cards[1]).toHaveTextContent("Migrate the settings store · cancelled");
     expect(cards[1]).toHaveTextContent("No reply was kept.");
+  });
+});
+
+describe("the thread a report came from", () => {
+  const child: ChatThreadNavigationItem = {
+    threadId: "00000000-0000-4000-8000-000000000099",
+    title: "Install docs thread",
+    projectId: "project-1",
+    activity: "working",
+    turnStartedAt: new Date(Date.now() - 14 * 60_000).toISOString(),
+    checkoutChip: { checkoutKind: "managed-worktree", label: "fix/install-docs" },
+    provider: { displayName: "Claude", driverKind: "claude" },
+    modelId: "claude-opus-5-5",
+  };
+
+  const startedTask = (startedThreadId: string) =>
+    ({
+      status: "started",
+      startedThreadId,
+      offer: { id: startedThreadId, title: "Fix stale install docs" },
+    }) as unknown as SideTask;
+
+  async function renderReport(options: {
+    readonly tasks: ReadonlyArray<SideTask>;
+    readonly listed?: boolean;
+  }) {
+    const onOpen = vi.fn();
+    const client = { sideTasks: vi.fn(async () => ({ threadId: "parent", tasks: options.tasks })) };
+    render(
+      <ThreadReferencesContext.Provider
+        value={listsOf({ code: options.listed === false ? [] : [child] }, onOpen)}
+      >
+        <textarea aria-label="Prompt" />
+        <SideTaskProvider client={client as never} threadId="parent">
+          <SideTaskReportCards
+            text={delivery([{ title: "Fix stale install docs", outcome: "completed" }])}
+          />
+        </SideTaskProvider>
+      </ThreadReferencesContext.Provider>,
+    );
+    await act(async () => {});
+    return onOpen;
+  }
+
+  it("shows the thread's card on hover without leaving the prompt, and opens it", async () => {
+    const user = userEvent.setup();
+    const onOpen = await renderReport({ tasks: [startedTask(child.threadId)] });
+    const prompt = screen.getByRole("textbox", { name: "Prompt" });
+    await user.click(prompt);
+
+    await user.hover(
+      await screen.findByRole("button", { name: /^Thread: Fix stale install docs/ }),
+    );
+
+    const card = await screen.findByRole("dialog", { name: "Thread details" });
+    expect(prompt).toHaveFocus();
+    for (const fact of [
+      "Install docs thread",
+      "Working 14m",
+      "octant",
+      "fix/install-docs",
+      "Claude · Opus 5.5",
+    ]) {
+      expect(card).toHaveTextContent(fact);
+    }
+    await user.click(within(card).getByRole("button", { name: "Open thread" }));
+    expect(onOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: child.threadId, mode: "code" }),
+    );
+  });
+
+  it("opens the card on a press with its actions in reach", async () => {
+    const user = userEvent.setup();
+    await renderReport({ tasks: [startedTask(child.threadId)] });
+    const title = await screen.findByRole("button", { name: /^Thread: Fix stale install docs/ });
+
+    act(() => title.focus());
+    await user.keyboard("{Enter}");
+
+    const card = await screen.findByRole("dialog", { name: "Thread details" });
+    await waitFor(() =>
+      expect(within(card).getByRole("button", { name: "Open thread" })).toHaveFocus(),
+    );
+  });
+
+  it.each([
+    [
+      "the window does not list the thread",
+      { tasks: [startedTask(child.threadId)], listed: false },
+    ],
+    ["no side task here started a thread by that name", { tasks: [] }],
+    [
+      "two side tasks of that name started threads",
+      { tasks: [startedTask(child.threadId), startedTask("00000000-0000-4000-8000-000000000098")] },
+    ],
+  ])("keeps the title as text when %s", async (_reason, options) => {
+    await renderReport(options);
+
+    expect(screen.getByRole("article")).toHaveTextContent("Fix stale install docs · finished");
+    expect(screen.queryByRole("button", { name: /^Thread:/ })).not.toBeInTheDocument();
   });
 });

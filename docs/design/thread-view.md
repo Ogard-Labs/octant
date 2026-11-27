@@ -583,8 +583,11 @@ text its thread's title reads as now, unless an unlisted or renamed thread could
 stand there instead. A chip only ever opens a thread the message mentioned.
 A mention of a thread the window does not list, text no id
 claims, and a message sent before ids were stored stay the text they were. A
-side task's receipt opens the same card from the title of the thread it
-started, while the window lists that thread.
+side task's receipt and its "Report from side task" row open the same card from
+the task's title, for the thread it started, while the window lists that
+thread. As on a sent chip, no line says what a turn reads. A report names its
+task by title alone, so a row whose title two of the thread's side tasks
+started threads under stays text.
 
 Rejected: opening the thread on a press, which would leave a half-written prompt
 by accident and leave touch with no way to the card.

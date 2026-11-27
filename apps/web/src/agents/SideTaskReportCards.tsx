@@ -1,3 +1,5 @@
+import { useThreadSideTasks } from "../followUps/SideTaskCards";
+import { LazyThreadReferenceChip } from "../threadReferences/LazyThreadReferenceChip";
 import {
   parseSideTaskReportDelivery,
   type SideTaskReportCardBlock,
@@ -48,7 +50,7 @@ function SideTaskReportCard(props: { readonly block: SideTaskReportCardBlock }) 
       <header className="child-result__head">
         <span className="child-result__title">Report from side task</span>
         <span className="child-result__attribution">
-          {block.title} · {OUTCOME_WORDS[block.outcome]}
+          <ReportedTaskTitle title={block.title} /> · {OUTCOME_WORDS[block.outcome]}
         </span>
       </header>
       {block.text === undefined ? (
@@ -61,4 +63,21 @@ function SideTaskReportCard(props: { readonly block: SideTaskReportCardBlock }) 
       {block.truncated ? <p className="child-result__note">The reply was cut short.</p> : null}
     </article>
   );
+}
+
+/**
+ * The task's name, opening the card of the thread it started. A report names
+ * its task by title alone, so the thread is the one the pane's side tasks
+ * started under that title. Where two share it, or none is listed, the name
+ * stays text rather than pointing at a thread that may not have reported.
+ */
+function ReportedTaskTitle(props: { readonly title: string }) {
+  const started = useThreadSideTasks().flatMap((task) =>
+    task.offer.title === props.title && task.startedThreadId !== undefined
+      ? [String(task.startedThreadId)]
+      : [],
+  );
+  const [threadId] = started;
+  if (threadId === undefined || started.length > 1) return props.title;
+  return <LazyThreadReferenceChip look="link" threadId={threadId} title={props.title} />;
 }
