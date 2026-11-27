@@ -234,7 +234,7 @@ import { SpokeWebhookService } from "../hub/spokeWebhookService";
 import { sendWebhookDelivery, spokeWebhookHubPort } from "../hub/webhookLinks";
 import { HubVisitorService } from "../hub/hubVisitorService";
 import { SpokeVisitorService } from "../hub/spokeVisitorService";
-import { HubRelayService } from "../hub/hubRelayService";
+import { HubRelayService, hubRelayAddress } from "../hub/hubRelayService";
 import { SpokeRelayService } from "../hub/spokeRelayService";
 import { openRelayTunnel, spokeRelayHubPort } from "../hub/relayLinks";
 import { askVisitorSpoke, spokeVisitorHubPort } from "../hub/visitorLinks";
@@ -795,6 +795,9 @@ export function wireRemote(deps: RemoteDependencies) {
         remotePortForwards: services.remotePortForwards ?? remotePortForwards,
         agentAccess: (request, facts, pauseSignal) =>
           agentAccessListenerRoutes(request, facts, pauseSignal),
+        relayAddressFor:
+          services.relayAddressFor ??
+          ((deviceId) => relaysBound?.spoke.relayAddressFor(deviceId) ?? { status: "unavailable" }),
         serve: options.remoteServe ?? serve,
         config,
       });
@@ -1541,6 +1544,14 @@ export function wireRemote(deps: RemoteDependencies) {
         fingerprint,
       ),
     record: recordHubMembership,
+    address: () =>
+      hubService.status().enabled
+        ? hubRelayAddress(
+            hubStateStore.load(),
+            hubService.hubMemberId(),
+            publicEntrance.funnelName(),
+          )
+        : undefined,
   });
   const spokeRelay = new SpokeRelayService({
     state: hubStateStore,
@@ -1645,6 +1656,7 @@ export function wireRemote(deps: RemoteDependencies) {
       .then((open) => {
         if (!open) hubRelay.closeAll();
         hubRelay.sweep();
+        return publicEntrance.refreshFunnelName();
       })
       .catch(() => undefined);
   };

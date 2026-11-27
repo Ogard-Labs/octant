@@ -342,4 +342,33 @@ describe("forgetting a paired computer", () => {
 
     expect(await screen.findByText("Nope.")).toBeTruthy();
   });
+
+  it("turns this app's own choice to reach a computer through its hub on, off by default", async () => {
+    let enabled = false;
+    const setPairedComputerRelay = vi.fn(async (_origin: string, next: boolean) => {
+      enabled = next;
+      return true;
+    });
+    const bridge = bridgeWith({
+      listPairedComputers: vi.fn(async () => [
+        { ...studio, relayThroughHub: { enabled, addressKnown: true } },
+      ]),
+      setPairedComputerRelay,
+    });
+    renderSection(bridge, undefined);
+    const choice = await screen.findByRole("switch", {
+      name: "Reach Studio Mac through the hub when away",
+    });
+    expect(choice.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText(/Away: private network only/)).toBeTruthy();
+    await userEvent.click(choice);
+    expect(setPairedComputerRelay).toHaveBeenCalledWith(studio.origin, true);
+    expect(await screen.findByText(/Away, Octant reaches it through its hub/)).toBeTruthy();
+  });
+
+  it("offers no relay choice where the app cannot relay", async () => {
+    renderSection(bridgeWith({ listPairedComputers: vi.fn(async () => [studio]) }), undefined);
+    expect(await screen.findByText("Studio Mac")).toBeTruthy();
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
 });

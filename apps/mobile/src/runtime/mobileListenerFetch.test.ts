@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ListenerTrustRefused,
+  ListenerUnreachable,
   createInMemoryDeviceKeyStore,
+  type PairedHostRelayChoice,
   type ListenerOriginTrust,
   type PinnedListenerTransportPort,
   type RemoteDeviceKeyStore,
 } from "@octant/client-runtime";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
-import { createMobileListenerFetch } from "./mobileListenerFetch";
+import { decodeRelayAddress } from "@octant/contracts";
+import {
+  createMobileListenerFetch,
+  type RelayedListenerTransportPort,
+} from "./mobileListenerFetch";
 
 const PINNED_ORIGIN = "https://100.101.102.103:8443";
 const PIN = `sha256-${Buffer.alloc(32, 1).toString("base64url")}`;
@@ -142,5 +149,102 @@ describe("the phone's session fetch", () => {
 
     expect(phone.platformFetch).toHaveBeenCalledTimes(1);
     expect(phone.pinnedTransport).not.toHaveBeenCalled();
+  });
+
+  describe("through the hub when away", () => {
+    const ADDRESS = decodeRelayAddress({
+      hubMemberId: "22222222-2222-4222-8222-222222222222",
+      relayUrl: "wss://hub.example.com/relay/v1",
+    });
+    const pinned = { [PINNED_ORIGIN]: { current: { kind: "pinned", pin: PIN } } } as const;
+
+    function away(
+      choice: PairedHostRelayChoice | undefined,
+      failure: Error = new ListenerUnreachable(),
+    ) {
+      const relayedFetch = vi.fn(async () => new Response("relayed"));
+      const relayTransport = vi.fn<RelayedListenerTransportPort>(() => ({
+        status: "available",
+        fetch: relayedFetch,
+      }));
+      const directFetch = vi.fn(async (): Promise<Response> => {
+        throw failure;
+      });
+      let chosen = choice;
+      const fetch = createMobileListenerFetch({
+        deviceKeyStore: storeWith(pinned),
+        pinnedTransport: () => ({ status: "available", fetch: directFetch }),
+        platformFetch: vi.fn(async () => new Response("platform")),
+        relay: {
+          choiceFor: async () => chosen,
+          transport: relayTransport,
+          admit: async () => ({ signature: "s", deviceSpki: "k" }),
+        },
+      });
+      const choose = (next: PairedHostRelayChoice) => {
+        chosen = next;
+      };
+      return { fetch, directFetch, relayedFetch, relayTransport, choose };
+    }
+
+    it("goes to the relay first for the next request, without dialing home again", async () => {
+      const phone = away({ enabled: true, address: ADDRESS });
+      await phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`);
+      await phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`);
+      expect(phone.directFetch).toHaveBeenCalledTimes(1);
+      expect(phone.relayedFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("dials home first again once the choice or the address changes", async () => {
+      const phone = away({ enabled: true, address: ADDRESS });
+      await phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`);
+      phone.choose({
+        enabled: true,
+        address: { ...ADDRESS, relayUrl: "wss://other.example.com/relay/v1" },
+      });
+      await phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`);
+      expect(phone.directFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("never relays while the phone's choice for that computer is off", async () => {
+      const phone = away({ enabled: false, address: ADDRESS });
+      await expect(phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`)).rejects.toBeInstanceOf(
+        ListenerUnreachable,
+      );
+      expect(phone.relayTransport).not.toHaveBeenCalled();
+    });
+
+    it("never relays without the address the computer told it at home", async () => {
+      const phone = away({ enabled: true });
+      await expect(phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`)).rejects.toThrow();
+      expect(phone.relayTransport).not.toHaveBeenCalled();
+    });
+
+    it("relays to the computer's own host id once its choice is on and home is out of reach", async () => {
+      const phone = away({ enabled: true, address: ADDRESS });
+      expect(await (await phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`)).text()).toBe("relayed");
+      expect(phone.relayTransport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          origin: PINNED_ORIGIN,
+          trust: pinned[PINNED_ORIGIN],
+          route: expect.objectContaining({
+            url: ADDRESS.relayUrl,
+            targetMemberId: "11111111-1111-4111-8111-111111111111",
+            hubMemberId: String(ADDRESS.hubMemberId),
+          }),
+        }),
+      );
+    });
+
+    it("never relays after the computer's key was refused", async () => {
+      const phone = away(
+        { enabled: true, address: ADDRESS },
+        new ListenerTrustRefused("pin-mismatch"),
+      );
+      await expect(phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`)).rejects.toBeInstanceOf(
+        ListenerTrustRefused,
+      );
+      expect(phone.relayTransport).not.toHaveBeenCalled();
+    });
   });
 });

@@ -13,6 +13,7 @@ import {
   judgeListenerAddresses,
   judgeListenerCertificate,
   ListenerTrustRefused,
+  ListenerUnreachable,
   MAX_STAGED_TRUST_WINDOW_MS,
   type ListenerOriginTrust,
   type ListenerTrust,
@@ -102,6 +103,12 @@ export function createExchangeListenerFetch(options: {
     previous: ListenerOriginTrust,
     next: ListenerOriginTrust,
   ) => Promise<void> | void;
+  /**
+   * The port carries the bytes through the hub's relay rather than dialling:
+   * no name is resolved and no address judged, since none is reached from
+   * here. The pin rule is the same.
+   */
+  readonly throughRelay?: true;
 }): typeof globalThis.fetch {
   const match = HTTPS_ORIGIN.exec(options.origin);
   const host = match?.[1];
@@ -146,14 +153,24 @@ export function createExchangeListenerFetch(options: {
       // naming a hash this client does not know.
       throw new ListenerTrustRefused(refusalFor(options.trust, undefined, now()));
     }
-    let addresses: ReadonlyArray<string>;
-    try {
-      addresses = isAddress ? [hostname] : await options.port.resolve(hostname);
-    } catch {
-      throw new TypeError("The listener could not be reached.");
+    let judged: { readonly address: string };
+    if (options.throughRelay === true) {
+      judged = { address: hostname };
+    } else {
+      let addresses: ReadonlyArray<string>;
+      try {
+        addresses = isAddress ? [hostname] : await options.port.resolve(hostname);
+      } catch {
+        throw new ListenerUnreachable();
+      }
+      // The phone's modules answer a name that no longer resolves, as a
+      // private DNS name does away from home, with no addresses rather than a
+      // failure. There is no address to refuse and nothing was sent.
+      if (addresses.length === 0) throw new ListenerUnreachable();
+      const judgement = judgeListenerAddresses(addresses);
+      if (judgement.status === "refused") throw new ListenerTrustRefused(judgement.reason);
+      judged = judgement;
     }
-    const judged = judgeListenerAddresses(addresses);
-    if (judged.status === "refused") throw new ListenerTrustRefused(judged.reason);
 
     const lines = [
       `${method} ${path} HTTP/1.1`,
@@ -188,7 +205,7 @@ export function createExchangeListenerFetch(options: {
         request: new Uint8Array(0),
         signal,
       });
-      if (probe.status === "failed") throw new TypeError("The listener could not be reached.");
+      if (probe.status === "failed") throw new ListenerUnreachable();
       if (probe.status === "refused")
         throw new ListenerTrustRefused(refusalFor(previous, probe.servedPin, now()));
       try {
@@ -216,7 +233,12 @@ export function createExchangeListenerFetch(options: {
       request,
       signal,
     });
-    if (opening.status === "failed") throw new TypeError("The listener could not be reached.");
+    // Only a failure before the request was written leaves it unsent.
+    if (opening.status === "failed") {
+      throw opening.reason === "connection-failed"
+        ? new TypeError("The listener could not be reached.")
+        : new ListenerUnreachable();
+    }
     if (opening.status === "refused") {
       throw new ListenerTrustRefused(refusalFor(options.trust, opening.servedPin, now()));
     }

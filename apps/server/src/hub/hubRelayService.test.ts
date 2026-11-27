@@ -1,8 +1,11 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { relayAdmissionPayload } from "@octant/contracts";
+import { decodeRelayAddress, relayAdmissionPayload } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
-import type { HubState, HubStatePort } from "./hubStateStore";
-import { HubRelayService, type RelayTunnelEnd } from "./hubRelayService";
+import { HubState, type HubStatePort } from "./hubStateStore";
+import { Schema } from "effect";
+
+const decodeHubState = Schema.decodeUnknownSync(HubState);
+import { HubRelayService, hubRelayAddress, type RelayTunnelEnd } from "./hubRelayService";
 import { startPublicEntrance } from "./publicEntrance";
 
 const HUB = "22222222-2222-4222-8222-222222222222";
@@ -186,6 +189,42 @@ describe("the hub's device relay", () => {
     expect(service.status().hosts).toBe(0);
   });
 
+  it("saves and journals a host's device list only when it changes", () => {
+    let state: HubState = {};
+    let saves = 0;
+    const journaled: string[] = [];
+    const service = new HubRelayService({
+      state: {
+        load: () => state,
+        save: (next) => {
+          saves += 1;
+          state = next;
+        },
+      },
+      serving: () => true,
+      hubMemberId: () => HUB,
+      openTunnel: async () => undefined,
+      record: (change) => journaled.push(change.change),
+    });
+    const first = deviceKey().fingerprint;
+    const second = deviceKey().fingerprint;
+    // A host with no devices that the hub holds nothing for changes nothing.
+    service.receiveDevices(HOST, { fingerprints: [] });
+    expect([saves, journaled.length]).toEqual([0, 0]);
+    service.receiveDevices(HOST, { fingerprints: [first, second] });
+    expect([saves, journaled.length]).toEqual([1, 1]);
+    // The periodic resend of the same keys, in any order.
+    expect(service.receiveDevices(HOST, { fingerprints: [second, first] })).toEqual({
+      status: "recorded",
+      count: 2,
+    });
+    expect([saves, journaled.length]).toEqual([1, 1]);
+    service.receiveDevices(HOST, { fingerprints: [first] });
+    service.receiveDevices(HOST, { fingerprints: [] });
+    expect([saves, journaled.length]).toEqual([3, 3]);
+    expect(service.status().hosts).toBe(0);
+  });
+
   it("closes every relay when its switch goes off", async () => {
     const { service, url } = await relay(32);
     const key = deviceKey();
@@ -198,5 +237,124 @@ describe("the hub's device relay", () => {
     expect(await closed).toBe(1001);
     expect(service.status().tunnels).toBe(0);
     expect(service.handler()).toBeUndefined();
+  });
+});
+
+describe("the relay address a hub hands its hosts", () => {
+  /** A hub whose own roster entry has the tailnet name, with its relay and entrance as given. */
+  function hubState(
+    entrance: HubState["publicEntrance"],
+    relayOn = true,
+    listener: { readonly privateNames: string[]; readonly addresses: string[] } = {
+      privateNames: ["mac-mini.tail1234.ts.net"],
+      addresses: [],
+    },
+  ): HubState {
+    return decodeHubState({
+      hub: {
+        enabled: true,
+        members: [],
+        joinTickets: [],
+        roster: {
+          roster: {
+            sequence: 1,
+            members: [
+              {
+                memberId: HUB,
+                name: "Mac mini",
+                role: "hub",
+                identityKeyFingerprint: "f".repeat(64),
+                listenerPin: "e".repeat(64),
+                ...listener,
+                owner: false,
+              },
+            ],
+            standbyOrder: [],
+            failoverAfterSeconds: 60,
+          },
+          signedBy: { kind: "hub", memberId: HUB },
+          signature: "signature",
+        },
+      },
+      relayHub: { enabled: relayOn, hosts: [] },
+      ...(entrance === undefined ? {} : { publicEntrance: entrance }),
+    });
+  }
+
+  it("names its Funnel front on its own tailnet name and port", () => {
+    expect(hubRelayAddress(hubState({ enabled: true, funnel: { port: 443 } }), HUB)).toEqual({
+      hubMemberId: HUB,
+      relayUrl: "wss://mac-mini.tail1234.ts.net/relay/v1",
+    });
+    expect(
+      hubRelayAddress(hubState({ enabled: true, funnel: { port: 10000 } }), HUB)?.relayUrl,
+    ).toBe("wss://mac-mini.tail1234.ts.net:10000/relay/v1");
+  });
+
+  it("names its Funnel front when its private listener is bound to an IP address only", () => {
+    const state = hubState({ enabled: true, funnel: { port: 8443 } }, true, {
+      privateNames: [],
+      addresses: ["100.101.104.1"],
+    });
+    expect(hubRelayAddress(state, HUB)).toBeUndefined();
+    expect(hubRelayAddress(state, HUB, "mac-mini.tail1234.ts.net")?.relayUrl).toBe(
+      "wss://mac-mini.tail1234.ts.net:8443/relay/v1",
+    );
+    expect(
+      hubRelayAddress(
+        hubState(
+          { enabled: true, funnel: { port: 443 }, ownFrontOrigin: "https://octant.example.com" },
+          true,
+          { privateNames: [], addresses: ["100.101.104.1"] },
+        ),
+        HUB,
+        "mac-mini.tail1234.ts.net",
+      )?.relayUrl,
+    ).toBe("wss://octant.example.com/relay/v1");
+  });
+
+  it("names the address the person typed for their own front over Funnel", () => {
+    expect(
+      hubRelayAddress(
+        hubState({
+          enabled: true,
+          funnel: { port: 443 },
+          ownFrontOrigin: "https://octant.example.com",
+        }),
+        HUB,
+      )?.relayUrl,
+    ).toBe("wss://octant.example.com/relay/v1");
+  });
+
+  it("names none while the relay or the entrance is off, or no public address is known", () => {
+    expect(hubRelayAddress(hubState({ enabled: true, funnel: { port: 443 } }, false), HUB)).toBe(
+      undefined,
+    );
+    expect(hubRelayAddress(hubState({ enabled: false, funnel: { port: 443 } }), HUB)).toBe(
+      undefined,
+    );
+    expect(hubRelayAddress(hubState({ enabled: true }), HUB)).toBeUndefined();
+    expect(hubRelayAddress(hubState(undefined), HUB)).toBeUndefined();
+  });
+
+  it("tells a host its relay address in the answer to the host's device list", () => {
+    let state: HubState = {};
+    const address = decodeRelayAddress({
+      hubMemberId: HUB,
+      relayUrl: "wss://octant.example.com/relay/v1",
+    });
+    const service = new HubRelayService({
+      state: { load: () => state, save: (next) => void (state = next) },
+      serving: () => true,
+      hubMemberId: () => HUB,
+      openTunnel: async () => undefined,
+      record: () => undefined,
+      address: () => address,
+    });
+    expect(service.receiveDevices(HOST, { fingerprints: [] })).toEqual({
+      status: "recorded",
+      count: 0,
+      relay: address,
+    });
   });
 });

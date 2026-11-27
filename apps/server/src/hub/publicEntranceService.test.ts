@@ -30,6 +30,8 @@ function setup(
     /** A state another run of the service left, as after a restart. */
     readonly state?: HubStatePort;
     readonly paused?: boolean;
+    /** The tailnet name the daemon reports; undefined while it cannot answer. */
+    readonly daemonName?: () => string | undefined;
     readonly now?: () => number;
     /** What the host knows of its own Tailscale address and certificate. */
     readonly tailnet?: { readonly address?: string; readonly certificate?: boolean };
@@ -41,6 +43,12 @@ function setup(
   const calls: string[][] = [];
   const exec: TailscaleExec = async (_file, args) => {
     calls.push([...args]);
+    if (args[0] === "status") {
+      const name = options.daemonName?.();
+      return name === undefined
+        ? { exitCode: 1, stdout: "", stderr: "tailscaled is not running" }
+        : { exitCode: 0, stdout: JSON.stringify({ Self: { DNSName: `${name}.` } }), stderr: "" };
+    }
     if (args[0] === "funnel" && args[1] === "status") {
       return { exitCode: 0, stdout: "{}", stderr: "" };
     }
@@ -454,5 +462,54 @@ describe("what the person did not ask for", () => {
       () => false,
     );
     expect(answered).toBe(false);
+  });
+});
+
+describe("the tailnet name Funnel serves", () => {
+  /** A hub with its relay switch on and the entrance on, with Funnel when asked. */
+  async function relayingHub(options: { readonly funnel: boolean }) {
+    let name: string | undefined = "mac-mini.tail1234.ts.net";
+    let clock = 0;
+    const host = setup({ daemonName: () => name, now: () => clock });
+    host.state.save({
+      ...host.state.load(),
+      hub: { enabled: true, members: [], joinTickets: [] },
+      relayHub: { enabled: true, hosts: [] },
+    });
+    await host.service.setEnabled(true, WINDOW);
+    if (options.funnel) await host.service.setFunnel({ enabled: true }, WINDOW);
+    return {
+      ...host,
+      rename: (next: string | undefined) => {
+        name = next;
+        clock += 60_000;
+      },
+    };
+  }
+
+  it("is read from the Tailscale daemon while Funnel is on, and forgotten with Funnel", async () => {
+    const { service } = await relayingHub({ funnel: true });
+    await service.refreshFunnelName();
+    expect(service.funnelName()).toBe("mac-mini.tail1234.ts.net");
+    await service.setFunnel({ enabled: false }, WINDOW);
+    expect(service.funnelName()).toBeUndefined();
+  });
+
+  it("follows a renamed machine and keeps the last name while the daemon cannot answer", async () => {
+    const { service, rename } = await relayingHub({ funnel: true });
+    await service.refreshFunnelName();
+    rename(undefined);
+    await service.refreshFunnelName();
+    expect(service.funnelName()).toBe("mac-mini.tail1234.ts.net");
+    rename("hub.tail1234.ts.net");
+    await service.refreshFunnelName();
+    expect(service.funnelName()).toBe("hub.tail1234.ts.net");
+  });
+
+  it("is not asked for while Funnel is off", async () => {
+    const { service, calls } = await relayingHub({ funnel: false });
+    await service.refreshFunnelName();
+    expect(calls).toEqual([]);
+    expect(service.funnelName()).toBeUndefined();
   });
 });

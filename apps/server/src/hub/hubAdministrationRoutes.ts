@@ -33,6 +33,7 @@ import {
   decodeHubPublicFunnelRequest,
   decodeHubPublicFrontsRequest,
   decodeHubPublicStandbyServeRequest,
+  decodeHubPublicAddressRequest,
   decodeHubWebhookCreateRequest,
   decodeHubVisitorCommentRequest,
   decodeHubVisitorLinkRequest,
@@ -151,6 +152,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   publicStandby: "/api/desktop/hub/public/standby",
   /** The Tailscale addresses of the person's own proxy on another machine; only a window on this host lists them. */
   publicFronts: "/api/desktop/hub/public/fronts",
+  /** The public address the person's own front answers on, which the hub names to devices as its relay. */
+  publicAddress: "/api/desktop/hub/public/address",
   /** This spoke's webhook endpoints: only a window on this host mints, rotates or removes one. */
   webhookCreate: "/api/desktop/hub/webhooks/create",
   webhookRotate: "/api/desktop/hub/webhooks/rotate",
@@ -522,6 +525,13 @@ export function createHubAdministrationRouteHandler(
           const changed = options.publicStandby.set(value.enabled, WINDOW_PRINCIPAL);
           if (changed.status === "changed") await options.publicEntrance?.reconcile();
           return outcome(changed);
+        }
+        case HUB_ADMINISTRATION_ROUTES.publicAddress: {
+          const value = decodeHubPublicAddressRequest(parseJson(request, body.text));
+          if (options.publicEntrance === undefined) return failure("unavailable", 503);
+          return outcome(
+            await options.publicEntrance.setOwnFrontAddress(value.url, WINDOW_PRINCIPAL),
+          );
         }
         case HUB_ADMINISTRATION_ROUTES.webhookCreate: {
           const value = decodeHubWebhookCreateRequest(parseJson(request, body.text));

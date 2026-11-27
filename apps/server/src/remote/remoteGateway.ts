@@ -143,6 +143,10 @@ export type RemoteProductDispatch = (
 ) => Promise<Response | undefined>;
 
 export interface RemoteGatewayServices {
+  /** What this host tells one of its paired devices about reaching it through the hub. */
+  readonly relayAddressFor?: (
+    deviceId: string,
+  ) => import("@octant/contracts").RemoteRelayAddressAnswer;
   /** Public old-key-signed transition, read only over the already pinned hello connection. */
   readonly listenerKeyTransition?: () =>
     | import("@octant/contracts").ListenerKeyTransition
@@ -926,6 +930,7 @@ function assembleServices(
     deviceAccessLevel,
     pairedDeviceKeyFingerprint: (deviceId) =>
       lifecycle.listDevices().find((device) => device.deviceId === deviceId)?.deviceKeyFingerprint,
+    ...(options.relayAddressFor === undefined ? {} : { relayAddressFor: options.relayAddressFor }),
     remoteAccessPaused,
     ...(options.productDispatch === undefined ? {} : { productDispatch: options.productDispatch }),
     ...(proxySessions === undefined || remoteServerGrants === undefined

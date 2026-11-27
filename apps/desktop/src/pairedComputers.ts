@@ -23,17 +23,29 @@ import {
   decodeListenerOriginTrust,
   type ListenerOriginTrust,
 } from "@octant/client-runtime/remote-listener-trust";
-import { decodeHubWindowComputers, type HubWindowComputers } from "@octant/contracts";
+import {
+  decodeHubWindowComputers,
+  decodeRelayAddress,
+  type HubWindowComputers,
+} from "@octant/contracts";
+import type { PairedComputerRelayChoice } from "@octant/contracts/desktop-bridge";
+import {
+  createRelayAwayMemory,
+  type PairedHostRelayChoice,
+  type RelayAwayMemory,
+} from "@octant/client-runtime/paired-host-relay";
 import { classifyRemoteListenerAddress } from "@octant/domain";
 import {
   sendHubAdministrationOperation,
   type HubAdministrationControlRuntime,
 } from "./hubAdministrationControls";
 import { requestPairedComputer } from "./pairedComputerRequests";
+import type { PairedComputerRelaySigning } from "./pairedComputerRelaySigning";
 
 export interface PairedComputer {
   readonly origin: string;
   readonly displayName: string;
+  readonly relayThroughHub?: PairedComputerRelayChoice;
 }
 
 interface PinRecord {
@@ -48,6 +60,11 @@ interface PinRecord {
    * introduction, so a member the roster drops is no longer reachable.
    */
   readonly throughHub?: true;
+  /**
+   * This app's own choice to reach the computer through its hub when away,
+   * and the relay address the computer told it on the private network.
+   */
+  readonly relay?: PairedHostRelayChoice;
 }
 
 /** The single-use ticket a pairing code carried, for the window that claims it. */
@@ -87,6 +104,8 @@ export class PairedComputerPins {
   readonly #now: () => number;
   readonly #staged = new Map<string, { readonly record: PinRecord; readonly expiresAt: number }>();
   #records: ReadonlyArray<PinRecord>;
+  /** Keyed by the record itself, which is replaced when anything in it changes. */
+  readonly #away = new WeakMap<PinRecord, RelayAwayMemory>();
 
   constructor(path: string, now: () => number = Date.now) {
     this.#path = path;
@@ -138,7 +157,69 @@ export class PairedComputerPins {
   list(): ReadonlyArray<PairedComputer> {
     return this.#records
       .filter((record) => record.throughHub !== true)
-      .map(({ origin, displayName }) => ({ origin, displayName }));
+      .map(({ origin, displayName, relay }) => ({
+        origin,
+        displayName,
+        ...(relay === undefined
+          ? {}
+          : {
+              relayThroughHub: {
+                enabled: relay.enabled,
+                addressKnown: relay.address !== undefined,
+              },
+            }),
+      }));
+  }
+
+  /** This app's choice and stored relay address for a recorded computer. */
+  relayFor(origin: string): PairedHostRelayChoice | undefined {
+    return this.#records.find((record) => record.origin === origin)?.relay;
+  }
+
+  /**
+   * Until when requests to a recorded computer go to the relay first. A new
+   * pairing, choice, or relay address starts again from home.
+   */
+  relayAwayFor(origin: string): RelayAwayMemory | undefined {
+    const record = this.#records.find((item) => item.origin === origin);
+    if (record === undefined) return undefined;
+    const away = this.#away.get(record) ?? createRelayAwayMemory();
+    this.#away.set(record, away);
+    return away;
+  }
+
+  /** Turns this app's choice to relay to one recorded computer on or off; false for an unknown one. */
+  setRelayChoice(origin: string, enabled: boolean): boolean {
+    const record = this.#records.find((item) => item.origin === origin);
+    if (record === undefined) return false;
+    const relay: PairedHostRelayChoice = {
+      enabled,
+      ...(record.relay?.address === undefined ? {} : { address: record.relay.address }),
+    };
+    this.#replace(record, { ...record, relay });
+    return true;
+  }
+
+  /**
+   * Keeps the relay address a recorded computer told this app over the
+   * private network, or forgets it when the computer said it lets none through.
+   * Only the main-process transport calls this, from a direct answer.
+   */
+  rememberRelayAddress(origin: string, address: PairedHostRelayChoice["address"]): void {
+    const record = this.#records.find((item) => item.origin === origin);
+    if (record === undefined) return;
+    const relay: PairedHostRelayChoice = {
+      enabled: record.relay?.enabled === true,
+      ...(address === undefined ? {} : { address }),
+    };
+    if (JSON.stringify(relay) === JSON.stringify(record.relay ?? { enabled: false })) return;
+    this.#replace(record, { ...record, relay });
+  }
+
+  #replace(record: PinRecord, next: PinRecord): void {
+    const records = this.#records.map((item) => (item === record ? next : item));
+    writePinRecords(this.#path, records);
+    this.#records = records;
   }
 
   /** Whether this origin is a hub member's, pinned from the host's roster. */
@@ -168,7 +249,15 @@ export class PairedComputerPins {
             isPrivateListenerOrigin(member.origin) &&
             !direct.some((record) => record.origin === member.origin),
         )
-        .map((member) => ({ ...member, throughHub: true as const })),
+        .map((member) => {
+          // A member named again keeps this app's own relay choice for it.
+          const relay = this.#records.find((record) => record.origin === member.origin)?.relay;
+          return {
+            ...member,
+            throughHub: true as const,
+            ...(relay === undefined ? {} : { relay }),
+          };
+        }),
     ];
     if (JSON.stringify(next) === JSON.stringify(this.#records)) return;
     writePinRecords(this.#path, next);
@@ -481,7 +570,7 @@ function readPinRecords(path: string): ReadonlyArray<PinRecord> {
   const records: PinRecord[] = [];
   for (const entry of computers) {
     if (typeof entry !== "object" || entry === null) continue;
-    const { origin, displayName, pin, listenerTrust, hostId, throughHub } = entry as Record<
+    const { origin, displayName, pin, listenerTrust, hostId, throughHub, relay } = entry as Record<
       string,
       unknown
     >;
@@ -506,10 +595,24 @@ function readPinRecords(path: string): ReadonlyArray<PinRecord> {
         ...(trust === undefined ? {} : { listenerTrust: trust }),
         ...(hostId === undefined ? {} : { hostId }),
         ...(throughHub === true ? { throughHub: true as const } : {}),
+        ...readRelayChoice(relay),
       });
     }
   }
   return records;
+}
+
+/** A stored relay choice; one that does not read is dropped, which leaves the choice off. */
+function readRelayChoice(value: unknown): { readonly relay?: PairedHostRelayChoice } {
+  if (typeof value !== "object" || value === null) return {};
+  const { enabled, address } = value as Record<string, unknown>;
+  if (typeof enabled !== "boolean") return {};
+  if (address === undefined) return { relay: { enabled } };
+  try {
+    return { relay: { enabled, address: decodeRelayAddress(address) } };
+  } catch {
+    return { relay: { enabled } };
+  }
 }
 
 function writePinRecords(path: string, records: ReadonlyArray<PinRecord>): void {
@@ -536,6 +639,8 @@ export const PAIRED_COMPUTER_CHANNELS = {
   settle: DESKTOP_IPC_CHANNELS.pairedComputerSettle,
   request: DESKTOP_IPC_CHANNELS.pairedComputerRequest,
   introduceToHub: DESKTOP_IPC_CHANNELS.pairedComputerIntroduceToHub,
+  relayChoice: DESKTOP_IPC_CHANNELS.pairedComputerRelayChoice,
+  relaySigned: DESKTOP_IPC_CHANNELS.pairedComputerRelaySigned,
 } as const;
 
 /**
@@ -543,7 +648,7 @@ export const PAIRED_COMPUTER_CHANNELS = {
  * pasted code, list paired computers, forget one, and send one request to a
  * listed computer. Each refusal is a value with one line of copy.
  */
-export function installPairedComputerIpcHandlers(options: {
+export function installPairedComputerIpcHandlers<Window>(options: {
   readonly handle: (
     channel: string,
     handler: (event: unknown, ...args: readonly unknown[]) => unknown,
@@ -556,6 +661,15 @@ export function installPairedComputerIpcHandlers(options: {
   readonly hubAdministration: (event: unknown) => HubAdministrationControlRuntime;
   /** The Node transport; replaced only by tests. */
   readonly fetchFor?: (origin: string, trust: ListenerOriginTrust) => typeof globalThis.fetch;
+  /**
+   * Asks the window that sent a request to sign its relay admission, and
+   * takes its answer; absent, no request relays. `windowOf` names the asking
+   * window from its IPC event.
+   */
+  readonly relaySigning?: {
+    readonly broker: Pick<PairedComputerRelaySigning<Window>, "ask" | "answer">;
+    readonly windowOf: (event: unknown) => Window;
+  };
 }): void {
   const authorize = (event: unknown): void => {
     try {
@@ -591,10 +705,22 @@ export function installPairedComputerIpcHandlers(options: {
   });
   options.handle(PAIRED_COMPUTER_CHANNELS.request, async (event, request) => {
     authorize(event);
+    const pins = options.pins();
+    const relaySigning = options.relaySigning;
     return await requestPairedComputer({
       request,
-      pins: options.pins(),
+      pins,
       ...(options.fetchFor === undefined ? {} : { fetchFor: options.fetchFor }),
+      ...(relaySigning === undefined
+        ? {}
+        : {
+            admitRelay: (origin: string, payload: string) =>
+              relaySigning.broker.ask(relaySigning.windowOf(event), {
+                origin,
+                hostId: pins.hostIdFor(origin) ?? "",
+                payload,
+              }),
+          }),
     });
   });
   options.handle(PAIRED_COMPUTER_CHANNELS.introduceToHub, async (event, request) => {
@@ -610,5 +736,17 @@ export function installPairedComputerIpcHandlers(options: {
       pins: options.pins(),
       send: (body) => sendHubAdministrationOperation(runtime, "window-guest", body),
     });
+  });
+  options.handle(PAIRED_COMPUTER_CHANNELS.relayChoice, (event, origin, enabled) => {
+    authorize(event);
+    if (typeof origin !== "string" || typeof enabled !== "boolean") return false;
+    return options.pins().setRelayChoice(origin, enabled);
+  });
+  options.handle(PAIRED_COMPUTER_CHANNELS.relaySigned, (event, answer) => {
+    authorize(event);
+    const relaySigning = options.relaySigning;
+    return relaySigning === undefined
+      ? false
+      : relaySigning.broker.answer(relaySigning.windowOf(event), answer);
   });
 }

@@ -5,6 +5,7 @@ import {
   type PinnedListenerExchangePort,
   type PinnedListenerExchangeRequest,
 } from "./pinnedListenerExchange";
+import { createRelayFallbackFetch } from "./pairedHostRelay";
 import { ListenerTrustRefused, type ListenerOriginTrust } from "./remoteListenerTrust";
 
 const ORIGIN = "https://100.101.102.103:8443";
@@ -153,6 +154,26 @@ describe("a listener fetch over the phone's pinned exchange", () => {
     await expect(refusalOf(fetch("https://studio.tail1234.ts.net:8443/"))).resolves.toBe(
       "not-private-address",
     );
+    expect(host.port.open).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "no longer resolves", addresses: [], relays: 1 },
+    { name: "resolves to a public address", addresses: ["203.0.113.7"], relays: 0 },
+  ])("uses the hub's relay only when it must: a name that $name", async (row) => {
+    const named = "https://studio.tail1234.ts.net:8443";
+    const host = listener({ served: PIN, addresses: row.addresses });
+    const relayed = vi.fn(async () => new Response("through the hub"));
+    const fetch = createRelayFallbackFetch({
+      direct: createExchangeListenerFetch({ origin: named, trust: PINNED, port: host.port }),
+      relayed: () => relayed,
+    });
+
+    const answer = fetch(`${named}/api/work/turns`, { method: "POST", body: "{}" });
+
+    if (row.relays === 1) await expect((await answer).text()).resolves.toBe("through the hub");
+    else await expect(refusalOf(answer)).resolves.toBe("not-private-address");
+    expect(relayed).toHaveBeenCalledTimes(row.relays);
     expect(host.port.open).not.toHaveBeenCalled();
   });
 

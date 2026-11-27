@@ -111,6 +111,18 @@ public final class PinnedTlsExchange {
     }
   }
 
+  /// The local port of this exchange's connection once it has one, for a
+  /// bridge in this process that must accept only this connection.
+  public func localPort(completion: @escaping (UInt16?) -> Void) {
+    queue.async { [self] in
+      if case .hostPort(_, let port)? = connection.currentPath?.localEndpoint {
+        completion(port.rawValue)
+      } else {
+        completion(nil)
+      }
+    }
+  }
+
   public func cancel() {
     queue.async { [self] in
       settle(.failed(reason: "connection-failed"))

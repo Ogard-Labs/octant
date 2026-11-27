@@ -12,6 +12,8 @@ import type {
   AuditActingPrincipal,
   HubMembershipChangedPayload,
   HubRelayDevicesUpdate,
+  RelayAddress,
+  RemoteRelayAddressAnswer,
 } from "@octant/contracts";
 import { classifyRemoteSourceClass, normalizePeerAddress } from "../remoteRequestFacts";
 import type { RequestTransportFacts } from "../server";
@@ -25,9 +27,14 @@ export interface RelayDevice {
   readonly active: boolean;
 }
 
+/** The hub's answer to this host's list: taken or not, and its relay address when it named one. */
+export type SpokeRelayHubAnswer =
+  | { readonly taken: false }
+  | { readonly taken: true; readonly relay?: RelayAddress };
+
 export interface SpokeRelayHubPort {
-  /** Sends the hub this host's list; false when it was not taken. */
-  readonly sendDevices: (update: HubRelayDevicesUpdate) => Promise<boolean>;
+  /** Sends the hub this host's list. */
+  readonly sendDevices: (update: HubRelayDevicesUpdate) => Promise<SpokeRelayHubAnswer>;
 }
 
 export interface SpokeRelayServiceOptions {
@@ -41,6 +48,7 @@ export interface SpokeRelayServiceOptions {
   /** Serves one relayed byte stream as this host's listener; false while it is not ready. */
   readonly serve: (socket: Duplex, facts: RequestTransportFacts) => boolean;
   readonly record: (change: HubMembershipChangedPayload) => void;
+  readonly now?: () => number;
 }
 
 export type RelayAllowOutcome =
@@ -58,12 +66,20 @@ export type RelayTunnelRefusal =
 // here is its own TLS server.
 const TUNNELS_MAX = 32;
 
+/**
+ * How often a look sends the list again although nothing here changed, so a
+ * relay address the hub's person changed (a Funnel port, their own front)
+ * reaches this host's devices without waiting for a device change.
+ */
+export const RELAY_ADDRESS_REFRESH_MS = 10 * 60 * 1000;
+
 const EMPTY: SpokeRelayState = { deviceIds: [] };
 
 export class SpokeRelayService {
   readonly #options: SpokeRelayServiceOptions;
   /** What the hub last took, so a look sends again only when it changed. */
   #lastSent: string | undefined;
+  #lastSentAt = 0;
   /** Each open relayed stream, by the device key it carries. */
   readonly #streams = new Map<string, Set<Duplex>>();
 
@@ -146,12 +162,49 @@ export class SpokeRelayService {
     const key = this.#sendKey(fingerprints);
     const sent = await this.#options.hub.sendDevices({ fingerprints });
     const held = this.#load();
-    if (sent) {
+    if (sent.taken) {
       this.#lastSent = key;
-      if (held.unpublished === true) this.#save({ deviceIds: held.deviceIds });
+      this.#lastSentAt = this.#now();
+      // Only an address naming the hub this host follows is kept; the hub
+      // naming none (its switch off, or no public address) clears it.
+      const hub = this.#options.state.load().link?.hubMemberId;
+      const address =
+        sent.relay !== undefined &&
+        hub !== undefined &&
+        String(sent.relay.hubMemberId) === String(hub)
+          ? sent.relay
+          : undefined;
+      this.#save({
+        deviceIds: held.deviceIds,
+        ...(address === undefined ? {} : { address }),
+      });
     } else if (held.unpublished !== true) {
       this.#save({ ...held, unpublished: true });
     }
+  }
+
+  /**
+   * What this host tells one of its own paired devices about reaching it
+   * through the hub: the hub's relay address, only while Relay is ticked,
+   * the device is listed and active, and the address names the hub this host
+   * follows. The route that answers it is refused through the relay.
+   */
+  relayAddressFor(deviceId: string): RemoteRelayAddressAnswer {
+    const unavailable = { status: "unavailable" } as const;
+    if (!this.#options.relayGranted()) return unavailable;
+    const held = this.#load();
+    if (!held.deviceIds.includes(deviceId)) return unavailable;
+    if (!this.#options.devices().some((device) => device.deviceId === deviceId && device.active))
+      return unavailable;
+    const link = this.#options.state.load().link;
+    const address = held.address;
+    if (link === undefined || address === undefined) return unavailable;
+    if (String(address.hubMemberId) !== String(link.hubMemberId)) return unavailable;
+    return { status: "available", hubMemberId: address.hubMemberId, relayUrl: address.relayUrl };
+  }
+
+  #now(): number {
+    return this.#options.now?.() ?? Date.now();
   }
 
   /** Sends again when the hub has not taken the list, or the grant or the devices changed. */
@@ -159,7 +212,12 @@ export class SpokeRelayService {
     this.sweep();
     const held = this.#load();
     const current = this.#sendKey(this.#fingerprints());
-    if (held.unpublished !== true && current === this.#lastSent) return;
+    if (
+      held.unpublished !== true &&
+      current === this.#lastSent &&
+      this.#now() - this.#lastSentAt < RELAY_ADDRESS_REFRESH_MS
+    )
+      return;
     await this.publish();
   }
 

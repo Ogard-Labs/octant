@@ -28,6 +28,7 @@ import { OwnerAlertsPanel } from "./OwnerAlertsPanel";
 import { OwnerMovesPanel } from "./OwnerMovesPanel";
 import { PairingPanel } from "./PairingPanel";
 import { RemoveHostPanel } from "./RemoveHostPanel";
+import { RelayChoicePanel } from "./RelayChoicePanel";
 
 /** Settings, and the Add computer screen pushed from it or from Home. */
 export function HostsScreen(props: {
@@ -57,6 +58,7 @@ export function HostsScreen(props: {
     transports,
     placementHostId,
     setPlacementHostId,
+    relayChoices,
   } = useMobileSession();
   const offlineDemo = environment.kind === "mock" && environment.offlineDemo;
   const pairedHostIds = useMemo(() => hosts.map((host) => host.hostId), [hosts]);
@@ -76,8 +78,8 @@ export function HostsScreen(props: {
   const [removeFailed, setRemoveFailed] = useState(false);
   const [notificationKeyKept, setNotificationKeyKept] = useState(false);
   const removeMobileHostInTurn = useMemo(
-    () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
-    [deviceKeyStore, hub, registry],
+    () => createMobileHostRemover({ registry, hub, deviceKeyStore, relayChoices }),
+    [deviceKeyStore, hub, registry, relayChoices],
   );
   const notificationPermission = mobileNotificationPort;
   const pushRegistrations = mobilePushRegistrationBook();
@@ -364,9 +366,19 @@ export function HostsScreen(props: {
                             />
                           ) : null}
                           {environment.kind === "live" ? (
+                            <RelayChoicePanel
+                              choices={relayChoices}
+                              hostLabel={host.label}
+                              origin={host.origin}
+                              testIdSuffix={host.hostId}
+                            />
+                          ) : null}
+                          {environment.kind === "live" ? (
                             <RemoveHostPanel
                               hostLabel={host.label}
-                              onRemove={() => removeHost(host.hostId)}
+                              onRemove={() => {
+                                removeHost(host.hostId);
+                              }}
                               testIdSuffix={host.hostId}
                             />
                           ) : null}

@@ -1,5 +1,5 @@
 import { decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
-import type { ProjectId } from "@octant/contracts";
+import type { ProjectId, RelayAddress } from "@octant/contracts";
 import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // A whole Octant host for the hub tests: its journal, its real remote gateway
 // behind a real TLS listener serving a certificate it made itself, and the hub
@@ -54,7 +54,7 @@ import { sendWebhookDelivery, spokeWebhookHubPort } from "./webhookLinks";
 import { HubVisitorService } from "./hubVisitorService";
 import { SpokeVisitorService, type VisitorThreadSource } from "./spokeVisitorService";
 import { askVisitorSpoke, spokeVisitorHubPort } from "./visitorLinks";
-import { HubRelayService } from "./hubRelayService";
+import { HubRelayService, hubRelayAddress } from "./hubRelayService";
 import { SpokeRelayService } from "./spokeRelayService";
 import { openRelayTunnel, spokeRelayHubPort } from "./relayLinks";
 import {
@@ -327,6 +327,11 @@ export async function startHubTestHost(input: {
   readonly network: HubTestNetwork;
   readonly cleanups: Array<() => Promise<void> | void>;
   readonly listenerStatus?: Partial<PrivateListenerHostStatus>;
+  /**
+   * The relay address this host names as hub; absent, it works it out from
+   * its own state as a real hub does. A test names its loopback entrance here.
+   */
+  readonly relayAddress?: () => RelayAddress | undefined;
   /** What a delegation to this host becomes; absent, this host has no Project open for delegated work. */
   readonly delegationHost?: PeerDelegationHost;
   /** This host's active Projects, for the list a member asks for. */
@@ -857,6 +862,7 @@ export async function startHubTestHost(input: {
         fingerprint,
       ),
     record: (change) => records.push(change),
+    address: input.relayAddress ?? (() => hubRelayAddress(state.load(), hub.hubMemberId())),
   });
   const spokeRelay = new SpokeRelayService({
     state,
@@ -1080,6 +1086,7 @@ export async function startHubTestHost(input: {
       signing: identity.signing,
       webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
       hubLink,
+      relayAddressFor: (deviceId) => spokeRelay.relayAddressFor(deviceId),
       onDeviceRemoved: (deviceId) => {
         pairedDeviceAlerts.dropDevice(deviceId);
         void spokeRelay.deviceRemoved(deviceId);

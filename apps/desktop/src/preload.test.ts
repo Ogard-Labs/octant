@@ -500,6 +500,41 @@ describe("desktop preload bridge", () => {
     unsubscribe();
   });
 
+  it("hands main's relay signing request to the window's signer and sends back only its answer", async () => {
+    const invoke = vi.fn().mockResolvedValue(true);
+    const on = vi.fn();
+    const removeListener = vi.fn();
+    const bridge = createHostBridge({ invoke, on, removeListener }, projectWindowCapability);
+    const sign = vi.fn(async () => ({ signature: "signature", deviceSpki: "spki" }));
+    const stop = bridge.answerPairedComputerRelaySigning?.(sign);
+    const [[channel, receive]] = on.mock.calls as [
+      [string, (event: unknown, value: unknown) => void],
+    ];
+    expect(channel).toBe(IPC_CHANNELS.pairedComputerRelaySign);
+
+    receive(
+      {},
+      { requestId: "r1", origin: "https://100.101.102.103:8443", payload: "text", extra: 1 },
+    );
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.pairedComputerRelaySigned, {
+        requestId: "r1",
+        signature: "signature",
+        deviceSpki: "spki",
+      }),
+    );
+    expect(sign).toHaveBeenCalledWith({
+      requestId: "r1",
+      origin: "https://100.101.102.103:8443",
+      payload: "text",
+    });
+    // A request that does not read is never handed to the signer.
+    receive({}, { requestId: "r2", origin: 42, payload: "text" });
+    expect(sign).toHaveBeenCalledTimes(1);
+    stop?.();
+    expect(removeListener).toHaveBeenCalledWith(IPC_CHANNELS.pairedComputerRelaySign, receive);
+  });
+
   it("sends a paired-computer request on its own channel with only the named fields", async () => {
     const invoke = vi.fn().mockResolvedValue({
       status: "answered",
@@ -784,6 +819,7 @@ describe("desktop preload bridge", () => {
       "acknowledgeWhatsNew",
       "addProviderApiKey",
       "agentAccessRequest",
+      "answerPairedComputerRelaySigning",
       "approveRemotePairingRequest",
       "attachBrowserSurface",
       "cancelCodeOperationApproval",
@@ -892,6 +928,7 @@ describe("desktop preload bridge", () => {
       "setAutomaticAppUpdateChecks",
       "setManagedToolAutomaticUpdates",
       "setMenuBarOpenThread",
+      "setPairedComputerRelay",
       "setProviderCredential",
       "setQuitShortcutSecondPress",
       "setRemoteAccessPaused",

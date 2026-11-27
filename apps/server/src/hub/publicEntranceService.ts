@@ -2,8 +2,10 @@
 // opens, the Funnel front, and the rules that close both. The entrance opens
 // only while the switch is on, remote access is not paused, and the host is a
 // hub or a member of one. Pausing remote access closes it and turns Funnel off;
-// resuming reopens the listener but never turns Funnel back on, so Octant runs
-// a Tailscale command only for a person's own switch or pause. With front
+// resuming reopens the listener but never turns Funnel back on, so Octant
+// changes Tailscale only for a person's own switch or pause. While Funnel and
+// the hub's device relay are both on it also reads the tailnet name from
+// `tailscale status`, to tell devices where the relay is. With front
 // addresses listed, for the person's own proxy on another machine, it binds
 // the hub's Tailscale address with its Tailscale certificate instead of
 // loopback, serves only those addresses, and never binds anything else.
@@ -15,7 +17,12 @@ import {
   type PublicForwardEnvelope,
   type PublicFunnelPort,
 } from "@octant/contracts";
-import { decidePublicEntranceBind, publicFrontAdmitted, readPublicFronts } from "@octant/domain";
+import {
+  decidePublicEntranceBind,
+  publicFrontAdmitted,
+  publicFrontOrigin,
+  readPublicFronts,
+} from "@octant/domain";
 import type { HubStatePort, PublicEntranceState } from "./hubStateStore";
 import {
   startPublicEntrance,
@@ -23,7 +30,7 @@ import {
   type PublicEntranceHandlers,
   type PublicEntranceRole,
 } from "./publicEntrance";
-import type { TailscaleExec } from "./tailscaleCliDaemon";
+import { readTailscaleName, type TailscaleExec } from "./tailscaleCliDaemon";
 import { createTailscaleFunnel, type TailscaleFunnel } from "./tailscaleFunnel";
 
 /** Whether this host acts as the hub, is a member that forwards to it, or is in no hub at all. */
@@ -117,11 +124,19 @@ export interface PublicEntranceStatus {
   readonly funnel: { readonly enabled: boolean; readonly port?: PublicFunnelPort };
   /** This host's own choice, as a standby, to serve the entrance while it stands in. */
   readonly serveWhileStandingIn: boolean;
+  /** The public address the person typed for their own front, when they did. */
+  readonly ownFrontOrigin?: string;
 }
+
+export type PublicAddressOutcome =
+  | { readonly status: "changed"; readonly ownFrontOrigin?: string }
+  | { readonly status: "refused"; readonly kind: "invalid-address" };
 
 const DEFAULT_FUNNEL_PORT: PublicFunnelPort = 443;
 
 const FUNNEL_OFF_RETRY_MS = 60_000;
+/** The entrance looks every few seconds; a machine is renamed far less often. */
+const FUNNEL_NAME_REFRESH_MS = 60_000;
 
 export class PublicEntranceService {
   readonly #options: PublicEntranceServiceOptions;
@@ -130,6 +145,9 @@ export class PublicEntranceService {
   /** One change at a time, so a pause and a switch cannot open and close the listener out of order. */
   #queue: Promise<unknown> = Promise.resolve();
   #funnelOffRetryAt = 0;
+  /** The tailnet name last read from the daemon, and when it was last asked. */
+  #funnelName: string | undefined;
+  #funnelNameAskedAt: number | undefined;
   /**
    * Set when a pause or a lost role could not turn Funnel off. Resuming must not
    * reopen the port Funnel still points at, since that would put the entrance
@@ -170,7 +188,38 @@ export class PublicEntranceService {
           ? { enabled: false }
           : { enabled: true, port: saved.funnel.port },
       serveWhileStandingIn: saved?.serveWhileStandingIn === true,
+      ...(saved?.ownFrontOrigin === undefined ? {} : { ownFrontOrigin: saved.ownFrontOrigin }),
     };
+  }
+
+  /**
+   * Records the public address the person's own front answers on, so the hub
+   * can tell paired devices where its relay is. Octant cannot see a front it
+   * does not run, so the person types it; only an `https:` origin with a DNS
+   * name is taken. It opens nothing: the entrance and its route table are
+   * unchanged.
+   */
+  setOwnFrontAddress(
+    url: string | undefined,
+    principal: AuditActingPrincipal,
+  ): Promise<PublicAddressOutcome> {
+    return this.#serially(async (): Promise<PublicAddressOutcome> => {
+      const origin = url === undefined ? undefined : publicFrontOrigin(url);
+      if (url !== undefined && origin === undefined) {
+        return { status: "refused", kind: "invalid-address" };
+      }
+      const state = this.#options.state.load();
+      const current = state.publicEntrance ?? { enabled: false };
+      const { ownFrontOrigin: _previous, ...rest } = current;
+      this.#options.state.save({
+        ...state,
+        publicEntrance: origin === undefined ? rest : { ...rest, ownFrontOrigin: origin },
+      });
+      this.#options.record({ change: "public-address-changed", actingPrincipal: principal });
+      return origin === undefined
+        ? { status: "changed" }
+        : { status: "changed", ownFrontOrigin: origin };
+    });
   }
 
   setEnabled(
@@ -296,6 +345,44 @@ export class PublicEntranceService {
   /** Opens or closes the listener to match the switch, the pause, and the role. */
   reconcile(): Promise<boolean> {
     return this.#serially(() => this.#reconcile());
+  }
+
+  /** The tailnet name Funnel serves, as last read; undefined while Funnel is off. */
+  funnelName(): string | undefined {
+    return this.#saved()?.funnel === undefined ? undefined : this.#funnelName;
+  }
+
+  /**
+   * Reads the tailnet name from the daemon, at most once a minute, and only on
+   * the hub while Funnel and the device relay are on and no address was typed:
+   * the one case the name is used. A standby standing in is never asked. A
+   * daemon that cannot answer leaves the last name. It runs outside the queue,
+   * so a slow tool never delays a pause or a switch.
+   */
+  async refreshFunnelName(): Promise<void> {
+    if (this.#closed) return;
+    const state = this.#options.state.load();
+    if (
+      state.publicEntrance?.funnel === undefined ||
+      state.publicEntrance.ownFrontOrigin !== undefined ||
+      state.hub?.enabled !== true ||
+      state.relayHub?.enabled !== true
+    ) {
+      return;
+    }
+    const now = this.#now();
+    if (
+      this.#funnelNameAskedAt !== undefined &&
+      now - this.#funnelNameAskedAt < FUNNEL_NAME_REFRESH_MS
+    ) {
+      return;
+    }
+    this.#funnelNameAskedAt = now;
+    const name = await readTailscaleName({
+      exec: this.#options.exec,
+      platform: this.#options.platform,
+    });
+    if (name !== undefined) this.#funnelName = name;
   }
 
   /** A request another member's entrance forwarded; only the acting hub with its entrance on runs it. */
@@ -476,6 +563,7 @@ export class PublicEntranceService {
   }): void {
     const state = this.#options.state.load();
     const serve = state.publicEntrance?.serveWhileStandingIn;
+    const ownFrontOrigin = state.publicEntrance?.ownFrontOrigin;
     this.#options.state.save({
       ...state,
       publicEntrance: {
@@ -484,6 +572,7 @@ export class PublicEntranceService {
         ...(next.funnel === undefined ? {} : { funnel: next.funnel }),
         ...(serve === undefined ? {} : { serveWhileStandingIn: serve }),
         ...(next.fronts === undefined || next.fronts.length === 0 ? {} : { fronts: next.fronts }),
+        ...(ownFrontOrigin === undefined ? {} : { ownFrontOrigin }),
       },
     });
   }

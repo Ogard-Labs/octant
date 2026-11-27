@@ -116,7 +116,7 @@ triggers, and the person's own paired devices away from the private network,
 with failover and no Octant-run service, and settled
 [decisions H29 to H36](#decisions); slices 21 to 26 are built as the
 delivery plan records, run only on loopback, and slice 27 is partly built: the
-server side and a Node client, with no phone or desktop app using it yet.
+server side and the phone and desktop apps, with no relay through a standby.
 
 ## Outcome
 
@@ -1164,7 +1164,7 @@ Standby:
 | Act            | Act on the spoke as a paired device would, within the Projects the person names: create threads, send turns, answer questions. Approvals stay on the spoke (below)                                                                                                     |
 | Usage          | Read the spoke's provider plan-limit readings, the windows its own Limits view shows, through `GET /api/hub/usage` (maintainer decision C, 2026-11-26). Never a credential, thread, or cost                                                                            |
 | Public         | Hold this spoke's visitor-link grants and sealed webhook secrets, and carry visitor traffic and webhook deliveries between the [public entrance](#public-entrance) and this spoke. The spoke still checks every fetch and owns every run (built, run only on loopback) |
-| Relay          | Carry this spoke's own paired devices to it through the public entrance as ciphertext the hub cannot read ([Your own devices through the hub](#your-own-devices-through-the-hub); built on the server, the apps are not wired yet)                                     |
+| Relay          | Carry this spoke's own paired devices to it through the public entrance as ciphertext the hub cannot read ([Your own devices through the hub](#your-own-devices-through-the-hub); built, run only on loopback)                                                         |
 
 **Status and Usage stay with the hub itself.** A standby standing in uses
 the spoke's grant for what keeps the network running (the roster, wakes,
@@ -3283,9 +3283,9 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
 A paired phone or computer away from the private network can reach the hosts
 it paired with through the hub's public entrance, so the hub is the person's
 own relay and no Octant-run relay is needed (decision H36). Partly built: the
-hub's admission, the host's list and tunnel, the refusals, and a client for a
-device on Node are built and run between hosts on loopback; the phone and
-desktop apps do not use the client yet (below).
+hub's admission, the host's list and tunnel, the refusals, the address a
+device learns, and the phone and desktop apps' relay are built and run
+between hosts on loopback; what is not built is listed below.
 
 - **Pinned end to end.** The device opens a WebSocket to the entrance's relay
   route and names one host. The hub carries the bytes to that host over the
@@ -3311,11 +3311,54 @@ desktop apps do not use the client yet (below).
   hub removed ends the relayed tunnels it still holds. A spoke that follows
   a promoted hub sends that hub its device keys again.
 - **Off by default.** The hub's Device relay switch, each host's Relay
-  hub-grant item, and each device's own per-host choice. A browser cannot
-  check a pin, so the relay serves only the phone and desktop apps. Until a
-  device can make its own choice, the host's person makes it on the host
-  (`octant hub relay allow <device-id>`): only a device the host's own window
-  allowed is listed, and the hub learns only its key's fingerprint.
+  hub-grant item, the host's allowance for each device
+  (`octant hub relay allow <device-id>`: only a device the host's own window
+  allowed is listed, and the hub learns only its key's fingerprint), and each
+  device's own per-host choice, "Reach this computer through the hub when
+  away", kept on the device. A browser cannot check a pin, so the relay
+  serves only the phone and desktop apps; a plain browser never relays.
+- **When a device relays.** Only when its choice for that host is on, it
+  holds the relay address that host told it, and the direct private
+  connection failed before anything was sent. A refused host key, or a
+  failure after a request may have left, is never retried through the hub.
+  After the relay answers, the device goes to the relay first for a minute,
+  then tries home again; a relayed request that fails, or a change to the
+  pairing, the choice, or the stored address, sends the next one home first.
+  Revoking the phone from the phone itself, or removing the computer there,
+  forgets the choice and the address, so pairing again starts with it off.
+- **How a device learns the relay address.** The acting hub works out its
+  own public address: the address the person typed for their own front
+  (`octant hub public address <https-url>`, taken only as an `https:` origin
+  with a DNS name), or else its Funnel front on its own tailnet name and
+  port. The hub reads that name from the local Tailscale daemon
+  (`tailscale status`) while Funnel and its relay switch are on, at most once
+  a minute, because a private listener bound to an IP address has no name in
+  the roster. Reading it changes nothing in Tailscale, and a standby standing
+  in never does it. While its relay switch and entrance are on, the hub names
+  `{ hubMemberId, relayUrl }` in its answer to each host's relay device list,
+  over the signed, pinned hub link, and a host sends that list again every ten
+  minutes; the hub saves and journals a list only when it differs from the one
+  it holds. A spoke and a device take only a `wss:` relay address. Each host answers its own paired devices on the authenticated
+  `GET /api/remote/relay-address`, only while Relay is ticked, the device is
+  listed and active, and the address names the hub it follows. The route
+  answers only on the private network: through the relay it is refused
+  (`relayed-admin-refused`), so a device keeps the address it learned at home
+  and uses it when away. The phone asks each paired computer when its
+  connection becomes ready, every ten minutes while it stays so, and when the
+  person turns that computer's switch on, so an approval given after an
+  earlier "unavailable" answer is learned while still at home. The signed host
+  hello is unchanged. Rejected: a new
+  field in the signed hello (it changes a signed contract), and typing the
+  address into each device (error-prone).
+- **On the desktop and the phone.** The desktop's main process runs the
+  relay and its pinned TLS; the window keeps the device key and signs only
+  text that reads exactly as `octant/relay/v1|<challenge>|<host>|<hub>` for
+  the computer its key is paired with, at main's request, and main asks only
+  for that text. The phone's pinned TLS module runs the same TLS and pin
+  check over bytes the relay's WebSocket carries: an SSLEngine on Android;
+  on iOS, which has no public TLS 1.3 over app-supplied bytes, the unchanged
+  pinned exchange over a loopback listener that accepts only that exchange's
+  own connection, checked by its port, and then stops listening.
 - **How it is built.** The device answers the hub's challenge with
   `octant/relay/v1|<challenge>|<host>|<hub>` signed by its device key; the
   hub admits it only if that host listed the key's fingerprint, then opens a
@@ -3336,9 +3379,7 @@ desktop apps do not use the client yet (below).
   tunnels when its Relay item, its allowance for that device, or the device
   itself goes, or remote access pauses there. Revoking a device takes its
   key off the hub's list at once.
-- **Not built yet:** the phone and desktop apps using the relay (the Node
-  client in `packages/client-runtime` exists, with no app wiring) and the
-  device's own per-host choice; WebSocket routes inside a relay (a host
+- **Not built yet:** WebSocket routes inside a relay (a host
   answers them 501); a relay through a forwarding member or a standing-in
   standby (only the acting hub admits relays, and a forwarding member answers
   the relay route 404). The switch and each host's device list are in
@@ -4842,11 +4883,13 @@ limits, and the device relay's channel design.
     entrance with its pin checked, the hub sees only ciphertext, and an
     unlisted key or a pairing route is refused. **Linux container: yes**
     for the server; a phone on mobile data is a maintainer gate. Partly
-    built: the server side, the CLI and loopback routes, and the Node client,
-    proved by a two-host loopback smoke over real TLS in which a recording
-    front never sees the request or its answer; not built yet: the apps'
-    use of the client, the device's own choice, and a relay through a
-    standby ([Your own devices through the hub](#your-own-devices-through-the-hub)).
+    built: the server side, the CLI and loopback routes, the relay address a
+    device learns at home, and the desktop and phone apps with each device's
+    own choice, proved by a two-host loopback smoke over real TLS in which a
+    recording front never sees the request or its answer, which drives the
+    desktop's client path and both phone TLS streams through the relay; not
+    built yet: a relay through a standby
+    ([Your own devices through the hub](#your-own-devices-through-the-hub)).
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

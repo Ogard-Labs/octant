@@ -526,3 +526,62 @@ export const decodeHubRelayDeviceRequest = Schema.decodeUnknownSync(HubRelayDevi
 
 /** A relayed connection asked for a route only a connection on the private network may use. */
 export const RELAYED_ADMIN_REFUSED = "relayed-admin-refused";
+
+/**
+ * The relay route a device opens: `wss://<the hub's public address>/relay/v1`.
+ * Devices and spokes refuse any other address, an unencrypted one included.
+ */
+export const RelayUrl = Schema.String.pipe(
+  Schema.maxLength(300),
+  Schema.pattern(/^wss:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?\/relay\/v1$/),
+);
+export type RelayUrl = typeof RelayUrl.Type;
+export const isRelayUrl = Schema.is(RelayUrl);
+
+/** Where a host's paired devices reach it through the hub, and which hub that is. */
+export const RelayAddress = Schema.Struct({
+  hubMemberId: HubMemberId,
+  relayUrl: RelayUrl,
+}).annotations(strict);
+export type RelayAddress = typeof RelayAddress.Type;
+export const decodeRelayAddress = Schema.decodeUnknownSync(RelayAddress);
+
+/**
+ * The hub's answer to a host's device list. The hub names its relay address
+ * while its relay switch is on and it knows its own public address, so the
+ * address reaches each host over the pinned, signed hub link and never through
+ * the public entrance.
+ */
+export const HubRelayDevicesReceipt = Schema.Struct({
+  status: Schema.Literal("recorded"),
+  count: Schema.Int.pipe(Schema.nonNegative()),
+  relay: Schema.optional(RelayAddress),
+});
+export type HubRelayDevicesReceipt = typeof HubRelayDevicesReceipt.Type;
+export const decodeHubRelayDevicesReceipt = Schema.decodeUnknownSync(HubRelayDevicesReceipt);
+
+/**
+ * The device route that tells a paired device its host's relay address. It
+ * answers only on the private network; through the relay it is refused, so a
+ * device learns the address only while it is at home.
+ */
+export const REMOTE_RELAY_ADDRESS_PATH = "/api/remote/relay-address";
+
+export const RemoteRelayAddressAnswer = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("available"),
+    hubMemberId: HubMemberId,
+    relayUrl: RelayUrl,
+  }),
+  /** This host lets no relay through for this device now: no hub, Relay unticked, or not listed. */
+  Schema.Struct({ status: Schema.Literal("unavailable") }),
+);
+export type RemoteRelayAddressAnswer = typeof RemoteRelayAddressAnswer.Type;
+export const decodeRemoteRelayAddressAnswer = Schema.decodeUnknownSync(RemoteRelayAddressAnswer);
+
+/** The address the person's own front answers on, typed on the hub; absent clears it. */
+export const HubPublicAddressRequest = Schema.Struct({
+  url: Schema.optional(Schema.String.pipe(Schema.maxLength(300))),
+}).annotations(strict);
+export type HubPublicAddressRequest = typeof HubPublicAddressRequest.Type;
+export const decodeHubPublicAddressRequest = Schema.decodeUnknownSync(HubPublicAddressRequest);

@@ -1015,6 +1015,17 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
     maxBodyBytes: 4_096,
     maxResponseBytes: 4_096,
   },
+  // The hub's relay address for this device (decision H36): answered on the
+  // private network only, so it is also refused through the relay itself.
+  {
+    id: "remote-relay-address",
+    match: { kind: "exact", path: "/api/remote/relay-address" },
+    surface: "authenticated-product",
+    methods: ["GET"],
+    allowQuery: false,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    maxResponseBytes: 4_096,
+  },
   {
     id: "remote-auth-push-token",
     match: { kind: "exact", path: "/api/remote/auth/push-token" },
@@ -2140,7 +2151,11 @@ const RELAYED_PRE_AUTH_PATHS: ReadonlySet<string> = new Set([
  * route at all: only what a paired device reaches with its session, never
  * by default because a route exists.
  */
+/** Authenticated routes for the private network alone; a relayed request never reaches them. */
+const PRIVATE_ONLY_ROUTE_IDS: ReadonlySet<string> = new Set(["remote-relay-address"]);
+
 function relayedMayReach(decision: Extract<RemoteRouteDecision, { readonly kind: "allow" }>) {
+  if (decision.route !== undefined && PRIVATE_ONLY_ROUTE_IDS.has(decision.route.id)) return false;
   if (decision.surface === "authenticated-product" || decision.surface === "web-assets")
     return true;
   const match = decision.route?.match;

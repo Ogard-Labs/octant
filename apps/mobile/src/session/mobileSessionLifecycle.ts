@@ -9,6 +9,7 @@ import type {
   MobileHostRegistry,
   MobileHostRegistryRead,
 } from "../hosts/HostRegistry";
+import type { RelayChoiceStore } from "../hosts/relayChoiceStore";
 import type { MobileHostSessionHub } from "./MobileHostSessionHub";
 
 export function disconnectLiveMobileSession(input: {
@@ -53,9 +54,11 @@ export interface RemoveMobileHostResult {
 
 /**
  * Take a host off the phone's list and delete what the phone holds for it: its
- * device key in secure storage and the live session on its bridge. Other hosts'
- * keys stay. The host leaves the list and its bridge stops before the key is
- * deleted, so nothing reconnects with a key that is going away. A key that
+ * relay choice and address, its device key in secure storage, and the live
+ * session on its bridge. Other hosts' keys stay. The relay choice goes first,
+ * so a removal that fails there leaves the host listed to try again, and a
+ * later pairing at the same origin never starts out relaying. The host leaves
+ * the list and its bridge stops before the key is deleted, so nothing reconnects with a key that is going away. A key that
  * cannot be deleted is reported, not thrown, because the host is already gone
  * from the list and the person cannot retry from there.
  */
@@ -64,8 +67,10 @@ export async function removeMobileHost(input: {
   readonly registry: Pick<MobileHostRegistry, "get" | "list" | "remove">;
   readonly hub: Pick<MobileHostSessionHub, "syncRegistrations">;
   readonly deviceKeyStore: Pick<RemoteDeviceKeyStore, "remove">;
+  readonly relayChoices: Pick<RelayChoiceStore, "forget">;
 }): Promise<RemoveMobileHostResult> {
   const registration = await input.registry.get(input.hostId);
+  if (registration !== undefined) await input.relayChoices.forget(registration.origin);
   await input.registry.remove(input.hostId);
   const remaining = await input.registry.list();
   if (remaining.kind === "ok") input.hub.syncRegistrations(remaining.hosts);

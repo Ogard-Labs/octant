@@ -68,6 +68,8 @@ import type {
   PairedComputerAnswer,
   PairedComputerOutcome,
   PairedComputerRequest,
+  PairedComputerRelaySignature,
+  PairedComputerRelaySigningRequest,
   HubWindowIntroductionOutcome,
   HubWindowIntroductionRequest,
   PrivateListenerControlFailureCode,
@@ -549,6 +551,19 @@ export interface OctantHostBridge {
   readonly introduceWindowToHub?: (
     request: HubWindowIntroductionRequest,
   ) => Promise<HubWindowIntroductionOutcome>;
+  /** Turns this app's choice to reach one paired computer through its hub when away on or off. */
+  readonly setPairedComputerRelay?: (origin: string, enabled: boolean) => Promise<boolean>;
+  /**
+   * Makes `sign` this window's answer when main relays one of its requests
+   * and the hub asks for the device key's signature. Main asks only for the
+   * exact relay admission text; `sign` decides again and answers undefined
+   * for anything else. Returns a function that stops answering.
+   */
+  readonly answerPairedComputerRelaySigning?: (
+    sign: (
+      request: PairedComputerRelaySigningRequest,
+    ) => Promise<PairedComputerRelaySignature | undefined>,
+  ) => () => void;
   /**
    * Shows a server of another paired computer, which that computer granted,
    * in Octant's browser or the default browser. The main process checks the
@@ -1744,6 +1759,41 @@ export function createHostBridge(
                 pairedComputerRequestOf(request),
               ),
             ),
+          setPairedComputerRelay: async (origin: string, enabled: boolean) =>
+            typeof origin === "string" &&
+            typeof enabled === "boolean" &&
+            (await ipc.invoke(IPC_CHANNELS.pairedComputerRelayChoice, origin, enabled)) === true,
+          answerPairedComputerRelaySigning: (
+            sign: (
+              request: PairedComputerRelaySigningRequest,
+            ) => Promise<PairedComputerRelaySignature | undefined>,
+          ) => {
+            const receive = (_event: unknown, value: unknown): void => {
+              if (typeof value !== "object" || value === null) return;
+              const { requestId, origin, payload } = value as Record<string, unknown>;
+              if (
+                typeof requestId !== "string" ||
+                typeof origin !== "string" ||
+                typeof payload !== "string"
+              )
+                return;
+              void sign({ requestId, origin, payload })
+                .catch(() => undefined)
+                .then((answer) =>
+                  ipc.invoke(IPC_CHANNELS.pairedComputerRelaySigned, {
+                    requestId,
+                    ...(answer === undefined
+                      ? {}
+                      : { signature: answer.signature, deviceSpki: answer.deviceSpki }),
+                  }),
+                )
+                .catch(() => undefined);
+            };
+            ipc.on(IPC_CHANNELS.pairedComputerRelaySign, receive);
+            return () => {
+              ipc.removeListener(IPC_CHANNELS.pairedComputerRelaySign, receive);
+            };
+          },
           introduceWindowToHub: async (request: HubWindowIntroductionRequest) =>
             decodeHubWindowIntroductionOutcome(
               await ipc.invoke(IPC_CHANNELS.pairedComputerIntroduceToHub, {
@@ -1818,11 +1868,28 @@ function decodePairedComputer(value: unknown): PairedComputer {
   if (typeof value !== "object" || value === null) {
     throw new Error("Octant returned an invalid paired computer.");
   }
-  const { origin, displayName } = value as Record<string, unknown>;
+  const { origin, displayName, relayThroughHub } = value as Record<string, unknown>;
   if (typeof origin !== "string" || typeof displayName !== "string") {
     throw new Error("Octant returned an invalid paired computer.");
   }
-  return Object.freeze({ origin, displayName });
+  const relay =
+    typeof relayThroughHub === "object" && relayThroughHub !== null
+      ? (relayThroughHub as Record<string, unknown>)
+      : undefined;
+  return Object.freeze({
+    origin,
+    displayName,
+    ...(relay !== undefined &&
+    typeof relay.enabled === "boolean" &&
+    typeof relay.addressKnown === "boolean"
+      ? {
+          relayThroughHub: Object.freeze({
+            enabled: relay.enabled,
+            addressKnown: relay.addressKnown,
+          }),
+        }
+      : {}),
+  });
 }
 
 function decodePairedComputers(value: unknown): ReadonlyArray<PairedComputer> {

@@ -1,3 +1,4 @@
+import { decodeRelayAddress } from "@octant/contracts";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import {
   createExpoSecureDeviceKeyStore,
@@ -9,6 +10,7 @@ import {
   createInMemoryMobileHostRegistryStorage,
   createMobileHostRegistry,
 } from "../hosts/HostRegistry";
+import { createRelayChoiceStore } from "../hosts/relayChoiceStore";
 import {
   disconnectLiveMobileSession,
   createMobileHostRemover,
@@ -166,15 +168,22 @@ describe("live mobile session lifecycle", () => {
           hostKeyFingerprint: "fingerprint",
         });
       }
-      return { storage, deviceKeyStore, registry, hub };
+      const relayChoices = createRelayChoiceStore(createInMemoryMobileHostRegistryStorage());
+      return { storage, deviceKeyStore, registry, hub, relayChoices };
     }
 
     it("leaves no device key for the removed host and keeps the other host's key", async () => {
-      const { storage, deviceKeyStore, registry, hub } = await pairTwoHosts();
+      const { storage, deviceKeyStore, registry, hub, relayChoices } = await pairTwoHosts();
       const listed = await registry.list();
       const [first, second] = listed.kind === "ok" ? listed.hosts : [];
 
-      const result = await removeMobileHost({ hostId: firstHostId, registry, hub, deviceKeyStore });
+      const result = await removeMobileHost({
+        hostId: firstHostId,
+        registry,
+        hub,
+        deviceKeyStore,
+        relayChoices,
+      });
 
       expect(result).toEqual({ localCredentialRemoved: true });
       expect(await registry.get(firstHostId)).toBeUndefined();
@@ -186,7 +195,7 @@ describe("live mobile session lifecycle", () => {
     });
 
     it("removes a host that cannot be reached without sending anything to it", async () => {
-      const { storage, deviceKeyStore, registry, hub } = await pairTwoHosts();
+      const { storage, deviceKeyStore, registry, hub, relayChoices } = await pairTwoHosts();
       const unreachable = vi.fn(async () => {
         throw new TypeError("Network request failed");
       });
@@ -199,6 +208,7 @@ describe("live mobile session lifecycle", () => {
           registry,
           hub,
           deviceKeyStore,
+          relayChoices,
         });
 
         expect(result).toEqual({ localCredentialRemoved: true });
@@ -214,9 +224,28 @@ describe("live mobile session lifecycle", () => {
       }
     });
 
+    it("forgets the removed host's relay choice and address, so pairing again starts off", async () => {
+      const { deviceKeyStore, registry, hub, relayChoices } = await pairTwoHosts();
+      const first = await registry.get(firstHostId);
+      const second = await registry.get(secondHostId);
+      const address = decodeRelayAddress({
+        hubMemberId: "11111111-1111-4111-8111-111111111111",
+        relayUrl: "wss://hub.example.com/relay/v1",
+      });
+      for (const host of [first!, second!]) {
+        await relayChoices.setEnabled(host.origin, true);
+        await relayChoices.rememberAddress(host.origin, address);
+      }
+
+      await removeMobileHost({ hostId: firstHostId, registry, hub, deviceKeyStore, relayChoices });
+
+      expect(await relayChoices.read(first!.origin)).toBeUndefined();
+      expect(await relayChoices.read(second!.origin)).toEqual({ enabled: true, address });
+    });
+
     it("keeps both hosts removed when two removals are started back to back", async () => {
-      const { storage, deviceKeyStore, registry, hub } = await pairTwoHosts();
-      const remove = createMobileHostRemover({ registry, hub, deviceKeyStore });
+      const { storage, deviceKeyStore, registry, hub, relayChoices } = await pairTwoHosts();
+      const remove = createMobileHostRemover({ registry, hub, deviceKeyStore, relayChoices });
 
       await Promise.all([remove(firstHostId), remove(secondHostId)]);
 
@@ -225,14 +254,14 @@ describe("live mobile session lifecycle", () => {
     });
 
     it("stops the removed host's session before its key is deleted", async () => {
-      const { deviceKeyStore, registry, hub } = await pairTwoHosts();
+      const { deviceKeyStore, registry, hub, relayChoices } = await pairTwoHosts();
       const keyStillStoredAtSync: boolean[] = [];
       const first = await registry.get(firstHostId);
       hub.syncRegistrations.mockImplementation(async () => {
         keyStillStoredAtSync.push((await deviceKeyStore.get(first!.keyId)) !== undefined);
       });
 
-      await removeMobileHost({ hostId: firstHostId, registry, hub, deviceKeyStore });
+      await removeMobileHost({ hostId: firstHostId, registry, hub, deviceKeyStore, relayChoices });
 
       expect(hub.syncRegistrations).toHaveBeenCalledOnce();
       expect(
@@ -242,12 +271,13 @@ describe("live mobile session lifecycle", () => {
     });
 
     it("reports a key that could not be deleted after the host has left the list", async () => {
-      const { registry, hub } = await pairTwoHosts();
+      const { registry, hub, relayChoices } = await pairTwoHosts();
 
       const result = await removeMobileHost({
         hostId: firstHostId,
         registry,
         hub,
+        relayChoices,
         deviceKeyStore: {
           remove: async () => {
             throw new Error("secure storage unavailable");

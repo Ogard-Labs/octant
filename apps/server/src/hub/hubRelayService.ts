@@ -18,10 +18,13 @@ import {
   decodeRelayAdmission,
   relayAdmissionPayload,
   type AuditActingPrincipal,
+  type HubRelayDevicesReceipt,
+  type RelayAddress,
   type HubMembershipChangedPayload,
   type HubRelayDevicesUpdate,
   type RelayAdmission,
 } from "@octant/contracts";
+import { relayUrlForPublicOrigin } from "@octant/domain";
 import { Schema } from "effect";
 import {
   WebSocketEndpoint,
@@ -30,7 +33,7 @@ import {
   type WebSocketMessage,
 } from "../webSocketRelay";
 import { publicKeyFingerprint, verifySignature } from "./hubCrypto";
-import type { HubRelayHubState, HubStatePort } from "./hubStateStore";
+import type { HubRelayHubState, HubState, HubStatePort } from "./hubStateStore";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
 /** One relayed message is one TLS record or a few; far above that is not a device. */
@@ -61,6 +64,8 @@ export interface HubRelayServiceOptions {
     deviceFingerprint: string,
   ) => Promise<RelayTunnelEnd | undefined>;
   readonly record: (change: HubMembershipChangedPayload) => void;
+  /** Where devices open this hub's relay, while it knows; named to each host in its answer. */
+  readonly address?: () => RelayAddress | undefined;
   readonly maxTunnels?: number;
   readonly admissionTimeoutMs?: number;
 }
@@ -73,8 +78,49 @@ export interface HubRelayStatus {
 
 const EMPTY: HubRelayHubState = { enabled: false, hosts: [] };
 
+function sameKeys(held: ReadonlyArray<string>, sent: ReadonlyArray<string>): boolean {
+  const keys = new Set(held);
+  const next = new Set(sent);
+  return keys.size === next.size && [...next].every((key) => keys.has(key));
+}
+
 function refuseUpgrade(socket: Duplex, status: string): void {
   socket.end(`HTTP/1.1 ${status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n`);
+}
+
+/**
+ * The relay address this host hands its spokes while it serves as the hub:
+ * the public address the person typed for their own front, or else its
+ * Funnel front on its own tailnet name, as the local Tailscale daemon reports
+ * it (`funnelName`). The roster's private names stand in until that is read; a
+ * listener bound to an IP address has none. Undefined while the relay switch
+ * or the entrance is off, or the address is not known.
+ */
+export function hubRelayAddress(
+  state: HubState,
+  hubMemberId: string,
+  funnelName?: string,
+): RelayAddress | undefined {
+  const entrance = state.publicEntrance;
+  if (state.hub?.enabled !== true || state.relayHub?.enabled !== true) return undefined;
+  if (entrance?.enabled !== true) return undefined;
+  let origin = entrance.ownFrontOrigin;
+  if (origin === undefined && entrance.funnel !== undefined) {
+    const self = state.hub.roster?.roster.members.find(
+      (member) => String(member.memberId) === hubMemberId,
+    );
+    const name = [funnelName, ...(self?.privateNames ?? [])].find((candidate) =>
+      candidate?.endsWith(".ts.net"),
+    );
+    if (name !== undefined) {
+      origin =
+        entrance.funnel.port === 443
+          ? `https://${name}`
+          : `https://${name}:${entrance.funnel.port}`;
+    }
+  }
+  if (origin === undefined) return undefined;
+  return { hubMemberId: decodeMemberId(hubMemberId), relayUrl: relayUrlForPublicOrigin(origin) };
 }
 
 export class HubRelayService {
@@ -147,27 +193,39 @@ export class HubRelayService {
     }
   }
 
-  /** Replaces the device keys one host lets through; an empty list withdraws them. */
-  receiveDevices(
-    memberId: string,
-    update: HubRelayDevicesUpdate,
-  ): { readonly status: "recorded"; readonly count: number } {
+  /**
+   * Replaces the device keys one host lets through; an empty list withdraws
+   * them. Each host sends its list again every ten minutes, so a lost one
+   * recovers; a list the hub already holds is neither saved nor journaled.
+   */
+  receiveDevices(memberId: string, update: HubRelayDevicesUpdate): HubRelayDevicesReceipt {
     const held = this.#load();
-    const others = held.hosts.filter((host) => String(host.memberId) !== memberId);
-    this.#save({
-      ...held,
-      hosts:
-        update.fingerprints.length === 0
-          ? others
-          : [...others, { memberId: decodeMemberId(memberId), fingerprints: update.fingerprints }],
-    });
-    this.#options.record({
-      change: "relay-devices-received",
-      actingPrincipal: { kind: "peer", memberId: decodeMemberId(memberId) },
-      memberId: decodeMemberId(memberId),
-    });
+    const listed = held.hosts.find((host) => String(host.memberId) === memberId)?.fingerprints;
+    if (!sameKeys(listed ?? [], update.fingerprints)) {
+      const others = held.hosts.filter((host) => String(host.memberId) !== memberId);
+      this.#save({
+        ...held,
+        hosts:
+          update.fingerprints.length === 0
+            ? others
+            : [
+                ...others,
+                { memberId: decodeMemberId(memberId), fingerprints: update.fingerprints },
+              ],
+      });
+      this.#options.record({
+        change: "relay-devices-received",
+        actingPrincipal: { kind: "peer", memberId: decodeMemberId(memberId) },
+        memberId: decodeMemberId(memberId),
+      });
+    }
     this.sweep();
-    return { status: "recorded", count: update.fingerprints.length };
+    const relay = this.#options.address?.();
+    return {
+      status: "recorded",
+      count: update.fingerprints.length,
+      ...(relay === undefined ? {} : { relay }),
+    };
   }
 
   /** The entrance's relay route; absent while the switch is off or this host is not the acting hub. */

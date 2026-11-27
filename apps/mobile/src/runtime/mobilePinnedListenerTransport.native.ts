@@ -1,10 +1,13 @@
 import { requireOptionalNativeModule } from "expo";
 import {
   createExchangeListenerFetch,
+  createRelayedExchangePort,
   type PinnedListenerTransportPort,
 } from "@octant/client-runtime";
+import type { RelayedListenerTransportPort } from "./mobileListenerFetch";
 import {
   nativePinnedTlsExchangePort,
+  nativePinnedTlsStreamPort,
   type OctantPinnedTlsNativeModule,
 } from "./pinnedTlsExchangePort";
 
@@ -34,3 +37,30 @@ export const mobilePinnedListenerTransport: PinnedListenerTransportPort = ({
           port: nativePinnedTlsExchangePort(native),
         }),
       };
+
+/**
+ * The same pinned transport through the hub's relay: the module runs the TLS
+ * over bytes the relay tunnel carries, so the pin is checked inside the
+ * tunnel exactly as at home. A build whose module has no stream never relays.
+ */
+export const mobileRelayedListenerTransport: RelayedListenerTransportPort = ({
+  origin,
+  trust,
+  hostId,
+  onTrust,
+  route,
+}) => {
+  const stream = native === null ? undefined : nativePinnedTlsStreamPort(native);
+  if (stream === undefined) return { status: "unavailable" };
+  return {
+    status: "available",
+    fetch: createExchangeListenerFetch({
+      origin,
+      trust,
+      hostId,
+      onTrust,
+      throughRelay: true,
+      port: createRelayedExchangePort({ stream, route }),
+    }),
+  };
+};

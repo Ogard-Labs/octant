@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   nativePinnedTlsExchangePort,
+  nativePinnedTlsStreamPort,
   type OctantPinnedTlsNativeModule,
 } from "./pinnedTlsExchangePort";
 
@@ -110,5 +111,56 @@ describe("the phone's native pinned exchange", () => {
     });
     expect(again).toEqual({ status: "failed", reason: "connection-failed" });
     expect(native.open).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the phone's native pinned stream through the relay", () => {
+  function nativeStream(events: ReadonlyArray<unknown>) {
+    const queue = [...events];
+    return {
+      ...nativeAnswering({ status: "failed", reason: "unreachable" }),
+      streamOpen: vi.fn(),
+      streamPush: vi.fn(),
+      streamPushEnd: vi.fn(),
+      streamPull: vi.fn(async () => queue.shift()),
+      streamCancel: vi.fn(),
+    } satisfies OctantPinnedTlsNativeModule;
+  }
+
+  it("hands the module the pins and request, and reads its events as bytes", async () => {
+    const native = nativeStream([
+      { status: "send", chunk: Buffer.from("hello").toString("base64") },
+      { status: "opened", servedPin: PIN },
+      { status: "refused" },
+    ]);
+    const port = nativePinnedTlsStreamPort(native);
+    if (port === undefined) throw new Error("No stream port.");
+    port.open("s1", { pins: [PIN], request: request.request });
+    expect(native.streamOpen).toHaveBeenCalledWith(
+      "s1",
+      null,
+      [PIN],
+      Buffer.from(request.request).toString("base64"),
+    );
+    const sent = await port.pull("s1");
+    expect(sent.status).toBe("send");
+    expect(sent.status === "send" ? Buffer.from(sent.chunk).toString() : "").toBe("hello");
+    expect(await port.pull("s1")).toEqual({ status: "opened", servedPin: PIN });
+    expect(await port.pull("s1")).toEqual({ status: "refused" });
+    port.push("s1", new Uint8Array([1, 2]));
+    expect(native.streamPush).toHaveBeenCalledWith("s1", "AQI=");
+  });
+
+  it("reads an event the module should never give as a failure, never as an opening or bytes", async () => {
+    const port = nativePinnedTlsStreamPort(
+      nativeStream([{ status: "opened" }, { status: "data", chunk: 7 }, "junk", undefined]),
+    );
+    for (let index = 0; index < 4; index += 1) {
+      expect((await port?.pull("s1"))?.status).toBe("failed");
+    }
+  });
+
+  it("offers no stream from a module built before it had one", () => {
+    expect(nativePinnedTlsStreamPort(nativeAnswering({ status: "end" }))).toBeUndefined();
   });
 });
