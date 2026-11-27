@@ -325,6 +325,66 @@ export function loadMobileWorkingTreeReview(
   }, failure);
 }
 
+/**
+ * Resolves a pull request observation's unified diff through the evidence batch
+ * route so the phone can open individual changed files from the review or its
+ * guide anchors.
+ */
+export function loadMobilePullRequestDiff(
+  transport: MobileRemoteTransport,
+  input: {
+    readonly threadId: string;
+    readonly operationId: string;
+    readonly diff: {
+      readonly contentId: string;
+      readonly byteLength: number;
+      readonly truncated?: boolean;
+    };
+  },
+): Promise<
+  MobilePaneRead<{ readonly files: ReadonlyArray<MobileDiffFile>; readonly truncated: boolean }>
+> {
+  const failure = "Pull request diff could not be read.";
+  return attempt(async () => {
+    if (input.diff.byteLength === 0) {
+      return {
+        status: "ready",
+        value: { files: [], truncated: input.diff.truncated === true },
+      };
+    }
+    const batch = await readJson(
+      await transport.authenticatedFetch({
+        method: "POST",
+        path: "/api/code/evidence/batch",
+        contentType: "application/json",
+        body: JSON.stringify({
+          threadId: input.threadId,
+          items: [{ operationId: input.operationId, contentId: input.diff.contentId }],
+        }),
+      }),
+      decodeHostAnswer(CodeEvidenceBatchResponse),
+      failure,
+    );
+    if (batch.status !== "ready") return batch;
+    if (String(batch.value.threadId) !== input.threadId) {
+      return { status: "unavailable", message: failure };
+    }
+    const text = batch.value.items.find(
+      (item) =>
+        String(item.operationId) === input.operationId &&
+        String(item.contentId) === input.diff.contentId,
+    )?.text;
+    if (text === undefined) return { status: "unavailable", message: failure };
+    return {
+      status: "ready",
+      value: {
+        files: parseMobileUnifiedDiff(text),
+        truncated: input.diff.truncated === true,
+      },
+    };
+  }, failure);
+}
+
 /** The checkout's recent commits, newest first, as desktop Review's History lists them. */
 export function loadMobileGitHistory(
   transport: MobileRemoteTransport,
