@@ -3401,13 +3401,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   ? atMenu.listId
                   : slash.open
                     ? slash.listId
-                    : mention.open
+                    : mention.listed
                       ? mentionListId
                       : pathMentionOpen
                         ? pathMentionListId
                         : undefined
               }
-              aria-expanded={atMenu.open || slash.open || mention.open || pathMentionOpen}
+              aria-expanded={atMenu.open || slash.open || mention.listed || pathMentionOpen}
               className="composer-input window-no-drag"
               id={`code-thread-composer-${String(thread.id)}`}
               onChange={(event) => {

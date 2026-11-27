@@ -541,13 +541,13 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={atMenu.open || slash.open || mention.open}
+                aria-expanded={atMenu.open || slash.open || mention.listed}
                 aria-controls={
                   atMenu.open
                     ? atMenu.listId
                     : slash.open
                       ? slash.listId
-                      : mention.open
+                      : mention.listed
                         ? mentionListId
                         : undefined
                 }

@@ -3835,13 +3835,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"
               aria-autocomplete="list"
-              aria-expanded={atMenu.open || slash.open || mention.open}
+              aria-expanded={atMenu.open || slash.open || mention.listed}
               aria-controls={
                 atMenu.open
                   ? atMenu.listId
                   : slash.open
                     ? slash.listId
-                    : mention.open
+                    : mention.listed
                       ? mentionListId
                       : undefined
               }

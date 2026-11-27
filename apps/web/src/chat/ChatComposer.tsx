@@ -269,7 +269,6 @@ export function ChatComposer(props: ChatComposerProps) {
     textarea: () => messageRef.current,
     disabled: false,
   });
-  const mentionOpen = mention.open;
   const activeMention = mention.activeOptionId;
   // `/` commands come from the host command registry mounted by the shell. A
   // skill only appears when this composer actually has the host's draft
@@ -672,7 +671,7 @@ export function ChatComposer(props: ChatComposerProps) {
           ? atMenu.listId
           : commandOpen
             ? commandListId
-            : mentionOpen
+            : mention.listed
               ? mentionListId
               : undefined
       }
@@ -682,7 +681,7 @@ export function ChatComposer(props: ChatComposerProps) {
         offeredCommands.length === 0 &&
         props.onResolveExtensionReference === undefined
           ? undefined
-          : atMenu.open || commandOpen || mentionOpen
+          : atMenu.open || commandOpen || mention.listed
       }
       className="composer-input window-no-drag"
       onChange={(event) => {
@@ -746,7 +745,7 @@ export function ChatComposer(props: ChatComposerProps) {
           )}
         </div>
       ) : null}
-      {mentionOpen ? (
+      {mention.open ? (
         <ThreadMentionTypeahead
           activeIndex={mention.activeIndex}
           {...(props.threadMentions?.busy === undefined ? {} : { busy: props.threadMentions.busy })}

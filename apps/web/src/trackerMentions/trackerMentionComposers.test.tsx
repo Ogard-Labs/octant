@@ -117,6 +117,26 @@ afterEach(() => {
 });
 
 describe.each(composers)("the # list of %s", (_name, label, composer) => {
+  it("points assistive technology at no list when nothing matches", async () => {
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) =>
+      String(input).endsWith("/api/thread-mentions/trackers")
+        ? Response.json({ candidates: [] })
+        : Response.json({ message: "unavailable" }, { status: 503 }),
+    );
+    const user = userEvent.setup();
+    render(composer());
+    const input = await screen.findByLabelText(label);
+    await waitFor(() => expect(input).toBeEnabled());
+
+    await user.type(input, "#nothing");
+    await screen.findByText(/No thread you can open matches/);
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(input).not.toHaveAttribute("aria-controls");
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+  });
+
   it("tells assistive technology which list is open and which row is highlighted", async () => {
     vi.stubGlobal("fetch", async (input: RequestInfo | URL) =>
       String(input).endsWith("/api/thread-mentions/trackers")

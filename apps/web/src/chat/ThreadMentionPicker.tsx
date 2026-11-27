@@ -77,6 +77,8 @@ export interface ThreadMentions {
 
 export interface ThreadMentionTypeaheadController {
   readonly open: boolean;
+  /** Open with rows, the only time there is a listbox to point assistive technology at. */
+  readonly listed: boolean;
   readonly activeIndex: number;
   /** The highlighted row's id within the list, whichever kind of row it is. */
   readonly activeOptionId: string | undefined;
@@ -248,6 +250,7 @@ export function useThreadMentionTypeahead(input: {
 
   return {
     open,
+    listed: open && rows > 0,
     activeIndex,
     activeOptionId,
     trackers,
