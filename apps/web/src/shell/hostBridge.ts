@@ -321,6 +321,7 @@ export type HubAdministrationOperation =
   | "push"
   | "public"
   | "public-funnel"
+  | "public-standby"
   | "webhook-create"
   | "webhook-rotate"
   | "webhook-remove"

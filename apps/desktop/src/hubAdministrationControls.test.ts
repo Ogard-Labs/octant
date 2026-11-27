@@ -227,6 +227,20 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("sends a standby's choice to serve the public entrance only with its decoded body", async () => {
+    const { calls, runtime: controls } = runtime(() =>
+      Response.json({ status: "changed", enabled: true }),
+    );
+    await sendHubAdministrationOperation(controls, "public-standby", { enabled: true });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/public/standby",
+    ]);
+    expect(
+      await sendHubAdministrationOperation(controls, "public-standby", { enabled: "on" }),
+    ).toMatchObject({ status: 400 });
+    expect(calls).toHaveLength(1);
+  });
+
   it("sends the direct sending operations only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 

@@ -8,6 +8,8 @@ export interface PublicEntranceView {
   readonly paused: boolean;
   readonly address?: string;
   readonly funnel: { readonly enabled: boolean; readonly port?: number };
+  /** This host's own choice, as a named standby, to serve the entrance while it stands in. */
+  readonly serveWhileStandingIn: boolean;
 }
 
 function field(value: unknown, key: string): unknown {
@@ -28,6 +30,7 @@ export function readPublicEntrance(value: unknown): PublicEntranceView | undefin
     paused: field(value, "paused") === true,
     ...(typeof address === "string" ? { address } : {}),
     funnel: { enabled: funnelOn, ...(typeof port === "number" ? { port } : {}) },
+    serveWhileStandingIn: field(value, "serveWhileStandingIn") === true,
   };
 }
 
@@ -49,6 +52,9 @@ export function HubPublicEntranceSection(props: {
   readonly busy: boolean;
   readonly onEntrance: (on: boolean) => void;
   readonly onFunnel: (on: boolean) => void;
+  /** This computer is a standby the hub named; only then can it choose to serve. */
+  readonly namedStandby: boolean;
+  readonly onStandbyServe: (on: boolean) => void;
 }) {
   const { view } = props;
   return (
@@ -83,6 +89,26 @@ export function HubPublicEntranceSection(props: {
               onCheckedChange={props.onFunnel}
             />
           </SettingRow>
+        )}
+        {!props.namedStandby && !view.serveWhileStandingIn ? null : (
+          // A plain row, not an indexed SettingRow: Remote access holds as
+          // many indexed settings as a page may, and search finds this one
+          // through the Public entrance row above it.
+          <div className="setrow">
+            <span className="setrow-label">Serve the public entrance</span>
+            <p className="setrow-hint">
+              While this computer stands in for the hub, answer visitor links and webhooks here. Off
+              by default.
+            </p>
+            <div className="setrow-control">
+              <OctantSwitch
+                checked={view.serveWhileStandingIn}
+                disabled={props.busy}
+                label="Serve the public entrance"
+                onCheckedChange={props.onStandbyServe}
+              />
+            </div>
+          </div>
         )}
         {!view.enabled || view.address === undefined ? null : (
           <div className="setrow">

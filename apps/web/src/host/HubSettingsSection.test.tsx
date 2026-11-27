@@ -1825,6 +1825,62 @@ describe("HubSettingsSection public entrance", () => {
     );
   });
 
+  const memberWithEntrance = (namedStandby: boolean, serveWhileStandingIn: boolean) => ({
+    hub: { enabled: false },
+    spoke: {
+      membership: "member",
+      hub: { memberId: "m-1", name: "Mac mini" },
+      grant: { items: ["roster", "standby", "public"], actProjects: [] },
+      acceptedMemberIds: [],
+      roster: { roster: { members: [] } },
+      namedStandby,
+    },
+    publicEntrance: {
+      enabled: false,
+      listening: false,
+      funnel: { enabled: false },
+      serveWhileStandingIn,
+    },
+  });
+
+  it("lets a named standby choose to serve the public entrance while it stands in", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: memberWithEntrance(true, false) },
+      "public-standby": { status: 200, body: { status: "changed", enabled: true } },
+    });
+    const serve = await screen.findByRole("switch", { name: "Serve the public entrance" });
+    expect(serve).not.toBeChecked();
+    await user.click(serve);
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "public-standby")?.body).toEqual({
+        enabled: true,
+      }),
+    );
+    expect(await screen.findByText(/^Serve the public entrance is on\./)).toBeVisible();
+  });
+
+  it("offers a member the hub never named no choice to serve", async () => {
+    renderHub({ status: { status: 200, body: memberWithEntrance(false, false) } });
+    await screen.findByRole("switch", { name: "Public entrance" });
+    expect(
+      screen.queryByRole("switch", { name: "Serve the public entrance" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says why the host refused to serve", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: { status: 200, body: memberWithEntrance(true, false) },
+      "public-standby": {
+        status: 409,
+        body: { status: "refused", kind: "not-a-named-standby" },
+      },
+    });
+    await user.click(await screen.findByRole("switch", { name: "Serve the public entrance" }));
+    expect(await screen.findByText("The hub has not named this computer a standby.")).toBeVisible();
+  });
+
   it("says why Tailscale refused Funnel", async () => {
     const user = userEvent.setup();
     renderHub({

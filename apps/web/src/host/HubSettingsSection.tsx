@@ -868,6 +868,25 @@ export function HubSettingsSection({
     await refresh();
   };
 
+  const setStandbyServe = async (on: boolean) => {
+    const reply = await act(
+      "public-standby",
+      { enabled: on },
+      "changed",
+      on
+        ? "Octant could not turn on serving while standing in."
+        : "Octant could not turn off serving while standing in.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        on
+          ? "Serve the public entrance is on. This computer answers visitor links and webhooks only while it stands in for the hub."
+          : "Serve the public entrance is off. While standing in, this computer's entrance forwards and serves nothing itself.",
+      );
+    }
+    await refresh();
+  };
+
   const setDirectPush = async (on: boolean) => {
     const reply = await act(
       "direct-push",
@@ -1468,7 +1487,7 @@ export function HubSettingsSection({
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Accept moved threads is|Push sender is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address|Saved\. A member|A member.s window can see this hub)/.test(
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Accept moved threads is|Push sender is|Serve the public entrance is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address|Saved\. A member|A member.s window can see this hub)/.test(
                 message,
               )
                 ? "success"
@@ -1833,6 +1852,8 @@ export function HubSettingsSection({
           busy={busy}
           onEntrance={(on) => void setPublicEntrance(on)}
           onFunnel={(on) => void setPublicFunnel(on)}
+          namedStandby={status.link?.namedStandby === true}
+          onStandbyServe={(on) => void setStandbyServe(on)}
           view={status.publicEntrance}
         />
       )}

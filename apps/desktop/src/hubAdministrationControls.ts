@@ -31,6 +31,7 @@ import {
   decodeHubSignInDecisionRequest,
   decodeHubPublicEntranceSwitchRequest,
   decodeHubPublicFunnelRequest,
+  decodeHubPublicStandbyServeRequest,
   decodeHubWebhookCreateRequest,
   decodeHubWebhookEndpointRequest,
   decodeHubPushSwitchRequest,
@@ -225,6 +226,12 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/public/funnel",
     decodeBody: decodeHubPublicFunnelRequest,
+  },
+  // A named standby's own choice to serve the entrance while it stands in for the hub.
+  "public-standby": {
+    method: "POST",
+    path: "/api/desktop/hub/public/standby",
+    decodeBody: decodeHubPublicStandbyServeRequest,
   },
   // This spoke's webhook endpoints; a new secret is shown once.
   "webhook-create": {
