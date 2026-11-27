@@ -1,6 +1,10 @@
 import { mobileRemoteFetch } from "../runtime/mobileRemoteFetch";
 import { createMobileListenerFetch } from "../runtime/mobileListenerFetch";
-import { mobilePinnedListenerTransport } from "../runtime/mobilePinnedListenerTransport";
+import {
+  mobilePinnedListenerTransport,
+  mobileRelayedListenerTransport,
+} from "../runtime/mobilePinnedListenerTransport";
+import { createRelayChoiceStore, type RelayChoiceStore } from "../hosts/relayChoiceStore";
 import {
   createContext,
   useCallback,
@@ -14,7 +18,10 @@ import {
 import {
   createExpoSecureDeviceKeyStore,
   createInMemoryExpoSecureStringStorage,
+  createRelayAdmissionSigner,
   createRemoteSessionBridge,
+  relayAddressFromResponse,
+  REMOTE_RELAY_ADDRESS_PATH,
   type MobileRemoteTransport,
   type RemoteSessionBridge,
   type RemoteSessionBridgeState,
@@ -65,6 +72,8 @@ export interface MobileSessionContextValue {
   readonly guestHubStore: GuestHubStore;
   /** The hosts whose one-time Full access warning this phone has had accepted. */
   readonly fullAccessWarnings: FullAccessWarningStore;
+  /** This phone's own choice, per paired computer, to reach it through its hub when away. */
+  readonly relayChoices: RelayChoiceStore;
   readonly deviceKeyStore: ReturnType<typeof createExpoSecureDeviceKeyStore>;
   /** Primary bridge used by PairingPanel connect/resume flows. */
   readonly bridge: RemoteSessionBridge;
@@ -86,6 +95,9 @@ export interface MobileSessionContextValue {
   readonly setPlacementHostId: (hostId: string | undefined) => void;
   readonly hub: MobileHostSessionHub;
 }
+
+/** How often a connected computer is asked again where its hub's relay is. */
+const RELAY_ADDRESS_REFRESH_MS = 10 * 60 * 1000;
 
 // Defined here because the shared copy file is owned elsewhere in this change.
 const HOSTS_UNREADABLE = "Couldn't read your paired computers. Pair again to continue.";
@@ -111,15 +123,20 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     () => createFullAccessWarningStore(registryStorage),
     [registryStorage],
   );
-  const listenerFetch = useMemo(
-    () =>
-      createMobileListenerFetch({
-        deviceKeyStore,
-        pinnedTransport: mobilePinnedListenerTransport,
-        platformFetch: mobileRemoteFetch,
-      }),
-    [deviceKeyStore],
-  );
+  const relayChoices = useMemo(() => createRelayChoiceStore(registryStorage), [registryStorage]);
+  const listenerFetch = useMemo(() => {
+    const sign = createRelayAdmissionSigner(deviceKeyStore);
+    return createMobileListenerFetch({
+      deviceKeyStore,
+      pinnedTransport: mobilePinnedListenerTransport,
+      platformFetch: mobileRemoteFetch,
+      relay: {
+        choiceFor: (origin) => relayChoices.read(origin),
+        transport: mobileRelayedListenerTransport,
+        admit: (origin, payload) => sign({ origin, payload }),
+      },
+    });
+  }, [deviceKeyStore, relayChoices]);
   const hub = useMemo(
     () =>
       createMobileHostSessionHub({
@@ -151,6 +168,32 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
 
   useEffect(() => bridge.subscribe(setBridgeState), [bridge]);
   useEffect(() => hub.subscribe(() => setHubEpoch((value) => value + 1)), [hub]);
+  // Each connected computer tells the phone where its hub's relay is. It
+  // answers only at home, so an answer through the relay changes nothing.
+  const relayAskedAt = useRef(new Map<string, number>());
+  useEffect(() => {
+    const ask = (): void => {
+      for (const slot of hub.slots()) {
+        if (slot.state.kind !== "ready") continue;
+        const asked = relayAskedAt.current.get(slot.registration.origin) ?? 0;
+        if (Date.now() - asked < RELAY_ADDRESS_REFRESH_MS) continue;
+        relayAskedAt.current.set(slot.registration.origin, Date.now());
+        const connection = slot.bridge.connection();
+        if (connection === undefined) continue;
+        void connection
+          .authenticatedFetch({ method: "GET", path: REMOTE_RELAY_ADDRESS_PATH })
+          .then(relayAddressFromResponse)
+          .then((learned) =>
+            learned === "unchanged"
+              ? undefined
+              : relayChoices.rememberAddress(slot.registration.origin, learned),
+          )
+          .catch(() => undefined);
+      }
+    };
+    ask();
+    return hub.subscribe(ask);
+  }, [hub, relayChoices]);
 
   useEffect(() => {
     const current = new AbortController();
@@ -249,6 +292,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     registry,
     guestHubStore,
     fullAccessWarnings,
+    relayChoices,
     deviceKeyStore,
     bridge,
     bridgeState,
@@ -294,6 +338,10 @@ function MockMobileSessionProvider(props: {
     () => createFullAccessWarningStore(createInMemoryMobileHostRegistryStorage()),
     [],
   );
+  const relayChoices = useMemo(
+    () => createRelayChoiceStore(createInMemoryMobileHostRegistryStorage()),
+    [],
+  );
   const bridge = useMemo(
     () =>
       createRemoteSessionBridge({
@@ -336,6 +384,7 @@ function MockMobileSessionProvider(props: {
     registry,
     guestHubStore,
     fullAccessWarnings,
+    relayChoices,
     deviceKeyStore,
     bridge,
     bridgeState: bridge.getState(),

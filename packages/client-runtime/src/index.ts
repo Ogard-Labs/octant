@@ -85,6 +85,7 @@ export * from "./remoteListenerTrust";
 export * from "./pinnedListenerExchange";
 export * from "./pairedHostRelay";
 export * from "./relayTunnel";
+export * from "./relayedPinnedExchange";
 export * from "./remoteSessionBridge";
 export * from "./connectionSupervisor";
 export * from "./shellClient";

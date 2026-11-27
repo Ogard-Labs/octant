@@ -5,7 +5,13 @@
 // entrance, running its own pinned TLS inside, while a proxy in front of the
 // entrance records every byte the hub and its front could see.
 
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as joinPath, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import { request as httpRequest } from "node:http";
 import { createServer as createTcpServer, connect as connectTcp, type Server } from "node:net";
 import { HOST_HELLO_CLIENT_NONCE_PARAMETER } from "@octant/contracts/remote-access";
@@ -16,15 +22,20 @@ import {
   testOnlyListenerTls,
 } from "@octant/client-runtime/remote-listener-tls-node";
 import {
+  ListenerTrustRefused,
+  createExchangeListenerFetch,
   createRelayFallbackFetch,
+  createRelayedExchangePort,
   createRemoteConnection,
+  type PinnedTlsStreamEvent,
+  type PinnedTlsStreamPort,
   parseRelayAdmissionPayload,
   relayAddressFromResponse,
   relayRouteFor,
   type PairedHostRelayChoice,
 } from "@octant/client-runtime";
 import { decodeRelayAddress, type RelayAddress } from "@octant/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
 import { startPublicEntrance, type PublicEntrance } from "./publicEntrance";
 
@@ -433,4 +444,197 @@ describe("your own devices through the hub", () => {
     expect(refused.status).toBe(403);
     expect(await refused.json()).toEqual({ status: "refused", kind: "relayed-admin-refused" });
   }, 60_000);
+});
+
+// The phone's native TLS stream, built from the module's own sources and run
+// as a command-line harness, carried through the same relay: the pin check
+// inside the tunnel is the phone's own, not Node's.
+const PHONE_MODULE = resolve(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "../../../mobile/modules/octant-pinned-tls",
+);
+
+function has(command: string, args: ReadonlyArray<string>): boolean {
+  try {
+    execFileSync(command, [...args], { stdio: "ignore", timeout: 60_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const swiftcFound = process.platform === "darwin" && has("xcrun", ["--find", "swiftc"]);
+const kotlincFound = has("kotlinc", ["-version"]) && has("java", ["-version"]);
+const kotlincRequired = process.env.OCTANT_REQUIRE_KOTLINC === "1";
+const nativeBuild = mkdtempSync(joinPath(tmpdir(), "octant-pinned-tls-stream-"));
+let swiftStream: string | undefined;
+let kotlinStream: string | undefined;
+
+beforeAll(() => {
+  if (swiftcFound) {
+    const binary = joinPath(nativeBuild, "pinned-tls-stream");
+    execFileSync(
+      "xcrun",
+      [
+        "swiftc",
+        "-o",
+        binary,
+        joinPath(PHONE_MODULE, "ios/PinnedTlsExchange.swift"),
+        joinPath(PHONE_MODULE, "ios/PinnedTlsStream.swift"),
+        joinPath(PHONE_MODULE, "test/stream/main.swift"),
+      ],
+      { stdio: "inherit", timeout: 240_000 },
+    );
+    if (existsSync(binary)) swiftStream = binary;
+  }
+  if (kotlincFound) {
+    const jar = joinPath(nativeBuild, "pinned-tls-stream.jar");
+    execFileSync(
+      "kotlinc",
+      [
+        joinPath(PHONE_MODULE, "android/src/main/java/sh/octant/pinnedtls/PinnedTlsExchange.kt"),
+        joinPath(PHONE_MODULE, "android/src/main/java/sh/octant/pinnedtls/PinnedTlsStream.kt"),
+        joinPath(PHONE_MODULE, "test/android/StreamMain.kt"),
+        joinPath(PHONE_MODULE, "test/android/Base64.kt"),
+        "-include-runtime",
+        "-d",
+        jar,
+      ],
+      { stdio: "inherit", timeout: 240_000 },
+    );
+    if (existsSync(jar)) kotlinStream = jar;
+  }
+}, 480_000);
+
+afterAll(() => {
+  rmSync(nativeBuild, { recursive: true, force: true });
+});
+
+/** The native stream port over one harness process per stream, as the module would run it. */
+function harnessStreams(
+  command: () => readonly [string, ReadonlyArray<string>],
+): PinnedTlsStreamPort {
+  const running = new Map<
+    string,
+    {
+      readonly write: (line: object) => void;
+      readonly next: () => Promise<PinnedTlsStreamEvent>;
+      readonly kill: () => void;
+    }
+  >();
+  return {
+    open: (id, input) => {
+      const [binary, args] = command();
+      const child = spawn(binary, [...args], { stdio: ["pipe", "pipe", "inherit"] });
+      cleanups.push(() => void child.kill());
+      const queued: PinnedTlsStreamEvent[] = [];
+      const waiting: Array<(event: PinnedTlsStreamEvent) => void> = [];
+      const deliver = (event: PinnedTlsStreamEvent) => {
+        const taker = waiting.shift();
+        if (taker === undefined) queued.push(event);
+        else taker(event);
+      };
+      createInterface({ input: child.stdout }).on("line", (line) => {
+        const event = JSON.parse(line) as Record<string, string>;
+        const chunk =
+          event.chunk === undefined
+            ? undefined
+            : Uint8Array.from(Buffer.from(event.chunk, "base64"));
+        deliver(
+          (chunk === undefined ? event : { ...event, chunk }) as unknown as PinnedTlsStreamEvent,
+        );
+      });
+      child.on("exit", () => deliver({ status: "end" }));
+      const write = (line: object) => {
+        if (child.stdin.writable) child.stdin.write(`${JSON.stringify(line)}\n`);
+      };
+      write({
+        pins: kotlinStream !== undefined && binary === "java" ? input.pins.join(",") : input.pins,
+        request: Buffer.from(input.request).toString("base64"),
+      });
+      running.set(id, {
+        write,
+        next: () =>
+          new Promise((resolveEvent) => {
+            const event = queued.shift();
+            if (event === undefined) waiting.push(resolveEvent);
+            else resolveEvent(event);
+          }),
+        kill: () => void child.kill(),
+      });
+    },
+    push: (id, chunk) => running.get(id)?.write({ push: Buffer.from(chunk).toString("base64") }),
+    pushEnd: (id) => running.get(id)?.write({ end: true }),
+    pull: async (id) => (await running.get(id)?.next()) ?? { status: "end" },
+    cancel: (id) => running.get(id)?.kill(),
+  };
+}
+
+const phoneStreams = [
+  {
+    name: "the phone's iOS stream",
+    runs: () => swiftcFound,
+    command: (): readonly [string, ReadonlyArray<string>] => {
+      if (swiftStream === undefined) throw new Error("The iOS stream was not built.");
+      return [swiftStream, []];
+    },
+  },
+  {
+    name: "the phone's Android stream",
+    runs: () => kotlincFound || kotlincRequired,
+    command: (): readonly [string, ReadonlyArray<string>] => {
+      if (kotlinStream === undefined) throw new Error("The Android stream was not built.");
+      return ["java", ["-cp", kotlinStream, "sh.octant.pinnedtls.StreamMainKt"]];
+    },
+  },
+];
+
+describe.each(phoneStreams)("a phone through the hub over $name", ({ runs, command }) => {
+  async function phoneFetch(pinOverride?: string) {
+    const scene = await setUp();
+    const fetch = createExchangeListenerFetch({
+      origin: scene.spoke.origin,
+      trust: { current: { kind: "pinned", pin: pinOverride ?? scene.pin } },
+      throughRelay: true,
+      port: createRelayedExchangePort({
+        stream: harnessStreams(command),
+        route: {
+          url: `ws://127.0.0.1:${scene.front.port}/relay/v1`,
+          targetMemberId: scene.spoke.hostId,
+          admit: async (payload) => ({
+            signature: scene.device.sign(payload),
+            deviceSpki: scene.device.spki,
+          }),
+          timeoutMs: 5_000,
+        },
+      }),
+    });
+    return { ...scene, fetch };
+  }
+
+  it.runIf(runs())(
+    "carries the phone's own pinned TLS to its host, and the hub sees only ciphertext",
+    async () => {
+      const { fetch, spoke, front } = await phoneFetch();
+      const marker = randomBytes(32).toString("base64url");
+      const url = new URL("/api/remote/hello", spoke.origin);
+      url.searchParams.set(HOST_HELLO_CLIENT_NONCE_PARAMETER, marker);
+      const response = await fetch(url.href);
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(await response.json())).toContain(marker);
+      expect(front.seen().includes(Buffer.from(marker))).toBe(false);
+    },
+    60_000,
+  );
+
+  it.runIf(runs())(
+    "refuses a host whose pin differs inside the tunnel, before any request byte",
+    async () => {
+      const { fetch, spoke } = await phoneFetch(`sha256-${randomBytes(32).toString("base64url")}`);
+      await expect(fetch(`${spoke.origin}/api/remote/hello`)).rejects.toBeInstanceOf(
+        ListenerTrustRefused,
+      );
+    },
+    60_000,
+  );
 });

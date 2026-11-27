@@ -103,6 +103,12 @@ export function createExchangeListenerFetch(options: {
     previous: ListenerOriginTrust,
     next: ListenerOriginTrust,
   ) => Promise<void> | void;
+  /**
+   * The port carries the bytes through the hub's relay rather than dialling:
+   * no name is resolved and no address judged, since none is reached from
+   * here. The pin rule is the same.
+   */
+  readonly throughRelay?: true;
 }): typeof globalThis.fetch {
   const match = HTTPS_ORIGIN.exec(options.origin);
   const host = match?.[1];
@@ -147,14 +153,20 @@ export function createExchangeListenerFetch(options: {
       // naming a hash this client does not know.
       throw new ListenerTrustRefused(refusalFor(options.trust, undefined, now()));
     }
-    let addresses: ReadonlyArray<string>;
-    try {
-      addresses = isAddress ? [hostname] : await options.port.resolve(hostname);
-    } catch {
-      throw new ListenerUnreachable();
+    let judged: { readonly address: string };
+    if (options.throughRelay === true) {
+      judged = { address: hostname };
+    } else {
+      let addresses: ReadonlyArray<string>;
+      try {
+        addresses = isAddress ? [hostname] : await options.port.resolve(hostname);
+      } catch {
+        throw new ListenerUnreachable();
+      }
+      const judgement = judgeListenerAddresses(addresses);
+      if (judgement.status === "refused") throw new ListenerTrustRefused(judgement.reason);
+      judged = judgement;
     }
-    const judged = judgeListenerAddresses(addresses);
-    if (judged.status === "refused") throw new ListenerTrustRefused(judged.reason);
 
     const lines = [
       `${method} ${path} HTTP/1.1`,

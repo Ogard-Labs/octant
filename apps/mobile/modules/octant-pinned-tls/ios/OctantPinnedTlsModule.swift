@@ -1,12 +1,16 @@
 // The phone's pinned listener transport, as the Expo module the client
 // runtime's exchange port calls: open an exchange, then read its reply one
-// chunk at a time. Bytes cross as base64 strings.
+// chunk at a time. Bytes cross as base64 strings. A stream is the same
+// exchange over bytes the app carries through the hub's relay: the app
+// pushes the listener's ciphertext in and pulls events, ciphertext to send
+// among them, one at a time.
 
 import ExpoModulesCore
 import Foundation
 
 public class OctantPinnedTlsModule: Module {
   private var running: [String: PinnedTlsExchange] = [:]
+  private var streams: [String: (stream: PinnedTlsStream, inbox: StreamInbox)] = [:]
   private let lock = NSLock()
 
   public func definition() -> ModuleDefinition {
@@ -66,6 +70,54 @@ public class OctantPinnedTlsModule: Module {
     Function("cancel") { (id: String) in
       self.lock.withLock { self.running.removeValue(forKey: id) }?.cancel()
     }
+
+    Function("streamOpen") { (id: String, serverName: String?, pins: [String], request: String) in
+      // A request that does not decode opens nothing; its pull then reads as ended.
+      guard let bytes = Data(base64Encoded: request) else { return }
+      let inbox = StreamInbox()
+      let stream = PinnedTlsStream(serverName: serverName, pins: pins, request: bytes) { event in
+        switch event {
+        case .send(let chunk): inbox.put(["status": "send", "chunk": chunk.base64EncodedString()])
+        case .opened(let servedPin): inbox.put(["status": "opened", "servedPin": servedPin])
+        case .refused(let servedPin):
+          var refused: [String: Any] = ["status": "refused"]
+          if let servedPin { refused["servedPin"] = servedPin }
+          inbox.put(refused)
+        case .failed(let reason): inbox.put(["status": "failed", "reason": reason])
+        case .data(let chunk): inbox.put(["status": "data", "chunk": chunk.base64EncodedString()])
+        case .end: inbox.put(["status": "end"])
+        }
+      }
+      self.lock.withLock { self.streams[id] = (stream, inbox) }
+      stream.begin()
+    }
+
+    Function("streamPush") { (id: String, chunk: String) in
+      guard let bytes = Data(base64Encoded: chunk) else { return }
+      self.lock.withLock { self.streams[id] }?.stream.receive(bytes)
+    }
+
+    Function("streamPushEnd") { (id: String) in
+      self.lock.withLock { self.streams[id] }?.stream.receiveEnd()
+    }
+
+    AsyncFunction("streamPull") { (id: String, promise: Promise) in
+      guard let held = self.lock.withLock({ self.streams[id] }) else {
+        promise.resolve(["status": "end"])
+        return
+      }
+      held.inbox.take { event in
+        let status = event["status"] as? String
+        if status != "send" && status != "opened" && status != "data" {
+          self.lock.withLock { _ = self.streams.removeValue(forKey: id) }
+        }
+        promise.resolve(event)
+      }
+    }
+
+    Function("streamCancel") { (id: String) in
+      self.lock.withLock { self.streams.removeValue(forKey: id) }?.stream.cancel()
+    }
   }
 
   private func forget(_ id: String) {
@@ -93,5 +145,34 @@ public class OctantPinnedTlsModule: Module {
       cursor = entry.pointee.ai_next
     }
     return found
+  }
+}
+
+/// A stream's events in order, handed to one waiting pull at a time.
+private final class StreamInbox {
+  private let lock = NSLock()
+  private var queued: [[String: Any]] = []
+  private var waiting: [([String: Any]) -> Void] = []
+
+  func put(_ event: [String: Any]) {
+    let taker: (([String: Any]) -> Void)? = lock.withLock {
+      if waiting.isEmpty {
+        queued.append(event)
+        return nil
+      }
+      return waiting.removeFirst()
+    }
+    taker?(event)
+  }
+
+  func take(_ completion: @escaping ([String: Any]) -> Void) {
+    let event: [String: Any]? = lock.withLock {
+      if queued.isEmpty {
+        waiting.append(completion)
+        return nil
+      }
+      return queued.removeFirst()
+    }
+    if let event { completion(event) }
   }
 }
