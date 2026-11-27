@@ -948,8 +948,9 @@ const NUMBER_SEARCH_TERM = /^#([1-9][0-9]{0,8})$/;
 
 /**
  * Compose the GitHub search query from bounded client terms. Unknown
- * `qualifier:` tokens are dropped so the client can never inject repo,
- * type, or other search syntax.
+ * `qualifier:` tokens never reach GitHub as syntax, so the client cannot inject
+ * repo, type, or other search terms: a title-only search keeps them as quoted
+ * title text (`fix:` opens many titles), and the others drop them.
  */
 function composeIssueSearchQuery(input: {
   readonly owner: string;
@@ -980,7 +981,7 @@ function composeIssueSearchQuery(input: {
       numbers.push(numbered[1]);
       continue;
     }
-    if (token.includes(":")) continue;
+    if (token.includes(":") && input.scope !== "titles") continue;
     const cleaned = token.replaceAll(/["\\]/g, "");
     if (cleaned.length > 0) titleParts.push(cleaned);
   }

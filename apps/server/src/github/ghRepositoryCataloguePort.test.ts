@@ -433,6 +433,26 @@ describe("searchIssuesAndPullRequests", () => {
     expect(path).not.toContain("type:issue");
   });
 
+  it("searches a title word with a colon as plain text, which cannot leave the repository", async () => {
+    const { port, run } = portReturning([[searchItem()]]);
+
+    await port.searchIssuesAndPullRequests(
+      {
+        owner: "octant",
+        name: "octant",
+        query: 'fix: repo:attacker/secrets"',
+        pageSize: 10,
+        state: "all",
+        match: "title",
+      },
+      new AbortController().signal,
+    );
+
+    const path = decodeURIComponent(String(run.mock.calls.at(0)));
+    // Inside the quotes GitHub reads both words as title text, not qualifiers.
+    expect(path).toContain('q=repo:octant/octant "fix: repo:attacker/secrets" in:title&');
+  });
+
   it("refuses a repository it cannot name safely before spawning gh", async () => {
     const { port, run } = portReturning([[]]);
 
