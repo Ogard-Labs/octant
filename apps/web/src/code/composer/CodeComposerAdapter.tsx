@@ -475,7 +475,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     setPrompt(suggestion.prompt);
     textareaRef.current?.focus();
   };
-  const mentionListId = "code-new-thread-mentions";
+  const mentionListId = useId();
   const images = useWorkComposerImages();
   // A model that cannot read images may still take one when Sees images can
   // describe it; the host decides again when the turn starts.
@@ -1686,14 +1686,24 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={atMenu.open || slash.open}
-                aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
+                aria-expanded={atMenu.open || slash.open || mention.open}
+                aria-controls={
+                  atMenu.open
+                    ? atMenu.listId
+                    : slash.open
+                      ? slash.listId
+                      : mention.open
+                        ? mentionListId
+                        : undefined
+                }
                 aria-activedescendant={
                   atMenu.active !== undefined
                     ? `${atMenu.listId}-${atMenu.active.id}`
-                    : slash.active === undefined
-                      ? undefined
-                      : `${slash.listId}-${slash.active.id}`
+                    : slash.active !== undefined
+                      ? `${slash.listId}-${slash.active.id}`
+                      : mention.activeOptionId === undefined
+                        ? undefined
+                        : `${mentionListId}-${mention.activeOptionId}`
                 }
                 autoFocus
                 className="composer-input"
