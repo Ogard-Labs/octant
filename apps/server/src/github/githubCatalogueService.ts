@@ -257,6 +257,9 @@ export class GithubCatalogueService {
 
   async #observeSnapshot(signal: AbortSignal): Promise<GithubAuthenticationSnapshot> {
     const snapshot = await this.#snapshot(signal);
+    // A check its caller cancelled reads as no account, which is not an account
+    // switch: a `#` search is cancelled every time its query changes.
+    if (signal.aborted) return snapshot;
     const accountKey = `${snapshot.account?.login ?? ""}`;
     // A different active account must never see the previous account's cached
     // catalogue, known rows, or recents, and must not inherit that account's

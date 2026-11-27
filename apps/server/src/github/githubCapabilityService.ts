@@ -92,6 +92,9 @@ export class GithubCapabilityService {
     } catch {
       return undefined;
     }
+    // A cancelled probe command reads as a refused operation, so caching it
+    // would deny every other caller until the entry expired.
+    if (signal.aborted) return undefined;
     this.#cachedProbes = { results, at: this.#now() };
     return results;
   }
