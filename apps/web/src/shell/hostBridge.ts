@@ -324,6 +324,8 @@ export type HubAdministrationOperation =
   | "webhook-create"
   | "webhook-rotate"
   | "webhook-remove"
+  | "relay"
+  | "relay-device"
   | "direct-push"
   | "direct-push-environment"
   | "direct-push-credential"

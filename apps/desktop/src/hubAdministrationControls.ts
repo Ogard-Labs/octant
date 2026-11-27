@@ -34,6 +34,8 @@ import {
   decodeHubWebhookCreateRequest,
   decodeHubWebhookEndpointRequest,
   decodeHubPushSwitchRequest,
+  decodeHubRelayDeviceRequest,
+  decodeHubRelaySwitchRequest,
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
   decodeHubWakeSwitchRequest,
@@ -239,6 +241,17 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/webhooks/remove",
     decodeBody: decodeHubWebhookEndpointRequest,
+  },
+  // The hub's device relay switch, and which of this host's paired devices may come through it.
+  relay: {
+    method: "POST",
+    path: "/api/desktop/hub/relay",
+    decodeBody: decodeHubRelaySwitchRequest,
+  },
+  "relay-device": {
+    method: "POST",
+    path: "/api/desktop/hub/relay/devices",
+    decodeBody: decodeHubRelayDeviceRequest,
   },
   "direct-push": {
     method: "POST",

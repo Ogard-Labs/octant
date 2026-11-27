@@ -202,6 +202,31 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("sends the device relay switch and one device's choice only with their decoded bodies", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
+
+    await sendHubAdministrationOperation(controls, "relay", { enabled: true });
+    await sendHubAdministrationOperation(controls, "relay-device", {
+      deviceId: "device-1",
+      allowed: false,
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/relay",
+      "http://127.0.0.1:4317/api/desktop/hub/relay/devices",
+    ]);
+
+    for (const [operation, body] of [
+      ["relay", { enabled: true, devices: [] }],
+      ["relay-device", { deviceId: "", allowed: true }],
+      ["relay-device", { deviceId: "device-1" }],
+    ] as const) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(2);
+  });
+
   it("sends the direct sending operations only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 

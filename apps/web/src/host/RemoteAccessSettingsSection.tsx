@@ -555,6 +555,10 @@ export function RemoteAccessSettingsSection({
     }
   }, [mintedCode, listener.kind, codeListener?.origin, codeListener?.pin]);
   const activeDevices = devices.filter((device) => device.state === "active");
+  const deviceNames = useMemo(
+    () => new Map(devices.map((device) => [String(device.deviceId), device.deviceLabel])),
+    [devices],
+  );
 
   return (
     <section
@@ -1136,6 +1140,7 @@ export function RemoteAccessSettingsSection({
           pairing={bridge}
           {...(ownerUnlock === undefined ? {} : { ownerUnlock })}
           {...(projectNames === undefined ? {} : { projectNames })}
+          deviceNames={deviceNames}
         />
       )}
       {pairedComputers === undefined ? null : (

@@ -45,6 +45,7 @@ import { PairingCodeQr } from "./PairingCodeQr";
 // The public entrance's own screens load as their own chunks: the renderer has
 // no room left for them in the main one (hub-and-spokes.md, slice 25).
 const HubWebhooksSection = lazy(() => import("./HubWebhooksSection"));
+const HubDeviceRelaySection = lazy(() => import("./HubDeviceRelaySection"));
 
 /**
  * The hub role and hub membership of this host. Every action goes through the
@@ -72,6 +73,8 @@ export interface HubSettingsSectionProps {
    * item names. A saved id missing here stays listed so it can be unticked.
    */
   readonly projectNames?: ReadonlyMap<string, string>;
+  /** This computer's paired devices' names by device id, for the device relay list. */
+  readonly deviceNames?: ReadonlyMap<string, string>;
 }
 
 const NO_PROJECTS: ReadonlyMap<string, string> = new Map();
@@ -314,6 +317,7 @@ interface HubStatus {
    */
   readonly entrance: {
     readonly webhooks: unknown;
+    readonly relay: unknown;
   };
   /** Whether this computer takes work other members delegate; absent where delegation is not composed. */
   readonly delegationAccepting?: boolean;
@@ -486,6 +490,7 @@ export function HubSettingsSection({
   ownerUnlock,
   now,
   projectNames = NO_PROJECTS,
+  deviceNames = NO_PROJECTS,
 }: HubSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   /** The public half of the unlock key made for the join in progress; the private half never leaves the Secure Enclave. */
@@ -1843,6 +1848,17 @@ export function HubSettingsSection({
             now={clock}
           />
         )}
+        {status === undefined || (!hubOn && status.link?.membership !== "member") ? null : (
+          <HubDeviceRelaySection
+            body={status.entrance.relay}
+            deviceNames={deviceNames}
+            hubOn={hubOn}
+            member={status.link?.membership === "member"}
+            onChanged={refresh}
+            relayGranted={status.link?.grant.items.includes("relay") === true}
+            request={request}
+          />
+        )}
       </Suspense>
 
       {!hubOn || status === undefined ? null : (
@@ -2634,7 +2650,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const pairedMergeUnlock = field(body, "pairedMergeUnlock") === true;
   const ownerApprovalAnswerUnlock = field(body, "ownerApprovalAnswerUnlock") === true;
   const delegationAccepting = field(field(body, "delegation"), "accepting");
-  const entrance = { webhooks: field(body, "webhooks") };
+  const entrance = { webhooks: field(body, "webhooks"), relay: field(body, "relay") };
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
