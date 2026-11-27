@@ -7,9 +7,12 @@ import {
   CodeBoardView,
   type CodeThread,
   type CodeThreadReviewState,
+  type ProviderModelOptionValues,
+  type ThreadBoardPullRequestSummary,
   type WorkThread,
   ChatBootstrap,
   ChatCommandResult,
+  ChatNavigation,
   CodeBootstrap,
   WorkThreadBootstrap,
   decodeHostAnswer,
@@ -49,11 +52,23 @@ export interface MobileThreadRuntimeReport {
 export interface MobileWaitingAsk {
   readonly label: string;
   readonly text?: string;
+  /** A choice the person makes (a decision or a proposal); any other wait is absent here. */
+  readonly decision?: true;
+  /** The agent marked the decision urgent. */
+  readonly urgent?: true;
 }
 
 /** How a row's detail line names its waiting ask. */
 export function mobileWaitingAskLine(ask: MobileWaitingAsk): string {
   return ask.text === undefined ? ask.label : `${ask.label}: ${ask.text}`;
+}
+
+/** The pull requests the host's Code board names for a thread. */
+export interface MobileRowPullRequests {
+  /** The first one's number. */
+  readonly number: number;
+  readonly count: number;
+  readonly state: ThreadBoardPullRequestSummary["state"];
 }
 
 export interface MobileInboxRow {
@@ -64,10 +79,17 @@ export interface MobileInboxRow {
   readonly status: string;
   readonly freshness: string;
   readonly reviewState?: MobileCodeReviewState;
+  readonly pullRequests?: MobileRowPullRequests;
   /** The thread's Project; a Chat with no folder has none. */
   readonly projectId?: string;
+  /** The provider that answers here; a row known only from an ask has none. */
+  readonly providerInstanceId?: string;
   readonly pinned?: boolean;
   readonly live?: MobileThreadLiveState;
+  /** How far the thread's own activity has come, as its computer's journal position. */
+  readonly lastSequence?: number;
+  /** Activity past what this phone has read: the phone's own, no computer sends it. */
+  readonly unread?: boolean;
   /** The oldest approval, question or other ask the host says waits on the person here. */
   readonly waitingAsk?: MobileWaitingAsk;
   /** The thread's aggregate version, which a row action sends as its expected version. */
@@ -164,7 +186,12 @@ async function decodeJson<T>(
   }
 }
 
-function chatRow(hostId: string, thread: ChatThread): MobileInboxRow {
+function chatRow(
+  hostId: string,
+  thread: ChatThread,
+  live?: MobileThreadLiveState,
+  lastSequence?: number,
+): MobileInboxRow {
   return {
     hostId,
     mode: "chat",
@@ -172,8 +199,11 @@ function chatRow(hostId: string, thread: ChatThread): MobileInboxRow {
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    providerInstanceId: String(thread.providerInstanceId),
     ...restFields(thread),
     ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
+    ...(live === undefined ? {} : { live }),
+    ...(lastSequence === undefined ? {} : { lastSequence }),
   };
 }
 
@@ -185,6 +215,7 @@ function workRow(hostId: string, thread: WorkThread, live?: MobileThreadLiveStat
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    providerInstanceId: String(thread.providerInstanceId),
     projectId: String(thread.projectId),
     ...restFields(thread),
     ...(live === undefined ? {} : { live }),
@@ -196,6 +227,7 @@ function codeRow(
   thread: CodeThread,
   reviewState?: MobileCodeReviewState,
   live?: MobileThreadLiveState,
+  lastSequence?: number,
 ): MobileInboxRow {
   return {
     hostId,
@@ -204,11 +236,13 @@ function codeRow(
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    providerInstanceId: String(thread.providerInstanceId),
     projectId: String(thread.projectId),
     ...restFields(thread),
     ...(thread.pinned === true ? { pinned: true } : {}),
     ...(reviewState === undefined ? {} : { reviewState }),
     ...(live === undefined ? {} : { live }),
+    ...(lastSequence === undefined ? {} : { lastSequence }),
   };
 }
 
@@ -219,6 +253,10 @@ interface MobileInboxBootstrapRows {
   readonly codeThreads: ReadonlyArray<CodeThread>;
   readonly workRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
   readonly codeRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
+  readonly chatRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
+  /** Journal positions by thread id; a thread with none has reported no activity. */
+  readonly chatActivity?: ReadonlyMap<string, number>;
+  readonly codeActivity?: ReadonlyMap<string, number>;
   readonly failure?: MobileInboxFailure;
 }
 
@@ -241,13 +279,23 @@ export function normalizeMobileInbox(input: {
   readonly codeReviewStates?: ReadonlyMap<string, MobileCodeReviewState>;
   readonly workRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
   readonly codeRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
+  readonly chatRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
+  readonly chatActivity?: ReadonlyMap<string, number>;
+  readonly codeActivity?: ReadonlyMap<string, number>;
 }): ReadonlyArray<MobileInboxRow> {
   const reportFor = (
     reports: ReadonlyArray<MobileThreadRuntimeReport> | undefined,
     threadId: string,
   ) => reports?.find((report) => String(report.threadId) === threadId);
   return sortMobileInboxRows([
-    ...input.chatThreads.map((thread) => chatRow(input.hostId, thread)),
+    ...input.chatThreads.map((thread) =>
+      chatRow(
+        input.hostId,
+        thread,
+        mobileThreadLiveState(reportFor(input.chatRuntime, String(thread.id))),
+        input.chatActivity?.get(String(thread.id)),
+      ),
+    ),
     ...input.workThreads.map((thread) =>
       workRow(
         input.hostId,
@@ -261,6 +309,7 @@ export function normalizeMobileInbox(input: {
         thread,
         input.codeReviewStates?.get(String(thread.id)),
         mobileThreadLiveState(reportFor(input.codeRuntime, String(thread.id))),
+        input.codeActivity?.get(String(thread.id)),
       ),
     ),
   ]);
@@ -287,6 +336,7 @@ async function fetchMobileInboxBootstrapRows(
     transport.authenticatedFetch({ method: "GET", path: "/api/chat/bootstrap" }),
     transport.authenticatedFetch({ method: "GET", path: "/api/work/threads/bootstrap" }),
     transport.authenticatedFetch({ method: "GET", path: "/api/code/bootstrap" }),
+    transport.authenticatedFetch({ method: "GET", path: "/api/chat/navigation" }),
   ]);
   const failures: MobileInboxFailure[] = [];
   const decodeBootstrap = async <T>(
@@ -322,6 +372,10 @@ async function fetchMobileInboxBootstrapRows(
     "Code bootstrap failed over the remote session.",
   );
 
+  // The run state and position of each Chat, which its bootstrap leaves out. A
+  // computer that answers without them still lists its Chats, quiet.
+  const chatNavigation = await chatNavigationThreads(settled[3]);
+
   return {
     hostId: transport.hostId,
     chatThreads: chat?.threads ?? [],
@@ -329,15 +383,35 @@ async function fetchMobileInboxBootstrapRows(
     codeThreads: code?.threads ?? [],
     workRuntime: work?.runtime ?? [],
     codeRuntime: code?.runtime ?? [],
+    chatRuntime: chatNavigation.map((thread) => ({
+      threadId: thread.id,
+      executing: thread.executing,
+      ...(thread.awaitingInput === undefined ? {} : { awaitingInput: thread.awaitingInput }),
+    })),
+    chatActivity: new Map(chatNavigation.map((thread) => [String(thread.id), thread.lastSequence])),
+    codeActivity: new Map(
+      (code?.activity ?? []).map((entry) => [String(entry.threadId), entry.lastSequence]),
+    ),
     ...(failures[0] === undefined ? {} : { failure: failures[0] }),
   };
+}
+
+async function chatNavigationThreads(
+  result: PromiseSettledResult<Response> | undefined,
+): Promise<ChatNavigation["threads"]> {
+  if (result === undefined || result.status === "rejected" || !result.value.ok) return [];
+  try {
+    return decodeHostAnswer(ChatNavigation)(await result.value.json()).threads;
+  } catch {
+    return [];
+  }
 }
 
 function rowsFromMobileInboxBootstrap(
   input: MobileInboxBootstrapRows,
   board?: CodeBoardView,
 ): ReadonlyArray<MobileInboxRow> {
-  return normalizeMobileInbox({
+  const rows = normalizeMobileInbox({
     ...input,
     ...(board === undefined
       ? {}
@@ -347,6 +421,29 @@ function rowsFromMobileInboxBootstrap(
           ),
         }),
   });
+  if (board === undefined) return rows;
+  const pullRequests = new Map(
+    board.cards.map((card) => [String(card.threadId), cardPullRequests(card)] as const),
+  );
+  return rows.map((row) => {
+    const held = row.mode === "code" ? pullRequests.get(row.threadId) : undefined;
+    return held === undefined ? row : { ...row, pullRequests: held };
+  });
+}
+
+/** A delivery branch's linked pull request stands in until the board has summaries. */
+function cardPullRequests(card: CodeBoardView["cards"][number]): MobileRowPullRequests | undefined {
+  const [first] = card.pullRequestSummaries.items;
+  if (first !== undefined) {
+    return {
+      number: first.identity.number,
+      count: card.pullRequestSummaries.items.length + card.pullRequestSummaries.hiddenCount,
+      state: first.state,
+    };
+  }
+  return card.linkedPullRequest.kind === "linked"
+    ? { number: card.linkedPullRequest.number, count: 1, state: card.linkedPullRequest.state }
+    : undefined;
 }
 
 /** Fan-out Chat/Work/Code bootstraps over an authenticated remote transport. */
@@ -462,7 +559,12 @@ function pendingRequestAsk(item: unknown): MobileListedAsk | undefined {
       request.mode === "code" && request.kind === "approval" && request.browserOrigin !== undefined
         ? WAITING_ASK_LABELS["browser-approval"]
         : PENDING_REQUEST_LABELS[request.kind];
-    return listedAsk(request, { label, text: request.text });
+    return listedAsk(request, {
+      label,
+      text: request.text,
+      ...(request.kind === "decision" ? { decision: true } : {}),
+      ...(request.kind === "decision" && request.urgent === true ? { urgent: true } : {}),
+    });
   } catch {
     return unknownAsk(item);
   }
@@ -471,7 +573,13 @@ function pendingRequestAsk(item: unknown): MobileListedAsk | undefined {
 function waitingAskItem(item: unknown): MobileListedAsk | undefined {
   try {
     const ask = decodeWaitingAskItem(item);
-    return listedAsk(ask, { label: WAITING_ASK_LABELS[ask.kind], text: ask.text });
+    return listedAsk(ask, {
+      label: WAITING_ASK_LABELS[ask.kind],
+      text: ask.text,
+      ...(ask.kind === "memory-proposal" || ask.kind === "routine-proposal"
+        ? { decision: true }
+        : {}),
+    });
   } catch {
     return unknownAsk(item);
   }
@@ -688,6 +796,7 @@ export async function changeMobileChatProvider(input: {
   readonly expectedVersion: number;
   readonly providerInstanceId: string;
   readonly modelId: string;
+  readonly modelOptionValues?: ProviderModelOptionValues;
 }): Promise<ChatThread> {
   const response = await input.transport.authenticatedFetch({
     method: "POST",
@@ -698,6 +807,9 @@ export async function changeMobileChatProvider(input: {
       expectedVersion: input.expectedVersion,
       providerInstanceId: input.providerInstanceId,
       modelId: input.modelId,
+      ...(input.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: input.modelOptionValues }),
     }),
   });
   if (!response.ok) {
@@ -736,6 +848,8 @@ export async function createMobileChatWithFirstTurn(input: {
   readonly prompt: string;
   readonly providerInstanceId?: string;
   readonly modelId?: string;
+  /** The model's declared option values; sent with the model change. */
+  readonly modelOptionValues?: ProviderModelOptionValues;
   /**
    * Told as soon as the host has made the thread, before its first turn: a
    * turn that then fails to start still leaves a thread the caller can name.
@@ -754,7 +868,9 @@ export async function createMobileChatWithFirstTurn(input: {
   if (
     input.providerInstanceId !== undefined &&
     input.modelId !== undefined &&
-    (thread.providerInstanceId !== input.providerInstanceId || thread.modelId !== input.modelId)
+    (thread.providerInstanceId !== input.providerInstanceId ||
+      thread.modelId !== input.modelId ||
+      input.modelOptionValues !== undefined)
   ) {
     thread = await changeMobileChatProvider({
       transport: input.transport,
@@ -762,6 +878,9 @@ export async function createMobileChatWithFirstTurn(input: {
       expectedVersion: thread.version,
       providerInstanceId: input.providerInstanceId,
       modelId: input.modelId,
+      ...(input.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: input.modelOptionValues }),
     });
   }
   await sendMobileChatTurn({
@@ -784,6 +903,8 @@ export async function sendMobileChatTurn(input: {
   readonly prompt: string;
   readonly providerInstanceId?: string;
   readonly modelId?: string;
+  /** Sent with the model change; an absent value leaves the thread's values as they are. */
+  readonly modelOptionValues?: ProviderModelOptionValues;
   readonly attachmentIds?: ReadonlyArray<string>;
 }): Promise<void> {
   const trimmed = input.prompt.trim();
@@ -798,6 +919,9 @@ export async function sendMobileChatTurn(input: {
       expectedVersion,
       providerInstanceId: input.providerInstanceId,
       modelId: input.modelId,
+      ...(input.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: input.modelOptionValues }),
     });
     expectedVersion = updated.version;
   }

@@ -23,7 +23,8 @@ export interface AppearancePreferences {
 
 /** A fresh install starts on Soft glow with the effect off, like the desktop. */
 export const DEFAULT_APPEARANCE: AppearancePreferences = {
-  picture: "soft-glow",
+  // The system look: a picture is drawn only once the person chooses one.
+  picture: "plain",
   effect: DEFAULT_EFFECT,
   colorSchemePreference: "system",
   surfaceStyle: "glass",

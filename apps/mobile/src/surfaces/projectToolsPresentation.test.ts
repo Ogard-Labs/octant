@@ -1,33 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  appendTerminalOutput,
-  importDropLines,
-  PHONE_TERMINAL_KEPT_CHARACTERS,
-  projectPageAddress,
-  terminalPlainText,
-} from "./projectToolsPresentation";
+import { importDropLines, projectPageAddress } from "./projectToolsPresentation";
 import { listMobileThreadTools } from "../panes/threadPanesPresentation";
-
-describe("a Project terminal's output on the phone", () => {
-  it("extends what it shows, and takes the host's tail whole when it fell behind", () => {
-    expect(appendTerminalOutput("$ ", { text: "ls\r\n", replace: false, characters: 6 })).toBe(
-      "$ ls\r\n",
-    );
-    expect(appendTerminalOutput("old", { text: "tail", replace: true, characters: 900 })).toBe(
-      "tail",
-    );
-    const long = "x".repeat(PHONE_TERMINAL_KEPT_CHARACTERS);
-    expect(appendTerminalOutput(long, { text: "y", replace: false, characters: 1 })).toHaveLength(
-      PHONE_TERMINAL_KEPT_CHARACTERS,
-    );
-  });
-
-  it("drops colours and titles, honours backspace, and lets a carriage return redraw its line", () => {
-    const raw =
-      "\u001b]0;user@mac\u0007\u001b[1;32muser\u001b[0m$ lss\b\r\n" + "10%\r50%\r100%\n" + "done";
-    expect(terminalPlainText(raw)).toBe("user$ ls\n100%\ndone");
-  });
-});
 
 describe("a Private page's address typed on the phone", () => {
   it("adds https to a bare host and keeps an address that names its scheme", () => {

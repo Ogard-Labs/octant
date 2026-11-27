@@ -1,3 +1,4 @@
+import { hapticSuccess } from "../ui/haptics";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
@@ -23,6 +24,16 @@ export interface ApprovalDecisionButtonsProps {
  * Allow is the filled primary, Deny is outlined, and the broader "this session"
  * choice is a quiet text button last, away from the single-use answers.
  */
+/** A decision is felt as it is given. */
+function felt(decide: (() => void) | undefined): (() => void) | undefined {
+  return decide === undefined
+    ? undefined
+    : () => {
+        hapticSuccess();
+        decide();
+      };
+}
+
 export function ApprovalDecisionButtons(props: ApprovalDecisionButtonsProps) {
   const { colors } = useTheme();
   const state = { disabled: props.busy, busy: props.busy };
@@ -33,7 +44,7 @@ export function ApprovalDecisionButtons(props: ApprovalDecisionButtonsProps) {
         accessibilityRole="button"
         accessibilityState={{ ...state, disabled: props.busy || props.allowDisabled === true }}
         disabled={props.busy || props.allowDisabled === true}
-        onPress={props.onAllow}
+        onPress={felt(props.onAllow)}
         style={[styles.button, { backgroundColor: colors.send }, props.busy ? styles.busy : null]}
       >
         <Text style={[mobileTypography.section, { color: colors.sendLabel }]}>
@@ -45,7 +56,7 @@ export function ApprovalDecisionButtons(props: ApprovalDecisionButtonsProps) {
         accessibilityRole="button"
         accessibilityState={state}
         disabled={props.busy}
-        onPress={props.onDeny}
+        onPress={felt(props.onDeny)}
         style={[
           styles.button,
           { borderColor: colors.textSecondary, borderWidth: 1 },
@@ -63,7 +74,7 @@ export function ApprovalDecisionButtons(props: ApprovalDecisionButtonsProps) {
           accessibilityState={state}
           disabled={props.busy}
           hitSlop={8}
-          onPress={props.onAllowSession}
+          onPress={felt(props.onAllowSession)}
           style={[styles.button, styles.secondary, props.busy ? styles.busy : null]}
         >
           <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
@@ -78,7 +89,7 @@ export function ApprovalDecisionButtons(props: ApprovalDecisionButtonsProps) {
           accessibilityState={state}
           disabled={props.busy}
           hitSlop={8}
-          onPress={props.narrower.onPress}
+          onPress={felt(props.narrower.onPress)}
           style={[styles.button, styles.secondary, props.busy ? styles.busy : null]}
         >
           <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>

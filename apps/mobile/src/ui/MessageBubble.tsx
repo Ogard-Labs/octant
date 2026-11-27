@@ -5,6 +5,7 @@ import type { ChatMessagePart, ReplyDetailLevel } from "@octant/contracts";
 import { radii, space, useTheme } from "../../design-system";
 import { MessageActions, type MessageActionItem } from "./MessageActions";
 import { MessageBlocks } from "./MessageBlocks";
+import { MessageMenu } from "./MessageMenu";
 import { resolveChatMessageParts } from "./messageDocument";
 import { ReasoningPart } from "./ReasoningPart";
 import { ToolActivity, type ToolCall } from "./ToolActivity";
@@ -22,6 +23,8 @@ export interface MessageBubbleProps {
   readonly extraActions?: ReadonlyArray<MessageActionItem>;
   /** Fork from here and Rewind to here; shown under either role's message. */
   readonly turnActions?: ReadonlyArray<MessageActionItem>;
+  /** When the message was sent or the reply finished, where the thread says. */
+  readonly at?: string | undefined;
   /** The thread's Reply detail level; absent draws Low. */
   readonly replyDetail?: ReplyDetailLevel;
 }
@@ -63,7 +66,7 @@ function isResearchRole(role: string): boolean {
  * user = control-fill bubble; assistant = reasoning and tool rows, then bare prose.
  */
 export function MessageBubble(props: MessageBubbleProps) {
-  const { colors, surfaceStyle } = useTheme();
+  const { colors } = useTheme();
   const user = isUserRole(props.role);
   const research = isResearchRole(props.role);
   const showActions = props.showActions !== false && !user && !research;
@@ -79,6 +82,14 @@ export function MessageBubble(props: MessageBubbleProps) {
     [props.body, props.parts, props.role],
   );
 
+  const copy: MessageActionItem = {
+    id: "copy",
+    label: "Copy",
+    icon: "copy-outline",
+    onPress: async () => {
+      await Clipboard.setStringAsync(props.body);
+    },
+  };
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -88,103 +99,96 @@ export function MessageBubble(props: MessageBubbleProps) {
         },
         rowUser: { alignItems: "flex-end" },
         rowAssistant: { alignItems: "stretch" },
+        // The menu lifts the bubble alone, so it holds the bubble's width.
+        userMenu: { alignSelf: "flex-end", maxWidth: "84%" },
+        assistantMenu: { alignSelf: "stretch" },
         bubble: {
-          maxWidth: "84%",
           borderRadius: radii.bubble,
           paddingHorizontal: 14,
           paddingVertical: 10,
         },
-        // A person's message: the control fill and a hairline, no accent
-        // (docs/design/thread-view.md › Transcript); the reply beside it is bare prose.
+        // A person's message: the control fill, no accent and no outline; the
+        // reply beside it is bare prose.
         bubbleUser: {
-          // On glass the bubble takes the thin glass fill so the ground shows
-          // through it like every other panel; flat keeps the control fill.
-          backgroundColor: surfaceStyle === "glass" ? colors.glassFillRegular : colors.userBubble,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: surfaceStyle === "glass" ? colors.glassStrokeStrong : colors.hairline,
+          backgroundColor: colors.userBubble,
         },
         assistantStack: {
           width: "100%",
           gap: space.xs,
         },
       }),
-    [colors, surfaceStyle],
+    [colors],
   );
 
   if (user) {
+    const actions = [copy, ...(props.turnActions ?? [])];
     return (
       <View style={[styles.row, styles.rowUser]} testID={props.testID}>
-        <View style={[styles.bubble, styles.bubbleUser]}>
-          <MessageBlocks text={props.body} tone="user" />
-        </View>
-        {props.turnActions === undefined || props.turnActions.length === 0 ? null : (
-          <MessageActions
-            actions={props.turnActions}
-            {...(props.testID === undefined ? {} : { testID: `${props.testID}-actions` })}
-          />
-        )}
+        <MessageMenu actions={actions} style={styles.userMenu}>
+          <View style={[styles.bubble, styles.bubbleUser]}>
+            <MessageBlocks text={props.body} tone="user" />
+          </View>
+        </MessageMenu>
+        <MessageActions
+          actions={actions}
+          at={props.at}
+          trailing
+          {...(props.testID === undefined ? {} : { testID: `${props.testID}-actions` })}
+        />
       </View>
     );
   }
 
+  const actions = [
+    ...(showActions ? [copy, ...(props.extraActions ?? [])] : []),
+    ...(props.turnActions ?? []),
+  ];
   return (
     <View style={[styles.row, styles.rowAssistant]} testID={props.testID}>
-      <View style={styles.assistantStack}>
-        {parts.map((part, index) => {
-          // The level is in the key so a change of level remounts each panel
-          // at the new level, dropping a choice made by hand at the old one.
-          const level = props.replyDetail ?? "low";
-          const key = `${part.kind}:${index}:${level}`;
-          if (part.kind === "reasoning") {
-            const presentation = mobileReplyDetailPresentation(level, part.text);
+      <MessageMenu actions={actions} style={styles.assistantMenu}>
+        <View style={styles.assistantStack}>
+          {parts.map((part, index) => {
+            // The level is in the key so a change of level remounts each panel
+            // at the new level, dropping a choice made by hand at the old one.
+            const level = props.replyDetail ?? "low";
+            const key = `${part.kind}:${index}:${level}`;
+            if (part.kind === "reasoning") {
+              const presentation = mobileReplyDetailPresentation(level, part.text);
+              return (
+                <ReasoningPart
+                  defaultExpanded={presentation.reasoningExpanded}
+                  key={key}
+                  preview={presentation.reasoningPreview}
+                  text={part.text}
+                />
+              );
+            }
+            if (part.kind === "tools") {
+              const presentation = mobileReplyDetailPresentation(level, "");
+              return (
+                <ToolActivity
+                  calls={part.calls}
+                  defaultDetailOpen={presentation.toolDetailOpen}
+                  defaultOpen={presentation.toolCallsOpen}
+                  key={key}
+                />
+              );
+            }
             return (
-              <ReasoningPart
-                defaultExpanded={presentation.reasoningExpanded}
+              <View
                 key={key}
-                preview={presentation.reasoningPreview}
-                text={part.text}
-              />
+                {...(props.testID === undefined ? {} : { testID: `${props.testID}-prose` })}
+              >
+                <MessageBlocks text={part.text} tone="assistant" />
+              </View>
             );
-          }
-          if (part.kind === "tools") {
-            const presentation = mobileReplyDetailPresentation(level, "");
-            return (
-              <ToolActivity
-                calls={part.calls}
-                defaultDetailOpen={presentation.toolDetailOpen}
-                defaultOpen={presentation.toolCallsOpen}
-                key={key}
-              />
-            );
-          }
-          return (
-            <View
-              key={key}
-              {...(props.testID === undefined ? {} : { testID: `${props.testID}-prose` })}
-            >
-              <MessageBlocks text={part.text} tone="assistant" />
-            </View>
-          );
-        })}
-      </View>
-      {showActions || (props.turnActions?.length ?? 0) > 0 ? (
+          })}
+        </View>
+      </MessageMenu>
+      {actions.length > 0 ? (
         <MessageActions
-          actions={[
-            ...(showActions
-              ? [
-                  {
-                    id: "copy",
-                    label: "Copy",
-                    icon: "copy-outline" as const,
-                    onPress: async () => {
-                      await Clipboard.setStringAsync(props.body);
-                    },
-                  },
-                  ...(props.extraActions ?? []),
-                ]
-              : []),
-            ...(props.turnActions ?? []),
-          ]}
+          actions={actions}
+          at={props.at}
           {...(props.testID === undefined ? {} : { testID: `${props.testID}-actions` })}
         />
       ) : null}

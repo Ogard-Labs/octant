@@ -115,7 +115,7 @@ export function presentStaleHostSecurity(
     return {
       health,
       allowProductMutations: false,
-      message: "Host is unavailable. No product mutations are queued from this phone.",
+      message: "Host is unavailable. Messages wait on this phone; nothing else does.",
     };
   }
   if (health === "unauthorized") {

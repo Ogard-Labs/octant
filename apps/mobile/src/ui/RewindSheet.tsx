@@ -104,9 +104,8 @@ export function RewindSheet(props: RewindSheetProps) {
   const removed = props.removedTurns;
   return (
     <BottomSheet
-      onClose={() => {
-        if (!props.busy) props.onClose();
-      }}
+      dismissible={!props.busy}
+      onClose={props.onClose}
       testID="mobile-rewind-sheet"
       title={MOBILE_COPY.rewindSheetTitle}
       visible={props.visible}

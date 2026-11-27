@@ -1,23 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Platform,
   Pressable,
   ScrollView,
-  type ScrollViewInstance,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "../ui/Icon";
 import {
   chatAttemptStatusLabel,
+  MOBILE_THREAD_LEVEL_LABELS,
   mobileAttachmentOffer,
+  mobileThreadLevel,
   setMobileUsageResume,
+  stopMobileCodeTurn,
+  stopMobileWorkTurn,
   type MobileAttachmentSource,
   type MobileInboxRow,
+  type RemoteSessionStanding,
 } from "@octant/client-runtime";
+import { ScreenHeader } from "../navigation/ScreenHeader";
+import { BottomSheet } from "../ui/BottomSheet";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
 import { presentStaleHostSecurity } from "@octant/domain";
 import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
@@ -35,24 +43,22 @@ import {
   conversationComposerAccess,
   listMobileThreadSurfaces,
 } from "../surfaces/threadSurfacePresentation";
-import {
-  MOBILE_COPY,
-  MOBILE_TAB_LABELS,
-  mobileModelLabel,
-  mobileThreadComposerCopy,
-} from "../copy";
+import { MOBILE_COPY, MOBILE_SCREEN_TITLES, mobileModelLabel, mobileThreadHint } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
 import { CoordinatorProposalsPanel } from "../review/CoordinatorProposalsPanel";
 import { ThreadRoutinesPanel } from "../review/ThreadRoutinesPanel";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
+import { chosenReasoningLabel, selectableModelSettings } from "./modelSettings";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { mobileSpacing } from "../theme/tokens";
 import { useTheme } from "../../design-system";
+import { ListRow, ListSection } from "../ui/NativeChrome";
+import { useWhileHere } from "../ui/useWhileHere";
+import { KeyboardRoom } from "../ui/KeyboardRoom";
 import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
-import { IconButton } from "../ui/IconButton";
-import { NavBar } from "../ui/NativeChrome";
+import type { MobileThreadPaneId } from "../panes/threadPanesPresentation";
 import { ThreadPanesSheet, type ThreadTool } from "../panes/ThreadPanesSheet";
 import { listMobileThreadTools } from "../panes/threadPanesPresentation";
 import { CanvasHtmlImportSheet } from "../surfaces/CanvasHtmlImportSheet";
@@ -65,18 +71,22 @@ import { appendTranscript } from "../voice/voiceDictation";
 import { DefaultLevelsPanel } from "./thread/DefaultLevelsPanel";
 import { createSelectedThreadGuard } from "./thread/selectedThreadGuard";
 import { ThreadLevelPanel } from "./thread/ThreadLevelPanel";
-import { ThreadTranscript } from "./thread/ThreadTranscript";
+import { useThreadTranscriptRows } from "./thread/ThreadTranscript";
+import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { ResumeBar, type ResumeOffer } from "./thread/ResumeBar";
 import { useThreadReplyDetail } from "./thread/useThreadReplyDetail";
 import type { ThreadHookInput, ThreadTarget, ThreadUi } from "./thread/threadTypes";
+import { useMobileThreads } from "./MobileThreadsContext";
+import { useOutbox } from "../outbox/OutboxContext";
+import { WaitingMessages } from "../outbox/WaitingMessages";
+import { QueuedMessages } from "./thread/QueuedMessages";
+import { isLiveWorkTurn, turnSubagents } from "./thread/turnActivity";
+import { useTurnControl } from "./thread/useTurnControl";
 import { useChatThread } from "./thread/useChatThread";
 import { useCodeThread } from "./thread/useCodeThread";
 import { useThreadTurnActions } from "./thread/useThreadTurnActions";
 import { useWorkThread } from "./thread/useWorkThread";
 import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
-import { QueuedMessages } from "./thread/QueuedMessages";
-import { followUpRoute } from "./thread/followUpRoute";
-import { useMobileMessageQueue } from "./thread/useMobileMessageQueue";
 import {
   MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS,
   MOBILE_CHAT_IDLE_REFRESH_MAX_DELAY_MS,
@@ -90,7 +100,6 @@ const RECONNECTING_COPY = "Reconnecting to the host…";
 
 export interface ThreadScreenProps {
   readonly selected: MobileInboxRow | undefined;
-  readonly onBack: () => void;
   /** Opens the thread a fork made. */
   readonly onOpenThread: (row: MobileInboxRow) => void;
   /** A Chat turn a message search matched; the thread opens scrolled to it. */
@@ -122,17 +131,53 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const connectionStatus = useConnectionStatus(supervisor);
   const staleGate = useMemo(() => presentStaleHostSecurity(hostHealth), [hostHealth]);
   const models = usePlacementHostModels(transport);
-  const [prompt, setPrompt] = useState("");
+  // The page already ends above the bar, which the keyboard covers.
+  const insets = useSafeAreaInsets();
+  const { drafts, lastStanding: standingKept, noteStanding, projectName } = useMobileThreads();
+  const draftKey =
+    // With the computer's own key: another under its id starts from nothing.
+    selected === undefined
+      ? ""
+      : `${selectedHost?.hostKeyFingerprint ?? ""}:${selected.hostId}:${selected.mode}:${selected.threadId}`;
+  const [prompt, setPrompt] = useState(() => drafts.read(draftKey));
+  // A send can land after this screen is gone, on the draft or on a later screen
+  // of the same thread, so the words are cleared by what was sent.
+  const sentPrompt = (next: string) => {
+    if (next === "") drafts.sent(draftKey, prompt);
+    else setPrompt(next);
+  };
+  useEffect(
+    () =>
+      drafts.onSent((thread, text) => {
+        if (thread === draftKey) setPrompt((current) => (current === text ? "" : current));
+      }),
+    [draftKey, drafts],
+  );
+  useEffect(() => drafts.keep(draftKey, prompt), [draftKey, drafts, prompt]);
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [panesOpen, setPanesOpen] = useState(false);
-  const scrollRef = useRef<ScrollViewInstance>(null);
+  const [initialPane, setInitialPane] = useState<MobileThreadPaneId | undefined>();
+  const openPanes = (pane: MobileThreadPaneId | undefined) => {
+    setInitialPane(pane);
+    setPanesOpen(true);
+  };
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const listRef = useRef<LegendListRef>(null);
   const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
-  const standing = useRemoteSessionStanding(transport, offlineDemo);
+  const outbox = useOutbox();
+  const whileHere = useWhileHere();
+  const noteAnswered = useCallback(
+    (answered: RemoteSessionStanding) => {
+      if (hostId !== undefined) noteStanding(hostId, answered);
+    },
+    [hostId, noteStanding],
+  );
+  const standing = useRemoteSessionStanding(transport, offlineDemo, 0, noteAnswered);
   const watchingOnly = standing.accessLevel === "read-only";
   const surfaces = useMemo(
     () => listMobileThreadSurfaces({ mode: selected?.mode ?? "chat", session: standing }),
@@ -169,7 +214,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
     gate: staleGate,
     prompt,
     typedScope,
-    setPrompt,
+    setPrompt: sentPrompt,
   });
 
   const chat = useChatThread({ ...shared(targetFor("chat")), modelOptions: models.options });
@@ -309,9 +354,152 @@ export function ThreadScreen(props: ThreadScreenProps) {
     attachmentOffer.sources.length > 0
       ? { onPressAttach: () => setAttachOpen(true) }
       : {};
-  const followUpComposerCopy =
-    mode === "code" || mode === "work" ? mobileThreadComposerCopy(mode) : undefined;
-  const sendFollowUp = () => void (mode === "work" ? work : code).sendFollowUp();
+  // Only a computer that cannot be reached right now is written to for later;
+  // one that rejected this phone, or that the phone may only watch, is not.
+  // Which of the two it is, is what that computer last said of this session.
+  const lastStanding = hostId === undefined ? undefined : standingKept(hostId);
+  const unreached =
+    !offlineDemo &&
+    lastStanding !== undefined &&
+    conversationComposerAccess(
+      listMobileThreadSurfaces({ mode: mode ?? "chat", session: lastStanding }),
+    ).editable &&
+    ["idle", "connecting", "stale", "unavailable"].includes(hostHealth);
+  const waiting =
+    selected === undefined
+      ? []
+      : outbox.waitingFor({
+          hostId: selected.hostId,
+          mode: selected.mode,
+          threadId: selected.threadId,
+        });
+  const keepForLater = (text: string, typedByPerson: boolean, unansweredId?: string): boolean => {
+    if (selected === undefined) return false;
+    const refused = outbox.keep({
+      id: unansweredId ?? globalThis.crypto.randomUUID(),
+      hostId: selected.hostId,
+      mode: selected.mode,
+      threadId: selected.threadId,
+      text,
+      writtenAt: new Date().toISOString(),
+      ...(unansweredId === undefined ? {} : { attempted: true }),
+      ...(typedByPerson ? { typedByPerson: true } : {}),
+    });
+    if (refused !== undefined && refused !== "") ui.setError(refused);
+    return refused === undefined;
+  };
+  // Files stay with the draft: they go through the computer as they are added.
+  const sendLater = () => {
+    const keepIt = () => {
+      const typed = typedClaimFor(typedScope, prompt).typedByPerson === true;
+      if (keepForLater(prompt.trim(), typed, isUnanswered ? unanswered?.id : undefined)) {
+        drafts.noteUnanswered(draftKey, undefined);
+        drafts.noteMayBeSent(draftKey, undefined);
+        sentPrompt("");
+      }
+    };
+    if (pendingAttachments.length > 0) ui.setError(MOBILE_COPY.outboxNoFiles);
+    else if (isUnanswered) keepIt();
+    else unlessMayBeSent(keepIt);
+  };
+  // Words that a failed send may have delivered are not queued as new ones
+  // without the person: the queue would deliver them a second time.
+  const unlessMayBeSent = (send: () => void) => {
+    if (drafts.mayBeSent(draftKey) !== prompt.trim()) {
+      send();
+      return;
+    }
+    Alert.alert(MOBILE_COPY.outboxMayBeSentTitle, MOBILE_COPY.outboxMayBeSentBody, [
+      { text: "Cancel", style: "cancel" },
+      { text: MOBILE_COPY.outboxSendAnyway, onPress: whileHere(send) },
+    ]);
+  };
+  const sendNow = (send: () => Promise<unknown>) =>
+    unlessMayBeSent(() => {
+      const text = prompt;
+      // Noted before it leaves, for a screen that is gone when the answer comes.
+      drafts.noteMayBeSent(draftKey, text);
+      void send().then((outcome) => {
+        if (outcome !== "failed" && outcome !== "stale") drafts.noteMayBeSent(draftKey, undefined);
+      });
+    });
+  // Words whose answer is still out are the same message, so they go the same
+  // way, under the same id, whether or not a turn runs now.
+  const unanswered = drafts.unanswered(draftKey);
+  const isUnanswered =
+    unanswered?.words ===
+    JSON.stringify([prompt.trim(), pendingAttachments.map((attachment) => attachment.id)]);
+  const queueNow = () => {
+    // A queued Chat message runs on the thread's model as it is then; a model
+    // or setting chosen since goes only with a message sent once the turn ends.
+    if (mode === "chat" && chat.choiceWaits) {
+      ui.setError(MOBILE_COPY.queueKeepsThreadModel);
+      return;
+    }
+    // The claim is of the words pressed Send on, read before anything is awaited.
+    const typed = typedClaimFor(typedScope, prompt).typedByPerson === true;
+    if (isUnanswered) void turnControl.queueMessage(typed);
+    else unlessMayBeSent(() => void turnControl.queueMessage(typed));
+  };
+  const runningWorkTurn = workTurnLive
+    ? work.turns?.findLast((turn) => isLiveWorkTurn(turn))
+    : undefined;
+  const runningCodeTurn = codeTurnLive
+    ? code.turns?.findLast((turn) => turn.status === "waiting")
+    : undefined;
+  const mayAct = !offlineDemo && composerAccess.editable && staleGate.allowProductMutations;
+  const turnLive = chat.activeAttempt !== undefined || workTurnLive || codeTurnLive;
+  const turnControl = useTurnControl({
+    ...shared(
+      identity === undefined ||
+        offlineDemo ||
+        hostId === undefined ||
+        threadId === undefined ||
+        mode === undefined
+        ? undefined
+        : { identity, hostId, threadId, mode },
+    ),
+    live: turnLive,
+    stopTurn:
+      !mayAct || transport === undefined
+        ? undefined
+        : runningWorkTurn !== undefined
+          ? () =>
+              stopMobileWorkTurn({
+                transport,
+                threadId: String(runningWorkTurn.threadId),
+                turnId: String(runningWorkTurn.turnId),
+                requestId: String(runningWorkTurn.requestId),
+              })
+          : runningCodeTurn !== undefined && code.thread !== undefined
+            ? () =>
+                stopMobileCodeTurn({
+                  transport,
+                  threadId: String(code.thread?.id),
+                  checkoutId: String(code.thread?.checkoutId),
+                  turnOperationId: runningCodeTurn.operationId,
+                })
+            : undefined,
+    attachmentIds: pendingAttachments.map((attachment) => attachment.id),
+    onQueued: () => threadAttachments.attachmentsSent(),
+    onStopped: () => void refresh({ quiet: true }),
+    unanswered: drafts.unanswered(draftKey),
+    // The words too: without the queue, or with the files a reopened screen no
+    // longer has, they would otherwise go another way as a new message.
+    noteUnanswered: (message) => {
+      drafts.noteUnanswered(draftKey, message);
+      drafts.noteMayBeSent(draftKey, message === undefined ? undefined : prompt);
+    },
+    onUnanswered: ({ id, text, typedByPerson }) => keepForLater(text, typedByPerson, id),
+  });
+  // Where the queue cannot be read, a running turn still closes the composer.
+  const queues = mayAct && turnLive && turnControl.queue !== undefined;
+  const mayQueue = queues || (isUnanswered && turnControl.queue !== undefined);
+  const subagents = runningWorkTurn === undefined ? [] : turnSubagents(runningWorkTurn);
+  const subagentsWorking = subagents.filter((agent) => agent.working).length;
+  const threadHint = mode === "code" || mode === "work" ? mobileThreadHint(mode) : undefined;
+  const sendFollowUp = () => void sendNow(() => (mode === "work" ? work : code).sendFollowUp());
+  const runningChatTurn = chat.view?.turns.at(-1);
   const liveBusy = busy || chat.activeAttempt !== undefined;
   const [resumeBusy, setResumeBusy] = useState(false);
   const resetLabel = (resetsAt: string | undefined) =>
@@ -408,30 +596,13 @@ export function ThreadScreen(props: ThreadScreenProps) {
     };
   })();
   const composerEditable =
-    composerAccess.editable &&
-    (mode === "chat"
-      ? staleGate.allowProductMutations && chat.activeAttempt === undefined
-      : staleGate.allowProductMutations && (mode === "code" || work.thread !== undefined));
-  // A follow-up typed while a Work or Code turn runs joins the host's queue
-  // for this thread and waits for that turn to end.
-  const followUpTurnLive = workTurnLive || codeTurnLive;
-  const queue = useMobileMessageQueue({
-    transport: offlineDemo ? undefined : transport,
-    scope:
-      (mode === "work" || mode === "code") && threadId !== undefined
-        ? { mode, threadId }
-        : undefined,
-    active: followUpTurnLive,
-    allowChanges: composerAccess.editable && staleGate.allowProductMutations,
-  });
-  const queueFollowUp = () => {
-    const typed = typedClaimFor(typedScope, prompt).typedByPerson === true;
-    const submitted = prompt;
-    void queue.enqueue(submitted, typed).then((queued) => {
-      // Words typed while the message joined the queue stay in the draft.
-      if (queued) setPrompt((draft) => (draft === submitted ? "" : draft));
-    });
-  };
+    unreached ||
+    (composerAccess.editable &&
+      (mode === "chat"
+        ? staleGate.allowProductMutations && (chat.activeAttempt === undefined || queues)
+        : staleGate.allowProductMutations &&
+          ((!workTurnLive && !codeTurnLive) || queues) &&
+          (mode === "code" || work.thread !== undefined)));
   const appendToDraft = useCallback(
     (text: string) => setPrompt((draft) => appendTranscript(typedScope, draft, text)),
     [typedScope],
@@ -443,13 +614,73 @@ export function ThreadScreen(props: ThreadScreenProps) {
   });
   const replyDetail = useThreadReplyDetail({ transport, mode, threadId });
 
+  const transcriptRows = useThreadTranscriptRows({
+    ...(props.focusTurnId === undefined ? {} : { focus: { turnId: props.focusTurnId } }),
+    allowProductMutations: staleGate.allowProductMutations,
+    chat,
+    codeConversation: code.conversation,
+    modelOptions: models.options,
+    providerDirectory: models.providerDirectory,
+    ...(offlineDemo || transport === undefined || selected?.mode !== "code"
+      ? {}
+      : { onOpenReview: () => openPanes("review") }),
+    replyDetail,
+    turnActionsFor: turnActions.actionsFor,
+    workTurns: work.turns,
+  });
+  // A search hit lands on its turn once that turn has been read.
+  const focusIndex = transcriptRows.findIndex((row) => row.focused);
+  const landed = useRef<string | undefined>(undefined);
+  // The thread opened again from its row after a search hit, in the same
+  // screen (an iPad's column): once the newest page is in, the reader is
+  // taken to its end, as a freshly opened thread starts there.
+  const lastFocus = useRef(props.focusTurnId);
+  const toNewest = useRef(false);
+  useEffect(() => {
+    const reopened = lastFocus.current !== undefined && props.focusTurnId === undefined;
+    lastFocus.current = props.focusTurnId;
+    if (!reopened) return;
+    // The same hit tapped again later jumps to it again.
+    landed.current = undefined;
+    // Chat and Work show their whole conversation, so they go to its end at
+    // once; a Code thread waits for its newest page below.
+    if (mode === "code") toNewest.current = true;
+    else void listRef.current?.scrollToEnd({ animated: false });
+  }, [mode, props.focusTurnId]);
+  const shownPage = code.conversation;
+  useEffect(() => {
+    if (!toNewest.current || shownPage === undefined || shownPage.hasLater) return;
+    toNewest.current = false;
+    void listRef.current?.scrollToEnd({ animated: false });
+  }, [shownPage]);
+  // A search hit opened in this screen is in the conversation, so a full
+  // view (the Browser) gives way to it.
+  useEffect(() => {
+    if (props.focusTurnId === undefined) return;
+    setViewFloating(false);
+    setSurface("chat");
+  }, [props.focusTurnId]);
+  useEffect(() => {
+    if (focusIndex < 0 || props.focusTurnId === undefined) return;
+    if (landed.current === props.focusTurnId) return;
+    landed.current = props.focusTurnId;
+    void listRef.current?.scrollToIndex({ index: focusIndex, viewOffset: 12, animated: true });
+  }, [focusIndex, props.focusTurnId]);
   const styles = useMemo(
     () =>
       StyleSheet.create({
         shell: { flex: 1, backgroundColor: "transparent" },
         scroll: { flex: 1 },
-        content: {
+        details: {
+          gap: mobileSpacing.md,
           paddingHorizontal: mobileSpacing.md,
+          paddingBottom: mobileSpacing.xl,
+        },
+        // Left and right, not horizontal: the list's browser build passes
+        // this style to the page as it is.
+        content: {
+          paddingLeft: mobileSpacing.md,
+          paddingRight: mobileSpacing.md,
           paddingBottom: mobileSpacing.xl,
           gap: mobileSpacing.sm,
           flexGrow: 1,
@@ -500,6 +731,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
         viewName: { flex: 1, color: colors.textSecondary, fontSize: 13, fontWeight: "500" },
         viewFloat: { padding: 4 },
         stage: { flex: 1 },
+        listEnds: { gap: mobileSpacing.sm },
         floatingView: {
           position: "absolute",
           top: mobileSpacing.sm,
@@ -533,44 +765,75 @@ export function ThreadScreen(props: ThreadScreenProps) {
   if (selected === undefined) {
     return (
       <View style={styles.shell}>
-        <NavBar
-          backTestID="mobile-thread-back"
-          onBack={props.onBack}
-          title={MOBILE_TAB_LABELS.thread}
-        />
+        <ScreenHeader title={MOBILE_SCREEN_TITLES.thread} />
         <Text style={styles.help}>{MOBILE_COPY.threadEmpty}</Text>
       </View>
     );
   }
 
   const title = formatScreenshotSafeLabel(selected.title);
+  const projectLabel = projectName(selected);
+  const project = projectLabel === undefined ? undefined : formatScreenshotSafeLabel(projectLabel);
+  const effortLabel = chosenReasoningLabel(selectedModel?.settings, chat.modelOptionValues);
   const modelLabel =
-    selectedModel?.label ??
-    (chat.view !== undefined
-      ? mobileModelLabel(models.options, String(chat.view.thread.modelId))
-      : MOBILE_COPY.modelHostOnly);
+    selectedModel === undefined
+      ? chat.view !== undefined
+        ? mobileModelLabel(models.options, String(chat.view.thread.modelId))
+        : MOBILE_COPY.modelHostOnly
+      : effortLabel === undefined
+        ? selectedModel.label
+        : `${selectedModel.label} · ${effortLabel}`;
   const codePolicy = code.policy;
+  // The mode the next turn runs under, named where the turn is written. A
+  // restricted session is shown no mode, as the panel itself shows it none.
+  const levelSubject =
+    selected.mode === "code" && code.thread !== undefined
+      ? ({ mode: "code", thread: code.thread } as const)
+      : selected.mode === "work" && work.thread !== undefined
+        ? ({ mode: "work", thread: work.thread } as const)
+        : undefined;
+  const levelLabel =
+    levelSubject === undefined || offlineDemo || !standing.actsAsHostPerson
+      ? undefined
+      : MOBILE_THREAD_LEVEL_LABELS[mobileThreadLevel(levelSubject)];
 
   return (
-    <View style={styles.shell} testID="mobile-thread-screen">
-      <NavBar
-        backTestID="mobile-thread-back"
-        onBack={props.onBack}
-        subtitle={hostLabel}
-        title={title}
-        trailing={
-          offlineDemo || transport === undefined ? undefined : (
-            <IconButton
-              accessibilityLabel="Views and panes"
-              iconSize={19}
-              name="grid-outline"
-              onPress={() => setPanesOpen(true)}
-              size={34}
-              testID="mobile-thread-panes-open"
-              variant="ghost"
-            />
-          )
+    <KeyboardRoom leaves={insets.bottom} style={styles.shell} testID="mobile-thread-screen">
+      <ScreenHeader
+        actions={
+          offlineDemo || transport === undefined
+            ? []
+            : [
+                ...(threadTools.includes("terminal")
+                  ? [
+                      {
+                        label: MOBILE_COPY.projectTerminalTitle,
+                        icon: "terminal-outline" as const,
+                        onPress: () => setOpenTool("terminal"),
+                        testID: "mobile-thread-terminal-open",
+                      },
+                    ]
+                  : []),
+                ...(selected.mode === "code"
+                  ? [
+                      {
+                        label: MOBILE_COPY.threadChanges,
+                        icon: "git-branch-outline" as const,
+                        onPress: () => openPanes("review"),
+                        testID: "mobile-thread-changes-open",
+                      },
+                    ]
+                  : []),
+                {
+                  label: MOBILE_COPY.threadDetails,
+                  icon: "ellipsis-horizontal",
+                  onPress: () => setDetailsOpen(true),
+                  testID: "mobile-thread-details-open",
+                },
+              ]
         }
+        subtitle={[project, hostLabel].filter((part) => part !== undefined).join(" · ")}
+        title={title}
       />
 
       {/* A view replaces the transcript, so while one is open a single chip
@@ -585,7 +848,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             style={({ pressed }) => [styles.viewReturn, pressed ? { opacity: 0.6 } : null]}
             testID="mobile-thread-view-return"
           >
-            <Ionicons color={colors.accent} name="chevron-back" size={15} />
+            <Icon color={colors.accent} name="chevron-back" size={15} />
             <Text style={styles.viewReturnLabel}>{MOBILE_COPY.threadViewReturn}</Text>
           </Pressable>
           <Text numberOfLines={1} style={styles.viewName}>
@@ -599,217 +862,195 @@ export function ThreadScreen(props: ThreadScreenProps) {
             style={({ pressed }) => [styles.viewFloat, pressed ? { opacity: 0.6 } : null]}
             testID="mobile-thread-view-float"
           >
-            <Ionicons color={colors.accent} name="contract-outline" size={17} />
+            <Icon color={colors.accent} name="contract-outline" size={17} />
           </Pressable>
         </View>
       )}
 
       <View style={styles.stage}>
-        <ScrollView
-          ref={scrollRef}
+        <LegendList
+          ref={listRef}
           contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          style={styles.scroll}
-          testID="mobile-thread-transcript"
-        >
-          {connectionStatus.kind === "waiting-to-retry" || chat.reconnecting ? (
-            <Text style={styles.connectionStatus}>{RECONNECTING_COPY}</Text>
-          ) : connectionStatus.kind === "offline" ? (
-            <Text style={styles.connectionStatus}>Waiting for the network.</Text>
-          ) : null}
-          {/* One card, also above the full Browser view: handing a page back there
-              answers no prompt, so its Continue has to be in reach. */}
-          {offlineDemo ||
-          transport === undefined ||
-          (fullView && activeSurface !== "browser") ? null : (
-            <BrowserApprovalCard
-              actsAsHostPerson={standing.actsAsHostPerson}
-              threadId={selected.threadId}
-              threadTitle={title}
-              transport={transport}
-              watchingOnly={watchingOnly}
-            />
-          )}
-          {!offlineDemo && fullView && activeSurface === "browser" && transport !== undefined ? (
-            <BrowserSurfacePanel
-              actsAsHostPerson={standing.actsAsHostPerson}
-              mode={selected.mode}
-              reach={browserReach}
-              threadId={selected.threadId}
-              transport={transport}
-            />
-          ) : null}
-          {fullView ? null : (
-            <>
-              {offlineDemo || transport === undefined ? null : (
-                <ExtensionToolApprovalCard
-                  actsAsHostPerson={standing.actsAsHostPerson}
-                  threadId={selected.threadId}
-                  transport={transport}
-                  watchingOnly={watchingOnly}
+          data={fullView ? [] : transcriptRows}
+          estimatedItemSize={160}
+          // A thread opens on its newest turn and stays there as it grows,
+          // until the person scrolls up to read or a search names a turn.
+          initialScrollAtEnd={props.focusTurnId === undefined}
+          keyExtractor={(row) => row.key}
+          ListFooterComponent={
+            fullView ? null : (
+              <View style={styles.listEnds}>
+                <WaitingMessages
+                  unsaved={outbox.unsaved}
+                  messages={waiting}
+                  onDelete={(message) =>
+                    message.attempted === true
+                      ? Alert.alert(MOBILE_COPY.outboxDeleteTitle, MOBILE_COPY.outboxDeleteSent, [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: MOBILE_COPY.outboxDelete,
+                            style: "destructive",
+                            onPress: whileHere(() => outbox.remove(message.id)),
+                          },
+                        ])
+                      : outbox.remove(message.id)
+                  }
+                  onEdit={(message) => {
+                    outbox.remove(message.id);
+                    setPrompt((draft) =>
+                      draft.trim().length === 0 ? message.text : `${message.text}\n\n${draft}`,
+                    );
+                  }}
+                  onTryAgain={outbox.tryAgain}
                 />
-              )}
-              {offlineDemo ||
-              transport === undefined ||
-              !standing.actsAsHostPerson ||
-              selected.mode === "chat" ? null : (
-                <ThreadSecretCards
-                  key={`secrets:${selected.hostId}:${selected.threadId}`}
-                  threadId={selected.threadId}
-                  transport={transport}
-                />
-              )}
-              {offlineDemo || transport === undefined ? null : (
-                <>
-                  <MemoryProposalCard
-                    key={`memory:${selected.hostId}:${selected.threadId}`}
+                {!offlineDemo &&
+                Platform.OS !== "web" &&
+                selectedHost !== undefined &&
+                hostHealth !== "unauthorized" ? (
+                  <ThreadVideoClips
+                    key={`${selected.hostId}:${selectedHost.credentialGeneration}:${selected.mode}:${selected.threadId}`}
+                    hostId={selected.hostId}
+                    threadId={selected.threadId}
+                    threadKind={`${selected.mode}-thread`}
+                    transport={hostHealth === "ready" ? transport : undefined}
+                  />
+                ) : null}
+                {/* What waits on the person comes last, beside the composer. */}
+                {offlineDemo || transport === undefined ? null : (
+                  <BrowserApprovalCard
+                    actsAsHostPerson={standing.actsAsHostPerson}
+                    threadId={selected.threadId}
+                    threadTitle={title}
+                    transport={transport}
+                    watchingOnly={watchingOnly}
+                  />
+                )}
+                {offlineDemo || transport === undefined ? null : (
+                  <ExtensionToolApprovalCard
                     actsAsHostPerson={standing.actsAsHostPerson}
                     threadId={selected.threadId}
                     transport={transport}
+                    watchingOnly={watchingOnly}
                   />
-                  <RoutineProposalCard
-                    key={`routine:${selected.hostId}:${selected.threadId}`}
-                    actsAsHostPerson={standing.actsAsHostPerson}
+                )}
+                {offlineDemo ||
+                transport === undefined ||
+                !standing.actsAsHostPerson ||
+                selected.mode === "chat" ? null : (
+                  <ThreadSecretCards
+                    key={`secrets:${selected.hostId}:${selected.threadId}`}
                     threadId={selected.threadId}
                     transport={transport}
                   />
-                </>
-              )}
-              {offlineDemo || transport === undefined ? null : (
-                <NativeHarnessSessionPanel
-                  threadId={selected.threadId}
-                  transport={transport}
-                  watchingOnly={watchingOnly}
-                />
-              )}
-              {offlineDemo || transport === undefined || !standing.actsAsHostPerson ? null : (
-                <ServiceOfferCard
-                  key={`${selected.hostId}:${selected.mode}:${selected.threadId}`}
-                  inProject={selected.projectId !== undefined}
-                  threadId={selected.threadId}
-                  threadKind={`${selected.mode}-thread`}
-                  transport={transport}
-                />
-              )}
-              {offlineDemo ||
-              transport === undefined ||
-              selected.mode !== "work" ||
-              work.thread === undefined ? null : (
-                <WorkRequestCards
-                  projectId={String(work.thread.projectId)}
-                  threadId={String(work.thread.id)}
-                  transport={transport}
-                  watchingOnly={watchingOnly}
-                />
-              )}
-              {busy && chat.activeAttempt === undefined ? (
-                <ActivityIndicator color={colors.accent} />
-              ) : null}
-              {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
-              {turnActions.notice !== undefined ? (
-                <Text style={styles.connectionStatus} testID="mobile-thread-notice">
-                  {turnActions.notice}
-                </Text>
-              ) : null}
-              {offlineDemo || transport === undefined ? null : selected.mode === "code" &&
+                )}
+                {offlineDemo || transport === undefined ? null : (
+                  <>
+                    <MemoryProposalCard
+                      key={`memory:${selected.hostId}:${selected.threadId}`}
+                      actsAsHostPerson={standing.actsAsHostPerson}
+                      threadId={selected.threadId}
+                      transport={transport}
+                    />
+                    <RoutineProposalCard
+                      key={`routine:${selected.hostId}:${selected.threadId}`}
+                      actsAsHostPerson={standing.actsAsHostPerson}
+                      threadId={selected.threadId}
+                      transport={transport}
+                    />
+                  </>
+                )}
+                {offlineDemo || transport === undefined ? null : (
+                  <NativeHarnessSessionPanel
+                    threadId={selected.threadId}
+                    transport={transport}
+                    watchingOnly={watchingOnly}
+                  />
+                )}
+                {offlineDemo || transport === undefined || !standing.actsAsHostPerson ? null : (
+                  <ServiceOfferCard
+                    key={`${selected.hostId}:${selected.mode}:${selected.threadId}`}
+                    inProject={selected.projectId !== undefined}
+                    threadId={selected.threadId}
+                    threadKind={`${selected.mode}-thread`}
+                    transport={transport}
+                  />
+                )}
+                {offlineDemo ||
+                transport === undefined ||
+                selected.mode !== "work" ||
+                work.thread === undefined ? null : (
+                  <WorkRequestCards
+                    projectId={String(work.thread.projectId)}
+                    threadId={String(work.thread.id)}
+                    transport={transport}
+                    watchingOnly={watchingOnly}
+                  />
+                )}
+                {!offlineDemo &&
+                selected.mode === "code" &&
+                transport !== undefined &&
                 code.thread !== undefined ? (
-                <ThreadLevelPanel
-                  actsAsHostPerson={standing.actsAsHostPerson}
-                  warnings={fullAccessWarnings}
-                  onChanged={() => void code.refresh({ quiet: true })}
-                  subject={{ mode: "code", thread: code.thread }}
-                  transport={transport}
-                />
-              ) : selected.mode === "work" && work.thread !== undefined ? (
-                <ThreadLevelPanel
-                  actsAsHostPerson={standing.actsAsHostPerson}
-                  warnings={fullAccessWarnings}
-                  onChanged={() => void work.refresh({ quiet: true })}
-                  subject={{ mode: "work", thread: work.thread }}
-                  transport={transport}
-                />
+                  <CoordinatorProposalsPanel
+                    actsAsHostPerson={standing.actsAsHostPerson}
+                    thread={code.thread}
+                    transport={transport}
+                  />
+                ) : null}
+                {busy && chat.activeAttempt === undefined ? (
+                  <ActivityIndicator color={colors.accent} />
+                ) : null}
+                {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
+                {turnActions.notice !== undefined ? (
+                  <Text style={styles.connectionStatus} testID="mobile-thread-notice">
+                    {turnActions.notice}
+                  </Text>
+                ) : null}
+              </View>
+            )
+          }
+          ListHeaderComponent={
+            <View style={styles.listEnds}>
+              {connectionStatus.kind === "waiting-to-retry" || chat.reconnecting ? (
+                <Text style={styles.connectionStatus}>{RECONNECTING_COPY}</Text>
+              ) : connectionStatus.kind === "offline" ? (
+                <Text style={styles.connectionStatus}>Waiting for the network.</Text>
               ) : null}
+              {/* Above the full Browser view too: handing a page back there
+                  answers no prompt, so its Continue has to be in reach. */}
               {!offlineDemo &&
-              transport !== undefined &&
-              (selected.mode === "work" || selected.mode === "code") &&
-              routinesProjectId !== undefined ? (
-                <DefaultLevelsPanel
+              fullView &&
+              activeSurface === "browser" &&
+              transport !== undefined ? (
+                <BrowserApprovalCard
                   actsAsHostPerson={standing.actsAsHostPerson}
-                  warnings={fullAccessWarnings}
-                  mode={selected.mode}
-                  projectId={routinesProjectId}
-                  transport={transport}
-                />
-              ) : null}
-              {!offlineDemo &&
-              selected.mode === "code" &&
-              (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
-                <ApprovalDeferralSheet
-                  executionPolicy={codePolicy}
-                  mode="code"
-                  operationSummary="Approval-gated Code operations"
+                  threadId={selected.threadId}
                   threadTitle={title}
-                  {...(hostLabel === undefined ? {} : { hostLabel })}
+                  transport={transport}
+                  watchingOnly={watchingOnly}
                 />
               ) : null}
-              {!offlineDemo && selected.mode === "code" && transport !== undefined ? (
-                <PullRequestReviewPanel threadId={selected.threadId} transport={transport} />
-              ) : null}
               {!offlineDemo &&
-              selected.mode === "code" &&
-              transport !== undefined &&
-              code.thread !== undefined ? (
-                <CoordinatorProposalsPanel
+              fullView &&
+              activeSurface === "browser" &&
+              transport !== undefined ? (
+                <BrowserSurfacePanel
                   actsAsHostPerson={standing.actsAsHostPerson}
-                  thread={code.thread}
-                  transport={transport}
-                />
-              ) : null}
-              {!offlineDemo &&
-              transport !== undefined &&
-              (selected.mode === "work" || selected.mode === "code") &&
-              routinesProjectId !== undefined ? (
-                <ThreadRoutinesPanel
                   mode={selected.mode}
-                  projectId={routinesProjectId}
+                  reach={browserReach}
                   threadId={selected.threadId}
                   transport={transport}
                 />
               ) : null}
-              <ThreadTranscript
-                {...(props.focusTurnId === undefined
-                  ? {}
-                  : {
-                      focus: {
-                        turnId: props.focusTurnId,
-                        onFound: (y: number) =>
-                          scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true }),
-                      },
-                    })}
-                allowProductMutations={staleGate.allowProductMutations}
-                chat={chat}
-                codeConversation={code.conversation}
-                modelOptions={models.options}
-                providerDirectory={models.providerDirectory}
-                replyDetail={replyDetail}
-                turnActionsFor={turnActions.actionsFor}
-                workTurns={work.turns}
-              />
-              {!offlineDemo &&
-              Platform.OS !== "web" &&
-              selectedHost !== undefined &&
-              hostHealth !== "unauthorized" ? (
-                <ThreadVideoClips
-                  key={`${selected.hostId}:${selectedHost.credentialGeneration}:${selected.mode}:${selected.threadId}`}
-                  hostId={selected.hostId}
-                  threadId={selected.threadId}
-                  threadKind={`${selected.mode}-thread`}
-                  transport={hostHealth === "ready" ? transport : undefined}
-                />
-              ) : null}
-            </>
-          )}
-        </ScrollView>
+            </View>
+          }
+          maintainScrollAtEnd={props.focusTurnId === undefined}
+          recycleItems={false}
+          renderItem={({ item }) => item.node}
+          style={styles.scroll}
+          {...(Platform.OS === "web"
+            ? {}
+            : { keyboardShouldPersistTaps: "handled", testID: "mobile-thread-transcript" })}
+        />
         {viewFloating && activeSurface === "browser" && !offlineDemo && transport !== undefined ? (
           <View style={styles.floatingView} testID="mobile-thread-view-floating">
             <View style={styles.floatingHeader}>
@@ -823,7 +1064,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 onPress={() => openSurface("chat")}
                 testID="mobile-thread-view-floating-close"
               >
-                <Ionicons color={colors.textSecondary} name="close" size={15} />
+                <Icon color={colors.textSecondary} name="close" size={15} />
               </Pressable>
             </View>
             <BrowserSurfacePanel
@@ -857,38 +1098,50 @@ export function ThreadScreen(props: ThreadScreenProps) {
           }}
         />
       ) : null}
-      {resumeOffer === undefined ? null : <ResumeBar busy={resumeBusy} offer={resumeOffer} />}
-      {selected.mode === "chat" ? null : (
+      {turnControl.queue === undefined ? null : (
         <QueuedMessages
-          allowChanges={queue.allowChanges}
-          changing={queue.changing}
-          error={queue.error}
-          items={queue.items}
-          onEdit={queue.edit}
-          onRemove={queue.remove}
-          onSendNow={queue.sendNow}
+          actions={
+            mayAct
+              ? {
+                  onEdit: turnControl.editQueued,
+                  onRemove: (messageId) => void turnControl.removeQueued(messageId),
+                  onSendNow: (messageId) => void turnControl.sendQueuedNow(messageId),
+                }
+              : undefined
+          }
+          changing={turnControl.pending}
+          queue={turnControl.queue}
         />
       )}
+      {resumeOffer === undefined ? null : <ResumeBar busy={resumeBusy} offer={resumeOffer} />}
       {selected.mode === "chat" ? (
         <>
           <FloatingComposer
-            busy={liveBusy}
+            busy={!unreached && liveBusy}
             busyLabel={
               chat.activeAttempt !== undefined
                 ? chatAttemptStatusLabel(chat.activeAttempt.outcome)
                 : MOBILE_COPY.working
             }
+            busySince={chat.activeAttempt === undefined ? undefined : runningChatTurn?.createdAt}
             editable={composerEditable}
-            footerHint={composerAccess.reason}
+            footerHint={unreached ? undefined : composerAccess.reason}
+            modelDriverKind={selectedModel?.driverKind}
             modelLabel={modelLabel}
             onChangeText={setPrompt}
             onPressModel={() => setModelOpen(true)}
-            onSubmit={() => void chat.send()}
+            slashCommands={attachmentModel?.commands}
+            slashProviderLabel={attachmentModel?.detail}
+            onSubmit={() =>
+              unreached ? sendLater() : void (mayQueue ? queueNow() : sendNow(chat.send))
+            }
+            queues={queues}
+            sending={turnControl.pending}
             {...(chat.activeAttempt === undefined ? attachProps : {})}
             {...(chat.activeAttempt !== undefined && staleGate.allowProductMutations
               ? { onStop: () => void chat.stop() }
               : {})}
-            placeholder={MOBILE_COPY.composerFollowUp}
+            placeholder={unreached ? MOBILE_COPY.outboxComposer : MOBILE_COPY.composerFollowUp}
             testID="mobile-thread-composer"
             typedScope={typedScope}
             value={prompt}
@@ -897,46 +1150,121 @@ export function ThreadScreen(props: ThreadScreenProps) {
         </>
       ) : (
         <FloatingComposer
-          busy={busy}
-          busyLabel={MOBILE_COPY.turnRunning}
+          busy={!unreached && (busy || workTurnLive || codeTurnLive)}
+          busyLabel={
+            !busy && latestTurnAtUsageLimit
+              ? MOBILE_COPY.turnWaitingOnUsageLimit
+              : subagentsWorking > 0
+                ? MOBILE_COPY.waitingOnSubagents(subagentsWorking)
+                : MOBILE_COPY.working
+          }
+          busySince={runningWorkTurn?.acceptedAt ?? runningCodeTurn?.startedAt}
           editable={composerEditable}
-          footerHint={
-            composerAccess.reason ??
-            (!followUpTurnLive
-              ? followUpComposerCopy?.footerHint
-              : latestTurnAtUsageLimit
-                ? MOBILE_COPY.turnWaitingOnUsageLimit
-                : pendingAttachments.length > 0
-                  ? MOBILE_COPY.queueKeepsAttachments
-                  : MOBILE_COPY.queueWhileTurnRuns)
-          }
-          modelLabel={
-            selected.mode === "work" && work.thread !== undefined
-              ? mobileModelLabel(models.options, String(work.thread.modelId))
-              : MOBILE_COPY.modelHostOnly
-          }
+          footerHint={unreached ? undefined : composerAccess.reason}
+          {...(levelLabel === undefined
+            ? {}
+            : { modelLabel: levelLabel, onPressModel: () => setDetailsOpen(true) })}
           onChangeText={setPrompt}
-          {...(() => {
-            const route = followUpRoute({
-              mode: selected.mode,
-              turnLive: followUpTurnLive,
-              queueing: queue.changing,
-            });
-            return route === "wait"
-              ? {}
-              : { onSubmit: route === "queue" ? queueFollowUp : sendFollowUp };
-          })()}
+          slashCommands={attachmentModel?.commands}
+          slashProviderLabel={attachmentModel?.detail}
+          onSubmit={unreached ? sendLater : mayQueue ? queueNow : sendFollowUp}
+          queues={queues}
+          sending={turnControl.pending}
+          {...(turnControl.stop === undefined ? {} : { onStop: () => void turnControl.stop?.() })}
           {...(workTurnLive || codeTurnLive ? {} : attachProps)}
-          placeholder={followUpComposerCopy?.placeholder ?? MOBILE_COPY.composerFollowUp}
+          placeholder={unreached ? MOBILE_COPY.outboxComposer : MOBILE_COPY.composerFollowUp}
           testID="mobile-thread-composer"
           typedScope={typedScope}
           value={prompt}
           voice={voice}
         />
       )}
+      <BottomSheet
+        onClose={() => setDetailsOpen(false)}
+        testID="mobile-thread-details"
+        title={MOBILE_COPY.threadDetails}
+        visible={detailsOpen}
+      >
+        <ScrollView contentContainerStyle={styles.details}>
+          {offlineDemo || transport === undefined ? null : (
+            <ListSection>
+              <ListRow
+                accessory="chevron"
+                icon="grid-outline"
+                label={MOBILE_COPY.threadViewsAndPanes}
+                last
+                onPress={() => {
+                  setDetailsOpen(false);
+                  openPanes(undefined);
+                }}
+                testID="mobile-thread-panes-open"
+              />
+            </ListSection>
+          )}
+          {threadHint === undefined ? null : (
+            <Text style={styles.connectionStatus}>{threadHint}</Text>
+          )}
+          {offlineDemo || transport === undefined ? null : selected.mode === "code" &&
+            code.thread !== undefined ? (
+            <ThreadLevelPanel
+              actsAsHostPerson={standing.actsAsHostPerson}
+              warnings={fullAccessWarnings}
+              onChanged={() => void code.refresh({ quiet: true })}
+              subject={{ mode: "code", thread: code.thread }}
+              transport={transport}
+            />
+          ) : selected.mode === "work" && work.thread !== undefined ? (
+            <ThreadLevelPanel
+              actsAsHostPerson={standing.actsAsHostPerson}
+              warnings={fullAccessWarnings}
+              onChanged={() => void work.refresh({ quiet: true })}
+              subject={{ mode: "work", thread: work.thread }}
+              transport={transport}
+            />
+          ) : null}
+          {!offlineDemo &&
+          transport !== undefined &&
+          (selected.mode === "work" || selected.mode === "code") &&
+          routinesProjectId !== undefined ? (
+            <DefaultLevelsPanel
+              actsAsHostPerson={standing.actsAsHostPerson}
+              warnings={fullAccessWarnings}
+              mode={selected.mode}
+              projectId={routinesProjectId}
+              transport={transport}
+            />
+          ) : null}
+          {!offlineDemo &&
+          selected.mode === "code" &&
+          (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
+            <ApprovalDeferralSheet
+              executionPolicy={codePolicy}
+              mode="code"
+              operationSummary="Approval-gated Code operations"
+              threadTitle={title}
+              {...(hostLabel === undefined ? {} : { hostLabel })}
+            />
+          ) : null}
+          {!offlineDemo && selected.mode === "code" && transport !== undefined ? (
+            <PullRequestReviewPanel threadId={selected.threadId} transport={transport} />
+          ) : null}
+          {!offlineDemo &&
+          transport !== undefined &&
+          (selected.mode === "work" || selected.mode === "code") &&
+          routinesProjectId !== undefined ? (
+            <ThreadRoutinesPanel
+              mode={selected.mode}
+              projectId={routinesProjectId}
+              threadId={selected.threadId}
+              transport={transport}
+            />
+          ) : null}
+        </ScrollView>
+      </BottomSheet>
       {offlineDemo || transport === undefined ? null : (
         <ThreadPanesSheet
           codeThread={selected.mode === "code" ? code.thread : undefined}
+          initialPane={initialPane}
           mode={selected.mode}
           onClose={() => setPanesOpen(false)}
           onOpenView={(view) => {
@@ -991,9 +1319,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
       />
       <ModelPickerSheet
         onClose={() => setModelOpen(false)}
+        onChangeValue={chat.setModelOptionValue}
         onSelect={(id) => {
           chat.setModelOptionId(id);
-          setModelOpen(false);
+          // A model with settings keeps the sheet open so they can be set.
+          if (
+            selectableModelSettings(models.options.find((option) => option.id === id)?.settings)
+              .length === 0
+          ) {
+            setModelOpen(false);
+          }
         }}
         options={models.options.map((option) => ({
           id: option.id,
@@ -1001,8 +1336,10 @@ export function ThreadScreen(props: ThreadScreenProps) {
           detail: option.detail,
         }))}
         selectedId={chat.modelOptionId}
+        settings={models.options.find((option) => option.id === chat.modelOptionId)?.settings}
+        values={chat.modelOptionValues}
         visible={modelOpen}
       />
-    </View>
+    </KeyboardRoom>
   );
 }

@@ -3,10 +3,9 @@ import {
   collectMobileUserFacingCopy,
   mobileHostHealthLabel,
   mobileModelLabel,
-  mobileThreadComposerCopy,
+  mobileThreadHint,
   MOBILE_PRODUCT_NAME,
-  MOBILE_ROUTE_IDS,
-  MOBILE_TAB_LABELS,
+  MOBILE_SCREEN_TITLES,
 } from "./copy";
 
 const retiredProductName = "OpenOr" + "bit";
@@ -17,27 +16,21 @@ describe("mobile package identity", () => {
     expect(collectMobileUserFacingCopy()).not.toContain(retiredProductName);
   });
 
-  it("exposes Inbox home, Agents, Thread, Settings, and To-dos routes", () => {
-    expect([...MOBILE_ROUTE_IDS]).toEqual(["home", "agents", "thread", "hosts", "todos"]);
-    expect(MOBILE_TAB_LABELS).toEqual({
-      home: "Inbox",
-      agents: "Agents",
+  it("names every screen's title", () => {
+    expect(MOBILE_SCREEN_TITLES).toEqual({
+      home: "Octant",
+      threads: "Threads",
+      inbox: "Inbox",
       thread: "Thread",
-      hosts: "Settings",
+      settings: "Settings",
       todos: "To-dos",
+      usage: "Usage",
     });
   });
 
   it("keeps Work and Code follow-up guidance mode-specific and honest about host-only steps", () => {
-    expect(mobileThreadComposerCopy("work")).toMatchObject({
-      placeholder: expect.stringContaining("Work"),
-    });
-    expect(mobileThreadComposerCopy("code")).toMatchObject({
-      placeholder: expect.stringContaining("Code"),
-    });
-    expect(mobileThreadComposerCopy("code").footerHint).toMatch(/approve/i);
-    expect(mobileThreadComposerCopy("work").footerHint).toMatch(/stay there/i);
-    expect(mobileThreadComposerCopy("code")).not.toEqual(mobileThreadComposerCopy("work"));
+    expect(mobileThreadHint("code")).toMatch(/approve/i);
+    expect(mobileThreadHint("work")).toMatch(/stay there/i);
   });
 
   it("uses host-advertised model labels instead of inventing display names", () => {

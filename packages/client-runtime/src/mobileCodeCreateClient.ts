@@ -10,6 +10,7 @@ import {
   CodeOperationResult,
   type CodeThread,
   type ProjectSummary,
+  type ProviderModelOptionValues,
   CodeBootstrap,
   CodeCommandResult,
   CodeEvidenceReference,
@@ -298,6 +299,7 @@ export async function createMobileCodeFromPrompt(input: {
   readonly project: MobileCodeProjectOption;
   readonly providerInstanceId: string;
   readonly modelId: string;
+  readonly modelOptionValues?: ProviderModelOptionValues;
   readonly threadId?: string;
   readonly retry?: MobileCodeCreationRetry;
   readonly confirmDeliveryTarget: (
@@ -442,6 +444,9 @@ export async function createMobileCodeFromPrompt(input: {
               title,
               providerInstanceId: input.providerInstanceId,
               modelId: input.modelId,
+              ...(input.modelOptionValues === undefined
+                ? {}
+                : { modelOptionValues: input.modelOptionValues }),
               executionPolicy: "approval-gated",
               permissionPersistence: "current-session",
               deliveryTarget,
@@ -461,6 +466,9 @@ export async function createMobileCodeFromPrompt(input: {
                 lifecycle: "active",
                 providerInstanceId: input.providerInstanceId,
                 modelId: input.modelId,
+                ...(input.modelOptionValues === undefined
+                  ? {}
+                  : { modelOptionValues: input.modelOptionValues }),
                 executionPolicy: "approval-gated",
                 permissionPersistence: "current-session",
                 deliveryTarget,

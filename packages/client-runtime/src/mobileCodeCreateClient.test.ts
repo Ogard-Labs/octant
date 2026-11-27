@@ -163,6 +163,7 @@ describe("mobile Code creation", () => {
         project: { projectId, name: "Octant", root: "/repos/octant" },
         providerInstanceId,
         modelId: "gpt-5.6",
+        modelOptionValues: { effort: "high" },
         threadId,
         confirmDeliveryTarget: vi.fn(async (proposal) => {
           expect(proposal).toMatchObject({
@@ -194,6 +195,7 @@ describe("mobile Code creation", () => {
       kind: "create-code-thread",
       thread: {
         checkoutId,
+        modelOptionValues: { effort: "high" },
         executionPolicy: "approval-gated",
         deliveryTarget: { branchIntent: "development" },
       },
@@ -340,6 +342,7 @@ describe("mobile Code creation", () => {
               projectId,
               providerInstanceId,
               modelId: "gpt-5.6",
+              modelOptionValues: { effort: "high" },
               executionPolicy: "approval-gated",
               permissionPersistence: "current-session",
               sourceBranch: "release",
@@ -420,6 +423,7 @@ describe("mobile Code creation", () => {
         },
         providerInstanceId,
         modelId: "gpt-5.6",
+        modelOptionValues: { effort: "high" },
         threadId,
         confirmDeliveryTarget: vi.fn(async (proposal) => {
           expect(proposal).toMatchObject({

@@ -204,11 +204,33 @@ try:
     run(["xcodebuild", "build-for-testing", "-workspace", str(ios / "Octant.xcworkspace"),
          "-scheme", "OctantOfflineNativeTests", "-configuration", "Release",
          "-destination", "id=" + device, "-derivedDataPath", str(derived_data),
-         "CODE_SIGNING_ALLOWED=NO"], timeout=1800)
-    for label, size, method in (
-        ("standard", "large", "testColdDemoReplyForegroundAndReset"),
-        ("large-text", "accessibility-extra-large", "testLargeTextEntryAndReply"),
+         # A Release build makes every architecture; the Simulator runs one.
+         "ONLY_ACTIVE_ARCH=YES",
+         # A cold build with the native look's modules runs past 30 minutes on
+         # a hosted runner (seen at 1800 s on 2026-11-27).
+         "CODE_SIGNING_ALLOWED=NO"], timeout=2700)
+    if os.environ.get("OCTANT_KEEP_SIMULATOR_APP") == "1":
+        # The app and its test runner, before the scenarios, so a failing one
+        # can be looked into by hand.
+        products = derived_data / "Build/Products"
+        kept = work / "Products"
+        for name in ("Octant.app", "OctantOfflineNativeTests-Runner.app"):
+            run(["ditto", str(products / "Release-iphonesimulator" / name),
+                 str(kept / "Release-iphonesimulator" / name)], timeout=300)
+        for plan in products.glob("*.xctestrun"):
+            run(["ditto", str(plan), str(kept / "drive.xctestrun")], timeout=60)
+        run(["ditto", "-c", "-k", "--norsrc", "--keepParent", str(kept),
+             str(artifacts / "Octant-simulator.zip")], timeout=300)
+    for label, size, appearance, method in (
+        ("standard", "large", "light", "testColdDemoReplyForegroundAndReset"),
+        ("large-text", "accessibility-extra-large", "light", "testLargeTextEntryAndReply"),
+        ("dark", "large", "dark", "testDarkPlacesAndMenus"),
     ):
+        # Set on the device: the test process's own switch left the app light.
+        run(["xcrun", "simctl", "ui", device, "appearance", appearance], timeout=120)
+        observed_appearance = run(["xcrun", "simctl", "ui", device, "appearance"], timeout=120, capture=True).strip()
+        if observed_appearance != appearance:
+            raise RuntimeError("The owned Simulator did not adopt the requested appearance.")
         set_content_size(device, size)
         observed_size = run(["xcrun", "simctl", "ui", device, "content_size"], capture=True).strip()
         if observed_size != size:
@@ -218,10 +240,11 @@ try:
              "-destination", "id=" + device, "-derivedDataPath", str(derived_data),
              "-resultBundlePath", str(artifacts / (label + ".xcresult")),
              "-parallel-testing-enabled", "NO", "-test-timeouts-enabled", "YES",
-             "-maximum-test-execution-time-allowance", "180",
+             "-maximum-test-execution-time-allowance", "300",
              "-only-testing:OctantOfflineNativeTests/OfflineDemoTests/" + method,
              "CODE_SIGNING_ALLOWED=NO"], timeout=1800)
-        checks.append({"scenario": label, "systemTextSize": observed_size})
+        checks.append({"scenario": label, "systemTextSize": observed_size,
+                       "systemAppearance": observed_appearance})
     (artifacts / "acceptance.json").write_text(json.dumps({
         "checks": checks, "simulator": device, "runtime": runtime,
         "nativeUi": True, "screenshotProtectionChanged": False,

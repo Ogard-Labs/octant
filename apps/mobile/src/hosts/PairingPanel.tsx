@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import {
   createRemotePairingClient,
   isRemotePairingFailure,
@@ -371,7 +371,7 @@ export function PairingPanel(props: PairingPanelProps) {
     <View style={styles.field}>
       <Text style={styles.label}>{input.label}</Text>
       <View style={styles.inputRow}>
-        <Ionicons color={colors.textTertiary} name={input.icon} size={18} />
+        <Icon color={colors.textTertiary} name={input.icon} size={18} />
         <TextInput
           autoCapitalize="none"
           autoCorrect={false}

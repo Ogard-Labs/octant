@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { MobileInboxRow, MobileRemoteTransport } from "@octant/client-runtime";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -57,11 +57,35 @@ vi.mock("expo-video", () => ({
     createElement("div", { "data-testid": "video-playing", "data-uri": player.uri }),
 }));
 vi.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
+vi.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
 vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
   ...(await import("../../design-system/tokens")),
 }));
 vi.mock("../session/MobileSessionContext", () => ({ useMobileSession: () => context.current }));
+vi.mock("./MobileThreadsContext", async () => {
+  const { createThreadDrafts } = await import("./threadDrafts");
+  const drafts = createThreadDrafts();
+  return {
+    useMobileThreads: () => ({
+      drafts,
+      lastStanding: () => undefined,
+      noteStanding: () => undefined,
+      projectName: () => undefined,
+    }),
+  };
+});
+vi.mock("../outbox/OutboxContext", () => ({
+  useOutbox: () => ({
+    waitingFor: () => [],
+    unsaved: false,
+    keep: () => undefined,
+    remove: () => undefined,
+    tryAgain: () => undefined,
+  }),
+}));
 vi.mock("../session/usePlacementHostModels", () => ({
   usePlacementHostModels: () => ({ options: [], providerDirectory: [] }),
 }));
@@ -87,7 +111,22 @@ vi.mock("../review/ThreadRoutinesPanel", () => ({ ThreadRoutinesPanel: nothing }
 vi.mock("../ui/AttachSourceSheet", () => ({ AttachSourceSheet: nothing }));
 vi.mock("../ui/FloatingComposer", () => ({ FloatingComposer: nothing }));
 vi.mock("../ui/IconButton", () => ({ IconButton: nothing }));
-vi.mock("../ui/NativeChrome", () => ({ NavBar: nothing }));
+// The list's own windowing needs a laid-out screen; here it draws every part.
+vi.mock("@legendapp/list/react-native", async () => {
+  const { createElement: element, Fragment } = await import("react");
+  return {
+    LegendList: (props: {
+      readonly ListHeaderComponent?: ReactNode;
+      readonly ListFooterComponent?: ReactNode;
+    }) => element(Fragment, null, props.ListHeaderComponent, props.ListFooterComponent),
+  };
+});
+vi.mock("../navigation/ScreenHeader", () => ({ ScreenHeader: nothing }));
+vi.mock("../ui/NativeChrome", () => ({
+  ListNote: nothing,
+  ListRow: nothing,
+  ListSection: nothing,
+}));
 vi.mock("../ui/ModelPickerSheet", () => ({ ModelPickerSheet: nothing }));
 vi.mock("../ui/RewindSheet", () => ({ RewindSheet: nothing }));
 vi.mock("../panes/ThreadPanesSheet", () => ({ ThreadPanesSheet: nothing }));
@@ -98,7 +137,10 @@ vi.mock("../surfaces/ProjectToolSheets", () => ({
 }));
 vi.mock("./thread/DefaultLevelsPanel", () => ({ DefaultLevelsPanel: nothing }));
 vi.mock("./thread/ThreadLevelPanel", () => ({ ThreadLevelPanel: nothing }));
-vi.mock("./thread/ThreadTranscript", () => ({ ThreadTranscript: nothing }));
+vi.mock("./thread/ThreadTranscript", () => ({
+  ThreadTranscript: nothing,
+  useThreadTranscriptRows: () => [],
+}));
 vi.mock("./thread/pickAttachment", () => ({ pickAttachment: async () => undefined }));
 
 const hostId = "11111111-1111-4111-8111-111111111111";
@@ -200,7 +242,6 @@ async function openScreen() {
           preference: "light",
           children: createElement(ThreadScreen, {
             selected: row,
-            onBack: () => undefined,
             onOpenThread: () => undefined,
           }),
         }),

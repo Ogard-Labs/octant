@@ -32,7 +32,10 @@ const config: ExpoConfig = {
   scheme: "octant",
   icon: "./assets/icon.png",
   version: "0.1.0",
-  orientation: "portrait",
+  // Every orientation, so a foldable's inner screen (a landscape panel about
+  // an iPad mini's size on iPhone Duo) and an Android foldable or tablet are
+  // filled the way the device is held, as an iPad already was.
+  orientation: "default",
   userInterfaceStyle: "automatic",
   experiments: {
     autolinkingModuleResolution: true,

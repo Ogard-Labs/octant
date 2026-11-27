@@ -943,6 +943,8 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows Wor
 - Plan refuses Project memory writes. Below Full access, unless the Project's "Agents may write Project memory without asking" switch is on, a write waits for the person's confirmation in the thread; only a local window or a person-paired device sets that switch (maintainer decision, 2026-11-12).
 - Only a person moves a thread to another Project of its mode whose folder is or contains its own; it keeps kind, history and level, gains no reach, is journaled, and is refused while a turn runs or the thread waits on the person.
 
+- The phone lists Chat, Work and Code threads together in one Threads place, narrowed by mode, computer and Project, with the sidebar's Status, Projects and Activity arrangements; its bar is the system's, icons only (maintainer request, 2026-11-25). Detail: [Mobile maturity](mobile-maturity.md#exists-today).
+
 Not built yet:
 
 - The Project memory confirmation card on a paired device's turn: the device has no card for it, so the write is refused like a host-started turn's (`isPairedDeviceScope` in `projectMemoryAccess.ts`).
@@ -2786,7 +2788,8 @@ Octant looks like a calm, colourful workbench. Colour is the default and grey is
 - Everything that opens over the window arrives and leaves one way; reduced motion removes the transition. A leaving dialog takes no press or key, and focus returns to its opener.
 - A placeholder holds its box until its content paints, and a later read keeps what is drawn until the fresh answer lands. There is one scrollbar and one picker-row recipe, declared once.
 - A sentence says what the person waits for, what happened or what to do next, never the mechanism, held by a contract test (maintainer request, 2026-11-25). Copy says "this Mac" only when the host reports macOS.
-- The phone app reads as a native app and shares the product's radius scale, count hues and transcript.
+- The phone app is drawn with the platform's own parts (maintainer decision, 2026-11-24): the system tab bar, icons only; a native stack per place; the system sheet, menu, alert and segmented control; and every text style following the system text size. A picture ground and glass panels are Appearance choices behind content only. Android is Material. It keeps the product radius scale, the count tiles' hues and the transcript recipe. Code in a reply and in the Review diff is drawn in syntax colours with Shiki's grammars on its JavaScript regex engine (approved dependency, 2026-11-26), and the Project terminal draws the shell's screen with Octant's own emulator and native text ([mobile maturity](mobile-maturity.md)). Built on iOS; Android's Material menus and dialogs are not built yet.
+- On a window at least 640 points wide (an iPad, a foldable opened), Threads and Inbox show the list beside the open thread, and the app turns with the device on iPhone; folding or opening keeps the open thread (maintainer request, 2026-11-26).
 
 Not built yet:
 
@@ -3804,7 +3807,9 @@ The host is authoritative for mode, Project, thread, provider, approval and Done
 - On a host whose own person paired it, the phone sets modes and levels (Full access included) with no owner unlock, and offers Always allow in this Project (maintainer decision, 2026-11-12). A restricted session sees neither.
 - Sensors are touched only on an explicit, visible act. The app receives no over-the-air code updates.
 
-Not built yet:
+- Words are the one thing that may wait on the phone (maintainer decision, 2026-11-25): a plain follow-up to an existing thread, written while its computer cannot be reached, sealed on the phone and sent once through the thread's own queue by an unlocked, foreground session. No approval, answer, stop, merge, setting, row action, file or new thread waits. The thread list outlives a restart, sealed and bound to the pairing ([Mobile maturity](mobile-maturity.md)).
+- A running turn can be stopped from the phone, naming the turn the person saw; a message written meanwhile goes to the thread's queue on the computer, where a waiting one can be edited, sent now or removed (maintainer request, 2026-11-25).
+  Not built yet:
 
 - Phone screens for the rest of what the host accepts from such a device (packages, providers and keys, paired devices, host controls): not designed for the phone yet.
 

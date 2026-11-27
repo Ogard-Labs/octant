@@ -1,0 +1,184 @@
+import type { MobileInboxMode } from "@octant/client-runtime";
+
+/**
+ * Messages written to a thread while its computer could not be reached. Words
+ * alone: an approval, an answer, a stop or any other action is taken by the
+ * computer when it is made, or not at all.
+ */
+export interface Pairing {
+  /** The computer's own key, which another that takes its id does not have. */
+  readonly hostKeyFingerprint: string;
+  /** This phone's key there, new each time it is paired. */
+  readonly keyId: string;
+}
+
+export interface WaitingMessage {
+  /** The computer's own id for it, the same for every attempt, so it is taken once. */
+  readonly id: string;
+  readonly hostId: string;
+  readonly mode: MobileInboxMode;
+  readonly threadId: string;
+  readonly text: string;
+  /** The pairing it was written under; it is sent by itself under no other. */
+  readonly pairing: Pairing;
+  readonly writtenAt: string;
+  /** Why it waits on the person: the computer's refusal, or its age. */
+  readonly refused?: string;
+  /** It was sent and no answer came, so its computer may already have it. */
+  readonly attempted?: boolean;
+  /**
+   * The person typed it. Every attempt says so alike: the computer takes a
+   * repeat under the same id only as the same message.
+   */
+  readonly typedByPerson?: boolean;
+}
+
+export interface Outbox {
+  readonly messages: ReadonlyArray<WaitingMessage>;
+}
+
+export const EMPTY_OUTBOX: Outbox = { messages: [] };
+
+const MAX_MESSAGES = 50;
+const MAX_CHARACTERS = 20_000;
+/** A thread moves on; older words are offered back rather than sent on their own. */
+const SENT_WITHIN_MS = 24 * 60 * 60 * 1_000;
+
+type Thread = Pick<WaitingMessage, "hostId" | "mode" | "threadId">;
+
+const threadKey = (thread: Thread): string => `${thread.hostId}:${thread.mode}:${thread.threadId}`;
+
+export function addWaiting(
+  outbox: Outbox,
+  message: WaitingMessage,
+): { readonly status: "added" | "full" | "too-long" | "empty"; readonly outbox: Outbox } {
+  if (message.text.trim().length === 0) return { status: "empty", outbox };
+  if (message.text.length > MAX_CHARACTERS) return { status: "too-long", outbox };
+  // Held already: a send and its lost answer can both bring it here.
+  if (outbox.messages.some((held) => held.id === message.id)) return { status: "added", outbox };
+  if (outbox.messages.length >= MAX_MESSAGES) return { status: "full", outbox };
+  return { status: "added", outbox: { messages: [...outbox.messages, message] } };
+}
+
+export function removeWaiting(outbox: Outbox, id: string): Outbox {
+  return { messages: outbox.messages.filter((message) => message.id !== id) };
+}
+
+export function markRefused(outbox: Outbox, id: string, reason: string): Outbox {
+  return {
+    messages: outbox.messages.map((message) =>
+      message.id === id ? { ...message, refused: reason } : message,
+    ),
+  };
+}
+
+export function markAttempted(outbox: Outbox, id: string): Outbox {
+  return outbox.messages.some((message) => message.id === id && message.attempted !== true)
+    ? {
+        messages: outbox.messages.map((message) =>
+          message.id === id ? { ...message, attempted: true } : message,
+        ),
+      }
+    : outbox;
+}
+
+/** The person says it still applies. It keeps its id, so it is still taken once. */
+export function tryAgain(
+  outbox: Outbox,
+  id: string,
+  now: Date,
+  pairing?: Pairing | undefined,
+): Outbox {
+  return {
+    messages: outbox.messages.map((message) => {
+      if (message.id !== id) return message;
+      const { refused: _refused, ...rest } = message;
+      // A new pairing with the same computer is the person's to accept. Another
+      // computer under its id is not the one they wrote to.
+      const under =
+        pairing !== undefined && pairing.hostKeyFingerprint === message.pairing.hostKeyFingerprint
+          ? pairing
+          : message.pairing;
+      return { ...rest, pairing: under, writtenAt: now.toISOString() };
+    }),
+  };
+}
+
+/** A computer taken off the phone takes the words written for it along. */
+export function dropHostsNotIn(outbox: Outbox, hostIds: ReadonlySet<string>): Outbox {
+  const messages = outbox.messages.filter((message) => hostIds.has(message.hostId));
+  return messages.length === outbox.messages.length ? outbox : { messages };
+}
+
+export function waitingFor(outbox: Outbox, thread: Thread): ReadonlyArray<WaitingMessage> {
+  return outbox.messages.filter((message) => threadKey(message) === threadKey(thread));
+}
+
+/**
+ * The next message of each thread on this computer. A thread's messages go in
+ * the order they were written, so one that waits on the person holds the rest.
+ */
+export function dueMessages(
+  outbox: Outbox,
+  target: { readonly hostId: string; readonly pairing: Pairing },
+  now: Date,
+): {
+  readonly send: ReadonlyArray<WaitingMessage>;
+  readonly held: ReadonlyArray<{
+    readonly message: WaitingMessage;
+    readonly why: "tooOld" | "otherComputer" | "pairedAgain";
+  }>;
+} {
+  const seen = new Set<string>();
+  const send: WaitingMessage[] = [];
+  const held: Array<{
+    message: WaitingMessage;
+    why: "tooOld" | "otherComputer" | "pairedAgain";
+  }> = [];
+  for (const message of outbox.messages) {
+    if (message.hostId !== target.hostId || seen.has(threadKey(message))) continue;
+    seen.add(threadKey(message));
+    if (message.refused !== undefined) continue;
+    if (message.pairing.hostKeyFingerprint !== target.pairing.hostKeyFingerprint)
+      held.push({ message, why: "otherComputer" });
+    else if (message.pairing.keyId !== target.pairing.keyId)
+      held.push({ message, why: "pairedAgain" });
+    else if (now.getTime() - Date.parse(message.writtenAt) >= SENT_WITHIN_MS)
+      held.push({ message, why: "tooOld" });
+    else send.push(message);
+  }
+  return { send, held };
+}
+
+function isMessage(value: unknown): value is WaitingMessage {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Readonly<Record<string, unknown>>;
+  const pairing = entry.pairing as Readonly<Record<string, unknown>> | null | undefined;
+  return (
+    typeof pairing === "object" &&
+    pairing !== null &&
+    typeof pairing.hostKeyFingerprint === "string" &&
+    typeof pairing.keyId === "string" &&
+    ["id", "hostId", "threadId", "text", "writtenAt"].every(
+      (key) => typeof entry[key] === "string",
+    ) &&
+    (entry.mode === "chat" || entry.mode === "work" || entry.mode === "code") &&
+    (entry.refused === undefined || typeof entry.refused === "string") &&
+    (entry.attempted === undefined || typeof entry.attempted === "boolean") &&
+    (entry.typedByPerson === undefined || typeof entry.typedByPerson === "boolean")
+  );
+}
+
+/** What the phone kept, or nothing at all when it cannot be read whole. */
+export function parseOutbox(kept: string | null): Outbox {
+  if (kept === null) return EMPTY_OUTBOX;
+  try {
+    const parsed: unknown = JSON.parse(kept);
+    if (typeof parsed !== "object" || parsed === null || !("messages" in parsed))
+      return EMPTY_OUTBOX;
+    const { messages } = parsed;
+    return Array.isArray(messages) && messages.every(isMessage) ? { messages } : EMPTY_OUTBOX;
+  } catch {
+    return EMPTY_OUTBOX;
+  }
+}

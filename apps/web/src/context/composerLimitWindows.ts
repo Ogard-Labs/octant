@@ -1,8 +1,5 @@
 import type { ProviderRateLimitWindow } from "@octant/contracts/context";
-import {
-  providerLimitWindowName,
-  providerLimitWindowShortLabel,
-} from "../providers/providerLimitWindow";
+import { providerLimitWindowName, providerLimitWindowShortLabel } from "@octant/client-runtime";
 import type { ComposerContextUsageFallback } from "./composerContextMeterScope";
 
 /** The share used at which a limit bar takes the warning ink, as the meter's popover does. */

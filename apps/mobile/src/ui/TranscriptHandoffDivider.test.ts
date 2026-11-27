@@ -88,7 +88,10 @@ function renderDivider(entry: MobileTranscriptHandoffEntry): HTMLElement {
   return host;
 }
 
-function renderChatTranscript(view: ChatThreadView): HTMLElement {
+function renderChatTranscript(
+  view: ChatThreadView,
+  focus?: ThreadTranscriptProps["focus"],
+): HTMLElement {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -102,10 +105,14 @@ function renderChatTranscript(view: ChatThreadView): HTMLElement {
     pendingAttachments: [],
     modelOptionId: undefined,
     setModelOptionId: vi.fn(),
+    modelOptionValues: {},
+    setModelOptionValue: vi.fn(),
+    choiceWaits: false,
     reconnecting: false,
     refresh: vi.fn(async () => {}),
     attach: vi.fn(async () => {}),
-    send: vi.fn(async () => {}),
+    attachmentsSent: () => undefined,
+    send: vi.fn(async () => undefined),
     stop: vi.fn(async () => {}),
     retry: vi.fn(async () => {}),
     completeWorkItem: vi.fn(),
@@ -125,6 +132,7 @@ function renderChatTranscript(view: ChatThreadView): HTMLElement {
           turnActionsFor: () => [],
           replyDetail: "low",
           modelOptions,
+          ...(focus === undefined ? {} : { focus }),
         }),
       ),
     ),
@@ -143,6 +151,119 @@ const emptyOmissions = {
   truncatedCharacters: 0,
   sourceTruncatedMessages: 0,
 };
+
+const now = "2026-11-24T12:00:00.000Z";
+const threadId = "00000000-0000-4000-8000-000000000801";
+const turn1Id = "00000000-0000-4000-8000-000000000802";
+const turn2Id = "00000000-0000-4000-8000-000000000803";
+const user1Id = "00000000-0000-4000-8000-000000000811";
+const reply1aId = "00000000-0000-4000-8000-000000000812";
+const reply1bId = "00000000-0000-4000-8000-000000000813";
+const user2Id = "00000000-0000-4000-8000-000000000814";
+const reply2Id = "00000000-0000-4000-8000-000000000815";
+
+function twoTurnView() {
+  const ref = (contentId: string) => ({ contentId, digest: "a".repeat(64), byteLength: 10 });
+  const body = (contentId: string, role: "user" | "assistant", text: string) => ({
+    contentId,
+    role,
+    body: text,
+    byteLength: text.length,
+    digest: "a".repeat(64),
+  });
+  return decodeChatThreadView({
+    thread: {
+      id: threadId,
+      title: "Handoff",
+      lifecycle: "active",
+      providerInstanceId: claudeId,
+      modelId: "claude-opus-4",
+      researchEnabled: false,
+      researchRouting: "automatic",
+      personalityInstructions: "Be calm.",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    },
+    lastSequence: 2,
+    turns: [
+      {
+        id: turn1Id,
+        threadId,
+        sequence: 1,
+        userMessageRef: ref(user1Id),
+        attachmentIds: [],
+        attempts: [
+          {
+            id: "10000000-0000-4000-8000-000000000821",
+            turnId: turn1Id,
+            threadId,
+            providerInstanceId: codexId,
+            providerSessionId: "20000000-0000-4000-8000-000000000821",
+            modelId: "gpt-5.3",
+            contextManifestId: "30000000-0000-4000-8000-000000000821",
+            outcome: "interrupted",
+            responseRefs: [ref(reply1aId)],
+            citationIds: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "10000000-0000-4000-8000-000000000822",
+            turnId: turn1Id,
+            threadId,
+            providerInstanceId: claudeId,
+            providerSessionId: "20000000-0000-4000-8000-000000000822",
+            modelId: "claude-sonnet-4",
+            contextManifestId: "30000000-0000-4000-8000-000000000822",
+            outcome: "completed",
+            responseRefs: [ref(reply1bId)],
+            citationIds: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        createdAt: now,
+      },
+      {
+        id: turn2Id,
+        threadId,
+        sequence: 2,
+        userMessageRef: ref(user2Id),
+        attachmentIds: [],
+        attempts: [
+          {
+            id: "10000000-0000-4000-8000-000000000823",
+            turnId: turn2Id,
+            threadId,
+            providerInstanceId: claudeId,
+            providerSessionId: "20000000-0000-4000-8000-000000000822",
+            modelId: "claude-opus-4",
+            contextManifestId: "30000000-0000-4000-8000-000000000823",
+            outcome: "completed",
+            responseRefs: [ref(reply2Id)],
+            citationIds: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        createdAt: now,
+      },
+    ],
+    contents: [
+      body(user1Id, "user", "First prompt"),
+      body(reply1aId, "assistant", "Partial"),
+      body(reply1bId, "assistant", "Recovered"),
+      body(user2Id, "user", "Second prompt"),
+      body(reply2Id, "assistant", "Done"),
+    ],
+    attachments: [],
+    citations: [],
+    workItems: [],
+    workListVersion: 0,
+    followUpVersion: 0,
+  });
+}
 
 describe("TranscriptHandoffDivider on the phone", () => {
   it("renders a context handoff with source and target models and its disclosure note", () => {
@@ -212,115 +333,7 @@ describe("TranscriptHandoffDivider on the phone", () => {
   });
 
   it("places turn-to-turn handoffs on the next user message and retry handoffs on the retry reply", () => {
-    const now = "2026-11-24T12:00:00.000Z";
-    const threadId = "00000000-0000-4000-8000-000000000801";
-    const turn1Id = "00000000-0000-4000-8000-000000000802";
-    const turn2Id = "00000000-0000-4000-8000-000000000803";
-    const user1Id = "00000000-0000-4000-8000-000000000811";
-    const reply1aId = "00000000-0000-4000-8000-000000000812";
-    const reply1bId = "00000000-0000-4000-8000-000000000813";
-    const user2Id = "00000000-0000-4000-8000-000000000814";
-    const reply2Id = "00000000-0000-4000-8000-000000000815";
-    const ref = (contentId: string) => ({ contentId, digest: "a".repeat(64), byteLength: 10 });
-    const body = (contentId: string, role: "user" | "assistant", text: string) => ({
-      contentId,
-      role,
-      body: text,
-      byteLength: text.length,
-      digest: "a".repeat(64),
-    });
-    const view = decodeChatThreadView({
-      thread: {
-        id: threadId,
-        title: "Handoff",
-        lifecycle: "active",
-        providerInstanceId: claudeId,
-        modelId: "claude-opus-4",
-        researchEnabled: false,
-        researchRouting: "automatic",
-        personalityInstructions: "Be calm.",
-        version: 1,
-        createdAt: now,
-        updatedAt: now,
-      },
-      lastSequence: 2,
-      turns: [
-        {
-          id: turn1Id,
-          threadId,
-          sequence: 1,
-          userMessageRef: ref(user1Id),
-          attachmentIds: [],
-          attempts: [
-            {
-              id: "10000000-0000-4000-8000-000000000821",
-              turnId: turn1Id,
-              threadId,
-              providerInstanceId: codexId,
-              providerSessionId: "20000000-0000-4000-8000-000000000821",
-              modelId: "gpt-5.3",
-              contextManifestId: "30000000-0000-4000-8000-000000000821",
-              outcome: "interrupted",
-              responseRefs: [ref(reply1aId)],
-              citationIds: [],
-              createdAt: now,
-              updatedAt: now,
-            },
-            {
-              id: "10000000-0000-4000-8000-000000000822",
-              turnId: turn1Id,
-              threadId,
-              providerInstanceId: claudeId,
-              providerSessionId: "20000000-0000-4000-8000-000000000822",
-              modelId: "claude-sonnet-4",
-              contextManifestId: "30000000-0000-4000-8000-000000000822",
-              outcome: "completed",
-              responseRefs: [ref(reply1bId)],
-              citationIds: [],
-              createdAt: now,
-              updatedAt: now,
-            },
-          ],
-          createdAt: now,
-        },
-        {
-          id: turn2Id,
-          threadId,
-          sequence: 2,
-          userMessageRef: ref(user2Id),
-          attachmentIds: [],
-          attempts: [
-            {
-              id: "10000000-0000-4000-8000-000000000823",
-              turnId: turn2Id,
-              threadId,
-              providerInstanceId: claudeId,
-              providerSessionId: "20000000-0000-4000-8000-000000000822",
-              modelId: "claude-opus-4",
-              contextManifestId: "30000000-0000-4000-8000-000000000823",
-              outcome: "completed",
-              responseRefs: [ref(reply2Id)],
-              citationIds: [],
-              createdAt: now,
-              updatedAt: now,
-            },
-          ],
-          createdAt: now,
-        },
-      ],
-      contents: [
-        body(user1Id, "user", "First prompt"),
-        body(reply1aId, "assistant", "Partial"),
-        body(reply1bId, "assistant", "Recovered"),
-        body(user2Id, "user", "Second prompt"),
-        body(reply2Id, "assistant", "Done"),
-      ],
-      attachments: [],
-      citations: [],
-      workItems: [],
-      workListVersion: 0,
-      followUpVersion: 0,
-    });
+    const view = twoTurnView();
 
     const host = renderChatTranscript(view);
     const renderedIds = Array.from(host.querySelectorAll("[data-testid]"))
@@ -944,5 +957,15 @@ describe("TranscriptHandoffDivider on the phone", () => {
       `mobile-chat-described-images-after-${userId}-0`,
       `mobile-chat-handoff-after-${userId}-1`,
     ]);
+  });
+
+  it("marks the turn a message search names, so the list can land on it", () => {
+    const view = twoTurnView();
+    const second = view.turns[1];
+    if (second === undefined) throw new Error("The view has no second turn.");
+    const host = renderChatTranscript(view, { turnId: String(second.id) });
+    const marked = host.querySelectorAll('[data-testid="mobile-thread-focused-message"]');
+    expect(marked).toHaveLength(1);
+    expect(marked[0]?.textContent).toContain("Second prompt");
   });
 });

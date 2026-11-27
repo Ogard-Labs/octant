@@ -181,10 +181,12 @@ export const lightColors: ThemeColors = {
   atmosphereScrimEnd: "rgba(255,255,255,0.44)",
 };
 
-/** Neutral Octant dark — mirrors the desktop workspace greys. */
+/** Neutral Octant dark: the desktop's controls and inks on the system's own page. */
 export const darkColors: ThemeColors = {
-  canvas: shared("workspace", "dark"),
-  canvasSoft: shared("app-background", "dark"),
+  // The phone's page is the system's dark: near black, with every control
+  // raised from it. The desktop's panes are greys because they sit on one.
+  canvas: "#0A0A0A",
+  canvasSoft: "#0A0A0A",
   ink: shared("text-primary", "dark"),
   body: shared("text-secondary", "dark"),
   bodyStrong: shared("text-primary", "dark"),

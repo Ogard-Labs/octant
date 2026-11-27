@@ -1,6 +1,9 @@
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import type { ProviderModelOption, ProviderModelOptionValues } from "@octant/contracts";
+import { Icon } from "./Icon";
+import { ChoicePill } from "./ChoicePill";
+import { modelSettingValueLabel, selectableModelSettings } from "../inbox/modelSettings";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { BottomSheet } from "./BottomSheet";
@@ -17,7 +20,16 @@ export interface ModelPickerSheetProps {
   readonly options: ReadonlyArray<ModelOption>;
   readonly selectedId?: string | undefined;
   readonly onSelect: (id: string) => void;
+  /** What the selected model declares, such as reasoning effort. */
+  readonly settings?: ReadonlyArray<ProviderModelOption> | undefined;
+  /** The chosen value per option id; an absent id is the model's default. */
+  readonly values?: ProviderModelOptionValues | undefined;
+  /** `undefined` returns the option to its default. */
+  readonly onChangeValue?: ((optionId: string, value: string | undefined) => void) | undefined;
 }
+
+const DEFAULT_CHOICE = "default";
+const valueChoice = (value: string) => `value:${value}`;
 
 export function ModelPickerSheet(props: ModelPickerSheetProps) {
   const { colors } = useTheme();
@@ -58,6 +70,20 @@ export function ModelPickerSheet(props: ModelPickerSheetProps) {
           color: colors.textSecondary,
           fontSize: mobileTypography.caption.fontSize,
         },
+        settingRow: {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: mobileSpacing.md,
+          marginHorizontal: mobileSpacing.sm,
+          paddingHorizontal: mobileSpacing.md,
+          paddingVertical: mobileSpacing.sm,
+        },
+        settingLabel: {
+          flexShrink: 1,
+          color: colors.textPrimary,
+          fontSize: mobileTypography.body.fontSize,
+        },
         choiceIcon: {
           width: 30,
           height: 30,
@@ -70,6 +96,8 @@ export function ModelPickerSheet(props: ModelPickerSheetProps) {
     [colors],
   );
 
+  const selected = props.options.find((option) => option.id === props.selectedId);
+  const settings = selectableModelSettings(props.settings);
   return (
     <BottomSheet onClose={props.onClose} title="Model" visible={props.visible}>
       <Text style={styles.section}>Active</Text>
@@ -98,11 +126,11 @@ export function ModelPickerSheet(props: ModelPickerSheetProps) {
                 </View>
                 {selected ? (
                   <View style={styles.choiceIcon}>
-                    <Ionicons color={colors.success} name="checkmark" size={18} />
+                    <Icon color={colors.success} name="checkmark" size={18} />
                   </View>
                 ) : (
                   <View style={styles.choiceIcon}>
-                    <Ionicons color={colors.textTertiary} name="chevron-forward" size={16} />
+                    <Icon color={colors.textTertiary} name="chevron-forward" size={16} />
                   </View>
                 )}
               </Pressable>
@@ -110,6 +138,43 @@ export function ModelPickerSheet(props: ModelPickerSheetProps) {
           );
         })
       )}
+      {selected !== undefined && settings.length > 0 && props.onChangeValue !== undefined ? (
+        <View>
+          <Text style={styles.section}>{selected.label}</Text>
+          {settings.map((option) => {
+            const current = props.values?.[option.id];
+            const onChangeValue = props.onChangeValue;
+            return (
+              <View key={option.id} style={styles.settingRow}>
+                <Text style={styles.settingLabel}>{option.displayName}</Text>
+                <ChoicePill
+                  look="quiet"
+                  onSelect={(id) =>
+                    onChangeValue?.(
+                      option.id,
+                      id === DEFAULT_CHOICE ? undefined : id.slice(valueChoice("").length),
+                    )
+                  }
+                  options={[
+                    { id: DEFAULT_CHOICE, label: "Default" },
+                    ...option.values.map((value) => ({
+                      id: valueChoice(value),
+                      label: modelSettingValueLabel(value),
+                    })),
+                  ]}
+                  selected={
+                    current !== undefined && option.values.includes(current)
+                      ? valueChoice(current)
+                      : DEFAULT_CHOICE
+                  }
+                  testID={`mobile-model-setting-${option.id}`}
+                  title={option.displayName}
+                />
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
     </BottomSheet>
   );
 }

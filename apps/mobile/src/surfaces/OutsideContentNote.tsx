@@ -1,6 +1,6 @@
 import { approvalOutsideContentLines } from "@octant/domain";
 import type { ApprovalOutsideContent } from "@octant/contracts";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import { StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
@@ -23,7 +23,7 @@ export function OutsideContentNote(props: { readonly outsideContent: ApprovalOut
       testID="mobile-native-harness-approval-outside-content"
     >
       <View style={styles.lead}>
-        <Ionicons color={colors.warning} name="warning-outline" size={16} />
+        <Icon color={colors.warning} name="warning-outline" size={16} />
         <Text style={[mobileTypography.section, styles.leadText, { color: colors.textPrimary }]}>
           {MOBILE_COPY.outsideContentLead}
         </Text>

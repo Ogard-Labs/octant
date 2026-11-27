@@ -1,4 +1,9 @@
-import type { MobileContextMeter, MobileDiffFile, MobileInboxMode } from "@octant/client-runtime";
+import type {
+  MobileContextMeter,
+  MobileDiffFile,
+  MobileDiffLine,
+  MobileInboxMode,
+} from "@octant/client-runtime";
 import type { CodeBoardCard, LocalServerListener } from "@octant/contracts";
 import { formatExactCount, formatTokenCount } from "@octant/domain";
 
@@ -48,6 +53,38 @@ export function listMobileThreadTools(input: {
 /** `+42 −12`, the desktop's diffstat, with a true minus sign. */
 export function diffstatText(additions: number, deletions: number): string {
   return `+${formatExactCount(additions)} −${formatExactCount(deletions)}`;
+}
+
+/** A diff line with the file's own line numbers, where the line has them. */
+export interface NumberedDiffLine extends MobileDiffLine {
+  readonly oldNumber?: number;
+  readonly newNumber?: number;
+}
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+
+/**
+ * Numbers a diff from its hunk headers: context lines carry both numbers,
+ * removed only the old, added only the new. Lines before the first hunk, and
+ * the headers themselves, have none, since nothing says where they sit.
+ */
+export function numberedDiffLines(
+  lines: ReadonlyArray<MobileDiffLine>,
+): ReadonlyArray<NumberedDiffLine> {
+  let oldNext: number | undefined;
+  let newNext: number | undefined;
+  return lines.map((line): NumberedDiffLine => {
+    if (line.kind === "hunk") {
+      const header = HUNK_HEADER.exec(line.text);
+      oldNext = header?.[1] === undefined ? undefined : Number(header[1]);
+      newNext = header?.[2] === undefined ? undefined : Number(header[2]);
+      return line;
+    }
+    if (oldNext === undefined || newNext === undefined) return line;
+    if (line.kind === "removed") return { ...line, oldNumber: oldNext++ };
+    if (line.kind === "added") return { ...line, newNumber: newNext++ };
+    return { ...line, oldNumber: oldNext++, newNumber: newNext++ };
+  });
 }
 
 /** The working tree's totals across every file the diff carried. */

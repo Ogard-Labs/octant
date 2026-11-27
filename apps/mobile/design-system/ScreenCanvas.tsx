@@ -20,7 +20,7 @@ export interface ScreenCanvasProps {
  * The Octant canvas mirrors the desktop ground: a flat workspace colour under
  * one of the first-party pictures, a person's photo, or the plain page, printed
  * as it is, pixelated or dithered. It is drawn once and never moves. A custom
- * photo stays dimmed for readability; the plain page keeps a whisper of wash.
+ * photo stays dimmed for readability; the plain page is the flat canvas colour.
  */
 // A pixelated or dithered print is all edges, so it steps back under the
 // canvas colour the way the atmosphere does; a plain print keeps its full depth.
@@ -88,15 +88,7 @@ export function ScreenCanvas(props: ScreenCanvasProps) {
             testID="mobile-canvas-gradient"
           />
         </>
-      ) : (
-        <LinearGradient
-          colors={[colors.atmosphereGradientStart, "transparent", colors.atmosphereGradientEnd]}
-          end={{ x: 1, y: 0.85 }}
-          start={{ x: 0.05, y: 0 }}
-          style={StyleSheet.absoluteFill}
-          testID="mobile-canvas-ground-wash"
-        />
-      )}
+      ) : null}
       <View style={styles.content}>{props.children}</View>
     </View>
   );

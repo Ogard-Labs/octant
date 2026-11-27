@@ -8,7 +8,7 @@ import type {
 } from "@octant/contracts/context";
 import type { ContextCompactionState } from "@octant/contracts/context-rpc";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
-import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
+import { providerLimitWindowLabel } from "@octant/client-runtime";
 import { driverLabel, isModelEndpointDriverKind } from "../providers/providerSettingsPresentation";
 import { compactTokenCount } from "./contextInspectorModel";
 

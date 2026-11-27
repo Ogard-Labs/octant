@@ -4,11 +4,22 @@ import {
 } from "@octant/client-runtime/typed-composer-text";
 import { useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
+import { Icon } from "./Icon";
+import { radii, space, typography, useTheme } from "../../design-system";
 import type { ComposerVoice } from "../voice/useVoiceDictation";
+import { ComposerSurface } from "./ComposerSurface";
 import { ComposerVoiceButton } from "./ComposerVoiceButton";
+import { MOBILE_COPY } from "../copy";
+import { hapticSend } from "./haptics";
 import { IconButton } from "./IconButton";
+import { hasProviderMark, ProviderMark } from "./ProviderMark";
+import { SlashCommandSuggestions } from "./SlashCommandSuggestions";
+import { WorkingPill } from "./WorkingPill";
+import type { ProviderSlashCommand } from "@octant/contracts";
+
+// The chip shares one line with the message, so its name stops growing before
+// it takes the message's room. The message itself follows the system size.
+const CONTROL_TEXT_SCALE = 1.3;
 
 export interface FloatingComposerProps {
   readonly placeholder: string;
@@ -20,15 +31,27 @@ export interface FloatingComposerProps {
   /** When set with busy, show Stop instead of Send (interrupt in-flight turn). */
   readonly onStop?: () => void;
   readonly modelLabel?: string;
+  /** The model's provider, whose mark stands for the model where it has one. */
+  readonly modelDriverKind?: string | undefined;
   readonly onPressModel?: () => void;
   readonly onPressAttach?: () => void;
   readonly busy?: boolean;
+  /** While a turn runs, a message may still be written and waits behind it. */
+  readonly queues?: boolean;
+  /** A message is on its way, so it cannot be sent again. */
+  readonly sending?: boolean;
   readonly editable?: boolean;
   readonly testID?: string;
   readonly footerHint?: string | undefined;
   readonly busyLabel?: string;
+  /** When the running turn started, where the thread says. */
+  readonly busySince?: string | undefined;
   /** Dictation through the host; absent while the host is not ready for it. */
   readonly voice?: ComposerVoice | undefined;
+  /** The provider's own slash commands for the model, offered while a message begins with `/`. */
+  readonly slashCommands?: ReadonlyArray<ProviderSlashCommand> | undefined;
+  /** The provider account's name, shown on each command. */
+  readonly slashProviderLabel?: string | undefined;
 }
 
 export function FloatingComposer(props: FloatingComposerProps) {
@@ -43,43 +66,46 @@ export function FloatingComposer(props: FloatingComposerProps) {
           backgroundColor: "transparent",
         },
         card: {
-          paddingHorizontal: space.md,
-          paddingTop: 10,
-          paddingBottom: space.xs,
+          flexDirection: "row",
+          alignItems: "center",
           gap: 2,
+          paddingHorizontal: 6,
+          paddingVertical: 5,
         },
         placeholder: {
           color: colors.textTertiary,
+          flex: 1,
           fontSize: typography.body.fontSize,
-          paddingVertical: space.xs,
+          paddingHorizontal: 6,
+          paddingVertical: 8,
         },
         input: {
           color: colors.textPrimary,
           fontSize: typography.body.fontSize,
+          flex: 1,
           minHeight: 24,
           maxHeight: 140,
+          marginVertical: 6,
+          paddingHorizontal: 6,
+          paddingVertical: 0,
           textAlignVertical: "top",
           lineHeight: 21,
         },
-        toolbar: {
-          flexDirection: "row",
-          alignItems: "center",
-          gap: space.xs,
-          paddingTop: 2,
-        },
-        spacer: { flex: 1 },
         modelChip: {
-          flexShrink: 1,
+          maxWidth: 128,
           flexDirection: "row",
           alignItems: "center",
           gap: 4,
-          height: 30,
+          minHeight: 30,
+          marginVertical: 2,
           paddingHorizontal: 10,
           borderRadius: radii.pill,
           backgroundColor: colors.glassFillThin,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: colors.glassStroke,
         },
+        // A mark names the model by itself, so it needs no box around it.
+        modelMark: { backgroundColor: "transparent", borderWidth: 0, paddingHorizontal: 6 },
         modelLabel: {
           color: colors.textPrimary,
           fontSize: typography.caption.fontSize,
@@ -93,12 +119,6 @@ export function FloatingComposer(props: FloatingComposerProps) {
           fontSize: 12,
           lineHeight: 16,
         },
-        busyHint: {
-          color: colors.accent,
-          fontSize: 12,
-          fontWeight: "500",
-          marginRight: space.xs,
-        },
       }),
     [colors],
   );
@@ -108,13 +128,41 @@ export function FloatingComposer(props: FloatingComposerProps) {
   useEffect(() => {
     if (props.value !== undefined) composerValueShown(props.typedScope, props.value);
   }, [props.value, props.typedScope]);
+  const marked = props.modelDriverKind !== undefined && hasProviderMark(props.modelDriverKind);
   const multiline = props.value !== undefined;
-  const editable = props.editable !== false && !props.busy;
-  const canSend = editable && (props.value ?? "").trim().length > 0 && props.onSubmit !== undefined;
+  const queues = props.busy === true && props.queues === true;
+  const editable = props.editable !== false && (props.busy !== true || queues);
+  const canSend =
+    props.sending !== true &&
+    editable &&
+    (props.value ?? "").trim().length > 0 &&
+    props.onSubmit !== undefined;
 
   return (
     <View style={styles.wrap} testID={props.testID ?? "mobile-floating-composer"}>
-      <GlassSurface contentStyle={styles.card} material="thick" radius={radii.composer}>
+      {props.busy === true ? (
+        <WorkingPill label={props.busyLabel ?? "Working"} since={props.busySince} />
+      ) : null}
+      {/* A composer that cannot send has no draft to write a command into. */}
+      {!editable || props.value === undefined || props.onChangeText === undefined ? null : (
+        <SlashCommandSuggestions
+          commands={props.slashCommands}
+          draft={props.value}
+          onChoose={props.onChangeText}
+          providerLabel={props.slashProviderLabel ?? ""}
+        />
+      )}
+      <ComposerSurface contentStyle={styles.card}>
+        {props.onPressAttach !== undefined ? (
+          <IconButton
+            accessibilityLabel="Add attachment"
+            name="add"
+            onPress={props.onPressAttach}
+            size={34}
+            testID="mobile-composer-attach"
+            variant="ghost"
+          />
+        ) : null}
         {multiline ? (
           <TextInput
             editable={editable}
@@ -132,64 +180,64 @@ export function FloatingComposer(props: FloatingComposerProps) {
         ) : (
           <Text style={styles.placeholder}>{props.placeholder}</Text>
         )}
-        <View style={styles.toolbar}>
-          {props.onPressAttach !== undefined ? (
-            <IconButton
-              accessibilityLabel="Add attachment"
-              name="add"
-              onPress={props.onPressAttach}
-              size={34}
-              testID="mobile-composer-attach"
-              variant="ghost"
-            />
-          ) : null}
-          {props.modelLabel !== undefined && props.onPressModel !== undefined ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={props.onPressModel}
-              style={styles.modelChip}
-              testID="mobile-composer-model"
-            >
-              <Text style={styles.modelLabel} numberOfLines={1}>
+        {props.modelLabel !== undefined && props.onPressModel !== undefined ? (
+          <Pressable
+            accessibilityLabel={props.modelLabel}
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={props.onPressModel}
+            style={[styles.modelChip, marked ? styles.modelMark : null]}
+            testID="mobile-composer-model"
+          >
+            {props.modelDriverKind !== undefined && marked ? (
+              <ProviderMark driverKind={props.modelDriverKind} size={18} />
+            ) : (
+              <Text
+                maxFontSizeMultiplier={CONTROL_TEXT_SCALE}
+                numberOfLines={1}
+                style={styles.modelLabel}
+              >
                 {props.modelLabel}
               </Text>
-              <Ionicons color={colors.textSecondary} name="chevron-down" size={13} />
-            </Pressable>
-          ) : props.modelLabel !== undefined ? (
-            <Text style={styles.modelLabel} numberOfLines={1}>
-              {props.modelLabel}
-            </Text>
-          ) : null}
-          <View style={styles.spacer} />
-          {props.busy === true ? (
-            <Text style={styles.busyHint} testID="mobile-composer-busy">
-              {props.busyLabel ?? "Working"}
-            </Text>
-          ) : props.voice !== undefined ? (
-            <ComposerVoiceButton size={34} voice={props.voice} />
-          ) : null}
-          {props.busy === true && props.onStop !== undefined ? (
-            <IconButton
-              accessibilityLabel="Stop"
-              name="stop"
-              onPress={props.onStop}
-              size={34}
-              testID="mobile-composer-stop"
-              variant="send"
-            />
-          ) : props.onSubmit !== undefined ? (
-            <IconButton
-              accessibilityLabel="Send"
-              disabled={!canSend}
-              name="arrow-up"
-              onPress={props.onSubmit}
-              size={34}
-              testID="mobile-composer-send"
-              variant="send"
-            />
-          ) : null}
-        </View>
-      </GlassSurface>
+            )}
+            <Icon color={colors.textSecondary} name="chevron-down" size={13} />
+          </Pressable>
+        ) : props.modelLabel !== undefined ? (
+          <Text
+            maxFontSizeMultiplier={CONTROL_TEXT_SCALE}
+            numberOfLines={1}
+            style={styles.modelLabel}
+          >
+            {props.modelLabel}
+          </Text>
+        ) : null}
+        {props.busy === true && !queues ? null : props.voice !== undefined ? (
+          <ComposerVoiceButton size={34} voice={props.voice} />
+        ) : null}
+        {props.busy === true && props.onStop !== undefined && !(queues && canSend) ? (
+          <IconButton
+            accessibilityLabel="Stop"
+            name="stop"
+            onPress={props.onStop}
+            size={34}
+            testID="mobile-composer-stop"
+            variant="stop"
+          />
+        ) : props.onSubmit !== undefined ? (
+          <IconButton
+            accessibilityLabel={queues ? MOBILE_COPY.queueSend : "Send"}
+            disabled={!canSend}
+            name="arrow-up"
+            onPress={() => {
+              hapticSend();
+              props.onSubmit?.();
+            }}
+            size={34}
+            testID="mobile-composer-send"
+            variant="send"
+          />
+        ) : null}
+      </ComposerSurface>
       {props.voice?.notice !== undefined ? (
         <Text style={styles.footerHint} testID="mobile-composer-voice-notice">
           {props.voice.notice}

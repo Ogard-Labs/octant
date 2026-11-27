@@ -42,9 +42,9 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
   // selected-thread guard lets reads of one thread overlap, so a read of the
   // page left behind could otherwise land last and put it back.
   const pageGeneration = useRef(0);
-  // The search hit is looked for once per opened thread, on its first load.
-  // The thread screen mounts afresh for every hit it opens, so the hit is
-  // read when the thread changes rather than tracked on its own.
+  // A search hit is looked for on the next load: the thread's first, or the
+  // one a new hit in the open thread asks for. The screen stays mounted for a
+  // second hit in it (an iPad's column), so its draft and files stay too.
   const focus = useRef(focusOperationId);
   focus.current = focusOperationId;
   const pendingFocus = useRef<string | undefined>(focusOperationId);
@@ -98,12 +98,24 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     [enabled, guard, identity, threadId, transport, ui],
   );
 
+  // A new hit loads its page; the thread opened again with no hit (its row
+  // tapped) leaves an older page for the newest, as a fresh open does.
+  const lookedFor = useRef(focusOperationId);
+  useEffect(() => {
+    if (focusOperationId === lookedFor.current) return;
+    lookedFor.current = focusOperationId;
+    pendingFocus.current = focusOperationId;
+    anchor.current = undefined;
+    pageGeneration.current += 1;
+    void refresh({ quiet: true });
+  }, [focusOperationId, refresh]);
+
   const sendFollowUp = async () => {
     const typedClaim = typedClaimFor(input.typedScope, prompt);
     if (!enabled || transport === undefined || identity === undefined || threadId === undefined) {
       return;
     }
-    await runMutation({
+    return runMutation({
       guard,
       identity,
       gate,
@@ -182,5 +194,6 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     threadModel,
     pendingAttachments: attachments.pending,
     attach: attachments.attach,
+    attachmentsSent: attachments.sent,
   };
 }

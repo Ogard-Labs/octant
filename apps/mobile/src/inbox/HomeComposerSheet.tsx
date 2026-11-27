@@ -2,13 +2,19 @@ import {
   composerValueShown,
   noteTypedComposerText,
 } from "@octant/client-runtime/typed-composer-text";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import { radii, space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import { BottomSheet } from "../ui/BottomSheet";
-import { SegmentedControl } from "../ui/NativeChrome";
+import { ChoicePill } from "../ui/ChoicePill";
+import { ComposerSurface } from "../ui/ComposerSurface";
+import { SlashCommandSuggestions } from "../ui/SlashCommandSuggestions";
+import type { ProviderSlashCommand } from "@octant/contracts";
+import { hapticSend } from "../ui/haptics";
+import { hasProviderMark, ProviderMark } from "../ui/ProviderMark";
+import { SegmentedControl } from "../ui/SegmentedControl";
 import { ComposerVoiceButton } from "../ui/ComposerVoiceButton";
 import { IconButton, type MobileIconName } from "../ui/IconButton";
 import type { ComposerVoice } from "../voice/useVoiceDictation";
@@ -24,6 +30,11 @@ const MOBILE_CREATE_MODES: ReadonlyArray<{
   { id: "code", label: "Code", icon: "code-slash" },
 ];
 
+// The question is large already, and shares what the keyboard leaves with the
+// message, which follows the system size as far as it goes.
+const BAR_TEXT_SCALE = 1.2;
+const QUESTION_TEXT_SCALE = 1.3;
+
 function placeholderFor(mode: MobileCreateMode): string {
   if (mode === "work") return MOBILE_COPY.composerWork;
   if (mode === "code") return MOBILE_COPY.composerCode;
@@ -37,12 +48,23 @@ export function HomeComposerSheet(props: {
   /** The draft this sheet holds, which says whose typing a send may claim. */
   readonly typedScope: string;
   readonly modelLabel: string;
+  readonly modelDriverKind?: string | undefined;
+  /** The chosen model's provider commands, offered while the message begins with `/`. */
+  readonly slashCommands?: ReadonlyArray<ProviderSlashCommand> | undefined;
+  readonly slashProviderLabel?: string | undefined;
   readonly placementLabel?: string | undefined;
   readonly projectLabel?: string | undefined;
   readonly busy?: boolean;
   readonly editable?: boolean;
   readonly error?: string | undefined;
-  readonly availableModes?: ReadonlyArray<MobileCreateMode> | undefined;
+  /** The Projects this computer offers the chosen mode; a Chat has none. */
+  readonly projects?: ReadonlyArray<{ readonly id: string; readonly label: string }> | undefined;
+  /** The paired computers a new thread may go to. */
+  readonly hosts?: ReadonlyArray<{ readonly id: string; readonly label: string }> | undefined;
+  readonly selectedHostId?: string | undefined;
+  readonly onSelectHost?: ((hostId: string) => void) | undefined;
+  readonly selectedProjectId?: string | undefined;
+  readonly onSelectProject?: ((projectId: string) => void) | undefined;
   readonly onChangePrompt: (value: string) => void;
   readonly onClose: () => void;
   readonly onPressModel: () => void;
@@ -55,6 +77,8 @@ export function HomeComposerSheet(props: {
   /** Where the draft came from ("From to-do"); removing it leaves an ordinary draft. */
   readonly sourceLabel?: string | undefined;
   readonly onRemoveSource?: (() => void) | undefined;
+  /** Sheets shown over this one, which the system stacks only from inside it. */
+  readonly over?: ReactNode;
 }) {
   const { colors } = useTheme();
   useEffect(() => {
@@ -63,50 +87,57 @@ export function HomeComposerSheet(props: {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        sheet: {
-          marginHorizontal: space.sm,
-          marginBottom: process.env.EXPO_OS === "web" ? 48 : space.sm,
-          borderBottomLeftRadius: radii.composer,
-          borderBottomRightRadius: radii.composer,
-        },
         content: {
-          minHeight: 380,
+          minHeight: 420,
           paddingHorizontal: space.md,
-          paddingBottom: space.md,
-          gap: space.md,
+          paddingBottom: space.sm,
+          gap: space.sm,
         },
-        header: { minHeight: 44, flexDirection: "row", alignItems: "center" },
-        cancel: { flex: 1 },
-        cancelLabel: { color: colors.accent, fontSize: 17 },
+        header: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 12 },
         headerTitle: {
           color: colors.textPrimary,
-          fontSize: typography.pageTitle.fontSize,
-          fontWeight: typography.pageTitle.fontWeight,
-          letterSpacing: typography.pageTitle.letterSpacing,
+          fontSize: 20,
+          fontWeight: "700",
+          letterSpacing: -0.3,
         },
-        headerEnd: { flex: 1, alignItems: "flex-end" },
-        context: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.sm },
-        contextItem: {
-          flexDirection: "row",
+        question: {
+          flex: 1,
+          overflow: "hidden",
           alignItems: "center",
-          gap: 5,
-          minWidth: 0,
-          maxWidth: "100%",
-          flexShrink: 1,
+          justifyContent: "center",
+          gap: 6,
+        },
+        headline: {
+          color: colors.textPrimary,
+          fontSize: 24,
+          fontWeight: "600",
+          letterSpacing: -0.3,
+          textAlign: "center",
         },
         contextText: {
-          minWidth: 0,
           flexShrink: 1,
           color: colors.textSecondary,
-          fontSize: typography.caption.fontSize,
-          fontWeight: "500",
+          fontSize: typography.detail.fontSize,
+        },
+        notice: { alignItems: "center", gap: 4, paddingTop: space.sm },
+        source: { flexDirection: "row", alignItems: "center", gap: 6 },
+        composer: {
+          flexDirection: "row",
+          alignItems: "flex-end",
+          gap: 2,
+          paddingLeft: 14,
+          paddingRight: 6,
+          paddingVertical: 6,
         },
         input: {
           flex: 1,
-          minHeight: 120,
+          minHeight: 24,
+          maxHeight: 160,
+          marginVertical: 5,
           color: colors.textPrimary,
           fontSize: 17,
           lineHeight: 23,
+          paddingVertical: 0,
           textAlignVertical: "top",
           outlineColor: "transparent",
           outlineStyle: "solid",
@@ -124,16 +155,14 @@ export function HomeComposerSheet(props: {
           fontWeight: "500",
         },
         error: { color: colors.danger, fontSize: typography.caption.fontSize, lineHeight: 18 },
-        toolbar: { flexDirection: "row", alignItems: "center", gap: space.sm },
         model: {
-          flexShrink: 1,
-          height: 32,
+          height: 34,
+          maxWidth: 120,
           flexDirection: "row",
           alignItems: "center",
           gap: 4,
-          paddingHorizontal: 12,
+          paddingHorizontal: 8,
           borderRadius: radii.pill,
-          backgroundColor: colors.control,
         },
         modelPressed: { backgroundColor: colors.controlPressed },
         modelText: {
@@ -142,89 +171,90 @@ export function HomeComposerSheet(props: {
           fontSize: typography.detail.fontSize,
           fontWeight: "500",
         },
-        spacer: { flex: 1 },
       }),
     [colors],
   );
 
   const editable = props.editable !== false && props.busy !== true;
   const canSubmit = editable && props.prompt.trim().length > 0;
-  const availableModes = MOBILE_CREATE_MODES.filter(
-    (mode) => props.availableModes === undefined || props.availableModes.includes(mode.id),
-  );
   const projectLabel =
-    props.mode === "chat" ? "New conversation" : (props.projectLabel ?? "Choose on host");
+    props.mode === "chat" ? MOBILE_COPY.newConversation : (props.projectLabel ?? "Choose on host");
 
+  const choices = props.projects ?? [];
+  const hosts = props.hosts ?? [];
   return (
     <BottomSheet
       contentStyle={styles.content}
       headerVisible={false}
       onClose={props.onClose}
-      sheetStyle={styles.sheet}
+      size="full"
       testID="mobile-home-composer-sheet"
-      title="New thread"
+      title={MOBILE_COPY.newThread}
       visible={props.visible}
     >
       <View style={styles.header}>
-        <Pressable
-          accessibilityRole="button"
-          hitSlop={8}
+        <IconButton
+          accessibilityLabel="Cancel"
+          iconSize={18}
+          name="close"
           onPress={props.onClose}
-          style={styles.cancel}
+          size={40}
           testID="mobile-home-composer-cancel"
+        />
+        <Text
+          accessibilityRole="header"
+          maxFontSizeMultiplier={BAR_TEXT_SCALE}
+          style={styles.headerTitle}
         >
-          <Text style={styles.cancelLabel}>Cancel</Text>
-        </Pressable>
-        <Text accessibilityRole="header" style={styles.headerTitle}>
-          New thread
+          {MOBILE_COPY.newThread}
         </Text>
-        <View style={styles.headerEnd}>
-          <IconButton
-            accessibilityLabel={props.busy === true ? "Creating" : "Send"}
-            disabled={!canSubmit}
-            iconSize={18}
-            name={props.busy === true ? "hourglass-outline" : "arrow-up"}
-            onPress={props.onSubmit}
-            size={32}
-            testID="mobile-home-composer-submit"
-            variant="send"
-          />
-        </View>
       </View>
 
-      {availableModes.length > 1 ? (
-        <SegmentedControl
-          onSelect={props.onSelectMode}
-          optionTestID={(id) => `mobile-home-composer-mode-${id}`}
-          options={availableModes}
-          selected={props.mode}
-        />
-      ) : null}
-
-      <View style={styles.context} testID="mobile-home-composer-context">
-        <View style={styles.contextItem}>
-          <Ionicons
-            color={colors.textTertiary}
-            name={
-              props.mode === "code"
-                ? "git-branch-outline"
-                : props.mode === "work"
-                  ? "briefcase-outline"
-                  : "chatbubble-outline"
-            }
-            size={16}
-          />
+      <View style={styles.question} testID="mobile-home-composer-context">
+        {props.mode === "chat" ? (
           <Text
             accessibilityLabel={projectLabel}
-            numberOfLines={1}
-            style={styles.contextText}
+            maxFontSizeMultiplier={QUESTION_TEXT_SCALE}
+            style={styles.headline}
             testID="mobile-home-composer-project-label"
           >
             {projectLabel}
           </Text>
-        </View>
-        <View style={styles.contextItem}>
-          <Ionicons color={colors.textTertiary} name="cloud-outline" size={16} />
+        ) : (
+          <>
+            <Text maxFontSizeMultiplier={QUESTION_TEXT_SCALE} style={styles.headline}>
+              {props.mode === "code" ? MOBILE_COPY.newCodeQuestion : MOBILE_COPY.newWorkQuestion}
+            </Text>
+            {choices.length === 0 || props.selectedProjectId === undefined ? (
+              <Text
+                maxFontSizeMultiplier={QUESTION_TEXT_SCALE}
+                style={styles.headline}
+                testID="mobile-home-composer-project-label"
+              >
+                {projectLabel}
+              </Text>
+            ) : (
+              <ChoicePill
+                look="title"
+                onSelect={(id) => props.onSelectProject?.(id)}
+                options={choices}
+                selected={props.selectedProjectId}
+                testID="mobile-home-composer-project-label"
+                title={MOBILE_COPY.projects}
+              />
+            )}
+          </>
+        )}
+        {hosts.length > 1 && props.selectedHostId !== undefined ? (
+          <ChoicePill
+            look="quiet"
+            onSelect={(id) => props.onSelectHost?.(id)}
+            options={hosts}
+            selected={props.selectedHostId}
+            testID="mobile-home-composer-host-label"
+            title={MOBILE_COPY.workspaces}
+          />
+        ) : (
           <Text
             accessibilityLabel={props.placementLabel ?? "No host"}
             numberOfLines={1}
@@ -233,65 +263,46 @@ export function HomeComposerSheet(props: {
           >
             {props.placementLabel ?? "No host"}
           </Text>
-        </View>
-      </View>
-
-      {props.sourceLabel === undefined ? null : (
-        <View style={styles.context} testID="mobile-home-composer-source">
-          <View style={styles.contextItem}>
-            <Ionicons color={colors.textTertiary} name="checkmark-circle-outline" size={16} />
-            <Text numberOfLines={1} style={styles.contextText}>
-              {props.sourceLabel}
+        )}
+        {props.placementDisabledReason === undefined ? null : (
+          <View style={styles.notice}>
+            <Text selectable style={styles.placementReason}>
+              {props.placementDisabledReason}
             </Text>
-            {props.onRemoveSource === undefined ? null : (
-              <Pressable
-                accessibilityLabel={`Remove ${props.sourceLabel}`}
-                accessibilityRole="button"
-                hitSlop={10}
-                onPress={props.onRemoveSource}
-                testID="mobile-home-composer-source-remove"
-              >
-                <Ionicons color={colors.textTertiary} name="close-circle" size={16} />
+            {props.onRefreshHost === undefined ? null : (
+              <Pressable onPress={props.onRefreshHost} testID="mobile-home-composer-refresh-host">
+                <Text style={styles.refresh}>Refresh host</Text>
               </Pressable>
             )}
           </View>
-        </View>
-      )}
+        )}
+      </View>
 
-      {props.placementDisabledReason === undefined ? null : (
-        <View>
-          <Text selectable style={styles.placementReason}>
-            {props.placementDisabledReason}
+      {props.sourceLabel === undefined ? null : (
+        <View style={styles.source} testID="mobile-home-composer-source">
+          <Icon color={colors.textTertiary} name="checkmark-circle-outline" size={16} />
+          <Text numberOfLines={1} style={styles.contextText}>
+            {props.sourceLabel}
           </Text>
-          {props.onRefreshHost === undefined ? null : (
-            <Pressable onPress={props.onRefreshHost} testID="mobile-home-composer-refresh-host">
-              <Text style={styles.refresh}>Refresh host</Text>
+          {props.onRemoveSource === undefined ? null : (
+            <Pressable
+              accessibilityLabel={`Remove ${props.sourceLabel}`}
+              accessibilityRole="button"
+              hitSlop={10}
+              onPress={props.onRemoveSource}
+              testID="mobile-home-composer-source-remove"
+            >
+              <Icon color={colors.textTertiary} name="close-circle" size={16} />
             </Pressable>
           )}
         </View>
       )}
-
-      <TextInput
-        autoFocus
-        editable={editable}
-        multiline
-        onChangeText={(value) => {
-          noteTypedComposerText(props.typedScope, value);
-          props.onChangePrompt(value);
-        }}
-        placeholder={placeholderFor(props.mode)}
-        placeholderTextColor={colors.textTertiary}
-        style={[styles.input, !editable ? styles.disabled : null]}
-        testID="mobile-home-composer-input"
-        value={props.prompt}
-      />
-
       {props.error === undefined ? null : (
         <Text selectable style={styles.error}>
           {props.error}
         </Text>
       )}
-      {/* The sheet is a modal over the floating composer, so a dictation
+      {/* The sheet is a modal over the thread's composer, so a dictation
           refusal (microphone denied, allowance used) must be said here too. */}
       {props.voice?.notice === undefined ? null : (
         <Text style={styles.placementReason} testID="mobile-home-composer-voice-notice">
@@ -299,29 +310,66 @@ export function HomeComposerSheet(props: {
         </Text>
       )}
 
-      <View style={styles.toolbar}>
-        <IconButton
-          accessibilityLabel="Attachments unavailable"
-          disabled
-          name="add"
-          size={32}
-          variant="ghost"
+      <SegmentedControl
+        onSelect={props.onSelectMode}
+        optionTestID={(id) => `mobile-home-composer-mode-${id}`}
+        options={MOBILE_CREATE_MODES}
+        selected={props.mode}
+      />
+      <SlashCommandSuggestions
+        commands={editable ? props.slashCommands : undefined}
+        draft={props.prompt}
+        onChoose={props.onChangePrompt}
+        providerLabel={props.slashProviderLabel ?? ""}
+      />
+      <ComposerSurface contentStyle={styles.composer}>
+        <TextInput
+          autoFocus
+          editable={editable}
+          multiline
+          onChangeText={(value) => {
+            noteTypedComposerText(props.typedScope, value);
+            props.onChangePrompt(value);
+          }}
+          placeholder={placeholderFor(props.mode)}
+          placeholderTextColor={colors.textTertiary}
+          style={[styles.input, !editable ? styles.disabled : null]}
+          testID="mobile-home-composer-input"
+          value={props.prompt}
         />
         <Pressable
           accessibilityLabel={`Choose model, ${props.modelLabel}`}
           accessibilityRole="button"
+          hitSlop={6}
           onPress={props.onPressModel}
           style={({ pressed }) => [styles.model, pressed ? styles.modelPressed : null]}
           testID="mobile-home-composer-model"
         >
-          <Text numberOfLines={1} style={styles.modelText}>
-            {props.modelLabel}
-          </Text>
-          <Ionicons color={colors.textSecondary} name="chevron-down" size={13} />
+          {props.modelDriverKind !== undefined && hasProviderMark(props.modelDriverKind) ? (
+            <ProviderMark driverKind={props.modelDriverKind} size={18} />
+          ) : (
+            <Text maxFontSizeMultiplier={1.3} numberOfLines={1} style={styles.modelText}>
+              {props.modelLabel}
+            </Text>
+          )}
+          <Icon color={colors.textSecondary} name="chevron-down" size={12} />
         </Pressable>
-        <View style={styles.spacer} />
-        {props.voice === undefined ? null : <ComposerVoiceButton size={32} voice={props.voice} />}
-      </View>
+        {props.voice === undefined ? null : <ComposerVoiceButton size={34} voice={props.voice} />}
+        <IconButton
+          accessibilityLabel={props.busy === true ? "Creating" : "Send"}
+          disabled={!canSubmit}
+          iconSize={18}
+          name={props.busy === true ? "hourglass-outline" : "arrow-up"}
+          onPress={() => {
+            hapticSend();
+            props.onSubmit();
+          }}
+          size={34}
+          testID="mobile-home-composer-submit"
+          variant="send"
+        />
+      </ComposerSurface>
+      {props.over}
     </BottomSheet>
   );
 }

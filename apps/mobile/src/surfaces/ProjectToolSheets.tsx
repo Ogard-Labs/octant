@@ -4,7 +4,6 @@ import {
   Image,
   Pressable,
   ScrollView,
-  type ScrollViewInstance,
   StyleSheet,
   Text,
   TextInput,
@@ -26,19 +25,19 @@ import { useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import { BottomSheet } from "../ui/BottomSheet";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
-import {
-  appendTerminalOutput,
-  projectPageAddress,
-  terminalPlainText,
-} from "./projectToolsPresentation";
+import { projectPageAddress } from "./projectToolsPresentation";
+import { TerminalScreen, type TerminalSnapshot } from "../terminal/terminalScreen";
+import { TerminalView } from "../terminal/TerminalView";
+import { createTerminalSender, type TerminalSender } from "../terminal/terminalSender";
 
 /**
- * A phone keyboard's line of text, not a screen: the shell is sized for the
- * lines it prints to wrap on a phone rather than be cut.
+ * The size a shell starts at before the terminal view has measured how many
+ * cells fit; the view's first measure resizes it to the real screen.
  */
 const PHONE_TERMINAL_COLUMNS = 60;
 const PHONE_TERMINAL_ROWS = 30;
-const CONTROL_C = "\u0003";
+/** The largest size the host takes (`TerminalGeometry`). */
+const MAX_TERMINAL_CELLS = 500;
 
 export interface ProjectTerminalSheetProps {
   readonly visible: boolean;
@@ -55,23 +54,27 @@ type TerminalState =
       readonly kind: "open";
       readonly terminalId: CodeTerminalId;
       readonly view: ProjectTerminalView;
+      /** What is typed goes to this shell, and to no shell opened after it. */
+      readonly sender: TerminalSender;
     }
   | { readonly kind: "refused"; readonly message: string };
 
 /**
  * The device's own shell in this Project's folder, as the paired browser's
- * Project tools open it: plain lines of output read from the host, a line to
- * run, and Control-C. The host decides the folder, the posture and that the
+ * Project tools open it: the shell's screen drawn from the raw output read
+ * from the host (`TerminalView`), sized to the cells that fit, with the
+ * keyboard and a row of the keys it lacks. The host decides the folder, the posture and that the
  * shell is this device's alone; it ends when the sheet closes, or when this
  * phone is revoked or goes quiet.
  */
 export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
   const { colors } = useTheme();
   const [state, setState] = useState<TerminalState>({ kind: "idle" });
-  const [output, setOutput] = useState("");
-  const [line, setLine] = useState("");
+  const [snapshot, setSnapshot] = useState<TerminalSnapshot>();
   const [note, setNote] = useState<string>();
-  const scrollRef = useRef<ScrollViewInstance>(null);
+  const screen = useRef<TerminalScreen | undefined>(undefined);
+  const sender = useRef<TerminalSender | undefined>(undefined);
+  const size = useRef({ columns: PHONE_TERMINAL_COLUMNS, rows: PHONE_TERMINAL_ROWS });
   // Which open of the sheet a start belongs to: a shell that finishes starting
   // after the sheet closed is stopped, not adopted.
   const generation = useRef(0);
@@ -90,18 +93,49 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
         projectId: project,
         terminalId,
       }).catch(() => undefined);
-    setOutput("");
+    const opening = createTerminalSender(async (item) => {
+      try {
+        const answer = await sendMobileProjectTerminal(
+          transport,
+          item.kind === "write"
+            ? { kind: "write", projectId: project, terminalId, data: item.data }
+            : {
+                kind: "resize",
+                projectId: project,
+                terminalId,
+                columns: item.columns,
+                rows: item.rows,
+              },
+        );
+        if (item.kind === "write") {
+          setNote(answer.kind === "project-terminal-refused" ? answer.message : undefined);
+        }
+      } catch {
+        // A lost size is resent with the next change; the next read says
+        // whether the shell is still there.
+        if (item.kind === "write") setNote(MOBILE_COPY.approvalSendFailed);
+      }
+    });
+    sender.current = opening;
+    // A program's questions (where is the cursor, what terminal is this) go
+    // back to the shell as typed input, as a terminal's answers do.
+    const opened = new TerminalScreen(size.current.columns, size.current.rows, (reply) => {
+      if (running.current === terminalId) opening.write(reply);
+    });
+    screen.current = opened;
+    setSnapshot(opened.snapshot());
     setNote(undefined);
     offset.current = 0;
     setState({ kind: "starting" });
     void (async () => {
       try {
+        const startSize = size.current;
         const started = await sendMobileProjectTerminal(transport, {
           kind: "start",
           projectId: project,
           terminalId,
-          columns: PHONE_TERMINAL_COLUMNS,
-          rows: PHONE_TERMINAL_ROWS,
+          columns: startSize.columns,
+          rows: startSize.rows,
         });
         if (startedFor !== generation.current) {
           stop();
@@ -116,7 +150,9 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
           return;
         }
         running.current = terminalId;
-        setState({ kind: "open", terminalId, view: started.terminal });
+        setState({ kind: "open", terminalId, view: started.terminal, sender: opening });
+        // The view measured while the shell was starting.
+        if (size.current !== startSize) opening.resize(size.current.columns, size.current.rows);
       } catch {
         // The reply was lost, not necessarily the start: stop whatever began.
         stop();
@@ -128,12 +164,14 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
     return () => {
       generation.current += 1;
       running.current = undefined;
+      opening.close();
       stop();
       setState({ kind: "idle" });
     };
   }, [visible, transport, projectId]);
 
   const openTerminal = state.kind === "open" ? state.terminalId : undefined;
+  const shellSender = state.kind === "open" ? state.sender : undefined;
   const shellRunning = state.kind === "open" && state.view.state === "running";
   useEffect(() => {
     if (openTerminal === undefined || !shellRunning) return;
@@ -156,9 +194,14 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
         }
         if (answer.kind !== "project-terminal") return;
         const received = answer.output;
-        if (received !== undefined) {
+        const drawn = screen.current;
+        if (received !== undefined && drawn !== undefined) {
           offset.current = received.characters;
-          setOutput((shown) => appendTerminalOutput(shown, received));
+          // The reader's offset fell out of what the host keeps: start the
+          // screen over from the tail it sent.
+          if (received.replace) drawn.reset();
+          drawn.write(received.text);
+          setSnapshot(drawn.snapshot());
         }
         setState((current) =>
           current.kind === "open" && current.terminalId === openTerminal
@@ -176,35 +219,29 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
     return () => clearInterval(timer);
   }, [openTerminal, shellRunning, transport, projectId, props.pollIntervalMs]);
 
-  const write = async (data: string) => {
-    if (openTerminal === undefined) return;
-    try {
-      const answer = await sendMobileProjectTerminal(transport, {
-        kind: "write",
-        projectId: decodeProjectId(projectId),
-        terminalId: openTerminal,
-        data,
-      });
-      setNote(answer.kind === "project-terminal-refused" ? answer.message : undefined);
-    } catch {
-      setNote(MOBILE_COPY.approvalSendFailed);
+  const resized = (columns: number, rows: number) => {
+    size.current = {
+      columns: Math.min(columns, MAX_TERMINAL_CELLS),
+      rows: Math.min(rows, MAX_TERMINAL_CELLS),
+    };
+    const drawn = screen.current;
+    if (drawn !== undefined) {
+      drawn.resize(size.current.columns, size.current.rows);
+      setSnapshot(drawn.snapshot());
     }
-  };
-  const runLine = () => {
-    const typed = line;
-    setLine("");
-    void write(`${typed}\r`);
+    if (running.current !== undefined)
+      sender.current?.resize(size.current.columns, size.current.rows);
   };
 
   return (
     <BottomSheet
       onClose={props.onClose}
-      sheetStyle={styles.sheet}
+      size="full"
       testID="mobile-project-terminal"
       title={MOBILE_COPY.projectTerminalTitle}
       visible={props.visible}
     >
-      <View style={styles.body}>
+      <View style={styles.terminalBody}>
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
           {MOBILE_COPY.projectToolsLifetime}
         </Text>
@@ -217,66 +254,26 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
             {state.message}
           </Text>
         ) : null}
-        {state.kind !== "open" ? null : (
-          <>
-            <ScrollView
-              accessibilityLabel={MOBILE_COPY.projectTerminalOutput}
-              onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
-              ref={scrollRef}
-              style={[
-                styles.output,
-                { borderColor: colors.hairlineStrong, backgroundColor: colors.control },
-              ]}
-              testID="mobile-project-terminal-output"
-            >
-              <Text selectable style={[mobileTypography.mono, { color: colors.textPrimary }]}>
-                {terminalPlainText(output)}
-              </Text>
-            </ScrollView>
-            {state.view.state === "running" ? (
-              <View style={styles.row}>
-                <TextInput
-                  accessibilityLabel={MOBILE_COPY.projectTerminalLine}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onChangeText={setLine}
-                  onSubmitEditing={runLine}
-                  placeholder={MOBILE_COPY.projectTerminalLine}
-                  placeholderTextColor={colors.textSecondary}
-                  returnKeyType="send"
-                  spellCheck={false}
-                  style={[
-                    styles.input,
-                    mobileTypography.mono,
-                    {
-                      color: colors.textPrimary,
-                      borderColor: colors.hairlineStrong,
-                      backgroundColor: colors.control,
-                    },
-                  ]}
-                  testID="mobile-project-terminal-line"
-                  value={line}
-                />
-                <ToolButton
-                  label={MOBILE_COPY.projectTerminalRun}
-                  onPress={runLine}
-                  primary
-                  testID="mobile-project-terminal-run"
-                />
-                <ToolButton
-                  accessibilityLabel={MOBILE_COPY.projectTerminalInterruptLabel}
-                  label="⌃C"
-                  onPress={() => void write(CONTROL_C)}
-                  testID="mobile-project-terminal-interrupt"
-                />
-              </View>
-            ) : (
-              <Text style={[mobileTypography.body, { color: colors.textSecondary }]}>
-                {MOBILE_COPY.projectTerminalEnded}
-              </Text>
-            )}
-          </>
+        {/* Drawn while the shell starts too, so it starts at the size that fits. */}
+        {state.kind === "refused" || snapshot === undefined ? null : (
+          <TerminalView
+            accepting={shellRunning}
+            // Bound to the shell drawn now: a paste whose clipboard read
+            // outlasts a close and reopen goes to that shell's closed sender,
+            // never to the new shell.
+            onInput={(data) => {
+              if (openTerminal !== undefined) shellSender?.write(data);
+            }}
+            onSize={resized}
+            snapshot={snapshot}
+            testID="mobile-project-terminal-output"
+          />
         )}
+        {state.kind === "open" && state.view.state !== "running" ? (
+          <Text style={[mobileTypography.body, { color: colors.textSecondary }]}>
+            {MOBILE_COPY.projectTerminalEnded}
+          </Text>
+        ) : null}
         {note === undefined ? null : (
           <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>{note}</Text>
         )}
@@ -357,7 +354,7 @@ export function ProjectPageSheet(props: ProjectPageSheetProps) {
   return (
     <BottomSheet
       onClose={props.onClose}
-      sheetStyle={styles.sheet}
+      size="full"
       testID="mobile-project-page"
       title={MOBILE_COPY.projectPageTitle}
       visible={props.visible}
@@ -490,13 +487,12 @@ export function ToolButton(props: {
 }
 
 const styles = StyleSheet.create({
-  sheet: { maxHeight: "90%", minHeight: "60%" },
   body: { paddingHorizontal: mobileSpacing.md, gap: mobileSpacing.sm },
-  output: {
-    height: 320,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    padding: mobileSpacing.sm,
+  terminalBody: {
+    flex: 1,
+    paddingHorizontal: mobileSpacing.md,
+    paddingBottom: mobileSpacing.sm,
+    gap: mobileSpacing.sm,
   },
   row: { flexDirection: "row", alignItems: "center", gap: mobileSpacing.xs },
   input: {

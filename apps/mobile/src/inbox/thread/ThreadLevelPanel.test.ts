@@ -7,13 +7,27 @@ import { ThemeProvider } from "../../../design-system/theme";
 import { createInMemoryMobileHostRegistryStorage } from "../../hosts/HostRegistry";
 import { createFullAccessWarningStore } from "../../hosts/fullAccessWarningStore";
 import { ThreadLevelPanel, type ThreadLevelPanelProps } from "./ThreadLevelPanel";
-vi.mock("react-native", () => vi.importActual("react-native-web"));
+interface ShownAlert {
+  readonly title: string;
+  readonly message: string;
+  readonly buttons: ReadonlyArray<{ readonly text: string; readonly onPress?: () => void }>;
+}
+// The browser build shows no system alert, so the test answers it as a person would.
+const alerts = vi.hoisted(() => ({ shown: [] as ShownAlert[] }));
+vi.mock("react-native", async () => ({
+  ...(await vi.importActual<Record<string, unknown>>("react-native-web")),
+  Alert: {
+    alert: (title: string, message: string, buttons: ShownAlert["buttons"]) =>
+      void alerts.shown.push({ title, message, buttons }),
+  },
+}));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const roots: Root[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) act(() => root.unmount());
   document.body.replaceChildren();
+  alerts.shown.length = 0;
 });
 
 const codeThread = {
@@ -58,10 +72,17 @@ function buttons(label: string) {
     (element) => element.textContent === label,
   );
 }
+/** What the open system alert says, if one is open. */
+const alertText = () => {
+  const shown = alerts.shown.at(-1);
+  return shown === undefined ? "" : `${shown.title} ${shown.message}`;
+};
 async function press(label: string) {
   const button = buttons(label)[0];
-  if (button === undefined) throw new Error(`Missing button ${label}`);
-  await act(async () => button.click());
+  const inAlert = alerts.shown.at(-1)?.buttons.find((entry) => entry.text === label);
+  if (button === undefined && inAlert === undefined) throw new Error(`Missing button ${label}`);
+  if (button === undefined) alerts.shown.pop();
+  await act(async () => (button === undefined ? inAlert?.onPress?.() : button.click()));
   await act(async () => {});
 }
 
@@ -79,8 +100,8 @@ describe("a thread's mode on a phone the host's own person paired", () => {
     expect(document.body.textContent).toContain("Mode: Ask first");
     await press("Full access");
     expect(sent).toEqual([]);
-    expect(document.body.textContent).toContain("with no sandbox");
-    expect(document.body.textContent).not.toMatch(/unlock/i);
+    expect(alertText()).toContain("with no sandbox");
+    expect(alertText()).not.toMatch(/unlock/i);
     await press("Use Full access");
 
     expect(sent).toEqual([
@@ -91,6 +112,23 @@ describe("a thread's mode on a phone the host's own person paired", () => {
       }),
     ]);
     expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends nothing and keeps warning when the person cancels the Full access warning", async () => {
+    const { transport, sent } = host("host-f");
+    const warnings = createFullAccessWarningStore(createInMemoryMobileHostRegistryStorage());
+    mount({
+      actsAsHostPerson: true,
+      subject: { mode: "code", thread: codeThread as never },
+      transport,
+      warnings,
+      onChanged: vi.fn(),
+    });
+
+    await press("Full access");
+    await press("Cancel");
+    expect(sent).toEqual([]);
+    expect(await warnings.acknowledged("host-f")).toBe(false);
   });
 
   it("changes to any other mode at once, and says so when the host refuses", async () => {
@@ -157,7 +195,7 @@ describe("a thread's mode on a phone the host's own person paired", () => {
       onChanged: vi.fn(),
     });
     await press("Full access");
-    expect(document.body.textContent).not.toContain("with no sandbox");
+    expect(alertText()).toBe("");
     expect(again.sent).toHaveLength(1);
     for (const root of roots.splice(0)) act(() => root.unmount());
     document.body.replaceChildren();
@@ -172,7 +210,7 @@ describe("a thread's mode on a phone the host's own person paired", () => {
       onChanged: vi.fn(),
     });
     await press("Full access");
-    expect(document.body.textContent).toContain("with no sandbox");
+    expect(alertText()).toContain("with no sandbox");
     expect(other.sent).toEqual([]);
   });
 

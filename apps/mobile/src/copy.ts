@@ -4,16 +4,15 @@ import type { MobileHostHealthKind } from "./session/MobileHostSessionHub";
 export const MOBILE_PRODUCT_NAME = "Octant";
 export const MOBILE_PRODUCT_TAGLINE = "Your computers, from your phone";
 
-export const MOBILE_ROUTE_IDS = ["home", "agents", "thread", "hosts", "todos"] as const;
-export type MobileRouteId = (typeof MOBILE_ROUTE_IDS)[number];
-
-export const MOBILE_TAB_LABELS = {
-  home: "Inbox",
-  agents: "Agents",
+export const MOBILE_SCREEN_TITLES = {
+  home: "Octant",
+  threads: "Threads",
+  inbox: "Inbox",
   thread: "Thread",
-  hosts: "Settings",
+  settings: "Settings",
   todos: "To-dos",
-} as const satisfies Record<MobileRouteId, string>;
+  usage: "Usage",
+} as const;
 
 export const MOBILE_HOST_HEALTH_LABELS = {
   ready: "Ready",
@@ -40,21 +39,93 @@ export function mobileModelLabel(
 export const MOBILE_COPY = {
   inboxEmpty: "Pair a computer to see your Chat, Work and Code threads.",
   inboxWelcome: "Pick up your threads from anywhere.",
-  inboxTitle: "Inbox",
-  inboxNoThreads: "No threads yet. Start one from the composer below.",
+  searchThreads: "Search threads",
+  searchInbox: "Search Inbox",
+  searchNone: "No threads match.",
+  countedNoneNeedsYou: "Nothing needs you right now.",
+  countedNoneWorking: "No thread is working.",
+  countedNoneToReview: "No finished turns waiting.",
+  allModes: "All modes",
+  projects: "Projects",
+  modes: "Modes",
+  arrangement: "Arrange",
+  threadsNone: "No threads yet. Start one with New.",
+  allProjects: "All Projects",
+  newThread: "New thread",
+  newConversation: "New conversation",
+  newCodeQuestion: "What's next for",
+  newWorkQuestion: "What needs doing in",
   threadEmpty: "Select a thread from Inbox.",
   threadStart: "Start the conversation with your host.",
   threadStartHelp: "Follow-ups stream on the paired host. Pick a model, then send.",
   reasoningTitle: "Reasoning",
+  thinking: "Thinking",
+  thoughtFor: (seconds: number): string =>
+    seconds < 60 ? `Thought for ${seconds}s` : `Thought for ${Math.floor(seconds / 60)}m`,
+  toolCallsTruncated: "Later calls are on your computer.",
+  threadChanges: "Changes",
+  linkOpen: (host: string): string => `Open ${host}?`,
+  linkOpenAction: "Open",
+  linkCopy: "Copy link",
+  outboxWaiting: "Waiting to send",
+  outboxMayBeSent: "Sent, no answer yet",
+  outboxDelete: "Delete",
+  outboxEdit: "Edit",
+  outboxTryAgain: "Send again",
+  outboxTooOld: "Written more than a day ago, so it was not sent on its own.",
+  outboxOtherComputer: "This is not the computer it was written for, so it is not sent there.",
+  outboxNoComputer: "Your computers could not be read just now. Try again.",
+  outboxPairedAgain: "This phone was paired again. Send it again if it still applies.",
+  outboxUnsaved: "Not saved on this phone yet. Keep the app open.",
+  outboxMayBeSentTitle: "Send this again?",
+  outboxMayBeSentBody:
+    "The last try failed without a clear answer, so your computer may already have it.",
+  outboxSendAnyway: "Send again",
+  outboxRefusal: {
+    full: "Too many messages are waiting on this phone.",
+    "too-long": "This message is too long to wait on the phone.",
+    empty: "",
+  },
+  outboxDeleteTitle: "Delete this message?",
+  outboxDeleteSent: "Your computer may already have it. Deleting it here does not take it back.",
+  outboxNoFiles: "Files cannot wait on the phone. Remove them, or send when your computer is back.",
+  outboxRow: "To send",
+  outboxComposer: "Message… (sent when your computer is back)",
+  queueWaiting: "Queued",
+  queueSending: "Sending",
+  queueRemove: "Remove from queue",
+  queueKeepsThreadModel:
+    "The model you chose goes with a message sent after this turn. Send it when the turn ends.",
+  queueEdit: "Edit",
+  queueSave: "Save",
+  queueCancelEdit: "Cancel",
+  queueSendNow: "Send now",
+  queueEditLabel: "Queued message",
+  queueUnreadable: "This message cannot be read here.",
+  queueHeld: "The queue is held. Continue it on your computer.",
+  queueSend: "Queue message",
+  waitingOnSubagents: (count: number): string =>
+    `Waiting on ${count} ${count === 1 ? "subagent" : "subagents"}`,
+  planProgress: (done: number, total: number): string => `Plan · ${done} of ${total}`,
+  planTaskState: {
+    pending: "To do",
+    running: "Running",
+    waiting: "Waiting",
+    completed: "Done",
+    failed: "Failed",
+  },
+  /** The computer saw files change; it cannot know who changed them. */
+  filesChanged: (total: number, truncated: boolean): string =>
+    `${truncated ? "At least " : ""}${total} ${total === 1 ? "file" : "files"} changed while this ran`,
+  filesMore: (count: number): string => `${count} more`,
   toolStatusRunning: "Running",
   toolStatusDone: "Done",
   toolStatusFailed: "Failed",
   threadViewReturn: "Conversation",
-  workNoFolder: "No folder",
   searchMessages: "In threads",
   searchToolOutput: "Tool output",
   searchCanvas: "Canvas",
-  noProject: "No Project",
+  threadDetails: "Thread details",
   threadViews: "Views",
   threadViewsAndPanes: "Views and panes",
   toolCallsOne: "1 tool call",
@@ -104,9 +175,14 @@ export const MOBILE_COPY = {
   placementHere: "New threads go here",
   placementMakeHere: "Make new threads go here",
   pairRevokeNote: "Other paired devices stay connected if you revoke later.",
-  allHosts: "All hosts",
-  allAgents: "Agents",
-  todosTitle: "To-dos",
+  allHosts: "All computers",
+  usageLoading: "Reading plan usage…",
+  usageNoComputer: "Connect to a computer to see its plan usage.",
+  usageRefused: "This computer does not share usage with this phone.",
+  usageUnreachable: "This computer cannot be reached.",
+  usageNoAccounts: "No provider accounts are set up on this computer.",
+  usageLimitReached: "Limit reached",
+  usageOld: "From the last successful read",
   todosNew: "Add a to-do",
   todosOpen: "Open",
   todosDone: "Done",
@@ -127,7 +203,6 @@ export const MOBILE_COPY = {
   todoStartProjectsUnread:
     "This computer's Projects could not be read, so this draft is a Chat. Go back to To-dos and press Start again to try once more.",
   homeRecent: "Recent",
-  statusAllShort: "All",
   homeSeeAll: "See all",
   placementSection: "New threads go to",
   workspaces: "Computers",
@@ -136,9 +211,7 @@ export const MOBILE_COPY = {
   composerChat: "Ask your host…",
   composerWork: "Plan work in this project…",
   composerCode: "Describe a Code task…",
-  composerFollowUp: "Reply…",
-  composerDisclaimerShort: "Threads live on your computer.",
-  newThreadsUse: "New threads use",
+  composerFollowUp: "Message…",
   modelHostOnly: "Host models",
   modelUnavailable: "No host models",
   working: "Working",
@@ -192,8 +265,7 @@ export const MOBILE_COPY = {
   attachFromLibrary: "Choose photo",
   attachFromFiles: "Choose file",
   needsAttention: "Needs you",
-  inReview: "In review",
-  read: "Read",
+  toReview: "To review",
   placementHint: "New threads go to the computer marked “New threads go here”.",
   createModeChat: "Chat",
   createModeWork: "Work",
@@ -203,14 +275,12 @@ export const MOBILE_COPY = {
   workNoProject: "No active Work project on this host. Create one on the desktop first.",
   workFollowUpHint:
     "Runs on your computer in this thread's folder. Files and the shell stay there.",
-  workFollowUpPlaceholder: "Follow up on this Work thread…",
   codeFollowUpHint:
     "Runs on your computer and asks before tools run. Approve and edit files there.",
   codeReviewTitle: "Review Code on mobile",
   codeReviewEntryBody:
     "Read changes and checks, start tasks, and follow up here. Approvals and edits happen on your computer.",
   codeBrowseThreads: "Browse Code threads",
-  codeFollowUpPlaceholder: "Follow up on this Code thread…",
   transcriptEmpty: "No turns yet.",
   codeEarlierTurns: "Showing the newest turns. Open the thread on the desktop for earlier ones.",
   turnRunning: "Working on your computer…",
@@ -265,11 +335,15 @@ export const MOBILE_COPY = {
   projectTools: "Project tools",
   projectToolsLifetime:
     "Your own shell in this Project's folder. It ends when you close it, or when this phone is revoked or goes quiet.",
+  columnsNothingOpen: "Choose a thread to read it here.",
   projectTerminalTitle: "Terminal",
   projectTerminalOutput: "Terminal output",
   projectTerminalLine: "Command",
   projectTerminalRun: "Run",
   projectTerminalInterruptLabel: "Send Control-C",
+  projectTerminalPaste: "Paste",
+  projectTerminalControlKey: "Control",
+  projectTerminalTypeHint: "Opens the keyboard to type into the shell.",
   projectTerminalEnded: "The shell ended. Close and open the terminal again for a new one.",
   projectTerminalDidNotStart: "The Project terminal did not start.",
   projectTerminalCouldNotStart: "The Project terminal could not be started.",
@@ -347,31 +421,19 @@ export const MOBILE_COPY = {
 } as const;
 
 /**
- * What the composer promises for a Work or Code follow-up: the turn runs on
- * the host under the thread's own authority, and the parts a phone cannot do
+ * What the thread's details promise for a Work or Code follow-up: the turn runs
+ * on the host under the thread's own authority, and the parts a phone cannot do
  * — approvals, file edits, shell — are named rather than implied.
  */
-export function mobileThreadComposerCopy(mode: "work" | "code"): {
-  readonly placeholder: string;
-  readonly footerHint: string;
-} {
-  if (mode === "code") {
-    return {
-      placeholder: MOBILE_COPY.codeFollowUpPlaceholder,
-      footerHint: MOBILE_COPY.codeFollowUpHint,
-    };
-  }
-  return {
-    placeholder: MOBILE_COPY.workFollowUpPlaceholder,
-    footerHint: MOBILE_COPY.workFollowUpHint,
-  };
+export function mobileThreadHint(mode: "work" | "code"): string {
+  return mode === "code" ? MOBILE_COPY.codeFollowUpHint : MOBILE_COPY.workFollowUpHint;
 }
 
 export function collectMobileUserFacingCopy(): string {
   return [
     MOBILE_PRODUCT_NAME,
     MOBILE_PRODUCT_TAGLINE,
-    ...Object.values(MOBILE_TAB_LABELS),
+    ...Object.values(MOBILE_SCREEN_TITLES),
     ...Object.values(MOBILE_COPY),
   ].join("\n");
 }

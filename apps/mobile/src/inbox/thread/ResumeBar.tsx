@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../ui/Icon";
 import { radii, space, typography, useTheme } from "../../../design-system";
 
 export interface ResumeOffer {
@@ -53,7 +53,7 @@ export function ResumeBar(props: { readonly offer: ResumeOffer; readonly busy: b
   });
   return (
     <View style={styles.bar} testID="mobile-thread-resume-bar">
-      <Ionicons color={colors.textSecondary} name="pause-circle-outline" size={16} />
+      <Icon color={colors.textSecondary} name="pause-circle-outline" size={16} />
       <View style={styles.text}>
         <Text style={styles.label}>{props.offer.label}</Text>
         {props.offer.detail === undefined ? null : (

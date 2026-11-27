@@ -5,6 +5,7 @@ import {
   completeMobileChatFollowUp,
   completeMobileChatWorkItem,
   decodeMobileModelOptionId,
+  keepDeclaredModelOptionValues,
   interruptMobileChatTurn,
   latestActiveChatAttempt,
   latestRetryableChatAttempt,
@@ -13,7 +14,13 @@ import {
   sendMobileChatTurn,
   type MobileModelOption,
 } from "@octant/client-runtime";
-import type { ChatThreadView, ThreadFollowUp, ThreadWorkItem } from "@octant/contracts";
+import type {
+  ChatThreadView,
+  ProviderModelOptionValues,
+  ThreadFollowUp,
+  ThreadWorkItem,
+} from "@octant/contracts";
+import { chatSettingsToSend } from "../modelSettings";
 import { runChatEventLoop } from "./chatEventLoop";
 import { modelOptionForThread } from "./pendingAttachments";
 import { runLoad, runMutation, sendThenReload } from "./runMutation";
@@ -37,7 +44,9 @@ export function useChatThread(
   const [pendingFailure, setPendingFailure] = useState<string | undefined>();
   const attachments = useThreadAttachments("chat", input);
   const pendingAttachments = attachments.pending;
-  const [modelOptionId, setModelOptionId] = useState<string | undefined>();
+  const [modelOptionId, setModelOptionIdState] = useState<string | undefined>();
+  // The person's own choice of the model's settings; absent, the thread's own apply.
+  const [chosenValues, setChosenValues] = useState<ProviderModelOptionValues | undefined>();
   const [reconnecting, setReconnecting] = useState(false);
   const hasView = view !== undefined;
 
@@ -48,7 +57,8 @@ export function useChatThread(
     setLoaded(undefined);
     setPendingPrompt(undefined);
     setPendingFailure(undefined);
-    setModelOptionId(undefined);
+    setModelOptionIdState(undefined);
+    setChosenValues(undefined);
     setReconnecting(false);
   }, [identity]);
 
@@ -62,8 +72,29 @@ export function useChatThread(
       providerInstanceId: loadedProvider,
       modelId: loadedModel,
     });
-    if (match !== undefined) setModelOptionId(match.id);
+    if (match !== undefined) setModelOptionIdState(match.id);
   }, [loadedModel, loadedProvider, modelOptions]);
+
+  // A value the newly chosen model does not declare would make the host refuse
+  // the change, so choosing a model drops what it does not offer.
+  const selectedSettings = modelOptions.find((option) => option.id === modelOptionId)?.settings;
+  const modelOptionValues = keepDeclaredModelOptionValues(
+    selectedSettings,
+    chosenValues ?? view?.thread.modelOptionValues,
+  );
+  const setModelOptionId = (id: string) => {
+    setModelOptionIdState(id);
+    const next = modelOptions.find((option) => option.id === id);
+    setChosenValues((previous) =>
+      previous === undefined ? undefined : keepDeclaredModelOptionValues(next?.settings, previous),
+    );
+  };
+  const setModelOptionValue = (optionId: string, value: string | undefined) => {
+    const rest = Object.fromEntries(
+      Object.entries(modelOptionValues).filter(([id]) => id !== optionId),
+    );
+    setChosenValues(value === undefined ? rest : { ...rest, [optionId]: value });
+  };
 
   const refresh = useCallback(
     async (options?: RefreshOptions) => {
@@ -123,17 +154,41 @@ export function useChatThread(
     });
   };
 
-  const send = async () => {
-    // Read now, before anything is awaited: the claim is of the text being sent.
-    const typedClaim = typedClaimFor(typedScope, prompt);
-    if (!enabled || transport === undefined || view === undefined || identity === undefined) return;
+  // The model and settings the person chose that the thread does not run yet:
+  // they go with the next message sent, never with one that waits in the queue.
+  const chosenChange = (() => {
+    if (view === undefined) return undefined;
     const decoded =
       modelOptionId === undefined ? undefined : decodeMobileModelOptionId(modelOptionId);
     const needsChange =
       decoded !== undefined &&
       (decoded.providerInstanceId !== String(view.thread.providerInstanceId) ||
         decoded.modelId !== String(view.thread.modelId));
-    await runMutation({
+    const settingsToSend = chatSettingsToSend({
+      settings: selectedSettings,
+      chosen: chosenValues,
+      thread: view.thread.modelOptionValues,
+    });
+    return { decoded, needsChange, settingsToSend };
+  })();
+  const choiceWaits =
+    chosenChange !== undefined &&
+    (chosenChange.needsChange || chosenChange.settingsToSend !== undefined);
+
+  const send = async () => {
+    // Read now, before anything is awaited: the claim is of the text being sent.
+    const typedClaim = typedClaimFor(typedScope, prompt);
+    if (
+      !enabled ||
+      transport === undefined ||
+      view === undefined ||
+      identity === undefined ||
+      chosenChange === undefined
+    )
+      return;
+    const { decoded, needsChange, settingsToSend } = chosenChange;
+    const valuesChanged = settingsToSend !== undefined;
+    return runMutation({
       guard,
       identity,
       gate,
@@ -151,14 +206,19 @@ export function useChatThread(
               ...(pendingAttachments.length > 0
                 ? { attachmentIds: pendingAttachments.map((item) => item.id) }
                 : {}),
-              ...(needsChange && decoded !== undefined
+              ...((needsChange || valuesChanged) && decoded !== undefined
                 ? { providerInstanceId: decoded.providerInstanceId, modelId: decoded.modelId }
+                : {}),
+              ...(settingsToSend !== undefined && decoded !== undefined
+                ? { modelOptionValues: settingsToSend }
                 : {}),
             }),
           onSent: () => {
             if (!guard.isSelected(identity)) return;
             setPrompt("");
             attachments.sent();
+            // The host has the choice now; from here its values are the thread's.
+            setChosenValues(undefined);
           },
           reload: () => loadMobileChatThread(transport, view.thread.id),
         }),
@@ -245,9 +305,13 @@ export function useChatThread(
     pendingAttachments,
     modelOptionId,
     setModelOptionId,
+    modelOptionValues,
+    setModelOptionValue,
+    choiceWaits,
     reconnecting,
     refresh,
     attach: attachments.attach,
+    attachmentsSent: attachments.sent,
     send,
     stop,
     retry,

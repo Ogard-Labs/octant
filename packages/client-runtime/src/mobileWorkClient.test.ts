@@ -92,8 +92,10 @@ describe("mobile work create", () => {
             kind?: string;
             hostId?: string;
             title?: string;
+            modelOptionValues?: Record<string, string>;
           };
           expect(payload.kind).toBe("create-work-thread");
+          expect(payload.modelOptionValues).toEqual({ effort: "high" });
           expect(payload.hostId).toBe("local");
           expect(payload.title).toBe("Ship work");
           return Response.json({ kind: "thread-created", thread });
@@ -129,6 +131,7 @@ describe("mobile work create", () => {
       projectId,
       providerInstanceId,
       modelId: "model-a",
+      modelOptionValues: { effort: "high" },
       bindingRevisionId: "30000000-0000-4000-8000-000000000001",
     });
     expect(row).toMatchObject({
