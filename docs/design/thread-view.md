@@ -608,12 +608,15 @@ is Octant's own.
   team is searched.
 
 A number (`#2901`) finds that pull request or issue, a Linear key (`ENG-12`)
-finds that issue, and any other text of two or more characters matches titles,
-open and closed alike. The token ends at a space, as a thread's does, so title
-text is one word. Each tracker gives at most five rows. The search runs once
-typing rests (300 ms) and never for a bare `#`. Without a connection nothing is
+finds that issue, however many newer titles hold the key, and any other text of
+two or more characters matches titles, open and closed alike. The token ends at
+a space, as a thread's does, so title text is one word; a colon in it (`fix:`)
+is title text, never a GitHub qualifier. Each tracker gives at most five rows.
+The search runs once typing rests (300 ms) and never for a bare `#`, and the
+host stops one the composer has abandoned. Without a connection nothing is
 listed and nothing asks the person to connect; a tracker that refuses, fails or
-takes longer than eight seconds adds no rows.
+takes longer than eight seconds adds no rows, and neither does a GitHub page
+kept from before a failed read.
 
 The host serves the search to a window under the same authentication as the
 thread search (`/api/thread-mentions/trackers`). The composer names its thread,
@@ -637,12 +640,17 @@ focus in it, as a thread's does: the kind (pull request, GitHub issue or Linear
 issue), the number or key, the title, the state (open, draft, merged or closed;
 the Linear workflow state), the repository or team, and the author (GitHub) or
 assignee (Linear). **Open** shows a pull request of a Code Project this window
-holds in Octant's pull-request pane, and anything else in the browser.
+holds in Octant's pull-request pane while the window is in Code, which has that
+pane, and anything else, Chat and Work included, in the browser.
 **Remove**, in the prompt only, takes every reference to that item out of the
 text. The facts are what this window's searches already returned: drawing a card
 asks no tracker anything. After a reload, a restored draft or a sent message
 shows only what the reference itself says (kind, number or key, title, and the
 repository or team), until a search in the window returns the item again.
+
+A ticket key in a mentioned item's title is part of that mention: neither the
+composer nor the sent message looks it up as a reference of its own. Keys
+written outside a mention are looked up as before.
 
 **The sent message** keeps the chip. The turn stores each mentioned item's kind,
 source, id and URL, each item once, in the order the text shows them, at most
