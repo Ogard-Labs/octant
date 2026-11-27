@@ -3170,6 +3170,18 @@ export class WorkTurnService {
     return this.#liveUpdates.head(threadId);
   }
 
+  /**
+   * The reply text an unsettled turn has streamed so far, for a host-side
+   * reader that may see nothing else of the live turn, as a visitor link does.
+   * It is not a route and applies no authority check of its own: the caller
+   * must already be allowed to read the thread's messages.
+   */
+  liveReplyText(requestId: WorkTurnRequestId): string | undefined {
+    const status = this.#projection.lookup(requestId)?.status;
+    if (status === undefined || status === "completed" || status === "cancelled") return undefined;
+    return this.#liveResponses.get(String(requestId));
+  }
+
   #withLive(turn: WorkTurnState): WorkTurnState {
     if (turn.status === "completed" || turn.status === "cancelled") return turn;
     // The live steps live only in this process until the turn settles; a window

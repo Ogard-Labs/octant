@@ -993,6 +993,73 @@ describe("octant hub push", () => {
 });
 
 describe("octant hub public", () => {
+  it("reads the fronts on another machine, and clearing them", () => {
+    expect(
+      resolveHubCliCommand(["public", "fronts", "100.101.102.103", "fd7a:115c:a1e0::1"], {}),
+    ).toEqual({
+      action: "public",
+      mode: "fronts",
+      addresses: ["100.101.102.103", "fd7a:115c:a1e0::1"],
+    });
+    expect(resolveHubCliCommand(["public", "fronts"], { clear: true })).toEqual({
+      action: "public",
+      mode: "fronts",
+      addresses: [],
+    });
+    expect(resolveHubCliCommand(["public", "fronts"], {})).toBeUndefined();
+    expect(
+      resolveHubCliCommand(["public", "fronts", "100.101.102.103"], { clear: true }),
+    ).toBeUndefined();
+  });
+
+  it("lists the fronts and says where to point them", async () => {
+    const host = await fixture((request) =>
+      request.path === "/api/desktop/hub/public/fronts"
+        ? ok({ status: "changed", fronts: ["100.101.102.103"] })
+        : ok({
+            publicEntrance: {
+              enabled: true,
+              listening: true,
+              paused: false,
+              address: "https://100.90.1.2:41000",
+              fronts: ["100.101.102.103"],
+              funnel: { enabled: false },
+            },
+          }),
+    );
+    expect(
+      await host.run({ action: "public", mode: "fronts", addresses: ["100.101.102.103"] }),
+    ).toBe(0);
+    expect(host.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/public/fronts",
+      body: { addresses: ["100.101.102.103"] },
+    });
+    expect(host.text()).toContain("https://100.90.1.2:41000");
+    expect(host.text()).toContain("100.101.102.103");
+  });
+
+  it("says why a front list was refused", async () => {
+    const host = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "not-a-tailscale-address" },
+    }));
+    expect(await host.run({ action: "public", mode: "fronts", addresses: ["192.168.1.20"] })).toBe(
+      1,
+    );
+  });
+
+  it("says a front list cannot reach the address family this computer listens on", async () => {
+    const host = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "no-front-in-address-family" },
+    }));
+    expect(
+      await host.run({ action: "public", mode: "fronts", addresses: ["fd7a:115c:a1e0::1"] }),
+    ).toBe(1);
+    expect(host.errors()).toContain("IPv4");
+    expect(host.errors()).toContain("(no-front-in-address-family)");
+  });
+
   it("reads on, off and status with a Funnel port or the person's own front", () => {
     expect(resolveHubCliCommand(["public", "on"], {})).toEqual({
       action: "public",
@@ -1471,8 +1538,73 @@ describe("octant hub webhook", () => {
       mode: "rotate",
       endpointId: "AAAAAAAAAAAAAAAAAAAAAA",
     });
-    expect(resolveHubCliCommand(["webhook", "create"], { scheme: "stripe" })).toBeUndefined();
+    expect(resolveHubCliCommand(["webhook", "create"], { scheme: "stripe" })).toEqual({
+      action: "webhook",
+      mode: "create",
+      scheme: "stripe",
+      label: "Webhook",
+    });
+    expect(resolveHubCliCommand(["webhook", "secret", "AAAAAAAAAAAAAAAAAAAAAA"], {})).toEqual({
+      action: "webhook",
+      mode: "secret",
+      endpointId: "AAAAAAAAAAAAAAAAAAAAAA",
+    });
+    expect(resolveHubCliCommand(["webhook", "create"], { scheme: "paypal" })).toBeUndefined();
     expect(resolveHubCliCommand(["webhook", "remove"], {})).toBeUndefined();
+  });
+
+  it("a new Stripe endpoint prints its path and asks for the secret Stripe shows", async () => {
+    const created = await fixture(() =>
+      ok({
+        status: "awaiting-secret",
+        endpointId: "AAAAAAAAAAAAAAAAAAAAAA",
+        path: "/hooks/AAAAAAAAAAAAAAAAAAAAAA",
+      }),
+    );
+    expect(
+      await created.run({ action: "webhook", mode: "create", scheme: "stripe", label: "Payments" }),
+    ).toBe(0);
+    expect(created.text()).toContain("/hooks/AAAAAAAAAAAAAAAAAAAAAA");
+    expect(created.text()).toContain("octant hub webhook secret AAAAAAAAAAAAAAAAAAAAAA");
+  });
+
+  it("reads Stripe's secret from standard input, never from the command line", async () => {
+    const host = await fixture(() => ok({ status: "set", published: true }));
+    expect(
+      await host.run(
+        { action: "webhook", mode: "secret", endpointId: "AAAAAAAAAAAAAAAAAAAAAA" },
+        Readable.from(["whsec_fromStripe0123456789\n"]),
+      ),
+    ).toBe(0);
+    expect(host.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/webhooks/secret",
+      body: { endpointId: "AAAAAAAAAAAAAAAAAAAAAA", secret: "whsec_fromStripe0123456789" },
+    });
+    expect(host.text()).not.toContain("whsec_fromStripe0123456789");
+    const empty = await fixture(() => ok({ status: "set", published: true }));
+    expect(
+      await empty.run(
+        { action: "webhook", mode: "secret", endpointId: "AAAAAAAAAAAAAAAAAAAAAA" },
+        Readable.from([]),
+      ),
+    ).toBe(1);
+    expect(empty.sent).toHaveLength(0);
+  });
+
+  it("says why a paste is refused while two replaced secrets are still taken", async () => {
+    const host = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "too-many-replaced-secrets" },
+    }));
+    expect(
+      await host.run(
+        { action: "webhook", mode: "secret", endpointId: "AAAAAAAAAAAAAAAAAAAAAA" },
+        Readable.from(["whsec_fromStripe0123456789\n"]),
+      ),
+    ).toBe(1);
+    expect(host.errors()).toContain("still holds two replaced secrets");
+    expect(host.errors()).toContain("two days after the oldest was replaced");
+    expect(host.errors()).toContain("(too-many-replaced-secrets)");
   });
 
   it("prints a new endpoint's secret once, with its path", async () => {
@@ -1519,6 +1651,13 @@ describe("octant hub visitor", () => {
       threadId: "t",
       scope: "read",
     });
+    expect(resolveHubCliCommand(["visitor", "share", "work", "t"], {})).toEqual({
+      action: "visitor",
+      mode: "share",
+      threadMode: "work",
+      threadId: "t",
+      scope: "read",
+    });
     expect(resolveHubCliCommand(["visitor", "list"], {})).toEqual({
       action: "visitor",
       mode: "list",
@@ -1534,7 +1673,6 @@ describe("octant hub visitor", () => {
       mode: "send",
       id: "BBBBBBBBBBBBBBBBBBBBBB",
     });
-    expect(resolveHubCliCommand(["visitor", "share", "work", "t"], {})).toBeUndefined();
     expect(
       resolveHubCliCommand(["visitor", "share", "code", "t"], { hours: "200" }),
     ).toBeUndefined();

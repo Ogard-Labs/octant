@@ -1,10 +1,14 @@
 import type { HubMemberId, VisitorLinkId } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  decidePublicEntranceBind,
   decideVisitorLink,
   decideWebhookDelivery,
+  publicFrontAdmitted,
+  readPublicFronts,
   readWebhookHeaders,
   redactForVisitor,
+  stripeEventId,
   visitorLinkSigningPayload,
   webhookDedupeKeys,
 } from "./hubPublicPolicy";
@@ -60,6 +64,76 @@ describe("webhook headers", () => {
         "x-github-delivery": "guid",
       }),
     ).toEqual({ status: "refused", kind: "missing-signature" });
+  });
+});
+
+describe("Stripe webhook headers", () => {
+  it("reads a Stripe delivery's timestamp and every v1 signature, ignoring v0", () => {
+    const one = "a".repeat(64);
+    const two = "B".repeat(64);
+    expect(
+      readWebhookHeaders("stripe", {
+        "stripe-signature": `t=${seconds(NOW)},v1=${one},v0=${"c".repeat(64)},v1=${two}`,
+      }),
+    ).toEqual({
+      status: "read",
+      timestampMs: Math.floor(NOW / 1000) * 1000,
+      signatures: [one, two.toLowerCase()],
+    });
+  });
+
+  it("refuses a Stripe delivery with no timestamp or no v1 signature", () => {
+    expect(readWebhookHeaders("stripe", { "stripe-signature": `v1=${"a".repeat(64)}` })).toEqual({
+      status: "refused",
+      kind: "missing-signature",
+    });
+    expect(
+      readWebhookHeaders("stripe", {
+        "stripe-signature": `t=${seconds(NOW)},v0=${"a".repeat(64)}`,
+      }),
+    ).toEqual({ status: "refused", kind: "missing-signature" });
+    expect(readWebhookHeaders("stripe", {})).toEqual({
+      status: "refused",
+      kind: "missing-signature",
+    });
+  });
+
+  it("names a Stripe delivery by the event id in its body", () => {
+    expect(stripeEventId('{"id":"evt_1","type":"invoice.paid"}')).toBe("evt_1");
+    expect(stripeEventId('{"type":"invoice.paid"}')).toBeUndefined();
+    expect(stripeEventId("not json")).toBeUndefined();
+    expect(stripeEventId(`{"id":"${"e".repeat(257)}"}`)).toBeUndefined();
+  });
+
+  it("a Stripe delivery signed more than five minutes ago is refused", () => {
+    const read = readWebhookHeaders("stripe", {
+      "stripe-signature": `t=${seconds(NOW - 5 * 60_000 - 1_000)},v1=${"a".repeat(64)}`,
+    });
+    if (read.status !== "read") throw new Error(read.kind);
+    expect(
+      decideWebhookDelivery({
+        endpointEnabled: true,
+        signatureMatches: true,
+        ...(read.timestampMs === undefined ? {} : { timestampMs: read.timestampMs }),
+        nowMs: NOW,
+        dedupeKeys: webhookDedupeKeys({ scheme: "stripe", deliveryId: "evt_1" }),
+        claimed: () => false,
+      }),
+    ).toEqual({ status: "refused", kind: "stale-timestamp" });
+  });
+
+  it("a redelivered Stripe event starts no second run", () => {
+    const claimedKeys = new Set(webhookDedupeKeys({ scheme: "stripe", deliveryId: "evt_1" }));
+    expect(
+      decideWebhookDelivery({
+        endpointEnabled: true,
+        signatureMatches: true,
+        timestampMs: NOW,
+        nowMs: NOW,
+        dedupeKeys: webhookDedupeKeys({ scheme: "stripe", deliveryId: "evt_1" }),
+        claimed: (key) => claimedKeys.has(key),
+      }),
+    ).toEqual({ status: "duplicate" });
   });
 });
 
@@ -282,5 +356,97 @@ describe("what a visitor reads", () => {
     expect(redactForVisitor("https://example.com,/home/alice/notes.md")).toBe(
       "https://example.com,[path]",
     );
+  });
+});
+
+describe("a front on another machine", () => {
+  it("takes only Tailscale addresses as front addresses", () => {
+    expect(readPublicFronts([" 100.101.102.103 ", "FD7A:115C:A1E0::1"])).toEqual({
+      status: "read",
+      fronts: ["100.101.102.103", "fd7a:115c:a1e0::1"],
+    });
+    for (const address of [
+      "192.168.1.20",
+      "10.0.0.5",
+      "8.8.8.8",
+      "0.0.0.0",
+      "::",
+      "127.0.0.1",
+      "vps.tail1234.ts.net",
+      "100.064.1.1",
+    ]) {
+      expect(readPublicFronts([address])).toEqual({
+        status: "refused",
+        kind: "not-a-tailscale-address",
+        address,
+      });
+    }
+    expect(readPublicFronts(Array.from({ length: 9 }, (_, index) => `100.64.0.${index}`))).toEqual({
+      status: "refused",
+      kind: "too-many",
+    });
+  });
+
+  it("admits a connection only from a listed front, in whichever form the socket reports it", () => {
+    const fronts = ["100.101.102.103", "fd7a:115c:a1e0::1"];
+    expect(publicFrontAdmitted("100.101.102.103", fronts)).toBe(true);
+    expect(publicFrontAdmitted("::ffff:100.101.102.103", fronts)).toBe(true);
+    expect(publicFrontAdmitted("fd7a:115c:a1e0:0:0:0:0:1", fronts)).toBe(true);
+    expect(publicFrontAdmitted("100.101.102.104", fronts)).toBe(false);
+    expect(publicFrontAdmitted("127.0.0.1", fronts)).toBe(false);
+    expect(publicFrontAdmitted(undefined, fronts)).toBe(false);
+  });
+
+  it("binds the hub's Tailscale address with its certificate, and never a wildcard, LAN or public one", () => {
+    expect(
+      decidePublicEntranceBind({ fronts: [], tailnetAddress: undefined, certificate: false }),
+    ).toEqual({ kind: "loopback" });
+    expect(
+      decidePublicEntranceBind({
+        fronts: ["100.101.102.103"],
+        tailnetAddress: "100.90.1.2",
+        certificate: true,
+      }),
+    ).toEqual({ kind: "tailnet", address: "100.90.1.2" });
+    for (const address of ["0.0.0.0", "::", "192.168.1.20", "203.0.113.9", undefined]) {
+      expect(
+        decidePublicEntranceBind({
+          fronts: ["100.101.102.103"],
+          tailnetAddress: address,
+          certificate: true,
+        }),
+      ).toEqual({ kind: "refused", reason: "no-tailnet-address" });
+    }
+    expect(
+      decidePublicEntranceBind({
+        fronts: ["100.101.102.103"],
+        tailnetAddress: "100.90.1.2",
+        certificate: false,
+      }),
+    ).toEqual({ kind: "refused", reason: "no-tailnet-certificate" });
+  });
+
+  it("refuses a front list none of whose addresses can reach the bound address's family", () => {
+    expect(
+      decidePublicEntranceBind({
+        fronts: ["fd7a:115c:a1e0::1"],
+        tailnetAddress: "100.90.1.2",
+        certificate: true,
+      }),
+    ).toEqual({ kind: "refused", reason: "no-front-in-address-family" });
+    expect(
+      decidePublicEntranceBind({
+        fronts: ["100.101.102.103"],
+        tailnetAddress: "fd7a:115c:a1e0::2",
+        certificate: true,
+      }),
+    ).toEqual({ kind: "refused", reason: "no-front-in-address-family" });
+    expect(
+      decidePublicEntranceBind({
+        fronts: ["fd7a:115c:a1e0::1", "100.101.102.103"],
+        tailnetAddress: "100.90.1.2",
+        certificate: true,
+      }),
+    ).toEqual({ kind: "tailnet", address: "100.90.1.2" });
   });
 });

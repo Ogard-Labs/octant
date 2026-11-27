@@ -34,6 +34,7 @@ import {
   SignedVisitorLinkGrant,
   VisitorThreadMode,
   HubWebhookEndpoint,
+  HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE,
   WebhookDeliveryEnvelope,
   WebhookEndpointId,
   WebhookSignatureScheme,
@@ -431,6 +432,14 @@ export const PublicEntranceState = Schema.Struct({
   funnel: Schema.optional(Schema.Struct({ port: PublicFunnelPort }).annotations(strict)),
   /** A standby's own choice to serve the entrance while it stands in for the hub. */
   serveWhileStandingIn: Schema.optional(Schema.Boolean),
+  /**
+   * The Tailscale addresses of the person's own proxy on another machine.
+   * While any is listed, the entrance binds the hub's Tailscale address and
+   * serves only them.
+   */
+  fronts: Schema.optional(
+    Schema.Array(Schema.String.pipe(Schema.maxLength(64))).pipe(Schema.maxItems(8)),
+  ),
 }).annotations(strict);
 export type PublicEntranceState = typeof PublicEntranceState.Type;
 
@@ -461,11 +470,35 @@ export const HubWebhookHubState = Schema.Struct({
   }).annotations(strict),
 }).annotations(strict);
 
+/**
+ * How many replaced Stripe secrets one endpoint can hold at once. Each is held
+ * up to two days. Every one is a further sealed copy in the endpoint list the
+ * spoke hands its hub, and two is the most that keeps a full spoke's longest
+ * list inside that route's request limit; a list the hub refuses would leave it
+ * checking deliveries against secrets the spoke no longer has.
+ */
+export const SPOKE_REPLACED_SECRETS_MAX = 2;
+
 /** One of this spoke's endpoints, with the secret it checks deliveries with; only the person sees the secret, once. */
 export const SpokeWebhookEndpoint = Schema.Struct({
   endpointId: WebhookEndpointId,
   scheme: WebhookSignatureScheme,
-  secret: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  /** Absent only for a Stripe endpoint whose person has not pasted Stripe's secret yet. */
+  secret: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))),
+  /**
+   * The Stripe secrets newer pastes replaced, oldest first. A new delivery
+   * signed with one is taken until its own `until`, a day after the paste
+   * that replaced it, and it is held a further hold after that, so a delivery
+   * the hub or a standby already answered still runs.
+   */
+  previousSecrets: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        secret: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+        until: Schema.Int.pipe(Schema.nonNegative()),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(SPOKE_REPLACED_SECRETS_MAX)),
+  ),
   label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
   createdAt: Schema.Int.pipe(Schema.nonNegative()),
   /** The ids this endpoint replaced by rotation, so a routine that names one still reads it. */
@@ -494,7 +527,9 @@ export type SpokeWebhookLogEntry = typeof SpokeWebhookLogEntry.Type;
 
 /** This spoke's endpoints, the deliveries it accepted, the keys it claimed (kept seven days), and a short log. */
 export const SpokeWebhookState = Schema.Struct({
-  endpoints: Schema.Array(SpokeWebhookEndpoint).pipe(Schema.maxItems(64)),
+  endpoints: Schema.Array(SpokeWebhookEndpoint).pipe(
+    Schema.maxItems(HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE),
+  ),
   deliveries: Schema.Array(SpokeWebhookDelivery).pipe(Schema.maxItems(1_024)),
   claimed: Schema.Array(
     Schema.Struct({

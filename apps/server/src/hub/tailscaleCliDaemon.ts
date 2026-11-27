@@ -132,6 +132,40 @@ export function createTailscaleCliDaemon(options: TailscaleCliDaemonOptions): Ta
   };
 }
 
+/**
+ * This machine's own Tailscale address, from `tailscale status --json`: the
+ * IPv4 one when it has one; a front list must hold one front of the family
+ * bound, or the bind is refused. Undefined when the
+ * tool cannot run or lists none; the caller still checks it is a Tailscale
+ * address before it binds.
+ */
+export async function readTailscaleAddress(input: {
+  readonly exec: TailscaleExec;
+  readonly platform: NodeJS.Platform;
+}): Promise<string | undefined> {
+  let status: TailscaleExecResult = { exitCode: null, stdout: "", stderr: "" };
+  for (const file of tailscaleBinaryCandidates(input.platform)) {
+    status = await input.exec(file, ["status", "--json"]);
+    if (status.exitCode !== null) break;
+  }
+  if (status.exitCode !== 0) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(status.stdout);
+    const self =
+      typeof parsed === "object" && parsed !== null && "Self" in parsed ? parsed.Self : undefined;
+    const ips =
+      typeof self === "object" && self !== null && "TailscaleIPs" in self
+        ? self.TailscaleIPs
+        : undefined;
+    const listed = Array.isArray(ips)
+      ? ips.filter((entry): entry is string => typeof entry === "string")
+      : [];
+    return listed.find((entry) => !entry.includes(":")) ?? listed[0];
+  } catch {
+    return undefined;
+  }
+}
+
 /** The real exec seam: a program that cannot start answers with a null exit code. */
 export const execTailscale: TailscaleExec = (file, args) =>
   new Promise((resolve) => {

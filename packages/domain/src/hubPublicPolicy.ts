@@ -5,12 +5,14 @@
 
 import {
   VISITOR_LINK_MAX_LIFETIME_MS,
+  WEBHOOK_HOLD_MS,
   WEBHOOK_TIMESTAMP_WINDOW_MS,
   type VisitorLinkGrant,
   type VisitorLinkRefusalKind,
   type WebhookRefusalKind,
   type WebhookSignatureScheme,
 } from "@octant/contracts";
+import { tailscaleAddressKey } from "./remoteAccessPolicy";
 import { redactSecretsAndPrivateKeys } from "./secretShapedTextPolicy";
 
 export type WebhookHeaders = Readonly<Record<string, string | undefined>>;
@@ -18,10 +20,14 @@ export type WebhookHeaders = Readonly<Record<string, string | undefined>>;
 export type WebhookHeaderReading =
   | {
       readonly status: "read";
-      readonly deliveryId: string;
+      /**
+       * Absent for Stripe, whose event id is inside the signed body and is
+       * read only once the signature passes ({@link stripeEventId}).
+       */
+      readonly deliveryId?: string;
       /** Present only for a scheme that signs a timestamp. */
       readonly timestampMs?: number;
-      /** The signatures to compare: base64 for Standard Webhooks, hex for GitHub. */
+      /** The signatures to compare: base64 for Standard Webhooks, hex for GitHub and Stripe. */
       readonly signatures: ReadonlyArray<string>;
       readonly event?: string;
     }
@@ -64,6 +70,20 @@ export function readWebhookHeaders(
       signatures,
     };
   }
+  if (scheme === "stripe") {
+    // `t=<seconds>,v1=<hex>[,v1=<hex>...]`; `v0` and any other scheme are ignored.
+    let timestamp: string | undefined;
+    const signatures: string[] = [];
+    for (const entry of (headers["stripe-signature"] ?? "").split(",")) {
+      const [name, value = ""] = entry.trim().split("=", 2);
+      if (name === "t" && timestamp === undefined) timestamp = value;
+      if (name === "v1" && /^[0-9a-f]{64}$/i.test(value)) signatures.push(value.toLowerCase());
+    }
+    if (timestamp === undefined || !/^\d{1,12}$/.test(timestamp) || signatures.length === 0) {
+      return MISSING;
+    }
+    return { status: "read", timestampMs: Number(timestamp) * 1000, signatures };
+  }
   const deliveryId = nonEmpty(headers["x-github-delivery"]);
   const header = headers["x-hub-signature-256"]?.trim() ?? "";
   const match = /^sha256=([0-9a-f]{64})$/i.exec(header);
@@ -78,24 +98,61 @@ export function readWebhookHeaders(
 }
 
 /**
+ * The event id of a Stripe delivery, from its body. Read only after the
+ * signature passed, so an unsigned body can never name a claim.
+ */
+export function stripeEventId(body: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || !("id" in parsed)) return undefined;
+  return typeof parsed.id === "string" ? nonEmpty(parsed.id) : undefined;
+}
+
+/**
  * The keys a spoke claims for one delivery. GitHub's delivery id is not under
  * its signature, so a captured body could come back under a fresh id; the body's
  * digest is a second key, and either one already claimed makes it a duplicate.
  */
 export function webhookDedupeKeys(
   input:
-    | { readonly scheme: "standard-webhooks"; readonly deliveryId: string }
+    | { readonly scheme: "standard-webhooks" | "stripe"; readonly deliveryId: string }
     | { readonly scheme: "github"; readonly deliveryId: string; readonly bodyDigest: string },
 ): ReadonlyArray<string> {
-  return input.scheme === "standard-webhooks"
-    ? [`id:${input.deliveryId}`]
-    : [`id:${input.deliveryId}`, `body:${input.bodyDigest}`];
+  return input.scheme === "github"
+    ? [`id:${input.deliveryId}`, `body:${input.bodyDigest}`]
+    : [`id:${input.deliveryId}`];
 }
 
 export type WebhookDeliveryDecision =
   | { readonly status: "accept"; readonly claimKeys: ReadonlyArray<string> }
   | { readonly status: "duplicate" }
   | { readonly status: "refused"; readonly kind: WebhookRefusalKind };
+
+/**
+ * Whether a host still holds a replaced Stripe secret. `until` is when new
+ * deliveries signed with it stop being taken; one received just before then
+ * may wait a whole hold for its spoke, so the secret is kept that much longer.
+ */
+export function replacedWebhookSecretKept(until: number, nowMs: number): boolean {
+  return nowMs < until + WEBHOOK_HOLD_MS;
+}
+
+/**
+ * Whether a replaced Stripe secret verifies a delivery: it was still taken
+ * when the delivery was received, however much later the delivery is handed on.
+ * A delivery from the internet is received now, so none is taken after `until`.
+ */
+export function replacedWebhookSecretVerifies(input: {
+  readonly until: number;
+  readonly receivedAtMs: number;
+  readonly nowMs: number;
+}): boolean {
+  return input.receivedAtMs < input.until && replacedWebhookSecretKept(input.until, input.nowMs);
+}
 
 /**
  * Whether a delivery may start its routine. The hub runs it before it queues,
@@ -220,4 +277,82 @@ function redactPaths(text: string): string {
     .replace(UNIX_PATH, "$1[path]")
     .replace(WINDOWS_PATH, "$1[path]")
     .replace(NETWORK_SHARE, "$1[path]");
+}
+
+/** How many front addresses one entrance lists. */
+export const PUBLIC_FRONTS_MAX = 8;
+
+export type PublicFrontsReading =
+  | { readonly status: "read"; readonly fronts: ReadonlyArray<string> }
+  | {
+      readonly status: "refused";
+      readonly kind: "not-a-tailscale-address";
+      readonly address: string;
+    }
+  | { readonly status: "refused"; readonly kind: "too-many" };
+
+/**
+ * The addresses of the person's own proxy on another machine. Each is a
+ * Tailscale address literal: the entrance on the hub's Tailscale address
+ * answers nothing else, so a LAN, public or wildcard address, or a name that
+ * could resolve to one, is refused.
+ */
+export function readPublicFronts(addresses: ReadonlyArray<string>): PublicFrontsReading {
+  if (addresses.length > PUBLIC_FRONTS_MAX) return { status: "refused", kind: "too-many" };
+  const fronts: string[] = [];
+  for (const address of addresses) {
+    const written = address.trim().toLowerCase();
+    if (tailscaleAddressKey(written) === undefined) {
+      return { status: "refused", kind: "not-a-tailscale-address", address };
+    }
+    if (!fronts.includes(written)) fronts.push(written);
+  }
+  return { status: "read", fronts };
+}
+
+/** Whether a connection's peer is one of the listed fronts. */
+export function publicFrontAdmitted(
+  remoteAddress: string | undefined,
+  fronts: ReadonlyArray<string>,
+): boolean {
+  const key = remoteAddress === undefined ? undefined : tailscaleAddressKey(remoteAddress);
+  return key !== undefined && fronts.some((front) => tailscaleAddressKey(front) === key);
+}
+
+export type PublicEntranceBind =
+  | { readonly kind: "loopback" }
+  | { readonly kind: "tailnet"; readonly address: string }
+  | {
+      readonly kind: "refused";
+      readonly reason:
+        | "no-tailnet-address"
+        | "no-tailnet-certificate"
+        | "no-front-in-address-family";
+    };
+
+/**
+ * Where the entrance listens. With no front listed, on loopback for a front
+ * on the same machine. With fronts listed, on the hub's own Tailscale address
+ * with its Tailscale certificate, and nowhere else: an address that is not a
+ * Tailscale one (a wildcard, LAN or public address) refuses the bind rather
+ * than fall back to it. A listener on an IPv4 address takes no IPv6 peer and
+ * the reverse, so a list with no front of the bound address's family, which
+ * would admit nothing, is refused too.
+ */
+export function decidePublicEntranceBind(input: {
+  readonly fronts: ReadonlyArray<string>;
+  readonly tailnetAddress: string | undefined;
+  readonly certificate: boolean;
+}): PublicEntranceBind {
+  if (input.fronts.length === 0) return { kind: "loopback" };
+  const address = input.tailnetAddress?.trim().toLowerCase();
+  if (address === undefined || tailscaleAddressKey(address) === undefined) {
+    return { kind: "refused", reason: "no-tailnet-address" };
+  }
+  if (!input.certificate) return { kind: "refused", reason: "no-tailnet-certificate" };
+  const ipv6 = address.includes(":");
+  if (!input.fronts.some((front) => front.includes(":") === ipv6)) {
+    return { kind: "refused", reason: "no-front-in-address-family" };
+  }
+  return { kind: "tailnet", address };
 }

@@ -6,11 +6,16 @@ import type {
   VisitorFetchRequest,
   VisitorLinkId,
 } from "@octant/contracts";
-import { VISITOR_PROJECTION_MAX_BYTES } from "@octant/contracts";
+import { decodeWorkTurnRequestId, VISITOR_PROJECTION_MAX_BYTES } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
 import { publicKeyFingerprint } from "./hubCrypto";
-import { SpokeVisitorService, type VisitorThreadRead } from "./spokeVisitorService";
+import {
+  SpokeVisitorService,
+  type VisitorThreadRead,
+  type VisitorThreadSource,
+} from "./spokeVisitorService";
+import { visitorThreadSource } from "./visitorThreadSources";
 
 // Lets a test make the next random id one that base64url would start with "-".
 const randomness = vi.hoisted(() => ({ dashFirst: 0 }));
@@ -25,6 +30,17 @@ vi.mock("node:crypto", async (importOriginal) => {
     },
   };
 });
+
+// What the Chat and Code projections hold, for the reads of a streaming reply.
+const projections = vi.hoisted(() => ({ chat: undefined as unknown, code: undefined as unknown }));
+vi.mock("../persistence/chatProjection", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../persistence/chatProjection")>()),
+  readChatThreadView: () => projections.chat,
+}));
+vi.mock("../persistence/codeProjection", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../persistence/codeProjection")>()),
+  readCodeThread: () => projections.code,
+}));
 
 const SPOKE = "11111111-1111-4111-8111-111111111111" as HubMemberId;
 const HUB = "22222222-2222-4222-8222-222222222222";
@@ -56,6 +72,7 @@ function setup(
     paused?: () => boolean;
     sendGrants?: (update: HubVisitorGrantsUpdate) => Promise<boolean>;
     hubMemberId?: () => string;
+    source?: VisitorThreadSource;
   } = {},
 ) {
   let now = 1_800_000_000_000;
@@ -77,7 +94,7 @@ function setup(
         }),
     },
     signing: () => key,
-    source: {
+    source: options.source ?? {
       read: () =>
         options.thread?.() ?? {
           status: "found",
@@ -128,6 +145,111 @@ const fetchOf = (
   binding,
   kind,
   ...extra,
+});
+
+describe("a webhook signing secret in a shared Work thread", () => {
+  it("reaches a visitor redacted, in a settled message and a still-streaming reply", async () => {
+    const secret = "whsec_5WbX1kEMOo2N8gQk9Ff3LhZtA7cYdRsV";
+    const context = setup({
+      source: visitorThreadSource(
+        () => {
+          throw new Error("A Work read uses no database.");
+        },
+        () => ({}),
+        {
+          thread: () => ({ title: `Check ${secret}`, lifecycle: "active" }),
+          turns: () => [
+            {
+              requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+              turnId: "turn-1",
+              status: "running",
+              transcript: [
+                { role: "user", text: `Verify events with ${secret}` },
+                { role: "assistant", text: "" },
+              ],
+            },
+          ],
+          // The reply has not settled, so only the live read holds it.
+          liveReplyText: () => `I will use ${secret} next`,
+          activity: () => ({ executing: true, awaitingInput: false }),
+        },
+      ),
+    });
+    const link = await context.service.share({
+      mode: "work",
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    expect(answer).toMatchObject({
+      status: "ok",
+      projection: {
+        title: "Check [redacted]",
+        messages: [
+          { role: "person", text: "Verify events with [redacted]" },
+          { role: "agent", text: "I will use [redacted] " },
+        ],
+      },
+    });
+  });
+});
+
+describe("a secret a Work reply is still writing", () => {
+  it("shows a visitor none of it, and redacts it whole once the turn settles", async () => {
+    const secret = "whsec_5WbX1kEMOo2N8gQk9Ff3LhZtA7cYdRsV";
+    // Shorter than the redactor's pattern, as the first streamed pieces are.
+    let live: string | undefined = `The secret is ${secret.slice(0, 12)}`;
+    const context = setup({
+      source: visitorThreadSource(
+        () => {
+          throw new Error("A Work read uses no database.");
+        },
+        () => ({}),
+        {
+          thread: () => ({ title: "Check", lifecycle: "active" }),
+          turns: () => [
+            {
+              requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+              turnId: "turn-1",
+              status: live === undefined ? "completed" : "running",
+              transcript: [
+                { role: "user", text: "Show it" },
+                {
+                  role: "assistant",
+                  text: live === undefined ? `The secret is ${secret}` : "",
+                },
+              ],
+            },
+          ],
+          liveReplyText: () => live,
+          activity: () => ({ executing: live !== undefined, awaitingInput: false }),
+        },
+      ),
+    });
+    const link = await context.service.share({
+      mode: "work",
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    const opened = fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) });
+
+    const streaming = context.service.fetch(opened, HUB);
+    expect(JSON.stringify(streaming)).not.toContain("whsec_");
+    live = undefined;
+    expect(context.service.fetch(opened, HUB)).toMatchObject({
+      projection: {
+        messages: [
+          { role: "person", text: "Show it" },
+          { role: "agent", text: "The secret is [redacted]" },
+        ],
+      },
+    });
+  });
 });
 
 describe("sharing a thread with a visitor", () => {
@@ -253,6 +375,59 @@ describe("sharing a thread with a visitor", () => {
       "state",
       "messages",
     ]);
+  });
+});
+
+describe("sharing a Work thread", () => {
+  it("a Work thread can be shared, and its visitor reads only redacted messages and state", async () => {
+    const turn = {
+      requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+      turnId: "turn-1",
+      status: "waiting",
+      failure: { category: "rate-limited", message: "Limit reached.", usageLimit: {} },
+      transcript: [
+        { role: "user", text: "Draft the reply to /Users/ada/Mail/acme.eml" },
+        { role: "assistant", text: "Here is a draft." },
+      ],
+      toolSteps: [{ name: "read_file", state: "completed", message: "TOOL OUTPUT: inbox" }],
+    } as const;
+    const context = setup({
+      source: visitorThreadSource(
+        () => {
+          throw new Error("A Work read uses no database.");
+        },
+        () => ({}),
+        {
+          thread: () => ({ title: "Answer Acme", lifecycle: "active" }),
+          turns: () => [turn],
+          liveReplyText: () => undefined,
+          activity: () => ({ executing: false, awaitingInput: true, waitsOnTurnAlone: true }),
+        },
+      ),
+    });
+    const link = await context.service.share({
+      mode: "work",
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    expect(answer).toMatchObject({
+      status: "ok",
+      projection: {
+        title: "Answer Acme",
+        state: "owner-deciding",
+        messages: [
+          { role: "person", text: "Draft the reply to [path]" },
+          { role: "agent", text: "Here is a draft." },
+        ],
+      },
+    });
+    expect(JSON.stringify(answer)).not.toContain("TOOL OUTPUT");
+    expect(JSON.stringify(answer)).not.toContain("/Users/ada");
   });
 });
 
@@ -443,4 +618,161 @@ describe("visitor comments", () => {
     await context.service.look();
     expect(context.sent).toHaveLength(2);
   });
+});
+
+describe("a secret a Chat or Code reply is still writing", () => {
+  const secret = "whsec_5WbX1kEMOo2N8gQk9Ff3LhZtA7cYdRsV";
+  // Shorter than the redactor's pattern, as the first streamed pieces are.
+  const partial = `The secret is ${secret.slice(0, 12)}`;
+  const settled = {
+    projection: {
+      messages: [
+        { role: "person", text: "Show it" },
+        { role: "agent", text: "The secret is [redacted]" },
+      ],
+    },
+  };
+  const streamed = {
+    projection: {
+      messages: [
+        { role: "person", text: "Show it" },
+        { role: "agent", text: "The secret is " },
+      ],
+    },
+  };
+
+  async function opened(context: ReturnType<typeof setup>, mode: "chat" | "code") {
+    const link = await context.service.share({
+      mode,
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    return fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) });
+  }
+
+  it.each(["queued", "streaming", "waiting"])(
+    "shows a visitor none of it while a Chat reply is %s, and redacts it whole once settled",
+    async (outcome) => {
+      const chat = (state: string, reply: string) => ({
+        thread: { title: "Check", lifecycle: "active" },
+        contents: [
+          { contentId: "asked", role: "user", body: "Show it" },
+          { contentId: "reply-1", role: "assistant", body: reply.slice(0, 7) },
+          { contentId: "reply-2", role: "assistant", body: reply.slice(7) },
+        ],
+        turns: [
+          {
+            id: "turn-1",
+            userMessageRef: { contentId: "asked" },
+            attempts: [
+              {
+                id: "attempt-1",
+                outcome: state,
+                responseRefs: [{ contentId: "reply-1" }, { contentId: "reply-2" }],
+              },
+            ],
+          },
+        ],
+      });
+      projections.chat = chat(outcome, partial);
+      const context = setup({
+        source: visitorThreadSource(
+          () => ({}) as never,
+          () => ({}),
+        ),
+      });
+      const request = await opened(context, "chat");
+
+      const live = context.service.fetch(request, HUB);
+      expect(live).toMatchObject(streamed);
+      expect(JSON.stringify(live)).not.toContain("whsec_");
+      projections.chat = chat("completed", `The secret is ${secret}`);
+      expect(context.service.fetch(request, HUB)).toMatchObject(settled);
+    },
+  );
+
+  it.each(["waiting", "interrupted", "cancelled", "failed"])(
+    "keeps back the last word of a Chat reply that stopped (%s), even once a newer turn completed",
+    async (outcome) => {
+      projections.chat = {
+        thread: { title: "Check", lifecycle: "active", releasedStopId: "attempt-1" },
+        contents: [
+          { contentId: "asked-1", role: "user", body: "Show it" },
+          { contentId: "reply-1", role: "assistant", body: `The secret is ${secret.slice(0, 12)}` },
+          { contentId: "asked-2", role: "user", body: "Go on" },
+          { contentId: "reply-2", role: "assistant", body: "Done" },
+        ],
+        turns: [
+          {
+            id: "turn-1",
+            userMessageRef: { contentId: "asked-1" },
+            attempts: [{ id: "attempt-1", outcome, responseRefs: [{ contentId: "reply-1" }] }],
+          },
+          {
+            id: "turn-2",
+            userMessageRef: { contentId: "asked-2" },
+            attempts: [
+              { id: "attempt-2", outcome: "completed", responseRefs: [{ contentId: "reply-2" }] },
+            ],
+          },
+        ],
+      };
+      const context = setup({
+        source: visitorThreadSource(
+          () => ({}) as never,
+          () => ({}),
+        ),
+      });
+      const request = await opened(context, "chat");
+      const read = JSON.stringify(context.service.fetch(request, HUB));
+      expect(read).toContain("The secret is");
+      expect(read).toContain("Done");
+      expect(read).not.toContain("whsec_");
+    },
+  );
+
+  it.each([
+    { executing: true, awaitingInput: false },
+    { executing: false, awaitingInput: true },
+  ])(
+    "shows a visitor none of it while a Code turn is live (%o), and redacts it whole once settled",
+    async (running) => {
+      let activity = running;
+      let reply = partial;
+      // Newest first, as the read orders them; an earlier settled reply follows.
+      const connection = {
+        prepare: () => ({
+          all: () => [
+            { content_role: "assistant", body_text: reply },
+            { content_role: "user", body_text: "Show it" },
+            { content_role: "assistant", body_text: "Ready." },
+          ],
+        }),
+      };
+      projections.code = { title: "Check", lifecycle: "active" };
+      const context = setup({
+        source: visitorThreadSource(
+          () => connection as never,
+          () => activity,
+        ),
+      });
+      const request = await opened(context, "code");
+
+      const live = context.service.fetch(request, HUB);
+      expect(live).toMatchObject({
+        projection: {
+          messages: [{ role: "agent", text: "Ready." }, ...streamed.projection.messages],
+        },
+      });
+      expect(JSON.stringify(live)).not.toContain("whsec_");
+      activity = { executing: false, awaitingInput: false };
+      reply = `The secret is ${secret}`;
+      expect(context.service.fetch(request, HUB)).toMatchObject({
+        projection: {
+          messages: [{ role: "agent", text: "Ready." }, ...settled.projection.messages],
+        },
+      });
+    },
+  );
 });

@@ -68,21 +68,38 @@ export type HubCliCommand =
   | { readonly action: "public"; readonly mode: "status" }
   /** As a standby, serve the entrance while standing in for the hub, or stop. */
   | { readonly action: "public"; readonly mode: "standby"; readonly serve: boolean }
-  /** This spoke's webhook endpoints; a new or rotated endpoint's secret is printed once. */
+  /**
+   * The Tailscale addresses of the person's own proxy on another machine; the
+   * entrance then binds this computer's Tailscale address. Empty clears them.
+   */
+  | {
+      readonly action: "public";
+      readonly mode: "fronts";
+      readonly addresses: ReadonlyArray<string>;
+    }
+  /**
+   * This spoke's webhook endpoints; a new or rotated endpoint's secret is
+   * printed once. Stripe mints its own secret, which `secret` reads from
+   * standard input.
+   */
   | {
       readonly action: "webhook";
       readonly mode: "create";
-      readonly scheme: "standard-webhooks" | "github";
+      readonly scheme: "standard-webhooks" | "github" | "stripe";
       readonly label: string;
     }
   | { readonly action: "webhook"; readonly mode: "list" }
-  | { readonly action: "webhook"; readonly mode: "rotate" | "remove"; readonly endpointId: string }
+  | {
+      readonly action: "webhook";
+      readonly mode: "rotate" | "remove" | "secret";
+      readonly endpointId: string;
+    }
   /** The hub's visitor-link switch, and this spoke's links and the comments waiting on them. */
   | { readonly action: "visitor"; readonly mode: "on" | "off" | "list" }
   | {
       readonly action: "visitor";
       readonly mode: "share";
-      readonly threadMode: "code" | "chat";
+      readonly threadMode: "code" | "chat" | "work";
       readonly threadId: string;
       readonly scope: "read" | "comment";
       readonly hours?: number;
@@ -269,6 +286,16 @@ export function resolveHubCliCommand(
     }
     case "public": {
       const [mode, choice] = rest;
+      if (mode === "fronts") {
+        if (!only("clear") || !isSwitch(flags.clear)) return undefined;
+        const addresses = rest.slice(1);
+        if (flags.clear === true) {
+          return addresses.length === 0 ? { action, mode, addresses: [] } : undefined;
+        }
+        return addresses.length > 0 && addresses.length <= 8
+          ? { action, mode, addresses }
+          : undefined;
+      }
       if (mode === "standby") {
         return rest.length === 2 && only() && (choice === "on" || choice === "off")
           ? { action, mode, serve: choice === "on" }
@@ -291,7 +318,7 @@ export function resolveHubCliCommand(
     case "webhook": {
       const [mode, endpointId] = rest;
       if (mode === "list") return rest.length === 1 && only() ? { action, mode } : undefined;
-      if (mode === "rotate" || mode === "remove") {
+      if (mode === "rotate" || mode === "remove" || mode === "secret") {
         return rest.length === 2 &&
           only() &&
           endpointId !== undefined &&
@@ -302,7 +329,10 @@ export function resolveHubCliCommand(
       if (mode !== "create" || rest.length !== 1 || !only("scheme", "label")) return undefined;
       const scheme = flags.scheme ?? "standard-webhooks";
       const label = flags.label ?? "Webhook";
-      if ((scheme !== "standard-webhooks" && scheme !== "github") || typeof label !== "string") {
+      if (
+        (scheme !== "standard-webhooks" && scheme !== "github" && scheme !== "stripe") ||
+        typeof label !== "string"
+      ) {
         return undefined;
       }
       return { action, mode, scheme, label };
@@ -334,7 +364,9 @@ export function resolveHubCliCommand(
           : undefined;
       }
       if (mode !== "share" || rest.length !== 3 || !only("comment", "hours")) return undefined;
-      if ((first !== "code" && first !== "chat") || second === undefined) return undefined;
+      if ((first !== "code" && first !== "chat" && first !== "work") || second === undefined) {
+        return undefined;
+      }
       if (flags.comment !== undefined && !isSwitch(flags.comment)) return undefined;
       // A bare --hours parses as true, which Number would read as one hour.
       if (flags.hours !== undefined && typeof flags.hours !== "string") return undefined;
@@ -503,8 +535,15 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runCertificate(input, command.mode, command.acknowledgeTransparency);
     case "public":
       return await runPublic(input, command);
-    case "webhook":
-      return await runWebhook(input, command);
+    case "webhook": {
+      if (command.mode !== "secret") return await runWebhook(input, command);
+      const secret = await readOneLine(input.stdin);
+      if (secret === undefined || secret.trim() === "") {
+        input.stderr.write("No secret arrived on standard input.\n");
+        return 1;
+      }
+      return await runWebhookSecret(input, command.endpointId, secret.trim());
+    }
     case "visitor":
       return await runVisitor(input, command);
     case "relay":
@@ -644,6 +683,24 @@ async function runPublic(
   command: Extract<HubCliCommand, { action: "public" }>,
 ): Promise<number> {
   if (command.mode === "status") return await printPublicStatus(input);
+  if (command.mode === "fronts") {
+    const response = await post(input, "/api/desktop/hub/public/fronts", {
+      addresses: command.addresses,
+    });
+    if (!isOk(response, "changed")) {
+      return refusal(
+        input,
+        response,
+        "Octant refused those fronts. Each must be a Tailscale address of your own proxy, and Funnel must be off.",
+      );
+    }
+    input.stdout.write(
+      command.addresses.length === 0
+        ? "No front on another machine is listed; the entrance listens on this computer only.\n"
+        : "Only these addresses reach the entrance now. Point your proxy at this computer's tailnet name, which its certificate covers:\n",
+    );
+    return await printPublicStatus(input);
+  }
   if (command.mode === "standby") {
     const response = await post(input, "/api/desktop/hub/public/standby", {
       enabled: command.serve,
@@ -695,9 +752,22 @@ async function runPublic(
   return 0;
 }
 
+async function runWebhookSecret(input: Input, endpointId: string, secret: string): Promise<number> {
+  const response = await post(input, "/api/desktop/hub/webhooks/secret", { endpointId, secret });
+  if (!isOk(response, "set")) {
+    return refusal(input, response, "Octant refused that secret.");
+  }
+  input.stdout.write(
+    field(response.body, "published") === true
+      ? "The endpoint takes Stripe's deliveries now.\n"
+      : "The secret is kept; the hub has not taken it yet, and this computer tries again shortly.\n",
+  );
+  return 0;
+}
+
 async function runWebhook(
   input: Input,
-  command: Extract<HubCliCommand, { action: "webhook" }>,
+  command: Exclude<Extract<HubCliCommand, { action: "webhook" }>, { mode: "secret" }>,
 ): Promise<number> {
   if (command.mode === "list") {
     const response = await input.session.send({ path: "/api/desktop/hub/status", method: "GET" });
@@ -735,6 +805,18 @@ async function runWebhook(
           label: command.label,
         })
       : await post(input, "/api/desktop/hub/webhooks/rotate", { endpointId: command.endpointId });
+  if (isOk(response, "awaiting-secret")) {
+    const endpointId = String(field(response.body, "endpointId"));
+    input.stdout.write(
+      [
+        `Path on your hub's public address  ${String(field(response.body, "path"))}`,
+        "Add the full URL as an endpoint in Stripe, then copy the signing secret Stripe shows and run:",
+        `  octant hub webhook secret ${endpointId}`,
+        "It reads the secret from standard input. The endpoint takes no delivery until then.",
+      ].join("\n") + "\n",
+    );
+    return 0;
+  }
   if (!isOk(response, "created")) {
     return refusal(input, response, "Octant refused to make the endpoint.");
   }
@@ -858,6 +940,7 @@ async function printPublicStatus(input: Input): Promise<number> {
         field(entrance, "listening") === true ? ", listening" : ""
       }${field(entrance, "paused") === true ? " (remote access is paused)" : ""}`,
       ...(typeof address === "string" ? [`  Address on this computer  ${address}`] : []),
+      ...frontLines(field(entrance, "fronts")),
       `  Funnel  ${
         field(funnel, "enabled") === true ? `on, port ${String(field(funnel, "port"))}` : "off"
       }`,
@@ -866,6 +949,12 @@ async function printPublicStatus(input: Input): Promise<number> {
     ].join("\n") + "\n",
   );
   return 0;
+}
+
+/** The listed front addresses on another machine, when there are any. */
+function frontLines(value: unknown): ReadonlyArray<string> {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  return [`  Fronts on another machine  ${value.map(String).join(", ")}`];
 }
 
 /** The standbys' public URLs, for senders that accept a fallback address. */
@@ -1542,6 +1631,8 @@ async function runRemove(input: Input, member: string): Promise<number> {
 }
 
 const REFUSAL_COPY: Readonly<Record<string, string>> = {
+  "too-many-replaced-secrets":
+    "This endpoint still holds two replaced secrets: each takes new deliveries for a day after it was replaced and is kept a day more for deliveries the hub still holds, and another would drop one early. Run this again two days after the oldest was replaced. Rotating the endpoint instead retires its URL (a standby standing in for the hub stops taking it once it hears), drops the deliveries it has not run yet, and needs the new URL and secret set in Stripe.",
   "hub-role-off": "The hub role is off. Turn it on with `octant hub enable`.",
   "listener-not-running":
     "The remote listener is not running. Turn it on first with `octant listener enable`.",
@@ -1604,6 +1695,8 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "funnel-off-failed":
     "Tailscale did not turn Funnel off. Run `tailscale funnel --https=<port> off` yourself, with the port `octant hub public status` shows.",
   "listener-failed": "The public entrance could not open a port on this computer.",
+  "no-front-in-address-family":
+    "None of those fronts can reach the entrance: it listens on this computer's IPv4 Tailscale address when it has one, otherwise its IPv6 one. List a front of the same kind.",
   "public-not-granted":
     "This computer's hub grant does not tick Public. Tick it with `octant hub grant --items` first.",
   "unknown-endpoint": "This computer has no endpoint with that id.",

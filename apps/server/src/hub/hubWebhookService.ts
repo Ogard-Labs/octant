@@ -27,17 +27,17 @@ import { Schema } from "effect";
 import {
   decideWebhookDelivery,
   readWebhookHeaders,
-  webhookDedupeKeys,
   hubSealingKeyPayload,
+  replacedWebhookSecretVerifies,
 } from "@octant/domain";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort, HubWebhookQueued } from "./hubStateStore";
 import type { PublicAnswer, PublicRequest } from "./publicEntrance";
 import {
   makeSealingKeyPair,
+  openPreviousWebhookSecret,
   openWebhookSecret,
-  verifyWebhookSignature,
-  webhookBodyDigest,
+  verifiedWebhookDeliveryByAny,
 } from "./publicEntranceCrypto";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
@@ -189,35 +189,36 @@ export class HubWebhookService {
         String(entry.spokeMemberId) === String(queued.spokeMemberId),
     );
     if (endpoint === undefined) return { status: "unknown-endpoint" };
-    const secret = this.#secretFor(endpoint, hub.sealingKey.privateKey);
-    if (secret === undefined) return { status: "unknown-endpoint" };
+    const receivedAt = queued.envelope.receivedAt;
+    const secrets = this.#secretsFor(endpoint, hub.sealingKey.privateKey, receivedAt);
+    if (secrets.length === 0) return { status: "unknown-endpoint" };
     const body = Buffer.from(queued.envelope.body, "base64");
     const reading = readWebhookHeaders(endpoint.scheme, queued.envelope.headers);
-    const receivedAt = queued.envelope.receivedAt;
     const now = this.#options.now();
     if (
       reading.status === "refused" ||
-      reading.deliveryId !== queued.envelope.deliveryId ||
       receivedAt > now + WEBHOOK_TIMESTAMP_WINDOW_MS ||
       now - receivedAt > WEBHOOK_HOLD_MS
     ) {
       return { status: "refused" };
     }
-    const keys =
-      endpoint.scheme === "github"
-        ? webhookDedupeKeys({
-            scheme: "github",
-            deliveryId: reading.deliveryId,
-            bodyDigest: webhookBodyDigest(body),
-          })
-        : webhookDedupeKeys({ scheme: "standard-webhooks", deliveryId: reading.deliveryId });
+    const verified = verifiedWebhookDeliveryByAny({
+      scheme: endpoint.scheme,
+      secrets,
+      reading,
+      body,
+    });
+    if (verified !== undefined && verified.deliveryId !== queued.envelope.deliveryId) {
+      return { status: "refused" };
+    }
+    const keys = verified?.keys ?? [];
     const forEndpoint = hub.queue.filter(
       (entry) => String(entry.envelope.endpointId) === endpointId,
     );
     const held = new Set(forEndpoint.flatMap((entry) => entry.keys));
     const decision = decideWebhookDelivery({
       endpointEnabled: true,
-      signatureMatches: verifyWebhookSignature({ scheme: endpoint.scheme, secret, reading, body }),
+      signatureMatches: verified !== undefined,
       ...(reading.timestampMs === undefined ? {} : { timestampMs: reading.timestampMs }),
       nowMs: receivedAt,
       dedupeKeys: keys,
@@ -349,16 +350,15 @@ export class HubWebhookService {
       this.#count("refused");
       return answer(401, { error: reading.kind });
     }
-    const secret = this.#secretFor(endpoint, hub.sealingKey.privateKey);
-    if (secret === undefined) return NOT_FOUND;
-    const keys =
-      endpoint.scheme === "github"
-        ? webhookDedupeKeys({
-            scheme: "github",
-            deliveryId: reading.deliveryId,
-            bodyDigest: webhookBodyDigest(body.bytes),
-          })
-        : webhookDedupeKeys({ scheme: "standard-webhooks", deliveryId: reading.deliveryId });
+    const secrets = this.#secretsFor(endpoint, hub.sealingKey.privateKey, now);
+    if (secrets.length === 0) return NOT_FOUND;
+    const verified = verifiedWebhookDeliveryByAny({
+      scheme: endpoint.scheme,
+      secrets,
+      reading,
+      body: body.bytes,
+    });
+    const keys = verified?.keys ?? [];
     const queuedKeys = new Set(
       hub.queue
         .filter((queued) => String(queued.envelope.endpointId) === endpointId)
@@ -366,21 +366,18 @@ export class HubWebhookService {
     );
     const decision = decideWebhookDelivery({
       endpointEnabled: true,
-      signatureMatches: verifyWebhookSignature({
-        scheme: endpoint.scheme,
-        secret,
-        reading,
-        body: body.bytes,
-      }),
+      signatureMatches: verified !== undefined,
       ...(reading.timestampMs === undefined ? {} : { timestampMs: reading.timestampMs }),
       nowMs: now,
       dedupeKeys: keys,
       claimed: (key) => queuedKeys.has(key),
     });
     if (decision.status === "duplicate") return answer(200, { duplicate: true });
-    if (decision.status === "refused") {
+    // An accepted decision always has a verified delivery; the second test narrows it.
+    if (decision.status === "refused" || verified === undefined) {
       this.#count("refused");
-      return answer(decision.kind === "stale-timestamp" ? 400 : 401, { error: decision.kind });
+      const kind = decision.status === "refused" ? decision.kind : "bad-signature";
+      return answer(kind === "stale-timestamp" ? 400 : 401, { error: kind });
     }
     const forEndpoint = hub.queue.filter(
       (queued) => String(queued.envelope.endpointId) === endpointId,
@@ -399,7 +396,7 @@ export class HubWebhookService {
       bytes: body.bytes.length,
       envelope: {
         endpointId: endpoint.endpointId,
-        deliveryId: reading.deliveryId,
+        deliveryId: verified.deliveryId,
         receivedAt: now,
         headers,
         body: body.bytes.toString("base64"),
@@ -460,13 +457,38 @@ export class HubWebhookService {
     for (const spoke of unreachable) await this.#wake(spoke);
   }
 
-  #secretFor(endpoint: HubWebhookEndpoint, privateKey: string): string | undefined {
-    const sealed = endpoint.sealedSecrets.find(
+  /**
+   * This host's copy of the endpoint's secret, then, for a Stripe endpoint
+   * whose person pasted new ones, each replaced one that was still taken when
+   * the delivery was received (now, for one from the internet; the standby's
+   * receipt, for one handed back). Empty when nothing here opens.
+   */
+  #secretsFor(
+    endpoint: HubWebhookEndpoint,
+    privateKey: string,
+    receivedAtMs: number,
+  ): ReadonlyArray<string> {
+    const [current, ...replaced] = endpoint.sealedSecrets.filter(
       (entry) => String(entry.recipientMemberId) === this.#options.hubMemberId(),
     );
-    return sealed === undefined
-      ? undefined
-      : openWebhookSecret({ sealed, endpointId: String(endpoint.endpointId), privateKey });
+    const endpointId = String(endpoint.endpointId);
+    const secret =
+      current === undefined
+        ? undefined
+        : openWebhookSecret({ sealed: current, endpointId, privateKey });
+    if (secret === undefined) return [];
+    if (endpoint.scheme !== "stripe") return [secret];
+    const now = this.#options.now();
+    return [
+      secret,
+      ...replaced.flatMap((sealed) => {
+        const previous = openPreviousWebhookSecret({ sealed, endpointId, privateKey });
+        return previous !== undefined &&
+          replacedWebhookSecretVerifies({ until: previous.until, receivedAtMs, nowMs: now })
+          ? [previous.secret]
+          : [];
+      }),
+    ];
   }
 
   #takeRate(endpointId: string, now: number): boolean {

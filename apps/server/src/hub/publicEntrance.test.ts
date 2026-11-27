@@ -1,4 +1,7 @@
+import { checkServerIdentity } from "node:tls";
 import { request as httpRequest } from "node:http";
+import { get as httpsGet } from "node:https";
+import { connect } from "node:net";
 import type { Duplex } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { DIRECT_PUSH_GATEWAY_ROUTES } from "./directPushRoutes";
@@ -6,6 +9,10 @@ import { HUB_ADMINISTRATION_ROUTES } from "./hubAdministrationRoutes";
 import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
 import { HUB_OWNER_ROUTES } from "./hubOwnerRoutes";
 import { PEER_DELEGATION_ROUTES } from "./peerDelegationRoutes";
+import {
+  PRIVATE_LISTENER_TEST_CERT,
+  PRIVATE_LISTENER_TEST_KEY,
+} from "../privateListener.test-certs";
 import {
   matchPublicRoute,
   startPublicEntrance,
@@ -408,6 +415,93 @@ describe("relayed connections", () => {
     } finally {
       // A stalled close fails above and would otherwise leave the device's socket open.
       device.socket.destroy();
+    }
+  });
+});
+
+describe("a front on another machine", () => {
+  async function bootTailnet(admits: (remoteAddress: string | undefined) => boolean) {
+    // The test machine has no Tailscale address; the bind address and the
+    // peer check are the listener's inputs, and the service picks them.
+    const entrance = await startPublicEntrance({
+      port: 0,
+      role: () => "serve",
+      handlers: {},
+      tailnet: {
+        address: "127.0.0.1",
+        tls: { cert: PRIVATE_LISTENER_TEST_CERT, key: PRIVATE_LISTENER_TEST_KEY },
+        admits,
+      },
+    });
+    open.push(entrance);
+    return entrance;
+  }
+
+  const health = (port: number) =>
+    new Promise<number | "refused">((resolve) => {
+      const request = httpsGet(
+        {
+          host: "127.0.0.1",
+          port,
+          path: "/healthz",
+          ca: PRIVATE_LISTENER_TEST_CERT,
+          // The chain is verified against the fixture; its certificate names
+          // the address it was issued for, so the identity is checked there.
+          checkServerIdentity: (_host, certificate) =>
+            checkServerIdentity("192.168.1.20", certificate),
+        },
+        (response) => {
+          response.resume();
+          resolve(response.statusCode ?? 0);
+        },
+      );
+      request.on("error", () => resolve("refused"));
+    });
+
+  it("a connection from an unlisted address is refused before TLS", async () => {
+    const seen: Array<string | undefined> = [];
+    const entrance = await bootTailnet((remoteAddress) => {
+      seen.push(remoteAddress);
+      return false;
+    });
+    expect(await health(entrance.port)).toBe("refused");
+    expect(seen).toHaveLength(1);
+  });
+
+  it("a connection from a listed front is served over TLS", async () => {
+    const entrance = await bootTailnet((remoteAddress) => remoteAddress === "127.0.0.1");
+    expect(await health(entrance.port)).toBe(200);
+  });
+
+  it("closing the entrance ends a listed front's connection that never finishes TLS", async () => {
+    const admitted = Promise.withResolvers<void>();
+    const entrance = await startPublicEntrance({
+      port: 0,
+      role: () => "serve",
+      handlers: {},
+      tailnet: {
+        address: "127.0.0.1",
+        tls: { cert: PRIVATE_LISTENER_TEST_CERT, key: PRIVATE_LISTENER_TEST_KEY },
+        admits: () => {
+          admitted.resolve();
+          return true;
+        },
+      },
+    });
+    // TCP only: no TLS byte ever follows.
+    const front = connect({ host: "127.0.0.1", port: entrance.port });
+    front.on("error", () => undefined);
+    const ended = new Promise<void>((done) => front.on("close", () => done()));
+    try {
+      await admitted.promise;
+      const closed = await Promise.race([
+        entrance.close().then(() => "closed" as const),
+        new Promise<"stalled">((resolve) => setTimeout(() => resolve("stalled"), 2_000)),
+      ]);
+      expect(closed).toBe("closed");
+      await ended;
+    } finally {
+      front.destroy();
     }
   });
 });

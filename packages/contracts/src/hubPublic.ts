@@ -90,10 +90,11 @@ export type WebhookEndpointId = typeof WebhookEndpointId.Type;
 
 /**
  * How a sender signs. Standard Webhooks signs an id and a timestamp with the
- * body; GitHub signs the body alone. Stripe's format comes later (maintainer
- * decision, 2026-11-26).
+ * body; GitHub signs the body alone; Stripe signs a timestamp with the body
+ * and puts the event id inside it. Stripe mints its own secret, so a Stripe
+ * endpoint's secret is pasted in rather than minted.
  */
-export const WebhookSignatureScheme = Schema.Literal("standard-webhooks", "github");
+export const WebhookSignatureScheme = Schema.Literal("standard-webhooks", "github", "stripe");
 export type WebhookSignatureScheme = typeof WebhookSignatureScheme.Type;
 
 export const WEBHOOK_TIMESTAMP_WINDOW_MS = 5 * 60 * 1000;
@@ -130,6 +131,13 @@ export const HubWebhookEndpoint = Schema.Struct({
   endpointId: WebhookEndpointId,
   spokeMemberId: HubMemberId,
   scheme: WebhookSignatureScheme,
+  /**
+   * One copy per recipient, current secret first. A Stripe endpoint whose
+   * person pasted a new secret within the last day also carries, after it,
+   * each replaced secret still taken, sealed to the same recipient with its
+   * own end time inside the seal; a holder that opens only the first copy for
+   * its member id keeps working unchanged.
+   */
   sealedSecrets: Schema.Array(SealedWebhookSecret).pipe(Schema.minItems(1), Schema.maxItems(16)),
 }).annotations(strict);
 export type HubWebhookEndpoint = typeof HubWebhookEndpoint.Type;
@@ -143,6 +151,7 @@ export const WEBHOOK_FORWARDED_HEADERS = [
   "x-hub-signature-256",
   "x-github-delivery",
   "x-github-event",
+  "stripe-signature",
   "content-type",
 ] as const;
 
@@ -204,6 +213,17 @@ export const HubPublicFunnelRequest = Schema.Struct({
   port: Schema.optional(PublicFunnelPort),
 }).annotations(strict);
 export const decodeHubPublicFunnelRequest = Schema.decodeUnknownSync(HubPublicFunnelRequest);
+
+/**
+ * The Tailscale addresses of the person's own proxy on another machine. While
+ * any is listed, the entrance binds the hub's Tailscale address with its
+ * Tailscale certificate and serves only them; an empty list goes back to
+ * loopback. The host refuses any address that is not a Tailscale one.
+ */
+export const HubPublicFrontsRequest = Schema.Struct({
+  addresses: Schema.Array(Schema.String.pipe(Schema.maxLength(64))).pipe(Schema.maxItems(8)),
+}).annotations(strict);
+export const decodeHubPublicFrontsRequest = Schema.decodeUnknownSync(HubPublicFrontsRequest);
 
 /**
  * A standby's own choice to serve the public entrance while it stands in for
@@ -323,6 +343,13 @@ export const HubWebhookCreateRequest = Schema.Struct({
 }).annotations(strict);
 export const decodeHubWebhookCreateRequest = Schema.decodeUnknownSync(HubWebhookCreateRequest);
 
+/** A window on a spoke pastes the secret Stripe minted for one of its Stripe endpoints. */
+export const HubWebhookSecretRequest = Schema.Struct({
+  endpointId: WebhookEndpointId,
+  secret: Schema.String.pipe(Schema.maxLength(256)),
+}).annotations(strict);
+export const decodeHubWebhookSecretRequest = Schema.decodeUnknownSync(HubWebhookSecretRequest);
+
 /** A window on a spoke rotates or removes one of its endpoints. */
 export const HubWebhookEndpointRequest = Schema.Struct({
   endpointId: WebhookEndpointId,
@@ -330,7 +357,7 @@ export const HubWebhookEndpointRequest = Schema.Struct({
 export const decodeHubWebhookEndpointRequest = Schema.decodeUnknownSync(HubWebhookEndpointRequest);
 
 /** A thread a visitor link shares, as only the spoke that owns it knows it. */
-export const VisitorThreadMode = Schema.Literal("chat", "code");
+export const VisitorThreadMode = Schema.Literal("chat", "code", "work");
 export type VisitorThreadMode = typeof VisitorThreadMode.Type;
 
 /** Everything one spoke lets the hub hold for visitor links: it replaces what the hub held for it. */

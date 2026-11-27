@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HubMembershipChangedPayload } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  PRIVATE_LISTENER_TEST_CERT,
+  PRIVATE_LISTENER_TEST_KEY,
+} from "../privateListener.test-certs";
 import { createHubStateStore, type HubStatePort } from "./hubStateStore";
 import { PublicEntranceService } from "./publicEntranceService";
 import type { TailscaleExec } from "./tailscaleCliDaemon";
@@ -27,6 +31,8 @@ function setup(
     readonly state?: HubStatePort;
     readonly paused?: boolean;
     readonly now?: () => number;
+    /** What the host knows of its own Tailscale address and certificate. */
+    readonly tailnet?: { readonly address?: string; readonly certificate?: boolean };
   } = {},
 ) {
   const folder = mkdtempSync(join(tmpdir(), "octant-public-entrance-"));
@@ -57,6 +63,21 @@ function setup(
     privateListenerPort: () => options.privateListenerPort,
     role: () => role,
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.tailnet === undefined
+      ? {}
+      : {
+          tailnet: async () => ({
+            address: options.tailnet?.address,
+            tls:
+              options.tailnet?.certificate === true
+                ? {
+                    cert: PRIVATE_LISTENER_TEST_CERT,
+                    key: PRIVATE_LISTENER_TEST_KEY,
+                    name: "hub.tail1234.ts.net",
+                  }
+                : undefined,
+          }),
+        }),
   });
   services.push(service);
   return {
@@ -227,6 +248,87 @@ describe("the Funnel front", () => {
     });
     expect(calls[0]).toEqual(["funnel", "--https=10000", "off"]);
     expect(recorded.filter((entry) => entry.change === "public-funnel-changed")).toHaveLength(2);
+  });
+});
+
+describe("a front on another machine", () => {
+  it("takes only Tailscale addresses as fronts", async () => {
+    const { service, state } = setup({ tailnet: { address: "100.90.1.2", certificate: true } });
+    for (const address of ["192.168.1.20", "0.0.0.0", "203.0.113.9", "vps.tail1234.ts.net"]) {
+      expect(await service.setFronts([address], WINDOW)).toEqual({
+        status: "refused",
+        kind: "not-a-tailscale-address",
+      });
+    }
+    expect(state.load().publicEntrance?.fronts).toBeUndefined();
+    expect(await service.setFronts(["100.101.102.103"], WINDOW)).toEqual({
+      status: "changed",
+      fronts: ["100.101.102.103"],
+    });
+    expect(service.status().fronts).toEqual(["100.101.102.103"]);
+  });
+
+  it("never binds a LAN or public address, and never falls back to loopback, when fronts are listed", async () => {
+    for (const tailnet of [
+      { address: "192.168.1.20", certificate: true },
+      { address: "0.0.0.0", certificate: true },
+      { certificate: true },
+      { address: "100.90.1.2", certificate: false },
+    ]) {
+      const { service } = setup({ tailnet });
+      await service.setFronts(["100.101.102.103"], WINDOW);
+      expect(await service.setEnabled(true, WINDOW)).toEqual({
+        status: "refused",
+        kind: "listener-failed",
+      });
+      expect(service.status().listening).toBe(false);
+      expect(await health(service)).toBe("refused");
+    }
+  });
+
+  it("refuses a front list of IPv6 addresses only while the hub binds its IPv4 one", async () => {
+    const { service } = setup({ tailnet: { address: "100.90.1.2", certificate: true } });
+    await service.setEnabled(true, WINDOW);
+    expect(await service.setFronts(["fd7a:115c:a1e0::1"], WINDOW)).toEqual({
+      status: "refused",
+      kind: "no-front-in-address-family",
+    });
+    expect(service.status().fronts).toEqual([]);
+    expect(await health(service)).toBe(200);
+  });
+
+  it("a front list the host cannot bind for is refused, and the loopback entrance keeps serving", async () => {
+    const { service } = setup({ tailnet: { address: "192.168.1.20", certificate: true } });
+    await service.setEnabled(true, WINDOW);
+    expect(await health(service)).toBe(200);
+    expect(await service.setFronts(["100.101.102.103"], WINDOW)).toEqual({
+      status: "refused",
+      kind: "no-tailnet-address",
+    });
+    // Refused, so the list stays empty and the loopback entrance keeps serving.
+    expect(service.status().fronts).toEqual([]);
+    expect(await health(service)).toBe(200);
+    expect(await service.setFronts([], WINDOW)).toEqual({ status: "changed", fronts: [] });
+    expect(await health(service)).toBe(200);
+  });
+
+  it("refuses Funnel while fronts are listed, and fronts while Funnel is on", async () => {
+    const { service } = setup({ tailnet: { address: "100.90.1.2", certificate: true } });
+    await service.setEnabled(true, WINDOW);
+    expect(await service.setFunnel({ enabled: true }, WINDOW)).toMatchObject({
+      status: "changed",
+    });
+    expect(await service.setFronts(["100.101.102.103"], WINDOW)).toEqual({
+      status: "refused",
+      kind: "funnel-on",
+    });
+    await service.setFunnel({ enabled: false }, WINDOW);
+    await service.setEnabled(false, WINDOW);
+    await service.setFronts(["100.101.102.103"], WINDOW);
+    expect(await service.setFunnel({ enabled: true }, WINDOW)).toEqual({
+      status: "refused",
+      kind: "fronts-listed",
+    });
   });
 });
 

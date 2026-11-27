@@ -4184,6 +4184,25 @@ describe("WorkTurnService", () => {
     expect(turn?.toolSteps).toEqual([{ toolCallId: "call-1", toolName: "Read", state: "started" }]);
   });
 
+  it("supplies the reply a running turn has streamed so far, and none once it settled", async () => {
+    const gate = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onDelta?.("Partial reply");
+          await gate.promise;
+          return { kind: "completed", response: "Whole reply" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const requestId = decodeWorkTurnRequestId(ids.request);
+    await expect.poll(() => fixture.service.liveReplyText(requestId)).toBe("Partial reply");
+    gate.resolve();
+    await fixture.waitForIdle();
+    expect(fixture.service.liveReplyText(requestId)).toBeUndefined();
+  });
+
   it("shows a window that opens mid-turn the tool calls already made", async () => {
     const gate = deferred<void>();
     const fixture = serviceFixture({
