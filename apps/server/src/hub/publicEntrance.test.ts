@@ -1,4 +1,5 @@
 import { request as httpRequest } from "node:http";
+import type { Duplex } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { DIRECT_PUSH_GATEWAY_ROUTES } from "./directPushRoutes";
 import { HUB_ADMINISTRATION_ROUTES } from "./hubAdministrationRoutes";
@@ -377,7 +378,10 @@ describe("relayed connections", () => {
         },
       },
     });
-    const device = await new Promise<{ readonly ended: Promise<void> }>((resolve, reject) => {
+    const device = await new Promise<{
+      readonly socket: Duplex;
+      readonly ended: Promise<void>;
+    }>((resolve, reject) => {
       const request = httpRequest({
         host: "127.0.0.1",
         port: entrance.port,
@@ -386,16 +390,24 @@ describe("relayed connections", () => {
       });
       request.on("upgrade", (_response, socket) => {
         socket.on("error", () => undefined);
-        resolve({ ended: new Promise<void>((done) => socket.on("close", () => done())) });
+        resolve({
+          socket,
+          ended: new Promise<void>((done) => socket.on("close", () => done())),
+        });
       });
       request.on("error", reject);
       request.end();
     });
-    const closed = await Promise.race([
-      entrance.close().then(() => "closed" as const),
-      new Promise<"stalled">((resolve) => setTimeout(() => resolve("stalled"), 2_000)),
-    ]);
-    expect(closed).toBe("closed");
-    await device.ended;
+    try {
+      const closed = await Promise.race([
+        entrance.close().then(() => "closed" as const),
+        new Promise<"stalled">((resolve) => setTimeout(() => resolve("stalled"), 2_000)),
+      ]);
+      expect(closed).toBe("closed");
+      await device.ended;
+    } finally {
+      // A stalled close fails above and would otherwise leave the device's socket open.
+      device.socket.destroy();
+    }
   });
 });
