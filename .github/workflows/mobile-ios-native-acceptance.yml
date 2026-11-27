@@ -29,7 +29,7 @@ jobs:
     name: Exercise the offline demo on an owned iOS Simulator
     runs-on: macos-26
     # One build and three scenarios; a slow runner needs most of it.
-    timeout-minutes: 60
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
         with:

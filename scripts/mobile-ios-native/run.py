@@ -206,7 +206,9 @@ try:
          "-destination", "id=" + device, "-derivedDataPath", str(derived_data),
          # A Release build makes every architecture; the Simulator runs one.
          "ONLY_ACTIVE_ARCH=YES",
-         "CODE_SIGNING_ALLOWED=NO"], timeout=1800)
+         # A cold build with the native look's modules runs past 30 minutes on
+         # a hosted runner (seen at 1800 s on 2026-11-27).
+         "CODE_SIGNING_ALLOWED=NO"], timeout=2700)
     if os.environ.get("OCTANT_KEEP_SIMULATOR_APP") == "1":
         # The app and its test runner, before the scenarios, so a failing one
         # can be looked into by hand.
