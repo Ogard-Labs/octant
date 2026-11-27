@@ -177,7 +177,12 @@ describe("Desktop pane", () => {
     gesture(2, 50);
     gesture(0, 80);
     expect(wheel(true)).toBe(true);
-    const localScrollAllowed = wheel();
+    // Scrolling is read by a listener attached in an effect after control
+    // begins, and the "Hand back" button can be on screen before that effect
+    // runs: a merge-queue run recorded no scroll. Until the listener is in
+    // place a wheel is left alone and sends nothing, so wait for one to be
+    // consumed.
+    await waitFor(() => expect(wheel()).toBe(false));
     fireEvent.click(handBack);
     await screen.findByRole("button", { name: "Take control" });
     expect(
@@ -188,7 +193,6 @@ describe("Desktop pane", () => {
       { kind: "drag", x: 0.5, endX: 0.8 },
       { kind: "scroll", x: 0.5, y: 0.25, deltaY: 20 },
     ]);
-    expect(localScrollAllowed).toBe(false);
     expect(wheel()).toBe(true);
   });
 

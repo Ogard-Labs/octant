@@ -224,11 +224,19 @@ describe("ZenProjectTerminalCard", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "More terminal actions" }));
+    // The menu mounts when the shell's first read arrives, outside act, and a
+    // click that lands before its effects have run leaves it closed: twice in
+    // merge-queue runs the trigger still read aria-expanded="false" and no
+    // menu was drawn. Press it until the menu is open, then pick the item.
+    const trigger = await screen.findByRole("button", { name: "More terminal actions" });
+    await waitFor(() => {
+      if (trigger.getAttribute("aria-expanded") !== "true") fireEvent.click(trigger);
+      expect(trigger).toHaveAttribute("aria-expanded", "true");
+    });
     fireEvent.click(
       await screen.findByRole("menuitem", { name: "Open Google Antigravity terminal" }),
     );
-    expect(open).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
     expect(shell.execute).not.toHaveBeenCalledWith(
       expect.objectContaining({ kind: "start" }),
       expect.anything(),

@@ -169,6 +169,15 @@ describe("thread rest from the sidebar", () => {
     };
     render(chatShell(chatApi));
 
+    // The new-thread composer loads on demand and takes focus when it mounts.
+    // Under CPU load that landed after the row's menu opened, moved focus out
+    // of it and closed it, so Enter never reached Tomorrow (2 of 10 runs).
+    // Let the composer settle first.
+    await act(() => vi.dynamicImportSettled());
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "First message" })).toHaveFocus(),
+    );
+
     // A Chat row carries no inline gutter — it offers neither pinning nor
     // archiving — so its rest commands are reached by right-click, the row's
     // own menu.
