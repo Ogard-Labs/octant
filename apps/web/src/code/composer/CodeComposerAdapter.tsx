@@ -499,6 +499,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+    ...(props.projectId === undefined ? {} : { trackerProjectId: String(props.projectId) }),
     ...(storedMentionChips.length === 0 ? {} : { initialChips: storedMentionChips }),
   });
   const mention = useThreadMentionTypeahead({
@@ -1738,6 +1739,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   candidates={threadMentions.composer?.candidates ?? []}
                   listId={mentionListId}
                   onChoose={mention.choose}
+                  onChooseTracker={mention.chooseTracker}
+                  trackers={mention.trackers}
                   onHover={mention.setActiveIndex}
                 />
               ) : null

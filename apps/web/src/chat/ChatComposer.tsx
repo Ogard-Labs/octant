@@ -270,7 +270,7 @@ export function ChatComposer(props: ChatComposerProps) {
     disabled: false,
   });
   const mentionOpen = mention.open;
-  const activeMention = mention.activeCandidate;
+  const activeMention = mention.activeOptionId;
   // `/` commands come from the host command registry mounted by the shell. A
   // skill only appears when this composer actually has the host's draft
   // resolution path, because that path — not this list — decides whether the
@@ -658,7 +658,7 @@ export function ChatComposer(props: ChatComposerProps) {
             ? `${commandListId}-${activeCommand.id}`
             : activeMention === undefined
               ? undefined
-              : `${mentionListId}-${String(activeMention.threadId)}`
+              : `${mentionListId}-${activeMention}`
       }
       aria-autocomplete={
         props.threadMentions === undefined &&
@@ -753,6 +753,8 @@ export function ChatComposer(props: ChatComposerProps) {
           candidates={mentionCandidates}
           listId={mentionListId}
           onChoose={mention.choose}
+          onChooseTracker={mention.chooseTracker}
+          trackers={mention.trackers}
           onHover={mention.setActiveIndex}
         />
       ) : null}

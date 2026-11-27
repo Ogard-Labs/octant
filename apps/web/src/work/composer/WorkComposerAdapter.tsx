@@ -193,6 +193,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+    ...(props.projectId === undefined ? {} : { trackerProjectId: String(props.projectId) }),
     ...(storedMentionChips.length === 0 ? {} : { initialChips: storedMentionChips }),
   });
   const structuredDraftScope = useRef(draftScope);
@@ -588,6 +589,8 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                   candidates={threadMentions.composer?.candidates ?? []}
                   listId={mentionListId}
                   onChoose={mention.choose}
+                  onChooseTracker={mention.chooseTracker}
+                  trackers={mention.trackers}
                   onHover={mention.setActiveIndex}
                 />
               ) : null

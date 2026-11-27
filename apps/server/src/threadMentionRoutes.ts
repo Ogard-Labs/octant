@@ -6,7 +6,7 @@ import {
 import {
   decodeTrackerMentionSearchRequest,
   decodeTrackerMentionSearchResponse,
-} from "@octant/contracts/tracker-mention";
+} from "@octant/contracts/tracker-mention-search";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import type { TrackerMentionSearch } from "./trackerMentions/trackerMentionSearch";

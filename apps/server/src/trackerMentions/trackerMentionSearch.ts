@@ -1,14 +1,16 @@
 import {
-  decodeTrackerMentionCandidate,
-  MAX_TRACKER_MENTION_CANDIDATES,
   type GithubSearchRow,
   type LinearIssueRow,
   type MentionableThreadId,
   type ProjectId,
-  type TrackerMentionCandidate,
-  type TrackerMentionSearchRequest,
   type WindowId,
 } from "@octant/contracts";
+import {
+  decodeTrackerMentionCandidate,
+  MAX_TRACKER_MENTION_CANDIDATES,
+  type TrackerMentionCandidate,
+  type TrackerMentionSearchRequest,
+} from "@octant/contracts/tracker-mention-search";
 import { parseTrackerMentionQuery } from "@octant/domain/tracker-mention-policy";
 
 /** The rows one tracker contributes, so a busy one cannot crowd out the other. */

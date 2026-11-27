@@ -6030,6 +6030,8 @@ function LaunchedShell(
     withProviderMark: navigationModel.withProviderMark,
     projects: projectController.allProjects,
     onOpen: openCommandThread,
+    onOpenPullRequest: selectProjectPullRequestIdentity,
+    externalHost: props.hostBridge,
   });
 
   const sidebarTileCounts = useMemo(

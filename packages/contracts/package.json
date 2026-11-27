@@ -183,6 +183,7 @@
     "./github-issue-context": "./src/githubIssueContext.ts",
     "./tracker-reference": "./src/trackerReference.ts",
     "./tracker-mention": "./src/trackerMention.ts",
+    "./tracker-mention-search": "./src/trackerMentionSearch.ts",
     "./github-onboarding": "./src/githubOnboarding.ts",
     "./code-project-pull-requests": "./src/codeProjectPullRequests.ts",
     "./code-project-pull-request-switches": "./src/codeProjectPullRequestSwitches.ts",

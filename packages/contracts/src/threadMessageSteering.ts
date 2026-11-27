@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
 import { MentionableThreadId } from "./threadMentionIdentity";
+import { TrackerMentions } from "./trackerMention";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -23,6 +24,8 @@ export const ThreadMessageSteeredIntoTurn = Schema.Struct({
     Schema.maxLength(MAX_THREAD_MESSAGE_STEERED_BODY_CHARACTERS),
   ),
   steeredAt: UtcTimestamp,
+  /** The pull requests and issues the message mentioned; absent when it mentioned none. */
+  trackerMentions: Schema.optional(TrackerMentions),
 }).annotations(strict);
 export type ThreadMessageSteeredIntoTurn = typeof ThreadMessageSteeredIntoTurn.Type;
 

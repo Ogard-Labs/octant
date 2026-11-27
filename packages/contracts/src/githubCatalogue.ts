@@ -447,8 +447,6 @@ export const GithubRecentRepositoryCommand = Schema.Struct({
 }).annotations(strict);
 export type GithubRecentRepositoryCommand = typeof GithubRecentRepositoryCommand.Type;
 
-export const decodeGithubRepositoryOwner = Schema.decodeUnknownSync(GithubRepositoryOwner);
-export const decodeGithubRepositoryName = Schema.decodeUnknownSync(GithubRepositoryName);
 export const decodeGithubCatalogueReadRequest = Schema.decodeUnknownSync(
   GithubCatalogueReadRequest,
 );

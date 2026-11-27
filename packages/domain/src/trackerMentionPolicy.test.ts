@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyTrackerMention,
   findTrackerMentionSpans,
   findTrackerMentions,
   formatTrackerMentionReference,
@@ -34,6 +35,17 @@ describe("tracker mention references", () => {
     expect(findTrackerMentions("[#12 x](http://github.com/acme/app/issues/12)")).toEqual([]);
     expect(findTrackerMentions("#2901 on its own")).toEqual([]);
     expect(findTrackerMentions("#[A thread title]")).toEqual([]);
+  });
+
+  it("puts a chosen item in place of the typed token as one reference", () => {
+    const applied = applyTrackerMention(
+      "look at #29 please",
+      { start: 8, end: 11 },
+      { source: "github", id: "2901", title: "Fix login", url: pull },
+    );
+    expect(applied.draft).toBe(`look at [#2901 Fix login](${pull})  please`);
+    expect(applied.caretIndex).toBe(applied.draft.indexOf(" please"));
+    expect(findTrackerMentions(applied.draft)).toHaveLength(1);
   });
 
   it("reads a typed query as a number, a Linear key, or title words", () => {

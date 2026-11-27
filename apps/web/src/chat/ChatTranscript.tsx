@@ -679,6 +679,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                         content={userContent}
                         missing="Message content is unavailable."
                         threadMentionIds={turn.threadMentionIds}
+                        trackerMentions={turn.trackerMentions}
                       />
                       {attachmentList}
                     </div>
@@ -1450,11 +1451,18 @@ function MessageBody(props: {
   readonly content: ChatContentBody | undefined;
   readonly missing: string;
   readonly threadMentionIds?: ReadonlyArray<string> | undefined;
+  readonly trackerMentions?: ChatThreadView["turns"][number]["trackerMentions"];
 }) {
   if (props.content === undefined) {
     return <OctantAlert tone="warning">{props.missing}</OctantAlert>;
   }
-  return <SentMessageText text={props.content.body} threadMentionIds={props.threadMentionIds} />;
+  return (
+    <SentMessageText
+      text={props.content.body}
+      threadMentionIds={props.threadMentionIds}
+      trackerMentions={props.trackerMentions}
+    />
+  );
 }
 
 function CitationList(props: { readonly citations: ChatThreadView["citations"] }) {

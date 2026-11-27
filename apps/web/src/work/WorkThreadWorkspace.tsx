@@ -1611,6 +1611,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+    trackerThreadId: String(props.threadId),
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -3223,6 +3224,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           <SentMessageText
                             text={row.entry.text}
                             threadMentionIds={row.turn.threadMentionIds}
+                            trackerMentions={row.turn.trackerMentions}
                           />
                         </div>
                         {row.at === undefined ? null : (
@@ -3896,6 +3898,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     candidates={threadMentions.composer?.candidates ?? []}
                     listId={mentionListId}
                     onChoose={mention.choose}
+                    onChooseTracker={mention.chooseTracker}
+                    trackers={mention.trackers}
                     onHover={mention.setActiveIndex}
                   />
                 ) : null}

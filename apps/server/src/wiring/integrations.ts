@@ -12,7 +12,7 @@ import {
   THREAD_RETENTION_EVENT_NAMES,
 } from "@octant/contracts";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { GhAuthenticationPort } from "../github/ghAuthenticationPort";
 import { GhHomeActivityPort } from "../github/ghHomeActivityPort";
 import { GhRepositoryCataloguePort } from "../github/ghRepositoryCataloguePort";
@@ -22,7 +22,7 @@ import { GithubIssueContextService } from "../github/githubIssueContextService";
 import { LinearIssueContextService } from "../plugins/linear/linearIssueContextService";
 import { LinearReadToolService } from "../plugins/linear/linearReadToolService";
 import { linearRoutineEventSources } from "../plugins/linear/linearRoutineEventSources";
-import { decodeGithubRepositoryName, decodeGithubRepositoryOwner } from "@octant/contracts";
+import { GithubRepositoryName, GithubRepositoryOwner } from "@octant/contracts";
 import {
   decodeLinearIssueListPage,
   LINEAR_ISSUE_GET_OPERATION,
@@ -605,8 +605,8 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
           const response = await githubCatalogueService.read(
             {
               kind: "search",
-              owner: decodeGithubRepositoryOwner(input.owner),
-              name: decodeGithubRepositoryName(input.name),
+              owner: Schema.decodeUnknownSync(GithubRepositoryOwner)(input.owner),
+              name: Schema.decodeUnknownSync(GithubRepositoryName)(input.name),
               query: input.text,
               pageSize: 10,
               state: "all",
@@ -623,8 +623,8 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
           const response = await githubCatalogueService.read(
             {
               kind: "item",
-              owner: decodeGithubRepositoryOwner(input.owner),
-              name: decodeGithubRepositoryName(input.name),
+              owner: Schema.decodeUnknownSync(GithubRepositoryOwner)(input.owner),
+              name: Schema.decodeUnknownSync(GithubRepositoryName)(input.name),
               number: input.number,
             },
             signal,

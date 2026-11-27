@@ -589,6 +589,71 @@ started, while the window lists that thread.
 Rejected: opening the thread on a press, which would leave a half-written prompt
 by accident and leave touch with no way to the card.
 
+## Mentioning a pull request or issue in a prompt
+
+The `#` list also offers pull requests and issues, after its threads, in every
+composer that takes `#` mentions, in Chat, Work and Code (maintainer request,
+2026-11-27). The phone's composer has no `#` list. Choosing one puts one inline
+chip in the prompt, reading the item's number or key and its title. The design
+is Octant's own.
+
+**What the list finds** (maintainer decision, 2026-11-27):
+
+- pull requests and GitHub issues of the repository of the composer's Project,
+  through the host's GitHub connection. A Code Project's repository is the one
+  the host already observes; a Work Project has one where its folder's remotes
+  name exactly one GitHub repository; Chat has none;
+- Linear issues of the team mapped to the Project, through the host's Linear
+  connection. With no mapping, and for a composer in no Project, every connected
+  team is searched.
+
+A number (`#2901`) finds that pull request or issue, a Linear key (`ENG-12`)
+finds that issue, and any other text of two or more characters matches titles,
+open and closed alike. The token ends at a space, as a thread's does, so title
+text is one word. Each tracker gives at most five rows. The search runs once
+typing rests (300 ms) and never for a bare `#`. Without a connection nothing is
+listed and nothing asks the person to connect; a tracker that refuses, fails or
+takes longer than eight seconds adds no rows.
+
+The host serves the search to a window under the same authentication as the
+thread search (`/api/thread-mentions/trackers`). The composer names its thread,
+whose Project the host takes only if the window can open that thread (a Side
+Chat searches as the thread it sits beside), or the Project a new thread would
+start in, which the window must hold. A device held to the remote action
+catalogue is not served it, as it is not served the thread search.
+
+**What the agent receives.** The prompt's text holds an ordinary link,
+`[#2901 Title](https://github.com/owner/name/pull/2901)` or
+`[ENG-12 Title](https://linear.app/…)`, so drafts, copies, queued messages and
+the provider read the same thing. A mention reads nothing for the agent and
+grants nothing: no context is added to the turn, and the agent looks the item
+up, if it does, with the tools and authority it already has. Because the
+reference is the whole mention, a reference of that exact shape is one however
+it got into the prompt (chosen, pasted, or restored with a draft): its label and
+URL must name the same item on github.com or linear.app.
+
+**The chip and its card.** Hovering opens the card and pressing opens it with
+focus in it, as a thread's does: the kind (pull request, GitHub issue or Linear
+issue), the number or key, the title, the state (open, draft, merged or closed;
+the Linear workflow state), the repository or team, and the author (GitHub) or
+assignee (Linear). **Open** shows a pull request of a Code Project this window
+holds in Octant's pull-request pane, and anything else in the browser.
+**Remove**, in the prompt only, takes every reference to that item out of the
+text. The facts are what this window's searches already returned: drawing a card
+asks no tracker anything. After a reload, a restored draft or a sent message
+shows only what the reference itself says (kind, number or key, title, and the
+repository or team), until a search in the window returns the item again.
+
+**The sent message** keeps the chip. The turn stores each mentioned item's kind,
+source, id and URL, each item once, in the order the text shows them, at most
+20, read by the host from the message's own text
+([Architecture](../architecture.md#modes-chat-work-and-code)). A reload or a
+replay draws the chip from those fields and asks no tracker. A message steered
+into a running Work or Code turn records them the same way; a mention does not
+make it wait for the next turn. A message sent
+before this record, and a message the host composed (a delivered result or
+report), stays text.
+
 ## Subagents in a thread
 
 A thread's subagents sit in a card attached above the composer's message

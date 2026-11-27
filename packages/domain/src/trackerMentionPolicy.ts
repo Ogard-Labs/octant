@@ -2,13 +2,14 @@ import {
   MAX_TRACKER_MENTIONS_PER_TURN,
   type TrackerMention,
 } from "@octant/contracts/tracker-mention";
+import type { TrackerMentionCandidate } from "@octant/contracts/tracker-mention-search";
 
 /** One place a pull request or issue reference stands in a text. */
 export interface TrackerMentionSpan {
   readonly start: number;
   readonly end: number;
   readonly text: string;
-  /** `#2901` or `OCT-1042`. */
+  /** `#2901` or `ENG-12`. */
   readonly label: string;
   readonly title: string;
   readonly mention: TrackerMention;
@@ -86,6 +87,34 @@ export function recordedTrackerMentions(
 ): { readonly trackerMentions: ReadonlyArray<TrackerMention> } | Record<string, never> {
   const trackerMentions = text === undefined ? [] : findTrackerMentions(text);
   return trackerMentions.length === 0 ? {} : { trackerMentions };
+}
+
+/**
+ * Replace the active `#` token with the item's reference, leaving a trailing
+ * space so the person keeps typing prose.
+ */
+export function applyTrackerMention(
+  draft: string,
+  token: { readonly start: number; readonly end: number },
+  item: Pick<TrackerMentionCandidate, "source" | "id" | "title" | "url">,
+): { readonly draft: string; readonly caretIndex: number } {
+  const reference = `${formatTrackerMentionReference({
+    label: trackerMentionLabel(item),
+    title: item.title,
+    url: item.url,
+  })} `;
+  return {
+    draft: `${draft.slice(0, token.start)}${reference}${draft.slice(token.end)}`,
+    caretIndex: token.start + reference.length,
+  };
+}
+
+/** How a GitHub number or a Linear key reads. */
+export function trackerMentionLabel(item: {
+  readonly source: TrackerMention["source"];
+  readonly id: string;
+}): string {
+  return item.source === "github" ? `#${item.id}` : item.id;
 }
 
 export type TrackerMentionQuery =
