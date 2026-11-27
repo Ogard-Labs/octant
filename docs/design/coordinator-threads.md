@@ -724,6 +724,12 @@ from the checkout's Project conversation path. A revision without that path
 reports those cases as unsupported with zero samples. The other revision can
 still run them, and a pass-rate delta requires completed samples on both sides.
 
+The Project dispatch score checks that each confirmed worker’s title is paired
+with its returned reference in the recap. A list item, heading, or worker label
+can supply the title before a separate reference field. The field takes
+precedence over mentions in the description. The recorded start actions show
+what the model actually assigned when recap wording affects a score.
+
 Prepare two clean, separate Git checkouts and run `bun install --frozen-lockfile`
 in each. Copy `coordinatorEvaluation.ts` and `coordinatorEvaluationInput.test-support.ts` from
 the evaluator's `apps/server/src/coordinator/` into that same directory in each

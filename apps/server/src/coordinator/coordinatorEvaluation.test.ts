@@ -58,6 +58,17 @@ it("requires the Project conversation to name and link each confirmed worker", (
     },
   ];
   expect(score(cases.projectAssign, actions, "Started CSV parser and Changelog.")).toBe(false);
+  for (const swapped of [false, true]) {
+    const parserRef = swapped ? "changelog@project" : "parser@project";
+    const changelogRef = swapped ? "parser@project" : "changelog@project";
+    for (const recap of [
+      `Started two workers: parser@project and changelog@project.\n\nWorker: CSV parser\nReference: ${parserRef}\n\nWorker: Changelog\nReference: ${changelogRef}`,
+      `- **CSV parser**\n  Reference: ${parserRef} (separate from the Changelog work)\n- **Changelog**\n  Reference: ${changelogRef} (documents the CSV parser)`,
+      `- **CSV parser**\nFeeds the changelog generator.\n  Reference: ${parserRef}\n- **Changelog**\nDocuments the CSV parser.\n  Reference: ${changelogRef}`,
+      `- **CSV parser**\n  Cooperates with changelog@project.\n  Reference: ${parserRef}\n- **Changelog**\n  Cooperates with parser@project.\n  Reference: ${changelogRef}`,
+    ])
+      expect.soft(score(cases.projectAssign, actions, recap), recap).toBe(!swapped);
+  }
   expect
     .soft(
       score(

@@ -123,34 +123,59 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     workers.push({ title: title.toLowerCase(), reference: startedReference });
   }
 
-  const hasReference = (text: string) => workers.some(({ reference }) => text.includes(reference));
-  const hasTitle = (text: string) => {
-    // A readable reference can contain the worker's title all by itself.
-    const prose = workers.reduce((rest, { reference }) => rest.replaceAll(reference, " "), text);
-    return workers.some(({ title }) => prose.includes(title));
-  };
-  // Join complementary fragments of one list item or heading. A second title
-  // or reference begins another entry even if it uses the same "Worker:" label.
   const entries: string[] = [];
-  for (const line of answer.toLowerCase().split("\n")) {
-    if (!line.trim()) continue;
-    const previous = entries.at(-1);
-    const startsItem = /^\s*(?:[-+*]|\d+[.)]|#{1,6})\s/.test(line);
-    const labeled = /^\s*(?:worker|reference)\s*:/.test(line);
-    if (previous && !startsItem && (labeled || /^[ \t]/.test(line))) {
-      const previousHasReference = hasReference(previous);
-      const lineHasReference = hasReference(line);
-      const previousHasTitle = hasTitle(previous);
-      // Descriptions can name dependencies. Keep the heading as the worker
-      // name while waiting for the reference belonging to this item.
-      if (previousHasTitle && !previousHasReference && !lineHasReference && !labeled) continue;
-      if (!(previousHasReference && lineHasReference) && !(previousHasTitle && hasTitle(line))) {
-        entries[entries.length - 1] = `${previous} ${line.trimStart()}`;
+  let pending: { part: "title" | "reference"; value: string } | undefined;
+  const implicit = new Set<string>();
+  // An unlabelled continuation can supply the missing value. Keep it as a
+  // fallback until the item ends so a later explicit field takes priority.
+  const finishItem = (explicit?: string) => {
+    const partner = explicit ?? (implicit.size === 1 ? [...implicit][0] : undefined);
+    if (pending && partner) entries.push(pending.value + " " + partner);
+    pending = undefined;
+    implicit.clear();
+  };
+  for (const raw of answer.toLowerCase().split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const marker = /^(?:[-+*]|\d+[.)]|#{1,6})\s+/.exec(line);
+    const content = line.slice(marker?.[0].length ?? 0);
+    const field = /^(worker|reference)\s*:\s*/.exec(content);
+    const value = content.slice(field?.[0].length ?? 0);
+    const lead = value.replace(/^[\s`*_[(<]+/, "");
+    const refs = workers.filter(({ reference }) => value.includes(reference));
+    const prose = refs.reduce((rest, { reference }) => rest.replaceAll(reference, " "), value);
+    const titles = workers.filter(({ title }) => prose.includes(title));
+    const leadingRef = refs.find(({ reference }) => lead.startsWith(reference));
+    const leadingTitle = titles.find(({ title }) => lead.startsWith(title));
+
+    if (pending && !marker) {
+      // The identifier in a reference field belongs to the preceding title.
+      // An aside in that field may name a different worker.
+      if (pending.part === "title" && leadingRef && (field || refs.length === 1)) {
+        finishItem(leadingRef.reference);
+        continue;
+      }
+      if (pending.part === "reference" && leadingTitle && refs.length === 0) {
+        finishItem(leadingTitle.title);
+        continue;
+      }
+      if (!field && !leadingTitle && !leadingRef) {
+        for (const worker of pending.part === "title" ? refs : titles) {
+          implicit.add(pending.part === "title" ? worker.reference : worker.title);
+        }
         continue;
       }
     }
-    entries.push(line);
+    finishItem();
+    entries.push(value);
+    const title = leadingTitle ?? (titles.length === 1 ? titles[0] : undefined);
+    if (refs.length === 0 && title && (marker || field || leadingTitle)) {
+      pending = { part: "title", value: title.title };
+    } else if (refs.length === 1 && titles.length === 0 && leadingRef) {
+      pending = { part: "reference", value: leadingRef.reference };
+    }
   }
+  finishItem();
 
   const paired = new Set<string>();
   for (const entry of entries) {
