@@ -1482,6 +1482,19 @@ describe("importing Octant's data into Nightly", () => {
       "invalidated",
     );
     merged.close();
+    // The thread's own row is what its view and commands read, apart from the
+    // scheduler: its latest state must no longer show a scheduled resume.
+    const threadResume = (aggregateType: string, aggregateId: string) =>
+      eventsIn(paths.nightly, aggregateType, aggregateId)
+        .map(
+          (entry) =>
+            (entry.payload.thread as { readonly usageResume?: { readonly status?: string } })
+              ?.usageResume?.status,
+        )
+        .filter((status) => status !== undefined)
+        .at(-1);
+    expect(threadResume("work-thread", workThread)).toBe("invalidated");
+    expect(threadResume("code-thread", codeThread)).toBe("invalidated");
     octant = openStore(paths.octant);
     rename(octant, "work", "Work renamed in Octant");
     rename(octant, "code", "Code renamed in Octant");
