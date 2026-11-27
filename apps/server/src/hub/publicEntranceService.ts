@@ -354,8 +354,8 @@ export class PublicEntranceService {
 
   /**
    * Reads the tailnet name from the daemon, at most once a minute, and only on
-   * the hub while Funnel and the device relay are on and no address was typed:
-   * the one case the name is used. A standby standing in is never asked. A
+   * the hub while Funnel is on, the device relay or visitor links are on, and
+   * no address was typed: the one case the name is used. A standby standing in is never asked. A
    * daemon that cannot answer leaves the last name. It runs outside the queue,
    * so a slow tool never delays a pause or a switch.
    */
@@ -366,7 +366,7 @@ export class PublicEntranceService {
       state.publicEntrance?.funnel === undefined ||
       state.publicEntrance.ownFrontOrigin !== undefined ||
       state.hub?.enabled !== true ||
-      state.relayHub?.enabled !== true
+      (state.relayHub?.enabled !== true && state.visitorHub?.enabled !== true)
     ) {
       return;
     }

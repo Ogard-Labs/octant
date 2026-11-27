@@ -64,6 +64,17 @@ export interface VisitorThreadSource {
   readonly read: (mode: VisitorThreadMode, threadId: string) => VisitorThreadRead;
 }
 
+/** What came of sending the grant list. */
+export interface SpokeVisitorSendOutcome {
+  /** Every recipient took the list. */
+  readonly sent: boolean;
+  /**
+   * The answer of the hub this host follows, when it gave one: its public
+   * origin, or none. A standby's answer never names one.
+   */
+  readonly hub?: { readonly memberId: string; readonly publicOrigin?: string };
+}
+
 export interface SpokeVisitorHubPort {
   readonly target: () => { readonly memberId: string } | undefined;
   /**
@@ -71,7 +82,7 @@ export interface SpokeVisitorHubPort {
    * when its person ticked Standby), so a change to them is sent again.
    */
   readonly recipients?: () => string;
-  readonly sendGrants: (update: HubVisitorGrantsUpdate) => Promise<boolean>;
+  readonly sendGrants: (update: HubVisitorGrantsUpdate) => Promise<SpokeVisitorSendOutcome>;
 }
 
 export interface SpokeVisitorServiceOptions {
@@ -102,7 +113,10 @@ export type SpokeVisitorShared =
   | {
       readonly status: "shared";
       readonly linkId: string;
-      /** The path with the secret in its fragment; shown to the person once. */
+      /**
+       * The whole link behind the hub's public origin when this host knows it,
+       * else the path alone; the secret is in the fragment. Shown once.
+       */
       readonly url: string;
       readonly expiresAt: number;
       readonly published: boolean;
@@ -174,7 +188,7 @@ export class SpokeVisitorService {
     };
   }
 
-  /** Mints a link for one thread; the secret is in the returned path's fragment and nowhere else. */
+  /** Mints a link for one thread; the secret is in the returned link's fragment and nowhere else. */
   async share(input: HubVisitorShareRequest): Promise<SpokeVisitorShared> {
     if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
     const signing = this.#options.signing();
@@ -217,7 +231,7 @@ export class SpokeVisitorService {
     return {
       status: "shared",
       linkId,
-      url: `/v/${linkId}#k=${secret}`,
+      url: `${this.#hubOrigin() ?? ""}/v/${linkId}#k=${secret}`,
       expiresAt: grant.expiresAt,
       published,
     };
@@ -359,7 +373,9 @@ export class SpokeVisitorService {
           .map((link) => link.signed)
       : [];
     const recipients = hub.recipients?.();
-    const sent = await hub.sendGrants({ grants });
+    const outcome = await hub.sendGrants({ grants });
+    this.#keepHubOrigin(granted, outcome.hub);
+    const sent = outcome.sent;
     // A link shared or stopped while this list was out is not in it; the flag
     // stays, and the next look sends the newer list.
     if (sent && revision === this.#revision) {
@@ -384,6 +400,30 @@ export class SpokeVisitorService {
       return;
     }
     await this.publish();
+  }
+
+  /** Keeps what the followed hub said of its address; without Public nothing is kept. */
+  #keepHubOrigin(granted: boolean, answered: SpokeVisitorSendOutcome["hub"]): void {
+    if (granted && answered === undefined) return;
+    const { publicAddress: previous, ...rest } = this.#load();
+    const next =
+      granted && answered?.publicOrigin !== undefined
+        ? {
+            hubMemberId: decodeMemberId(answered.memberId),
+            origin: answered.publicOrigin,
+          }
+        : undefined;
+    if (previous === undefined && next === undefined) return;
+    this.#save({ ...rest, ...(next === undefined ? {} : { publicAddress: next }) });
+  }
+
+  /** The origin the hub this host follows now last named; another hub's is never used. */
+  #hubOrigin(): string | undefined {
+    const held = this.#load().publicAddress;
+    const target = this.#options.hub?.target();
+    return held !== undefined && target?.memberId === String(held.hubMemberId)
+      ? held.origin
+      : undefined;
   }
 
   #takeComment(

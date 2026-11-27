@@ -55,6 +55,7 @@ import { HubVisitorService } from "./hubVisitorService";
 import { SpokeVisitorService, type VisitorThreadSource } from "./spokeVisitorService";
 import { askVisitorSpoke, spokeVisitorHubPort } from "./visitorLinks";
 import { HubRelayService, hubRelayAddress } from "./hubRelayService";
+import { hubPublicOrigin } from "./hubPublicOrigin";
 import { SpokeRelayService } from "./spokeRelayService";
 import { openRelayTunnel, spokeRelayHubPort } from "./relayLinks";
 import {
@@ -847,6 +848,7 @@ export async function startHubTestHost(input: {
         spokeMemberId,
         request,
       ),
+    publicOrigin: () => hubPublicOrigin(state.load(), hub.hubMemberId()),
     record: (change) => records.push(change),
     now: Date.now,
   });

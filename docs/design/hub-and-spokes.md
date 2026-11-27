@@ -3065,11 +3065,19 @@ visitor sits on the Computer card of the thread's Environment tool, shown
 only for a thread on this computer in a local desktop window and only for a
 kind of thread the visitor-link contract names; it opens a dialog, loaded as
 its own chunk, with the thread's links and the Requests waiting on them.
-The dialog shows a new link as its path, labels it one, offers Copy path, and
-asks the person to put the hub's public address in front of it, as the command
-line does. Sharing publishes the link to the hub this computer joined, and the
-window does not know that hub's public address. A whole link built from this
-computer's own Funnel address would name a host that never receives it.
+Sharing publishes the link to the hub this computer joined. In its answer to a
+spoke's grant list, over the pinned, signed hub link, the acting hub names its
+public origin while its visitor switch and entrance are on and it knows the
+address (the one typed with `octant hub public address`, or Funnel's tailnet
+name and port), as it names its relay address. The spoke keeps it only from the
+hub it follows, never from a standby, and only while Public is ticked. Knowing
+it, the dialog and the command line give the whole
+`https://<hub address>/v/<id>#k=<secret>` link, and the dialog offers Copy
+link. Without it they show the path, label it one, ask the person to put the
+hub's public address in front of it, and the dialog offers Copy path. While the
+hub cannot be reached, the spoke uses the origin that hub last named. A whole
+link is never built from this computer's own Funnel address, which would name a
+host that never receives it.
 A sent request's framed comment stays in the
 dialog even when the links cannot be read again.
 While it is open and the window is shown, the dialog reads the links and

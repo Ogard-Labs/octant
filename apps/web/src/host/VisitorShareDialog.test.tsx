@@ -120,8 +120,7 @@ describe("VisitorShareDialog", () => {
   it("shows a new link as a path to put the hub's public address in front of, and copies the path", async () => {
     const user = userEvent.setup();
     renderDialog({
-      // Sharing goes through the hub this computer joined, whose public
-      // address the window does not know, so the link is always a path.
+      // The hub named no public address, so the host answers the path alone.
       "visitor-list": {
         status: 200,
         body: { visitors: { spoke: { links: [], comments: [], published: true } } },
@@ -138,6 +137,25 @@ describe("VisitorShareDialog", () => {
     expect(within(link).queryByRole("button", { name: "Copy link" })).not.toBeInTheDocument();
     await user.click(within(link).getByRole("button", { name: "Copy path" }));
     expect(await navigator.clipboard.readText()).toBe(`/v/${LINK}#k=secret-part`);
+  });
+
+  it("shows a whole link as a link to send, and copies it", async () => {
+    const user = userEvent.setup();
+    const url = `https://octant.example.com/v/${LINK}#k=secret-part`;
+    renderDialog({
+      "visitor-list": statusWith({ links: [], comments: [], published: true }),
+      "visitor-share": { status: 200, body: { ...madeLink.body, url } },
+    });
+    await screen.findByText("Nothing is shared with a visitor.");
+    await user.click(screen.getByRole("button", { name: "Make link" }));
+    const link = await screen.findByRole("group", { name: "New visitor link" });
+    expect(within(link).getByText(url)).toBeInTheDocument();
+    expect(within(link).getByText(/Send this link to your visitor now/)).toBeInTheDocument();
+    expect(within(link).queryByText(/public address in front/)).not.toBeInTheDocument();
+    expect(within(link).queryByRole("button", { name: "Copy path" })).not.toBeInTheDocument();
+    await user.click(within(link).getByRole("button", { name: "Copy link" }));
+    expect(await navigator.clipboard.readText()).toBe(url);
+    expect(await screen.findByText("Link copied.")).toBeInTheDocument();
   });
 
   it("keeps a sent request's comment copyable when the links cannot be read again", async () => {

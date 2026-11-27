@@ -12,6 +12,7 @@ import type { HubState, HubStatePort } from "./hubStateStore";
 import { publicKeyFingerprint } from "./hubCrypto";
 import {
   SpokeVisitorService,
+  type SpokeVisitorSendOutcome,
   type VisitorThreadRead,
   type VisitorThreadSource,
 } from "./spokeVisitorService";
@@ -70,7 +71,7 @@ function setup(
     thread?: () => VisitorThreadRead;
     granted?: () => boolean;
     paused?: () => boolean;
-    sendGrants?: (update: HubVisitorGrantsUpdate) => Promise<boolean>;
+    sendGrants?: (update: HubVisitorGrantsUpdate) => Promise<SpokeVisitorSendOutcome>;
     hubMemberId?: () => string;
     source?: VisitorThreadSource;
   } = {},
@@ -90,7 +91,7 @@ function setup(
         options.sendGrants ??
         (async (update) => {
           sent.push(update);
-          return true;
+          return { sent: true };
         }),
     },
     signing: () => key,
@@ -264,6 +265,43 @@ describe("sharing a thread with a visitor", () => {
     );
     expect(JSON.stringify(update)).not.toContain("thread-1");
     expect(JSON.stringify(update)).not.toContain(link.url.split("#k=")[1]);
+  });
+
+  const FRONT = "https://octant.example.com";
+
+  it("gives a whole link behind the public origin the hub names, else the path alone", async () => {
+    let named: string | undefined;
+    const context = setup({
+      sendGrants: async () => ({
+        sent: true,
+        hub: { memberId: HUB, ...(named === undefined ? {} : { publicOrigin: named }) },
+      }),
+    });
+    const path = await shared(context);
+    expect(path.url.startsWith(`/v/${path.linkId}#k=`)).toBe(true);
+    named = FRONT;
+    const whole = await shared(context);
+    expect(whole.url.startsWith(`${FRONT}/v/${whole.linkId}#k=`)).toBe(true);
+    // The hub naming none again, as with its visitor links turned off, drops it.
+    named = undefined;
+    expect((await shared(context)).url.startsWith("/v/")).toBe(true);
+  });
+
+  it("keeps the followed hub's origin while it cannot be reached, and never another hub's", async () => {
+    let followed = HUB;
+    let reachable = true;
+    const context = setup({
+      hubMemberId: () => followed,
+      sendGrants: async () =>
+        reachable
+          ? { sent: true, hub: { memberId: HUB, publicOrigin: FRONT } }
+          : { sent: false },
+    });
+    await shared(context);
+    reachable = false;
+    expect((await shared(context)).url.startsWith(`${FRONT}/v/`)).toBe(true);
+    followed = "33333333-3333-4333-8333-333333333333";
+    expect((await shared(context)).url.startsWith("/v/")).toBe(true);
   });
 
   it("refuses to share while the Public item is unticked", async () => {
@@ -591,7 +629,7 @@ describe("visitor comments", () => {
         calls += 1;
         if (calls === 1) await new Promise<void>((resolve) => (releaseFirst = resolve));
         sent.push(update.grants.length);
-        return true;
+        return { sent: true };
       },
     });
     const first = context.service.share({ mode: "code", threadId: "thread-1", scope: "read" });

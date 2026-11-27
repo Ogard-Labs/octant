@@ -17,6 +17,7 @@ import {
   HubDirectPushEnvironment,
   HubGrant,
   HubMemberId,
+  HubPublicOrigin,
   HubOfferBody,
   HubOfferDeliveryResult,
   HubOfferId,
@@ -572,6 +573,10 @@ export const SpokeVisitorState = Schema.Struct({
   comments: Schema.Array(SpokeVisitorComment).pipe(Schema.maxItems(5_120)),
   /** The hub has not taken the current grant list yet; the next look sends it again. */
   unpublished: Schema.optional(Schema.Literal(true)),
+  /** The public origin the hub last named in its answer, which new links are put behind. */
+  publicAddress: Schema.optional(
+    Schema.Struct({ hubMemberId: HubMemberId, origin: HubPublicOrigin }).annotations(strict),
+  ),
 }).annotations(strict);
 export type SpokeVisitorState = typeof SpokeVisitorState.Type;
 
