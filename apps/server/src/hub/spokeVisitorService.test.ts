@@ -159,7 +159,7 @@ describe("a webhook signing secret in a shared Work thread", () => {
             },
           ],
           // The reply has not settled, so only the live read holds it.
-          liveReplyText: () => `I will use ${secret}.`,
+          liveReplyText: () => `I will use ${secret} next`,
           activity: () => ({ executing: true, awaitingInput: false }),
         },
       ),
@@ -180,7 +180,61 @@ describe("a webhook signing secret in a shared Work thread", () => {
         title: "Check [redacted]",
         messages: [
           { role: "person", text: "Verify events with [redacted]" },
-          { role: "agent", text: "I will use [redacted]." },
+          { role: "agent", text: "I will use [redacted] " },
+        ],
+      },
+    });
+  });
+});
+
+describe("a secret a Work reply is still writing", () => {
+  it("shows a visitor none of it, and redacts it whole once the turn settles", async () => {
+    const secret = "whsec_5WbX1kEMOo2N8gQk9Ff3LhZtA7cYdRsV";
+    // Shorter than the redactor's pattern, as the first streamed pieces are.
+    let live: string | undefined = `The secret is ${secret.slice(0, 12)}`;
+    const context = setup({
+      source: visitorThreadSource(
+        () => {
+          throw new Error("A Work read uses no database.");
+        },
+        () => ({}),
+        {
+          thread: () => ({ title: "Check", lifecycle: "active" }),
+          turns: () => [
+            {
+              requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+              turnId: "turn-1",
+              status: live === undefined ? "completed" : "running",
+              transcript: [
+                { role: "user", text: "Show it" },
+                {
+                  role: "assistant",
+                  text: live === undefined ? `The secret is ${secret}` : "",
+                },
+              ],
+            },
+          ],
+          liveReplyText: () => live,
+          activity: () => ({ executing: live !== undefined, awaitingInput: false }),
+        },
+      ),
+    });
+    const link = await context.service.share({
+      mode: "work",
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    const opened = fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) });
+
+    const streaming = context.service.fetch(opened, HUB);
+    expect(JSON.stringify(streaming)).not.toContain("whsec_");
+    live = undefined;
+    expect(context.service.fetch(opened, HUB)).toMatchObject({
+      projection: {
+        messages: [
+          { role: "person", text: "Show it" },
+          { role: "agent", text: "The secret is [redacted]" },
         ],
       },
     });

@@ -143,8 +143,41 @@ describe("a Work thread as a visitor reads it", () => {
       state: "working",
       messages: [
         { role: "person", text: "Summarise it" },
-        { role: "agent", text: "It runs for" },
+        { role: "agent", text: "It runs " },
       ],
+    });
+  });
+
+  it("holds back the word a running Work reply has not finished", () => {
+    const readLive = (text: string) =>
+      visitorThreadSource(
+        unusedConnection,
+        () => ({}),
+        workThreads({
+          turns: () => [
+            {
+              requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+              turnId: "turn-1",
+              status: "running",
+              transcript: [{ role: "user", text: "Show the secret" }],
+            },
+          ],
+          liveReplyText: () => text,
+          activity: () => ({ executing: true, awaitingInput: false }),
+        }),
+      ).read("work", "11111111-1111-4111-8111-111111111111");
+
+    const partial = readLive("The secret is\nwhsec_abc123");
+    expect(partial).toMatchObject({
+      messages: [
+        { role: "person", text: "Show the secret" },
+        { role: "agent", text: "The secret is\n" },
+      ],
+    });
+    expect(JSON.stringify(partial)).not.toContain("whsec_");
+    // A reply that is still one unfinished word shows nothing yet.
+    expect(readLive("whsec_abc")).toMatchObject({
+      messages: [{ role: "person", text: "Show the secret" }],
     });
   });
 

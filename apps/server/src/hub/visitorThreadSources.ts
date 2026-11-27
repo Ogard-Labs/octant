@@ -127,6 +127,15 @@ export interface WorkVisitorThreads {
   readonly activity: (threadId: WorkThreadId) => WorkTurnActivity;
 }
 
+/**
+ * A streaming reply up to its last whitespace. The visitor read redacts by a
+ * secret's shape, which the first characters of one still being written do not
+ * have yet, so a word is shown only once the reply has moved past it.
+ */
+function finishedWords(live: string): string {
+  return /^[\s\S]*\s/.exec(live)?.[0] ?? "";
+}
+
 function readWork(work: WorkVisitorThreads | undefined, threadId: string): VisitorThreadRead {
   if (work === undefined) return MISSING;
   let id;
@@ -147,7 +156,7 @@ function readWork(work: WorkVisitorThreads | undefined, threadId: string): Visit
         ? turn.transcript
         : [
             ...turn.transcript.filter((entry) => entry.role === "user"),
-            { role: "assistant" as const, text: live },
+            { role: "assistant" as const, text: finishedWords(live) },
           ];
     return transcript
       .filter((entry) => entry.text.trim() !== "")
