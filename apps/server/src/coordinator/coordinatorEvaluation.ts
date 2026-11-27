@@ -150,12 +150,23 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     const titles = workers.filter(({ title }) => prose.includes(title));
     const leadingRef = refs.find(({ reference }) => lead.startsWith(reference));
     const leadingTitle = titles.find(({ title }) => lead.startsWith(title));
-    // A name in a sentence is prose. A name on a line of its own can start an
-    // entry even without a list marker or a Worker label.
+    // Match the whole known title before consuming its closing markup. A
+    // parenthesis may belong to the title, as in "CSV parser (quoted commas)".
     const standalone = lead.replace(/[\s`*_\])>:]+$/, "");
-    const standaloneTitle = titles.find(({ title }) => standalone === title);
+    const entryTitle = titles.find(({ title }) => {
+      if (!lead.startsWith(title)) return false;
+      const tail = lead.slice(title.length).replace(/^[`*_\])>\s]+/, "");
+      if (!tail || /^(?:[:–—]|-\s)/.test(tail)) return true;
+      const link = tail.replace(/^[\s`*_[(<]+/, "");
+      return refs.some(({ reference }) => link.startsWith(reference));
+    });
     const standaloneRef = refs.find(({ reference }) => standalone === reference);
-    const titleHeading = field || marker ? leadingTitle : standaloneTitle;
+    const refSuffix =
+      leadingRef && lead.slice(leadingRef.reference.length).replace(/^[`*_\])>\s]+/, "");
+    const inlineRefTitle = refSuffix?.replace(/^[\s\p{P}`]+/u, "");
+    const inlineRefEntry =
+      inlineRefTitle && titles.some(({ title }) => inlineRefTitle.startsWith(title));
+    const titleHeading = field || marker ? leadingTitle : entryTitle;
 
     if (pending && !marker) {
       // The identifier in a reference field belongs to the preceding title.
@@ -172,10 +183,15 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
         finishItem(fieldTitle.title);
         continue;
       }
-      if (!field && !standaloneTitle && !(pending.part === "reference" && standaloneRef)) {
-        if (pending.part === "title" && leadingRef) {
-          const suffix = lead.slice(leadingRef.reference.length).replace(/^[`*_\])>\s]+/, "");
-          if (!suffix || suffix.startsWith("(")) referenceLines.add(leadingRef.reference);
+      if (
+        !field &&
+        !entryTitle &&
+        !inlineRefEntry &&
+        !(pending.part === "reference" && standaloneRef)
+      ) {
+        if (pending.part === "title" && leadingRef && refSuffix !== undefined) {
+          if (!refSuffix || /^(?:[(–—:]|-\s)/.test(refSuffix))
+            referenceLines.add(leadingRef.reference);
         }
         for (const worker of pending.part === "title" ? refs : titles) {
           implicit.add(pending.part === "title" ? worker.reference : worker.title);
@@ -186,7 +202,7 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     finishItem();
     entries.push(value);
     const title = titleHeading ?? (titles.length === 1 ? titles[0] : undefined);
-    if (refs.length === 0 && title && (marker || field || standaloneTitle)) {
+    if (refs.length === 0 && title && (marker || field || entryTitle)) {
       pending = { part: "title", value: title.title };
     } else if (refs.length === 1 && titles.length === 0 && leadingRef) {
       pending = { part: "reference", value: leadingRef.reference };

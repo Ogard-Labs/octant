@@ -61,7 +61,25 @@ it("requires the Project conversation to name and link each confirmed worker", (
   for (const swapped of [false, true]) {
     const parserRef = swapped ? "changelog@project" : "parser@project";
     const changelogRef = swapped ? "parser@project" : "changelog@project";
+    const titledActions = actions.map((action) => ({
+      ...action,
+      title: action.title === "CSV parser" ? "CSV parser (quoted commas)" : action.title,
+    }));
+    expect
+      .soft(
+        score(
+          cases.projectAssign,
+          titledActions,
+          `**CSV parser (quoted commas)**\nReference: ${parserRef}\n**Changelog**\nReference: ${changelogRef}`,
+        ),
+      )
+      .toBe(!swapped);
     for (const recap of [
+      `- **CSV parser**\n${parserRef} — running\nSee changelog@project for release notes.\n- **Changelog**\n${changelogRef} — running\nSee parser@project for changes.`,
+      `${parserRef}\nCSV parser is fixing quoted commas.\n\nChangelog: ${changelogRef}`,
+      `**CSV parser**\n\`${parserRef}\`\n${changelogRef} — Changelog`,
+      `**CSV parser** — handles quoted commas\nReference: ${parserRef}\n**Changelog**\nReference: ${changelogRef}`,
+      `**CSV parser**\n\`${parserRef}\`\n**Changelog** (${changelogRef})`,
       `${parserRef}\nCSV parser fixes things.\n${changelogRef}\nChangelog release notes follow.`,
       `**Worker:** CSV parser\nReference: see ${parserRef}\n__Worker__: Changelog\n**Reference:** see ${changelogRef}`,
       `CSV parser and Changelog have both started:\nI assigned CSV parser to ${parserRef}.\nI assigned Changelog to ${changelogRef}.`,
