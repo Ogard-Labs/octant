@@ -19,10 +19,6 @@ import {
   createDefaultDeviceKeyStore,
   type RemoteDeviceKeyStore,
 } from "@octant/client-runtime/remote-pairing-client";
-import {
-  createRelayAdmissionSigner,
-  learnRelayAddresses,
-} from "@octant/client-runtime/paired-host-relay";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
 import { syncHubComputersInWindow, withHubComputerDismissals } from "./hubWindowComputers";
@@ -152,6 +148,10 @@ export function useHostFederationLifecycle(
       // A computer that connects later is asked too, at most twice a minute.
       if (Date.now() - learnedAt < RELAY_LEARN_SPACING_MS) return;
       learnedAt = Date.now();
+      // Loaded only in the desktop app, which alone relays: the main chunk has
+      // no room for the relay client (scripts/initial-renderer-budget.json).
+      const { learnRelayAddresses } = await import("@octant/client-runtime/paired-host-relay");
+      if (cancelled) return;
       await learnRelayAddresses({
         transports: built.transports,
         remember: () => undefined,
@@ -181,7 +181,18 @@ export function useHostFederationLifecycle(
   const answerRelaySigning = hostBridge?.answerPairedComputerRelaySigning;
   useEffect(() => {
     if (built === undefined || answerRelaySigning === undefined) return;
-    return answerRelaySigning(createRelayAdmissionSigner(built.deviceKeyStore));
+    let stop: (() => void) | undefined;
+    let ended = false;
+    void import("@octant/client-runtime/paired-host-relay").then(
+      ({ createRelayAdmissionSigner }) => {
+        if (ended) return;
+        stop = answerRelaySigning(createRelayAdmissionSigner(built.deviceKeyStore));
+      },
+    );
+    return () => {
+      ended = true;
+      stop?.();
+    };
   }, [built, answerRelaySigning]);
 
   return stack;
