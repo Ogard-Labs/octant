@@ -145,7 +145,7 @@ describe("starting a thread from a to-do", () => {
       const list = await screen.findByRole("dialog", { name: "Saved drafts" });
       await user.click(within(list).getByRole("button", { name: "Restore" }));
       await waitFor(() => expect(input).toHaveValue(prompt));
-      expect(within(draft).getByText("From to-do")).toBeVisible();
+      expect(await within(draft).findByText("From to-do")).toBeVisible();
     } finally {
       connect.mockRestore();
       storage.mockRestore();

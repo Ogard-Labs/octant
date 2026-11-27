@@ -213,22 +213,29 @@ describe("ZenProjectTerminalCard", () => {
   it("offers to open the Work task's provider in a terminal of its own, without starting it here", async () => {
     const shell = client(() => running(""));
     const open = vi.fn();
+    const runtime = xtermRuntime();
     render(
       <ZenProjectTerminalCard
         client={shell}
         live
-        loadRuntime={xtermRuntime().loadRuntime}
+        loadRuntime={runtime.loadRuntime}
         onOpenProviderTerminal={{ name: "Google Antigravity", open }}
         projectId={projectId}
         terminalId={terminalId}
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "More terminal actions" }));
+    // The menu's trigger appears with the shell's first read, before the
+    // terminal finishes loading; twice in merge-queue runs a click landing in
+    // that gap left the trigger at aria-expanded="false" and drew no menu.
+    // Wait until the terminal is mounted, then click once.
+    const trigger = await screen.findByRole("button", { name: "More terminal actions" });
+    await waitFor(() => expect(runtime.options).toBeDefined());
+    fireEvent.click(trigger);
     fireEvent.click(
       await screen.findByRole("menuitem", { name: "Open Google Antigravity terminal" }),
     );
-    expect(open).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
     expect(shell.execute).not.toHaveBeenCalledWith(
       expect.objectContaining({ kind: "start" }),
       expect.anything(),

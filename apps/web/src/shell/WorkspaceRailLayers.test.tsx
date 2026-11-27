@@ -1,5 +1,5 @@
 import type { AutomationClient } from "@octant/client-runtime";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
@@ -127,6 +127,9 @@ describe("WorkspaceRailLayers", () => {
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
 
     await user.click(screen.getAllByRole("button", { name: "New task" })[0] as HTMLElement);
+    // The new-thread draft loads on demand, and on a loaded CI runner that cold
+    // import outlasted findBy's one-second wait. Wait for the import itself.
+    await act(() => vi.dynamicImportSettled());
 
     expect(await screen.findByRole("region", { name: "New Code thread" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Pull requests" })).not.toBeInTheDocument();
