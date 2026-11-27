@@ -723,6 +723,36 @@ describe("SettingsView", () => {
     expect(section).not.toHaveTextContent(/on the host computer/);
   });
 
+  it("lands a Nightly client's search for a public entrance setting on its own row", async () => {
+    renderSettings({
+      initialDeepLink: { section: "public-entrance", setting: "hub-public-funnel" },
+      hostBridge: {
+        managedInOctant: true,
+        applicationIdentity: { flavor: "nightly", productName: "Octant Nightly" },
+      } as never,
+    });
+
+    // The lazy page replaces the loading state; its outer section carries this id.
+    await waitFor(() =>
+      expect(document.querySelector('[data-setting-id="hub-public-funnel"]')).toHaveFocus(),
+    );
+    const section = document.getElementById("settings-public-entrance")!;
+    expect(section).toHaveTextContent(/Managed in Octant\./);
+    for (const id of [
+      "hub-public-entrance",
+      "hub-public-standby",
+      "hub-visitor-links",
+      "hub-webhook-endpoints",
+      "hub-device-relay",
+    ]) {
+      expect(section.querySelector(`[data-setting-id="${id}"]`)).not.toBeNull();
+    }
+    expect(within(section).queryByRole("button")).toBeNull();
+    for (const toggle of within(section).queryAllByRole("switch")) {
+      expect(toggle).toHaveAttribute("aria-disabled", "true");
+    }
+  });
+
   it("keeps pairing codes on the host: a client without the local administration bridge gets none", () => {
     renderSettings({ initialDeepLink: { section: "remote-access" } });
 

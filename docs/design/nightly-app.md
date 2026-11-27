@@ -988,7 +988,9 @@ channel is missing from it:
 - The preload of a Nightly client window omits every member that reaches an
   Octant-only channel, so the shared renderer hides those screens as it does
   for a remote client. Where Settings › Remote access would be, it shows one
-  quiet line: "Managed in Octant", naming what is set up there.
+  quiet line: "Managed in Octant", naming what is set up there. Settings ›
+  Public entrance keeps its rows, so search lands on each one; every switch is
+  disabled and each row says "Managed in Octant".
 - Nightly's test-host mode runs the full host-owning main, keeps every channel
   and shows every screen.
 

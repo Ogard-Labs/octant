@@ -30,9 +30,11 @@ import { readVisitors } from "./VisitorLinks";
  * chunk with those screens, since the main one has no room for them.
  *
  * Settings search lists every control here on every computer, so a control
- * this computer cannot use keeps its row and says why.
+ * this computer or window cannot use keeps its row and says why.
  */
 export interface PublicEntranceSettingsSectionProps {
+  /** A Nightly client window: Octant sets the entrance up, so no bridge is given. */
+  readonly managedInOctant?: boolean;
   /** The loopback hub administration; absent in a paired browser. */
   readonly hub?: HubAdministrationBridge;
   /** Names this computer's paired devices for the relay's list. */
@@ -155,13 +157,15 @@ export default function PublicEntranceSettingsSection(props: PublicEntranceSetti
   }
   const shown = status !== undefined && (status.hubOn || status.member);
   const entrance = shown ? status.entrance : undefined;
-  const unavailable = !present
-    ? "Set this up in the Octant app or with octant hub public on the computer itself."
-    : status === undefined
-      ? "Octant could not read this computer's hub status."
-      : shown
-        ? "This computer has not reported it."
-        : "Turn on the hub role in Remote access, or join a hub, first.";
+  const unavailable = props.managedInOctant
+    ? "Managed in Octant. The public entrance is set up in the Octant app."
+    : !present
+      ? "Set this up in the Octant app or with octant hub public on the computer itself."
+      : status === undefined
+        ? "Octant could not read this computer's hub status."
+        : shown
+          ? "This computer has not reported it."
+          : "Turn on the hub role in Remote access, or join a hub, first.";
   const focused = (settingId: string) => props.focusedSetting === settingId;
   const clock = props.now === undefined ? {} : { now: props.now };
 

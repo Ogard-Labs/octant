@@ -1601,21 +1601,16 @@ function ActiveSectionContent({
       );
     }
     case "public-entrance": {
-      if (props.hostBridge?.managedInOctant === true)
-        return (
-          <section aria-label="Public entrance" id="settings-public-entrance">
-            <p className="settings-managed-in-octant">
-              Managed in Octant. The public entrance is set up in the Octant app.
-            </p>
-          </section>
-        );
+      // Nightly administers none of this, but search still lands on each row.
+      const managedInOctant = props.hostBridge?.managedInOctant === true;
       const hub = hubAdministrationOf(props.hostBridge);
       const devices = remoteAccessAdministrationOf(props.hostBridge);
       return (
         <Suspense fallback={<SettingsState kind="loading">Loading Public entrance…</SettingsState>}>
           <LazyPublicEntranceSettings
-            {...(hub === undefined ? {} : { hub })}
-            {...(devices === undefined ? {} : { devices })}
+            {...(managedInOctant ? { managedInOctant } : {})}
+            {...(hub === undefined || managedInOctant ? {} : { hub })}
+            {...(devices === undefined || managedInOctant ? {} : { devices })}
             {...(focusedSetting === undefined ? {} : { focusedSetting: String(focusedSetting) })}
             threadTitles={
               new Map(
