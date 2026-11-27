@@ -14,12 +14,13 @@ export function CodeProjectWork(props: {
   readonly conversationId: CodeThreadId;
   readonly client: CodeClient;
   readonly onRead: (id: CodeThreadId, sequence: number) => void;
+  readonly reportCount: number;
   readonly reportSequence: number;
   readonly threads: ReadonlyArray<CodeThreadNavigationItem>;
   readonly onOpen: (id: CodeThreadId, title: string) => void;
   readonly onOpenBeside: (id: CodeThreadId, title: string) => void;
 }) {
-  const { projectId, client, reportSequence } = props;
+  const { projectId, client, reportCount, reportSequence } = props;
   const [page, setPage] = useState<CodeProjectReportPage>();
   const [failure, setFailure] = useState<string>();
   const [before, setBefore] = useState<CodeProjectReportPage["next"]>();
@@ -73,7 +74,7 @@ export function CodeProjectWork(props: {
     setBefore(undefined);
     readReports(abort);
     return () => abort.abort();
-  }, [readReports, reportSequence, retry]);
+  }, [readReports, reportCount, reportSequence, retry]);
 
   function loadEarlier() {
     const cursor = page?.next;

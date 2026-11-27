@@ -25,6 +25,7 @@ describe("the Project report", () => {
       conversationId: worker.coordinatorThreadId,
       client,
       reportSequence: 2,
+      reportCount: 1,
       onRead,
       onOpen: vi.fn(),
       onOpenBeside: vi.fn(),
@@ -67,18 +68,18 @@ describe("the Project report", () => {
         : { reports: [newest], next }),
     }));
     const onRead = vi.fn();
-    render(
-      <CodeProjectWork
-        projectId={projectId}
-        conversationId={worker.coordinatorThreadId}
-        client={{ ...client, execute }}
-        reportSequence={newest.sequence}
-        onRead={onRead}
-        onOpen={vi.fn()}
-        onOpenBeside={vi.fn()}
-        threads={[]}
-      />,
-    );
+    const props = {
+      projectId,
+      conversationId: worker.coordinatorThreadId,
+      client: { ...client, execute },
+      reportSequence: newest.sequence,
+      reportCount: 2,
+      onRead,
+      onOpen: vi.fn(),
+      onOpenBeside: vi.fn(),
+      threads: [],
+    };
+    const view = render(<CodeProjectWork {...props} />);
     expect(await screen.findByText(newest.summary)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Load earlier reports" }));
     expect(await screen.findByText(older.summary)).toBeVisible();
@@ -88,6 +89,10 @@ describe("the Project report", () => {
       { kind: "read-code-project-report-page", projectId, before: next },
       expect.any(AbortSignal),
     );
+    execute.mockResolvedValue({ kind: "project-report-page", reports: [newest] });
+    view.rerender(<CodeProjectWork {...props} reportCount={1} />);
+    await waitFor(() => expect(screen.queryByText(older.summary)).toBeNull());
+    expect(screen.getByText(newest.summary)).toBeVisible();
     expect(onRead.mock.calls).toEqual([[worker.coordinatorThreadId, newest.sequence]]);
   });
 });

@@ -850,12 +850,7 @@ export interface CodeServiceOptions {
    */
   readonly turnAwaiting?: (threadId: string) => "approval" | "user-input" | undefined;
   readonly projectReportPage?: import("./projectReports").ProjectReportReader["projectReportPage"];
-  readonly projectReports?: (
-    projectId: ProjectId,
-  ) => ReadonlyArray<import("@octant/contracts").CodeProjectReport>;
-  readonly projectReportSequence?: (
-    projectId: ProjectId,
-  ) => CodeThreadActivity["lastSequence"] | undefined;
+  readonly projectReportActivity?: import("./projectReports").ProjectReportReader["projectReportActivity"];
   /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
   /** The person's Settings choice to put a thread away once it is done; absent is off. */
@@ -1323,8 +1318,7 @@ export class CodeService {
   readonly #touchedIssues: CodeNavigationTouchedIssueSource | undefined;
   readonly #linkedIssues: CodeLinkedIssuesPort | undefined;
   readonly #projectReportPage: CodeServiceOptions["projectReportPage"];
-  readonly #projectReports: CodeServiceOptions["projectReports"];
-  readonly #projectReportSequence: CodeServiceOptions["projectReportSequence"];
+  readonly #projectReportActivity: CodeServiceOptions["projectReportActivity"];
   readonly #readLatestFinishedReceipt:
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
@@ -1405,8 +1399,7 @@ export class CodeService {
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#turnAwaiting = options.turnAwaiting;
     this.#projectReportPage = options.projectReportPage;
-    this.#projectReports = options.projectReports;
-    this.#projectReportSequence = options.projectReportSequence;
+    this.#projectReportActivity = options.projectReportActivity;
     this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
     this.#putAwayWhenDone = options.putAwayWhenDone ?? (() => false);
     this.#unfinishedWork = options.unfinishedWork;
@@ -1691,14 +1684,15 @@ export class CodeService {
         projectConversationId(this.#persistence.journal, thread.projectId) !== thread.id
       )
         continue;
-      const sequence = this.#projectReportSequence?.(thread.projectId);
-      if (sequence !== undefined) {
+      const reports = this.#projectReportActivity?.(thread.projectId);
+      if (reports && reports.projectReportSequence !== null) {
         activity.set(
           thread.id,
           decodeCodeThreadActivity({
             threadId: thread.id,
             lastSequence: activity.get(thread.id)?.lastSequence ?? 0,
-            projectReportSequence: sequence,
+            projectReportCount: reports.projectReportCount,
+            projectReportSequence: reports.projectReportSequence,
           }),
         );
       }
@@ -2199,25 +2193,19 @@ export class CodeService {
         );
         return { kind: "worktree-source-previewed", preview };
       }
-      if (
-        command.kind === "read-code-project-reports" ||
-        command.kind === "read-code-project-report-page"
-      ) {
+      if (command.kind === "read-code-project-report-page") {
         if (
           isRoutineHostScope(authenticatedWindowId) ||
           !(await this.#access.canAccessProject(authenticatedWindowId, command.projectId))
         )
           throw this.#failure("unauthorized", "This window cannot read the Project conversation.");
         const project = this.#persistence.readProject?.(command.projectId);
-        if (project?.type === "code" && project.lifecycle === "active") {
-          if (
-            command.kind === "read-code-project-report-page" &&
-            this.#projectReportPage !== undefined
-          )
-            return this.#projectReportPage(command.projectId, command.before);
-          if (command.kind === "read-code-project-reports" && this.#projectReports !== undefined)
-            return { kind: "project-reports", reports: this.#projectReports(command.projectId) };
-        }
+        if (
+          project?.type === "code" &&
+          project.lifecycle === "active" &&
+          this.#projectReportPage !== undefined
+        )
+          return this.#projectReportPage(command.projectId, command.before);
         throw this.#failure("unavailable", "Project reports are unavailable.");
       }
       const openingConversation = command.kind === "open-code-project-conversation";

@@ -1829,6 +1829,9 @@ function renderCodeTab(
       props.onOpenCodeThread(id, title, project.id);
     else void props.onOpenCodeWorkerBeside(paneId, id, title, project.id);
   };
+  const reportActivity = projectConversation
+    ? codeController.bootstrap?.activity.find((row) => row.threadId === tab.threadId)
+    : undefined;
   const report =
     projectConversation && project !== undefined ? (
       <CodeProjectWork
@@ -1837,10 +1840,8 @@ function renderCodeTab(
         conversationId={tab.threadId}
         onRead={props.codeController.markProjectReportsRead}
         client={codeController.client}
-        reportSequence={
-          props.codeController.bootstrap?.activity.find((row) => row.threadId === tab.threadId)
-            ?.projectReportSequence ?? 0
-        }
+        reportSequence={reportActivity?.projectReportSequence ?? 0}
+        reportCount={reportActivity?.projectReportCount ?? 0}
         threads={props.codeController.navigation}
         onOpen={(id, title) => props.onOpenCodeThread(id, title, project.id)}
         onOpenBeside={openBeside}

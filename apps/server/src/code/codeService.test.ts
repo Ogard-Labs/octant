@@ -1347,7 +1347,9 @@ describe("CodeService commands", () => {
       expect(first.thread.id).not.toEqual(ids.thread);
       expect(first.thread.messageWake).toBeUndefined();
       expect(readCodeThreads(host.connection)).toHaveLength(4);
-      expect(projectReportsReader(host.connection).projectReports(ids.project)).toEqual([]);
+      expect(projectReportsReader(host.connection).projectReportPage(ids.project).reports).toEqual(
+        [],
+      );
       const observe = (version: number, state: string) =>
         append("code-runtime", operationId, version, "code.runtime-work-updated@1", {
           kind: "runtime-work-updated",
@@ -1361,15 +1363,15 @@ describe("CodeService commands", () => {
         });
       const report = () =>
         host.service.execute(ids.window, {
-          kind: "read-code-project-reports",
+          kind: "read-code-project-report-page",
           projectId: ids.project,
         });
       observe(0, "running");
-      expect(await report()).toEqual({ kind: "project-reports", reports: [] });
+      expect(await report()).toEqual({ kind: "project-report-page", reports: [] });
       observe(1, "waiting");
       const waiting = await report();
       expect(waiting).toMatchObject({
-        kind: "project-reports",
+        kind: "project-report-page",
         reports: [{ workerId: worker.id, operationId, state: "waiting" }],
       });
       expect((await host.service.navigation(ids.window)).activity).toContainEqual(
@@ -1380,7 +1382,7 @@ describe("CodeService commands", () => {
       );
       await expect(
         host.service.execute(ids.window, {
-          kind: "read-code-project-reports",
+          kind: "read-code-project-report-page",
           projectId: otherProject,
         }),
       ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
@@ -1444,9 +1446,6 @@ describe("CodeService commands", () => {
       if (newest.kind !== "project-report-page" || newest.next === undefined)
         throw new Error("Expected a continuation for earlier Project reports.");
       expect(newest.reports).toHaveLength(25);
-      expect(projectReportsReader(host.connection).projectReportSequence(ids.project)).toBe(
-        newest.reports[0]?.sequence,
-      );
       const older = await host.service.execute(ids.window, {
         kind: "read-code-project-report-page",
         projectId: ids.project,
@@ -1460,11 +1459,21 @@ describe("CodeService commands", () => {
         ],
       });
       expect(older).not.toHaveProperty("next");
-      if (older.kind !== "project-report-page")
-        throw new Error("Expected earlier Project reports.");
-      expect(await report()).toEqual({
-        kind: "project-reports",
-        reports: [...newest.reports, ...older.reports],
+      const conversationActivity = async () =>
+        (await host.service.navigation(ids.window)).activity.find(
+          (row) => row.threadId === first.thread.id,
+        );
+      const newestSequence = newest.reports[0]?.sequence;
+      expect(await conversationActivity()).toMatchObject({
+        projectReportSequence: newestSequence,
+        projectReportCount: 27,
+      });
+      host.connection
+        .prepare("UPDATE code_transcript_search_projection SET rewound = 1 WHERE operation_id = ?")
+        .run(operationId);
+      expect(await conversationActivity()).toMatchObject({
+        projectReportSequence: newestSequence,
+        projectReportCount: 26,
       });
       expect(readCodePlannerDesignation(host.connection, ids.project)).toMatchObject({
         plannerThreadId: planner.id,

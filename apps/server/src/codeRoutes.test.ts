@@ -502,7 +502,6 @@ describe("Code routes", () => {
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
     const commands = [
       { kind: "open-code-project-conversation", projectId },
-      { kind: "read-code-project-reports", projectId },
       { kind: "read-code-project-report-page", projectId },
       { kind: "set-code-thread-coordinator", threadId, expectedVersion: 1, coordinator: true },
       {
@@ -549,8 +548,7 @@ describe("Code routes", () => {
         const action =
           command.kind === "open-code-project-conversation"
             ? "open the Project conversation"
-            : command.kind === "read-code-project-reports" ||
-                command.kind === "read-code-project-report-page"
+            : command.kind === "read-code-project-report-page"
               ? "read Project reports"
               : "set coordinators and wake switches";
         expect(await refused?.json()).toMatchObject({

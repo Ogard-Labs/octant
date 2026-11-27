@@ -8,7 +8,12 @@ import {
 } from "@octant/contracts";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 
-const sequence = Schema.decodeUnknownSync(GlobalSequence);
+const decodeReportActivity = Schema.decodeUnknownSync(
+  Schema.Struct({
+    projectReportCount: Schema.Int.pipe(Schema.nonNegative()),
+    projectReportSequence: Schema.NullOr(GlobalSequence),
+  }),
+);
 const pageSize = 25;
 
 // Select one receipt per turn in a single indexed pass. The journal can have
@@ -54,22 +59,21 @@ const reportContent = `
   ORDER BY sequence DESC, operationId DESC`;
 
 export function projectReportsReader(connection: SqliteConnection) {
-  const reports = connection.prepare(`WITH page AS (${reportSource}) ${reportContent}`);
   const page = connection.prepare(`WITH page AS MATERIALIZED (
     SELECT * FROM (${reportSource})
     WHERE (sequence, operationId) < (coalesce(?, 9223372036854775807), ?)
     ORDER BY sequence DESC, operationId DESC LIMIT ?
   ) ${reportContent}`);
-  const latest = connection.prepare(`SELECT MAX(sequence) AS sequence FROM (${reportSource})`);
+  const latest = connection.prepare(
+    `SELECT COUNT(*) AS projectReportCount, MAX(sequence) AS projectReportSequence FROM (${reportSource})`,
+  );
   // Navigation is read-only and can be polled by several windows. Share the
   // last result until SQLite changes. Rebuilds can change projections without
   // advancing the journal, so its head alone is not a sufficient cache key.
   const connectionRevision = connection.prepare("SELECT total_changes() AS revision");
   let cachedRevision: unknown;
-  const latestByProject = new Map<ProjectId, GlobalSequence | undefined>();
+  const latestByProject = new Map<ProjectId, ReturnType<typeof decodeReportActivity>>();
   return {
-    projectReports: (projectId: ProjectId) =>
-      reports.all(projectId).map((row) => decodeCodeProjectReport(row)),
     projectReportPage: (
       projectId: ProjectId,
       before?: CodeProjectReportCursor,
@@ -90,7 +94,7 @@ export function projectReportsReader(connection: SqliteConnection) {
           : { next: { sequence: last.sequence, operationId: last.operationId } }),
       };
     },
-    projectReportSequence: (projectId: ProjectId) => {
+    projectReportActivity: (projectId: ProjectId) => {
       const row = connectionRevision.get();
       const revision =
         typeof row === "object" && row !== null && "revision" in row ? row.revision : undefined;
@@ -98,17 +102,11 @@ export function projectReportsReader(connection: SqliteConnection) {
         cachedRevision = revision;
         latestByProject.clear();
       }
-      if (latestByProject.has(projectId)) return latestByProject.get(projectId);
-      const result = latest.get(projectId);
-      const newest =
-        typeof result === "object" &&
-        result !== null &&
-        "sequence" in result &&
-        result.sequence !== null
-          ? sequence(result.sequence)
-          : undefined;
-      latestByProject.set(projectId, newest);
-      return newest;
+      const cached = latestByProject.get(projectId);
+      if (cached !== undefined) return cached;
+      const activity = decodeReportActivity(latest.get(projectId));
+      latestByProject.set(projectId, activity);
+      return activity;
     },
   };
 }

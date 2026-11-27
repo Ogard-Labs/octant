@@ -1000,10 +1000,6 @@ export const CodeCommand = Schema.Union(
     before: Schema.optional(CodeProjectReportCursor),
   }).annotations(strict),
   Schema.Struct({
-    kind: Schema.Literal("read-code-project-reports"),
-    projectId: ProjectId,
-  }).annotations(strict),
-  Schema.Struct({
     kind: Schema.Literal("open-code-project-conversation"),
     projectId: ProjectId,
     model: Schema.optional(CodeDefaultModel),
@@ -1920,10 +1916,6 @@ export type CodeProjectReportPage = typeof CodeProjectReportPage.Type;
 export const CodeCommandResult = Schema.Union(
   CodeProjectReportPage,
   Schema.Struct({
-    kind: Schema.Literal("project-reports"),
-    reports: Schema.Array(CodeProjectReport),
-  }).annotations(strict),
-  Schema.Struct({
     kind: Schema.Literal("project-conversation-opened"),
     thread: CodeThread,
   }).annotations(strict),
@@ -1974,6 +1966,7 @@ export type CodeThreadView = typeof CodeThreadView.Type;
  * is the one a read cursor can be compared against.
  */
 export const CodeThreadActivity = Schema.Struct({
+  projectReportCount: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   projectReportSequence: Schema.optional(GlobalSequence),
   threadId: CodeThreadId,
   lastSequence: GlobalSequence,
