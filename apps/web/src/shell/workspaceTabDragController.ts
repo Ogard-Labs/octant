@@ -81,8 +81,9 @@ export class WorkspaceSurfaceDragController {
 
   cancel(): void {
     if (this.#snapshot.phase === "idle") return;
-    if (this.#snapshot.phase === "dragging")
-      this.#suppressedClickKey = this.#snapshot.source.dragKey;
+    // Escape and pointercancel produce no trailing click on the row, so
+    // leaving click suppression set would swallow the person's next real click.
+    this.#suppressedClickKey = null;
     this.#reset();
   }
 

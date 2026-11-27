@@ -1186,6 +1186,7 @@ describe("ProjectSidebarSection activity view", () => {
       ThreadRowActions,
       "onPinThread" | "onCompleteThread" | "onReopenThread" | "onWakeThread"
     >;
+    readonly onSelectThread?: (threadId: string) => void;
     readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
   }) {
     const rows = useRef(new Map<string, SidebarThreadDragRow>());
@@ -1213,7 +1214,7 @@ describe("ProjectSidebarSection activity view", () => {
       onPointerMove: drag.onPointerMove,
       onPointerUp: drag.onPointerUp,
       onPointerCancel: drag.onPointerCancel,
-      consumeThreadClickSuppression: drag.consumeSuppressedClick,
+      consumeThreadClickSuppression: (rowId) => drag.consumeSuppressedClick(`thread:${rowId}`),
       draggingRow:
         drag.active === null ? null : (rows.current.get(drag.active.source.dragKey) ?? null),
       offerFiles: vi.fn(),
@@ -1230,7 +1231,7 @@ describe("ProjectSidebarSection activity view", () => {
           onProjectOpen={vi.fn()}
           onReorder={vi.fn()}
           onRestore={vi.fn()}
-          onSelectThread={vi.fn()}
+          onSelectThread={props.onSelectThread ?? vi.fn()}
           projects={[chatProjectA]}
           threadActions={{ ...props.handlers }}
           threads={props.threads}
@@ -1337,6 +1338,49 @@ describe("ProjectSidebarSection activity view", () => {
       fireEvent.click(within(shelf).getByText("Settled"));
       dragRowTo(screen.getByRole("button", { name: /Finished work/ }), 400);
       expect(handlers.onReopenThread).toHaveBeenCalledWith("thread-done");
+    } finally {
+      layout.mockRestore();
+      window.localStorage.clear();
+    }
+  });
+
+  it("opens a thread row on the next click after an Escape-cancelled drag, while a completed drag still swallows its trailing click", () => {
+    window.localStorage.clear();
+    const layout = layOutDropZones();
+    const onSelectThread = vi.fn();
+    const handlers = {
+      onPinThread: vi.fn(),
+      onCompleteThread: vi.fn(),
+      onReopenThread: vi.fn(),
+      onWakeThread: vi.fn(),
+    };
+    try {
+      render(
+        <DropHarness
+          handlers={handlers}
+          onSelectThread={onSelectThread}
+          threads={[
+            {
+              projectId: String(chatProjectA.id),
+              threadId: "thread-open",
+              title: "Open work",
+              updatedAt: "2026-08-14T13:00:00.000Z",
+            },
+          ]}
+        />,
+      );
+      const row = screen.getByRole("button", { name: /Open work/ });
+      fireEvent.pointerDown(row, { button: 0, pointerId: 1, clientX: 20, clientY: 300 });
+      fireEvent.pointerMove(row, { pointerId: 1, clientX: 20, clientY: 50 });
+      fireEvent.keyDown(window, { key: "Escape" });
+
+      fireEvent.click(row);
+      expect(onSelectThread).toHaveBeenCalledTimes(1);
+      expect(onSelectThread).toHaveBeenCalledWith("thread-open");
+
+      dragRowTo(row, 50);
+      fireEvent.click(row);
+      expect(onSelectThread).toHaveBeenCalledTimes(1);
     } finally {
       layout.mockRestore();
       window.localStorage.clear();

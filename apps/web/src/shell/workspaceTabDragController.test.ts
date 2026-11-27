@@ -101,6 +101,6 @@ describe("WorkspaceSurfaceDragController", () => {
 
     expect(controller.getSnapshot()).toEqual({ phase: "idle" });
     expect(onDrop).not.toHaveBeenCalled();
-    expect(controller.consumeClickSuppression(source.dragKey)).toBe(true);
+    expect(controller.consumeClickSuppression(source.dragKey)).toBe(false);
   });
 });
