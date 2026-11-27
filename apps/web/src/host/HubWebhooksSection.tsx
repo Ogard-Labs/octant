@@ -147,7 +147,7 @@ const REFUSALS: Readonly<Record<string, string>> = {
   "scheme-mints-its-own":
     "That endpoint uses the secret Octant made; only a Stripe endpoint takes one pasted in.",
   "too-many-replaced-secrets":
-    "This endpoint still keeps two replaced secrets for deliveries the hub may hold, and another would drop one early. Paste again two days after the oldest was replaced, or rotate the endpoint for a new URL.",
+    "This endpoint still keeps two replaced secrets for deliveries the hub may hold, and another would drop one early. Paste again two days after the oldest was replaced. Rotating the endpoint instead retires its URL, drops the deliveries it has not run yet, and needs the new URL and secret set in Stripe.",
 };
 
 interface Minted {

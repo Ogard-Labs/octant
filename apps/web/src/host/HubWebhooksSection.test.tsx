@@ -325,6 +325,7 @@ describe("HubWebhooksSection", () => {
     await user.click(within(paste).getByRole("button", { name: "Save secret" }));
     expect(await screen.findByText(/still keeps two replaced secrets/)).toBeInTheDocument();
     expect(screen.getByText(/two days after the oldest was replaced/)).toBeInTheDocument();
+    expect(screen.getByText(/drops the deliveries it has not run yet/)).toBeInTheDocument();
   });
 
   it("marks a Stripe endpoint still waiting for its secret, and takes a rolled one later", async () => {
