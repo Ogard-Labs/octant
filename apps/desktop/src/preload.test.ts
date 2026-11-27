@@ -1720,6 +1720,16 @@ describe("desktop preload bridge", () => {
     await expect(
       bridge.enablePrivateListener?.({
         ...endpoint,
+        certificatePem: undefined,
+        privateKeyPem: undefined,
+      }),
+    ).resolves.toEqual(ready);
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.privateListenerEnable, endpoint);
+
+    invoke.mockClear();
+    await expect(
+      bridge.enablePrivateListener?.({
+        ...endpoint,
         certificatePem: "cert",
       } as unknown as typeof endpoint),
     ).rejects.toBeInstanceOf(TypeError);

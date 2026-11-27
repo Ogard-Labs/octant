@@ -120,8 +120,13 @@ type ListenerState =
 type ListenerDraft = {
   readonly hostname: string;
   readonly port: string;
-  /** `self-made`: the host makes its own certificate, which apps pin through a pairing code. */
-  readonly certificate: "self-made" | "pasted";
+  /**
+   * `self-made`: the host makes its own certificate, which apps pin through a
+   * pairing code. Unset follows the running listener, so moving one that
+   * serves a pasted certificate keeps asking for one: a self-made replacement
+   * would cut off every browser paired with it.
+   */
+  readonly certificate: "self-made" | "pasted" | undefined;
   readonly certificatePem: string;
   readonly privateKeyPem: string;
 };
@@ -129,7 +134,7 @@ type ListenerDraft = {
 const EMPTY_DRAFT: ListenerDraft = {
   hostname: "",
   port: "13774",
-  certificate: "self-made",
+  certificate: undefined,
   certificatePem: "",
   privateKeyPem: "",
 };
@@ -302,11 +307,13 @@ export function RemoteAccessSettingsSection({
       ? undefined
       : remoteListenerOrigin(draft.hostname.trim(), draftPort);
   const draftExposure = classifyRemoteListenerAddress(draft.hostname);
+  const certificateChoice =
+    draft.certificate ?? (status?.certificateSource === "pasted" ? "pasted" : "self-made");
   const draftComplete =
     draftOrigin !== undefined &&
     draftPort >= 1 &&
     draftPort <= 65_535 &&
-    (draft.certificate === "self-made" ||
+    (certificateChoice === "self-made" ||
       (draft.certificatePem.trim() !== "" && draft.privateKeyPem.trim() !== "")) &&
     (draftExposure === "lan-private" || draftExposure === "tailscale");
 
@@ -320,7 +327,7 @@ export function RemoteAccessSettingsSection({
       localConfirmation: true,
     } as const;
     setConfirming(
-      draft.certificate === "self-made"
+      certificateChoice === "self-made"
         ? endpoint
         : {
             ...endpoint,
@@ -645,10 +652,10 @@ export function RemoteAccessSettingsSection({
                     }
                   }}
                   options={CERTIFICATE_OPTIONS}
-                  value={draft.certificate}
+                  value={certificateChoice}
                 />
               </OctantField>
-              {draft.certificate === "self-made" ? null : (
+              {certificateChoice === "self-made" ? null : (
                 <>
                   <OctantField>
                     <OctantFieldLabel htmlFor={certificateId}>Certificate (PEM)</OctantFieldLabel>

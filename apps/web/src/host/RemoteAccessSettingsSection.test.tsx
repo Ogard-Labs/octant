@@ -232,6 +232,18 @@ describe("RemoteAccessSettingsSection", () => {
     );
   });
 
+  it("keeps asking for a pasted certificate when moving a listener that serves one", async () => {
+    const user = userEvent.setup();
+    const host = bridge(listening);
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    expect(await screen.findByText("Listening")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Certificate" })).toHaveTextContent(
+      "My own certificate",
+    );
+    expect(screen.getByLabelText("Certificate (PEM)")).toBeInTheDocument();
+  });
+
   it("asks for confirmation naming address, origin, and reach before enabling, and cancel changes nothing", async () => {
     const user = userEvent.setup();
     const host = bridge(off);
@@ -283,9 +295,6 @@ describe("RemoteAccessSettingsSection", () => {
       localConfirmation: true,
     });
     expect(await screen.findByText("Listening")).toBeInTheDocument();
-    // The form starts over, and the pasted key is not kept anywhere on the page.
-    expect(screen.queryByLabelText("Private key (PEM)")).not.toBeInTheDocument();
-    await choosePastedCertificate(user);
     expect(screen.getByLabelText("Private key (PEM)")).toHaveValue("");
   });
 

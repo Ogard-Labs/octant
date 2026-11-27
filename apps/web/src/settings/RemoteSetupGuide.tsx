@@ -185,8 +185,8 @@ export function RemoteSetupGuide(props: {
               certificates in the tailnet and run <code>tailscale cert</code> with the host’s full
               MagicDNS name on that host.{" "}
               {props.canConfigureHost
-                ? "Enter that name, certificate and key in Remote listener."
-                : "Enter that name, certificate and key in Remote listener in Settings on the host."}{" "}
+                ? "In Remote listener, enter that name, choose My own certificate, and enter the certificate and key."
+                : "In Remote listener in Settings on the host, enter that name, choose My own certificate, and enter the certificate and key."}{" "}
               Pair the device, or turn on the hub and use its join code.
             </li>
           </ol>

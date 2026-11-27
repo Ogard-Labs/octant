@@ -3184,15 +3184,22 @@ function decodeBrowserSurfaceTabState(value: unknown): BrowserSurfaceTabState {
   return Object.freeze({ tabId: value.tabId, url: value.url, title: value.title });
 }
 
-/** A request with neither PEM asks the host for the certificate it makes itself. */
+/**
+ * A request with neither PEM asks the host for the certificate it makes
+ * itself; a PEM given as undefined counts as absent, as the contract allows.
+ */
 function validatePrivateListenerEnableRequest(value: PrivateListenerEnableRequest): void {
-  const selfMade = isRecord(value) && !("certificatePem" in value) && !("privateKeyPem" in value);
+  const selfMade =
+    isRecord(value) && value.certificatePem === undefined && value.privateKeyPem === undefined;
   const keys = selfMade
     ? ["hostname", "localConfirmation", "origin", "port"]
     : ["certificatePem", "hostname", "localConfirmation", "origin", "port", "privateKeyPem"];
+  const given = isRecord(value)
+    ? Object.keys(value).filter((key) => (value as Record<string, unknown>)[key] !== undefined)
+    : [];
   if (
     !isRecord(value) ||
-    Object.keys(value).sort().join("\0") !== keys.sort().join("\0") ||
+    given.sort().join("\0") !== keys.sort().join("\0") ||
     typeof value.hostname !== "string" ||
     value.hostname.trim().length === 0 ||
     !Number.isSafeInteger(value.port) ||
