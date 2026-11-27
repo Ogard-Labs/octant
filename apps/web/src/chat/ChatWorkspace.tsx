@@ -1,3 +1,8 @@
+import {
+  appendToResultQuoteDraft,
+  rememberSentResultQuotes,
+  resultQuotePlaces,
+} from "../composer/resultQuoteDraft";
 import { threadDraftScope, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
@@ -90,7 +95,7 @@ import {
   REPLY_QUOTE_SOURCE,
 } from "../composer/composerQuoteMark";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
-import { promptsToRecall, sentPromptsNewestFirst } from "../composer/sentPrompts";
+import { promptsToRecall, sentPromptsNewestFirst, type SentPrompt } from "../composer/sentPrompts";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
@@ -2102,7 +2107,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 notes={{
                   threadId: String(view.thread.id),
                   onInsert: (note) => {
-                    const next = draftWithNote(props.controller.pendingDraft, note);
+                    const next = appendToResultQuoteDraft(
+                      typedScope,
+                      props.controller.pendingDraft,
+                      draftWithNote(props.controller.pendingDraft, note),
+                    );
                     draftEditRevisionRef.current += 1;
                     props.controller.setPendingDraft(next, next.length);
                   },
@@ -2298,6 +2307,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   restoreClaim();
                   return false;
                 }
+                const resultQuotes = resultQuotePlaces(typedScope, draft);
                 const result = await messageQueue.enqueue(
                   {
                     mode: "chat",
@@ -2318,7 +2328,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
                     ...typedClaimFor(typedScope, draft),
                   },
-                  () => {
+                  (messageId) => {
+                    rememberSentResultQuotes(typedScope, messageId, draft, resultQuotes);
                     retireStashRecovery?.();
                     releaseClaim();
                     continuation.reset();
@@ -2715,7 +2726,7 @@ function researchBackend(
 }
 
 /** The person's own prompts in a Chat thread, newest first; delivered reports are the host's. */
-function chatPromptsNewestFirst(view: ChatThreadView): ReadonlyArray<string> {
+function chatPromptsNewestFirst(view: ChatThreadView): ReadonlyArray<SentPrompt> {
   const bodies = new Map(
     view.contents.flatMap((content) =>
       content.role === "user" ? [[String(content.contentId), content.body] as const] : [],
@@ -2727,6 +2738,6 @@ function chatPromptsNewestFirst(view: ChatThreadView): ReadonlyArray<string> {
     // A routine's scheduled follow-up is sent as an ordinary turn, but it is the host's.
     return body === undefined || parseAutomationFollowUpTurnPrompt(body) !== undefined
       ? undefined
-      : body;
+      : { id: String(turn.submissionId ?? turn.id), text: body };
   });
 }

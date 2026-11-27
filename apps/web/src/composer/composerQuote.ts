@@ -2,6 +2,7 @@ import {
   rememberResultQuotePlaces,
   replaceResultQuoteRange,
   resultQuotePlaces,
+  shiftResultQuotePlaces,
   type ResultQuotePlace,
   type ResultQuoteSource,
 } from "./resultQuoteDraft";
@@ -261,7 +262,40 @@ export function appendComposerQuote(
   return next;
 }
 
+const RESULT_CLIPBOARD_TYPE = "application/x-octant-result-quotes";
+let copied:
+  | {
+      readonly token: string;
+      readonly text: string;
+      readonly places: ReadonlyArray<ResultQuotePlace>;
+    }
+  | undefined;
+
+function copyResultQuotes(
+  clipboard: DataTransfer,
+  threadId: string,
+  draft: string,
+  start: number,
+  end: number,
+): void {
+  const whole = resultQuotePlaces(threadId, draft).filter(
+    (place) => place.start >= start && place.end <= end,
+  );
+  if (whole.length === 0) return;
+  const token = globalThis.crypto.randomUUID();
+  clipboard.setData(RESULT_CLIPBOARD_TYPE, token);
+  copied = { token, text: draft.slice(start, end), places: shiftResultQuotePlaces(whole, -start) };
+}
+
+function pastedResultQuotes(clipboard: DataTransfer, threadId: string, text: string) {
+  return copied?.text === text && clipboard.getData(RESULT_CLIPBOARD_TYPE) === copied.token
+    ? copied.places.filter((place) => place.source.threadId === threadId)
+    : [];
+}
+
 composerQuoteToolsLoaded({
+  copyResultQuotes,
+  pastedResultQuotes,
   composerQuoteText,
   appendComposerQuote,
   findComposerQuotes,

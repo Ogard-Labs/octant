@@ -1,4 +1,10 @@
 import {
+  rememberResultQuotePlaces,
+  rememberSentResultQuotes,
+  resultQuotePlaces,
+  shiftResultQuotePlaces,
+} from "../composer/resultQuoteDraft";
+import {
   noteTypedComposerText,
   threadDraftScope,
   typedClaimFor,
@@ -3605,6 +3611,12 @@ export function useCodeController(options: CodeControllerOptions) {
         );
         return false;
       }
+      const quoteScope = threadDraftScope("code", sendingThreadId);
+      const draftText = previousDraft?.text ?? "";
+      const resultQuotes =
+        !outsideComposer && draftText.trim() === trimmed
+          ? resultQuotePlaces(quoteScope, draftText)
+          : [];
       const reviewReferences =
         reviewFindingReferences ??
         (!outsideComposer && previousDraft?.text.trim() === trimmed
@@ -3620,6 +3632,12 @@ export function useCodeController(options: CodeControllerOptions) {
         ) {
           return;
         }
+        const start = draftText.length - draftText.trimStart().length;
+        rememberResultQuotePlaces(
+          quoteScope,
+          trimmed,
+          shiftResultQuotePlaces(resultQuotes, -start),
+        );
         composerDraftRef.current.restoreFor(sendingThreadId, {
           ...previousDraft,
           text: trimmed,
@@ -3713,6 +3731,7 @@ export function useCodeController(options: CodeControllerOptions) {
         });
         setTurnStatus("running");
         fromOutsideComposer?.onAccepted();
+        rememberSentResultQuotes(quoteScope, String(operationId), draftText, resultQuotes);
         // A steered send may have emptied the composer so the user can keep
         // typing. Clearing here is safe only when no draft revision landed
         // after this dispatch.

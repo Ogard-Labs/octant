@@ -1,3 +1,4 @@
+import { appendToResultQuoteDraft } from "../composer/resultQuoteDraft";
 import { threadDraftScope } from "@octant/client-runtime/typed-composer-text";
 import { cleanedUpWorktreeSentence } from "@octant/domain";
 import { appendComposerQuote, TERMINAL_QUOTE_SOURCE } from "../composer/composerQuote";
@@ -413,9 +414,13 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           draftStore={props.controller.editorDrafts}
           onAddSelectionToChat={(prompt) =>
             props.controller.setPendingDraft(
-              props.controller.pendingDraft === ""
-                ? prompt
-                : `${props.controller.pendingDraft}\n\n${prompt}`,
+              appendToResultQuoteDraft(
+                threadDraftScope("code", String(props.tab.threadId)),
+                props.controller.pendingDraft,
+                props.controller.pendingDraft === ""
+                  ? prompt
+                  : `${props.controller.pendingDraft}\n\n${prompt}`,
+              ),
             )
           }
           {...(() => {

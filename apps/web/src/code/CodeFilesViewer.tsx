@@ -1,3 +1,5 @@
+import { threadDraftScope } from "@octant/client-runtime/typed-composer-text";
+import { appendToResultQuoteDraft } from "../composer/resultQuoteDraft";
 import "../styles/files-viewer.css";
 import type { CodeFileChangeNotice, CodeRelativePath, CodeThreadView } from "@octant/contracts";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -337,7 +339,11 @@ function ActiveFile(props: {
         file={file}
         onAddSelectionToChat={(prompt) =>
           controller.setPendingDraft(
-            controller.pendingDraft === "" ? prompt : `${controller.pendingDraft}\n\n${prompt}`,
+            appendToResultQuoteDraft(
+              threadDraftScope("code", String(view.thread.id)),
+              controller.pendingDraft,
+              controller.pendingDraft === "" ? prompt : `${controller.pendingDraft}\n\n${prompt}`,
+            ),
           )
         }
         onDirtyChange={props.onDirty}

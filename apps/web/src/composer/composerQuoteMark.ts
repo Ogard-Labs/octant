@@ -15,6 +15,18 @@ export const LEGACY_RESULT_REFERENCE_MARK = " · result reference ";
 export const COMPOSER_QUOTE_CLIPBOARD_TYPE = "application/x-octant-composer-quotes";
 
 export interface ComposerQuoteTools {
+  readonly copyResultQuotes: (
+    clipboard: DataTransfer,
+    threadId: string,
+    draft: string,
+    start: number,
+    end: number,
+  ) => void;
+  readonly pastedResultQuotes: (
+    clipboard: DataTransfer,
+    threadId: string,
+    text: string,
+  ) => ReadonlyArray<ResultQuotePlace>;
   readonly composerQuoteText: (quote: ComposerQuote) => string;
   readonly appendComposerQuote: (
     draft: string,

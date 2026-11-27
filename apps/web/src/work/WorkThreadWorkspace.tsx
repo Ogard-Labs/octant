@@ -1,3 +1,8 @@
+import {
+  appendToResultQuoteDraft,
+  rememberSentResultQuotes,
+  resultQuotePlaces,
+} from "../composer/resultQuoteDraft";
 import { threadDraftScope, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
@@ -2378,6 +2383,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       }
       const sideChatReturns = composerDraft.sideChatReturns;
       const draft = composerDraft.text;
+      const resultQuotes = resultQuotePlaces(typedScope, draft);
       const promptText = draft.includes(LEGACY_RESULT_REFERENCE_MARK)
         ? await promptWithReadableResultSources(draft)
         : draft;
@@ -2432,7 +2438,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               extensionSelections,
               ...typedClaimFor(typedScope, promptText),
             },
-            () => {
+            (messageId) => {
+              rememberSentResultQuotes(typedScope, `${messageId}:0`, draft, resultQuotes);
               retireStashRecovery?.();
               continuation.reset();
               if (currentThreadKeyRef.current !== sendingThreadId) return;
@@ -2484,6 +2491,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           setErrorMessage("The Work turn could not be started.");
           return false;
         }
+        rememberSentResultQuotes(typedScope, `${started.turn.turnId}:0`, draft, resultQuotes);
         retireStashRecovery?.();
         {
           continuation.reset();
@@ -3671,7 +3679,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     notes={{
                       threadId: String(thread.id),
                       onInsert: (note) => {
-                        const next = draftWithNote(prompt, note);
+                        const next = appendToResultQuoteDraft(
+                          typedScope,
+                          prompt,
+                          draftWithNote(prompt, note),
+                        );
                         composerDraft.setDraft(next, next.length);
                       },
                     }}
@@ -3801,12 +3813,16 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   sentPromptsNewestFirst(
                     turns.flatMap((turn) =>
                       turn.delivery === undefined
-                        ? turn.transcript.filter((entry) => entry.role === "user")
+                        ? turn.transcript.flatMap((entry, index) =>
+                            entry.role === "user"
+                              ? [{ id: `${turn.turnId}:${index}`, text: entry.text }]
+                              : [],
+                          )
                         : [],
                     ),
                     (entry) =>
                       parseAutomationFollowUpTurnPrompt(entry.text) === undefined
-                        ? entry.text
+                        ? entry
                         : undefined,
                   ),
               )}

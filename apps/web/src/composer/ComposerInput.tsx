@@ -27,11 +27,14 @@ import { createPortal, flushSync } from "react-dom";
 import { MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS } from "@octant/contracts/thread-message-queue";
 import {
   rememberResultQuotePlaces,
+  sentResultQuotes,
+  shiftResultQuotePlaces,
   replaceResultQuoteRange,
   resultQuotePlaces,
   type ResultQuotePlace,
 } from "./resultQuoteDraft";
 import { lazyOr } from "../lib/lazyOr";
+import type { SentPrompt } from "./sentPrompts";
 import type { ComposerQuotePlace } from "./composerQuote";
 import {
   COMPOSER_QUOTE_CLIPBOARD_TYPE,
@@ -145,7 +148,7 @@ export interface ComposerInputProps extends ForwardedAttributes {
    * for as long as the recalled text is unedited. A caller with attachments
    * or other context beside the prompt passes none.
    */
-  readonly recall?: ReadonlyArray<string> | undefined;
+  readonly recall?: ReadonlyArray<SentPrompt> | undefined;
   /**
    * Takes a paste too large for the prompt as a text file instead: 32 KiB or
    * more, or enough to push the prompt past what a message may hold. ⌘⇧V
@@ -725,17 +728,21 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       root: HTMLElement,
       text: string,
       pastedQuotes?: ReadonlyArray<string>,
+      pastedResults: ReadonlyArray<ResultQuotePlace> = [],
     ) => {
       const { start, end } = currentSelection(root);
       const current = modelRef.current;
       emit(`${current.slice(0, start)}${text}${current.slice(end)}`, start + text.length, {
         typing: false,
-        resultQuotes: replaceResultQuoteRange(
-          resultQuotePlaces(scopeRef.current, current),
-          start,
-          end,
-          text.length,
-        ),
+        resultQuotes: [
+          ...replaceResultQuoteRange(
+            resultQuotePlaces(scopeRef.current, current),
+            start,
+            end,
+            text.length,
+          ),
+          ...shiftResultQuotePlaces(pastedResults, start),
+        ],
         ...(pastedQuotes === undefined ? {} : { pastedQuotes }),
       });
     };
@@ -746,14 +753,18 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       start: number,
       end: number,
       text: string,
-      options?: { readonly caret?: number; readonly result?: ResultQuotePlace | undefined },
+      options?: {
+        readonly caret?: number;
+        readonly result?: ResultQuotePlace | undefined;
+        readonly results?: ReadonlyArray<ResultQuotePlace>;
+      },
     ) => {
       const root = rootRef.current;
       if (root === null) return;
       const current = modelRef.current;
       const next = `${current.slice(0, start)}${text}${current.slice(end)}`;
       const caret = options?.caret ?? start + text.length;
-      const resultQuotes = [
+      const resultQuotes = options?.results ?? [
         ...replaceResultQuoteRange(
           resultQuotePlaces(scopeRef.current, current),
           start,
@@ -789,6 +800,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       text: string,
       plain: boolean,
       pastedQuotes?: ReadonlyArray<string>,
+      pastedResults: ReadonlyArray<ResultQuotePlace> = [],
     ) => {
       const { start, end } = currentSelection(root);
       const current = modelRef.current;
@@ -818,7 +830,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         }
         return;
       }
-      replaceSelection(root, text, pastedQuotes);
+      replaceSelection(root, text, pastedQuotes, pastedResults);
     };
 
     const recallStep = (root: HTMLElement, direction: "older" | "newer"): boolean => {
@@ -830,18 +842,22 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       const { start, end } = currentSelection(root);
       if (start !== end) return false;
       const index = showing ? recalled.index : -1;
-      if (direction === "older") {
-        if (current.slice(0, start).includes("\n")) return false;
-        const next = sent[index + 1];
-        if (next === undefined) return showing;
-        recalledRef.current = { index: index + 1, text: next };
-        replaceRange(0, current.length, next, { caret: 0 });
-        return true;
+      const older = direction === "older";
+      if (
+        older
+          ? current.slice(0, start).includes("\n")
+          : !showing || current.slice(end).includes("\n")
+      ) {
+        return false;
       }
-      if (!showing || current.slice(end).includes("\n")) return false;
-      const next = index > 0 ? (sent[index - 1] ?? "") : "";
-      recalledRef.current = { index: index - 1, text: next };
-      replaceRange(0, current.length, next);
+      const entry = sent[older ? index + 1 : index - 1];
+      if (older && entry === undefined) return showing;
+      const next = entry?.text ?? "";
+      recalledRef.current = { index: older ? index + 1 : index - 1, text: next };
+      replaceRange(0, current.length, next, {
+        ...(older ? { caret: 0 } : {}),
+        results: sentResultQuotes(scopeRef.current, entry?.id, next),
+      });
       return true;
     };
 
@@ -1260,7 +1276,13 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         // Only whole quotes are kept apart from the text around them; other
         // data under Octant's type is ordinary pasted text.
         const trusted = tools?.trustComposerQuotes(copied) ?? [];
-        pasteText(root, text.replace(/\r\n?/g, "\n"), plain, trusted);
+        pasteText(
+          root,
+          text.replace(/\r\n?/g, "\n"),
+          plain,
+          trusted,
+          tools?.pastedResultQuotes(event.clipboardData, scopeRef.current, text),
+        );
       },
       onCopy: (event: ClipboardEvent<ComposerInputElement>) => {
         const root = rootRef.current;
@@ -1269,6 +1291,13 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         if (start === end) return;
         event.preventDefault();
         copyText(event.clipboardData, modelRef.current.slice(start, end));
+        loadedComposerQuoteTools()?.copyResultQuotes(
+          event.clipboardData,
+          scopeRef.current,
+          modelRef.current,
+          start,
+          end,
+        );
       },
       onCut: (event: ClipboardEvent<ComposerInputElement>) => {
         const root = rootRef.current;
@@ -1277,6 +1306,13 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         if (start === end) return;
         event.preventDefault();
         copyText(event.clipboardData, modelRef.current.slice(start, end));
+        loadedComposerQuoteTools()?.copyResultQuotes(
+          event.clipboardData,
+          scopeRef.current,
+          modelRef.current,
+          start,
+          end,
+        );
         if (editable) replaceSelection(root, "");
       },
       // Through React's own `onInput`, so the caller's state update lands

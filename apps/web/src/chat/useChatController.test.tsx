@@ -1,3 +1,5 @@
+import { appendComposerQuote } from "../composer/composerQuote";
+import { sentResultQuotes } from "../composer/resultQuoteDraft";
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import {
   decodeChatBootstrap,
@@ -1297,6 +1299,30 @@ describe("useChatController", () => {
 
     expect(result.current.errorMessage).toBeUndefined();
     expect(result.current.activeView?.thread.id).toBe(otherThreadId);
+  });
+
+  it("records a sent quote's source against the host's accepted turn identity", async () => {
+    const accepted = "90000000-0000-4000-8000-000000000001";
+    const scope = `chat:${threadId}`;
+    const quote = { source: "a subagent result", text: "Accepted excerpt", comment: "" };
+    const draft = appendComposerQuote("   Send this", quote, {
+      threadId: scope,
+      result: { label: quote.source, threadId: scope, row: "first-delivery", block: "0" },
+    });
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute: vi.fn().mockResolvedValue({ kind: "turn-created", turn: { id: accepted } }),
+    });
+    const { result } = renderHook(() => useChatController({ activeThreadId: threadId, client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    act(() => result.current.setPendingDraft(draft));
+    await act(async () => expect(await result.current.sendTurn(draft.trim())).toBe(true));
+    expect(
+      sentResultQuotes(scope, accepted, draft.trim()).map((place) => place.source.row),
+    ).toEqual(["first-delivery"]);
+    expect(sentResultQuotes(scope, "different-turn", draft.trim())).toEqual([]);
   });
 
   it("clears the composer as soon as send starts and restores the text if send fails", async () => {

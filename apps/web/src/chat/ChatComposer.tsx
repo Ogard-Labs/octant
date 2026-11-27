@@ -1,3 +1,4 @@
+import type { SentPrompt } from "../composer/sentPrompts";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import {
   ComposerAtTypeahead,
@@ -117,7 +118,7 @@ export interface ChatComposerProps {
   /** The draft this composer holds (see `threadDraftScope`). */
   readonly typedScope?: string | undefined;
   /** This thread's sent prompts, newest first, for ArrowUp recall. */
-  readonly recall?: ReadonlyArray<string> | undefined;
+  readonly recall?: ReadonlyArray<SentPrompt> | undefined;
   readonly stash?: ComposerStashBinding | undefined;
   readonly readOnly?: boolean;
   readonly benchmarkProjectId?: ProjectId | undefined;

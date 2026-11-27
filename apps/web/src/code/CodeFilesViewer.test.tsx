@@ -1,3 +1,5 @@
+import { appendComposerQuote } from "../composer/composerQuote";
+import { resultQuotePlaces } from "../composer/resultQuoteDraft";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type {
@@ -42,6 +44,7 @@ vi.mock("./MonacoEditorPane", () => ({
   MonacoEditorPane: (props: {
     readonly file: { readonly path: string };
     readonly onDirtyChange?: (dirty: boolean) => void;
+    readonly onAddSelectionToChat?: (prompt: string) => void;
     readonly onOpenInMainArea?: () => void;
     readonly onOpenInDefaultApp?: () => Promise<void>;
   }) => (
@@ -53,6 +56,9 @@ vi.mock("./MonacoEditorPane", () => ({
         type="button"
       >
         Edit {props.file.path}
+      </button>
+      <button onClick={() => props.onAddSelectionToChat?.("Selected file text")} type="button">
+        Send selection to agent
       </button>
       <button onClick={props.onOpenInMainArea} type="button">
         Open {props.file.path} in main area
@@ -138,9 +144,11 @@ function mount(
     readonly listingFails?: boolean;
     readonly hostBridge?: CodeFilesViewerProps["hostBridge"];
     readonly checkoutKind?: "worktree" | "remote-root";
+    readonly pendingDraft?: string;
   } = {},
 ) {
   const onOpenInMainArea = vi.fn();
+  const setPendingDraft = vi.fn((_text: string) => undefined);
   const executeOperation = vi.fn(async () =>
     options.status === undefined
       ? { kind: "operation-failed", failure: { message: "unavailable" } }
@@ -163,8 +171,8 @@ function mount(
             client: { executeOperation },
             conversation: [],
             editorDrafts: undefined,
-            pendingDraft: "",
-            setPendingDraft: vi.fn(),
+            pendingDraft: options.pendingDraft ?? "",
+            setPendingDraft,
           } as unknown as CodeFilesViewerProps["controller"]
         }
         explorer={{
@@ -186,7 +194,7 @@ function mount(
       <FilesClosePrompt />
     </div>,
   );
-  return { onOpenInMainArea };
+  return { onOpenInMainArea, setPendingDraft };
 }
 
 const tabNames = () => screen.queryAllByRole("tab").map((tab) => tab.textContent);
@@ -198,6 +206,22 @@ describe("CodeFilesViewer", () => {
     expect(await screen.findByRole("region", { name: "Code editor for a.ts" })).toBeVisible();
     expect(screen.getByText("Thread conversation")).toBeVisible();
     expect(onOpenInMainArea).not.toHaveBeenCalled();
+  });
+
+  it("keeps a result quote's original delivery when inserting an editor selection", async () => {
+    const user = userEvent.setup();
+    const scope = `code:${threadId}`;
+    const quote = { source: "a subagent result", text: "Relevant finding", comment: "" };
+    const pendingDraft = appendComposerQuote("", quote, {
+      threadId: scope,
+      result: { label: quote.source, threadId: scope, row: "delivery", block: "0" },
+    });
+    const { setPendingDraft } = mount({ pendingDraft });
+    await user.click(await screen.findByRole("treeitem", { name: "a.ts" }));
+    await user.click(await screen.findByRole("button", { name: "Send selection to agent" }));
+    const next = `${pendingDraft}\n\nSelected file text`;
+    expect(setPendingDraft).toHaveBeenCalledWith(next);
+    expect(resultQuotePlaces(scope, next).map((place) => place.source.row)).toEqual(["delivery"]);
   });
 
   it("replaces the preview tab on the next single click and keeps a double-clicked one", async () => {

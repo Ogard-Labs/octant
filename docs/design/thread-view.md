@@ -877,8 +877,11 @@ chip as ordinary text.
   when their details are unavailable. The source link is available in the
   original parent thread in the window that made the quote. Each occurrence
   keeps its delivery reference separately from the text, so two identical
-  excerpts can point to different deliveries. A copy or a restored draft from
-  an earlier window still preserves the attribution and excerpt.
+  excerpts can point to different deliveries. Inserts, undo, and moving a
+  quote within the parent composer preserve its source in that window. The
+  reference can also follow a recalled message when the send supplies a stable
+  message identity. A draft restored in another window preserves the attribution
+  and excerpt.
 - The quote is the prompt's own text: a line that names its source and says
   the words are for reference only, not instructions, then the words in a
   fence longer than any backtick run inside them, then the person's note on a

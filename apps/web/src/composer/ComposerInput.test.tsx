@@ -7,6 +7,8 @@ import {
   forgetTypedComposerText,
 } from "@octant/client-runtime/typed-composer-text";
 import { ResultQuoteScope, useResultQuoteScope } from "../transcript/ResultQuoteScope";
+import { rememberSentResultQuotes, resultQuotePlaces } from "./resultQuoteDraft";
+import type { SentPrompt } from "./sentPrompts";
 import { ComposerInput, type ComposerInputElement } from "./ComposerInput";
 import {
   appendComposerQuote,
@@ -41,7 +43,10 @@ function Prompt(props: {
   );
 }
 
-function Recalling(props: { readonly recall: ReadonlyArray<string> }) {
+function Recalling(props: {
+  readonly recall: ReadonlyArray<string | SentPrompt>;
+  readonly typedScope?: string;
+}) {
   const [value, setValue] = useState("");
   return (
     <>
@@ -49,7 +54,8 @@ function Recalling(props: { readonly recall: ReadonlyArray<string> }) {
       <ComposerInput
         id="recalling"
         onChange={(event) => setValue(event.currentTarget.value)}
-        recall={props.recall}
+        recall={props.recall.map((entry) => (typeof entry === "string" ? { text: entry } : entry))}
+        typedScope={props.typedScope}
         value={value}
       />
     </>
@@ -413,6 +419,79 @@ describe("ComposerInput", () => {
     );
     await user.click(screen.getByRole("button", { name: "Show source" }));
     expect(screen.getByRole("status")).toHaveTextContent("second-delivery");
+  });
+
+  it("keeps the exact delivery when a result quote is cut and pasted in its thread", async () => {
+    const user = userEvent.setup();
+    const threadId = "chat:move-result";
+    const quote = { source: "a subagent result", text: "Moved finding.", comment: "" };
+    const draft = appendComposerQuote("Why?", quote, {
+      threadId,
+      result: { label: quote.source, threadId, row: "delivered", block: "0" },
+    });
+    render(
+      <ResultQuoteScope threadId={threadId}>
+        <Controlled typedScope={threadId} value={draft} />
+      </ResultQuoteScope>,
+    );
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    const text = composerQuoteText(quote);
+    const data = new Map<string, string>();
+    const clipboardData = {
+      setData: (type: string, content: string) => data.set(type, content),
+      getData: (type: string) => data.get(type) ?? "",
+    };
+    input.focus();
+    input.setSelectionRange(draft.indexOf(text), draft.indexOf(text) + text.length);
+    fireEvent.cut(input, { clipboardData });
+    expect(clipboardData.getData("text/plain")).toBe(text);
+    input.setSelectionRange(0, 0);
+    fireEvent.paste(input, { clipboardData });
+    await user.click(
+      await screen.findByRole("button", { name: "Quote from a subagent result: Moved finding." }),
+    );
+    expect(screen.getByRole("button", { name: "Show source" })).toBeVisible();
+  });
+
+  it("recalls the newest accepted message's source when prompts have identical text", async () => {
+    const user = userEvent.setup();
+    const threadId = "chat:recall-result";
+    const quote = { source: "a subagent result", text: "Recalled finding.", comment: "" };
+    const draft = appendComposerQuote("  Why?", quote, {
+      threadId,
+      result: { label: quote.source, threadId, row: "delivered", block: "0" },
+    });
+    rememberSentResultQuotes(threadId, "accepted", draft, resultQuotePlaces(threadId, draft));
+    const app = render(
+      <ResultQuoteScope threadId={threadId}>
+        <Recalling typedScope={threadId} recall={[{ id: "accepted", text: draft.trim() }]} />
+      </ResultQuoteScope>,
+    );
+    screen.getByRole("textbox", { name: "Message" }).focus();
+    await user.keyboard("{ArrowUp}");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Quote from a subagent result: Recalled finding.",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Show source" })).toBeVisible();
+    app.unmount();
+    render(
+      <ResultQuoteScope threadId={threadId}>
+        <Recalling
+          typedScope={threadId}
+          recall={[{ id: "different-message", text: draft.trim() }]}
+        />
+      </ResultQuoteScope>,
+    );
+    screen.getByRole("textbox", { name: "Message" }).focus();
+    await user.keyboard("{ArrowUp}");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Quote from a subagent result: Recalled finding.",
+      }),
+    );
+    expect(screen.queryByRole("button", { name: "Show source" })).toBeNull();
   });
 
   it("keeps a copied quote's closing fence on its own line when it is pasted before existing text", () => {

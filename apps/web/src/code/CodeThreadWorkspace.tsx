@@ -1,3 +1,4 @@
+import { appendToResultQuoteDraft } from "../composer/resultQuoteDraft";
 import { threadDraftScope, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import "../styles/code-thread.css";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
@@ -3112,7 +3113,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               notes={{
                 threadId: String(thread.id),
                 onInsert: (note) => {
-                  const next = draftWithNote(draft, note);
+                  const next = appendToResultQuoteDraft(
+                    typedScope,
+                    draft,
+                    draftWithNote(draft, note),
+                  );
                   draftRevisionRef.current += 1;
                   setDraft(next);
                   props.controller.setPendingDraft?.(next, next.length);
@@ -3340,7 +3345,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       String(message.sourceThreadId) === String(thread.id)) &&
                     // A routine's scheduled follow-up is the host's, not the person's.
                     parseAutomationFollowUpTurnPrompt(message.text) === undefined
-                      ? message.text
+                      ? { id: String(message.operationId ?? message.id), text: message.text }
                       : undefined,
                   ),
               )}

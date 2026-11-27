@@ -1,3 +1,10 @@
+import { threadDraftScope } from "@octant/client-runtime/typed-composer-text";
+import {
+  rememberResultQuotePlaces,
+  rememberSentResultQuotes,
+  resultQuotePlaces,
+  shiftResultQuotePlaces,
+} from "../composer/resultQuoteDraft";
 import type { ThreadUsageLimited } from "@octant/contracts";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
@@ -1579,9 +1586,13 @@ export function useChatController(options: ChatControllerOptions) {
         (sendOptions.draftRevision === undefined ||
           composerDraftRef.current.revisionFor(sendingThreadId) === sendOptions.draftRevision);
       const clearsBeforeSend = consumesDraft && sendOptions.composerDraft === "consume";
-      const previousDraft = clearsBeforeSend
+      const previousDraft = consumesDraft
         ? composerDraftRef.current.readFor(sendingThreadId)
         : undefined;
+      const quoteScope = threadDraftScope("chat", sendingThreadId);
+      const draftText = previousDraft?.text ?? "";
+      const resultQuotes =
+        draftText.trim() === prompt ? resultQuotePlaces(quoteScope, draftText) : [];
       if (clearsBeforeSend) composerDraftRef.current.clearFor(sendingThreadId);
       const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
       const result = await execute({
@@ -1609,6 +1620,12 @@ export function useChatController(options: ChatControllerOptions) {
         composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
       ) {
         if (clearsBeforeSend && result === undefined) {
+          const start = draftText.length - draftText.trimStart().length;
+          rememberResultQuotePlaces(
+            quoteScope,
+            prompt,
+            shiftResultQuotePlaces(resultQuotes, -start),
+          );
           composerDraftRef.current.restoreFor(sendingThreadId, {
             ...previousDraft,
             text: prompt,
@@ -1618,6 +1635,14 @@ export function useChatController(options: ChatControllerOptions) {
         } else if (!clearsBeforeSend && result !== undefined) {
           composerDraftRef.current.clearFor(sendingThreadId);
         }
+      }
+      if (result?.kind === "turn-created") {
+        rememberSentResultQuotes(
+          quoteScope,
+          String(result.turn.submissionId ?? result.turn.id),
+          draftText,
+          resultQuotes,
+        );
       }
       if (result !== undefined) pendingSubmissionIds.current.delete(submissionKey);
       return result !== undefined;
