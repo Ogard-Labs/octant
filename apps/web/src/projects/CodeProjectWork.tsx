@@ -28,59 +28,73 @@ export function CodeProjectWork(props: {
   const [retry, setRetry] = useState(0);
   const request = useRef<AbortController>(null);
 
+  const loaded = useRef({ projectId, sequence: reportSequence, pages: 1 });
+
   const readReports = useCallback(
-    (abort: AbortController, cursor?: CodeProjectReportPage["next"]) => {
+    async (abort: AbortController, cursor?: CodeProjectReportPage["next"]) => {
       setLoading(true);
       setFailure(undefined);
-      void client
-        .execute(
-          {
-            kind: "read-code-project-report-page",
-            projectId,
-            ...(cursor === undefined ? {} : { before: cursor }),
-          },
-          abort.signal,
-        )
-        .then((result) => {
+      const previous = loaded.current;
+      const preserveDepth = previous.projectId === projectId && reportSequence <= previous.sequence;
+      const target = cursor === undefined && preserveDepth ? previous.pages : 1;
+      let next = cursor;
+      const reports: Array<CodeProjectReportPage["reports"][number]> = [];
+      let pages = 0;
+      try {
+        do {
+          const result = await client.execute(
+            {
+              kind: "read-code-project-report-page",
+              projectId,
+              ...(next === undefined ? {} : { before: next }),
+            },
+            abort.signal,
+          );
           if (abort.signal.aborted) return;
           if (result.kind !== "project-report-page")
             throw new Error("Project reports are unavailable.");
-          setPage((current) => {
-            if (cursor === undefined || current === undefined) return result;
-            const seen = new Set(current.reports.map((report) => report.operationId));
-            return {
-              ...result,
-              reports: [
-                ...current.reports,
-                ...result.reports.filter((report) => !seen.has(report.operationId)),
-              ],
-            };
-          });
-        })
-        .catch((error: unknown) => {
-          if (!abort.signal.aborted)
-            setFailure(error instanceof Error ? error.message : "Project reports are unavailable.");
-        })
-        .finally(() => {
-          if (!abort.signal.aborted) setLoading(false);
+          reports.push(...result.reports);
+          next = result.next;
+          pages += 1;
+        } while (next !== undefined && pages < target);
+        loaded.current = {
+          projectId,
+          sequence: reportSequence,
+          pages: cursor === undefined ? pages : previous.pages + 1,
+        };
+        setPage((current) => {
+          const existing = cursor === undefined ? [] : (current?.reports ?? []);
+          const byOperation = new Map(existing.map((report) => [report.operationId, report]));
+          for (const report of reports) byOperation.set(report.operationId, report);
+          return {
+            kind: "project-report-page",
+            reports: [...byOperation.values()],
+            ...(next === undefined ? {} : { next }),
+          };
         });
+      } catch (error) {
+        if (!abort.signal.aborted)
+          setFailure(error instanceof Error ? error.message : "Project reports are unavailable.");
+      } finally {
+        if (!abort.signal.aborted) setLoading(false);
+      }
     },
-    [client, projectId],
+    [client, projectId, reportSequence],
   );
 
   useEffect(() => {
     const abort = new AbortController();
     request.current = abort;
     setBefore(undefined);
-    readReports(abort);
+    void readReports(abort);
     return () => abort.abort();
-  }, [readReports, reportCount, reportSequence, retry]);
+  }, [readReports, reportCount, retry]);
 
   function loadEarlier() {
     const cursor = page?.next;
     if (request.current === null || cursor === undefined || loading) return;
     setBefore(cursor);
-    readReports(request.current, cursor);
+    void readReports(request.current, cursor);
   }
 
   const reports = page?.reports ?? [];
@@ -174,7 +188,7 @@ export function CodeProjectWork(props: {
               {report.summary && <p>{report.summary}</p>}
             </article>
           ))}
-          {page?.next !== undefined && (failure === undefined || before === undefined) && (
+          {page?.next !== undefined && failure === undefined && (
             <OctantButton size="sm" variant="ghost" disabled={loading} onClick={loadEarlier}>
               {loading && before !== undefined ? "Loading earlier reports" : "Load earlier reports"}
             </OctantButton>

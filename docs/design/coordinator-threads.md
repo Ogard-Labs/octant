@@ -51,8 +51,9 @@ finished summary when available. A long reply without a finished summary shows
 its opening and conclusion, with the full exchange in the linked worker. Reports derive from journaled turns,
 so recovery preserves their identity without another provider call. The reader
 opens on the newest report page and can read earlier pages in descending
-journal order. The latest report’s sequence drives unread and page refresh.
-Activity
+journal order. A newer report opens the newest page and advances the unread
+sequence. When a rewind removes reports, the reader refreshes the pages the
+person already opened and keeps the surviving results visible. Activity
 updates the roster. Reading a report spends unread, and the worker retains each
 unanswered request until the person answers it.
 

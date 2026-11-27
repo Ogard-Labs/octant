@@ -40,7 +40,7 @@ describe("the Project report", () => {
     expect(screen.getAllByText(summary)).toHaveLength(1);
     expect(screen.getByText(/Needs you \(0\)/)).toBeVisible();
   });
-  it("adds an earlier page once and marks only the newest report as read", async () => {
+  it("keeps earlier pages open across a rewind and marks only the newest report as read", async () => {
     const client = await projectConversationCodes();
     const { threads } = await client.bootstrap();
     const worker = threads.find((thread) => thread.coordinatorThreadId !== undefined);
@@ -60,11 +60,18 @@ describe("the Project report", () => {
       sequence: 2,
       summary: "Earlier result",
     });
+    const retained = decodeCodeProjectReport({
+      ...older,
+      operationId: "00000000-0000-4000-8000-000000000894",
+      sequence: 1,
+      summary: "Still visible",
+    });
+    let rewound = false;
     const next = { sequence: newest.sequence, operationId: newest.operationId };
     const execute = vi.fn<typeof client.execute>(async (command) => ({
       kind: "project-report-page",
       ...(command.kind === "read-code-project-report-page" && command.before !== undefined
-        ? { reports: [older] }
+        ? { reports: rewound ? [retained] : [older, retained] }
         : { reports: [newest], next }),
     }));
     const onRead = vi.fn();
@@ -73,7 +80,7 @@ describe("the Project report", () => {
       conversationId: worker.coordinatorThreadId,
       client: { ...client, execute },
       reportSequence: newest.sequence,
-      reportCount: 2,
+      reportCount: 3,
       onRead,
       onOpen: vi.fn(),
       onOpenBeside: vi.fn(),
@@ -89,10 +96,12 @@ describe("the Project report", () => {
       { kind: "read-code-project-report-page", projectId, before: next },
       expect.any(AbortSignal),
     );
-    execute.mockResolvedValue({ kind: "project-report-page", reports: [newest] });
-    view.rerender(<CodeProjectWork {...props} reportCount={1} />);
+    expect(screen.getByText(retained.summary)).toBeVisible();
+    rewound = true;
+    view.rerender(<CodeProjectWork {...props} reportCount={2} />);
     await waitFor(() => expect(screen.queryByText(older.summary)).toBeNull());
     expect(screen.getByText(newest.summary)).toBeVisible();
+    expect(screen.getByText(retained.summary)).toBeVisible();
     expect(onRead.mock.calls).toEqual([[worker.coordinatorThreadId, newest.sequence]]);
   });
 });
