@@ -390,6 +390,7 @@ import {
   type PageStoragePort,
   PairedComputerPins,
 } from "./pairedComputers";
+import { PairedComputerRelaySigning } from "./pairedComputerRelaySigning";
 import {
   formatHostInteractionMark,
   hostInteractionTraceEnabled,
@@ -3896,6 +3897,15 @@ function installIpcHandlers(): void {
     serverPages: { forgetListener: (origin) => remoteServerPages().forgetListener(origin) },
     webBuildVersion: app.getVersion(),
     hubAdministration: hubAdministrationRuntimeFor,
+    relaySigning: {
+      broker: new PairedComputerRelaySigning<WebContents>({
+        send: (contents, request) => {
+          if (!contents.isDestroyed()) contents.send(IPC_CHANNELS.pairedComputerRelaySign, request);
+        },
+        newId: () => randomUUID(),
+      }),
+      windowOf: (event) => (event as IpcMainInvokeEvent).sender,
+    },
   });
   installNativeMenuIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),

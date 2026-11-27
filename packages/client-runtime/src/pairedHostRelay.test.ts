@@ -1,7 +1,12 @@
 import { decodeRelayAddress } from "@octant/contracts";
+import type { StableHostId } from "@octant/contracts/remote-access";
 import { describe, expect, it, vi } from "vitest";
 import { ListenerTrustRefused, ListenerUnreachable } from "./remoteListenerTrust";
-import { createRelayFallbackFetch, relayRouteFor } from "./pairedHostRelay";
+import {
+  createRelayAdmissionSigner,
+  createRelayFallbackFetch,
+  relayRouteFor,
+} from "./pairedHostRelay";
 import { parseRelayAdmissionPayload } from "./relayTunnel";
 
 const ORIGIN = "https://laptop.tail1234.ts.net:8443";
@@ -118,6 +123,70 @@ describe("the text a device key signs for the relay", () => {
       undefined,
     ]) {
       expect(parseRelayAdmissionPayload(refused), String(refused)).toBeUndefined();
+    }
+  });
+});
+
+describe("the device key's signer for the relay", () => {
+  async function signerFor(hostId: string) {
+    const keyPair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
+      "sign",
+      "verify",
+    ]);
+    const signer = createRelayAdmissionSigner({
+      findByOrigin: async (origin) =>
+        origin === ORIGIN
+          ? {
+              keyId: "key",
+              origin,
+              hostId: hostId as StableHostId,
+              deviceId: "device",
+              credentialGeneration: 1,
+              hostKeyFingerprint: "f".repeat(64),
+              listenerTrust: { current: { kind: "pinned", pin: "sha256-pin" } },
+            }
+          : undefined,
+      get: async (keyId) => (keyId === "key" ? keyPair : undefined),
+    });
+    return { signer, keyPair };
+  }
+
+  it("signs the exact admission text for the host the origin is paired with", async () => {
+    const { signer, keyPair } = await signerFor(HOST);
+    const payload = `octant/relay/v1|${CHALLENGE}|${HOST}|${HUB}`;
+    const answer = await signer({ origin: ORIGIN, payload });
+    if (answer === undefined) throw new Error("Nothing was signed.");
+    const signature = Uint8Array.from(
+      atob(answer.signature.replaceAll("-", "+").replaceAll("_", "/")),
+      (character) => character.charCodeAt(0),
+    );
+    expect(
+      await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        keyPair.publicKey,
+        signature,
+        new TextEncoder().encode(payload),
+      ),
+    ).toBe(true);
+    expect(answer.deviceSpki).toMatch(/^[A-Za-z0-9_-]{80,}$/);
+  });
+
+  it("refuses any other text, another host, or an origin it holds no key for", async () => {
+    const { signer } = await signerFor(HOST);
+    for (const request of [
+      { origin: ORIGIN, payload: "POST\n/api/remote/auth/session\n{}" },
+      { origin: ORIGIN, payload: `octant/relay/v1|${CHALLENGE}|${HOST}|${HUB}|extra` },
+      { origin: ORIGIN, payload: `octant/relay/v1|${CHALLENGE}|${HUB}|${HUB}` },
+      {
+        origin: "https://other.tail1234.ts.net:8443",
+        payload: `octant/relay/v1|${CHALLENGE}|${HOST}|${HUB}`,
+      },
+      {
+        origin: ORIGIN,
+        payload: { toString: () => `octant/relay/v1|${CHALLENGE}|${HOST}|${HUB}` },
+      },
+    ]) {
+      expect(await signer(request), JSON.stringify(request.payload)).toBeUndefined();
     }
   });
 });

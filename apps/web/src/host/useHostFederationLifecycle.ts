@@ -19,6 +19,10 @@ import {
   createDefaultDeviceKeyStore,
   type RemoteDeviceKeyStore,
 } from "@octant/client-runtime/remote-pairing-client";
+import {
+  createRelayAdmissionSigner,
+  learnRelayAddresses,
+} from "@octant/client-runtime/paired-host-relay";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
 import { syncHubComputersInWindow, withHubComputerDismissals } from "./hubWindowComputers";
@@ -26,6 +30,8 @@ import { createPairedComputerFetch } from "./pairedComputerFetch";
 
 /** How often a window on a hub member reads the hub's members again, so one the hub drops leaves. */
 const HUB_COMPUTERS_REFRESH_MS = 5 * 60 * 1_000;
+/** The least time between two rounds of asking paired computers where their hub's relay is. */
+const RELAY_LEARN_SPACING_MS = 30_000;
 
 /**
  * Boot the shared Post-preview B6 lifecycle stack for Settings / shell chrome.
@@ -50,6 +56,7 @@ export function useHostFederationLifecycle(
     | "forgetPairedComputer"
     | "requestPairedComputer"
     | "introduceWindowToHub"
+    | "answerPairedComputerRelaySigning"
   >,
 ): HostFederationStack | undefined {
   const [stack, setStack] = useState<HostFederationStack | undefined>();
@@ -136,17 +143,46 @@ export function useHostFederationLifecycle(
         removeHost: (hostId) => rosterLifecycle.removeLocal(hostId),
       }).catch(() => undefined);
     };
+    // In the desktop app each paired computer tells main where its hub's relay
+    // is, answering only at home; main keeps the address from that answer, so
+    // the window keeps nothing. A browser never relays and never asks.
+    let learnedAt = 0;
+    const learnRelays = async (): Promise<void> => {
+      if (requestComputer.current === undefined) return;
+      // A computer that connects later is asked too, at most twice a minute.
+      if (Date.now() - learnedAt < RELAY_LEARN_SPACING_MS) return;
+      learnedAt = Date.now();
+      await learnRelayAddresses({
+        transports: built.transports,
+        remember: () => undefined,
+      }).catch(() => undefined);
+    };
     void built.lifecycle.sync().then(() => {
       if (cancelled) return;
       setStack(stackOnly);
       void syncHubComputers();
+      void learnRelays();
     });
-    const refresh = setInterval(() => void syncHubComputers(), HUB_COMPUTERS_REFRESH_MS);
+    const refresh = setInterval(() => {
+      void syncHubComputers();
+      void learnRelays();
+    }, HUB_COMPUTERS_REFRESH_MS);
+    const stopLearning = built.transports.subscribe(() => void learnRelays());
     return () => {
       cancelled = true;
       clearInterval(refresh);
+      stopLearning();
     };
   }, [built]);
+
+  // The window answers main's request to sign a relay admission, and only
+  // that: the signer refuses any text but the exact admission for the
+  // computer its key is paired with.
+  const answerRelaySigning = hostBridge?.answerPairedComputerRelaySigning;
+  useEffect(() => {
+    if (built === undefined || answerRelaySigning === undefined) return;
+    return answerRelaySigning(createRelayAdmissionSigner(built.deviceKeyStore));
+  }, [built, answerRelaySigning]);
 
   return stack;
 }

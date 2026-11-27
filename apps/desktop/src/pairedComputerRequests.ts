@@ -17,8 +17,29 @@
 //     and an oversized or slow reply fails instead of buffering.
 //
 // A computer forgotten while a request is in flight answers nothing.
+//
+// Away from the private network, a computer this app chose to reach through
+// its hub is reached through the hub's relay instead (decision H36): only
+// when the direct connection failed before sending anything, and only with
+// the relay address the computer told this app at home. Main runs the relay
+// and its TLS, held to the same pin; the window signs the hub's admission,
+// and nothing else, with its device key.
 
-import { createListenerFetch } from "@octant/client-runtime/remote-listener-tls-node";
+import {
+  createListenerFetch,
+  createRelayedListenerFetch,
+  type ListenerFetch,
+} from "@octant/client-runtime/remote-listener-tls-node";
+import {
+  REMOTE_RELAY_ADDRESS_PATH,
+  createRelayFallbackFetch,
+  relayAddressFromResponse,
+  relayRouteFor,
+} from "@octant/client-runtime/paired-host-relay";
+import type {
+  ListenerRelayRoute,
+  RelayAdmissionSignature,
+} from "@octant/client-runtime/relay-tunnel";
 import { MAX_CODE_ATTACHMENT_BYTES } from "@octant/contracts/code";
 import { MAX_WORK_ATTACHMENT_BYTES } from "@octant/contracts";
 import {
@@ -64,6 +85,8 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "POST", path: "/api/remote/auth/session" },
   { method: "POST", path: "/api/remote/auth/server-proxy-session" },
   { method: "GET", path: "/api/remote/auth/device" },
+  // Where the computer's hub relay is; the computer answers it only at home.
+  { method: "GET", path: REMOTE_RELAY_ADDRESS_PATH },
   { method: "POST", path: "/api/remote/auth/sign-out" },
   { method: "POST", path: "/api/remote/auth/rotate-key" },
   { method: "POST", path: "/api/remote/auth/revoke-self" },
@@ -212,6 +235,17 @@ export async function requestPairedComputer(input: {
   readonly pins: PairedComputerPins;
   /** The Node transport; replaced only by tests. */
   readonly fetchFor?: (origin: string, trust: ListenerOriginTrust) => typeof globalThis.fetch;
+  /**
+   * Signs a relay admission with the device key of the window that asked;
+   * absent, this request never relays.
+   */
+  readonly admitRelay?: (origin: string, payload: string) => Promise<RelayAdmissionSignature>;
+  /** The Node relay transport; replaced only by tests. */
+  readonly relayedFetchFor?: (
+    origin: string,
+    trust: ListenerOriginTrust,
+    route: ListenerRelayRoute,
+  ) => ListenerFetch;
 }): Promise<PairedComputerAnswer> {
   const decoded = decodeRequest(input.request, input.pins);
   if (decoded.status === "refused") return decoded;
@@ -237,10 +271,60 @@ export async function requestPairedComputer(input: {
                 input.pins.rememberTrust(o, previous, next),
             }),
       }));
+  const onTrust =
+    input.pins.pinFor(origin) === undefined
+      ? undefined
+      : (previous: ListenerOriginTrust, next: ListenerOriginTrust) =>
+          input.pins.rememberTrust(origin, previous, next);
+  const relayedFetchFor =
+    input.relayedFetchFor ??
+    ((o: string, t: ListenerOriginTrust, route: ListenerRelayRoute) =>
+      createRelayedListenerFetch({
+        origin: o,
+        trust: t,
+        relay: route,
+        ...(hostId === undefined ? {} : { hostId }),
+        ...(onTrust === undefined ? {} : { onTrust }),
+      }));
+  let relayed = false;
+  const admitRelay = input.admitRelay;
+  // A pairing never relays: the computer refuses pairing through its hub, and
+  // a computer not yet recorded has no relay choice. The hello does: it is a
+  // live session's first call as much as a pairing's.
+  const pathname = new URL(path, origin).pathname;
+  const neverRelayed =
+    input.pins.pinFor(origin) === undefined ||
+    pathname === "/api/remote/pairing" ||
+    pathname.startsWith("/api/remote/pairing/");
+  const transport =
+    neverRelayed || admitRelay === undefined || hostId === undefined
+      ? fetchFor(origin, trust)
+      : createRelayFallbackFetch({
+          direct: fetchFor(origin, trust),
+          relayed: () => {
+            const route = relayRouteFor({
+              choice: input.pins.relayFor(origin),
+              signer: {
+                targetMemberId: hostId,
+                admit: (payload) => admitRelay(origin, payload),
+              },
+            });
+            if (route === undefined) return undefined;
+            const through = relayedFetchFor(
+              origin,
+              input.pins.trustFor(origin, false) ?? trust,
+              route,
+            );
+            return (url, init) => {
+              relayed = true;
+              return through(url, init);
+            };
+          },
+        });
   const signal = AbortSignal.timeout(PAIRED_COMPUTER_REQUEST_LIMITS.timeoutMs);
   let response: Response;
   try {
-    response = await fetchFor(origin, trust)(`${origin}${path}`, {
+    response = await transport(`${origin}${path}`, {
       method,
       headers,
       body: body ?? null,
@@ -272,6 +356,13 @@ export async function requestPairedComputer(input: {
     return { status: "refused", message: NOT_PAIRED };
   if (read === undefined) {
     return { status: "unreachable", message: "That computer's answer was too large or too slow." };
+  }
+  // The relay address is kept only from the computer's own answer at home.
+  if (!relayed && method === "GET" && path === REMOTE_RELAY_ADDRESS_PATH) {
+    const learned = await relayAddressFromResponse(
+      new Response(new Uint8Array(read), { status: response.status }),
+    );
+    if (learned !== "unchanged") input.pins.rememberRelayAddress(origin, learned);
   }
   const answered: Array<readonly [string, string]> = [];
   response.headers.forEach((value, name) => {

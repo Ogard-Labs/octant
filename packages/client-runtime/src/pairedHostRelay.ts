@@ -14,7 +14,13 @@ import {
   isRelayUrl,
   type RelayAddress,
 } from "@octant/contracts";
-import type { ListenerRelayRoute } from "./relayTunnel";
+import {
+  parseRelayAdmissionPayload,
+  type ListenerRelayRoute,
+  type RelayAdmissionSignature,
+} from "./relayTunnel";
+import type { RemoteDeviceKeyStore } from "./remotePairingClient";
+import type { HostFederationTransports } from "./hostFederationTransports";
 import { ListenerUnreachable } from "./remoteListenerTrust";
 
 export interface PairedHostRelayChoice {
@@ -71,6 +77,29 @@ export async function relayAddressFromResponse(
 
 export { REMOTE_RELAY_ADDRESS_PATH };
 
+/**
+ * Asks every connected paired host where its hub's relay is, and hands each
+ * answer to `remember`. A host reached through the relay refuses the route,
+ * which leaves what was kept unchanged, so the address is learned only at
+ * home. One host failing never stops the others.
+ */
+export async function learnRelayAddresses(input: {
+  readonly transports: Pick<HostFederationTransports, "list" | "remoteTransportFor">;
+  readonly remember: (origin: string, address: RelayAddress | undefined) => void | Promise<void>;
+}): Promise<void> {
+  await Promise.allSettled(
+    input.transports.list().map(async (slot) => {
+      const origin = slot.origin;
+      const transport = input.transports.remoteTransportFor(slot.hostId);
+      if (origin === undefined || transport === undefined) return;
+      const learned = await relayAddressFromResponse(
+        await transport.authenticatedFetch({ method: "GET", path: REMOTE_RELAY_ADDRESS_PATH }),
+      );
+      if (learned !== "unchanged") await input.remember(origin, learned);
+    }),
+  );
+}
+
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 /** How long a device that found its host unreachable goes to the relay first before trying home again. */
@@ -92,8 +121,8 @@ export function createRelayFallbackFetch(input: {
   const now = input.now ?? Date.now;
   let awayUntil = 0;
   return async (request, init) => {
-    const relayed = input.relayed();
-    if (relayed !== undefined && now() < awayUntil) {
+    const relayed = now() < awayUntil ? input.relayed() : undefined;
+    if (relayed !== undefined) {
       try {
         return await relayed(request, init);
       } catch (error) {
@@ -112,4 +141,44 @@ export function createRelayFallbackFetch(input: {
       return response;
     }
   };
+}
+
+/**
+ * The device key's side of a relay admission, for the process that holds the
+ * key (the desktop window, the phone). It signs only text that reads exactly
+ * as `octant/relay/v1|<challenge>|<host>|<hub>`, only for the origin it is
+ * asked about, and only when that origin's pairing is with the host the text
+ * names; anything else is undefined and nothing is signed. The key never
+ * leaves: the answer is the signature and the key's public SPKI.
+ */
+export function createRelayAdmissionSigner(
+  store: Pick<RemoteDeviceKeyStore, "findByOrigin" | "get">,
+): (request: {
+  readonly origin: unknown;
+  readonly payload: unknown;
+}) => Promise<RelayAdmissionSignature | undefined> {
+  return async (request) => {
+    const parsed = parseRelayAdmissionPayload(request.payload);
+    if (parsed === undefined || typeof request.origin !== "string") return undefined;
+    const record = await store.findByOrigin(request.origin);
+    if (record === undefined || String(record.hostId) !== parsed.targetMemberId) return undefined;
+    const keyPair = await store.get(record.keyId);
+    if (keyPair === undefined) return undefined;
+    const signature = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      keyPair.privateKey,
+      new TextEncoder().encode(request.payload as string),
+    );
+    const spki = await crypto.subtle.exportKey("spki", keyPair.publicKey);
+    return {
+      signature: base64Url(new Uint8Array(signature)),
+      deviceSpki: base64Url(new Uint8Array(spki)),
+    };
+  };
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }

@@ -4,6 +4,7 @@ import { failureMessage } from "../lib/failureMessage";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
 import type { PairedComputer, PairedComputersBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
@@ -57,6 +58,19 @@ export function PairedComputersSettingsSection({
       });
     }
   }, [bridge]);
+
+  // Off by default and kept by this app alone: the computer's own person
+  // still decides whether this device may come through its hub at all.
+  const chooseRelay = useCallback(
+    async (computer: PairedComputer, enabled: boolean) => {
+      const changed = await bridge.setPairedComputerRelay?.(computer.origin, enabled);
+      if (changed !== true) {
+        setMessage({ kind: "error", text: "Octant couldn't change that choice." });
+      }
+      await refresh();
+    },
+    [bridge, refresh],
+  );
 
   useEffect(() => {
     void refresh();
@@ -149,6 +163,15 @@ export function PairedComputersSettingsSection({
     return host.state === "ready" ? "Connected" : "Not connected right now";
   };
 
+  // Said only once the person turned the choice on, so the row stays quiet otherwise.
+  const relayNote = (computer: PairedComputer): string => {
+    const relay = computer.relayThroughHub;
+    if (relay?.enabled !== true) return "";
+    return relay.addressKnown
+      ? " · Away, Octant reaches it through its hub."
+      : " · It hasn't told Octant where its hub is yet. Connect once at home.";
+  };
+
   return (
     <SettingsSection title="Other computers">
       <div className="setgroup">
@@ -208,13 +231,20 @@ export function PairedComputersSettingsSection({
         )}
         {computers.map((computer) => (
           <SettingRow
-            description={`${computer.origin} · ${connectionNote(computer)}`}
+            description={`${computer.origin} · ${connectionNote(computer)}${relayNote(computer)}`}
             key={computer.origin}
             label={computer.displayName}
             scope="app"
             settingId={`paired-computer-${computer.origin}`}
           >
             <div className="host-settings__controls">
+              {bridge.setPairedComputerRelay === undefined ? null : (
+                <OctantSwitch
+                  checked={computer.relayThroughHub?.enabled === true}
+                  label={`Reach ${computer.displayName} through the hub when away`}
+                  onCheckedChange={(enabled) => void chooseRelay(computer, enabled)}
+                />
+              )}
               <OctantButton
                 aria-haspopup="dialog"
                 aria-label={`Forget ${computer.displayName}`}

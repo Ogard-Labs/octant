@@ -56,6 +56,8 @@ import type {
   PairedComputerAnswer,
   PairedComputerOutcome,
   PairedComputerRequest,
+  PairedComputerRelaySignature,
+  PairedComputerRelaySigningRequest,
   PrivateListenerEnableRequest,
   PrivateListenerPublicStatus,
   ProjectRootPickerResult,
@@ -191,6 +193,22 @@ export interface PairedComputersBridge {
     outcome: "approved" | "abandoned",
   ) => Promise<SettlePairedComputerOutcome>;
   readonly requestPairedComputer: (request: PairedComputerRequest) => Promise<PairedComputerAnswer>;
+  /** This app's choice to reach a computer through its hub when away; absent where the app cannot relay. */
+  readonly setPairedComputerRelay?: PairedComputerRelayBridge["setPairedComputerRelay"];
+}
+
+/**
+ * This desktop app's own choice to reach a paired computer through its hub
+ * when away, and the window's part in it: main relays, and asks this window,
+ * which holds the device key, to sign the hub's admission. A browser has none.
+ */
+export interface PairedComputerRelayBridge {
+  readonly setPairedComputerRelay: (origin: string, enabled: boolean) => Promise<boolean>;
+  readonly answerPairedComputerRelaySigning: (
+    sign: (
+      request: PairedComputerRelaySigningRequest,
+    ) => Promise<PairedComputerRelaySignature | undefined>,
+  ) => () => void;
 }
 
 /**
@@ -239,6 +257,9 @@ function pairedComputersFrom(bridge: OctantHostBridge): PairedComputersBridge | 
     forgetPairedComputer: bridge.forgetPairedComputer,
     settlePairedComputer: bridge.settlePairedComputer,
     requestPairedComputer: bridge.requestPairedComputer,
+    ...(bridge.setPairedComputerRelay === undefined
+      ? {}
+      : { setPairedComputerRelay: bridge.setPairedComputerRelay }),
   };
 }
 
@@ -476,6 +497,7 @@ export interface OctantHostBridge
     EmbeddedBrowserBridge,
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
+    Partial<PairedComputerRelayBridge>,
     Partial<HubComputersBridge>,
     Partial<HubAdministrationBridge>,
     Partial<AgentAccessAdministrationBridge>,

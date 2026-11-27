@@ -457,6 +457,32 @@ export interface RemoteCredentialOperationReceipt {
 export interface PairedComputer {
   readonly origin: string;
   readonly displayName: string;
+  /**
+   * This app's own choice to reach that computer through its hub when away,
+   * off until the person turns it on, and whether the computer has told this
+   * app where its hub's relay is.
+   */
+  readonly relayThroughHub?: PairedComputerRelayChoice;
+}
+
+export interface PairedComputerRelayChoice {
+  readonly enabled: boolean;
+  readonly addressKnown: boolean;
+}
+
+/**
+ * Main asks the window that holds the device key to sign one relay admission
+ * for one paired computer; the window signs only the exact admission text.
+ */
+export interface PairedComputerRelaySigningRequest {
+  readonly requestId: string;
+  readonly origin: string;
+  readonly payload: string;
+}
+
+export interface PairedComputerRelaySignature {
+  readonly signature: string;
+  readonly deviceSpki: string;
 }
 
 export type ForgetPairedComputerOutcome =

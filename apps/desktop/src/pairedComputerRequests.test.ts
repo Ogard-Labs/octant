@@ -2,8 +2,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { ListenerTrustRefused } from "@octant/client-runtime/remote-listener-trust";
-import { MAX_WORK_ATTACHMENT_BYTES } from "@octant/contracts";
+import {
+  ListenerTrustRefused,
+  ListenerUnreachable,
+} from "@octant/client-runtime/remote-listener-trust";
+import { MAX_WORK_ATTACHMENT_BYTES, decodeRelayAddress } from "@octant/contracts";
 import { MAX_CODE_ATTACHMENT_BYTES } from "@octant/contracts/code";
 import {
   installPairedComputerIpcHandlers,
@@ -300,6 +303,7 @@ describe("a window's request to a paired computer", () => {
         "POST /api/remote/auth/session",
         "POST /api/remote/auth/server-proxy-session",
         "GET /api/remote/auth/device",
+        "GET /api/remote/relay-address",
         "POST /api/remote/auth/sign-out",
         "POST /api/remote/auth/rotate-key",
         "POST /api/remote/auth/revoke-self",
@@ -724,5 +728,145 @@ describe("the request channel", () => {
     trusted = true;
     const answer = (await handler?.({}, hello)) as PairedComputerAnswer;
     expect(answer.status).toBe("answered");
+  });
+});
+
+describe("reaching a paired computer through its hub when away", () => {
+  const HOST = "22222222-2222-4222-8222-222222222222";
+  const HUB = "11111111-1111-4111-8111-111111111111";
+  const RELAY_URL = "wss://hub.example.com/relay/v1";
+  const ADMISSION = { signature: "s".repeat(86), deviceSpki: "k".repeat(91) };
+
+  function pinsWithHost(): PairedComputerPins {
+    const pins = new PairedComputerPins(join(mkdtempSync(join(directory, "pins-")), "pins.json"));
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: PIN, hostId: HOST });
+    return pins;
+  }
+
+  function away() {
+    const direct = vi.fn<typeof globalThis.fetch>(async () => {
+      throw new ListenerUnreachable();
+    });
+    const relayed = vi.fn<typeof globalThis.fetch>(async () => Response.json({ relayed: true }));
+    const routes: Array<{ url: string; targetMemberId: string; hubMemberId?: string }> = [];
+    const admitted: string[] = [];
+    return {
+      direct,
+      relayed,
+      routes,
+      admitted,
+      options: (pins: PairedComputerPins) => ({
+        pins,
+        fetchFor: () => direct,
+        admitRelay: async (_origin: string, payload: string) => {
+          admitted.push(payload);
+          return ADMISSION;
+        },
+        relayedFetchFor: (
+          _origin: string,
+          _trust: unknown,
+          route: { url: string; targetMemberId: string; hubMemberId?: string },
+        ) => {
+          routes.push({
+            url: route.url,
+            targetMemberId: route.targetMemberId,
+            ...(route.hubMemberId === undefined ? {} : { hubMemberId: route.hubMemberId }),
+          });
+          return relayed;
+        },
+      }),
+    };
+  }
+
+  it("learns the relay address from the computer's own answer at home", async () => {
+    const pins = pinsWithHost();
+    const answer = await requestPairedComputer({
+      request: { origin: ORIGIN, method: "GET", path: "/api/remote/relay-address" },
+      pins,
+      fetchFor: () => async () =>
+        Response.json({ status: "available", hubMemberId: HUB, relayUrl: RELAY_URL }),
+    });
+    expect(answer.status).toBe("answered");
+    expect(pins.relayFor(ORIGIN)).toEqual({
+      enabled: false,
+      address: { hubMemberId: HUB, relayUrl: RELAY_URL },
+    });
+    expect(pins.list()[0]?.relayThroughHub).toEqual({ enabled: false, addressKnown: true });
+  });
+
+  it("never relays while this app's choice for that computer is off", async () => {
+    const pins = pinsWithHost();
+    pins.rememberRelayAddress(
+      ORIGIN,
+      decodeRelayAddress({ hubMemberId: HUB, relayUrl: RELAY_URL }),
+    );
+    const scene = away();
+    const answer = await requestPairedComputer({ request: hello, ...scene.options(pins) });
+    expect(answer.status).toBe("unreachable");
+    expect(scene.relayed).not.toHaveBeenCalled();
+    expect(scene.admitted).toEqual([]);
+  });
+
+  it("relays through the hub the computer named once the choice is on and home is out of reach", async () => {
+    const pins = pinsWithHost();
+    pins.rememberRelayAddress(
+      ORIGIN,
+      decodeRelayAddress({ hubMemberId: HUB, relayUrl: RELAY_URL }),
+    );
+    expect(pins.setRelayChoice(ORIGIN, true)).toBe(true);
+    const scene = away();
+    const answer = await requestPairedComputer({ request: hello, ...scene.options(pins) });
+    expect(answer.status).toBe("answered");
+    expect(scene.direct).toHaveBeenCalledTimes(1);
+    expect(scene.relayed).toHaveBeenCalledTimes(1);
+    expect(scene.routes).toEqual([{ url: RELAY_URL, targetMemberId: HOST, hubMemberId: HUB }]);
+  });
+
+  it("keeps no address from an answer that came through the relay, and none from a refusal", async () => {
+    const pins = pinsWithHost();
+    pins.rememberRelayAddress(
+      ORIGIN,
+      decodeRelayAddress({ hubMemberId: HUB, relayUrl: RELAY_URL }),
+    );
+    pins.setRelayChoice(ORIGIN, true);
+    const scene = away();
+    scene.relayed.mockImplementation(async () =>
+      Response.json({ status: "available", hubMemberId: HUB, relayUrl: "wss://other/relay/v1" }),
+    );
+    await requestPairedComputer({
+      request: { origin: ORIGIN, method: "GET", path: "/api/remote/relay-address" },
+      ...scene.options(pins),
+    });
+    expect(pins.relayFor(ORIGIN)?.address?.relayUrl).toBe(RELAY_URL);
+  });
+
+  it("never relays a pairing request", async () => {
+    const pins = pinsWithHost();
+    pins.rememberRelayAddress(
+      ORIGIN,
+      decodeRelayAddress({ hubMemberId: HUB, relayUrl: RELAY_URL }),
+    );
+    pins.setRelayChoice(ORIGIN, true);
+    const scene = away();
+    await requestPairedComputer({
+      request: { origin: ORIGIN, method: "POST", path: "/api/remote/pairing", body: "{}" },
+      ...scene.options(pins),
+    });
+    expect(scene.relayed).not.toHaveBeenCalled();
+  });
+
+  it("keeps the choice and the address across a restart", () => {
+    const path = join(mkdtempSync(join(directory, "pins-")), "pins.json");
+    const pins = new PairedComputerPins(path);
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: PIN, hostId: HOST });
+    pins.rememberRelayAddress(
+      ORIGIN,
+      decodeRelayAddress({ hubMemberId: HUB, relayUrl: RELAY_URL }),
+    );
+    pins.setRelayChoice(ORIGIN, true);
+    expect(new PairedComputerPins(path).relayFor(ORIGIN)).toEqual({
+      enabled: true,
+      address: { hubMemberId: HUB, relayUrl: RELAY_URL },
+    });
   });
 });

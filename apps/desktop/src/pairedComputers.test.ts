@@ -269,6 +269,8 @@ describe("pairing with another computer from its code", () => {
       IPC_CHANNELS.pairedComputerSettle,
       IPC_CHANNELS.pairedComputerRequest,
       IPC_CHANNELS.pairedComputerIntroduceToHub,
+      IPC_CHANNELS.pairedComputerRelayChoice,
+      IPC_CHANNELS.pairedComputerRelaySigned,
     ]);
     expect(Object.values(PAIRED_COMPUTER_CHANNELS)).toEqual([...handlers.keys()]);
     for (const channel of handlers.keys()) {
