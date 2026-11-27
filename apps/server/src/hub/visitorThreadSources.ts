@@ -44,21 +44,33 @@ export function codeVisitorState(
   return activity.executing === true ? "working" : "idle";
 }
 
+/** A Chat turn's latest attempt, as the visitor's state reads it. */
+export type ChatLatestAttempt = {
+  readonly outcome: ChatAttemptOutcome;
+  /** The attempt is parked on its account's usage limit, not on a question. */
+  readonly usageLimitStop: boolean;
+};
+
 /**
  * A Chat thread's state as a visitor reads it, from each turn's latest attempt
  * in order. Regenerating an older reply adds its attempt to that older turn, so
- * a run still going on any turn counts, not only on the last. Only the last
- * turn can wait on the owner, and not once a move to another account released
- * its usage-limit stop: an older turn's stop is history once a newer turn ran.
+ * a run or a question on any turn counts, not only on the last. A usage-limit
+ * stop is different: it waits on the owner only while it is the last turn's
+ * and no move to another account released it; an older one is history.
  */
 export function chatVisitorState(
-  latestOutcomes: ReadonlyArray<ChatAttemptOutcome | undefined>,
+  latest: ReadonlyArray<ChatLatestAttempt | undefined>,
   lastStopReleased: boolean,
 ): VisitorThreadState {
-  if (latestOutcomes.some((outcome) => outcome === "queued" || outcome === "streaming")) {
+  if (latest.some((attempt) => attempt?.outcome === "queued" || attempt?.outcome === "streaming")) {
     return "working";
   }
-  return latestOutcomes.at(-1) === "waiting" && !lastStopReleased ? "owner-deciding" : "idle";
+  const deciding = latest.some((attempt, index) => {
+    if (attempt?.outcome !== "waiting") return false;
+    if (!attempt.usageLimitStop) return true;
+    return index === latest.length - 1 && !lastStopReleased;
+  });
+  return deciding ? "owner-deciding" : "idle";
 }
 
 function readCode(
@@ -145,7 +157,12 @@ function readChat(connection: SqliteConnection, threadId: string): VisitorThread
     title: view.thread.title,
     archived: view.thread.lifecycle === "archived",
     state: chatVisitorState(
-      turns.map((turn) => turn.attempts.at(-1)?.outcome),
+      turns.map((turn) => {
+        const attempt = turn.attempts.at(-1);
+        return attempt === undefined
+          ? undefined
+          : { outcome: attempt.outcome, usageLimitStop: attempt.usageLimit !== undefined };
+      }),
       parkedStopReleased(view.thread, lastAttemptId),
     ),
     messages: messages.slice(-MAX_MESSAGES),

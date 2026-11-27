@@ -61,7 +61,11 @@ describe("a pinned request to a listener that never answers the dial", () => {
 
 describe("the system network's dial", () => {
   it("closes a connection still being made when its attempt is aborted", async () => {
-    const server = createServer();
+    const accepted = new Set<Socket>();
+    const server = createServer((socket) => {
+      accepted.add(socket);
+      socket.once("close", () => accepted.delete(socket));
+    });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     try {
       const address = server.address();
@@ -70,13 +74,10 @@ describe("the system network's dial", () => {
       const dialled = SYSTEM_NETWORK.dial("127.0.0.1", address.port, attempt.signal);
       attempt.abort(new Error("gave up"));
       await expect(dialled).rejects.toThrow("gave up");
-      await vi.waitFor(async () => {
-        const open = await new Promise<number>((resolve, reject) =>
-          server.getConnections((error, count) => (error ? reject(error) : resolve(count))),
-        );
-        expect(open).toBe(0);
-      });
+      await vi.waitFor(() => expect(accepted.size).toBe(0));
     } finally {
+      // A dial that leaked its socket would otherwise hold close() open.
+      for (const socket of accepted) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
