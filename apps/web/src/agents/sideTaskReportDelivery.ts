@@ -8,6 +8,8 @@
  * delivered, and a payload that does not read stays raw rather than guessed.
  */
 export interface SideTaskReportBlock {
+  /** The thread that reported; absent on reports delivered before they named it. */
+  readonly childThreadId: string | undefined;
   readonly title: string;
   readonly outcome: "completed" | "failed" | "cancelled";
   /** The child's reply on a completion; absent on failure and cancellation. */
@@ -32,8 +34,9 @@ function isReportOutcome(value: unknown): value is SideTaskReportBlock["outcome"
 function parseReport(value: unknown): SideTaskReportBlock | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const record = value as Record<string, unknown>;
-  const { title, outcome, text, truncated } = record;
+  const { childThreadId, title, outcome, text, truncated } = record;
   if (
+    (childThreadId !== undefined && typeof childThreadId !== "string") ||
     typeof title !== "string" ||
     title.length === 0 ||
     title.length > MAX_TITLE_LENGTH ||
@@ -44,6 +47,7 @@ function parseReport(value: unknown): SideTaskReportBlock | undefined {
     return undefined;
   }
   return {
+    childThreadId,
     title,
     outcome,
     text: typeof text === "string" && text.length > 0 ? text : undefined,

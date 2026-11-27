@@ -1192,7 +1192,7 @@ Status: Partly built. Since: 2026-10-12. Detail: [Architecture: Modes: Chat, Wor
 A `#thread` mention is a bounded, read-only view of a thread the sender can already open. Side Chat is a Chat-mode sidecar about exactly one source thread.
 
 - A mention stores only thread ids, never titles, transcripts or authority (maintainer decision, 2026-11-25).
-- A side task's receipt and its report row open the started thread's card from the task's title while the window lists that thread, asking the host for nothing ([Thread view](thread-view.md#mentioning-a-thread-in-a-prompt)).
+- A side task's receipt and its report row open the started thread's card from the task's title while the window lists that thread, asking the host for nothing; a report row finds its thread only by the id the report carries, never by title ([Thread view](thread-view.md#mentioning-a-thread-in-a-prompt)).
 - The `#` list also offers pull requests and GitHub issues of the composer's Project repository and Linear issues of its mapped team (every connected team without a mapping), only through connections the host already holds, never prompting for one (maintainer request, 2026-11-27).
 - Mentioning one adds a plain link to the prompt and records its kind, source, id and URL with the turn for the chip; it reads nothing for the agent and grants nothing (maintainer decision, 2026-11-27; [Thread view](thread-view.md#mentioning-a-pull-request-or-issue-in-a-prompt)).
 - `@file` completes only paths inside the bound root. An `@` or `/` chip never installs, trusts, enables or elevates anything, and the host re-resolves it at send.

@@ -101,7 +101,7 @@ export class SideTaskReportStore {
    */
   owe(
     childThreadId: string,
-    report: Omit<SideTaskReportOwed, "reportId" | "owedAt">,
+    report: Omit<SideTaskReportOwed, "reportId" | "owedAt" | "childThreadId">,
   ): "owed" | "stopped" | "purged" {
     if (this.#purged.has(childThreadId) || this.#purged.has(String(report.parentThreadId)))
       return "purged";
@@ -109,6 +109,7 @@ export class SideTaskReportStore {
     const record = this.#record(childThreadId);
     const full = {
       ...report,
+      childThreadId,
       reportId: this.#uuid(),
       owedAt: decodeUtcTimestamp(this.#clock()),
     } as SideTaskReportOwed;

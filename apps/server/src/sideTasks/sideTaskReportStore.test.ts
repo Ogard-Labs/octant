@@ -6,6 +6,12 @@ import { Schema } from "effect";
 import {
   EventActor,
   THREAD_RETENTION_EVENT_NAMES,
+  THREAD_SIDE_TASK_REPORTS_AGGREGATE_TYPE,
+  THREAD_SIDE_TASK_REPORT_EVENT_NAMES,
+  AggregateId,
+  AggregateVersion,
+  CorrelationId,
+  EventId,
   ThreadRetentionThreadPurged,
 } from "@octant/contracts";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
@@ -102,6 +108,55 @@ describe("SideTaskReportStore", () => {
     expect(owed.map((entry) => entry.report.text)).toEqual(["First", "Second", "Sibling"]);
     expect(owed[2]?.childThreadId).toBe(sibling);
     expect(store.undeliveredForParent("00000000-0000-4000-8000-0000000000dd")).toHaveLength(0);
+  });
+
+  it("names the thread each report came from, past a restart", () => {
+    const connection = openConnection();
+    const store = storeOn(connection);
+    store.owe(child, completion("First"));
+    store.owe(sibling, completion("Sibling"));
+
+    expect(
+      storeOn(connection)
+        .undeliveredForParent(parent)
+        .map((entry) => entry.report.childThreadId),
+    ).toEqual([child, sibling]);
+  });
+
+  it("replays a report journaled before reports named their thread", () => {
+    const connection = openConnection();
+    journalOn(connection).append({
+      aggregate: {
+        aggregateType: THREAD_SIDE_TASK_REPORTS_AGGREGATE_TYPE,
+        aggregateId: Schema.decodeUnknownSync(AggregateId)(child),
+      },
+      expectedVersion: Schema.decodeUnknownSync(AggregateVersion)(0),
+      events: [
+        {
+          eventId: Schema.decodeUnknownSync(EventId)("00000000-0000-4000-8000-00000000e001"),
+          eventName: THREAD_SIDE_TASK_REPORT_EVENT_NAMES.owed,
+          eventVersion: 1,
+          correlationId: Schema.decodeUnknownSync(CorrelationId)(
+            "00000000-0000-4000-8000-00000000e002",
+          ),
+          actor,
+          occurredAt: now,
+          payload: {
+            reportId: "00000000-0000-4000-8000-00000000e003",
+            parentThreadId: parent,
+            parentMode: "chat",
+            title: "Fix stale install docs",
+            outcome: "failed",
+            endedAt: now,
+            owedAt: now,
+          },
+        },
+      ],
+    });
+
+    const [entry] = storeOn(connection).undeliveredForParent(parent);
+    expect(entry?.report.title).toBe("Fix stale install docs");
+    expect(entry?.report.childThreadId).toBeUndefined();
   });
 
   it("owes nothing while reporting is stopped, and owes again once resumed", () => {

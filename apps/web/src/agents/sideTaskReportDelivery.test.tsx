@@ -1,8 +1,8 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { SideTask } from "@octant/contracts";
+import { decodeSideTaskOffer, type SideTask } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { SideTaskProvider } from "../followUps/SideTaskCards";
+import { SideTaskProvider, type SideTaskProviderProps } from "../followUps/SideTaskCards";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { listsOf } from "../threadReferences/threadReferenceLists.test-support";
 import { ThreadReferencesContext } from "../threadReferences/ThreadReferences";
@@ -31,6 +31,7 @@ describe("side-task report delivery", () => {
     ).toEqual([
       {
         kind: "report",
+        childThreadId: undefined,
         title: "Fix stale install docs",
         outcome: "completed",
         text: "The README now names scripts/setup.ts.",
@@ -65,6 +66,7 @@ describe("side-task report delivery", () => {
     ).toEqual([
       {
         kind: "report",
+        childThreadId: undefined,
         title: "Migrate the settings store",
         outcome: "failed",
         text: undefined,
@@ -92,6 +94,7 @@ describe("side-task report delivery", () => {
     ).toEqual([
       {
         kind: "report",
+        childThreadId: undefined,
         title: "Fix stale install docs",
         outcome: "completed",
         text: "Docs updated.",
@@ -99,6 +102,7 @@ describe("side-task report delivery", () => {
       },
       {
         kind: "report",
+        childThreadId: undefined,
         title: "Migrate the settings store",
         outcome: "cancelled",
         text: undefined,
@@ -139,6 +143,7 @@ describe("SideTaskReportCards", () => {
 });
 
 describe("the thread a report came from", () => {
+  const parentThreadId = "00000000-0000-4000-8000-000000000020";
   const child: ChatThreadNavigationItem = {
     threadId: "00000000-0000-4000-8000-000000000099",
     title: "Install docs thread",
@@ -149,28 +154,64 @@ describe("the thread a report came from", () => {
     provider: { displayName: "Claude", driverKind: "claude" },
     modelId: "claude-opus-5-5",
   };
+  const namesake: ChatThreadNavigationItem = {
+    threadId: "00000000-0000-4000-8000-000000000098",
+    title: "Newer docs thread",
+    projectId: "project-1",
+  };
 
-  const startedTask = (startedThreadId: string) =>
-    ({
-      status: "started",
-      startedThreadId,
-      offer: { id: startedThreadId, title: "Fix stale install docs" },
-    }) as unknown as SideTask;
+  /** A newer started task of the same name, the only one the pane's capped list still holds. */
+  const namesakeTask: SideTask = {
+    status: "started",
+    startedThreadId: namesake.threadId,
+    offer: decodeSideTaskOffer({
+      id: "00000000-0000-4000-8000-000000000061",
+      threadId: parentThreadId,
+      mode: "code",
+      suggestedBy: {
+        providerInstanceId: "00000000-0000-4000-8000-000000000001",
+        modelId: "sonnet",
+      },
+      title: "Fix stale install docs",
+      reason: "The README still names the removed setup script.",
+      prompt: "Update README.md so the install steps match scripts/setup.ts.",
+      target: "new-thread",
+      offeredAt: "2026-11-24T12:00:00.000Z",
+    }),
+  };
+
+  const unused = async (): Promise<never> => {
+    throw new Error("Reading a report acts on no side task.");
+  };
+  const client: NonNullable<SideTaskProviderProps["client"]> = {
+    sideTasks: async () => ({ threadId: parentThreadId, tasks: [namesakeTask] }),
+    start: unused,
+    continueHere: unused,
+    dismiss: unused,
+    setReporting: unused,
+  };
 
   async function renderReport(options: {
-    readonly tasks: ReadonlyArray<SideTask>;
-    readonly listed?: boolean;
+    readonly childThreadId?: string;
+    readonly listed?: ReadonlyArray<ChatThreadNavigationItem>;
   }) {
     const onOpen = vi.fn();
-    const client = { sideTasks: vi.fn(async () => ({ threadId: "parent", tasks: options.tasks })) };
     render(
       <ThreadReferencesContext.Provider
-        value={listsOf({ code: options.listed === false ? [] : [child] }, onOpen)}
+        value={listsOf({ code: options.listed ?? [namesake, child] }, onOpen)}
       >
         <textarea aria-label="Prompt" />
-        <SideTaskProvider client={client as never} threadId="parent">
+        <SideTaskProvider client={client} threadId={parentThreadId}>
           <SideTaskReportCards
-            text={delivery([{ title: "Fix stale install docs", outcome: "completed" }])}
+            text={delivery([
+              {
+                title: "Fix stale install docs",
+                outcome: "completed",
+                ...(options.childThreadId === undefined
+                  ? {}
+                  : { childThreadId: options.childThreadId }),
+              },
+            ])}
           />
         </SideTaskProvider>
       </ThreadReferencesContext.Provider>,
@@ -181,7 +222,7 @@ describe("the thread a report came from", () => {
 
   it("shows the thread's card on hover without leaving the prompt, and opens it", async () => {
     const user = userEvent.setup();
-    const onOpen = await renderReport({ tasks: [startedTask(child.threadId)] });
+    const onOpen = await renderReport({ childThreadId: child.threadId });
     const prompt = screen.getByRole("textbox", { name: "Prompt" });
     await user.click(prompt);
 
@@ -208,7 +249,7 @@ describe("the thread a report came from", () => {
 
   it("opens the card on a press with its actions in reach", async () => {
     const user = userEvent.setup();
-    await renderReport({ tasks: [startedTask(child.threadId)] });
+    await renderReport({ childThreadId: child.threadId });
     const title = await screen.findByRole("button", { name: /^Thread: Fix stale install docs/ });
 
     act(() => title.focus());
@@ -222,14 +263,10 @@ describe("the thread a report came from", () => {
 
   it.each([
     [
-      "the window does not list the thread",
-      { tasks: [startedTask(child.threadId)], listed: false },
+      "the window does not list the thread that reported",
+      { childThreadId: child.threadId, listed: [namesake] },
     ],
-    ["no side task here started a thread by that name", { tasks: [] }],
-    [
-      "two side tasks of that name started threads",
-      { tasks: [startedTask(child.threadId), startedTask("00000000-0000-4000-8000-000000000098")] },
-    ],
+    ["the report was delivered before reports named their thread", {}],
   ])("keeps the title as text when %s", async (_reason, options) => {
     await renderReport(options);
 

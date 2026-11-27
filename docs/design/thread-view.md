@@ -585,9 +585,10 @@ A mention of a thread the window does not list, text no id
 claims, and a message sent before ids were stored stay the text they were. A
 side task's receipt and its "Report from side task" row open the same card from
 the task's title, for the thread it started, while the window lists that
-thread. As on a sent chip, no line says what a turn reads. A report names its
-task by title alone, so a row whose title two of the thread's side tasks
-started threads under stays text.
+thread. As on a sent chip, no line says what a turn reads. A report carries the
+id of the thread that reported, so side tasks sharing a title never stand in for
+one another; a report delivered before it carried one stays text. A Zen thread
+card offers the same card, and Open thread there leaves Zen for the thread.
 
 Rejected: opening the thread on a press, which would leave a half-written prompt
 by accident and leave touch with no way to the card.
