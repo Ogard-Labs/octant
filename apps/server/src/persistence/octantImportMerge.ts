@@ -372,8 +372,13 @@ export function mergeOctantSnapshot(input: {
     contentRows: contentRows + copied.contentRows,
     settled: input.settled,
   };
+  // A mirror stream withheld for its folder is recorded even over an
+  // imported prefix: the revisions held are older than the next import's
+  // mark, so only this record brings them back once Octant's setting no
+  // longer names a folder. They then land only where Nightly's stream is
+  // still exactly the imported prefix, which the version check enforces.
   const heldBack = [...held.entries()]
-    .filter(([key]) => !nightlySpans.has(key))
+    .filter(([key]) => !nightlySpans.has(key) || folderMirrorStreams.has(key))
     .map(([, entry]) => entry);
   // Copies are never Code threads, so only threads appended under their own ids are listed.
   const codeThreadIds = [...importedThreads]

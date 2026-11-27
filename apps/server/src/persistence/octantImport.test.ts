@@ -53,7 +53,7 @@ import {
   TRIGGER_MAINTAINED_TABLES,
 } from "./octantImportTables";
 import { readProject } from "./projectProjection";
-import { listPendingUsageResumes } from "./usageResumeProjection";
+import { listPendingUsageResumes, readUsageResumeState } from "./usageResumeProjection";
 import { THREAD_RETENTION_AGGREGATE_ID } from "./threadRetentionProjection";
 import { readDeviceRegistrations, readHostIdentity } from "./remoteAccessProjection";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
@@ -334,6 +334,36 @@ function mirrorFallbackIn(folder: string): unknown {
   const events = eventsIn(folder, "artifact-mirror", MIRROR_SETTINGS_ID);
   const settings = events.at(-1)?.payload.settings as { readonly fallback?: unknown } | undefined;
   return settings?.fallback;
+}
+
+function codeThreadPayload(id: string) {
+  return {
+    kind: "thread-created",
+    thread: {
+      id,
+      projectId: ids.project,
+      bindingRevisionId: "0c7a0000-0000-4000-8000-000000000d01",
+      repositoryId: `repo_${"a".repeat(64)}`,
+      checkoutId: "0c7a0000-0000-4000-8000-000000000d02",
+      title: "Code thread",
+      lifecycle: "active",
+      providerInstanceId: provider,
+      modelId: "model-a",
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+      deliveryTarget: {
+        branchIntent: "feature",
+        remoteName: "origin",
+        proposedBaseRepository: "octant-dev/octant",
+        proposedBaseBranch: "main",
+        outcomeKind: "merged-pr",
+        confirmedAt: now,
+      },
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    },
+  };
 }
 
 describe("importing Octant's data into Nightly", () => {
@@ -1295,6 +1325,180 @@ describe("importing Octant's data into Nightly", () => {
       version: 5,
       usageResume: { status: "invalidated" },
     });
+    merged.close();
+  });
+
+  it("brings Octant's repository mirror setting after it was held for a folder over an imported one", () => {
+    const paths = folders();
+    let octant = openStore(paths.octant);
+    setMirror(octant, { kind: "project-repository", relativeDirectory: "docs/old" }, 1);
+    octant.close();
+    imported(runImport(paths));
+    octant = openStore(paths.octant);
+    setMirror(
+      octant,
+      { kind: "global-folder", canonicalRoot: "/Users/someone/Octant/Artifacts" },
+      2,
+    );
+    octant.close();
+    expect(imported(runImport(paths)).kept).toEqual([
+      { aggregateType: "artifact-mirror", aggregateId: MIRROR_SETTINGS_ID },
+    ]);
+    octant = openStore(paths.octant);
+    setMirror(octant, { kind: "project-repository", relativeDirectory: "docs/new" }, 3);
+    octant.close();
+
+    const third = imported(runImport(paths));
+
+    expect(third.kept).toEqual([]);
+    expect(mirrorFallbackIn(paths.nightly)).toEqual({
+      kind: "project-repository",
+      relativeDirectory: "docs/new",
+    });
+  });
+
+  it("keeps Nightly's own mirror setting when Octant's comes back from a folder", () => {
+    const paths = folders();
+    let octant = openStore(paths.octant);
+    setMirror(octant, { kind: "project-repository", relativeDirectory: "docs/old" }, 1);
+    octant.close();
+    imported(runImport(paths));
+    octant = openStore(paths.octant);
+    setMirror(
+      octant,
+      { kind: "global-folder", canonicalRoot: "/Users/someone/Octant/Artifacts" },
+      2,
+    );
+    octant.close();
+    imported(runImport(paths));
+    const nightly = openStore(paths.nightly);
+    setMirror(nightly, { kind: "project-repository", relativeDirectory: "docs/mine" }, 2);
+    nightly.close();
+    octant = openStore(paths.octant);
+    setMirror(octant, { kind: "project-repository", relativeDirectory: "docs/new" }, 3);
+    octant.close();
+
+    const third = imported(runImport(paths));
+
+    expect(third.kept).toEqual([
+      { aggregateType: "artifact-mirror", aggregateId: MIRROR_SETTINGS_ID },
+    ]);
+    expect(mirrorFallbackIn(paths.nightly)).toEqual({
+      kind: "project-repository",
+      relativeDirectory: "docs/mine",
+    });
+  });
+
+  it("brings Work and Code threads waiting on a usage limit with their resumes settled, and takes Octant's next update for each later", () => {
+    const paths = folders();
+    const workThread = "0c7a0000-0000-4000-8000-000000000f01";
+    const codeThread = "0c7a0000-0000-4000-8000-000000000f02";
+    const workRow = (title: string, version: number) => ({
+      id: workThread,
+      projectId: ids.project,
+      title,
+      lifecycle: "active",
+      providerInstanceId: provider,
+      modelId: "model-a",
+      version,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const codeRow = (title: string, version: number) => ({
+      ...(codeThreadPayload(codeThread).thread as Record<string, unknown>),
+      title,
+      version,
+    });
+    const resetsAt = "2026-11-27T18:00:00.000Z";
+    const record = (threadId: string) => ({
+      threadId,
+      turnId: "0c7a0000-0000-4000-8000-000000000f11",
+      providerInstanceId: provider,
+      usageLimit: { kind: "exhausted", resetsAt },
+      resetsAt,
+      scheduledAt: now,
+    });
+    const event = (eventName: string, payload: unknown) => ({
+      eventId: randomUUID(),
+      eventName,
+      eventVersion: 1,
+      correlationId: randomUUID(),
+      actor,
+      occurredAt: now,
+      payload,
+    });
+    const rename = (store: Store, mode: "work" | "code", title: string) => {
+      const aggregateId = mode === "work" ? workThread : codeThread;
+      const head = store.connection
+        .prepare(
+          "SELECT max(aggregate_version) AS head FROM event_journal WHERE aggregate_type = ? AND aggregate_id = ?",
+        )
+        .get(`${mode}-thread`, aggregateId) as { readonly head: number };
+      const row = mode === "work" ? workRow(title, head.head + 1) : codeRow(title, head.head + 1);
+      store.journal.append({
+        aggregate: { aggregateType: `${mode}-thread`, aggregateId },
+        expectedVersion: head.head,
+        events: [event(`${mode}.thread-updated@1`, { kind: "thread-updated", thread: row })],
+      });
+    };
+    let octant = openStore(paths.octant);
+    append(octant, "work-thread", workThread, "work.thread-created@1", {
+      kind: "thread-created",
+      thread: workRow("Work waiting", 1),
+    });
+    append(
+      octant,
+      "code-thread",
+      codeThread,
+      "code.thread-created@1",
+      codeThreadPayload(codeThread),
+    );
+    for (const mode of ["work", "code"] as const) {
+      const aggregateId = mode === "work" ? workThread : codeThread;
+      const row = mode === "work" ? workRow("Work waiting", 3) : codeRow("Code thread", 3);
+      octant.journal.append({
+        aggregate: { aggregateType: `${mode}-thread`, aggregateId },
+        expectedVersion: 1,
+        events: [
+          event("usage-resume.scheduled@1", { resume: record(aggregateId) }),
+          event(`${mode}.thread-updated@1`, {
+            kind: "thread-updated",
+            thread: { ...row, usageResume: { record: record(aggregateId), status: "scheduled" } },
+          }),
+        ],
+      });
+    }
+    expect(listPendingUsageResumes(octant.connection)).toHaveLength(2);
+    octant.close();
+
+    imported(runImport(paths));
+
+    let merged = openStore(paths.nightly);
+    expect(listPendingUsageResumes(merged.connection)).toEqual([]);
+    expect(readUsageResumeState(merged.connection, "work-thread", workThread)?.status).toBe(
+      "invalidated",
+    );
+    expect(readUsageResumeState(merged.connection, "code-thread", codeThread)?.status).toBe(
+      "invalidated",
+    );
+    merged.close();
+    octant = openStore(paths.octant);
+    rename(octant, "work", "Work renamed in Octant");
+    rename(octant, "code", "Code renamed in Octant");
+    octant.close();
+
+    const second = imported(runImport(paths));
+
+    expect(second.conflicts).toEqual([]);
+    expect(second.kept).toEqual([]);
+    const titles = (aggregateType: string, aggregateId: string) =>
+      eventsIn(paths.nightly, aggregateType, aggregateId)
+        .map((entry) => (entry.payload.thread as { readonly title?: string } | undefined)?.title)
+        .filter((title) => title !== undefined);
+    expect(titles("work-thread", workThread)).toContain("Work renamed in Octant");
+    expect(titles("code-thread", codeThread)).toContain("Code renamed in Octant");
+    merged = openStore(paths.nightly);
+    expect(listPendingUsageResumes(merged.connection)).toEqual([]);
     merged.close();
   });
 
