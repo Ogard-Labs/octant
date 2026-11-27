@@ -1,17 +1,23 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import {
+  AUTOMATION_WEBHOOK_ENDPOINT_FILTER,
+  AUTOMATION_WEBHOOK_INTEGRATION_ID,
+  AUTOMATION_WEBHOOK_SOURCE_ID,
   EventActor,
   decodeAutomationCommand,
   type AutomationIntegrationEvent,
   type AutomationEventSourceWindow,
   type UtcTimestamp,
+  type WebhookEndpointId,
 } from "@octant/contracts";
 import type { IntegrationEventSourceProvider } from "@octant/plugin-api/integration";
+import type { HubState, HubStatePort } from "../hub/hubStateStore";
+import { SpokeWebhookService } from "../hub/spokeWebhookService";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -307,5 +313,175 @@ describe("durable routine integration polling", () => {
     expect(f.projection.listRuns({ automationId: f.definition.id, limit: 10 }).runs).toHaveLength(
       0,
     );
+  });
+
+  it("acknowledges baselined and claimed webhook deliveries so a long busy routine never overflows its 32-event waiting list", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-routine-webhook-ack-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    databases.push(connection);
+    const baseTime = Date.parse("2026-11-26T12:00:00.000Z");
+    let elapsed = 0;
+    const nowMs = () => baseTime + elapsed;
+    const now = () => new Date(nowMs()).toISOString() as UtcTimestamp;
+    applyMigrations(connection, MIGRATIONS, now);
+    const runtime = createPhase1RuntimeRegistries();
+    const projection = runtime.automationProjection;
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: now,
+    });
+    const store = new AutomationEventStore({
+      journal,
+      uuid: randomUUID,
+      actor: Schema.decodeUnknownSync(EventActor)({
+        kind: "system",
+        actorId: AUTOMATION_TEST_IDS.actor,
+      }),
+    });
+    const commands = new AutomationCommandService({
+      store,
+      projection,
+      hostId: "local",
+      clock: now,
+    });
+    const offers = vi.fn();
+    const scheduler = new AutomationSchedulerService({
+      store,
+      projection,
+      dispatch: { offer: offers },
+      now,
+    });
+
+    let hubState: HubState = {};
+    const statePort: HubStatePort = {
+      load: () => hubState,
+      save: (next) => {
+        hubState = next;
+      },
+    };
+    const webhooks = new SpokeWebhookService({
+      state: statePort,
+      publicGranted: () => true,
+      remoteAccessPaused: () => false,
+      hub: undefined,
+      record: () => undefined,
+      now: nowMs,
+    });
+    const createdEndpoint = await webhooks.create({ scheme: "github", label: "Deploy hooks" });
+    if (createdEndpoint.status !== "created") throw new Error(createdEndpoint.status);
+    const deliver = (index: number) => {
+      const body = JSON.stringify({ n: index });
+      return webhooks.receive({
+        endpointId: createdEndpoint.endpointId as WebhookEndpointId,
+        deliveryId: `delivery-${index}`,
+        receivedAt: nowMs() + index,
+        headers: {
+          "x-hub-signature-256": `sha256=${createHmac("sha256", createdEndpoint.secret).update(body).digest("hex")}`,
+          "x-github-delivery": `delivery-${index}`,
+          "x-github-event": "push",
+        },
+        body: Buffer.from(body).toString("base64"),
+      });
+    };
+
+    // 16 deliveries sit unread before the hourly routine is armed.
+    for (let i = 0; i < 16; i += 1) expect(deliver(i)).toEqual({ status: "accepted" });
+    expect(deliver(16)).toEqual({ status: "refused", kind: "busy" });
+
+    const provider = webhooks.eventSources();
+    const draft = automationDefinitionDraftFixture({
+      missedRunPolicy: "run-once",
+      trigger: {
+        kind: "integration-event",
+        integrationId: AUTOMATION_WEBHOOK_INTEGRATION_ID,
+        sourceId: AUTOMATION_WEBHOOK_SOURCE_ID,
+        filters: { [AUTOMATION_WEBHOOK_ENDPOINT_FILTER]: createdEndpoint.endpointId },
+        pollMinutes: 60,
+        automaticStartLimit: 8,
+      },
+    });
+    const preparation = await prepareAutomationEventDefinition({
+      definition: draft,
+      sources: provider,
+      rearm: false,
+      current: () => true,
+      signal: new AbortController().signal,
+      now,
+    });
+    if (preparation === undefined) throw new Error("Expected webhook source preparation");
+    const created = commands.execute(
+      decodeAutomationCommand({
+        kind: "create-automation",
+        automationId: AUTOMATION_TEST_IDS.automation,
+        expectedVersion: 0,
+        principal: automationLocalWindowPrincipal(),
+        origin: { kind: "interactive" },
+        definition: preparation.definition,
+      }),
+      undefined,
+      undefined,
+      preparation,
+    );
+    if (created.kind !== "automation-created") throw new Error("Expected automation-created");
+
+    const sources = new AutomationEventSources({
+      projection,
+      scheduler,
+      sources: provider,
+      current: () => true,
+      now,
+      monotonic: () => elapsed,
+      wake: () => undefined,
+    });
+    const poll = async () => {
+      elapsed += 60 * 60_000;
+      const before = projection.getEventSource(created.automation.id)?.observationRevision ?? 0;
+      sources.reconcile();
+      await vi.waitFor(() =>
+        expect(
+          projection.getEventSource(created.automation.id)?.observationRevision,
+        ).toBeGreaterThan(before),
+      );
+    };
+
+    // First look baselines all 16 pre-existing deliveries and acknowledges every one of them
+    // immediately, so a full burst of 16 fresh deliveries is accepted without waiting 16 hours.
+    await poll();
+    expect(offers).not.toHaveBeenCalled();
+    for (let i = 16; i < 32; i += 1) expect(deliver(i)).toEqual({ status: "accepted" });
+    expect(deliver(32)).toEqual({ status: "refused", kind: "busy" });
+
+    // Second look claims delivery-16 (starting an active run), leaving 15 pending and freeing 1 slot.
+    await poll();
+    expect(offers).toHaveBeenCalledOnce();
+    expect(projection.activeRun(created.automation.id)).toBeDefined();
+    expect(projection.getEventSource(created.automation.id)?.pending).toHaveLength(15);
+
+    // While the run remains active (busy), keep looking across 30 looks while deliveries stream in:
+    // the single freed slot accepts delivery-32, and every later delivery stays refused as busy
+    // because busy looks acknowledge nothing; the waiting list never reaches 32 or needs-rearm.
+    expect(deliver(32)).toEqual({ status: "accepted" });
+    if (created.automation.trigger.kind !== "integration-event") {
+      throw new Error("Expected integration-event trigger");
+    }
+    const bound = await provider.bind(created.automation.trigger, new AbortController().signal);
+    if (bound === undefined) throw new Error("Expected bound webhook source");
+    for (let look = 0; look < 30; look += 1) {
+      expect(deliver(33 + look)).toEqual({ status: "refused", kind: "busy" });
+      const read = await bound.read(new AbortController().signal);
+      expect(read.kind).toBe("complete");
+      elapsed += 60 * 60_000;
+      sources.reconcile();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const checkpoint = projection.getEventSource(created.automation.id);
+    expect(checkpoint?.phase).not.toBe("needs-rearm");
+    expect(checkpoint?.reason).not.toBe("source-limit");
+    expect(checkpoint?.pending.length ?? 0).toBeLessThanOrEqual(16);
+    sources.stop();
   });
 });

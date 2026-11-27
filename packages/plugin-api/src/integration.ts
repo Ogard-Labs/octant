@@ -51,6 +51,13 @@ export interface IntegrationEventSource {
         readonly retryAfterSeconds?: number;
       }
   >;
+  /**
+   * Reports event ids the scheduler finished with (baselined, claimed for a
+   * run, or dropped under a missed-run policy) after committing its
+   * observation. A bounded source frees capacity only for acknowledged events
+   * instead of guessing from reads while a routine is busy.
+   */
+  readonly acknowledge?: (eventIds: ReadonlyArray<string>) => Promise<void> | void;
 }
 
 /**

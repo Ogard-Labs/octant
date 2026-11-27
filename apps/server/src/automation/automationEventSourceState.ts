@@ -26,8 +26,18 @@ export function initialAutomationEventCheckpoint(
   });
 }
 export type AutomationEventObservation =
-  | { readonly kind: "checkpoint"; readonly checkpoint: AutomationEventSourceCheckpoint }
-  | { readonly kind: "claim"; readonly receipt: AutomationIntegrationEventReceipt };
+  | {
+      readonly kind: "checkpoint";
+      readonly checkpoint: AutomationEventSourceCheckpoint;
+      /** Event ids finished on this look (baselined or dropped by missed-run policy). */
+      readonly acknowledgedEventIds?: ReadonlyArray<string>;
+    }
+  | {
+      readonly kind: "claim";
+      readonly receipt: AutomationIntegrationEventReceipt;
+      /** Event ids finished on this look (the claimed event plus any dropped by missed-run policy). */
+      readonly acknowledgedEventIds?: ReadonlyArray<string>;
+    };
 
 /** A complete bounded observation describes surviving events, never unseen history or its author. */
 export function reconcileAutomationEventObservation(input: {
@@ -55,7 +65,14 @@ export function reconcileAutomationEventObservation(input: {
   };
   const checkpoint = (
     updates: Partial<AutomationEventSourceCheckpoint>,
-  ): AutomationEventObservation => ({ kind: "checkpoint", checkpoint: next(updates) });
+    acknowledgedEventIds?: ReadonlyArray<string>,
+  ): AutomationEventObservation => ({
+    kind: "checkpoint",
+    checkpoint: next(updates),
+    ...(acknowledgedEventIds === undefined || acknowledgedEventIds.length === 0
+      ? {}
+      : { acknowledgedEventIds }),
+  });
   if (previous.phase === "held" || previous.phase === "needs-rearm") return checkpoint({});
   if (
     input.events.length > 256 ||
@@ -82,7 +99,12 @@ export function reconcileAutomationEventObservation(input: {
       ? input.events.map((event) => event.id)
       : [...new Set([...previous.seen, ...input.events.map((event) => event.id)])];
   if (seen.length > 256) return checkpoint({ phase: "needs-rearm", reason: "source-limit" });
-  if (!previous.baselineReady) return checkpoint({ baselineReady: true, seen, phase: "watching" });
+  if (!previous.baselineReady) {
+    return checkpoint(
+      { baselineReady: true, seen, phase: "watching" },
+      input.events.map((event) => event.id),
+    );
+  }
   const pending = [...previous.pending, ...fresh].sort(
     (a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id),
   );
@@ -91,15 +113,23 @@ export function reconcileAutomationEventObservation(input: {
     return checkpoint({ seen, pending, phase: "held", reason: "routine-output" });
   if (input.busy && fresh.length > 0)
     return checkpoint({ seen, pending, phase: "held", reason: "busy-input" });
+  let droppedIds: ReadonlyArray<string> = [];
   if (input.coverageGap) {
-    if (input.missedRunPolicy === "skip")
-      return checkpoint({ seen, pending: [], phase: "watching" });
-    pending.splice(0, Math.max(0, pending.length - 1));
+    if (input.missedRunPolicy === "skip") {
+      return checkpoint(
+        { seen, pending: [], phase: "watching" },
+        pending.map((event) => event.id),
+      );
+    }
+    droppedIds = pending.splice(0, Math.max(0, pending.length - 1)).map((event) => event.id);
   }
   if (previous.automaticStarts >= input.trigger.automaticStartLimit)
-    return checkpoint({ seen, pending, phase: "needs-rearm", reason: "automatic-start-limit" });
+    return checkpoint(
+      { seen, pending, phase: "needs-rearm", reason: "automatic-start-limit" },
+      droppedIds,
+    );
   const event = input.busy ? undefined : pending.shift();
-  if (event === undefined) return checkpoint({ seen, pending, phase: "watching" });
+  if (event === undefined) return checkpoint({ seen, pending, phase: "watching" }, droppedIds);
   return {
     kind: "claim",
     receipt: {
@@ -111,5 +141,6 @@ export function reconcileAutomationEventObservation(input: {
         automaticStarts: previous.automaticStarts + 1,
       }),
     },
+    acknowledgedEventIds: [...droppedIds, event.id],
   };
 }

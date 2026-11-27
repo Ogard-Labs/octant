@@ -267,6 +267,20 @@ export class AutomationEventSources {
       decision,
       current: () => current() && source.current(),
     });
-    if (committed === "committed") this.#observed.add(String(definition.id));
+    if (committed === "committed") {
+      this.#observed.add(String(definition.id));
+      const acknowledged = decision.acknowledgedEventIds;
+      if (
+        source.acknowledge !== undefined &&
+        acknowledged !== undefined &&
+        acknowledged.length > 0
+      ) {
+        try {
+          await source.acknowledge(acknowledged);
+        } catch {
+          /* Best-effort capacity release after the observation is already durable. */
+        }
+      }
+    }
   }
 }

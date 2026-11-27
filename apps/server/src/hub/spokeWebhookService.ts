@@ -610,20 +610,27 @@ export class SpokeWebhookService {
             const shown = held.deliveries
               .filter((delivery) => String(delivery.endpointId) === String(live.endpointId))
               .slice(-EVENTS_PER_READ);
-            // A routine starts at most one run a look and holds at most 32
-            // waiting events, so each read frees one slot, the oldest: a burst
-            // waits on the hub instead of overflowing a busy routine.
-            const freed = shown.find((delivery) => delivery.readAt === undefined);
-            if (freed !== undefined) {
-              const readAt = this.#options.now();
-              this.#save({
-                ...held,
-                deliveries: held.deliveries.map((delivery) =>
-                  delivery === freed ? { ...delivery, readAt } : delivery,
-                ),
-              });
-            }
             return { kind: "complete", events: shown.map(eventOf) };
+          },
+          acknowledge: (eventIds) => {
+            const live = current();
+            if (live === undefined || eventIds.length === 0) return;
+            const ids = new Set(eventIds);
+            const held = this.#load();
+            let changed = false;
+            const readAt = this.#options.now();
+            const deliveries = held.deliveries.map((delivery) => {
+              if (
+                String(delivery.endpointId) === String(live.endpointId) &&
+                delivery.readAt === undefined &&
+                ids.has(eventIdOf(delivery))
+              ) {
+                changed = true;
+                return { ...delivery, readAt };
+              }
+              return delivery;
+            });
+            if (changed) this.#save({ ...held, deliveries });
           },
         };
       },
