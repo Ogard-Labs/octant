@@ -1,5 +1,5 @@
 import { VISITOR_LINK_DEFAULT_LIFETIME_MS, VISITOR_LINK_MAX_LIFETIME_MS } from "@octant/contracts";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -44,7 +44,16 @@ export default function VisitorShareDialog(props: {
   const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
   const [scope, setScope] = useState<"read" | "comment">("read");
   const [expiry, setExpiry] = useState("day");
-  const [shared, setShared] = useState<{ readonly url: string; readonly published: boolean }>();
+  const [shared, setShared] = useState<{
+    readonly linkId: string;
+    readonly url: string;
+    readonly published: boolean;
+  }>();
+  const sharedPanel = useRef<HTMLDivElement>(null);
+  // The link is shown once; focus goes to it so it is not missed.
+  useEffect(() => {
+    if (shared !== undefined) sharedPanel.current?.focus();
+  }, [shared]);
   const titleId = useId();
   const scopeId = useId();
   const expiryId = useId();
@@ -102,7 +111,10 @@ export default function VisitorShareDialog(props: {
       VISITOR_REFUSALS,
     );
     const url = field(body, "url");
-    if (typeof url === "string") setShared({ url, published: field(body, "published") === true });
+    const linkId = field(body, "linkId");
+    if (typeof url === "string" && typeof linkId === "string") {
+      setShared({ linkId, url, published: field(body, "published") === true });
+    }
     await refresh();
   };
 
@@ -157,7 +169,13 @@ export default function VisitorShareDialog(props: {
         </OctantButton>
       </div>
       {shared === undefined ? null : (
-        <div aria-label="New visitor link" className="settings-panel__stack" role="group">
+        <div
+          aria-label="New visitor link"
+          className="settings-panel__stack"
+          ref={sharedPanel}
+          role="group"
+          tabIndex={-1}
+        >
           <p className="setrow-hint">
             Link on your hub's public address. The part after # is its secret; Octant does not show
             it again, so send the whole link now.
@@ -198,6 +216,9 @@ export default function VisitorShareDialog(props: {
           action={action}
           now={(props.now ?? Date.now)()}
           onChanged={refresh}
+          onStopped={(linkId) =>
+            setShared((current) => (current?.linkId === linkId ? undefined : current))
+          }
           view={loaded.view}
         />
       )}

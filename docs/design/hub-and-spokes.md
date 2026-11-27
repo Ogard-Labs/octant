@@ -3210,7 +3210,10 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
 - **Stripe deliveries use Stripe's own scheme.** Stripe mints the signing
   secret once it has the URL, so a Stripe endpoint starts without one: the
   person adds the URL in Stripe and pastes the secret Stripe shows with
-  `octant hub webhook secret <id>`, which reads it from standard input. Until
+  `octant hub webhook secret <id>`, which reads it from standard input, or in
+  Settings › Remote access › Webhook endpoints, which shows the URL, marks the
+  endpoint as waiting for its secret, and takes the secret in a masked field
+  it empties on send and never shows back. Until
   then the spoke hands the hub nothing for it and it takes no delivery;
   pasting again after rolling the secret in Stripe replaces it. A replaced
   secret has two deadlines, because the hub or a standby may have answered

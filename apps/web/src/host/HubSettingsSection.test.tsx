@@ -1881,6 +1881,39 @@ describe("HubSettingsSection public entrance", () => {
     expect(await screen.findByText("The hub has not named this computer a standby.")).toBeVisible();
   });
 
+  it("keeps a new webhook secret on screen when the next status read fails", async () => {
+    const user = userEvent.setup();
+    let reads = 0;
+    renderHub({
+      status: () => {
+        reads += 1;
+        return reads === 1
+          ? {
+              status: 200,
+              body: {
+                ...memberWithEntrance(false, false),
+                webhooks: { spoke: { endpoints: [], log: [], published: true } },
+              },
+            }
+          : { status: 503, body: { status: "refused", kind: "unavailable" } };
+      },
+      "webhook-create": {
+        status: 200,
+        body: {
+          status: "created",
+          endpointId: "A".repeat(22),
+          secret: "whsec_shown-once",
+          path: `/hooks/${"A".repeat(22)}`,
+          published: true,
+        },
+      },
+    });
+    await user.type(await screen.findByLabelText("Name"), "Deploys");
+    await user.click(screen.getByRole("button", { name: "Make endpoint" }));
+    expect(await screen.findByText("Octant could not read the hub status.")).toBeVisible();
+    expect(screen.getByText("whsec_shown-once")).toBeVisible();
+  });
+
   it("says why Tailscale refused Funnel", async () => {
     const user = userEvent.setup();
     renderHub({

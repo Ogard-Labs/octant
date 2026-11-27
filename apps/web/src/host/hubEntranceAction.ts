@@ -31,13 +31,13 @@ export interface HubEntranceAction {
   readonly say: (notice: HubEntranceNotice | undefined) => void;
   /**
    * Sends one operation. Answers the reply's body when the host said
-   * `expected`, else says why it refused (from `refusals` by kind, or the
-   * fallback) and answers undefined.
+   * `expected` (or one of them), else says why it refused (from `refusals`
+   * by kind, or the fallback) and answers undefined.
    */
   readonly run: (
     operation: HubAdministrationOperation,
     body: unknown,
-    expected: string,
+    expected: string | ReadonlyArray<string>,
     fallback: string,
     refusals?: Readonly<Record<string, string>>,
   ) => Promise<unknown>;
@@ -52,7 +52,13 @@ export function useHubEntranceAction(request: HubRequest): HubEntranceAction {
       setBusy(true);
       try {
         const reply = await request(operation, body);
-        if (reply.status === 200 && field(reply.body, "status") === expected) return reply.body;
+        const status = field(reply.body, "status");
+        if (
+          reply.status === 200 &&
+          typeof status === "string" &&
+          (typeof expected === "string" ? status === expected : expected.includes(status))
+        )
+          return reply.body;
         const kind = field(reply.body, "kind");
         const detail = field(reply.body, "message");
         say({

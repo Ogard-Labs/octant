@@ -323,6 +323,7 @@ export type HubAdministrationOperation =
   | "public-funnel"
   | "public-standby"
   | "webhook-create"
+  | "webhook-secret"
   | "webhook-rotate"
   | "webhook-remove"
   | "visitors"

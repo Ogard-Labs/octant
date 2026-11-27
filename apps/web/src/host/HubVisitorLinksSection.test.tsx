@@ -6,7 +6,11 @@ import HubVisitorLinksSection from "./HubVisitorLinksSection";
 
 const NOW = Date.parse("2026-11-27T10:00:00.000Z");
 
-function renderSection(options: { readonly hubOn: boolean; readonly member: boolean }) {
+function renderSection(options: {
+  readonly hubOn: boolean;
+  readonly member: boolean;
+  readonly threadTitles?: ReadonlyMap<string, string>;
+}) {
   const calls: Array<{ operation: HubAdministrationOperation; body: unknown }> = [];
   const request = vi.fn(async (operation: HubAdministrationOperation, sent?: unknown) => {
     calls.push({ operation, body: sent });
@@ -36,6 +40,7 @@ function renderSection(options: { readonly hubOn: boolean; readonly member: bool
       now={() => NOW}
       onChanged={vi.fn(async () => undefined)}
       request={request}
+      {...(options.threadTitles === undefined ? {} : { threadTitles: options.threadTitles })}
     />,
   );
   return { calls };
@@ -63,6 +68,18 @@ describe("HubVisitorLinksSection", () => {
       screen.getByText(
         "The hub has not taken the latest links yet; this computer tries again shortly.",
       ),
+    ).toBeInTheDocument();
+  });
+
+  it("names a shared thread by its title, in the row and in Stop sharing", () => {
+    renderSection({
+      hubOn: false,
+      member: true,
+      threadTitles: new Map([["chat:abcdef123456", "Plan the launch"]]),
+    });
+    expect(screen.getByText("Plan the launch")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Stop sharing Plan the launch, read only" }),
     ).toBeInTheDocument();
   });
 });

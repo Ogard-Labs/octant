@@ -1,5 +1,5 @@
 import { WebhookSignatureScheme } from "@octant/contracts";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -21,8 +21,9 @@ import "../styles/hub-entrance.css";
  * Settings › Remote access › Webhook endpoints: this computer's endpoints for
  * its routines, made, rotated and removed through the loopback hub
  * administration. The host mints each secret and the window shows it once;
- * it is never read back. Loaded as its own chunk (hub-and-spokes.md,
- * Webhook triggers).
+ * it is never read back. Stripe mints its own, so a Stripe endpoint shows
+ * its URL and takes the secret Stripe shows, pasted in and never echoed.
+ * Loaded as its own chunk (hub-and-spokes.md, Webhook triggers).
  */
 
 interface Endpoint {
@@ -31,6 +32,8 @@ interface Endpoint {
   readonly label: string;
   readonly path: string;
   readonly deliveries: number;
+  /** A Stripe endpoint whose person has not pasted Stripe's secret yet. */
+  readonly awaitingSecret: boolean;
 }
 
 interface LogEntry {
@@ -72,7 +75,16 @@ export function readWebhooks(value: unknown): WebhooksView | undefined {
         typeof scheme === "string" &&
         typeof label === "string" &&
         typeof path === "string"
-        ? [{ endpointId, scheme, label, path, deliveries: count(field(entry, "deliveries")) }]
+        ? [
+            {
+              endpointId,
+              scheme,
+              label,
+              path,
+              deliveries: count(field(entry, "deliveries")),
+              awaitingSecret: field(entry, "awaitingSecret") === true,
+            },
+          ]
         : [];
     }),
     log: list(field(spoke, "log")).flatMap((entry) => {
@@ -131,13 +143,26 @@ const REFUSALS: Readonly<Record<string, string>> = {
   "public-not-granted": "Tick Public in this computer's hub grant first.",
   "unknown-endpoint": "That endpoint is gone. The list is up to date now.",
   full: "This computer already has 64 endpoints. Remove one first.",
+  "invalid-secret": "That is not a Stripe signing secret. It starts with whsec_.",
+  "scheme-mints-its-own":
+    "That endpoint uses the secret Octant made; only a Stripe endpoint takes one pasted in.",
 };
 
 interface Minted {
+  readonly endpointId: string;
   readonly label: string;
   readonly path: string;
   readonly secret: string;
   readonly published: boolean;
+}
+
+/** The Stripe endpoint whose secret the person is pasting. */
+interface Pasting {
+  readonly endpointId: string;
+  readonly label: string;
+  readonly path: string;
+  /** Whether Stripe's first secret is awaited, rather than a rolled one. */
+  readonly first: boolean;
 }
 
 export default function HubWebhooksSection(props: {
@@ -157,6 +182,9 @@ export default function HubWebhooksSection(props: {
   const [label, setLabel] = useState("");
   const [scheme, setScheme] = useState<string>(schemes[0]);
   const [minted, setMinted] = useState<Minted>();
+  const [pasting, setPasting] = useState<Pasting>();
+  /** What the person is pasting; emptied the moment it is sent, saved or not. */
+  const [secretDraft, setSecretDraft] = useState("");
   const [confirming, setConfirming] = useState<{
     readonly kind: "rotate" | "remove";
     readonly endpoint: Endpoint;
@@ -164,14 +192,48 @@ export default function HubWebhooksSection(props: {
   const opener = useRef<HTMLButtonElement>(null);
   const labelId = useId();
   const schemeId = useId();
+  const secretId = useId();
+  const nameInput = useRef<HTMLInputElement>(null);
+  const formHint = useRef<HTMLParagraphElement>(null);
+  const mintedPanel = useRef<HTMLDivElement>(null);
+  const pastePanel = useRef<HTMLDivElement>(null);
   const now = (props.now ?? Date.now)();
 
+  // What the host shows once, and the paste step, take focus as they appear
+  // so a keyboard or screen reader user lands on them, not past them.
+  useEffect(() => {
+    if (minted !== undefined) mintedPanel.current?.focus();
+  }, [minted]);
+  const pastingId = pasting?.endpointId;
+  useEffect(() => {
+    if (pastingId !== undefined) pastePanel.current?.focus();
+  }, [pastingId]);
+
   const show = (body: unknown, name: string) => {
+    const endpointId = field(body, "endpointId");
     const path = field(body, "path");
     const secret = field(body, "secret");
-    if (typeof path === "string" && typeof secret === "string") {
-      setMinted({ label: name, path, secret, published: field(body, "published") === true });
+    if (typeof endpointId !== "string" || typeof path !== "string") return;
+    if (typeof secret === "string") {
+      setPasting(undefined);
+      setMinted({
+        endpointId,
+        label: name,
+        path,
+        secret,
+        published: field(body, "published") === true,
+      });
+    } else if (field(body, "status") === "awaiting-secret") {
+      setMinted(undefined);
+      setSecretDraft("");
+      setPasting({ endpointId, label: name, path, first: true });
     }
+  };
+
+  /** Forgets anything shown for an endpoint that no longer exists. */
+  const forget = (endpointId: string) => {
+    setMinted((current) => (current?.endpointId === endpointId ? undefined : current));
+    setPasting((current) => (current?.endpointId === endpointId ? undefined : current));
   };
 
   const create = async () => {
@@ -179,7 +241,7 @@ export default function HubWebhooksSection(props: {
     const body = await action.run(
       "webhook-create",
       { scheme, label: name },
-      "created",
+      ["created", "awaiting-secret"],
       "Octant could not make the endpoint.",
       REFUSALS,
     );
@@ -198,11 +260,14 @@ export default function HubWebhooksSection(props: {
       const body = await action.run(
         "webhook-rotate",
         { endpointId: chosen.endpoint.endpointId },
-        "created",
+        ["created", "awaiting-secret"],
         "Octant could not rotate the endpoint.",
         REFUSALS,
       );
-      if (body !== undefined) show(body, chosen.endpoint.label);
+      if (body !== undefined) {
+        forget(chosen.endpoint.endpointId);
+        show(body, chosen.endpoint.label);
+      }
     } else {
       const body = await action.run(
         "webhook-remove",
@@ -212,11 +277,42 @@ export default function HubWebhooksSection(props: {
         REFUSALS,
       );
       if (body !== undefined) {
+        forget(chosen.endpoint.endpointId);
         action.say({
           kind: "success",
           text: `Removed ${chosen.endpoint.label}. Its URL answers nothing now.`,
         });
       }
+      await props.onChanged();
+      // The removed row took its buttons with it; land on the form instead.
+      if (body !== undefined) (nameInput.current ?? formHint.current)?.focus();
+      return;
+    }
+    await props.onChanged();
+  };
+
+  const saveSecret = async () => {
+    const target = pasting;
+    const secret = secretDraft;
+    setSecretDraft("");
+    if (target === undefined || secret.trim() === "") return;
+    const body = await action.run(
+      "webhook-secret",
+      { endpointId: target.endpointId, secret },
+      "set",
+      "Octant could not save the secret.",
+      REFUSALS,
+    );
+    if (body !== undefined) {
+      setPasting(undefined);
+      action.say({
+        kind: "success",
+        text: `Saved the secret for ${target.label}. Stripe's deliveries are checked with it now.${
+          field(body, "published") === true
+            ? ""
+            : " The hub has not taken it yet; this computer tries again shortly."
+        }`,
+      });
     }
     await props.onChanged();
   };
@@ -246,7 +342,7 @@ export default function HubWebhooksSection(props: {
       {!props.member ? null : (
         <>
           <div className="settings-panel__stack">
-            <p className="setrow-hint">
+            <p className="setrow-hint" ref={formHint} tabIndex={-1}>
               {props.publicGranted
                 ? "Name it and pick how the sender signs. A delivery is event data for its routine and never changes what the routine may do."
                 : "Tick Public in this computer's hub grant to make one."}
@@ -258,6 +354,7 @@ export default function HubWebhooksSection(props: {
                 disabled={!props.publicGranted}
                 id={labelId}
                 maxLength={128}
+                ref={props.publicGranted ? nameInput : undefined}
                 onChange={(event) => setLabel(event.target.value)}
                 placeholder="Deploys from GitHub"
                 value={label}
@@ -284,7 +381,13 @@ export default function HubWebhooksSection(props: {
           </div>
 
           {minted === undefined ? null : (
-            <div aria-label="New endpoint secret" className="settings-panel__stack" role="group">
+            <div
+              aria-label="New endpoint secret"
+              className="settings-panel__stack"
+              ref={mintedPanel}
+              role="group"
+              tabIndex={-1}
+            >
               <p className="setrow-hint">
                 {`${minted.label}: give the sender the full URL and this secret now. Octant does not show the secret again.`}
               </p>
@@ -327,6 +430,71 @@ export default function HubWebhooksSection(props: {
             </div>
           )}
 
+          {pasting === undefined ? null : (
+            <div
+              aria-label="Stripe signing secret"
+              className="settings-panel__stack"
+              ref={pastePanel}
+              role="group"
+              tabIndex={-1}
+            >
+              <p className="setrow-hint">
+                {pasting.first
+                  ? `${pasting.label}: in Stripe, add an endpoint with the full URL, then paste the signing secret Stripe shows. It starts with whsec_.`
+                  : `${pasting.label}: after you roll the secret in Stripe, paste the new one here. Octant keeps taking the old one for 24 hours.`}
+              </p>
+              <div className="setrow">
+                <span className="setrow-label">Path on your hub's public address</span>
+                <code className="setrow-hint hub-entrance__secret">{pasting.path}</code>
+                <div className="setrow-control">
+                  <OctantButton
+                    onClick={() => void copy(pasting.path, "Path")}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    Copy path
+                  </OctantButton>
+                </div>
+              </div>
+              <form
+                className="settings-panel__stack"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveSecret();
+                }}
+              >
+                <OctantField>
+                  <OctantFieldLabel htmlFor={secretId}>Signing secret from Stripe</OctantFieldLabel>
+                  <OctantInput
+                    autoComplete="off"
+                    id={secretId}
+                    maxLength={256}
+                    onChange={(event) => setSecretDraft(event.target.value)}
+                    placeholder="whsec_…"
+                    spellCheck={false}
+                    type="password"
+                    value={secretDraft}
+                  />
+                </OctantField>
+                <div className="host-settings__controls">
+                  <OctantButton disabled={action.busy || secretDraft.trim() === ""} type="submit">
+                    Save secret
+                  </OctantButton>
+                  <OctantButton
+                    onClick={() => {
+                      setSecretDraft("");
+                      setPasting(undefined);
+                    }}
+                    type="button"
+                    variant="secondary"
+                  >
+                    {pasting.first ? "Later" : "Cancel"}
+                  </OctantButton>
+                </div>
+              </form>
+            </div>
+          )}
+
           {action.notice === undefined ? null : (
             <SettingsState kind={action.notice.kind}>{action.notice.text}</SettingsState>
           )}
@@ -340,12 +508,34 @@ export default function HubWebhooksSection(props: {
                   <span className="setrow-label">{endpoint.label}</span>
                   <p className="setrow-hint">
                     {`${schemeName(endpoint.scheme)} · ${endpoint.path}${
+                      endpoint.awaitingSecret ? " · waiting for the secret from Stripe" : ""
+                    }${
                       endpoint.deliveries === 0
                         ? ""
                         : ` · ${endpoint.deliveries} waiting for the routine`
                     }`}
                   </p>
                   <div className="setrow-control">
+                    {endpoint.scheme !== "stripe" ? null : (
+                      <OctantButton
+                        aria-label={`${endpoint.awaitingSecret ? "Paste secret" : "Paste new secret"} for ${endpoint.label}`}
+                        disabled={action.busy || !props.publicGranted}
+                        onClick={() => {
+                          setSecretDraft("");
+                          setMinted(undefined);
+                          setPasting({
+                            endpointId: endpoint.endpointId,
+                            label: endpoint.label,
+                            path: endpoint.path,
+                            first: endpoint.awaitingSecret,
+                          });
+                        }}
+                        size="sm"
+                        variant={endpoint.awaitingSecret ? "default" : "secondary"}
+                      >
+                        {endpoint.awaitingSecret ? "Paste secret" : "New secret"}
+                      </OctantButton>
+                    )}
                     <OctantButton
                       aria-label={`Rotate ${endpoint.label}`}
                       disabled={action.busy}
@@ -426,7 +616,9 @@ export default function HubWebhooksSection(props: {
             }
           >
             {confirming.kind === "rotate"
-              ? "The old URL and secret stop at once. Give the sender the new pair; routines that named this endpoint keep working."
+              ? confirming.endpoint.scheme === "stripe"
+                ? "The old URL and secret stop at once. Give Stripe the new URL and paste the secret it shows; routines that named this endpoint keep working."
+                : "The old URL and secret stop at once. Give the sender the new pair; routines that named this endpoint keep working."
               : "Its URL stops answering at once, and routines that named it get no more deliveries."}
           </OctantConfirmDialog>
         )}

@@ -1566,6 +1566,14 @@ function ActiveSectionContent({
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}
             projectNames={props.actProjectNames ?? NO_PROJECT_NAMES}
+            threadTitles={
+              new Map(
+                privacyThreadsFromSettings(props).map((thread) => [
+                  `${thread.mode}:${thread.id}`,
+                  thread.title,
+                ]),
+              )
+            }
             pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
             newDeviceAlerts={props.newDeviceAlertsClient}
             accessActivity={

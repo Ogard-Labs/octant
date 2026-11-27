@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import {
   copyToClipboard,
   field,
@@ -122,11 +124,21 @@ export function VisitorLinkList(props: {
   readonly onChanged: () => Promise<void>;
   /** Names the thread a link shares, where the list mixes threads. */
   readonly threadLabel?: (link: VisitorLink) => string;
+  /** Told once a link is stopped, so a caller showing it once can forget it. */
+  readonly onStopped?: (linkId: string) => void;
   readonly now: number;
 }) {
   const { view, action } = props;
   /** The framed comment Send handed back, until the person copies or closes it. */
   const [sent, setSent] = useState<string>();
+  /** The request the person asked to dismiss, until they confirm or cancel. */
+  const [dismissing, setDismissing] = useState<VisitorComment>();
+  const dismissOpener = useRef<HTMLButtonElement>(null);
+  const sentPanel = useRef<HTMLDivElement>(null);
+  // Send removes the request's row, so focus goes to what it handed back.
+  useEffect(() => {
+    if (sent !== undefined) sentPanel.current?.focus();
+  }, [sent]);
 
   const stop = async (link: VisitorLink) => {
     const body = await action.run(
@@ -137,6 +149,7 @@ export function VisitorLinkList(props: {
       VISITOR_REFUSALS,
     );
     if (body !== undefined) {
+      props.onStopped?.(link.linkId);
       action.say({ kind: "success", text: "Stopped sharing. The link's next request is refused." });
     }
     await props.onChanged();
@@ -146,12 +159,19 @@ export function VisitorLinkList(props: {
     const body = await action.run(
       "visitor-comment",
       { commentId: comment.commentId, action: decision },
-      decision === "send" ? "sent" : "dismissed",
+      // The host dismisses instead of sending when the request's link is gone.
+      decision === "send" ? ["sent", "dismissed"] : "dismissed",
       decision === "send" ? "Octant could not send that comment." : "Octant could not dismiss it.",
       VISITOR_REFUSALS,
     );
     const text = field(body, "text");
     if (decision === "send" && typeof text === "string") setSent(text);
+    if (decision === "send" && field(body, "status") === "dismissed") {
+      action.say({
+        kind: "error",
+        text: "Nothing was sent: the request's link no longer exists, so Octant dismissed it.",
+      });
+    }
     if (decision === "dismiss" && body !== undefined) {
       action.say({ kind: "success", text: "Dismissed. The visitor is not told." });
     }
@@ -163,7 +183,13 @@ export function VisitorLinkList(props: {
   return (
     <>
       {sent === undefined ? null : (
-        <div aria-label="Comment to send" className="settings-panel__stack" role="group">
+        <div
+          aria-label="Comment to send"
+          className="settings-panel__stack"
+          ref={sentPanel}
+          role="group"
+          tabIndex={-1}
+        >
           <p className="setrow-hint">
             The thread now carries outside content. Send this as your next message there:
           </p>
@@ -218,11 +244,12 @@ export function VisitorLinkList(props: {
                   <OctantButton
                     aria-label={`Dismiss the visitor's request: ${visitorText(comment.text).slice(0, 40)}`}
                     disabled={action.busy}
-                    onClick={() => void decide(comment, "dismiss")}
+                    onClick={() => setDismissing(comment)}
+                    ref={dismissing?.commentId === comment.commentId ? dismissOpener : undefined}
                     size="sm"
                     variant="secondary"
                   >
-                    Dismiss
+                    Dismiss…
                   </OctantButton>
                 </div>
               </li>
@@ -266,6 +293,25 @@ export function VisitorLinkList(props: {
           The hub has not taken the latest links yet; this computer tries again shortly.
         </p>
       )}
+      <OctantDialogPresence>
+        {dismissing === undefined ? null : (
+          <OctantConfirmDialog
+            confirmLabel="Dismiss request"
+            destructive
+            onCancel={() => setDismissing(undefined)}
+            onConfirm={() => {
+              const chosen = dismissing;
+              setDismissing(undefined);
+              void decide(chosen, "dismiss");
+            }}
+            restoreFocus={dismissOpener}
+            title="Dismiss this request?"
+          >
+            Octant throws the visitor's request away without sending it to the thread. The visitor
+            is not told, and it cannot be brought back.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </>
   );
 }

@@ -162,6 +162,144 @@ describe("HubWebhooksSection", () => {
     ).toBeInTheDocument();
   });
 
+  it("moves focus to a new secret so it is not missed", async () => {
+    const user = userEvent.setup();
+    renderSection({
+      view: body({}),
+      answers: {
+        "webhook-create": {
+          status: 200,
+          body: {
+            status: "created",
+            endpointId: ENDPOINT_ID,
+            secret: "whsec_shown-once",
+            path: `/hooks/${ENDPOINT_ID}`,
+            published: true,
+          },
+        },
+      },
+    });
+    await user.type(screen.getByLabelText("Name"), "Deploys");
+    await user.click(screen.getByRole("button", { name: "Make endpoint" }));
+    const shown = await screen.findByRole("group", { name: "New endpoint secret" });
+    await waitFor(() => expect(shown).toHaveFocus());
+  });
+
+  it("forgets a shown secret when its endpoint is removed, and moves focus to the form", async () => {
+    const user = userEvent.setup();
+    renderSection({
+      view: body({ endpoints: [deploys] }),
+      answers: {
+        "webhook-rotate": {
+          status: 200,
+          body: {
+            status: "created",
+            endpointId: ENDPOINT_ID,
+            secret: "whsec_rotated",
+            path: `/hooks/${ENDPOINT_ID}`,
+            published: true,
+          },
+        },
+        "webhook-remove": { status: 200, body: { status: "removed" } },
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Rotate Deploys" }));
+    await user.click(screen.getByRole("button", { name: "Rotate endpoint" }));
+    expect(await screen.findByText("whsec_rotated")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove Deploys" }));
+    await user.click(screen.getByRole("button", { name: "Remove endpoint" }));
+    expect(
+      await screen.findByText("Removed Deploys. Its URL answers nothing now."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("whsec_rotated")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveFocus());
+  });
+
+  it("gives a new Stripe endpoint's URL and takes the secret Stripe shows, never echoing it", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderSection({
+      view: body({}),
+      answers: {
+        "webhook-create": {
+          status: 200,
+          body: {
+            status: "awaiting-secret",
+            endpointId: ENDPOINT_ID,
+            path: `/hooks/${ENDPOINT_ID}`,
+          },
+        },
+        "webhook-secret": { status: 200, body: { status: "set", published: true } },
+      },
+    });
+    await user.type(screen.getByLabelText("Name"), "Payments");
+    await user.click(screen.getByRole("combobox", { name: "Signing" }));
+    await user.click(await screen.findByRole("option", { name: "Stripe" }));
+    await user.click(screen.getByRole("button", { name: "Make endpoint" }));
+
+    const paste = await screen.findByRole("group", { name: "Stripe signing secret" });
+    expect(within(paste).getByText(`/hooks/${ENDPOINT_ID}`)).toBeInTheDocument();
+    const field = within(paste).getByLabelText("Signing secret from Stripe");
+    expect(field).toHaveAttribute("type", "password");
+    await user.type(field, "whsec_from-stripe-0123456789");
+    await user.click(within(paste).getByRole("button", { name: "Save secret" }));
+
+    expect(calls).toContainEqual({
+      operation: "webhook-secret",
+      body: { endpointId: ENDPOINT_ID, secret: "whsec_from-stripe-0123456789" },
+    });
+    expect(
+      await screen.findByText(
+        "Saved the secret for Payments. Stripe's deliveries are checked with it now.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Stripe signing secret" })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("whsec_from-stripe-0123456789")).not.toBeInTheDocument();
+    expect(screen.queryByText("whsec_from-stripe-0123456789")).not.toBeInTheDocument();
+  });
+
+  it("marks a Stripe endpoint still waiting for its secret, and takes a rolled one later", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderSection({
+      view: body({
+        endpoints: [
+          { ...deploys, scheme: "stripe", label: "Payments", awaitingSecret: true },
+          {
+            ...deploys,
+            endpointId: "BBBBBBBBBBBBBBBBBBBBBB",
+            scheme: "stripe",
+            label: "Refunds",
+            path: "/hooks/BBBBBBBBBBBBBBBBBBBBBB",
+            awaitingSecret: false,
+          },
+        ],
+      }),
+      answers: {
+        "webhook-secret": { status: 409, body: { status: "refused", kind: "invalid-secret" } },
+      },
+    });
+    expect(
+      screen.getByText(/Stripe · \/hooks\/A+ · waiting for the secret from Stripe/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Paste secret for Payments" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Paste new secret for Refunds" }));
+    const paste = screen.getByRole("group", { name: "Stripe signing secret" });
+    expect(
+      within(paste).getByText(/Octant keeps taking the old one for 24 hours/),
+    ).toBeInTheDocument();
+    const field = within(paste).getByLabelText("Signing secret from Stripe");
+    await user.type(field, "not-a-stripe-secret");
+    await user.click(within(paste).getByRole("button", { name: "Save secret" }));
+    expect(calls).toContainEqual({
+      operation: "webhook-secret",
+      body: { endpointId: "BBBBBBBBBBBBBBBBBBBBBB", secret: "not-a-stripe-secret" },
+    });
+    expect(
+      await screen.findByText("That is not a Stripe signing secret. It starts with whsec_."),
+    ).toBeInTheDocument();
+    expect(field).toHaveValue("");
+  });
+
   it("lists recent deliveries newest first, with what became of each", () => {
     renderSection({
       view: body({

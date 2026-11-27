@@ -10,6 +10,7 @@ const OTHER_LINK = "M".repeat(22);
 const COMMENT = "C".repeat(22);
 
 type Answer = { readonly status: number; readonly body: unknown };
+type Answers = Partial<Record<HubAdministrationOperation, Answer | (() => Answer)>>;
 
 function statusWith(spoke: Record<string, unknown>) {
   return {
@@ -51,11 +52,12 @@ const shared = {
   published: true,
 };
 
-function renderDialog(answers: Partial<Record<HubAdministrationOperation, Answer>>) {
+function renderDialog(answers: Answers) {
   const calls: Array<{ operation: HubAdministrationOperation; body: unknown }> = [];
   const request = vi.fn(async (operation: HubAdministrationOperation, sent?: unknown) => {
     calls.push({ operation, body: sent });
-    return answers[operation] ?? { status: 200, body: {} };
+    const answer = answers[operation];
+    return (typeof answer === "function" ? answer() : answer) ?? { status: 200, body: {} };
   });
   const onClose = vi.fn();
   render(
@@ -143,7 +145,7 @@ describe("VisitorShareDialog", () => {
     expect(within(toSend).getByText(/A visitor wrote:/)).toBeInTheDocument();
   });
 
-  it("dismisses a visitor's request without sending it", async () => {
+  it("dismisses a visitor's request only after the person confirms, without sending it", async () => {
     const user = userEvent.setup();
     const { calls } = renderDialog({
       status: statusWith(shared),
@@ -153,12 +155,64 @@ describe("VisitorShareDialog", () => {
     await user.click(
       within(requests).getByRole("button", { name: /^Dismiss the visitor's request/ }),
     );
+    expect(calls.some((call) => call.operation === "visitor-comment")).toBe(false);
+    await user.click(await screen.findByRole("button", { name: "Dismiss request" }));
     expect(calls).toContainEqual({
       operation: "visitor-comment",
       body: { commentId: COMMENT, action: "dismiss" },
     });
     expect(await screen.findByText("Dismissed. The visitor is not told.")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Comment to send" })).not.toBeInTheDocument();
+  });
+
+  it("says a sent request was dismissed because its link no longer exists", async () => {
+    const user = userEvent.setup();
+    renderDialog({
+      status: statusWith(shared),
+      "visitor-comment": { status: 200, body: { status: "dismissed" } },
+    });
+    const requests = await screen.findByRole("list", { name: "Visitor requests" });
+    await user.click(within(requests).getByRole("button", { name: /^Send the visitor's request/ }));
+    expect(
+      await screen.findByText(
+        "Nothing was sent: the request's link no longer exists, so Octant dismissed it.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Octant could not send that comment.")).not.toBeInTheDocument();
+  });
+
+  it("moves focus to a new link, and forgets it once that link is stopped", async () => {
+    const user = userEvent.setup();
+    let reads = 0;
+    renderDialog({
+      status: () => {
+        reads += 1;
+        return statusWith(
+          reads === 1
+            ? { links: [], comments: [], published: true }
+            : { ...shared, links: shared.links.slice(0, 1), comments: [] },
+        );
+      },
+      "visitor-share": {
+        status: 200,
+        body: {
+          status: "shared",
+          linkId: LINK,
+          url: `/v/${LINK}#secret-part`,
+          expiresAt: NOW + 3_600_000,
+          published: true,
+        },
+      },
+      "visitor-stop": { status: 200, body: { status: "stopped" } },
+    });
+    await screen.findByText("Nothing is shared with a visitor.");
+    await user.click(screen.getByRole("button", { name: "Make link" }));
+    const link = await screen.findByRole("group", { name: "New visitor link" });
+    await waitFor(() => expect(link).toHaveFocus());
+    const links = await screen.findByRole("list", { name: "Visitor links" });
+    await user.click(within(links).getByRole("button", { name: /^Stop sharing/ }));
+    await screen.findByText("Stopped sharing. The link's next request is refused.");
+    expect(screen.queryByRole("group", { name: "New visitor link" })).not.toBeInTheDocument();
   });
 
   it("says why the host refused to share, and offers nothing to make where visitor links are not set up", async () => {

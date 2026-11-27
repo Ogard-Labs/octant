@@ -241,6 +241,34 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("forwards a pasted Stripe secret only with a body that names one endpoint and the secret", async () => {
+    const { calls, runtime: controls } = runtime(() =>
+      Response.json({ status: "set", published: true }),
+    );
+    const endpointId = "A".repeat(22);
+    await sendHubAdministrationOperation(controls, "webhook-secret", {
+      endpointId,
+      secret: "whsec_pasted-from-stripe",
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/webhooks/secret",
+    ]);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      endpointId,
+      secret: "whsec_pasted-from-stripe",
+    });
+    for (const body of [
+      { endpointId: "../admin", secret: "whsec_x" },
+      { endpointId, secret: "whsec_x", scheme: "github" },
+      { endpointId, secret: "x".repeat(257) },
+    ]) {
+      expect(await sendHubAdministrationOperation(controls, "webhook-secret", body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(1);
+  });
+
   it("shares, stops and answers visitor links only with bodies that name one thread, link or comment", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
     const linkId = "A".repeat(22);

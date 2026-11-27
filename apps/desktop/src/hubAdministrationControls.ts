@@ -38,6 +38,7 @@ import {
   decodeHubVisitorSwitchRequest,
   decodeHubWebhookCreateRequest,
   decodeHubWebhookEndpointRequest,
+  decodeHubWebhookSecretRequest,
   decodeHubPushSwitchRequest,
   decodeHubRelayDeviceRequest,
   decodeHubRelaySwitchRequest,
@@ -242,6 +243,12 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/webhooks/create",
     decodeBody: decodeHubWebhookCreateRequest,
+  },
+  // The secret Stripe minted for one of this spoke's Stripe endpoints, pasted in.
+  "webhook-secret": {
+    method: "POST",
+    path: "/api/desktop/hub/webhooks/secret",
+    decodeBody: decodeHubWebhookSecretRequest,
   },
   "webhook-rotate": {
     method: "POST",

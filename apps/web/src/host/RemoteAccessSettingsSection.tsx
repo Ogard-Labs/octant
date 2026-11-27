@@ -76,6 +76,8 @@ export interface RemoteAccessSettingsSectionProps {
   readonly ownerUnlock?: OwnerUnlockBridge | undefined;
   /** This computer's Code and Work Projects by id, which the hub grant's Act item can name. */
   readonly projectNames?: ReadonlyMap<string, string>;
+  /** This computer's thread titles by `mode:threadId`, for the visitor link list. */
+  readonly threadTitles?: ReadonlyMap<string, string>;
   /** Reads the clock so a test can freeze ticket expiry. */
   readonly now?: () => number;
   /** How long a paired device stays paired, a host setting; the row is absent without it. */
@@ -221,6 +223,7 @@ export function RemoteAccessSettingsSection({
   newDeviceAlerts,
   accessActivity,
   projectNames,
+  threadTitles,
 }: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   const [listener, setListener] = useState<ListenerState>({ kind: "loading" });
@@ -1140,6 +1143,7 @@ export function RemoteAccessSettingsSection({
           pairing={bridge}
           {...(ownerUnlock === undefined ? {} : { ownerUnlock })}
           {...(projectNames === undefined ? {} : { projectNames })}
+          {...(threadTitles === undefined ? {} : { threadTitles })}
           deviceNames={deviceNames}
         />
       )}

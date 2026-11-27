@@ -13,9 +13,16 @@ import { readVisitors, VisitorLinkList, type VisitorLink } from "./VisitorLinks"
 
 const MODE_NAMES: Readonly<Record<string, string>> = { chat: "Chat", code: "Code", work: "Work" };
 
-function threadLabel(link: VisitorLink): string {
-  return `${MODE_NAMES[link.mode] ?? link.mode} thread ${link.threadId.slice(0, 8)}`;
+// A thread this window has no title for (archived, or not loaded here) reads
+// by its kind and the start of its id.
+function threadLabel(link: VisitorLink, titles: ReadonlyMap<string, string>): string {
+  return (
+    titles.get(`${link.mode}:${link.threadId}`) ??
+    `${MODE_NAMES[link.mode] ?? link.mode} thread ${link.threadId.slice(0, 8)}`
+  );
 }
+
+const NO_TITLES: ReadonlyMap<string, string> = new Map();
 
 export default function HubVisitorLinksSection(props: {
   readonly request: HubRequest;
@@ -25,6 +32,8 @@ export default function HubVisitorLinksSection(props: {
   readonly member: boolean;
   readonly onChanged: () => Promise<void>;
   readonly now?: () => number;
+  /** Thread titles by `mode:threadId`. */
+  readonly threadTitles?: ReadonlyMap<string, string>;
 }) {
   const view = readVisitors(props.body);
   const action = useHubEntranceAction(props.request);
@@ -83,7 +92,7 @@ export default function HubVisitorLinksSection(props: {
             action={action}
             now={(props.now ?? Date.now)()}
             onChanged={props.onChanged}
-            threadLabel={threadLabel}
+            threadLabel={(link) => threadLabel(link, props.threadTitles ?? NO_TITLES)}
             view={view}
           />
         </>
