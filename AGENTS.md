@@ -387,7 +387,10 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
     advisory macOS and Windows jobs in the `CI` workflow; the merge queue runs
     them. Path-filtered native workflows still run on every ready layer.
   - Use separate PRs targeting `main` for independent outcomes so the merge queue
-    can group them without creating artificial dependencies.
+    can group them without creating artificial dependencies. A defect, review
+    finding or flaky test found while working is not an independent outcome:
+    fix it on the branch you are on (see
+    [Implementation Discipline](#implementation-discipline)).
 - Treat a stack as one delivery unit: keep its branches linear, enqueue or merge
   it from the lowest eligible PR, and let GitHub perform the cascading rebase after
   each landed layer. If `main` moves before the stack lands, rebase the stack

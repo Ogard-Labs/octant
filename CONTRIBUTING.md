@@ -191,7 +191,9 @@ or repeat unaffected checks simply for another handoff.
 Keep the Linear description's current summary consistent with its status. An
 implementation issue normally closes after merge and its applicable acceptance
 checks; an explicit different delivery target is honored. Preserve required
-native/provider/human checks, and keep unrelated discoveries in separate issues.
+native/provider/human checks. Fix what you find while working (review findings,
+small gaps, flaky tests) on the same branch rather than filing it; see
+[AGENTS.md](AGENTS.md#implementation-discipline).
 
 ## Releases
 
