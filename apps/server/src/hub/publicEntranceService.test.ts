@@ -70,7 +70,11 @@ function setup(
             address: options.tailnet?.address,
             tls:
               options.tailnet?.certificate === true
-                ? { cert: PRIVATE_LISTENER_TEST_CERT, key: PRIVATE_LISTENER_TEST_KEY }
+                ? {
+                    cert: PRIVATE_LISTENER_TEST_CERT,
+                    key: PRIVATE_LISTENER_TEST_KEY,
+                    name: "hub.tail1234.ts.net",
+                  }
                 : undefined,
           }),
         }),

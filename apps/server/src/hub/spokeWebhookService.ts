@@ -118,11 +118,11 @@ export type SpokeWebhookSecretSet =
   | { readonly status: "set"; readonly published: boolean }
   | {
       readonly status: "refused";
-      /** `secret-not-pasted`: the endpoint's scheme takes the secret this spoke minted. */
+      /** `scheme-mints-its-own`: the endpoint's scheme uses the secret this spoke minted, not a pasted one. */
       readonly kind:
         | "public-not-granted"
         | "unknown-endpoint"
-        | "secret-not-pasted"
+        | "scheme-mints-its-own"
         | "invalid-secret";
     };
 
@@ -239,7 +239,7 @@ export class SpokeWebhookService {
     const held = this.#load();
     const endpoint = held.endpoints.find((entry) => String(entry.endpointId) === endpointId);
     if (endpoint === undefined) return { status: "refused", kind: "unknown-endpoint" };
-    if (endpoint.scheme !== "stripe") return { status: "refused", kind: "secret-not-pasted" };
+    if (endpoint.scheme !== "stripe") return { status: "refused", kind: "scheme-mints-its-own" };
     const trimmed = secret.trim();
     if (!STRIPE_SECRET.test(trimmed)) return { status: "refused", kind: "invalid-secret" };
     this.#revision += 1;

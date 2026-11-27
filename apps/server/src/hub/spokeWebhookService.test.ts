@@ -472,7 +472,7 @@ describe("Stripe endpoints on the spoke", () => {
     if (github.status !== "created") throw new Error(github.status);
     expect(await service.setSecret(github.endpointId, STRIPE_SECRET)).toEqual({
       status: "refused",
-      kind: "secret-not-pasted",
+      kind: "scheme-mints-its-own",
     });
     const stripe = await service.create({ scheme: "stripe", label: "Payments" });
     if (stripe.status !== "awaiting-secret") throw new Error(stripe.status);

@@ -1307,7 +1307,9 @@ export function wireRemote(deps: RemoteDependencies) {
   // The Tailscale certificate the private listener serves is also the one the
   // public entrance serves a front on another machine; it stays in memory only.
   const listenerCertificateSink = createListenerCertificateSink(privateListenerController);
-  let tailnetTls: { readonly cert: string; readonly key: string } | undefined;
+  let tailnetTls:
+    | { readonly cert: string; readonly key: string; readonly name: string }
+    | undefined;
   const tailscaleCertificate = new TailscaleCertificateService({
     setting: createTailscaleCertificateSetting(
       providerDataDirectory,
@@ -1323,7 +1325,11 @@ export function wireRemote(deps: RemoteDependencies) {
       install: async (input) => {
         const installed = await listenerCertificateSink.install(input);
         if (installed.status === "installed") {
-          tailnetTls = { cert: input.certificatePem, key: input.privateKeyPem };
+          tailnetTls = {
+            cert: input.certificatePem,
+            key: input.privateKeyPem,
+            name: input.domain,
+          };
         }
         return installed;
       },

@@ -54,7 +54,12 @@ export interface PublicEntranceServiceOptions {
   }>;
 }
 
-type TailnetTls = { readonly cert: string; readonly key: string };
+type TailnetTls = {
+  readonly cert: string;
+  readonly key: string;
+  /** The tailnet name the certificate covers; a front checks it, not the address. */
+  readonly name: string;
+};
 type TailnetBind = NonNullable<Parameters<typeof startPublicEntrance>[0]["tailnet"]>;
 
 export type PublicFrontsOutcome =
@@ -395,15 +400,22 @@ export class PublicEntranceService {
       tailnetAddress: tailnet?.address,
       certificate: tls !== undefined,
     });
-    if (decision.kind !== "tailnet" || tls === undefined) {
-      this.#bindRefusal = decision.kind === "refused" ? decision.reason : "no-tailnet-certificate";
+    if (decision.kind === "refused") {
+      this.#bindRefusal = decision.reason;
       return undefined;
     }
-    const host = decision.address.includes(":") ? `[${decision.address}]` : decision.address;
+    if (decision.kind !== "tailnet" || tls === undefined) {
+      // Unreachable with fronts listed: the decision only says loopback
+      // without them, and refuses without a certificate.
+      this.#bindRefusal = "no-tailnet-certificate";
+      return undefined;
+    }
     return {
       // A renewed certificate rebinds too: a TLS server keeps the one it started with.
       key: `tailnet|${decision.address}|${fronts.join(",")}|${tls.cert}`,
-      origin: `https://${host}`,
+      // The listener binds the address, but a front verifies the certificate,
+      // which names this computer's tailnet name, so that is what it is told.
+      origin: `https://${tls.name}`,
       tailnet: {
         address: decision.address,
         tls,

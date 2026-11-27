@@ -2992,8 +2992,10 @@ person's work without any service Octant runs (maintainer decision,
   entrance listens only there, over TLS, and closes a connection from any
   other address before the handshake; the hub's address comes from
   `tailscale status`, and the certificate is the one the person turned on
-  for the private listener (`octant hub certificate`),
-  so without either the entrance stays closed rather than fall back to
+  for the private listener (`octant hub certificate`). The proxy is told the
+  hub's tailnet name, which that certificate covers, so it can verify it
+  without a hand-set server name,
+  and without either the entrance stays closed rather than fall back to
   another address. Funnel, which carries the internet to loopback, is
   refused while fronts are listed, and fronts while Funnel is on. It never
   binds a wildcard, LAN, or public address.

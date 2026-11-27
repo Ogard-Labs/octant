@@ -697,7 +697,7 @@ async function runPublic(
     input.stdout.write(
       command.addresses.length === 0
         ? "No front on another machine is listed; the entrance listens on this computer only.\n"
-        : "Only these addresses reach the entrance now. Point your proxy at this computer's Tailscale address:\n",
+        : "Only these addresses reach the entrance now. Point your proxy at this computer's tailnet name, which its certificate covers:\n",
     );
     return await printPublicStatus(input);
   }
