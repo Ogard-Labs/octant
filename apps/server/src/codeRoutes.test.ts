@@ -545,7 +545,16 @@ describe("Code routes", () => {
       for (const restricted of [undefined, "hub-roster"] as const) {
         const refused = await route(from(command, restricted));
         expect(refused?.status).toBe(403);
-        expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+        const action =
+          command.kind === "open-code-project-conversation"
+            ? "open the Project conversation"
+            : command.kind === "read-code-project-reports"
+              ? "read Project reports"
+              : "set coordinators and wake switches";
+        expect(await refused?.json()).toMatchObject({
+          category: "unauthorized",
+          message: expect.stringContaining(action),
+        });
       }
     }
     expect(execute).not.toHaveBeenCalled();

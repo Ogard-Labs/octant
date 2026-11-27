@@ -2925,9 +2925,13 @@ function LaunchedShell(
     changeRevision: machineChanges.codeNavigation,
     readCursorStore: codeReadCursorStore,
   });
+  const listedCodeThreads = useMemo(
+    () => codeController.navigation.filter((thread) => thread.projectConversation !== true),
+    [codeController.navigation],
+  );
   const restartNoticeThreads = useMemo(
     () => [
-      ...codeController.navigation.map((thread) => ({
+      ...listedCodeThreads.map((thread) => ({
         mode: "code" as const,
         threadId: String(thread.threadId),
         title: thread.title,
@@ -2946,7 +2950,7 @@ function LaunchedShell(
         ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
       })),
     ],
-    [chatController.navigation, codeController.navigation, workNavigation.navigation],
+    [chatController.navigation, listedCodeThreads, workNavigation.navigation],
   );
   // Bringing a Code thread's tab in front is the user opening it: the thread's
   // view — or its error state — fills the workspace, so its unread dot is
@@ -3410,7 +3414,7 @@ function LaunchedShell(
       todoThreadStates(todoThisHostId, [
         { mode: "chat", rows: chatController.navigation },
         { mode: "work", rows: workNavigation.navigation },
-        { mode: "code", rows: codeController.navigation },
+        { mode: "code", rows: listedCodeThreads },
         ...remoteTodoData.threadRows.flatMap((host) => [
           { hostId: host.hostId, mode: "chat" as const, rows: host.chat },
           { hostId: host.hostId, mode: "work" as const, rows: host.work },
@@ -3421,7 +3425,7 @@ function LaunchedShell(
       todoThisHostId,
       chatController.navigation,
       workNavigation.navigation,
-      codeController.navigation,
+      listedCodeThreads,
       remoteTodoData.threadRows,
     ],
   );
@@ -5843,59 +5847,53 @@ function LaunchedShell(
     };
     const codeProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
       codeController.status === "ready"
-        ? codeController.navigation
-            .filter((thread) => thread.projectConversation !== true)
-            .map((thread) => ({
-              threadId: String(thread.threadId),
-              title: thread.title,
-              projectId: String(thread.projectId),
-              providerInstanceId: String(thread.providerInstanceId),
-              ...(thread.modelId === undefined ? {} : { modelId: thread.modelId }),
-              ...(thread.createdAt === undefined ? {} : { createdAt: thread.createdAt }),
-              // The lifecycle used to ride along as a badge on every row, which
-              // said "active" beside almost every thread and told the reader
-              // nothing. The status dot carries it instead.
-              activity: codeThreadActivity(thread),
-              ...(thread.awaitingKind === undefined ? {} : { awaitingKind: thread.awaitingKind }),
-              ...(thread.turnStartedAt === undefined
-                ? {}
-                : { turnStartedAt: thread.turnStartedAt }),
-              ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
-              ...(thread.limited === undefined ? {} : { limited: thread.limited }),
-              ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
-              ...(thread.pullRequestSummaries === undefined
-                ? {}
-                : { pullRequests: thread.pullRequestSummaries }),
-              ...(thread.touchedIssues === undefined
-                ? {}
-                : { touchedIssues: thread.touchedIssues }),
-              ...(thread.linkedIssues === undefined ? {} : { linkedIssues: thread.linkedIssues }),
-              ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
-              ...(thread.unread === undefined ? {} : { unread: thread.unread }),
-              ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
-              ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
-              ...(thread.lineageParentThreadId === undefined
-                ? {}
-                : { lineageParentThreadId: thread.lineageParentThreadId }),
-              ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
-              ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
-              ...(thread.markedDone === true ? { markedDone: true } : {}),
-              ...(thread.coordinator === true ? { coordinator: true } : {}),
-              ...(thread.planner === true ? { planner: true } : {}),
-              ...workerLineage(thread.coordinatorThreadId),
-              ...(thread.coordinatorChoice === undefined
-                ? {}
-                : { coordinatorChoice: thread.coordinatorChoice }),
-              ...(thread.messageWake === true ? { messageWake: true } : {}),
-              ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
-              ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
-              ...threadRest(thread, {
-                now: snoozeClockNow,
-                awaitingInput:
-                  thread.awaitingInput === true ||
-                  (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
-              }),
-            }))
+        ? listedCodeThreads.map((thread) => ({
+            threadId: String(thread.threadId),
+            title: thread.title,
+            projectId: String(thread.projectId),
+            providerInstanceId: String(thread.providerInstanceId),
+            ...(thread.modelId === undefined ? {} : { modelId: thread.modelId }),
+            ...(thread.createdAt === undefined ? {} : { createdAt: thread.createdAt }),
+            // The lifecycle used to ride along as a badge on every row, which
+            // said "active" beside almost every thread and told the reader
+            // nothing. The status dot carries it instead.
+            activity: codeThreadActivity(thread),
+            ...(thread.awaitingKind === undefined ? {} : { awaitingKind: thread.awaitingKind }),
+            ...(thread.turnStartedAt === undefined ? {} : { turnStartedAt: thread.turnStartedAt }),
+            ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
+            ...(thread.limited === undefined ? {} : { limited: thread.limited }),
+            ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
+            ...(thread.pullRequestSummaries === undefined
+              ? {}
+              : { pullRequests: thread.pullRequestSummaries }),
+            ...(thread.touchedIssues === undefined ? {} : { touchedIssues: thread.touchedIssues }),
+            ...(thread.linkedIssues === undefined ? {} : { linkedIssues: thread.linkedIssues }),
+            ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
+            ...(thread.unread === undefined ? {} : { unread: thread.unread }),
+            ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
+            ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
+            ...(thread.lineageParentThreadId === undefined
+              ? {}
+              : { lineageParentThreadId: thread.lineageParentThreadId }),
+            ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+            ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+            ...(thread.markedDone === true ? { markedDone: true } : {}),
+            ...(thread.coordinator === true ? { coordinator: true } : {}),
+            ...(thread.planner === true ? { planner: true } : {}),
+            ...workerLineage(thread.coordinatorThreadId),
+            ...(thread.coordinatorChoice === undefined
+              ? {}
+              : { coordinatorChoice: thread.coordinatorChoice }),
+            ...(thread.messageWake === true ? { messageWake: true } : {}),
+            ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
+            ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
+            ...threadRest(thread, {
+              now: snoozeClockNow,
+              awaitingInput:
+                thread.awaitingInput === true ||
+                (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
+            }),
+          }))
         : [];
     // Work rows rest the same way Code rows do; the host's runtime says when a
     // thread waits on the person, which the builder already turned into
@@ -6015,6 +6013,7 @@ function LaunchedShell(
     codeController.bootstrap?.settings,
     codeController.navigation,
     codeController.status,
+    listedCodeThreads,
     codeProviderRequestsByThreadId,
     snoozeClockNow,
     providerController.instances,

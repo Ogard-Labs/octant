@@ -253,7 +253,20 @@ describe("collecting thread attention", () => {
         chatThreads: [],
         workThreads: [],
         codeThreads: [
-          { ...base, threadId: "code-done" as CodeThreadId, title: "Finished", unread: true },
+          {
+            ...base,
+            threadId: "code-done" as CodeThreadId,
+            title: "Finished",
+            unread: true,
+            coordinatorThreadId: "project-chat" as CodeThreadId,
+          },
+          {
+            ...base,
+            threadId: "project-chat" as CodeThreadId,
+            title: "Project",
+            unread: true,
+            projectConversation: true,
+          },
           {
             ...base,
             threadId: "code-running" as CodeThreadId,

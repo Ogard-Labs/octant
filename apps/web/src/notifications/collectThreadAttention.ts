@@ -108,6 +108,9 @@ export function collectThreadAttentionSignals(
     if (thread.followUp === true) {
       signals.push({ ...shared, reason: "question-asked" });
     } else if (
+      // The Project rail shows unread worker reports. The worker itself carries
+      // the Inbox notification. Direct questions and approvals still need an answer.
+      thread.projectConversation !== true &&
       thread.unread === true &&
       thread.executing !== true &&
       thread.completedAt === undefined &&
