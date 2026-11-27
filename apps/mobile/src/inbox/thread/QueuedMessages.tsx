@@ -157,29 +157,35 @@ export function QueuedMessages(props: {
               <Text numberOfLines={1} style={styles.text}>
                 {item.payload?.prompt ?? MOBILE_COPY.queueUnreadable}
               </Text>
-              {actions === undefined || row?.changeable !== true ? null : (
+              {actions === undefined || row === undefined || row.actions.length === 0 ? null : (
                 <>
-                  {textAction(
-                    MOBILE_COPY.queueEdit,
-                    () => setEditing({ messageId, text: row.text }),
-                    props.changing,
-                    `mobile-thread-queue-edit-${messageId}`,
-                  )}
-                  {textAction(
-                    MOBILE_COPY.queueSendNow,
-                    () => actions.onSendNow(messageId),
-                    props.changing,
-                    `mobile-thread-queue-send-now-${messageId}`,
-                  )}
-                  <IconButton
-                    accessibilityLabel={MOBILE_COPY.queueRemove}
-                    disabled={props.changing}
-                    name="close"
-                    onPress={() => actions.onRemove(messageId)}
-                    size={32}
-                    testID={`mobile-thread-queue-remove-${messageId}`}
-                    variant="ghost"
-                  />
+                  {row.actions.includes("edit")
+                    ? textAction(
+                        MOBILE_COPY.queueEdit,
+                        () => setEditing({ messageId, text: row.text }),
+                        props.changing,
+                        `mobile-thread-queue-edit-${messageId}`,
+                      )
+                    : null}
+                  {row.actions.includes("send-now")
+                    ? textAction(
+                        MOBILE_COPY.queueSendNow,
+                        () => actions.onSendNow(messageId),
+                        props.changing,
+                        `mobile-thread-queue-send-now-${messageId}`,
+                      )
+                    : null}
+                  {row.actions.includes("remove") ? (
+                    <IconButton
+                      accessibilityLabel={MOBILE_COPY.queueRemove}
+                      disabled={props.changing}
+                      name="close"
+                      onPress={() => actions.onRemove(messageId)}
+                      size={32}
+                      testID={`mobile-thread-queue-remove-${messageId}`}
+                      variant="ghost"
+                    />
+                  ) : null}
                 </>
               )}
             </View>

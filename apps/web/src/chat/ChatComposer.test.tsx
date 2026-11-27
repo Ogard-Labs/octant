@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   decodeContentSha256,
@@ -385,6 +385,66 @@ describe("ChatComposer", () => {
 
     expect(onFileSelected).toHaveBeenCalledWith(file);
     expect(onFileSelected.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("inserts the attached-file line only when onFileSelected accepts a large paste and leaves the prompt empty on refusal", async () => {
+    const largeText = "y".repeat(40 * 1024);
+    const pasteLarge = (field: HTMLElement) => {
+      field.focus();
+      fireEvent.paste(field, {
+        clipboardData: {
+          getData: (type: string) => (type === "text/plain" ? largeText : ""),
+          files: [],
+          items: [],
+          types: ["text/plain"],
+        },
+      });
+    };
+
+    function StatefulComposer(props: {
+      readonly onFileSelected: (
+        file: File,
+      ) => Promise<
+        { readonly status: "accepted" } | { readonly status: "refused"; readonly reason: string }
+      >;
+    }) {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatComposer
+          draft={draft}
+          isSending={false}
+          model={{ options: [{ id: "model-a", label: "Model A" }], value: "model-a" }}
+          onDraftChange={setDraft}
+          onFileSelected={props.onFileSelected}
+          onModelChange={vi.fn()}
+          onProviderChange={vi.fn()}
+          onResearchEnabledChange={vi.fn()}
+          onResearchRoutingChange={vi.fn()}
+          onSend={vi.fn(async () => true)}
+          provider={{ options: [{ id: "provider-a", label: "Provider A" }], value: "provider-a" }}
+          research={{ backend: { kind: "disabled" }, enabled: false, routing: "automatic" }}
+        />
+      );
+    }
+
+    const accepted = vi.fn(async () => ({ status: "accepted" as const }));
+    const first = render(<StatefulComposer onFileSelected={accepted} />);
+    const acceptedField = first.getByLabelText("Message");
+    pasteLarge(acceptedField);
+    await waitFor(() => expect(accepted).toHaveBeenCalledOnce());
+    await waitFor(() => expect(acceptedField).toHaveValue("See the attached pasted-text-1.txt."));
+    first.unmount();
+
+    const refused = vi.fn(async () => ({
+      status: "refused" as const,
+      reason: "A message can hold 4 attachments.",
+    }));
+    const second = render(<StatefulComposer onFileSelected={refused} />);
+    const refusedField = second.getByLabelText("Message");
+    pasteLarge(refusedField);
+    await waitFor(() => expect(refused).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(refusedField).toHaveValue("");
   });
 
   it("reports resolved research routing and exposes provider and model controls through callbacks", async () => {
