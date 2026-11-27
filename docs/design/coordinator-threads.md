@@ -754,8 +754,8 @@ dispatch reply must also give each confirmed worker's title and reference.
 A send must name the exact
 recipient and include the requested color and button. Both “primary button” and
 “primary action button” identify the target. Refused calls fail the score.
-A direct answer needs text and no decision tool calls. List and help calls are allowed
-in all cases. The score measures delegation decisions. Pass rates count
+A direct answer needs text and no decision tool calls. List, help, and successful reads of fixture workers are allowed in all cases.
+A read returns the worker’s title and state with an empty transcript. The score measures delegation decisions. Pass rates count
 completed samples, and the delta is candidate minus baseline. Read errors and
 incomplete counts alongside the rate. Either makes the comparison command
 exit nonzero. Use the normal server tests for offline fixture, assembly, and

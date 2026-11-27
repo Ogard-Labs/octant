@@ -69,6 +69,7 @@ export const cases = {
 
 export interface Action {
   readonly operation: string;
+  readonly reference?: string;
   readonly title?: string;
   readonly prompt?: string;
   readonly startedReference?: string;
@@ -81,7 +82,9 @@ export function score(
   actions: ReadonlyArray<Action>,
   answer: string,
 ): boolean {
-  const decisions = actions.filter(({ operation }) => operation !== "list" && operation !== "help");
+  const decisions = actions.filter(
+    ({ operation }) => operation !== "list" && operation !== "help" && operation !== "read",
+  );
   const { action, targets, workerCount, messageIncludes } = fixture.expected;
   if (action === "answer") return decisions.length === 0 && answer.trim().length > 0;
   if (decisions.some(({ operation }) => operation !== action)) return false;

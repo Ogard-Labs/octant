@@ -1,3 +1,5 @@
+import { decodeSiblingThreadsToolInput } from "@octant/contracts";
+import { frameExternalContentForModel } from "../context/externalContentFraming";
 import { MAX_AGENT_MESSAGE_RECIPIENTS } from "@octant/domain";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -141,6 +143,7 @@ export function decision(
       const { title, prompt } = startAssignment(decodeStart(raw));
       return { operation, title, prompt };
     }
+    if (operation === "read") return decodeSiblingThreadsToolInput(raw);
     if (operation === "send") return Schema.decodeUnknownSync(sendSchema)(raw);
     return { operation };
   } catch {
@@ -195,6 +198,26 @@ export async function sample(
         };
         if (action.operation === "help") result = input.help;
         if (action.operation === "list") result = { status: "listed", threads: workers };
+        let readContent: string | undefined;
+        if (action.operation === "read") {
+          const target = workers.find((worker) => worker.reference === action.reference);
+          if (target !== undefined) {
+            result = {
+              status: "read",
+              reference: target.reference,
+              title: target.title,
+              state: target.state,
+              transcript: [],
+              truncated: false,
+            };
+            readContent = frameExternalContentForModel({
+              origin: "external-content",
+              sourceLabel: "sibling-thread",
+              body: JSON.stringify(result),
+              section: "tool-results",
+            }).text;
+          }
+        }
         if (action.operation === "start" && action.title?.trim() && action.prompt?.trim()) {
           const id = `20000000-0000-4000-8000-${String(workers.length + 10).padStart(12, "0")}`;
           const reference = `${id}@${fixtureProjectId}`;
@@ -224,7 +247,11 @@ export async function sample(
             ? { ...action, operation: `refused: ${action.operation}` }
             : action,
         );
-        messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: readContent ?? JSON.stringify(result),
+        });
       }
     }
     return { status: "incomplete", reason: "tool round limit reached", actions };

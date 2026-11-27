@@ -34,6 +34,7 @@ it("detects unnecessary starts, missing assignments, duplicate assignments and m
       "",
     ),
   ).toBe(true);
+  expect(score(cases.projectQuestion, [{ operation: "refused: read" }], "Done.")).toBe(false);
   const palette = [cases.revise.workers[0].reference];
   expect(
     score(cases.revise, [send(palette, "Use dark blue for the primary action button.")], ""),
@@ -211,7 +212,7 @@ it("checks the model input emitted by each checkout", async () => {
   ).toThrow();
 });
 
-it("returns production help and per-recipient send receipts to the model", async () => {
+it.each([true, false])("checks worker read scope (%s) before sending", async (inScope) => {
   const assembled = await assembleCase(cases.revise, "Use the roster.");
   if ("status" in assembled) throw new Error("Named coordinator unavailable.");
   const input = decodeInputs({
@@ -245,6 +246,12 @@ it("returns production help and per-recipient send receipts to the model", async
     .fn<typeof fetch>()
     .mockResolvedValueOnce(response("help", { operation: "help" }))
     .mockResolvedValueOnce(
+      response("read", {
+        operation: "read",
+        reference: inScope ? recipient : cases.revise.workers[1].id,
+      }),
+    )
+    .mockResolvedValueOnce(
       response("send", {
         operation: "send",
         recipients: [recipient],
@@ -263,9 +270,18 @@ it("returns production help and per-recipient send receipts to the model", async
       input,
       decodeCoordinatorStartInput,
     );
-    expect(result).toMatchObject({ status: "completed", pass: true });
-    const body = fetchModel.mock.calls[2]?.[1]?.body;
+    expect(result).toMatchObject({ status: "completed", pass: inScope });
+    const body = fetchModel.mock.calls[3]?.[1]?.body;
     expect(typeof body).toBe("string");
+    const content = JSON.parse(String(body)).messages.find(
+      (message: { tool_call_id?: string }) => message.tool_call_id === "read",
+    ).content;
+    if (inScope) {
+      expect(content).toContain("sibling-thread");
+      expect(content).toContain(cases.revise.workers[0].title);
+    } else {
+      expect(JSON.parse(content)).toMatchObject({ status: "refused" });
+    }
     expect(String(body)).toContain(JSON.stringify(JSON.stringify(input.help)));
     expect(String(body)).toContain(
       JSON.stringify(
@@ -273,7 +289,7 @@ it("returns production help and per-recipient send receipts to the model", async
           {
             status: "sent",
             recipient,
-            messageId: "50000000-0000-4000-8000-000000010001",
+            messageId: "50000000-0000-4000-8000-000000020001",
             message:
               "Admitted. The recipient reads it as data at the start of its next turn; sending starts no turn there.",
           },
