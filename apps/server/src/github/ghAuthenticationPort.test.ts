@@ -712,7 +712,7 @@ describe("GhAuthenticationPort", () => {
       [
         "#!/bin/sh",
         'if [ "$1" = "--version" ]; then',
-        '  printf "gh version 2.46.0 (test)\\n"',
+        '  printf "gh version 2.50.0 (test)\\n"',
         "else",
         "  printf '{\"hosts\":{}}\\n'",
         "fi",
@@ -734,7 +734,7 @@ describe("GhAuthenticationPort", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-gh-auth-"));
     directories.push(directory);
     const executable = join(directory, "old-gh");
-    writeFileSync(executable, '#!/bin/sh\nprintf "gh version 2.44.9 (test)\\n"\n', { mode: 0o700 });
+    writeFileSync(executable, '#!/bin/sh\nprintf "gh version 2.49.9 (test)\\n"\n', { mode: 0o700 });
     chmodSync(executable, 0o700);
     const port = new GhAuthenticationPort({
       ghExecutable: executable,

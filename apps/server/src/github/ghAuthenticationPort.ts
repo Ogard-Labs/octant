@@ -8,7 +8,9 @@ const MAX_OUTPUT_BYTES = 64 * 1024;
 const INTERACTIVE_AUTH_TIMEOUT_MS = 10 * 60 * 1_000;
 const STATUS_OBSERVATION_TIMEOUT_MS = 5_000;
 const SECURE_STORE_PROBE_TIMEOUT_MS = 5_000;
-const MINIMUM_SUPPORTED_GH_VERSION = [2, 45, 0] as const;
+// `gh pr checks --json` (used by required-checks reads, babysitting, ci-logs,
+// and ci-rerun) shipped in GitHub CLI 2.50.0.
+const MINIMUM_SUPPORTED_GH_VERSION = [2, 50, 0] as const;
 const TOKEN_ENVIRONMENT_NAMES = [
   "GH_TOKEN",
   "GITHUB_TOKEN",
