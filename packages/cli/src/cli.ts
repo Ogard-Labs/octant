@@ -1173,7 +1173,7 @@ function refusesHostAdministration(context: CliContext, args: ParsedArgs): strin
         (args.positional[0] === "disable" && "remove-service" in args.flags)));
   const { commandName, productName } = context.identity;
   // Octant's login service is the only service these read, and it is not the
-  // test host's: the test host runs inside Nightly with no service of its own.
+  // own host's: that host runs inside Nightly with no service of its own.
   if (
     !administers &&
     context.target.kind === "test-host" &&
@@ -1181,10 +1181,10 @@ function refusesHostAdministration(context: CliContext, args: ParsedArgs): strin
     (args.positional[0] === "logs" ||
       (args.positional[0] === "status" && !("hostname" in args.flags || "port" in args.flags)))
   )
-    return `${productName}'s test host has no service. Use \`${commandName} status\` for its state; its log is ${context.environment.OCTANT_LOGS_DIR ?? "in the logs folder"}/service.log.`;
+    return `${productName}'s own host has no service. Use \`${commandName} status\` for its state; its log is ${context.environment.OCTANT_LOGS_DIR ?? "in the logs folder"}/service.log.`;
   if (!administers) return undefined;
   return context.target.kind === "test-host"
-    ? `${commandName} never starts, stops, installs or upgrades a host. ${productName}'s test host starts and stops with ${productName}.`
+    ? `${commandName} never starts, stops, installs or upgrades a host. ${productName}'s own host starts and stops with ${productName}.`
     : `${commandName} never starts, stops, installs or upgrades a host. Manage Octant's host with \`octant\` or the Octant app.`;
 }
 

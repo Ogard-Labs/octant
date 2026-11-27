@@ -46,36 +46,37 @@ function startupRole(identity = nightly) {
 }
 
 describe("Nightly's stored Data choice", () => {
-  it("connects to Octant's host until separate test data is chosen", async () => {
-    expect(startupRole()).toEqual({ kind: "octant-client" });
-    await storeDesktopDataChoice(storage, "test-data");
-    expect(readStoredDesktopDataChoice(storage)).toBe("test-data");
-    expect(startupRole()).toEqual({
+  it("runs Nightly's own host until Octant's data is chosen", async () => {
+    const own = {
       kind: "test-host",
       dataDirectory: testData,
       serverPort: 13_774,
       keychainServiceFamily: "octant-nightly-test-data",
-    });
+    };
+    expect(startupRole()).toEqual(own);
     await storeDesktopDataChoice(storage, "octant");
+    expect(readStoredDesktopDataChoice(storage, "darwin")).toBe("octant");
     expect(startupRole()).toEqual({ kind: "octant-client" });
+    await storeDesktopDataChoice(storage, "test-data");
+    expect(startupRole()).toEqual(own);
   });
 
-  it("reads a malformed, oversized or linked choice as Octant's data", async () => {
+  it("reads a malformed, oversized or linked choice as Nightly's own data", async () => {
     const file = join(storage, "data-choice.json");
     await writeFile(file, "{not json");
-    expect(startupRole()).toEqual({ kind: "octant-client" });
-    await writeFile(file, `{"data":"test-data"}${" ".repeat(2_000)}`);
-    expect(startupRole()).toEqual({ kind: "octant-client" });
+    expect(startupRole()).toMatchObject({ kind: "test-host" });
+    await writeFile(file, `{"data":"octant"}${" ".repeat(2_000)}`);
+    expect(startupRole()).toMatchObject({ kind: "test-host" });
     await rm(file);
     const elsewhere = join(home, "elsewhere.json");
-    await writeFile(elsewhere, '{"data":"test-data"}');
+    await writeFile(elsewhere, '{"data":"octant"}');
     await symlink(elsewhere, file);
-    expect(startupRole()).toEqual({ kind: "octant-client" });
+    expect(startupRole()).toMatchObject({ kind: "test-host" });
   });
 
-  it("reads a FIFO in place of the choice as Octant's data without waiting on it", () => {
+  it("reads a FIFO in place of the choice as Nightly's own data without waiting on it", () => {
     execFileSync("/usr/bin/mkfifo", [join(storage, "data-choice.json")]);
-    expect(startupRole()).toEqual({ kind: "octant-client" });
+    expect(startupRole()).toMatchObject({ kind: "test-host" });
   });
 
   it("leaves Octant the owner of its host whatever Nightly's storage says", async () => {
@@ -344,6 +345,7 @@ describe("Nightly's Data control", () => {
   }
 
   it("stores only the two fixed choices and relaunches only when the choice changed", async () => {
+    await storeDesktopDataChoice(storage, "octant");
     const { data, relaunch } = control({ kind: "octant-client" });
     await expect(data.state()).resolves.toEqual({
       running: "octant",
@@ -355,6 +357,12 @@ describe("Nightly's Data control", () => {
     await expect(data.choose("test-data")).resolves.toMatchObject({ chosen: "test-data" });
     expect(data.relaunch()).toEqual({ kind: "relaunching" });
     expect(relaunch).toHaveBeenCalledOnce();
+  });
+
+  it("asks a Nightly on Octant's host with no stored choice to relaunch on its own data", async () => {
+    const { data } = control({ kind: "octant-client" });
+    await expect(data.state()).resolves.toMatchObject({ running: "octant", chosen: "test-data" });
+    expect(data.relaunch()).toEqual({ kind: "relaunching" });
   });
 
   it("reports a refused removal while the test host runs", async () => {

@@ -164,13 +164,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("app-nightly-data"),
           label: "Data",
           scope: "app",
-          keywords: "octant nightly test separate host development testing relaunch",
+          keywords: "octant nightly own data separate host test relaunch",
         },
         {
           id: settingId("app-nightly-test-data"),
-          label: "Test data",
+          label: "Nightly's own data",
           scope: "app",
-          keywords: "octant nightly test folder development testing",
+          keywords: "octant nightly own data test folder trash remove",
         },
         {
           id: settingId("user-profile"),

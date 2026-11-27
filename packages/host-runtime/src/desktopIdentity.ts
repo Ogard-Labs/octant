@@ -123,25 +123,35 @@ export const DESKTOP_DATA_CHOICE_FILE = "data-choice.json";
 
 export type DesktopDataChoice = "octant" | "test-data";
 
+/** Where Nightly can run a host of its own: there, its own data is the default. */
+export function nightlyOwnHostPlatform(platform: NodeJS.Platform): boolean {
+  return platform === "darwin" || platform === "linux";
+}
+
 /**
- * Anything but an exact `{"data":"test-data"}` is Octant's data: a missing,
- * malformed or unreadable choice never starts a host.
+ * Nightly's data when no valid choice is stored: its own data where it can
+ * run a host, so it works without Octant installed (maintainer decision,
+ * 2026-11-27), and Octant's host elsewhere. Only an exact `{"data":"octant"}`
+ * or `{"data":"test-data"}` is a choice; a missing, malformed or unreadable
+ * one is the default. Neither value ever starts a host on Octant's folder.
  */
-export function decodeDesktopDataChoice(raw: string | undefined): DesktopDataChoice {
-  if (raw === undefined) return "octant";
+export function decodeDesktopDataChoice(
+  raw: string | undefined,
+  platform: NodeJS.Platform,
+): DesktopDataChoice {
+  const fallback: DesktopDataChoice = nightlyOwnHostPlatform(platform) ? "test-data" : "octant";
+  if (raw === undefined) return fallback;
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
-    return "octant";
+    return fallback;
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return "octant";
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return fallback;
   const keys = Object.keys(value);
-  return keys.length === 1 &&
-    keys[0] === "data" &&
-    (value as Readonly<Record<string, unknown>>).data === "test-data"
-    ? "test-data"
-    : "octant";
+  if (keys.length !== 1 || keys[0] !== "data") return fallback;
+  const data = (value as Readonly<Record<string, unknown>>).data;
+  return data === "octant" || data === "test-data" ? data : fallback;
 }
 
 export function encodeDesktopDataChoice(choice: DesktopDataChoice): string {
@@ -153,7 +163,7 @@ export type DesktopHostRole =
   | { readonly kind: "octant-host" }
   /** Nightly connects to Octant's host and never starts one. */
   | { readonly kind: "octant-client" }
-  /** Nightly owns a host of its own on its test data. */
+  /** Nightly owns a host of its own on its own data. */
   | {
       readonly kind: "test-host";
       readonly dataDirectory: string;
@@ -172,7 +182,8 @@ export function resolveDesktopHostRole(
   },
 ): DesktopHostRole {
   if (identity.testHost === null) return { kind: "octant-host" };
-  if (choice !== "test-data") return { kind: "octant-client" };
+  if (choice !== "test-data" || !nightlyOwnHostPlatform(location.platform))
+    return { kind: "octant-client" };
   return {
     kind: "test-host",
     dataDirectory: nightlyTestDataDirectory(identity.testHost, location),

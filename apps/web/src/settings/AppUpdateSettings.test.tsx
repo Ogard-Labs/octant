@@ -588,20 +588,20 @@ describe("AppUpdateSettings", () => {
       },
     });
 
-    it("chooses separate test data for the next launch and offers to relaunch", async () => {
+    it("chooses Octant's data for the next launch and offers to relaunch", async () => {
       const chooseNightlyData = vi.fn(async () => ({
-        running: "octant" as const,
-        chosen: "test-data" as const,
-        testDataPresent: false,
+        running: "test-data" as const,
+        chosen: "octant" as const,
+        testDataPresent: true,
       }));
       const relaunchNightly = vi.fn(async () => ({ kind: "relaunching" as const }));
       view({
         appUpdatePreferenceScope: "local",
-        ...nightlyIdentity("octant"),
+        ...nightlyIdentity("test-data"),
         readNightlyData: async () => ({
-          running: "octant",
-          chosen: "octant",
-          testDataPresent: false,
+          running: "test-data",
+          chosen: "test-data",
+          testDataPresent: true,
         }),
         chooseNightlyData,
         relaunchNightly,
@@ -609,16 +609,16 @@ describe("AppUpdateSettings", () => {
 
       const group = await screen.findByRole("group", { name: "Data" });
       expect(screen.queryByRole("button", { name: "Relaunch Octant Nightly" })).toBeNull();
-      fireEvent.click(within(group).getByRole("button", { name: "Separate test data" }));
-      expect(chooseNightlyData).toHaveBeenCalledWith("test-data");
+      fireEvent.click(within(group).getByRole("button", { name: "Octant's data" }));
+      expect(chooseNightlyData).toHaveBeenCalledWith("octant");
       expect(
-        await screen.findByText("Octant Nightly uses separate test data after it relaunches."),
+        await screen.findByText("Octant Nightly uses Octant's data after it relaunches."),
       ).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "Relaunch Octant Nightly" }));
       expect(relaunchNightly).toHaveBeenCalledOnce();
     });
 
-    it("removes test data only while Nightly is not running on it", async () => {
+    it("moves Nightly's own data to the Trash only while Nightly is not running on it", async () => {
       const removeNightlyTestData = vi.fn(async () => ({
         running: "octant" as const,
         chosen: "octant" as const,
@@ -636,14 +636,14 @@ describe("AppUpdateSettings", () => {
         chooseNightlyData: vi.fn(),
         removeNightlyTestData,
       });
-      fireEvent.click(await screen.findByRole("button", { name: "Remove test data" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Move to Trash" }));
       expect(removeNightlyTestData).toHaveBeenCalledOnce();
       await waitFor(() =>
-        expect(screen.queryByRole("button", { name: "Remove test data" })).toBeNull(),
+        expect(screen.queryByRole("button", { name: "Move to Trash" })).toBeNull(),
       );
     });
 
-    it("keeps removal off while the test host runs, and never offers to install Nightly from it", async () => {
+    it("keeps removal off while Nightly runs on its own data, and never offers to install Nightly from it", async () => {
       const readNightlyInstall = vi.fn();
       view({
         ...nightlyIdentity("test-data"),
@@ -656,7 +656,7 @@ describe("AppUpdateSettings", () => {
         chooseNightlyData: vi.fn(),
         removeNightlyTestData: vi.fn(),
       });
-      expect(await screen.findByRole("button", { name: "Remove test data" })).toBeDisabled();
+      expect(await screen.findByRole("button", { name: "Move to Trash" })).toBeDisabled();
       expect(readNightlyInstall).not.toHaveBeenCalled();
       expect(screen.queryByRole("group", { name: "Release ring" })).toBeNull();
     });

@@ -104,13 +104,13 @@ export function resolveHostOwningStartup(options: {
     return {
       kind: "refused",
       message:
-        "Octant Nightly refused to start a host: separate test data is no longer selected. Open Octant Nightly again.",
+        "Octant Nightly refused to start a host: its own data is no longer selected. Open Octant Nightly again.",
     };
   if (options.platform !== "darwin" && options.platform !== "linux")
     return {
       kind: "refused",
       message:
-        "Octant Nightly refused to start its test host: separate test data is available on macOS and Linux only.",
+        "Octant Nightly refused to start its own host: its own data is available on macOS and Linux only.",
     };
   const home = desktopHomeDirectory(options.appDataDirectory, options.platform);
   if (
@@ -123,7 +123,7 @@ export function resolveHostOwningStartup(options: {
     return {
       kind: "refused",
       message:
-        "Octant Nightly refused to start its test host: its test data folder overlaps Octant's data folder.",
+        "Octant Nightly refused to start its own host: its data folder overlaps Octant's data folder.",
     };
   const logsDirectory =
     options.platform === "darwin"

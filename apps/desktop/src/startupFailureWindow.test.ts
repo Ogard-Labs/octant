@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { quitAfterStartupFailure } from "./quitShutdown";
 import {
   NOTICE_CLOSE_URL,
+  STARTUP_FAILURE_ALTERNATIVE_URL,
   STARTUP_FAILURE_QUIT_URL,
   createNotices,
   showStartupFailureWindow,
@@ -147,6 +148,48 @@ describe("the window that shows a failed start", () => {
 
     expect(prevented).toHaveBeenCalledOnce();
     expect(quit).not.toHaveBeenCalled();
+  });
+
+  it("offers a second way forward before Quit, and runs it once instead of quitting", async () => {
+    const html = startupFailureDocument({
+      title: "Octant Nightly",
+      message: "Install Octant, or use Nightly's own data.",
+      alternative: { label: "Use Nightly's own data", url: STARTUP_FAILURE_ALTERNATIVE_URL },
+    });
+    expect(html.match(/<a /g)).toHaveLength(2);
+    expect(html.indexOf(STARTUP_FAILURE_ALTERNATIVE_URL)).toBeLessThan(
+      html.indexOf(STARTUP_FAILURE_QUIT_URL),
+    );
+
+    const fake = fakeWindow();
+    const quit = vi.fn();
+    const alternative = vi.fn();
+    await showStartupFailureWindow({
+      ready: async () => undefined,
+      quitRequested: () => false,
+      createWindow: () => fake.window,
+      title: "Octant Nightly",
+      message: "reason",
+      quit,
+      alternative: { label: "Use Nightly's own data", run: alternative },
+    });
+    expect(decodeURIComponent(fake.calls[0] ?? "")).toContain(STARTUP_FAILURE_ALTERNATIVE_URL);
+
+    expect(fake.navigate(STARTUP_FAILURE_ALTERNATIVE_URL)).toHaveBeenCalledOnce();
+    fake.navigate(STARTUP_FAILURE_ALTERNATIVE_URL);
+    expect(alternative).toHaveBeenCalledOnce();
+    expect(quit).not.toHaveBeenCalled();
+  });
+
+  it("ignores the second way forward when the window offered none", async () => {
+    const fake = fakeWindow();
+    const quit = vi.fn();
+    await show(fake, quit);
+
+    fake.navigate(STARTUP_FAILURE_ALTERNATIVE_URL);
+
+    expect(quit).not.toHaveBeenCalled();
+    expect(decodeURIComponent(fake.calls[0] ?? "")).not.toContain(STARTUP_FAILURE_ALTERNATIVE_URL);
   });
 
   it("ends the app when the window is closed", async () => {

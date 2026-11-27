@@ -6,13 +6,13 @@
 //
 //  1. the bundle is Octant Nightly at that version, and it is not signed with
 //     a Developer ID;
-//  2. an ordinary launch refuses as a development build: its message names
-//     the development build and the signed release it needs (read from the
-//     alert through System Events; reported as unverified when this terminal
-//     has no Accessibility access);
-//  3. with separate test data chosen, the packaged bundle starts its own test
-//     host on the throwaway home's test-data folder and an unused port, and
-//     stops with the app.
+//  2. a launch set to Octant's data refuses as a development build: its
+//     message names the development build and the signed release it needs
+//     (read from the alert through System Events; reported as unverified when
+//     this terminal has no Accessibility access);
+//  3. with no Data choice stored, the packaged bundle starts its own host on
+//     the throwaway home's own-data folder and an unused port, and stops with
+//     the app.
 //
 // Every process it starts is stopped and verified gone, the throwaway home is
 // removed, and the packaged output it created under `out/` is deleted. Set
@@ -189,7 +189,12 @@ try {
     TMPDIR: process.env.TMPDIR ?? tmpdir(),
     LANG: process.env.LANG ?? "en_US.UTF-8",
   };
+  const storage = join(home, "Library", "Application Support", identity.windowStorageName);
+  const choice = join(storage, "data-choice.json");
   {
+    // With no choice Nightly runs its own host; the client role is Octant's data.
+    await mkdir(storage, { recursive: true, mode: 0o700 });
+    await writeFile(choice, JSON.stringify({ data: "octant" }));
     const { child, outputTail } = spawnPackagedApplication({ executable, env: environment });
     running.add(child);
     if (child.pid !== undefined) started.set(child.pid, "packaged Nightly (client role)");
@@ -222,7 +227,7 @@ try {
       }
       const refused = /development build/.test(text) && /signed release/.test(text);
       checks.push({
-        check: "2. An ordinary launch refuses as an unsigned development build",
+        check: "2. A launch set to Octant's data refuses as an unsigned development build",
         status: refused ? "pass" : readable ? "fail" : "unverified",
         detail: refused
           ? text
@@ -236,9 +241,7 @@ try {
   }
 
   {
-    const storage = join(home, "Library", "Application Support", identity.windowStorageName);
-    await mkdir(storage, { recursive: true, mode: 0o700 });
-    await writeFile(join(storage, "data-choice.json"), JSON.stringify({ data: "test-data" }));
+    await rm(choice, { force: true });
     const port = await freePort();
     const { child, outputTail } = spawnPackagedApplication({
       executable,
@@ -278,7 +281,8 @@ try {
     );
     const survivors = members.filter(alive);
     checks.push({
-      check: "3. The packaged test host starts on the throwaway home's test data, then stops",
+      check:
+        "3. With no Data choice, the packaged bundle starts its own host on the throwaway home's data, then stops",
       status:
         ready && existsSync(testData) && !listening && survivors.length === 0 ? "pass" : "fail",
       detail: `ready=${ready} before-stop=${beforeStop} after=${Math.round((Date.now() - began) / 1_000)}s test-data=${existsSync(testData)} port-closed=${!listening} group=${members.length} survivors=${survivors.length}${ready ? "" : ` ${outputTail().slice(-400)}`}`,

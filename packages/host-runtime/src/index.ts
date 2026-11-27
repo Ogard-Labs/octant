@@ -300,6 +300,7 @@ export {
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
   encodeDesktopDataChoice,
+  nightlyOwnHostPlatform,
   resolveDesktopHostRole,
   resolveDesktopPackageFlavor,
   type DesktopDataChoice,

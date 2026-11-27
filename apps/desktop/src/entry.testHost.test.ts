@@ -57,7 +57,7 @@ it("starts Nightly's own host for test data without asking Octant for status or 
     expect(fixture.error).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Octant Nightly",
-        message: "Octant Nightly could not start the host for its test data.",
+        message: "Octant Nightly could not start the host for its own data.",
       }),
     ),
   );

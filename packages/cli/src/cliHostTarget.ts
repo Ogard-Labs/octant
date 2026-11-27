@@ -1,6 +1,8 @@
 import { isAbsolute, join, resolve } from "node:path";
 import {
+  decodeDesktopDataChoice,
   desktopWindowStorageDirectory,
+  nightlyOwnHostPlatform,
   readStoredDesktopDataChoice,
   resolveDesktopHostRole,
   type DesktopDataChoice,
@@ -10,10 +12,10 @@ import {
 /**
  * Which host this command-line tool talks to, decided once at startup.
  *
- * `octant` owns its host and may start it. `octant-nightly` attaches to
- * Octant's host on the person's real data and never starts, stops or migrates
- * a host there. When Nightly's stored Data choice is Separate test data, it
- * attaches to Nightly's own test host instead, on its folder and port.
+ * `octant` owns its host and may start it. `octant-nightly` attaches to the
+ * host Nightly's Data choice names: Nightly's own host on its folder and port
+ * (the default on macOS and Linux), or Octant's host on Octant's data, where
+ * it never starts, stops or migrates a host.
  */
 export type CliHostTarget =
   | {
@@ -36,7 +38,10 @@ export interface CliHostLocation {
   readonly home: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   /** Reads the stored Data choice; tests replace the file read. */
-  readonly readDataChoice?: (windowStorageDirectory: string) => DesktopDataChoice;
+  readonly readDataChoice?: (
+    windowStorageDirectory: string,
+    platform: NodeJS.Platform,
+  ) => DesktopDataChoice;
 }
 
 export function resolveCliHostTarget(
@@ -53,15 +58,16 @@ export function resolveCliHostTarget(
   try {
     choice = readChoice(
       desktopWindowStorageDirectory(identity, "", desktopAppDataDirectory(location)),
+      location.platform,
     );
   } catch {
-    choice = "octant";
+    choice = decodeDesktopDataChoice(undefined, location.platform);
   }
   if (choice !== "test-data") return { kind: "octant-host", environment: location.env };
-  if (location.platform !== "darwin")
+  if (!nightlyOwnHostPlatform(location.platform))
     return {
       kind: "refused",
-      message: `${identity.productName}'s separate test data is available on macOS only. Set Data to Octant's data in ${identity.productName}'s Settings to use ${identity.commandName} with Octant.`,
+      message: `${identity.productName}'s own data is available on macOS and Linux only. Set Data to Octant's data in ${identity.productName}'s Settings to use ${identity.commandName} with Octant.`,
     };
   const role = resolveDesktopHostRole(identity, choice, location);
   if (role.kind !== "test-host") return { kind: "octant-host", environment: location.env };
@@ -77,12 +83,22 @@ export function resolveCliHostTarget(
       ...location.env,
       OCTANT_DATA_DIR: role.dataDirectory,
       OCTANT_SERVER_PORT: String(serverPort),
-      // The desktop gives its test host this log folder, so reads find its log.
-      OCTANT_LOGS_DIR:
-        location.env.OCTANT_LOGS_DIR ??
-        join(location.home, "Library", "Logs", identity.productName),
+      // The desktop gives its own host this log folder, so reads find its log.
+      OCTANT_LOGS_DIR: location.env.OCTANT_LOGS_DIR ?? ownHostLogsDirectory(identity, location),
     },
   };
+}
+
+/** The log folder the desktop gives Nightly's own host (`resolveHostOwningStartup`). */
+function ownHostLogsDirectory(identity: DesktopIdentity, location: CliHostLocation): string {
+  if (location.platform === "darwin")
+    return join(location.home, "Library", "Logs", identity.productName);
+  const xdg = location.env.XDG_STATE_HOME;
+  const state =
+    xdg !== undefined && xdg !== "" && xdg.trim() === xdg && isAbsolute(xdg)
+      ? resolve(xdg)
+      : join(location.home, ".local", "state");
+  return join(state, "octant-nightly", "logs");
 }
 
 /** Electron's appData folder, where each desktop app keeps its window storage. */
@@ -101,6 +117,6 @@ export function desktopAppDataDirectory(location: {
 /** Why a command found no host, in the words of the host this tool attaches to. */
 export function hostNotRunningMessage(identity: DesktopIdentity, target: CliHostTarget): string {
   if (target.kind === "test-host")
-    return `${identity.productName}'s test host is not running. Open ${identity.productName} with Data set to Separate test data to start it; ${identity.commandName} never starts a host.`;
+    return `${identity.productName}'s own host is not running. Open ${identity.productName} to start it; ${identity.commandName} never starts a host.`;
   return `Octant is not running on this host. Open Octant, or start its host with \`octant server start\`; ${identity.commandName} never starts a host on Octant's data.`;
 }

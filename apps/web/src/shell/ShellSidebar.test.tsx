@@ -40,7 +40,7 @@ describe("ShellSidebar", () => {
     expect(identity.querySelector("button, a, [tabindex]")).toBeNull();
   });
 
-  it("labels Nightly's test data quietly beside the Nightly label", () => {
+  it("shows no data label beside the Nightly label when Nightly runs on its own data", () => {
     render(
       <ShellSidebar
         applicationIdentity={{
@@ -59,8 +59,8 @@ describe("ShellSidebar", () => {
         workspace={defaultWindowWorkspace(windowId)}
       />,
     );
-    const identity = screen.getByLabelText("Octant Nightly, test data");
-    expect(within(identity).getByText("Test data")).toHaveAttribute("data-variant", "outline");
+    const identity = screen.getByLabelText("Octant Nightly");
+    expect(within(identity).queryByText("Test data")).toBeNull();
     expect(within(identity).getByText("Nightly")).toBeTruthy();
   });
 
