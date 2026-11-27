@@ -1737,6 +1737,101 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("opens a mentioned pull request in the browser from Chat, which has no pull-request pane", async () => {
+    const user = userEvent.setup();
+    const openBrowserExternal = vi.fn(async () => undefined);
+    const url = "https://github.com/octant/octant/pull/7";
+    const text = `Compare [#7 Old fix](${url}) today`;
+    const now = "2026-07-20T08:00:00.000Z";
+    const turnId = "00000000-0000-4000-8000-000000000940";
+    const attemptId = "00000000-0000-4000-8000-000000000941";
+    const contentId = "00000000-0000-4000-8000-000000000942";
+    const chatApi = chats();
+    const emptyThread = chatApi.thread;
+    chatApi.thread = vi.fn(async (...input: Parameters<typeof emptyThread>) => {
+      const view = await emptyThread(...input);
+      return decodeChatThreadView({
+        ...view,
+        turns: [
+          {
+            id: turnId,
+            threadId: view.thread.id,
+            sequence: 1,
+            userMessageRef: { contentId, digest: "a".repeat(64), byteLength: text.length },
+            attachmentIds: [],
+            trackerMentions: [{ kind: "pull-request", source: "github", id: "7", url }],
+            attempts: [
+              {
+                id: attemptId,
+                turnId,
+                threadId: view.thread.id,
+                providerInstanceId: view.thread.providerInstanceId,
+                providerSessionId: "20000000-0000-4000-8000-000000000001",
+                modelId: "model-a",
+                contextManifestId: "30000000-0000-4000-8000-000000000001",
+                outcome: "completed",
+                responseRefs: [],
+                citationIds: [],
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+            createdAt: now,
+          },
+        ],
+        contents: [
+          {
+            contentId,
+            role: "user",
+            body: text,
+            digest: "a".repeat(64),
+            byteLength: text.length,
+          },
+        ],
+        lastSequence: 1,
+      });
+    });
+    const listed = projectBootstrap();
+
+    render(
+      <App
+        chatClient={chatApi}
+        hostBridge={{
+          ...credentialHostOperations(),
+          close: vi.fn(),
+          maximizeOrRestore: vi.fn(),
+          minimize: vi.fn(),
+          projectWindowCapability,
+          resetBounds: vi.fn(),
+          selectProjectRoot: vi.fn(),
+          setSidebarMaterialPreference: vi.fn(),
+          subscribeResolvedMaterial: vi.fn(() => () => undefined),
+          openBrowserExternal,
+        }}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        // A Code Project of this window holds the mentioned repository.
+        projectClient={projects({
+          ...listed,
+          active: listed.active.map((project) => ({
+            ...project,
+            connectedRepository: { host: "github.com", owner: "octant", repository: "octant" },
+          })) as typeof listed.active,
+        })}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(splitChatShellBootstrap())}
+      />,
+    );
+
+    const chips = await screen.findAllByRole("button", { name: "Pull request #7: Old fix" });
+    await user.click(chips[0] as HTMLElement);
+    const card = await screen.findByRole("dialog", { name: "Pull request details" });
+    await user.click(within(card).getByRole("button", { name: "Open" }));
+
+    expect(openBrowserExternal).toHaveBeenCalledWith(url);
+  });
+
   it("offers Tasks from More tools for a Chat thread showing a task list, without opening the dock", async () => {
     const user = userEvent.setup();
     const now = "2026-07-20T08:00:00.000Z";

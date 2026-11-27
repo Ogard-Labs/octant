@@ -132,7 +132,8 @@ export function useThreadMentionTypeahead(input: {
     if (caretIndex !== null) mentions.onDraftEdited?.(draft, caretIndex);
     const next = caretIndex === null ? undefined : parseThreadMentionToken(draft, caretIndex);
     setToken(next);
-    setActiveIndex(0);
+    // An arrow's release reads the same token again and keeps its highlight.
+    if (next?.start !== token?.start || next?.query !== token?.query) setActiveIndex(0);
     mentions.onQueryChange(next?.query);
   }
 

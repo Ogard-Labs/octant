@@ -8,7 +8,14 @@ const LazySentMentionText = lazyOr<{
   readonly trackerMentions: ReadonlyArray<TrackerMention>;
 }>(
   async () => (await import("./SentMentionText")).SentMentionText,
-  ({ text }) => <TrackerReferenceText asParagraph text={text} />,
+  // Plain until the chips arrive: reading the text for tracker tags here would
+  // look up the keys inside a mentioned item's title.
+  ({ text, trackerMentions }) =>
+    trackerMentions.length === 0 ? (
+      <TrackerReferenceText asParagraph text={text} />
+    ) : (
+      <p className="tracker-reference-text">{text}</p>
+    ),
 );
 
 /**

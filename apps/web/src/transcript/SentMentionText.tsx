@@ -1,5 +1,9 @@
 import type { TrackerMention } from "@octant/contracts";
-import { findSentThreadMentions, findTrackerMentionSpans } from "@octant/domain";
+import {
+  findSentThreadMentions,
+  findTrackerMentionSpans,
+  maskTrackerMentions,
+} from "@octant/domain";
 import { Fragment, type ReactNode } from "react";
 import { ThreadReferenceChip } from "../threadReferences/ThreadReferenceChip";
 import { TrackerMentionChip } from "../trackerMentions/TrackerMentionChip";
@@ -19,7 +23,9 @@ export function SentMentionText(props: {
   readonly trackerMentions: ReadonlyArray<TrackerMention>;
 }) {
   const { text } = props;
-  const { spans, byIdentity } = useTrackerReferenceResolutions(text);
+  const { spans, byIdentity } = useTrackerReferenceResolutions(
+    maskTrackerMentions(text, props.trackerMentions),
+  );
   const references = useThreadReferences();
   const threads = findSentThreadMentions(
     text,

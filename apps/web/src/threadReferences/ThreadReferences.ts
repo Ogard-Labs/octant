@@ -25,8 +25,11 @@ export interface ThreadReferenceLists {
     readonly connectedRepository?: ConnectedGitHubRepository | undefined;
   }>;
   readonly onOpen: (thread: CommandThread) => void;
-  /** Opens Octant's pane on a pull request a text names, in a Project this window holds. */
-  readonly onOpenPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
+  /**
+   * Opens Octant's pane on a pull request a text names, in a Project this window
+   * holds. Absent while the window has no such pane to show it in.
+   */
+  readonly onOpenPullRequest?: ((identity: ThreadBoardPullRequestIdentity) => void) | undefined;
   /** Where any other link named in text opens: the desktop's browser, else the window's. */
   readonly externalHost?: ExternalUrlHost | undefined;
 }
@@ -43,8 +46,16 @@ export function useThreadReferenceLists(input: ThreadReferenceLists): ThreadRefe
     () => ({
       ...input,
       onOpen: (thread) => open.current(thread),
-      onOpenPullRequest: (identity) => openPullRequest.current?.(identity),
+      onOpenPullRequest:
+        input.onOpenPullRequest && ((identity) => openPullRequest.current?.(identity)),
     }),
-    [input.chat, input.work, input.code, input.withProviderMark, input.projects],
+    [
+      input.chat,
+      input.work,
+      input.code,
+      input.withProviderMark,
+      input.projects,
+      !input.onOpenPullRequest,
+    ],
   );
 }

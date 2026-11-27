@@ -74,6 +74,23 @@ export function findTrackerMentionSpans(text: string): ReadonlyArray<TrackerMent
   });
 }
 
+/**
+ * The text with its references blanked, every other character where it was, so
+ * a ticket key in a mentioned item's title is not read as a reference of its
+ * own. `recorded` limits that to the references a sent message holds as mentions.
+ */
+export function maskTrackerMentions(
+  text: string,
+  recorded?: ReadonlyArray<{ readonly url: string }>,
+): string {
+  let masked = text;
+  for (const span of findTrackerMentionSpans(text)) {
+    if (recorded !== undefined && !recorded.some((each) => each.url === span.mention.url)) continue;
+    masked = `${masked.slice(0, span.start)}${" ".repeat(span.text.length)}${masked.slice(span.end)}`;
+  }
+  return masked;
+}
+
 /** What a sent message records: each referenced item once, in the order the text shows them. */
 export function findTrackerMentions(text: string): ReadonlyArray<TrackerMention> {
   const byUrl = new Map<string, TrackerMention>();

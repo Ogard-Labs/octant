@@ -1,4 +1,5 @@
 import type { TrackerReferenceResolution } from "@octant/contracts";
+import { maskTrackerMentions } from "@octant/domain";
 import { useTrackerReferenceResolutions } from "./TrackerReferenceContext";
 import { TrackerReferenceChip } from "./TrackerReferenceText";
 import { trackerReferenceIdentity } from "./trackerReferenceResolve";
@@ -9,7 +10,8 @@ import { trackerReferenceIdentity } from "./trackerReferenceResolve";
  * answered, so an unauthorized or rate-limited host never invents status.
  */
 export function TrackerReferenceComposerHints(props: { readonly draft: string }) {
-  const { spans, byIdentity } = useTrackerReferenceResolutions(props.draft);
+  // A mention is already its own chip, whatever its title says.
+  const { spans, byIdentity } = useTrackerReferenceResolutions(maskTrackerMentions(props.draft));
   const resolved = uniqueResolved(spans, byIdentity);
   if (resolved.length === 0) return null;
   return (

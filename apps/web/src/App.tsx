@@ -6030,7 +6030,8 @@ function LaunchedShell(
     withProviderMark: navigationModel.withProviderMark,
     projects: projectController.allProjects,
     onOpen: openCommandThread,
-    onOpenPullRequest: selectProjectPullRequestIdentity,
+    // The pane is a Code tool; elsewhere a mentioned pull request opens on the web.
+    onOpenPullRequest: activeMode === "code" ? selectProjectPullRequestIdentity : undefined,
     externalHost: props.hostBridge,
   });
 
