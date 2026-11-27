@@ -1,4 +1,4 @@
-import type { ChatAttemptOutcome } from "@octant/contracts";
+import { type ChatAttemptOutcome, decodeWorkTurnRequestId } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
   chatVisitorState,
@@ -81,6 +81,7 @@ describe("a Work thread as a visitor reads it", () => {
 
   function workThreads(overrides: Partial<WorkVisitorThreads> = {}): WorkVisitorThreads {
     const turn = {
+      requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
       turnId: "turn-1",
       status: "completed",
       transcript: [
@@ -95,6 +96,7 @@ describe("a Work thread as a visitor reads it", () => {
     return {
       thread: () => ({ title: "Read the Acme contract", lifecycle: "active" }),
       turns: () => [turn],
+      liveReplyText: () => undefined,
       activity: () => idle,
       ...overrides,
     };
@@ -115,6 +117,35 @@ describe("a Work thread as a visitor reads it", () => {
     });
     expect(JSON.stringify(read)).not.toContain("TOOL OUTPUT");
     expect(JSON.stringify(read)).not.toContain("summary.md");
+  });
+
+  it("shows the reply a running Work turn has streamed so far", () => {
+    const source = visitorThreadSource(
+      unusedConnection,
+      () => ({}),
+      workThreads({
+        turns: () => [
+          {
+            requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            turnId: "turn-1",
+            status: "running",
+            transcript: [
+              { role: "user", text: "Summarise it" },
+              { role: "assistant", text: "" },
+            ],
+          },
+        ],
+        liveReplyText: () => "It runs for",
+        activity: () => ({ executing: true, awaitingInput: false }),
+      }),
+    );
+    expect(source.read("work", "11111111-1111-4111-8111-111111111111")).toMatchObject({
+      state: "working",
+      messages: [
+        { role: "person", text: "Summarise it" },
+        { role: "agent", text: "It runs for" },
+      ],
+    });
   });
 
   it("finds no Work thread that is gone, being deleted, or not a Work thread id", () => {

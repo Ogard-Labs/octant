@@ -1,7 +1,7 @@
 // What a visitor link reads of a thread on this spoke, per mode. Only message
 // text leaves here: Code's prompts and replies from its message-search view,
 // Chat's messages and replies from its thread view, and Work's prompts and
-// replies from its turns' transcripts. Tool calls, diffs, files, attachments
+// replies from its turns' transcripts, with the reply still streaming. Tool calls, diffs, files, attachments
 // and approvals never enter these reads; an approval shows only as the
 // thread's state.
 //
@@ -113,6 +113,7 @@ export interface WorkVisitorThreads {
     threadId: WorkThreadId,
   ) => Pick<WorkThread, "title" | "lifecycle" | "providerHandoff"> | undefined;
   readonly turns: (threadId: WorkThreadId) => ReadonlyArray<{
+    readonly requestId: WorkTurnState["requestId"];
     readonly turnId: string;
     readonly status: WorkTurnState["status"];
     readonly failure?: { readonly usageLimit?: unknown } | undefined;
@@ -121,6 +122,8 @@ export interface WorkVisitorThreads {
       readonly text: string;
     }>;
   }>;
+  /** The reply an unsettled turn has streamed so far; the journaled transcript lacks it. */
+  readonly liveReplyText: (requestId: WorkTurnState["requestId"]) => string | undefined;
   readonly activity: (threadId: WorkThreadId) => WorkTurnActivity;
 }
 
@@ -137,16 +140,24 @@ function readWork(work: WorkVisitorThreads | undefined, threadId: string): Visit
     return MISSING;
   }
   const turns = work.turns(id);
-  const messages: Message[] = turns.flatMap((turn) =>
-    turn.transcript
+  const messages: Message[] = turns.flatMap((turn) => {
+    const live = work.liveReplyText(turn.requestId);
+    const transcript =
+      live === undefined
+        ? turn.transcript
+        : [
+            ...turn.transcript.filter((entry) => entry.role === "user"),
+            { role: "assistant" as const, text: live },
+          ];
+    return transcript
       .filter((entry) => entry.text.trim() !== "")
       .map(
         (entry): Message => ({
           role: entry.role === "user" ? "person" : "agent",
           text: entry.text,
         }),
-      ),
-  );
+      );
+  });
   const latest = turns.at(-1);
   return {
     status: "found",

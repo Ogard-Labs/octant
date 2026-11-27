@@ -6,7 +6,7 @@ import type {
   VisitorFetchRequest,
   VisitorLinkId,
 } from "@octant/contracts";
-import { VISITOR_PROJECTION_MAX_BYTES } from "@octant/contracts";
+import { decodeWorkTurnRequestId, VISITOR_PROJECTION_MAX_BYTES } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
 import { publicKeyFingerprint } from "./hubCrypto";
@@ -137,7 +137,7 @@ const fetchOf = (
 });
 
 describe("a webhook signing secret in a shared Work thread", () => {
-  it("reaches a visitor redacted", async () => {
+  it("reaches a visitor redacted, in a settled message and a still-streaming reply", async () => {
     const secret = "whsec_5WbX1kEMOo2N8gQk9Ff3LhZtA7cYdRsV";
     const context = setup({
       source: visitorThreadSource(
@@ -149,15 +149,18 @@ describe("a webhook signing secret in a shared Work thread", () => {
           thread: () => ({ title: `Check ${secret}`, lifecycle: "active" }),
           turns: () => [
             {
+              requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
               turnId: "turn-1",
-              status: "completed",
+              status: "running",
               transcript: [
                 { role: "user", text: `Verify events with ${secret}` },
-                { role: "assistant", text: `I will use ${secret}.` },
+                { role: "assistant", text: "" },
               ],
             },
           ],
-          activity: () => ({ executing: false, awaitingInput: false }),
+          // The reply has not settled, so only the live read holds it.
+          liveReplyText: () => `I will use ${secret}.`,
+          activity: () => ({ executing: true, awaitingInput: false }),
         },
       ),
     });
@@ -313,6 +316,7 @@ describe("sharing a thread with a visitor", () => {
 describe("sharing a Work thread", () => {
   it("a Work thread can be shared, and its visitor reads only redacted messages and state", async () => {
     const turn = {
+      requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
       turnId: "turn-1",
       status: "waiting",
       failure: { category: "rate-limited", message: "Limit reached.", usageLimit: {} },
@@ -331,6 +335,7 @@ describe("sharing a Work thread", () => {
         {
           thread: () => ({ title: "Answer Acme", lifecycle: "active" }),
           turns: () => [turn],
+          liveReplyText: () => undefined,
           activity: () => ({ executing: false, awaitingInput: true, waitsOnTurnAlone: true }),
         },
       ),

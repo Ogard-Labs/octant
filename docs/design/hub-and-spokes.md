@@ -3100,7 +3100,8 @@ are not built yet. A standing-in standby serves them too (slice 26).
   the thread: it writes every message as text. Built: the thread's title,
   its state (working, idle, or the owner deciding), and its messages (Code's
   prompts and replies, Chat's messages and replies, Work's prompts and
-  replies from each turn's transcript) with paths and
+  replies from each turn's transcript, with a streaming reply's text so far)
+  with paths and
   secret-shaped values replaced; the stream asks the spoke again every two
   seconds and ends when the spoke refuses. Not built yet: step titles and
   states.

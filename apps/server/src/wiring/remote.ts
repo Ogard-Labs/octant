@@ -1472,6 +1472,7 @@ export function wireRemote(deps: RemoteDependencies) {
       {
         thread: (threadId) => deps.workThreadProjection.read(threadId),
         turns: (threadId) => deps.workTurnProjection.listForThread(threadId),
+        liveReplyText: (requestId) => workTurnService.liveReplyText(requestId),
         activity: (threadId) => deps.observeWorkThreadRuntime(threadId),
       },
     ),
