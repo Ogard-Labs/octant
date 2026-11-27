@@ -249,6 +249,7 @@ export interface BeginChatTurnInput {
   readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly sideChatReturns?: ChatTurn["sideChatReturns"];
   readonly threadMentionIds?: ChatTurn["threadMentionIds"];
+  readonly trackerMentions?: ChatTurn["trackerMentions"];
   readonly userMessageRef: ChatContentReference;
   readonly attachmentIds?: ReadonlyArray<ChatAttachmentId>;
   readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
@@ -314,6 +315,9 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
       ? {}
       : { threadMentionIds: input.threadMentionIds }),
+    ...(input.trackerMentions === undefined || input.trackerMentions.length === 0
+      ? {}
+      : { trackerMentions: input.trackerMentions }),
     createdAt: input.createdAt,
   });
 }

@@ -2384,6 +2384,9 @@ function startTurn(
     ...(frame.event.threadMentionIds === undefined
       ? {}
       : { threadMentionIds: frame.event.threadMentionIds }),
+    ...(frame.event.trackerMentions === undefined
+      ? {}
+      : { trackerMentions: frame.event.trackerMentions }),
     ...(frame.event.checkpoint === undefined ? {} : { checkpoint: frame.event.checkpoint }),
     ...(frame.event.executionPolicy === undefined
       ? {}
@@ -2536,6 +2539,7 @@ type CodeConversationBuilder = {
   checkoutId?: CodeConversationTurn["checkoutId"];
   reviewFindingReferences?: CodeConversationTurn["reviewFindingReferences"];
   threadMentionIds?: CodeConversationTurn["threadMentionIds"];
+  trackerMentions?: CodeConversationTurn["trackerMentions"];
   checkpoint?: CodeConversationTurn["checkpoint"];
   executionPolicy?: CodeConversationTurn["executionPolicy"];
   describedImages?: CodeConversationTurn["describedImages"];

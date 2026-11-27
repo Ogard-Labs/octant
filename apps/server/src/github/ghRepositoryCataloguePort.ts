@@ -309,6 +309,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       readonly pageSize: number;
       readonly cursor?: string | undefined;
       readonly state: "open" | "closed" | "all";
+      readonly match?: "title" | undefined;
     },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhSearchObservationRow>>> {
@@ -320,12 +321,14 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       state: request.state,
       search: request.query,
       unassigned: false,
-      scope: "issues-and-pull-requests",
+      scope: request.match === "title" ? "titles" : "issues-and-pull-requests",
     });
     if (query === undefined) return ok([], false);
     return this.#paginateRest({
       kind: "search",
-      discriminator: `${repository}|${request.state}|${request.query.trim()}`,
+      discriminator: `${repository}|${request.state}|${request.query.trim()}${
+        request.match === "title" ? "|titles" : ""
+      }`,
       pageSize: request.pageSize,
       cursor: request.cursor,
       pathFor: (page) =>
@@ -337,6 +340,24 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       lastPage: SEARCH_LAST_PAGE,
       signal,
     });
+  }
+
+  async readItem(
+    request: { readonly owner: string; readonly name: string; readonly number: number },
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<GhSearchObservationRow>> {
+    const repository = validatedRepositoryPath(request.owner, request.name);
+    if (repository === undefined) return { kind: "unavailable" };
+    if (!Number.isSafeInteger(request.number) || request.number <= 0) {
+      return { kind: "unavailable" };
+    }
+    // The issues endpoint answers for a pull request too, with its draft flag
+    // and merge time, which is all a search row holds.
+    const result = await this.#run(["api", `repos/${repository}/issues/${request.number}`], signal);
+    if (result.kind !== "ok") return result;
+    const row = decodeSearchItem(tryParseJson(result.stdout));
+    if (row === undefined || row === "skip") return { kind: "unavailable" };
+    return { kind: "ok", value: row };
   }
 
   async readIssue(
@@ -940,7 +961,7 @@ function composeIssueSearchQuery(input: {
    * The issue catalogue matches issue titles; the agent's repository search
    * matches titles and bodies of issues and pull requests alike.
    */
-  readonly scope: "issue-titles" | "issues-and-pull-requests";
+  readonly scope: "issue-titles" | "issues-and-pull-requests" | "titles";
   /** The server's own qualifier, so it is never among the terms cut for length. */
   readonly closedReason?: GithubIssueClosedReasonFilter | undefined;
 }): string | undefined {
@@ -990,7 +1011,7 @@ function composeIssueSearchQuery(input: {
   if (titleParts.length > 0) {
     userTerms.push(
       `"${titleParts.join(" ")}"`,
-      input.scope === "issue-titles" ? "in:title" : "in:title,body",
+      input.scope === "issues-and-pull-requests" ? "in:title,body" : "in:title",
     );
   }
   const parts = [...prefix];

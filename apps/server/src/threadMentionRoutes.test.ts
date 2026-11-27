@@ -184,3 +184,68 @@ describe("Thread mention routes", () => {
     expect(await response?.json()).toEqual({ message: "Thread mention command is invalid." });
   });
 });
+
+describe("Pull request and issue search of the # list", () => {
+  const trackersUrl = "http://127.0.0.1/api/thread-mentions/trackers";
+  const candidate = {
+    kind: "pull-request" as const,
+    source: "github" as const,
+    id: "7",
+    url: "https://github.com/acme/app/pull/7",
+    title: "Fix login",
+    state: "open",
+    container: "acme/app",
+    person: "dana",
+  };
+
+  function trackerRoute() {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const trackers = vi.fn(async () => [candidate]);
+    return {
+      trackers,
+      handler: createThreadMentionRouteHandler({
+        service: { execute: vi.fn() },
+        trackers,
+        windowAuthorityStore: store,
+        now: () => 1,
+      }),
+    };
+  }
+
+  const request = (body: unknown, headers: Record<string, string> = authHeaders) =>
+    new Request(trackersUrl, { method: "POST", headers, body: JSON.stringify(body) });
+
+  it("answers the window's search under the window it authenticated", async () => {
+    const { handler, trackers } = trackerRoute();
+
+    const response = await handler(request({ query: "login" }));
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({ candidates: [candidate] });
+    expect(trackers).toHaveBeenCalledWith({ query: "login" }, { windowId });
+  });
+
+  it("refuses a request with no window capability, an outside origin, or an invented principal", async () => {
+    const { handler, trackers } = trackerRoute();
+
+    const unauthenticated = await handler(
+      request({ query: "login" }, { "content-type": "application/json" }),
+    );
+    const outsideOrigin = await handler(
+      request({ query: "login" }, { ...authHeaders, origin: "https://evil.example" }),
+    );
+    const invented = await handler(request({ query: "login", windowId }));
+
+    expect(unauthenticated?.status).toBe(401);
+    expect(outsideOrigin?.status).toBe(400);
+    expect(invented?.status).toBe(401);
+    expect(trackers).not.toHaveBeenCalled();
+  });
+
+  it("is not served by a host that wires no search", async () => {
+    const { handler } = createRoute();
+
+    expect(await handler(request({ query: "login" }))).toBeUndefined();
+  });
+});

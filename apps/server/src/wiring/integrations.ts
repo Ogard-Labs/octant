@@ -22,7 +22,12 @@ import { GithubIssueContextService } from "../github/githubIssueContextService";
 import { LinearIssueContextService } from "../plugins/linear/linearIssueContextService";
 import { LinearReadToolService } from "../plugins/linear/linearReadToolService";
 import { linearRoutineEventSources } from "../plugins/linear/linearRoutineEventSources";
-import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
+import { decodeGithubRepositoryName, decodeGithubRepositoryOwner } from "@octant/contracts";
+import {
+  decodeLinearIssueListPage,
+  LINEAR_ISSUE_GET_OPERATION,
+  LINEAR_ISSUE_LIST_OPERATION,
+} from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "../github/githubReadToolService";
 import { GhIssueWritePort } from "../github/ghIssueWritePort";
 import { ThreadLinkedIssueStore } from "../trackerIssues/threadLinkedIssueStore";
@@ -588,6 +593,64 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       service: integrationService,
       isEffective: (slug) => slug !== "linear" || linearIntegrationIsEffective(),
     });
+    // What the composer's `#` list searches: the person's own reads through the
+    // connections this host already holds. Without one, nothing is asked.
+    const trackerMentionTrackers = {
+      github: {
+        connected: githubIntegrationIsEffective,
+        search: async (
+          input: { readonly owner: string; readonly name: string; readonly text: string },
+          signal: AbortSignal,
+        ) => {
+          const response = await githubCatalogueService.read(
+            {
+              kind: "search",
+              owner: decodeGithubRepositoryOwner(input.owner),
+              name: decodeGithubRepositoryName(input.name),
+              query: input.text,
+              pageSize: 10,
+              state: "all",
+              match: "title",
+            },
+            signal,
+          );
+          return response.kind === "search" ? response.page.rows : [];
+        },
+        item: async (
+          input: { readonly owner: string; readonly name: string; readonly number: number },
+          signal: AbortSignal,
+        ) => {
+          const response = await githubCatalogueService.read(
+            {
+              kind: "item",
+              owner: decodeGithubRepositoryOwner(input.owner),
+              name: decodeGithubRepositoryName(input.name),
+              number: input.number,
+            },
+            signal,
+          );
+          return response.kind === "item" ? response.row : undefined;
+        },
+      },
+      linear: {
+        connected: linearConnected,
+        list: async (
+          input: { readonly search: string; readonly teamId?: string },
+          signal: AbortSignal,
+        ) => {
+          const result = await runLinearOperation(
+            LINEAR_ISSUE_LIST_OPERATION,
+            {
+              search: input.search,
+              pageSize: 10,
+              ...(input.teamId === undefined ? {} : { filter: { teamId: input.teamId } }),
+            },
+            signal,
+          );
+          return result.kind === "ok" ? decodeLinearIssueListPage(result.value).rows : [];
+        },
+      },
+    };
     return {
       agentMessageProjection,
       agentMessageService,
@@ -630,6 +693,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
+      trackerMentionTrackers,
       providerRuntimeNetwork,
       safeNetworkRoutes,
       safeNetworkStore,

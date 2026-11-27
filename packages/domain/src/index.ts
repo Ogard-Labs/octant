@@ -228,6 +228,7 @@ export * from "./githubCapabilityPolicy";
 export * from "./githubRepositoryReadPolicy";
 export * from "./githubRemoteIdentity";
 export * from "./trackerReferencePolicy";
+export * from "./trackerMentionPolicy";
 export * from "./codeProjectPullRequestPolicy";
 export * from "./codeProjectPullRequestCadencePolicy";
 export * from "./managedRepositoryPolicy";

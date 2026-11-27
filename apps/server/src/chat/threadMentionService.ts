@@ -70,6 +70,8 @@ export interface ThreadMentionDirectoryThread {
   readonly mode: OctantMode;
   readonly title: string;
   readonly placement: ThreadMentionPlacement;
+  /** The Project the thread belongs to, which scopes a search made from its composer. */
+  readonly projectId?: string;
   readonly updatedAt: UtcTimestamp;
   readonly version?: AggregateVersion;
   readonly busy?: boolean;
@@ -889,6 +891,7 @@ export function createChatThreadMentionDirectory(input: {
           mode: "chat" as const,
           title: thread.title,
           placement: threadPlacement(thread.projectId, input.projectLabel),
+          ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
           updatedAt: thread.updatedAt,
           ...(thread.version === undefined ? {} : { version: thread.version }),
           providerInstanceId: thread.providerInstanceId,
@@ -1087,6 +1090,7 @@ export function createWorkThreadMentionDirectory(input: {
           mode: "work" as const,
           title: thread.title,
           placement: threadPlacement(thread.projectId, input.projectLabel),
+          ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
           updatedAt: thread.updatedAt,
           ...(thread.version === undefined ? {} : { version: thread.version }),
           providerInstanceId: thread.providerInstanceId,
@@ -1199,6 +1203,7 @@ export function createCodeThreadMentionDirectory(input: {
           mode: "code" as const,
           title: thread.title,
           placement: threadPlacement(thread.projectId, input.projectLabel),
+          ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
           updatedAt: thread.updatedAt,
           ...(thread.version === undefined ? {} : { version: thread.version }),
           providerInstanceId: thread.providerInstanceId,

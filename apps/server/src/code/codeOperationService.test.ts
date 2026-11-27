@@ -2819,6 +2819,39 @@ describe("CodeOperationService", () => {
     );
   });
 
+  it("journals the pull requests and issues a Code message mentioned, and reads nothing for the agent", async () => {
+    const asked = vi.fn(async () => []);
+    const fixture = providerTurnFixture({ resolveThreadMentionContext: asked });
+    const message = "review [#2901 Fix](https://github.com/acme/app/pull/2901)";
+    fixture.evidence.read.mockImplementation(async () => message);
+    Object.assign(fixture.evidence, { readNow: () => message });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+
+    expect(asked).not.toHaveBeenCalled();
+    const started = fixture.turns.start.mock.calls[0]![0];
+    expect(started.prompt).toBe("review [#2901 Fix](https://github.com/acme/app/pull/2901)");
+    expect(JSON.stringify(started.context ?? [])).not.toContain("acme/app");
+    expect(fixture.events.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "conversation-turn-started",
+          trackerMentions: [
+            {
+              kind: "pull-request",
+              source: "github",
+              id: "2901",
+              url: "https://github.com/acme/app/pull/2901",
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
   it("takes no restore point on a Plan turn, which may write nothing", async () => {
     const checkpoint = vi.fn(async () => ({ status: "failed" as const }));
     const planning = providerTurnFixture({

@@ -545,6 +545,14 @@ describe("CodeOperationEventStore", () => {
         sessionId: "89000000-0000-4000-8000-000000000050",
         prompt,
         threadMentionIds: ["release-notes-thread"],
+        trackerMentions: [
+          {
+            kind: "pull-request",
+            source: "github",
+            id: "2901",
+            url: "https://github.com/acme/app/pull/2901",
+          },
+        ],
       }),
     });
     store.append({
@@ -587,6 +595,7 @@ describe("CodeOperationEventStore", () => {
           modelId: "model-one",
           prompt,
           threadMentionIds: ["release-notes-thread"],
+          trackerMentions: [{ source: "github", id: "2901" }],
           assistant: [prompt],
           status: "completed",
         },
@@ -602,6 +611,7 @@ describe("CodeOperationEventStore", () => {
       turns: [{ operationId: otherOperationId, modelId: "model-two", status: "waiting" }],
     });
     expect(secondPage.turns[0]?.threadMentionIds).toBeUndefined();
+    expect(secondPage.turns[0]?.trackerMentions).toBeUndefined();
     expect(
       restarted.conversation({ threadId: otherThreadId, afterCursor: 0, limit: 10 }).turns,
     ).toEqual([]);

@@ -70,9 +70,14 @@ interface CataloguePort {
       readonly pageSize: number;
       readonly cursor?: string;
       readonly state: "open" | "closed" | "all";
+      readonly match?: "title";
     },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhSearchObservationRow>>>;
+  readItem(
+    request: { readonly owner: string; readonly name: string; readonly number: number },
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<GhSearchObservationRow>>;
   listPullRequests(
     request: {
       readonly owner: string;
@@ -373,6 +378,7 @@ export class GithubCatalogueService {
           pageSize: request.pageSize,
           ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
           state: request.state ?? DEFAULT_ISSUE_STATE,
+          ...(request.match === undefined ? {} : { match: request.match }),
         },
         signal,
       );
@@ -389,6 +395,17 @@ export class GithubCatalogueService {
             freshness: { status: "fresh" },
           },
         },
+      };
+    }
+    if (request.kind === "item") {
+      const result = await this.#port.readItem(
+        { owner: request.owner, name: request.name, number: request.number },
+        signal,
+      );
+      if (result.kind !== "ok") return result;
+      return {
+        kind: "ok",
+        value: { kind: "item", row: result.value, freshness: { status: "fresh" } },
       };
     }
     if (request.kind === "assigned-work") {
@@ -523,6 +540,7 @@ function capabilityFor(
     // so gating the whole read on issues-read stays honest without inventing
     // a capability.
     case "search":
+    case "item":
     case "assigned-work":
       return "issues-read";
     case "pull-requests":
@@ -551,6 +569,8 @@ function markStale(
       return { kind: "pull-requests", page: { ...response.page, freshness } };
     case "search":
       return { kind: "search", page: { ...response.page, freshness } };
+    case "item":
+      return { kind: "item", row: response.row, freshness };
     case "projects":
       return { kind: "projects", page: { ...response.page, freshness } };
     case "assigned-work":

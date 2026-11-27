@@ -2561,6 +2561,7 @@ export class WorkThreadService {
         carriedFrom: { threadId: source.id, requestId: turn.requestId },
         prompt: turn.prompt,
         ...(turn.threadMentionIds === undefined ? {} : { threadMentionIds: turn.threadMentionIds }),
+        ...(turn.trackerMentions === undefined ? {} : { trackerMentions: turn.trackerMentions }),
         ...(turn.attachments === undefined
           ? {}
           : {

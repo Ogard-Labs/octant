@@ -1,4 +1,5 @@
 import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurnPort";
+import { recordedTrackerMentions } from "@octant/domain/tracker-mention-policy";
 import { strictKeptForLaunch } from "../strictResolution";
 import {
   attachedFilesMessage,
@@ -2676,6 +2677,7 @@ export class WorkTurnService {
             ...(command.threadMentionIds === undefined || command.threadMentionIds.length === 0
               ? {}
               : { threadMentionIds: command.threadMentionIds }),
+            ...(command.delivery === undefined ? recordedTrackerMentions(command.prompt) : {}),
             ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
             ...(describedImages === undefined ? {} : { describedImages }),
             ...(command.extensionSelections === undefined ||

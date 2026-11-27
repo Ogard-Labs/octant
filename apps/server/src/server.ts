@@ -480,6 +480,7 @@ export function startOctantServer(
       movedThreadHistory,
       terminalSessionRoutes,
       threadOutsideContentMarks,
+      trackerMentionTrackers,
       toolEgressRules,
       providerRuntimeNetwork,
       safeNetworkRoutes,
@@ -1346,6 +1347,9 @@ export function startOctantServer(
       threadNotesRoutes,
       workspacePresetRoutes,
     } = yield* wireChat({
+      gitObservationPort,
+      projectService,
+      trackerMentionTrackers,
       personSentTurns,
       threadUnfinishedWork,
       imageDescriber,
