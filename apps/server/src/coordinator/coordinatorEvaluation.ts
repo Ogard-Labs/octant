@@ -123,14 +123,27 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     workers.push({ title: title.toLowerCase(), reference: startedReference });
   }
 
-  // A worker's reference can continue its list item or sit below its heading.
-  // Keep other items separate even when the whole list is indented.
+  const hasReference = (text: string) => workers.some(({ reference }) => text.includes(reference));
+  const hasTitle = (text: string) => {
+    // A readable reference can contain the worker's title all by itself.
+    const prose = workers.reduce((rest, { reference }) => rest.replaceAll(reference, " "), text);
+    return workers.some(({ title }) => prose.includes(title));
+  };
+  // Join complementary fragments of one list item or heading. A second title
+  // or reference begins another entry even if it uses the same "Worker:" label.
   const entries: string[] = [];
   for (const line of answer.toLowerCase().split("\n")) {
+    if (!line.trim()) continue;
     const previous = entries.at(-1);
     const startsItem = /^\s*(?:[-+*]|\d+[.)]|#{1,6})\s/.test(line);
     const continuesItem = /^[ \t]+\S|^(?:worker|reference)\s*:/.test(line);
-    if (previous && !startsItem && continuesItem) {
+    if (
+      previous &&
+      !startsItem &&
+      continuesItem &&
+      !(hasReference(previous) && hasReference(line)) &&
+      !(hasTitle(previous) && hasTitle(line))
+    ) {
       entries[entries.length - 1] = `${previous} ${line.trimStart()}`;
     } else {
       entries.push(line);

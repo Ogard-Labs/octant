@@ -79,13 +79,31 @@ it("requires the Project conversation to name and link each confirmed worker", (
         actions,
         [
           "### CSV parser",
+          "",
           "Worker: parser@project",
           "### Changelog",
+          "",
           "Worker: changelog@project",
         ].join("\n"),
       ),
     )
     .toBe(true);
+  expect
+    .soft(
+      score(
+        cases.projectAssign,
+        actions,
+        "Worker: CSV parser (parser@project)\nWorker: changelog@project — Changelog",
+      ),
+    )
+    .toBe(true);
+  expect(
+    score(
+      cases.projectAssign,
+      actions,
+      "Worker: CSV parser (changelog@project)\nWorker: parser@project — Changelog",
+    ),
+  ).toBe(false);
   expect(
     score(
       cases.projectAssign,
